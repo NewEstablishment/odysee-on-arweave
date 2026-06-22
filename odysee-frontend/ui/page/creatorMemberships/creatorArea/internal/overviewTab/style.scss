@@ -1,0 +1,231 @@
+@import 'init/breakpoints';
+
+.bank-account-status {
+  margin-top: var(--spacing-s);
+  padding: var(--spacing-s);
+  border-radius: var(--border-radius);
+  border: 2px solid rgba(255, 0, 0, 0.8);
+  background-color: rgba(255, 0, 0, 0.1);
+
+  div {
+    label {
+      display: block;
+      font-size: var(--font-body);
+      font-weight: var(--font-weight-bold);
+    }
+
+    span {
+      display: block;
+      font-size: var(--font-small);
+      font-weight: var(--font-weight-bold);
+      opacity: 0.8;
+    }
+  }
+
+  .button {
+    width: auto;
+    max-width: 100%;
+    margin-top: var(--spacing-s);
+    margin-bottom: 0;
+  }
+}
+
+.ugly-alien-box {
+  margin-top: var(--spacing-l);
+  width: 100%;
+  background-color: #f3e3f6;
+  color: black;
+  border-radius: var(--border-radius);
+  text-align: center;
+  padding: var(--spacing-s);
+  font-weight: bold;
+
+  a {
+    color: var(--color-primary);
+  }
+
+  img {
+    width: 46px;
+    height: 46px;
+    background-color: #650f7c;
+    border-radius: 50%;
+    margin-left: var(--spacing-s);
+  }
+}
+
+.membership-overview-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-m);
+  margin-bottom: var(--spacing-l);
+
+  @media (max-width: $breakpoint-small) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.membership-overview-stat {
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius);
+  background-color: var(--color-header-background);
+  padding: var(--spacing-m) var(--spacing-l);
+
+  span {
+    display: block;
+    margin-bottom: var(--spacing-s);
+    color: var(--color-text-subtitle);
+    font-size: var(--font-small);
+    font-weight: var(--font-weight-bold);
+  }
+
+  strong {
+    color: var(--color-primary);
+    font-size: var(--font-large);
+    line-height: 1.1;
+  }
+}
+
+.membership-overview-list {
+  display: grid;
+  gap: var(--spacing-s);
+  margin-bottom: 28px;
+}
+
+.membership-overview-list__header,
+.membership-overview-channel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(90px, 0.35fr) minmax(150px, 0.5fr) 56px 48px;
+  align-items: center;
+  gap: var(--spacing-s);
+}
+
+.membership-overview-list__header {
+  padding: 0 var(--spacing-l) var(--spacing-xs);
+  color: var(--color-text-subtitle);
+  font-size: var(--font-xsmall);
+  font-weight: var(--font-weight-bold);
+
+  span:nth-child(2),
+  span:nth-child(3) {
+    text-align: right;
+  }
+}
+
+.membership-overview-channel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius);
+  background-color: var(--color-header-background);
+  padding: var(--spacing-m) var(--spacing-l);
+  transition:
+    background-color var(--animation-duration) var(--animation-style),
+    border-color var(--animation-duration) var(--animation-style);
+
+  &:focus-within,
+  &:hover {
+    background-color: rgba(var(--color-header-background-base), 0.55);
+    border-color: var(--color-link);
+  }
+
+  .button--alt {
+    background-image: linear-gradient(147deg, var(--color-primary), rgb(247, 121, 55));
+    color: white;
+
+    &:hover {
+      color: white;
+    }
+  }
+}
+
+.membership-overview-channel__select {
+  display: grid;
+  grid-column: span 3;
+  grid-template-columns: minmax(220px, 1fr) minmax(90px, 0.35fr) minmax(150px, 0.5fr);
+  align-items: center;
+  gap: var(--spacing-s);
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:focus {
+    outline: none;
+  }
+}
+
+.membership-overview-channel__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-s);
+  min-width: 0;
+  font-weight: var(--font-weight-bold);
+
+  .channel-thumbnail {
+    flex: 0 0 auto;
+    margin-right: 0;
+  }
+}
+
+.membership-overview-channel__metric {
+  color: var(--color-text);
+  font-weight: var(--font-weight-bold);
+  text-align: right;
+
+  span {
+    display: none;
+  }
+}
+
+.membership-overview-channel__action {
+  display: flex;
+  justify-content: flex-end;
+
+  .button {
+    min-width: 36px;
+    height: 36px;
+    margin: 0;
+  }
+}
+
+@media (max-width: $breakpoint-small) {
+  .membership-overview-list__header {
+    display: none;
+  }
+
+  .membership-overview-channel {
+    grid-template-columns: 1fr auto auto;
+    gap: var(--spacing-xs) var(--spacing-s);
+  }
+
+  .membership-overview-channel__select {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr auto auto;
+  }
+
+  .membership-overview-channel__metric {
+    display: grid;
+    gap: var(--spacing-xxs);
+    text-align: left;
+
+    span {
+      display: block;
+      color: var(--color-text-subtitle);
+      font-size: var(--font-xsmall);
+    }
+  }
+
+  .membership-overview-channel__identity {
+    grid-column: 1 / -1;
+  }
+}
+
+.link-to-bank-account {
+  margin-top: var(--spacing-m);
+  margin-bottom: var(--spacing-m);
+
+  a {
+    margin-top: 3px;
+  }
+}

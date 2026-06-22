@@ -1,0 +1,25 @@
+.sortable {
+  margin-bottom: var(--spacing-m);
+  // height: 50vh;
+}
+
+.sortable__bin {
+}
+
+.sortable__item {
+  display: flex;
+  align-items: center;
+}
+
+.sortable__item--hidden {
+  display: none;
+}
+
+.sortable__drag-handle {
+  opacity: 0.4;
+  margin-right: var(--spacing-xxs);
+}
+
+.sortable__item:last-child {
+  margin-bottom: 0;
+}

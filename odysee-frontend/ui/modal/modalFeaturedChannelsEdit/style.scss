@@ -1,0 +1,8 @@
+@import 'init/breakpoints';
+
+.modal-featured-channels-edit {
+  @media (max-width: $breakpoint-small) {
+    padding-left: var(--spacing-xs);
+    padding-right: var(--spacing-xs);
+  }
+}

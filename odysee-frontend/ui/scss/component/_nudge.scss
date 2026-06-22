@@ -1,0 +1,64 @@
+@import 'init/breakpoints';
+
+.nudge {
+  z-index: 3;
+  position: absolute;
+  top: 4rem;
+  left: 0;
+  white-space: normal;
+  overflow: visible;
+  padding: var(--spacing-m);
+  border-radius: var(--border-radius);
+  box-shadow: var(--card-box-shadow);
+  background-color: rgba(var(--color-header-background-base), 1);
+  color: var(--color-text);
+  font-weight: bold;
+  border: 2px solid var(--color-text);
+
+  .button--close {
+    .icon {
+      stroke: var(--color-secondary-contrast);
+    }
+
+    &:hover {
+      background-color: var(--color-primary);
+
+      .icon {
+        stroke: var(--color-primary-contrast);
+      }
+    }
+  }
+
+  @media (min-width: $breakpoint-small) {
+    top: calc(var(--height-button) + var(--spacing-s));
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: -0.5rem;
+    left: 1rem;
+    width: 0;
+    height: 0;
+    border: 10px solid transparent;
+    border-top: 0;
+    border-bottom: 8px solid var(--color-text);
+  }
+}
+
+.nudge__wrapper {
+  width: 10rem;
+  margin-right: var(--spacing-m);
+
+  @media (min-width: $breakpoint-small) {
+    width: 12.5rem;
+  }
+
+  .nudge__text {
+    display: -webkit-box;
+    max-width: 200px;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}

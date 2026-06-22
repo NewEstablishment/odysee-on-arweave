@@ -1,0 +1,23 @@
+$COLLAPSED_HEIGHT: 220px;
+
+.expandable {
+  max-height: 220px;
+  position: relative;
+  overflow-y: hidden;
+}
+
+.expandable--closed,
+.expandable--open {
+  margin-bottom: var(--spacing-s);
+}
+
+.expandable--closed-fade {
+  -webkit-mask-image: -webkit-gradient(linear, left 90%, left bottom, from(rgba(0, 0, 0, 1)), to(rgba(0, 0, 0, 0)));
+  .img__zoomable {
+    height: 200px;
+  }
+}
+
+.expandable--open {
+  max-height: 100%;
+}

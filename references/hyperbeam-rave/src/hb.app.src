@@ -1,0 +1,20 @@
+{application, hb, [
+    {description, "HyperBEAM: An Erlang implementation of the permaweb supercomputer."},
+    {vsn, "0.0.1"},
+    {registered, []},
+    {mod, {hb_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        inets,
+        ssl,
+        cowboy,
+        os_mon,
+        gun,
+        hackney
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["BSL-1.1"]},
+    {links, []}
+]}.

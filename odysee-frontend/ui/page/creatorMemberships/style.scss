@@ -1,0 +1,376 @@
+@import 'init/breakpoints';
+
+.memberships-wrapper {
+  margin-right: auto;
+  margin-left: auto;
+  width: 100%;
+  max-width: unset;
+
+  .memberships-header-wrapper {
+    position: relative;
+    background-position-y: var(--header-height);
+    background-position-x: var(--side-nav-width--micro);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+
+    background-size: calc(100% - var(--side-nav-width--micro));
+    min-height: var(--cover-photo-height);
+    height: 184px;
+    width: 100%;
+    margin-top: calc(var(--spacing-l) * -1);
+
+    .memberships-header {
+      display: flex;
+      position: relative;
+      width: calc(100% - 2 * var(--spacing-l));
+      max-width: var(--page-max-width);
+      height: 100%;
+      margin-left: auto;
+      margin-right: auto;
+
+      h1 {
+        font-size: xx-large;
+        font-weight: var(--font-weight-bold);
+        margin-top: auto;
+        margin-bottom: var(--spacing-m);
+        width: fit-content;
+        background-image: linear-gradient(147deg, var(--color-primary), rgb(247, 121, 55));
+        padding: var(--spacing-m);
+        border-radius: var(--border-radius);
+        padding: var(--spacing-m);
+        box-shadow:
+          0 3px 6px 0 var(--color-shadow),
+          0 4px 10px 0 rgba(0, 0, 0, 0.6);
+        color: white;
+
+        svg {
+          width: 30px;
+          height: 30px;
+          margin-bottom: -4px;
+          margin-right: var(--spacing-s);
+          color: white;
+        }
+      }
+    }
+
+    @media (max-width: $breakpoint-small) {
+      background-image: url('https://thumbnails.odycdn.com/optimize/s:600:0/quality:95/plain/https://thumbs.odycdn.com/9bf7e0c6e616bb988e5a19b6dfa863cd.webp');
+      background-position: 0 0;
+      background-size: 100%;
+    }
+
+    @media (min-width: $breakpoint-small) {
+      background-image: url('https://thumbnails.odycdn.com/optimize/s:600:0/quality:95/plain/https://thumbs.odycdn.com/9bf7e0c6e616bb988e5a19b6dfa863cd.webp');
+      background-position: 0 -200px;
+      background-size: 100%;
+    }
+
+    @media (min-width: $breakpoint-medium) {
+      background-image: url('https://thumbnails.odycdn.com/optimize/s:1600:0/quality:95/plain/https://thumbs.odycdn.com/9bf7e0c6e616bb988e5a19b6dfa863cd.webp');
+      background-position: calc(50% + var(--side-nav-width--micro) / 2) calc(0% - 60px);
+    }
+
+    @media (min-width: $breakpoint-large) {
+      background-image: url('https://thumbnails.odycdn.com/optimize/s:1600:0/quality:95/plain/https://thumbs.odycdn.com/9bf7e0c6e616bb988e5a19b6dfa863cd.webp');
+      background-position: calc(50% + var(--side-nav-width--micro) / 2) calc(0% - 120px);
+    }
+
+    @media (min-width: $breakpoint-xlarge) {
+      background-image: url('https://static.odycdn.com/images/banner_creatorPortal.jpg');
+      background-position: calc(50% + var(--side-nav-width--micro) / 2) calc(0% - 120px);
+    }
+
+    &:before {
+      position: absolute;
+      bottom: 0;
+      opacity: 1;
+      content: '';
+      height: 100%;
+      left: 0;
+      right: 0;
+      width: 100%;
+      background: linear-gradient(0deg, #0d0d0d 0, transparent 65%);
+    }
+  }
+
+  .memberships-content {
+    position: relative;
+    width: calc(100% - 2 * var(--spacing-l));
+    max-width: var(--page-max-width);
+    height: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: var(--spacing-l);
+
+    .memberships {
+      display: flex;
+      position: relative;
+      isolation: isolate;
+      min-height: 50vh;
+
+      @media (max-width: $breakpoint-small) {
+        flex-direction: column;
+        min-height: unset;
+      }
+    }
+  }
+}
+
+.bank-account-status {
+  margin-top: var(--spacing-s);
+  padding: var(--spacing-s);
+  border-radius: var(--border-radius);
+  border: 2px solid rgba(255, 0, 0, 0.8);
+  background-color: rgba(255, 0, 0, 0.1);
+
+  div {
+    label {
+      display: block;
+      font-size: var(--font-body);
+      font-weight: var(--font-weight-bold);
+    }
+
+    span {
+      display: block;
+      font-size: var(--font-small);
+      font-weight: var(--font-weight-bold);
+      opacity: 0.8;
+    }
+  }
+
+  .button {
+    width: auto;
+    max-width: 100%;
+    margin-top: var(--spacing-s);
+    margin-bottom: 0;
+  }
+}
+
+.creator-memberships-header {
+  width: 100%;
+  font-size: var(--font-title);
+  font-weight: var(--font-bold);
+  text-align: center;
+}
+
+.membership-wrapper {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+
+  .membership-content {
+    text-align: center;
+
+    div:first-of-type {
+      background: var(--color-header-background);
+      border-radius: 50px;
+      padding: var(--spacing-m);
+
+      h2 {
+        font-size: var(--font-title);
+        font-weight: var(--font-bold);
+        margin-bottom: var(--spacing-s);
+
+        &:after {
+          content: '';
+          display: block;
+          margin-left: 10%;
+          width: 80%;
+          height: 2px;
+          background-image: linear-gradient(147deg, var(--color-primary), rgb(247, 121, 55));
+          margin: 0 10px;
+          transition:
+            width 0.2s,
+            margin-left 0.2s;
+        }
+      }
+    }
+  }
+
+  .membership-content {
+    transition: background-color 0.4s;
+  }
+
+  &.supporter {
+    background-image: url('https://static.odycdn.com/images/banner_DonorPortal.jpg');
+    background-position: 20% -190px;
+    transition: background-position 0.4s;
+    z-index: 1;
+    width: 60%;
+    border-radius: var(--border-radius) 0 0 var(--border-radius);
+    overflow: hidden;
+
+    @media (max-width: $breakpoint-small) {
+      position: relative;
+      clip-path: unset;
+      width: 100%;
+      border-radius: var(--border-radius) var(--border-radius) 0 0;
+
+      .membership-content {
+        padding: 4% !important;
+      }
+    }
+
+    .membership-content {
+      padding-top: 3%;
+      padding-left: 3%;
+      padding-right: 16%;
+      width: 100%;
+      height: 100%;
+    }
+
+    &:before {
+      transition: background-color 0.4s;
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(0, 208, 217, 0);
+    }
+  }
+
+  &.memberships {
+    background-image: url('https://static.odycdn.com/images/banner_creatorPortal.jpg');
+    background-position: 10% -170px;
+    transition: background-position 0.4s;
+    border-radius: 0 var(--border-radius) var(--border-radius) 0;
+    clip-path: polygon(20% 0, 100% 0, 100% 100%, 0 100%);
+    z-index: 2;
+    width: 55%;
+    margin-left: auto;
+    overflow: hidden;
+
+    @media (max-width: $breakpoint-small) {
+      position: relative;
+      clip-path: unset;
+      width: 100%;
+      border-radius: 0 0 var(--border-radius) var(--border-radius);
+
+      .membership-content {
+        padding: 4% !important;
+      }
+    }
+
+    .membership-content {
+      margin-top: auto;
+      padding-bottom: 3%;
+      padding-right: 3%;
+      padding-left: 10%;
+      width: 100%;
+      height: 100%;
+    }
+
+    &:before {
+      z-index: 0;
+      transition: background-color 0.4s;
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(230, 25, 112, 0);
+    }
+  }
+
+  &:hover {
+    h2 {
+      font-size: var(--font-title);
+      font-weight: var(--font-bold);
+      margin-bottom: var(--spacing-s);
+
+      &:after {
+        margin-left: 5% !important;
+        width: 90% !important;
+      }
+    }
+
+    &.supporter {
+      background-position: 18% -196px;
+
+      &:before {
+        background-color: rgba(0, 208, 217, 0.1);
+      }
+    }
+
+    &.memberships {
+      background-position: 8% -196px;
+      &:before {
+        background-color: rgba(230, 25, 112, 0.1);
+      }
+    }
+  }
+
+  @media (max-width: $breakpoint-small) {
+    background-size: cover !important;
+    background-position: unset !important;
+    .membership-content {
+      padding: var(--spacing-s);
+    }
+  }
+}
+
+.portal-tagline {
+  margin-bottom: 12px;
+  font-size: 17px;
+  margin-left: 4px;
+}
+
+.membership-wrapper-title {
+  display: flex;
+  margin-top: -3px;
+  margin-bottom: var(--spacing-l);
+  @media (max-width: $breakpoint-small) {
+    margin-top: var(--spacing-s);
+    margin-bottom: 18px;
+  }
+
+  svg {
+    width: 3rem;
+    height: 3rem;
+    background-color: var(--color-header-background);
+    border-radius: 50%;
+    padding: var(--spacing-s);
+    margin-right: 0;
+  }
+  label {
+    font-size: var(--font-large);
+    font-weight: var(--font-weight-bold);
+    padding-left: 10px;
+    margin-top: var(--spacing-s);
+    flex: 1;
+    border-bottom: 1px solid var(--color-header-background);
+  }
+
+  button {
+    height: 36px;
+    margin-top: -6px;
+    float: right;
+    padding-left: var(--spacing-xs);
+    padding-right: var(--spacing-s);
+    .button__content {
+      .button__label {
+        font-size: var(--font-body);
+        margin-left: 0;
+      }
+    }
+    .icon {
+      background-color: unset;
+      width: 2rem;
+      height: 2rem;
+      padding: 8px;
+      padding-left: 0;
+      padding-right: 0;
+      margin: 0;
+    }
+  }
+}
+
+.errorColumn {
+  display: flex;
+  flex-direction: column;
+}

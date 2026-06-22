@@ -1,0 +1,75 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch debugger on a function.",
+      "type": "erlang",
+      "request": "launch",
+      "cwd": "${workspaceRoot}",
+      "projectnode": "hb",
+      "cookie": "hb-debug",
+      "preLaunchTask": "Rebar3 Compile",
+      "postDebugTask": "Stop HyperBEAM",
+      "stopOnEntry": true,
+      "internalConsoleOptions": "openOnSessionStart",
+      "module": "hb_debugger",
+      "function": "start_and_break",
+      "args": "[${input:moduleName}, ${input:functionName}, [${input:funcArgs}], <<\"${input:debuggerScope}\">>]"
+    },
+    {
+      "name": "Attach to a 'rebar3 debugger' node.",
+      "type": "erlang",
+      "request": "attach",
+      "projectnode": "hb",
+      "cookie": "hb-debug",
+      "timeout": 10,
+      "cwd": "${workspaceRoot}"
+    },
+    {
+      "name": "Attach C Debugger to beam.smp",
+      "type": "cppdbg",
+      "request": "attach",
+      "program": "",
+      "processId": "${command:pickProcess}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "text": "-enable-pretty-printing"
+        },
+        {
+          "description": "Set working directory",
+          "text": "cd ${workspaceFolder}"
+        }
+      ],
+      "logging": {
+        "engineLogging": true,
+        "trace": true,
+        "traceResponse": true
+      },
+      "internalConsoleOptions": "neverOpen"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "moduleName",
+      "type": "promptString",
+      "description": "Enter module to break in:"
+    },
+    {
+      "id": "functionName", 
+      "type": "promptString",
+      "description": "Enter function to invoke:"
+    },
+    {
+      "id": "funcArgs",
+      "type": "promptString",
+      "description": "(Optional) Pass arguments to the function:"
+    },
+    {
+      "id": "debuggerScope",
+      "type": "promptString",
+      "description": "(Optional) Additional modules/prefixes for debugger scope:"
+    }
+  ]
+}

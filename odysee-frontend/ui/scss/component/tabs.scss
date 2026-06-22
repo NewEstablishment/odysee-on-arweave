@@ -1,0 +1,162 @@
+@import 'init/breakpoints';
+
+.tabs {
+  position: relative;
+}
+
+.tabs--comment {
+  .tab__panel {
+    width: unset;
+    max-width: unset;
+  }
+}
+
+.tabs__list {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background-color: var(--color-tabs-background);
+  padding: var(--spacing-xxs) var(--spacing-main-padding);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+
+  & > *:not(.tab) {
+    // If there is anything after the tabs, render it on the opposite side of the page
+    margin-left: auto;
+  }
+
+  .tab {
+    flex: inherit;
+    white-space: nowrap;
+    &:hover {
+      color: var(--color-link);
+    }
+    @media (max-width: $breakpoint-small) {
+      &[aria-selected='true'] {
+        color: var(--color-primary);
+        &::after {
+          background: var(--color-primary);
+          height: 8px !important;
+          bottom: calc(var(--tab-indicator-size) * -2);
+        }
+      }
+      &:last-of-type {
+        margin-right: 0;
+      }
+    }
+  }
+}
+
+.tabs__list.isSticky {
+  z-index: 4;
+}
+
+.tabs__list--comment-selector {
+  border: 0 !important;
+  border-radius: 0 !important;
+  margin-bottom: 0px !important;
+  height: unset !important;
+
+  + .tab__divider {
+    display: none;
+  }
+
+  @media (max-width: $breakpoint-small) {
+    position: sticky;
+    padding: 0px;
+    height: 3rem !important;
+
+    button {
+      font-size: var(--font-xxsmall);
+    }
+  }
+}
+
+.tabs__list--collection-edit-page {
+  position: relative;
+  padding-right: var(--spacing-m);
+  margin-bottom: var(--spacing-l);
+  height: 46px;
+  border-radius: var(--border-radius);
+  border-bottom: 1px solid var(--color-header-button);
+
+  @media (max-width: $breakpoint-small) {
+    padding-left: var(--spacing-m);
+  }
+
+  .tab[aria-selected='true'] {
+    color: var(--color-link);
+
+    &::after {
+      height: 4px;
+      background-color: var(--color-link);
+    }
+  }
+
+  @media (max-width: $breakpoint-small) {
+    .tab[aria-selected='true']::after {
+      height: 4px !important;
+    }
+  }
+}
+
+.tab {
+  @extend .button--link;
+  margin-right: var(--spacing-l);
+  padding: 5px 0;
+  color: var(--color-tab-text);
+  position: relative;
+  font-size: var(--font-body);
+
+  &::after {
+    position: absolute;
+    bottom: calc(var(--tab-indicator-size) * -2 + 6px);
+    height: 0;
+    width: 100%;
+    content: '';
+    z-index: 0;
+
+    @media (max-width: $breakpoint-small) {
+      bottom: calc(var(--tab-indicator-size) * -2 - 6px);
+    }
+  }
+
+  &:focus {
+    box-shadow: none;
+  }
+
+  @media (max-width: $breakpoint-xsmall) {
+    margin-right: var(--spacing-s);
+  }
+}
+
+.tab--selected {
+  background-color: var(--color-background);
+}
+
+.tab--hidden {
+  display: none !important;
+}
+
+.tab__divider {
+  position: absolute;
+  margin-top: -46px;
+  @media (max-width: $breakpoint-small) {
+    display: none !important;
+  }
+}
+
+.tab::after,
+.tab__divider {
+  display: block;
+  transition: all var(--animation-duration) var(--animation-style);
+  z-index: 1;
+}
+
+.tab:hover::after,
+.tab__divider {
+  height: 4px;
+  background-color: var(--color-link);
+}

@@ -1,0 +1,31 @@
+@import 'init/breakpoints';
+
+.home__meme {
+  text-align: center;
+  font-weight: bold;
+  line-height: 1.2;
+  margin-top: 6px;
+  margin-bottom: -46px;
+
+  > .button {
+    white-space: initial;
+  }
+
+  .button__content {
+    background-image: var(--color-odysee-gradient);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    font-size: var(--font-large);
+    text-shadow: 0 0 0 transparent;
+    transition: text-shadow 3s;
+    &:hover {
+      text-shadow: 0 0 20px #e60073;
+    }
+  }
+
+  @media (max-width: $breakpoint-small) {
+    margin-top: var(--spacing-l);
+    margin-bottom: var(--spacing-l);
+  }
+}

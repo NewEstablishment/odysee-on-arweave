@@ -1,0 +1,344 @@
+%%% @doc A store module that reads data from another AO node.
+%%% Notably, this store only provides the _read_ side of the store interface.
+%%% The write side could be added, returning an commitment that the data has
+%%% been written to the remote node. In that case, the node would probably want
+%%% to upload it to an Arweave bundler to ensure persistence, too.
+-module(hb_store_remote_node).
+-export([scope/1, type/3, read/3, write/3, link/3, group/3, resolve/3]).
+%%% Public utilities.
+-export([maybe_cache/2, maybe_cache/3, read_local_cache/3]).
+-include("include/hb.hrl").
+-include_lib("eunit/include/eunit.hrl").
+
+%% @doc Return the scope of this store.
+%%
+%% For the remote store, the scope is always `remote'.
+%%
+%% @param StoreOpts A message with the store options (ignored).
+%% @returns remote.
+scope(_StoreOpts) ->
+    remote.
+
+%% @doc Resolve a key path in the remote store.
+%%
+%% For the remote node store, the key is returned as-is.
+%%
+%% @param Data A map containing node configuration.
+%% @param Key The key to resolve.
+%% @returns The resolved key.
+resolve(#{ <<"node">> := Node }, #{ <<"resolve">> := Key }, _NodeOpts) ->
+    ?event({remote_resolve, {node, Node}, {key, Key}}),
+    {ok, Key}.
+
+%% @doc Determine the type of value at a given key.
+%%
+%% Remote nodes support `simple', `composite', or `{error, not_found}'.
+%%
+%% @param Opts A map of options (including node configuration).
+%% @param Key The key whose value type is determined.
+%% @returns `{ok, simple}' or `{ok, composite}' if found, or
+%%          `{error, not_found}' otherwise.
+type(Opts = #{ <<"node">> := Node }, #{ <<"type">> := Key }, _NodeOpts) ->
+    ?event({remote_type, {node, Node}, {key, Key}}),
+    case read_request(Opts, Key) of
+        {composite, _} -> {ok, composite};
+        {ok, _} -> {ok, simple};
+        Other -> Other
+    end.
+
+%% @doc Read a key from the remote node.
+%%
+%% Makes an HTTP GET request to the remote node and returns the
+%% committed message.
+%%
+%% @param Opts A map of options (including node configuration).
+%% @param Key The key to read.
+%% @returns `{ok, Msg}' on success or `{error, not_found}' if the key is missing.
+read_request(#{ <<"only-ids">> := true }, Key) when not ?IS_ID(Key) ->
+    {error, not_found};
+read_request(Opts = #{ <<"node">> := Node }, Key) ->
+    ?event(store_remote_node, {executing_read, {node, Node}, {key, Key}}),
+    HTTPRes =
+        hb_http:get(
+            Node,
+            #{ <<"path">> => read_path(Key) },
+            Opts
+        ),
+    case HTTPRes of
+        {ok, Res} ->
+            case remote_read_message(Opts, Key, Res) of
+                {ok, VerifiedMsg} ->
+                    ?event(store_remote_node,
+                        {read_found, {result, VerifiedMsg, response, Res}}
+                    ),
+                    maybe_cache(Opts, VerifiedMsg, [Key]),
+                    {ok, VerifiedMsg};
+                {error, Reason} ->
+                    ?event(store_remote_node,
+                        {remote_read_rejected, {key, Key}, {reason, Reason}}
+                    ),
+                    {error, {remote_verification_failed, Reason}}
+            end;
+        {error, _Err} ->
+            ?event(store_remote_node, {read_not_found, {key, Key}}),
+            {error, not_found}
+    end;
+read_request(_, _) -> {error, not_found}.
+
+read_path(Key) ->
+    Query =
+        unicode:characters_to_binary(
+            uri_string:compose_query([{<<"read">>, Key}])
+        ),
+    <<"/~cache@1.0/read?", Query/binary>>.
+
+remote_read_message(Opts, Key, Res) ->
+    case should_verify_remote_read(Opts, Key) of
+        true ->
+            verify_remote_read(Opts, Key, Res);
+        false ->
+            hb_message:with_only_committed(Res, Opts)
+    end.
+
+should_verify_remote_read(Opts, Key) ->
+    case hb_maps:get(<<"verify-remote-read">>, Opts, false, Opts) of
+        false -> false;
+        _ -> hb_lbry_commitment:expected_remote_commitment(Key) =/= untyped
+    end.
+
+%% @doc Optionally verify the native commitments of a message returned by
+%% the untrusted remote node before it is cached or returned. Enabled with
+%% the `verify-remote-read' store option; enforcement happens at this trust
+%% boundary so a verified result can be cached and served from the local
+%% store without re-verification on every hit.
+verify_remote_read(Opts, Key, Msg) ->
+    case hb_maps:get(<<"verify-remote-read">>, Opts, false, Opts) of
+        false -> {ok, Msg};
+        _ -> hb_lbry_commitment:verify_remote_read(Key, Msg, Opts)
+    end.
+read(Opts, #{ <<"read">> := Key }, _NodeOpts) ->
+    read_request(Opts, Key).
+
+%% @doc Cache the data if the cache is enabled. The `local-store' option may
+%% either be `false' or a store definition to use as the local cache. Additional
+%% paths may be provided that should be linked to the data.
+maybe_cache(StoreOpts, Data) ->
+    maybe_cache(StoreOpts, Data, []).
+maybe_cache(StoreOpts, Data, Links) ->
+    ?event({maybe_cache, StoreOpts, Data}),
+    try
+        % Check if the local store is in our store options.
+        case hb_maps:get(<<"local-store">>, StoreOpts, false, StoreOpts) of
+            false ->
+                skipped;
+            Store ->
+                case hb_cache:write(Data, #{ <<"store">> => Store }) of
+                    {ok, RootPath} ->
+                        % Remove the base path from the links.
+                        LinksWithoutRootPath =
+                            lists:filter(
+                                fun(Link) -> Link /= RootPath end,
+                                Links
+                            ),
+                        ?event(store_remote_node, cached_received),
+                        LinkResults =
+                            lists:filtermap(
+                                fun(Link) ->
+                                    case hb_store:link(Store, #{ Link => RootPath }, #{}) of
+                                        ok ->
+                                            false;
+                                        Result ->
+                                            {true, {Link, Result}}
+                                    end
+                                end,
+                                LinksWithoutRootPath
+                            ),
+                        ?event(store_remote_node,
+                            {linked_cached,
+                                {failed_links, LinkResults}
+                            }
+                        ),
+                        case LinkResults of
+                            [] -> ok;
+                            _ -> {failed_links, LinkResults}
+                        end;
+                    {error, Err} ->
+                        ?event(store_remote_node, error_on_local_cache_write),
+                        ?event(warning, {error_caching_remote_node_data, Err}),
+                        {error, Err}
+                end
+        end
+    catch _:_ ->
+        ignored
+    end.
+
+%% @doc Read local store cached value.
+read_local_cache(StoreOpts, ID, _Opts) ->
+    ?event({read_local_cache, StoreOpts, ID}),
+    case hb_maps:get(<<"local-store">>, StoreOpts, false, StoreOpts) of
+        false -> {error, not_found};
+        Store -> hb_cache:read(ID, StoreOpts#{ <<"store">> => Store })
+    end.
+
+%% @doc Write a key to the remote node.
+%%
+%% Uploads each value to the remote cache and then links each requested
+%% destination to the uploaded path.
+%%
+%% @param Opts A map of options (including node configuration).
+%% @param Req Map of destination paths to values.
+%% @returns `ok' on success or `{error, Reason}' on failure.
+write(#{ <<"read-only">> := true }, _Req, _NodeOpts) ->
+    {error, not_found};
+write(Opts = #{ <<"node">> := Node }, Req, _NodeOpts) when is_map(Req) ->
+    ?event({write, {node, Node}, {request, Req}}),
+    maps:fold(
+        fun(Destination, Value, ok) ->
+            case remote_write_value(Opts, Value) of
+                {ok, SourcePath} ->
+                    remote_link(Opts, hb_path:to_binary(SourcePath), hb_path:to_binary(Destination));
+                {error, _} = Error ->
+                    Error
+            end;
+           (_Destination, _Value, Error) ->
+            Error
+        end,
+        ok,
+        Req
+    ).
+
+%% @doc Link a source to a destination in the remote node.
+%%
+%% Constructs an HTTP POST link request for the given source and destination,
+%% signing the request when a wallet is available.
+%%
+%% @returns `ok' on success or `{error, Reason}' on failure.
+link(#{ <<"read-only">> := true }, _Req, _NodeOpts) ->
+    {error, not_found};
+link(Opts = #{ <<"node">> := _Node }, Req, _NodeOpts) when is_map(Req) ->
+    maps:fold(
+        fun(Destination, Source, ok) ->
+            remote_link(Opts, hb_path:to_binary(Source), hb_path:to_binary(Destination));
+           (_Destination, _Source, Error) ->
+            Error
+        end,
+        ok,
+        Req
+    ).
+
+%% @doc Create a group in the remote node cache.
+group(#{ <<"read-only">> := true }, _Req, _NodeOpts) ->
+    {error, not_found};
+group(Opts = #{ <<"node">> := _Node }, #{ <<"group">> := Path }, _NodeOpts) ->
+    remote_group(Opts, hb_path:to_binary(Path)).
+
+remote_write_value(Opts = #{ <<"node">> := Node }, Value) ->
+    Msg = #{
+        <<"path">> => <<"/~cache@1.0/write">>,
+        <<"method">> => <<"POST">>,
+        <<"body">> => Value
+    },
+    SignedMsg = hb_message:commit(Msg, Opts),
+    case hb_http:post(Node, SignedMsg, Opts) of
+        {ok, Response} ->
+            case hb_ao:get(<<"status">>, Response, 0, #{}) of
+                200 ->
+                    case hb_ao:get(<<"path">>, Response, not_found, #{}) of
+                        not_found -> {error, missing_path};
+                        Path -> {ok, Path}
+                    end;
+                Status ->
+                    {error, {unexpected_status, Status}}
+            end;
+        {error, Err} ->
+            {error, Err}
+    end.
+
+remote_link(Opts = #{ <<"node">> := Node }, Source, Destination) ->
+    Msg = #{
+        <<"path">> => <<"/~cache@1.0/link">>,
+        <<"method">> => <<"POST">>,
+        <<"source">> => Source,
+        <<"destination">> => Destination
+    },
+    SignedMsg = hb_message:commit(Msg, Opts),
+    case hb_http:post(Node, SignedMsg, Opts) of
+        {ok, Response} ->
+            case hb_ao:get(<<"status">>, Response, 0, #{}) of
+                200 -> ok;
+                Status -> {error, {unexpected_status, Status}}
+            end;
+        {error, Err} ->
+            {error, Err}
+    end.
+
+remote_group(Opts = #{ <<"node">> := Node }, Path) ->
+    Msg = #{
+        <<"path">> => <<"/~cache@1.0/group">>,
+        <<"method">> => <<"POST">>,
+        <<"group">> => Path
+    },
+    SignedMsg = hb_message:commit(Msg, Opts),
+    case hb_http:post(Node, SignedMsg, Opts) of
+        {ok, Response} ->
+            case hb_ao:get(<<"status">>, Response, 0, #{}) of
+                200 -> ok;
+                Status -> {error, {unexpected_status, Status}}
+            end;
+        {error, Err} ->
+            {error, Err}
+    end.
+
+%%%--------------------------------------------------------------------
+%%% Tests
+%%%--------------------------------------------------------------------
+
+%% @doc Test that we can create a store, write a random message to it, then
+%% start a remote node with that store, and read the message from it.
+read_test() ->
+    rand:seed(default),
+    LocalStore = #{ 
+		<<"store-module">> => hb_store_fs,
+		<<"name">> => <<"cache-mainnet">>
+	},
+    hb_store:reset(LocalStore),
+    M = #{ <<"test-key">> => Rand = rand:uniform(1337) },
+    ID = hb_message:id(M),
+    {ok, ID} =
+        hb_cache:write(
+			M, 
+			#{ <<"store">> => LocalStore }
+		),
+    ?event({wrote, ID}),
+    Node =
+        hb_http_server:start_node(
+            #{
+                <<"store">> => LocalStore
+            }
+        ),
+    RemoteStore = [
+		#{ <<"store-module">> => hb_store_remote_node, <<"node">> => Node }
+	],
+    {ok, RetrievedMsg} = hb_cache:read(ID, #{ <<"store">> => RemoteStore }),
+    ?assertMatch(#{ <<"test-key">> := Rand }, hb_cache:ensure_all_loaded(RetrievedMsg)).
+
+read_only_ids_test() ->
+    LocalStore = hb_test_utils:test_store(),
+    hb_store:reset(LocalStore),
+    {ok, ID} =
+        hb_cache:write(
+			<<"message">>, 
+			#{ <<"store">> => LocalStore }
+		),
+    Node =
+        hb_http_server:start_node(
+            #{
+                <<"store">> => LocalStore
+            }
+        ),
+    RemoteStore = [
+		#{ <<"store-module">> => hb_store_remote_node,
+           <<"node">> => Node,
+           <<"only-ids">> => true }
+	],
+    ?assertEqual({error, not_found}, hb_cache:read(ID, #{ <<"store">> => RemoteStore })).

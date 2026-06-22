@@ -1,0 +1,92 @@
+import React from 'react';
+import { Modal } from 'modal/modal';
+import { DOMAIN } from 'config';
+import ThumbnailBrokenImage from 'component/selectThumbnail/thumbnail-broken.png';
+import { useAppDispatch } from 'redux/hooks';
+import { doHideModal } from 'redux/actions/app';
+import { doUploadThumbnail, doUpdatePublishForm } from 'redux/actions/publish';
+import './style.scss';
+// ****************************************************************************
+// ****************************************************************************
+export type Props = {
+  file: WebFile;
+  cb: (arg0: string) => void;
+  previewUrl?: string;
+  onUploadStarted?: (arg0: string) => void;
+  onUploadCanceled?: () => void;
+};
+
+// ****************************************************************************
+// ****************************************************************************
+function ModalConfirmThumbnailUpload(props: Props) {
+  const { file, cb, previewUrl, onUploadStarted, onUploadCanceled } = props;
+  const dispatch = useAppDispatch();
+  const filePath = file && (file.path || file.name);
+  const [imageSrc, setImageSrc] = React.useState('');
+  const resolvedImageSrc = previewUrl || imageSrc;
+
+  function handleConfirmed() {
+    if (file) {
+      dispatch(doUploadThumbnail('', file as any, null, null, file.path, cb));
+      dispatch(
+        doUpdatePublishForm({
+          thumbnailPath: file.path,
+        })
+      );
+      if (resolvedImageSrc) {
+        onUploadStarted?.(resolvedImageSrc);
+      }
+      dispatch(doHideModal());
+    }
+  }
+
+  React.useEffect(() => {
+    if (previewUrl) {
+      setImageSrc('');
+      return;
+    }
+
+    const imgSrc = URL.createObjectURL(file as any);
+    setImageSrc(imgSrc);
+    return () => {
+      if (imgSrc) {
+        URL.revokeObjectURL(imgSrc);
+      }
+    };
+  }, [file, previewUrl]);
+
+  function handleAborted() {
+    onUploadCanceled?.();
+    dispatch(doHideModal());
+  }
+
+  return (
+    <Modal
+      isOpen
+      title={__('Upload thumbnail')}
+      contentLabel={__('Confirm Thumbnail Upload')}
+      type="confirm"
+      confirmButtonLabel={__('Upload')}
+      onConfirmed={handleConfirmed}
+      onAborted={handleAborted}
+    >
+      <label>
+        {__('Are you sure you want to upload this thumbnail to %domain%', {
+          domain: DOMAIN,
+        })}
+        ?
+      </label>
+      <div className="upload-thumbnail-preview">
+        <img
+          className="upload-thumbnail-preview__image"
+          src={resolvedImageSrc || ThumbnailBrokenImage}
+          alt={__('Thumbnail Preview')}
+          onError={() => setImageSrc('')}
+        />
+        <div className="upload-thumbnail-preview__filename">{filePath}</div>
+      </div>
+    </Modal>
+  );
+}
+
+export default ModalConfirmThumbnailUpload;
