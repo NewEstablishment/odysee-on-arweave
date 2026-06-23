@@ -66,7 +66,18 @@ async function hyperbeamNodeResolve(params, extraHeaders) {
             : [];
   if (!urls.length) return null;
 
-  const entries = await Promise.all(
+  const { channelUris, resolveUris } = splitClaimIdChannelUris(urls);
+  const channelEntries =
+    channelUris.length > 1
+      ? await hyperbeamNodeClaimIdChannelEntries(channelUris, extraHeaders)
+      : await hyperbeamNodeResolveEntries(channelUris, extraHeaders);
+  const resolveEntries = await hyperbeamNodeResolveEntries(resolveUris, extraHeaders);
+
+  return Object.fromEntries([...channelEntries, ...resolveEntries].filter(([, claim]) => claim));
+}
+
+async function hyperbeamNodeResolveEntries(urls, extraHeaders) {
+  return Promise.all(
     urls.map(async (uri) => {
       const result = await hyperbeamNodeFetchJson(
         hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'resolve', { uri }),
@@ -75,8 +86,30 @@ async function hyperbeamNodeResolve(params, extraHeaders) {
       return [uri, sdkClaimFromHyperbeam((result && result[uri]) || result)];
     })
   );
+}
 
-  return Object.fromEntries(entries.filter(([, claim]) => claim));
+async function hyperbeamNodeClaimIdChannelEntries(urls, extraHeaders) {
+  const uriByClaimId = new Map();
+  urls.forEach((uri) => {
+    const claimId = claimIdFromChannelUri(uri);
+    if (claimId) uriByClaimId.set(claimId.toLowerCase(), uri);
+  });
+
+  const result = await hyperbeamNodeFetchJson(
+    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'search', { claim_ids: Array.from(uriByClaimId.keys()) }),
+    extraHeaders
+  );
+  const search = sdkSearchFromHyperbeam(result);
+  const items = Array.isArray(search && search.items) ? search.items : [];
+
+  return items
+    .map((item) => {
+      const claim = sdkClaimFromHyperbeam(item);
+      const claimId = claim && (claim.claim_id || claim['claim-id']);
+      const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
+      return uri ? [uri, claim] : null;
+    })
+    .filter(Boolean);
 }
 
 async function hyperbeamNodeClaimSearch(params, extraHeaders) {
@@ -199,6 +232,21 @@ function hyperbeamMode() {
   const value = window.localStorage && window.localStorage.getItem(HYPERBEAM_MODE_STORAGE_KEY);
   if (value === 'hybrid') return 'hyperbeam';
   return value === 'original' || value === 'hyperbeam' ? value : 'hyperbeam';
+}
+
+function splitClaimIdChannelUris(urls) {
+  return urls.reduce(
+    (groups, uri) => {
+      groups[claimIdFromChannelUri(uri) ? 'channelUris' : 'resolveUris'].push(uri);
+      return groups;
+    },
+    { channelUris: [], resolveUris: [] }
+  );
+}
+
+function claimIdFromChannelUri(uri) {
+  const match = String(uri).match(/^lbry:\/\/@[^/]+#([0-9a-f]{40})$/i);
+  return match ? match[1] : null;
 }
 
 function isHyperbeamDeviceEnabled(device) {

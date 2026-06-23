@@ -28,15 +28,45 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const urls = urlsFromResolveParams(params);
   if (!urls.length) return null;
 
-  const entries = await Promise.all(
-    urls.map(async (uri) => {
+  const { channelUris, resolveUris } = splitClaimIdChannelUris(urls);
+  const channelEntries =
+    channelUris.length > 1 ? await fetchClaimIdChannelEntries(channelUris) : await fetchResolveEntries(channelUris);
+  const resolveEntries = await fetchResolveEntries(resolveUris);
+
+  return Object.fromEntries([...channelEntries, ...resolveEntries].filter(([, claim]) => claim));
+}
+
+async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
+  return Promise.all(
+    urls.map(async (uri): Promise<[string, any]> => {
       const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { uri });
       const result = responsePayload(response);
       return [uri, sdkClaimFromHyperbeam(result?.[uri] || result)];
     })
   );
+}
 
-  return Object.fromEntries(entries.filter(([, claim]) => claim));
+async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[string, any]>> {
+  const uriByClaimId = new Map<string, string>();
+  urls.forEach((uri) => {
+    const claimId = claimIdFromChannelUri(uri);
+    if (claimId) uriByClaimId.set(claimId.toLowerCase(), uri);
+  });
+
+  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, {
+    claim_ids: Array.from(uriByClaimId.keys()),
+  });
+  const search = sdkSearchFromHyperbeam(responsePayload(response));
+  const items = Array.isArray(search?.items) ? search.items : [];
+
+  return items
+    .map((item: any): [string, any] | null => {
+      const claim = sdkClaimFromHyperbeam(item);
+      const claimId = value(claim, 'claim_id', 'claim-id');
+      const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
+      return uri ? [uri, claim] : null;
+    })
+    .filter(Boolean) as Array<[string, any]>;
 }
 
 export async function fetchHyperbeamGet(params: any): Promise<any | null> {
@@ -286,6 +316,21 @@ function urlsFromResolveParams(params: any): Array<string> {
   const source = params?.urls || params?.uris || params?.url || params?.uri;
   if (Array.isArray(source)) return source.filter(Boolean);
   return source ? [source] : [];
+}
+
+function splitClaimIdChannelUris(urls: Array<string>): { channelUris: Array<string>; resolveUris: Array<string> } {
+  return urls.reduce(
+    (groups, uri) => {
+      groups[claimIdFromChannelUri(uri) ? 'channelUris' : 'resolveUris'].push(uri);
+      return groups;
+    },
+    { channelUris: [], resolveUris: [] } as { channelUris: Array<string>; resolveUris: Array<string> }
+  );
+}
+
+function claimIdFromChannelUri(uri: string): string | null {
+  const match = String(uri).match(/^lbry:\/\/@[^/]+#([0-9a-f]{40})$/i);
+  return match ? match[1] : null;
 }
 
 function sdkClaimFromHyperbeam(result: any): any {
