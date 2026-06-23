@@ -798,9 +798,13 @@ classify_native_path(<<TxID:64/binary, ":", NOut/binary>>) ->
         false -> not_found
     end;
 classify_native_path(Path) ->
-    case {valid_hex_size(Path, 48), valid_hex_size(Path, 32)} of
-        {true, _} -> {ok, <<"odysee/blob/", Path/binary>>};
-        {_, true} -> {ok, <<"odysee/transaction/", Path/binary>>};
+    case
+        {valid_hex_size(Path, 48), valid_hex_size(Path, 32),
+            valid_hex_size(Path, 20)}
+    of
+        {true, _, _} -> {ok, <<"odysee/blob/", Path/binary>>};
+        {_, true, _} -> {ok, <<"odysee/transaction/", Path/binary>>};
+        {_, _, true} -> {ok, <<"odysee/claim-id/", Path/binary>>};
         _ -> not_found
     end.
 
@@ -874,6 +878,62 @@ direct_sha384_get_returns_native_blob_test() ->
     ?assertEqual(<<"lbry-blob@1.0">>, maps:get(<<"device">>, Msg)),
     ?assertEqual(Hash, maps:get(<<"blob-hash">>, Msg)),
     ?assertEqual(Bytes, maps:get(<<"data">>, Msg)).
+
+bare_claim_id_read_returns_committed_claim_test() ->
+    ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+    Store = claim_id_store(ClaimID),
+    ?assertEqual(
+        <<"odysee/claim-id/", ClaimID/binary>>,
+        canonical_read_path(ClaimID)
+    ),
+    {ok, Msg} = read(Store, #{ <<"read">> => ClaimID }, #{}),
+    ?assertEqual(<<"odysee-claim@1.0">>, maps:get(<<"device">>, Msg)),
+    ?assertEqual(ClaimID, maps:get(<<"claim-id">>, Msg)),
+    ?assertEqual(
+        true,
+        hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
+    ).
+
+direct_claim_id_get_returns_committed_claim_test() ->
+    ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+    Store = claim_id_store(ClaimID),
+    {ok, Msg} =
+        hb_ao:resolve(
+            #{ <<"path">> => <<"/", ClaimID/binary>> },
+            #{ <<"store">> => [Store] }
+        ),
+    ?assertEqual(<<"odysee-claim@1.0">>, maps:get(<<"device">>, Msg)),
+    ?assertEqual(ClaimID, maps:get(<<"claim-id">>, Msg)).
+
+direct_claim_id_http_get_returns_committed_claim_test() ->
+    application:ensure_all_started(inets),
+    ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+    Store = claim_id_store(ClaimID),
+    Node = hb_http_server:start_node(#{ <<"store">> => [Store] }),
+    URL = binary_to_list(<<Node/binary, ClaimID/binary>>),
+    {ok, {{_, 200, _}, Headers, _Body}} =
+        httpc:request(get, {URL, []}, [], [{body_format, binary}]),
+    SignatureInput = http_header(<<"signature-input">>, Headers),
+    ?assertNotEqual(not_found, SignatureInput),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(SignatureInput, <<"alg=\"odysee@1.0/claim\"">>)
+    ).
+
+claim_id_store(ClaimID) ->
+    Claim = #{
+        <<"device">> => <<"odysee-claim@1.0">>,
+        <<"claim-id">> => ClaimID,
+        <<"claim-name">> => <<"sample">>,
+        <<"claim-store-path">> => <<"odysee/claim-id/", ClaimID/binary>>,
+        <<"value">> => #{ <<"title">> => <<"Sample">> }
+    },
+    #{
+        <<"store-module">> => ?MODULE,
+        <<"fixtures">> => #{
+            <<"odysee/claim-id/", ClaimID/binary>> => Claim
+        }
+    }.
 
 direct_sha384_http_get_exposes_native_signature_input_test() ->
     application:ensure_all_started(inets),
