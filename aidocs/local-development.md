@@ -68,6 +68,8 @@ ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:19734 pnpm dev
 
 When `ODYSEE_HYPERBEAM_NODE_API` is set, the branch defaults the browser to HyperBEAM mode and routes canonical reads through `~odysee@1.0`. The browser mode key is `odysee-hyperbeam-mode`; valid values are `original`, `hybrid`, and `hyperbeam`.
 
+For the legacy-auth hosted-wallet demo, keep `ODYSEE_HYPERBEAM_LEGACY_AUTH_TRUST=local-demo` unless the HB node is running in an explicitly trusted or TEE-attested environment. The local-demo mode allows bearer auth only to localhost/loopback HB nodes. A local fake verifier can be paired with `ODYSEE_HYPERBEAM_LEGACY_AUTH_DEMO_TOKEN=demotoken` so the debug-console action works without a real logged-in session.
+
 Frontend validation:
 
 ```bash

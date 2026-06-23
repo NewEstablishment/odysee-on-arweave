@@ -9,6 +9,12 @@ import {
 } from 'util/hyperbeamDebug';
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { getHyperbeamMode, HYPERBEAM_MODES, setHyperbeamMode, type HyperbeamMode } from 'util/hyperbeamMode';
+import {
+  hyperbeamLegacyAuthTrust,
+  installHyperbeamLegacyAuthDemoGlobal,
+  runHyperbeamLegacyAuthDemo,
+  type LegacyAuthTrust,
+} from 'util/hyperbeamLegacyAuth';
 import ClaimTrace from './claimTrace';
 
 const MAX_EVENTS = 1200;
@@ -19,6 +25,7 @@ const FILTERS = [
   { key: 'original', label: 'original', color: '#94a3b8' },
   { key: 'native-device', label: 'native-device', color: '#0ea5e9' },
   { key: 'native:sdk-proxy', label: 'native:sdk-proxy', color: '#a78bfa' },
+  { key: 'legacy-auth', label: 'legacy-auth', color: '#22c55e' },
   { key: 'fallback', label: 'fallback', color: '#ffb020' },
 ] as const;
 
@@ -36,10 +43,14 @@ export default function HyperbeamDebugConsole() {
   const [activeFilters, setActiveFilters] = React.useState<Set<FilterKey>>(() => new Set());
   const [copied, setCopied] = React.useState(false);
   const [copiedRelevant, setCopiedRelevant] = React.useState(false);
+  const [legacyAuthRunning, setLegacyAuthRunning] = React.useState(false);
+  const [legacyAuthResult, setLegacyAuthResult] = React.useState<any>(null);
+  const [legacyAuthError, setLegacyAuthError] = React.useState<string | null>(null);
   const logRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     installHyperbeamFetchDebug();
+    installHyperbeamLegacyAuthDemoGlobal();
     return addHyperbeamDebugListener((event) => {
       setFilterCounts((current) => incrementFilterCounts(current, event));
       setEvents((current) => {
@@ -72,6 +83,7 @@ export default function HyperbeamDebugConsole() {
 
   if (!ODYSEE_HYPERBEAM_NODE_API) return null;
 
+  const legacyAuthTrust = hyperbeamLegacyAuthTrust();
   const last = events[events.length - 1];
   const visibleEvents =
     activeFilters.size === 0
@@ -131,6 +143,19 @@ export default function HyperbeamDebugConsole() {
     setEvents([]);
     setFilterCounts(emptyFilterCounts());
     window.location.reload();
+  };
+  const runLegacyAuthDemo = () => {
+    setLegacyAuthRunning(true);
+    setLegacyAuthError(null);
+    runHyperbeamLegacyAuthDemo()
+      .then((result) => {
+        setLegacyAuthResult(result);
+      })
+      .catch((error: any) => {
+        setLegacyAuthResult(error?.result || error?.body || null);
+        setLegacyAuthError(String(error?.message || error));
+      })
+      .finally(() => setLegacyAuthRunning(false));
   };
 
   return (
@@ -253,6 +278,13 @@ export default function HyperbeamDebugConsole() {
             <div style={{ overflowWrap: 'anywhere', marginBottom: 8, color: 'rgba(255,255,255,0.72)' }}>
               {modeEndpointLabel(mode)}
             </div>
+            <LegacyAuthDemoPanel
+              error={legacyAuthError}
+              result={legacyAuthResult}
+              running={legacyAuthRunning}
+              trust={legacyAuthTrust}
+              onRun={runLegacyAuthDemo}
+            />
           </div>
           {activeTab === 'trace' && <ClaimTrace events={events} />}
           {activeTab === 'requests' && (
@@ -429,6 +461,70 @@ function TabButton({ active, children, onClick }: { active: boolean; children: R
   );
 }
 
+function LegacyAuthDemoPanel({
+  error,
+  result,
+  running,
+  trust,
+  onRun,
+}: {
+  error: string | null;
+  result: any;
+  running: boolean;
+  trust: LegacyAuthTrust;
+  onRun: () => void;
+}) {
+  return (
+    <div
+      style={{
+        marginBottom: 8,
+        padding: '7px 8px',
+        border: '1px solid rgba(255,255,255,0.16)',
+        borderRadius: 4,
+        background: 'rgba(255,255,255,0.045)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <strong style={{ color: trust.allowed ? '#86efac' : '#ffb020' }}>{trust.label}</strong>
+        <span style={{ color: 'rgba(255,255,255,0.66)', overflowWrap: 'anywhere' }}>{trust.node}</span>
+        <button
+          type="button"
+          disabled={running || !trust.allowed}
+          onClick={onRun}
+          title={trust.allowed ? 'Run legacy auth through the configured HyperBEAM node' : trust.reason}
+          style={{
+            marginLeft: 'auto',
+            border: `1px solid ${trust.allowed ? 'rgba(34,197,94,0.68)' : 'rgba(255,255,255,0.14)'}`,
+            borderRadius: 4,
+            padding: '2px 8px',
+            background: trust.allowed ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.035)',
+            color: trust.allowed ? '#dcfce7' : 'rgba(255,255,255,0.36)',
+            cursor: running || !trust.allowed ? 'default' : 'pointer',
+            font: 'inherit',
+          }}
+        >
+          {running ? 'running' : 'run legacy auth demo'}
+        </button>
+      </div>
+      <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.62)', overflowWrap: 'anywhere' }}>{trust.reason}</div>
+      {error && <div style={{ marginTop: 6, color: '#ff8aa8', overflowWrap: 'anywhere' }}>{error}</div>}
+      {result && (
+        <pre
+          style={{
+            maxHeight: 170,
+            overflow: 'auto',
+            margin: '7px 0 0',
+            whiteSpace: 'pre-wrap',
+            color: 'rgba(255,255,255,0.78)',
+          }}
+        >
+          {JSON.stringify(result, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function eventColor(event: HyperbeamDebugEvent) {
   if (event.label === 'request') return hyperbeamDebugColor('info');
   return hyperbeamDebugColor(event.level, event.data?.sourceLayer || event.data?.deviceLayer);
@@ -482,7 +578,7 @@ function modeWaitLabel(mode: HyperbeamMode) {
 
 function filterDisabledInMode(filter: FilterKey, mode: HyperbeamMode) {
   if (mode === HYPERBEAM_MODES.original) {
-    return filter !== 'get' && filter !== 'failed' && filter !== 'original';
+    return filter !== 'get' && filter !== 'failed' && filter !== 'original' && filter !== 'legacy-auth';
   }
 
   if (mode === HYPERBEAM_MODES.hybrid) {
@@ -516,6 +612,9 @@ function incrementFilterCounts(
 
 function eventMatchesFilter(event: HyperbeamDebugEvent, filter: FilterKey) {
   const data = event.data || {};
+  const label = String(event.label || '').toLowerCase();
+  const device = String(data.device || '');
+  const devicePath = String(data.devicePath || '');
   const sourceLayer = String(data.sourceLayer || '');
   const deviceLayer = String(data.deviceLayer || '');
   const isPlainRequest = event.label === 'request';
@@ -537,6 +636,12 @@ function eventMatchesFilter(event: HyperbeamDebugEvent, filter: FilterKey) {
     case 'native-device':
       if (isPlainRequest) return false;
       return deviceLayer === 'native-device';
+    case 'legacy-auth':
+      return (
+        label.includes('legacy auth') ||
+        device === '~odysee-legacy-auth@1.0' ||
+        devicePath.includes('~odysee-legacy-auth@1.0')
+      );
     case 'fallback':
       if (isPlainRequest) return false;
       return sourceLayer.startsWith('fallback') || sourceLayer === 'device:fallback';
@@ -589,6 +694,9 @@ function relevantEvents(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMode)
 function isRelevant(event: HyperbeamDebugEvent) {
   const data = event.data || {};
   const status = Number(data.status);
+  const label = String(event.label || '').toLowerCase();
+  const device = String(data.device || '');
+  const devicePath = String(data.devicePath || '');
   const sourceLayer = String(data.sourceLayer || '');
   const deviceLayer = String(data.deviceLayer || '');
   return (
@@ -598,6 +706,9 @@ function isRelevant(event: HyperbeamDebugEvent) {
     sourceLayer === 'native:sdk-proxy' ||
     sourceLayer === 'native-device' ||
     deviceLayer === 'native-device' ||
+    label.includes('legacy auth') ||
+    device === '~odysee-legacy-auth@1.0' ||
+    devicePath.includes('~odysee-legacy-auth@1.0') ||
     sourceLayer.startsWith('fallback') ||
     sourceLayer === 'native-missing' ||
     sourceLayer === 'native-failed' ||

@@ -91,6 +91,7 @@ import { useAppDispatch } from 'redux/hooks';
 import { doSendPastRecsysEntries } from 'redux/actions/content';
 import { reloadOnceForDynamicImportError } from 'util/importFailure';
 import { installHyperbeamFetchDebug } from 'util/hyperbeamDebug';
+import { installHyperbeamLegacyAuthDemoGlobal } from 'util/hyperbeamLegacyAuth';
 // Import 3rd-party styles before ours for the current way we are code-splitting.
 import 'scss/third-party.scss';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -100,6 +101,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import 'scss/all.scss';
 
 installHyperbeamFetchDebug();
+installHyperbeamLegacyAuthDemoGlobal();
 
 type CancelScheduledWork = () => void;
 

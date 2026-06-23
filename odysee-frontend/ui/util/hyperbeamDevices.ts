@@ -7,6 +7,7 @@ export const HYPERBEAM_DEVICE = {
   channel: '~lbry-channel@1.0',
   comment: '~odysee-comment@1.0',
   internalApis: '~odysee-internal-apis@1.0',
+  legacyAuth: '~odysee-legacy-auth@1.0',
   livestream: '~odysee-livestream@1.0',
   productEvents: '~odysee-product-events@1.0',
   search: '~odysee-search@1.0',
