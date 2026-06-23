@@ -1,5 +1,4 @@
 import { SDK_API_PATH } from 'config';
-import { HYPERBEAM_DEVICE, hyperbeamDeviceBase, hyperbeamDevicePostParams64 } from 'util/hyperbeamDevices';
 const isProduction = process.env.NODE_ENV === 'production';
 const WATCHMAN_BACKEND_ENDPOINT = 'https://watchman.na-backend.odysee.com/reports/playback';
 const SEND_DATA_TO_WATCHMAN_INTERVAL = 10; // in seconds
@@ -10,14 +9,6 @@ let amountOfBufferEvents = 0;
 let amountOfBufferTimeInMS = 0;
 let videoType, userId, claimUrl, playerPoweredBy, videoPlayer, bitrateAsBitsPerSecond, isLivestream, isPreview;
 let lastSentTime;
-
-function hyperbeamNodeBase() {
-  return hyperbeamDeviceBase(HYPERBEAM_DEVICE.productEvents);
-}
-
-function hyperbeamNodePostJson(key: string, body: any) {
-  return hyperbeamNodeBase() ? hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.productEvents, key, body || {}) : null;
-}
 
 // calculate data for backend, send them, and reset buffer data for next interval
 async function sendAndResetWatchmanData() {
@@ -99,11 +90,6 @@ function startWatchmanIntervalIfNotRunning() {
 // post data to the backend
 async function sendWatchmanData(body) {
   try {
-    const nodeRequest = hyperbeamNodePostJson('watchman_playback', body);
-    if (nodeRequest) {
-      return await nodeRequest;
-    }
-
     const response = await fetch(WATCHMAN_BACKEND_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -217,18 +203,13 @@ export const watchman: Watchman = {
 
 function sendPromMetric(name: string, value: number | undefined, player: string) {
   if (gWatchmanAnalyticsEnabled) {
-    const metricBody = {
+    let url = new URL(SDK_API_PATH + '/metric/ui');
+    const params = {
       name: name,
       value: value ? value.toString() : '',
       player: player,
     };
-    const nodeRequest = hyperbeamNodePostJson('metric_ui', metricBody);
-    if (nodeRequest) {
-      return nodeRequest.catch(function (error) {});
-    }
-
-    let url = new URL(SDK_API_PATH + '/metric/ui');
-    url.search = new URLSearchParams(metricBody).toString();
+    url.search = new URLSearchParams(params).toString();
     return fetch(url, {
       method: 'post',
     }).catch(function (error) {});

@@ -26,7 +26,6 @@ reducers[ACTIONS.USER_STATE_POPULATE] = (state: SyncState) => {
   if (!syncReady) {
     return Object.assign({}, state, {
       prefsReady: true,
-      fatalError: false,
     });
   } else {
     return Object.assign({}, state);
@@ -36,7 +35,6 @@ reducers[ACTIONS.USER_STATE_POPULATE] = (state: SyncState) => {
 reducers[ACTIONS.SET_PREFS_READY] = (state: SyncState, action: any) =>
   Object.assign({}, state, {
     prefsReady: action.data,
-    fatalError: action.data ? false : state.fatalError,
   });
 
 reducers[ACTIONS.GET_SYNC_STARTED] = (state: SyncState) =>
@@ -45,7 +43,6 @@ reducers[ACTIONS.GET_SYNC_STARTED] = (state: SyncState) =>
     getSyncErrorMessage: null,
     syncApplyPasswordError: false,
     syncDeferredDueToMissingPassword: false,
-    fatalError: false,
   });
 
 reducers[ACTIONS.GET_SYNC_DEFERRED] = (state: SyncState) =>
@@ -92,7 +89,6 @@ reducers[ACTIONS.SET_SYNC_COMPLETED] = (state: SyncState, action: any) =>
     setSyncIsPending: false,
     setSyncErrorMessage: null,
     hasSyncedWallet: true,
-    fatalError: false,
     // sync was successful, so the user has a synced wallet at this point
     syncHash: action.data.syncHash,
     lastSyncHash: action.data.lastSyncHash !== undefined ? action.data.lastSyncHash : action.data.syncHash,

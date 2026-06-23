@@ -135,18 +135,6 @@ function ChannelPage(props: Props) {
   const { channelName } = parseURI(uri);
   const { permanent_url: permanentUrl } = claim;
   const claimId = claim.claim_id;
-  const hyperbeamClaimDebugAttrs =
-    claim && claim.claim_id
-      ? {
-          'data-hyperbeam-claim-id': claim.claim_id,
-          'data-hyperbeam-claim-title': title || claim.name || '',
-          'data-hyperbeam-claim-uri': claim.canonical_url || claim.permanent_url || uri || '',
-          'data-hyperbeam-claim-txid': claim.txid || '',
-          'data-hyperbeam-claim-nout': claim.nout ?? '',
-          'data-hyperbeam-claim-type': claim.value_type || '',
-          'data-hyperbeam-claim-sd-hash': claim.value?.source?.sd_hash || '',
-        }
-      : {};
   const compactSubCount = toCompactNotation(subCount, lang, 10000);
   const formattedSubCount = Number(subCount).toLocaleString();
   const isBlocked = claim && blockedChannels.includes(claim.permanent_url);
@@ -483,7 +471,6 @@ function ChannelPage(props: Props) {
   return (
     <ChannelPageContext.Provider value>
       <header
-        {...hyperbeamClaimDebugAttrs}
         className={classnames('channel-cover', {
           'channel-cover-legacy': legacyHeader,
         })}

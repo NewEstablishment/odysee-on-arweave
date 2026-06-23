@@ -1,4 +1,4 @@
-import Livestream from 'livestream';
+import { LIVESTREAM_KILL } from 'constants/livestream';
 import { toHex } from 'util/hex';
 import Lbry from 'lbry';
 import dayjs from 'util/dayjs';
@@ -136,18 +136,11 @@ const getStreamData = async (channelId: string, channelName: string): Promise<St
 
 export const killStream = async (channelId: string, channelName: string) => {
   const streamData = await getStreamData(channelId, channelName);
-  const data = await Livestream.call(
-    'streams',
-    'kill',
-    {
-      app: 'live',
-      channel_claim_id: channelId,
-      channel_name: channelName,
-      signature_ts: streamData.t,
-      signature: streamData.s,
-    },
-    'get'
+  const encodedChannelName = encodeURIComponent(channelName);
+  const apiData = await fetch(
+    `${LIVESTREAM_KILL}channel_claim_id=${channelId}&channel_name=${encodedChannelName}&signature_ts=${streamData.t}&signature=${streamData.s}`
   );
+  const data = (await apiData.json()).data;
   if (!data) throw new Error('Kill stream API failed.');
 };
 export function filterActiveLivestreamUris(

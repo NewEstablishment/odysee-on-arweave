@@ -15,7 +15,7 @@ import useThrottle from 'effects/use-throttle';
 import classnames from 'classnames';
 import * as PAGES from 'constants/pages';
 import { SOURCE_SELECT } from 'constants/publish_sources';
-import Livestream from 'livestream';
+import { NEW_LIVESTREAM_REPLAY_API } from 'constants/livestream';
 import Icon from 'component/common/icon';
 import VideoOptimizer from 'component/videoOptimizer/view';
 import VideoFormatNotice from 'component/videoFormatNotice/view';
@@ -112,6 +112,13 @@ function PublishFile(props: Props) {
     });
 
     if (signedMessage) {
+      const encodedChannelName = encodeURIComponent(channelName || '');
+      const newEndpointUrl =
+        `${NEW_LIVESTREAM_REPLAY_API}?channel_claim_id=${String(channelId)}` +
+        `&signature=${signedMessage.signature}&signature_ts=${
+          signedMessage.signing_ts
+        }&channel_name=${encodedChannelName || ''}`;
+      const responseFromNewApi = await fetch(newEndpointUrl);
       const data: Array<{
         Status: string;
         URL: string;
@@ -119,17 +126,7 @@ function PublishFile(props: Props) {
         PercentComplete: number;
         ThumbnailURLs: string[] | null;
         Created: string;
-      }> = await Livestream.call(
-        'replays',
-        'list',
-        {
-          channel_claim_id: String(channelId),
-          signature: signedMessage.signature,
-          signature_ts: signedMessage.signing_ts,
-          channel_name: channelName || '',
-        },
-        'get'
-      );
+      }> = (await responseFromNewApi.json()).data;
       const newData: Array<LivestreamReplayItem> = [];
 
       if (data && data.length > 0) {

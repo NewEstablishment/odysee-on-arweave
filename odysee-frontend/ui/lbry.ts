@@ -2,15 +2,8 @@ import analytics from 'analytics';
 import { FETCH_TIMEOUT, SDK_FETCH_TIMEOUT } from 'constants/errors';
 import { NO_AUTH, X_LBRY_AUTH_TOKEN } from 'constants/token';
 import fetchWithTimeout from 'util/fetch';
+import { fetchHyperbeamClaimSearch } from 'util/hyperbeam';
 import { PROXY_URL_NO_CF } from 'config';
-import { getAuthToken } from 'util/saved-passwords';
-import {
-  HYPERBEAM_DEVICE,
-  hyperbeamNodeBase,
-  hyperbeamSdkPostParams64,
-  isHyperbeamMethodEnabled,
-} from 'util/hyperbeamDevices';
-import { isHyperbeamFullMode, shouldSendHyperbeamAuthHeaders } from 'util/hyperbeamMode';
 
 import 'proxy-polyfill';
 
@@ -86,7 +79,17 @@ const Lbry: LbryTypes = {
   // Claim fetching and manipulation
   resolve: (params) => daemonCallWithResult('resolve', params, handleAuthentication),
   get: (params) => daemonCallWithResult('get', params),
-  claim_search: (params) => daemonCallWithResult('claim_search', params, claimSearchParamHook),
+  claim_search: (params = {}) => {
+    const searchParams = claimSearchParamHook(params);
+
+    if (!searchParams[NO_AUTH]) {
+      return daemonCallWithResult('claim_search', searchParams);
+    }
+
+    return fetchHyperbeamClaimSearch(searchParams).then(
+      (result) => result || daemonCallWithResult('claim_search', searchParams)
+    );
+  },
   claim_list: (params) => daemonCallWithResult('claim_list', params),
   channel_create: (params) => daemonCallWithResult('channel_create', params),
   channel_update: (params) => daemonCallWithResult('channel_update', params),
@@ -130,8 +133,6 @@ const Lbry: LbryTypes = {
   account_set: (params = {}) => daemonCallWithResult('account_set', params),
   sync_hash: (params = {}) => daemonCallWithResult('sync_hash', params),
   sync_apply: (params = {}) => daemonCallWithResult('sync_apply', params),
-  sync_get: (params = {}) => daemonCallWithResult('sync_get', params),
-  sync_set: (params = {}) => daemonCallWithResult('sync_set', params),
   // Preferences
   preference_get: (params = {}) => daemonCallWithResult('preference_get', params),
   preference_set: (params = {}) => daemonCallWithResult('preference_set', params),
@@ -288,11 +289,6 @@ export function apiCall(
   resolve: (...args: Array<any>) => any,
   reject: (...args: Array<any>) => any
 ) {
-  const nodeRead = hyperbeamNodeSdkCall(method, params);
-  if (nodeRead) {
-    return nodeRead.then(resolve, reject);
-  }
-
   let apiRequestHeaders = Lbry.apiRequestHeaders;
 
   if (params && params[NO_AUTH]) {
@@ -351,218 +347,6 @@ export function apiCall(
         reject(err);
       }
     });
-}
-
-function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null {
-  const localFullModeResult = hyperbeamFullModeLocalSdkResult(method, params);
-  if (localFullModeResult) {
-    return localFullModeResult;
-  }
-
-  switch (method) {
-    case 'resolve': {
-      const urls = Array.isArray(params?.urls)
-        ? params.urls
-        : params?.urls
-          ? [params.urls]
-          : Array.isArray(params?.uris)
-            ? params.uris
-            : params?.uris
-              ? [params.uris]
-              : params?.uri
-                ? [params.uri]
-                : [];
-      return urls.length ? hyperbeamNodeFetchJson('resolve', 'urls64', urls) : null;
-    }
-    case 'claim_search':
-      return hyperbeamNodeFetchJson(
-        'claim_search',
-        'params64',
-        stripHyperbeamNodeOnlyParams(claimSearchParamHook(params || {}))
-      );
-    case 'status':
-    case 'version':
-    case 'get':
-    case 'collection_resolve':
-    case 'collection_list':
-    case 'claim_list':
-    case 'channel_list':
-    case 'channel_sign':
-    case 'stream_list':
-    case 'support_list':
-    case 'transaction_show':
-    case 'file_list':
-    case 'blob_list':
-    case 'wallet_balance':
-    case 'wallet_list':
-    case 'preference_get':
-    case 'preference_set':
-    case 'wallet_status':
-    case 'wallet_unlock':
-    case 'wallet_lock':
-    case 'wallet_encrypt':
-    case 'wallet_decrypt':
-    case 'purchase_list':
-    case 'account_list':
-    case 'settings_get':
-    case 'settings_set':
-    case 'settings_clear':
-    case 'ffmpeg_find':
-    case 'address_is_mine':
-    case 'address_unused':
-    case 'address_list':
-    case 'transaction_list':
-    case 'txo_list':
-    case 'sync_hash':
-    case 'sync_apply':
-    case 'sync_get':
-    case 'sync_set':
-      return hyperbeamNodeFetchJson(method, 'params64', stripHyperbeamNodeOnlyParams(params || {}));
-    default:
-      return null;
-  }
-}
-
-export function debugHyperbeamNode(data: any) {
-  if (isHyperbeamFullMode()) return;
-
-  try {
-    fetch(
-      `${hyperbeamNodeBase()}/${HYPERBEAM_DEVICE.odysee}/sdk?method=debug&params64=${base64Url(JSON.stringify(data || {}))}`,
-      {
-        method: 'POST',
-        headers: { accept: 'application/json' },
-      }
-    ).catch(() => {});
-  } catch (e) {}
-}
-
-function stripHyperbeamNodeOnlyParams(params: Record<string, any>) {
-  const clean = { ...params };
-  delete clean[NO_AUTH];
-  return clean;
-}
-
-function hyperbeamNodeFetchJson(key: string, paramName: string, value: any): Promise<any> | null {
-  if (isHyperbeamFullMode()) {
-    const request = hyperbeamSdkPostParams64(key, value, hyperbeamNodeRequestHeaders(), paramName);
-    if (!request) return null;
-
-    return fetchWithTimeout(60000, request).then((response: Response | string) => {
-      if (typeof response !== 'object') {
-        throw new Error(`${key}: HyperBEAM SDK fallback fetch failed`);
-      }
-
-      return checkAndParse(response, key).then(unwrapJsonRpcResult);
-    });
-  }
-
-  if (!isHyperbeamMethodEnabled(key)) return null;
-
-  const request = hyperbeamSdkPostParams64(key, value, hyperbeamNodeRequestHeaders(), paramName);
-  if (!request) return null;
-
-  return fetchWithTimeout(60000, request).then((response: Response | string) => {
-    if (typeof response !== 'object') {
-      throw new Error(`${key}: HyperBEAM SDK fallback fetch failed`);
-    }
-
-    return checkAndParse(response, key).then(unwrapJsonRpcResult);
-  });
-}
-
-function hyperbeamNodeRequestHeaders() {
-  const headers: Record<string, string> = { accept: 'application/json' };
-  if (!shouldSendHyperbeamAuthHeaders()) return headers;
-
-  const savedAuthToken = getAuthToken();
-  if (savedAuthToken) headers[X_LBRY_AUTH_TOKEN] = savedAuthToken;
-
-  [X_LBRY_AUTH_TOKEN, 'X-Odysee-User-Id', 'Authorization'].forEach((key) => {
-    const value = Lbry.apiRequestHeaders[key];
-    if (value) headers[key] = value;
-  });
-  return headers;
-}
-
-function hasHyperbeamAuthToken() {
-  return Boolean(getAuthToken() || Lbry.apiRequestHeaders[X_LBRY_AUTH_TOKEN]);
-}
-
-function hyperbeamFullModeLocalSdkResult(method: string, params: any): Promise<any> | null {
-  if (!isHyperbeamFullMode()) return null;
-
-  switch (method) {
-    case 'channel_sign':
-      return Promise.reject(new Error('channel_sign requires authentication'));
-    case 'preference_get':
-    case 'preference_set':
-    case 'settings_get':
-    case 'settings_set':
-    case 'settings_clear':
-    case 'sync_get':
-    case 'sync_set':
-    case 'sync_apply':
-      return Promise.resolve({});
-    case 'sync_hash':
-      return Promise.resolve(null);
-    case 'wallet_balance':
-      return Promise.resolve({});
-    case 'wallet_status':
-      return Promise.resolve({ is_encrypted: false, is_locked: false });
-    case 'wallet_list':
-    case 'account_list':
-    case 'channel_list':
-    case 'collection_list':
-    case 'purchase_list':
-    case 'file_list':
-    case 'stream_list':
-    case 'blob_list':
-    case 'address_list':
-    case 'transaction_list':
-    case 'txo_list':
-      return Promise.resolve(emptyHyperbeamListResult(params));
-    case 'address_is_mine':
-      return Promise.resolve(false);
-    case 'address_unused':
-      return Promise.resolve('');
-    case 'wallet_unlock':
-    case 'wallet_lock':
-    case 'wallet_encrypt':
-    case 'wallet_decrypt':
-    case 'ffmpeg_find':
-      return Promise.reject(new Error(`${method} requires authentication`));
-    default:
-      return null;
-  }
-}
-
-function emptyHyperbeamListResult(params: any) {
-  return {
-    items: [],
-    page: Number(params?.page || 1),
-    page_size: Number(params?.page_size || 20),
-    total_items: 0,
-    total_pages: 0,
-  };
-}
-
-function unwrapJsonRpcResult(json: any) {
-  if (json?.error) {
-    throw new Error(json.error.message || json.error);
-  }
-
-  return json && Object.prototype.hasOwnProperty.call(json, 'result') ? json.result : json;
-}
-
-function base64Url(value: string) {
-  const bytes = new TextEncoder().encode(value);
-  let binary = '';
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function daemonCallWithResult(

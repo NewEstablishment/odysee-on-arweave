@@ -10,7 +10,6 @@ import Icon from 'component/common/icon';
 import { filterActiveLivestreamUris } from 'util/livestream';
 import { lazyImport } from 'util/lazyImport';
 import { tagSearchCsOptionsHook } from 'util/search';
-import { debugHyperbeamNode } from 'lbry';
 import UpcomingClaims from 'component/upcomingClaims';
 import useComponentDidMount from 'effects/use-component-did-mount';
 import usePersistedState from 'effects/use-persisted-state';
@@ -22,7 +21,6 @@ import {
 } from 'redux/selectors/livestream';
 import { selectSubscriptionIds } from 'redux/selectors/subscriptions';
 import { selectClientSetting } from 'redux/selectors/settings';
-import { selectPrefsReady } from 'redux/selectors/sync';
 import { doFetchAllActiveLivestreamsForQuery as doFetchAllActiveLivestreamsForQueryAction } from 'redux/actions/livestream';
 
 const ChannelsFollowingDiscoverPage = lazyImport(
@@ -43,7 +41,6 @@ const LivestreamSection = lazyImport(
 function ChannelsFollowingPage() {
   const dispatch = useAppDispatch();
   const channelIds = useAppSelector(selectSubscriptionIds);
-  const prefsReady = useAppSelector(selectPrefsReady);
   const tileLayout = useAppSelector((state) => selectClientSetting(state, SETTINGS.TILE_LAYOUT));
   const fetchingActiveLivestreams = useAppSelector(selectIsFetchingActiveLivestreams);
   const al = useAppSelector(selectActiveLivestreamByCreatorId);
@@ -56,20 +53,6 @@ function ChannelsFollowingPage() {
   useComponentDidMount(() => {
     dispatch(doFetchAllActiveLivestreamsForQueryAction());
   });
-  React.useEffect(() => {
-    debugHyperbeamNode({
-      event: 'CHANNELS_FOLLOWING_RENDER',
-      channelIds: channelIds.length,
-      hasSubscribedChannels,
-      prefsReady,
-      fetchingActiveLivestreams,
-    });
-  }, [channelIds.length, hasSubscribedChannels, prefsReady, fetchingActiveLivestreams]);
-
-  if (!prefsReady && !hasSubscribedChannels) {
-    return <Page noFooter fullWidthPage={tileLayout} className="main__channelsFollowing" />;
-  }
-
   return !hasSubscribedChannels ? (
     <React.Suspense fallback={null}>
       <ChannelsFollowingDiscoverPage />
