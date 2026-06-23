@@ -16,9 +16,8 @@ const MAX_RELEVANT_EVENTS = 24;
 const FILTERS = [
   { key: 'get', label: 'get', color: 'rgba(255,255,255,0.76)' },
   { key: 'failed', label: 'failed', color: '#ff4d7d' },
-  { key: 'original', label: 'original', color: '#94a3b8' },
+  { key: 'original', label: 'legacy', color: '#94a3b8' },
   { key: 'native-device', label: 'native-device', color: '#0ea5e9' },
-  { key: 'native:sdk-proxy', label: 'native:sdk-proxy', color: '#a78bfa' },
   { key: 'fallback', label: 'fallback', color: '#ffb020' },
 ] as const;
 
@@ -31,7 +30,6 @@ export default function HyperbeamDebugConsole() {
   const [mode, setMode] = React.useState<HyperbeamMode>(() => getHyperbeamMode());
   const [activeTab, setActiveTab] = React.useState<ConsoleTab>('trace');
   const [events, setEvents] = React.useState<Array<HyperbeamDebugEvent>>([]);
-  const [filterCounts, setFilterCounts] = React.useState<Record<FilterKey, number>>(() => emptyFilterCounts());
   const [expanded, setExpanded] = React.useState<Record<number, boolean>>({});
   const [activeFilters, setActiveFilters] = React.useState<Set<FilterKey>>(() => new Set());
   const [copied, setCopied] = React.useState(false);
@@ -41,7 +39,6 @@ export default function HyperbeamDebugConsole() {
   React.useEffect(() => {
     installHyperbeamFetchDebug();
     return addHyperbeamDebugListener((event) => {
-      setFilterCounts((current) => incrementFilterCounts(current, event));
       setEvents((current) => {
         const key = eventKey(event);
         const existingIndex = current.findLastIndex((currentEvent) => eventKey(currentEvent) === key);
@@ -70,9 +67,8 @@ export default function HyperbeamDebugConsole() {
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [events, open]);
 
-  if (!ODYSEE_HYPERBEAM_NODE_API) return null;
-
   const last = events[events.length - 1];
+  const filterCounts = React.useMemo(() => countFilters(events), [events]);
   const visibleEvents =
     activeFilters.size === 0
       ? events
@@ -129,7 +125,6 @@ export default function HyperbeamDebugConsole() {
     setMode(nextMode);
     setHyperbeamMode(nextMode);
     setEvents([]);
-    setFilterCounts(emptyFilterCounts());
     window.location.reload();
   };
 
@@ -188,7 +183,7 @@ export default function HyperbeamDebugConsole() {
             font: 'inherit',
           }}
         >
-          Odysee request log {open ? 'hide' : 'show'}
+          Odysee request log
           {!open && last ? ` · ${last.label} · ${last.level}` : ''}
         </button>
         {open && (
@@ -218,8 +213,7 @@ export default function HyperbeamDebugConsole() {
             lineHeight: 1,
           }}
         >
-          <option value={HYPERBEAM_MODES.original}>Original</option>
-          <option value={HYPERBEAM_MODES.hybrid}>Hybrid</option>
+          <option value={HYPERBEAM_MODES.original}>Legacy</option>
           <option value={HYPERBEAM_MODES.hyperbeam}>HyperBEAM</option>
         </select>
         <button
@@ -430,21 +424,26 @@ function TabButton({ active, children, onClick }: { active: boolean; children: R
 }
 
 function eventColor(event: HyperbeamDebugEvent) {
+  if (isFailedEvent(event)) return hyperbeamDebugColor('error');
   if (event.label === 'request') return hyperbeamDebugColor('info');
-  return hyperbeamDebugColor(event.level, event.data?.sourceLayer || event.data?.deviceLayer);
+  return hyperbeamDebugColor(event.level, event.data?.sourceLayer || nativeLayer(event) || event.data?.deviceLayer);
 }
 
 function eventSummary(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
   const data = event.data || {};
+  const path = data.nativePath || data.devicePath;
   const bits = [
     mode,
     data.repeatCount ? `x${data.repeatCount}` : undefined,
     data.method,
     data.status ? String(data.status) : undefined,
     data.deviceLayer,
+    data.nativeSource,
     data.sourceLayer,
+    data.sourceAlg,
     data.elapsedMs !== undefined ? `${data.elapsedMs}ms` : undefined,
-    data.devicePath,
+    path,
+    data.requestKey,
   ].filter(Boolean);
   return bits.length ? `- ${bits.join(' ')}` : '';
 }
@@ -452,9 +451,7 @@ function eventSummary(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
 function modeLabel(mode: HyperbeamMode) {
   switch (mode) {
     case HYPERBEAM_MODES.original:
-      return 'Original wiring';
-    case HYPERBEAM_MODES.hybrid:
-      return 'Hybrid read path';
+      return 'Legacy wiring';
     case HYPERBEAM_MODES.hyperbeam:
       return 'HyperBEAM wiring';
     default:
@@ -464,33 +461,19 @@ function modeLabel(mode: HyperbeamMode) {
 
 function modeEndpointLabel(mode: HyperbeamMode) {
   if (mode === HYPERBEAM_MODES.original) return `${modeLabel(mode)} · normal Odysee/API calls`;
-  if (mode === HYPERBEAM_MODES.hybrid) {
-    return `${modeLabel(mode)} · public reads through ${String(ODYSEE_HYPERBEAM_NODE_API).replace(
-      /\/+$/,
-      ''
-    )}; private/internal calls stay original`;
-  }
-  return `${modeLabel(mode)} · canonical reads through ${String(ODYSEE_HYPERBEAM_NODE_API).replace(
+  return `${modeLabel(mode)} · supported public reads through ${String(ODYSEE_HYPERBEAM_NODE_API).replace(
     /\/+$/,
     ''
-  )}; original fallback disabled`;
+  )}; unsupported SDK routes do not fall back`;
 }
 
 function modeWaitLabel(mode: HyperbeamMode) {
-  return mode === HYPERBEAM_MODES.original ? 'Original' : mode === HYPERBEAM_MODES.hybrid ? 'Hybrid' : 'HyperBEAM';
+  return mode === HYPERBEAM_MODES.original ? 'Legacy' : 'HyperBEAM';
 }
 
 function filterDisabledInMode(filter: FilterKey, mode: HyperbeamMode) {
   if (mode === HYPERBEAM_MODES.original) {
     return filter !== 'get' && filter !== 'failed' && filter !== 'original';
-  }
-
-  if (mode === HYPERBEAM_MODES.hybrid) {
-    if (filter === 'original') return false;
-    if (filter === 'native-device') return false;
-    if (filter === 'native:sdk-proxy') return false;
-    if (filter === 'fallback') return true;
-    return false;
   }
 
   return false;
@@ -500,35 +483,27 @@ function emptyFilterCounts(): Record<FilterKey, number> {
   return FILTERS.reduce((counts, filter) => ({ ...counts, [filter.key]: 0 }), {} as Record<FilterKey, number>);
 }
 
-function incrementFilterCounts(
-  current: Record<FilterKey, number>,
-  event: HyperbeamDebugEvent
-): Record<FilterKey, number> {
-  let next = current;
-  FILTERS.forEach((filter) => {
-    if (eventMatchesFilter(event, filter.key)) {
-      if (next === current) next = { ...current };
-      next[filter.key] = Number(next[filter.key] || 0) + 1;
-    }
-  });
-  return next;
+function countFilters(events: Array<HyperbeamDebugEvent>): Record<FilterKey, number> {
+  return events.reduce((counts, event) => {
+    FILTERS.forEach((filter) => {
+      if (eventMatchesFilter(event, filter.key)) {
+        counts[filter.key] = Number(counts[filter.key] || 0) + 1;
+      }
+    });
+    return counts;
+  }, emptyFilterCounts());
 }
 
 function eventMatchesFilter(event: HyperbeamDebugEvent, filter: FilterKey) {
   const data = event.data || {};
   const sourceLayer = String(data.sourceLayer || '');
   const deviceLayer = String(data.deviceLayer || '');
+  const isNative = Boolean(data.nativePath || data.nativeSource || data.sourceAlg || nativeLayer(event));
   const isPlainRequest = event.label === 'request';
 
   switch (filter) {
     case 'failed':
-      return (
-        event.level === 'error' ||
-        data.ok === false ||
-        Number(data.status) >= 400 ||
-        sourceLayer === 'native-missing' ||
-        sourceLayer === 'native-failed'
-      );
+      return isFailedEvent(event);
     case 'get':
       return String(data.method || '').toUpperCase() === 'GET';
     case 'original':
@@ -536,16 +511,25 @@ function eventMatchesFilter(event: HyperbeamDebugEvent, filter: FilterKey) {
       return sourceLayer === 'original';
     case 'native-device':
       if (isPlainRequest) return false;
-      return deviceLayer === 'native-device';
+      return deviceLayer === 'native-device' || isNative;
     case 'fallback':
       if (isPlainRequest) return false;
       return sourceLayer.startsWith('fallback') || sourceLayer === 'device:fallback';
-    case 'native:sdk-proxy':
-      if (isPlainRequest) return false;
-      return sourceLayer === 'native:sdk-proxy';
     default:
       return false;
   }
+}
+
+function isFailedEvent(event: HyperbeamDebugEvent) {
+  const data = event.data || {};
+  const sourceLayer = String(data.sourceLayer || '');
+  return (
+    event.level === 'error' ||
+    data.ok === false ||
+    Number(data.status) >= 400 ||
+    sourceLayer === 'native-missing' ||
+    sourceLayer === 'native-failed'
+  );
 }
 
 function eventKey(event: HyperbeamDebugEvent) {
@@ -558,6 +542,10 @@ function eventKey(event: HyperbeamDebugEvent) {
     status: data.status,
     ok: data.ok,
     pagePath: data.pagePath,
+    nativePath: data.nativePath,
+    nativeSource: data.nativeSource,
+    sourceAlg: data.sourceAlg,
+    requestKey: data.requestKey,
     devicePath: data.devicePath,
     device: data.device,
     deviceLayer: data.deviceLayer,
@@ -591,13 +579,14 @@ function isRelevant(event: HyperbeamDebugEvent) {
   const status = Number(data.status);
   const sourceLayer = String(data.sourceLayer || '');
   const deviceLayer = String(data.deviceLayer || '');
+  const isNative = Boolean(data.nativePath || data.nativeSource || data.sourceAlg || nativeLayer(event));
   return (
     event.level === 'error' ||
     data.ok === false ||
     status >= 400 ||
-    sourceLayer === 'native:sdk-proxy' ||
     sourceLayer === 'native-device' ||
     deviceLayer === 'native-device' ||
+    isNative ||
     sourceLayer.startsWith('fallback') ||
     sourceLayer === 'native-missing' ||
     sourceLayer === 'native-failed' ||
@@ -622,6 +611,10 @@ function compactEvent(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
     ok: data.ok,
     device: data.device,
     deviceLayer: data.deviceLayer,
+    nativePath: compactPath(data.nativePath),
+    nativeSource: data.nativeSource,
+    requestKey: compactPath(data.requestKey),
+    sourceAlg: data.sourceAlg,
     sourceLayer: data.sourceLayer,
     sourceReason: data.sourceReason,
     elapsedMs: data.elapsedMs,
@@ -631,6 +624,12 @@ function compactEvent(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
     contentType: data.contentType,
     response: compactBody(body),
   });
+}
+
+function nativeLayer(event: HyperbeamDebugEvent) {
+  const data = event.data || {};
+  if (data.nativePath || data.nativeSource || data.sourceAlg) return 'native-device';
+  return undefined;
 }
 
 function compactBody(body: any) {

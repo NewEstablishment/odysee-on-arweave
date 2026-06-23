@@ -2,7 +2,8 @@ import analytics from 'analytics';
 import { FETCH_TIMEOUT, SDK_FETCH_TIMEOUT } from 'constants/errors';
 import { NO_AUTH, X_LBRY_AUTH_TOKEN } from 'constants/token';
 import fetchWithTimeout from 'util/fetch';
-import { fetchHyperbeamClaimSearch } from 'util/hyperbeam';
+import { fetchHyperbeamClaimSearch, fetchHyperbeamGet, fetchHyperbeamResolve } from 'util/hyperbeam';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { PROXY_URL_NO_CF } from 'config';
 
 import 'proxy-polyfill';
@@ -79,17 +80,7 @@ const Lbry: LbryTypes = {
   // Claim fetching and manipulation
   resolve: (params) => daemonCallWithResult('resolve', params, handleAuthentication),
   get: (params) => daemonCallWithResult('get', params),
-  claim_search: (params = {}) => {
-    const searchParams = claimSearchParamHook(params);
-
-    if (!searchParams[NO_AUTH]) {
-      return daemonCallWithResult('claim_search', searchParams);
-    }
-
-    return fetchHyperbeamClaimSearch(searchParams).then(
-      (result) => result || daemonCallWithResult('claim_search', searchParams)
-    );
-  },
+  claim_search: (params = {}) => daemonCallWithResult('claim_search', params, claimSearchParamHook),
   claim_list: (params) => daemonCallWithResult('claim_list', params),
   channel_create: (params) => daemonCallWithResult('channel_create', params),
   channel_update: (params) => daemonCallWithResult('channel_update', params),
@@ -289,6 +280,11 @@ export function apiCall(
   resolve: (...args: Array<any>) => any,
   reject: (...args: Array<any>) => any
 ) {
+  const nodeRead = hyperbeamNodeSdkCall(method, params);
+  if (nodeRead) {
+    return nodeRead.then(resolve, reject);
+  }
+
   let apiRequestHeaders = Lbry.apiRequestHeaders;
 
   if (params && params[NO_AUTH]) {
@@ -347,6 +343,85 @@ export function apiCall(
         reject(err);
       }
     });
+}
+
+function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null {
+  if (!isHyperbeamEnabled()) return null;
+
+  const localResult = hyperbeamLocalSdkResult(method, params);
+  if (localResult) return localResult;
+  if (LEGACY_ONLY_SDK_METHODS.has(method)) return null;
+
+  switch (method) {
+    case 'resolve':
+      return fetchHyperbeamResolve(stripHyperbeamNodeOnlyParams(params || {})).then(requireHyperbeamResult(method));
+    case 'claim_search':
+      return fetchHyperbeamClaimSearch(stripHyperbeamNodeOnlyParams(claimSearchParamHook(params || {}))).then(
+        requireHyperbeamResult(method)
+      );
+    case 'get':
+      return fetchHyperbeamGet(stripHyperbeamNodeOnlyParams(params || {})).then(requireHyperbeamResult(method));
+    default:
+      return Promise.reject(new Error(`HyperBEAM mode does not support SDK method ${method}`));
+  }
+}
+
+const LEGACY_ONLY_SDK_METHODS = new Set([
+  'account_list',
+  'address_is_mine',
+  'address_list',
+  'address_unused',
+  'blob_list',
+  'channel_sign',
+  'channel_list',
+  'collection_list',
+  'file_list',
+  'purchase_list',
+  'preference_get',
+  'preference_set',
+  'settings_get',
+  'settings_set',
+  'settings_clear',
+  'stream_list',
+  'sync_get',
+  'sync_set',
+  'sync_apply',
+  'sync_hash',
+  'transaction_list',
+  'txo_list',
+  'wallet_balance',
+  'wallet_decrypt',
+  'wallet_encrypt',
+  'wallet_list',
+  'wallet_lock',
+  'wallet_status',
+  'wallet_unlock',
+]);
+
+function requireHyperbeamResult(method: string) {
+  return (result: any) => {
+    if (result) return result;
+    throw new Error(`HyperBEAM ${method} unavailable`);
+  };
+}
+
+function stripHyperbeamNodeOnlyParams(params: Record<string, any>) {
+  const clean = { ...params };
+  delete clean[NO_AUTH];
+  return clean;
+}
+
+function hyperbeamLocalSdkResult(method: string, params: any): Promise<any> | null {
+  switch (method) {
+    case 'status':
+      return Promise.resolve({ is_running: true });
+    case 'version':
+      return Promise.resolve({ lbrynet_version: 'hyperbeam' });
+    case 'ffmpeg_find':
+      return Promise.reject(new Error(`${method} requires authentication`));
+    default:
+      return null;
+  }
 }
 
 function daemonCallWithResult(

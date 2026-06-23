@@ -4,20 +4,29 @@ export const HYPERBEAM_MODE_STORAGE_KEY = 'odysee-hyperbeam-mode';
 
 export const HYPERBEAM_MODES = {
   original: 'original',
-  hybrid: 'hybrid',
   hyperbeam: 'hyperbeam',
 } as const;
 
 export type HyperbeamMode = (typeof HYPERBEAM_MODES)[keyof typeof HYPERBEAM_MODES];
 
-const CANONICAL_NATIVE_DEVICES = new Set(['~odysee@1.0']);
+const CANONICAL_NATIVE_DEVICES = new Set([
+  '~odysee-claim@1.0',
+  '~odysee-channel@1.0',
+  '~odysee-comment@1.0',
+  '~odysee-file@1.0',
+  '~odysee-file-reaction@1.0',
+  '~odysee-reaction@1.0',
+  '~odysee-stream@1.0',
+  '~odysee-subscription@1.0',
+]);
 
 export function getHyperbeamMode(): HyperbeamMode {
   if (!ODYSEE_HYPERBEAM_NODE_API) return HYPERBEAM_MODES.original;
   if (typeof window === 'undefined') return HYPERBEAM_MODES.hyperbeam;
 
   const value = window.localStorage.getItem(HYPERBEAM_MODE_STORAGE_KEY);
-  if (value === HYPERBEAM_MODES.original || value === HYPERBEAM_MODES.hybrid || value === HYPERBEAM_MODES.hyperbeam) {
+  if (value === 'hybrid') return HYPERBEAM_MODES.hyperbeam;
+  if (value === HYPERBEAM_MODES.original || value === HYPERBEAM_MODES.hyperbeam) {
     return value;
   }
 
@@ -38,10 +47,6 @@ export function isHyperbeamFullMode() {
   return Boolean(ODYSEE_HYPERBEAM_NODE_API) && getHyperbeamMode() === HYPERBEAM_MODES.hyperbeam;
 }
 
-export function isHyperbeamHybridMode() {
-  return Boolean(ODYSEE_HYPERBEAM_NODE_API) && getHyperbeamMode() === HYPERBEAM_MODES.hybrid;
-}
-
 export function isHyperbeamPublicReadDevice(device: string) {
   return CANONICAL_NATIVE_DEVICES.has(device);
 }
@@ -52,9 +57,9 @@ export function isHyperbeamDeviceEnabled(device: string) {
 }
 
 export function shouldSendHyperbeamAuthHeaders() {
-  return isHyperbeamFullMode();
+  return false;
 }
 
 export function shouldAllowOriginalNetworkFallback() {
-  return !isHyperbeamFullMode();
+  return !isHyperbeamEnabled();
 }

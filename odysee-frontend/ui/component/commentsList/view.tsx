@@ -55,6 +55,7 @@ import { selectUserHasValidMembershipForCreatorId } from 'redux/selectors/member
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 
 const DEBOUNCE_SCROLL_HANDLER_MS = 200;
+const COMMENT_REACTION_REQUEST_CACHE_MS = 30 * 1000;
 const CommentCreate: React.ComponentType<any> = lazyImport(
   () =>
     import(
@@ -127,6 +128,7 @@ export default function CommentList(props: Props) {
   const spinnerRef = React.useRef<HTMLDivElement>(null);
   const commentListRef = React.useRef<HTMLUListElement>(null);
   const threadRedirect = React.useRef(false);
+  const requestedReactionBatchesRef = React.useRef<Record<string, number>>({});
   const DEFAULT_SORT = ENABLE_COMMENT_REACTIONS ? SORT_BY.POPULARITY : SORT_BY.NEWEST;
   const [sort, setSort] = usePersistedState('comment-sort-by', DEFAULT_SORT);
   const [page, setPage] = React.useState(currentFetchedPage > 0 ? currentFetchedPage : 1);
@@ -294,6 +296,12 @@ export default function CommentList(props: Props) {
       }
 
       if (idsForReactionFetch.length !== 0) {
+        const batchKey = `${activeChannelId || 'anon'}:${idsForReactionFetch.slice().sort().join(',')}`;
+        const now = Date.now();
+        const lastRequestedAt = requestedReactionBatchesRef.current[batchKey] || 0;
+        if (now - lastRequestedAt < COMMENT_REACTION_REQUEST_CACHE_MS) return;
+
+        requestedReactionBatchesRef.current[batchKey] = now;
         dispatch(doCommentReactList(idsForReactionFetch))
           .then(() => {
             setReadyToDisplayComments(true);

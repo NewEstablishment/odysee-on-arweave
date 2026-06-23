@@ -12,6 +12,7 @@ interface Config {
   LBRY_WEB_PUBLISH_API_V4: string | undefined;
   LBRY_API_URL: string | undefined;
   LBRY_WEB_BUFFER_API: string | undefined;
+  ODYSEE_HYPERBEAM_NODE_API: string | undefined;
   SEARCH_SERVER_API: string | undefined;
   SEARCH_SERVER_API_ALT: string | undefined;
   COMMENT_SERVER_API: string | undefined;

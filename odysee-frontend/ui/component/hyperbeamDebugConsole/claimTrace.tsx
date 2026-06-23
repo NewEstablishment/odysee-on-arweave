@@ -28,6 +28,7 @@ type DiscoveredClaim = {
   provenance: 'page' | 'visible' | 'observed';
   source: string;
   valueType?: string;
+  isOwnChannel?: boolean;
   order?: number;
   summary?: any;
 };
@@ -97,7 +98,7 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
     if (selectedClaim.txid && !cachedSourceObservation(events, selectedClaim.txid)) {
       enqueue(
         `tx:${selectedClaim.txid}`,
-        hyperbeamDeviceUrl(HYPERBEAM_DEVICE.odysee, 'transaction', { txid: selectedClaim.txid })
+        hyperbeamDeviceUrl(HYPERBEAM_DEVICE.claim, 'transaction', { txid: selectedClaim.txid })
       );
     }
 
@@ -108,7 +109,7 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
     ) {
       enqueue(
         `descriptor:${selectedClaim.sdHash}`,
-        hyperbeamDeviceUrl(HYPERBEAM_DEVICE.odysee, 'descriptor', { 'sd-hash': selectedClaim.sdHash })
+        hyperbeamDeviceUrl(HYPERBEAM_DEVICE.streamDescriptor, 'fetch', { 'sd-hash': selectedClaim.sdHash })
       );
     }
 
@@ -310,13 +311,14 @@ function ClaimGroup({
             claim.txid && claim.nout !== undefined ? `outpoint ${claim.txid}:${claim.nout}` : undefined,
             claim.sdHash ? `sd ${claim.sdHash}` : undefined,
             `provenance ${claim.provenance}`,
+            claim.isOwnChannel ? 'own channel' : undefined,
             claim.source,
           ]
             .filter(Boolean)
             .join(' · ')}
           style={{
             display: 'grid',
-            gridTemplateColumns: '76px minmax(0, 1fr) minmax(92px, 148px)',
+            gridTemplateColumns: '76px 54px minmax(0, 1fr) minmax(92px, 148px)',
             gap: 6,
             alignItems: 'center',
             width: '100%',
@@ -334,6 +336,16 @@ function ClaimGroup({
         >
           <span style={{ color: provenanceColor(claim.provenance), overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {claim.provenance}
+          </span>
+          <span
+            style={{
+              color: claimTypeColor(claim.valueType),
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {claimTypeLabel(claim.valueType)}
           </span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{claim.label}</span>
           <span
@@ -363,6 +375,18 @@ function discoverClaims(events: Array<HyperbeamDebugEvent>): Array<DiscoveredCla
       nout: claim.nout,
       sdHash: claim.sdHash,
       urls: [claim.traceTarget],
+      traceTarget: claim.traceTarget,
+    }).forEach((alias) => claims.set(alias, claim));
+  });
+
+  context.reduxClaims.forEach((claim) => {
+    const urls = Array.isArray(claim.summary?.urls) ? claim.summary.urls : [claim.traceTarget];
+    claimAliases({
+      claimId: claim.claimId,
+      txid: claim.txid,
+      nout: claim.nout,
+      sdHash: claim.sdHash,
+      urls,
       traceTarget: claim.traceTarget,
     }).forEach((alias) => claims.set(alias, claim));
   });
@@ -490,6 +514,7 @@ function collectClaim(value: any, claims: Map<string, DiscoveredClaim>, source: 
       sdHash: existing.sdHash || sdHash,
       source: existing.source || source,
       valueType: existing.valueType || valueType,
+      isOwnChannel: existing.isOwnChannel || Boolean(claimId && context.myChannelIds.has(claimId)),
       order: existing.order,
       summary: existing.summary || claimSummary(value),
       provenance: provenanceRank(existing.provenance) <= provenanceRank(provenance) ? existing.provenance : provenance,
@@ -509,6 +534,7 @@ function collectClaim(value: any, claims: Map<string, DiscoveredClaim>, source: 
     provenance,
     source,
     valueType,
+    isOwnChannel: Boolean(claimId && context.myChannelIds.has(claimId)),
     summary: claimSummary(value),
   };
   aliases.forEach((alias) => claims.set(alias, claim));
@@ -602,7 +628,9 @@ type PageClaimContext = {
   currentUrl: string;
   currentChannelPrefix: string;
   pageChannelIds: Set<string>;
+  myChannelIds: Set<string>;
   renderedClaims: Array<DiscoveredClaim>;
+  reduxClaims: Array<DiscoveredClaim>;
 };
 
 function pageClaimContext(): PageClaimContext {
@@ -613,18 +641,23 @@ function pageClaimContext(): PageClaimContext {
       currentUrl: '',
       currentChannelPrefix: '',
       pageChannelIds: new Set(),
+      myChannelIds: new Set(),
       renderedClaims: [],
+      reduxClaims: [],
     };
   }
 
   const currentPath = normalizeComparable(window.location.pathname + window.location.hash);
+  const myChannelIds = reduxMyChannelIds();
   return {
     currentPageKey: normalizePagePath(`${window.location.pathname}${window.location.search}${window.location.hash}`),
     currentPath,
     currentUrl: normalizeComparable(window.location.href),
     currentChannelPrefix: channelPrefixFromPath(currentPath),
     pageChannelIds: new Set(),
+    myChannelIds,
     renderedClaims: renderedPageClaims(),
+    reduxClaims: reduxPageClaims(myChannelIds),
   };
 }
 
@@ -692,6 +725,77 @@ function renderedClaimProvenance(uri: string): DiscoveredClaim['provenance'] {
   return normalizedUri && (normalizedUri === currentUrl || normalizedUri === currentPath) ? 'page' : 'visible';
 }
 
+function reduxPageClaims(myChannelIds: Set<string>): Array<DiscoveredClaim> {
+  if (typeof window === 'undefined') return [];
+
+  const state = (window as any).app?.store?.getState?.();
+  const byId = state?.claims?.byId;
+  if (!byId || typeof byId !== 'object') return [];
+
+  return Object.values(byId)
+    .map((claim: any, order) => claimFromLoadedState(claim, order, myChannelIds))
+    .filter((claim): claim is DiscoveredClaim => Boolean(claim));
+}
+
+function reduxMyChannelIds() {
+  const state = (window as any).app?.store?.getState?.();
+  const byId = state?.claims?.myChannelClaimsById;
+  if (!byId || typeof byId !== 'object') return new Set<string>();
+  return new Set(Object.keys(byId));
+}
+
+function claimFromLoadedState(value: any, order: number, myChannelIds: Set<string>): DiscoveredClaim | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const claimId = stringField(value, ['claim_id', 'claim-id']);
+  const txid = stringField(value, ['txid']);
+  const nout = stringField(value, ['nout']);
+  const sdHash = claimSdHash(value);
+  const valueType = stringField(value, ['value_type', 'value.type', 'claim.value_type', 'raw.value_type']);
+  const urls = [
+    stringField(value, ['canonical_url']),
+    stringField(value, ['permanent_url']),
+    stringField(value, ['short_url']),
+  ].filter(Boolean);
+
+  if (!claimId || !isResolvedPageClaim(valueType)) return null;
+
+  const traceTarget = txid && nout !== undefined ? `${txid}:${nout}` : claimId || urls[0];
+  if (!traceTarget) return null;
+
+  const title = stringField(value, ['value.title', 'title', 'name', 'canonical_url', 'permanent_url']) || traceTarget;
+
+  return {
+    key: `claim:${claimId}`,
+    label: limitLabel(title),
+    traceTarget,
+    claimId,
+    txid,
+    nout,
+    sdHash,
+    provenance: reduxClaimProvenance(urls),
+    source: 'redux-claims',
+    valueType,
+    isOwnChannel: Boolean(claimId && myChannelIds.has(claimId)),
+    order,
+    summary: {
+      ...claimSummary(value),
+      urls,
+    },
+  };
+}
+
+function reduxClaimProvenance(urls: Array<string>): DiscoveredClaim['provenance'] {
+  if (typeof window === 'undefined') return 'visible';
+
+  const currentUrl = normalizeComparable(window.location.href);
+  const currentPath = normalizeComparable(window.location.pathname + window.location.hash);
+  const normalizedUrls = urls.map(normalizeComparable).filter(Boolean);
+  return normalizedUrls.some((url) => url.length > 1 && (url === currentUrl || url === currentPath))
+    ? 'page'
+    : 'visible';
+}
+
 function isVisibleElement(element: HTMLElement) {
   const style = window.getComputedStyle(element);
   return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
@@ -715,13 +819,21 @@ function claimProvenance(
 }
 
 function normalizeComparable(value: string) {
-  const clean = comparablePath(value).split(/[?#]/)[0].toLowerCase();
+  const clean = decodeComparable(comparablePath(value).split('?')[0]).toLowerCase();
   return clean
     .replace(/^https?:\/\/(?:www\.)?odysee\.com/, '')
     .replace(/^lbry:\/\//, '/')
     .replace(/#/g, ':')
     .replace(/\/+/g, '/')
     .replace(/\/$/, '');
+}
+
+function decodeComparable(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch (_error) {
+    return value;
+  }
 }
 
 function comparablePath(value: string) {
@@ -749,10 +861,15 @@ function normalizePagePath(value: string) {
 
 function compareClaims(a: DiscoveredClaim, b: DiscoveredClaim) {
   return (
+    ownChannelRank(a) - ownChannelRank(b) ||
     provenanceRank(a.provenance) - provenanceRank(b.provenance) ||
     (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) ||
     a.label.localeCompare(b.label)
   );
+}
+
+function ownChannelRank(claim: DiscoveredClaim) {
+  return claim.isOwnChannel ? 1 : 0;
 }
 
 function provenanceRank(provenance: DiscoveredClaim['provenance']) {
@@ -771,6 +888,18 @@ function claimIdLabel(claim: DiscoveredClaim) {
   if (claim.txid && claim.nout !== undefined) return `${claim.txid.slice(0, 8)}:${claim.nout}`;
   if (claim.sdHash) return claim.sdHash.slice(0, 10);
   return claim.traceTarget.slice(0, 14);
+}
+
+function claimTypeLabel(valueType: string | undefined) {
+  if (valueType === 'channel') return 'channel';
+  if (valueType === 'stream') return 'media';
+  return valueType || 'claim';
+}
+
+function claimTypeColor(valueType: string | undefined) {
+  if (valueType === 'channel') return '#ffb020';
+  if (valueType === 'stream') return '#a78bfa';
+  return 'rgba(255,255,255,0.5)';
 }
 
 function initialSteps(
@@ -909,9 +1038,7 @@ function cachedSourceObservation(events: Array<HyperbeamDebugEvent>, id: string 
     const data = event.data || {};
     const path = String(data.devicePath || data.url || '').toLowerCase();
     return (
-      (path.includes('/~odysee@1.0/source') ||
-        path.includes('/~odysee@1.0/transaction') ||
-        path.includes('/~odysee@1.0/descriptor')) &&
+      (path.includes('/~odysee-claim@1.0/transaction') || path.includes('/~odysee-stream-descriptor@1.0/fetch')) &&
       (path.includes(encodedId) || path.includes(cleanId))
     );
   });

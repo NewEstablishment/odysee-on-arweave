@@ -118,9 +118,10 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
       );
       const initialNout = firstString(pick(verification, 'nout'), claim?.nout, claim?.meta?.nout);
 
-      const claimUrl = baseUrl && claimId ? buildDeviceUrl(baseUrl, '~odysee@1.0/claim', { 'claim-id': claimId }) : '';
+      const claimUrl =
+        baseUrl && claimId ? buildDeviceUrl(baseUrl, '~odysee-claim@1.0/resolve', { claim_id: claimId }) : '';
       const channelClaimUrl =
-        baseUrl && channelId ? buildDeviceUrl(baseUrl, '~odysee@1.0/claim', { 'claim-id': channelId }) : '';
+        baseUrl && channelId ? buildDeviceUrl(baseUrl, '~odysee-claim@1.0/resolve', { claim_id: channelId }) : '';
 
       const [claimRequest, playbackRequest, channelClaim] = await Promise.all([
         claimUrl ? fetchDebugRequest('LOCATOR', claimUrl) : Promise.resolve(undefined),
@@ -134,19 +135,8 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
 
       const txid = firstString(initialTxid, pick(claimRequest?.body, 'txid'), pick(claimRequest?.body?.source, 'txid'));
       const nout = firstString(initialNout, pick(claimRequest?.body, 'nout'), pick(claimRequest?.body?.source, 'nout'));
-      const streamSourceUrl = baseUrl && txid ? buildDeviceUrl(baseUrl, '~odysee@1.0/source', { id: txid }) : '';
-      const claimOutputUrl =
-        baseUrl && txid && nout !== undefined
-          ? buildDeviceUrl(baseUrl, '~odysee@1.0/source', { id: `${txid}:${nout}` })
-          : '';
-
-      const [streamSource, claimOutputSource] = await Promise.all([
-        streamSourceUrl ? fetchDebugRequest('SOURCE', streamSourceUrl) : Promise.resolve(undefined),
-        claimOutputUrl ? fetchDebugRequest('SOURCE', claimOutputUrl) : Promise.resolve(undefined),
-      ]);
-
-      nextState.requests.streamSource = streamSource;
-      nextState.requests.claimOutputSource = claimOutputSource;
+      nextState.requests.streamSource = undefined;
+      nextState.requests.claimOutputSource = undefined;
 
       const channelTxid = firstString(
         pick(channelClaim?.body, 'txid'),
@@ -160,13 +150,8 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
         signingChannel?.nout,
         signingChannel?.meta?.nout
       );
-      const channelSourceId = channelTxid && channelNout !== undefined ? `${channelTxid}:${channelNout}` : channelTxid;
-      const channelSourceUrl =
-        baseUrl && channelSourceId ? buildDeviceUrl(baseUrl, '~odysee@1.0/source', { id: channelSourceId }) : '';
-
-      if (channelSourceUrl) {
-        nextState.requests.channelSource = await fetchDebugRequest('SOURCE', channelSourceUrl);
-      }
+      void channelTxid;
+      void channelNout;
 
       const playback = playbackRequest?.body || {};
       const mediaUrl = firstString(

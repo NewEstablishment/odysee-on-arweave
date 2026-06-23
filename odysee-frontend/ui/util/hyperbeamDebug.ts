@@ -20,7 +20,6 @@ export function hyperbeamDebugColor(level: HyperbeamDebugLevel, sourceLayer?: st
   if (source === 'native-device') return '#0ea5e9';
   if (level === 'error' || source === 'native-failed' || source === 'native-missing') return '#ff4d7d';
   if (source === 'original') return '#94a3b8';
-  if (source === 'native:sdk-proxy') return '#a78bfa';
   if (
     level === 'warn' ||
     source.startsWith('fallback') ||
@@ -76,6 +75,7 @@ export function installHyperbeamFetchDebug() {
     const shouldLog = isHyperbeam || (shouldAllowOriginalNetworkFallback() && isOriginalModeFetch(url));
     const startedAt = performance.now();
     const pageContext = pageContextSummary();
+    const requestKey = requestBodyKey(url, init);
 
     if (shouldLog) {
       pushHyperbeamDebug(
@@ -95,7 +95,8 @@ export function installHyperbeamFetchDebug() {
         response,
         elapsedMs,
         isHyperbeam ? hyperbeamFallbackLayer(url) : 'original',
-        pageContext
+        pageContext,
+        requestKey
       );
       pushHyperbeamDebug('response', summary, response.ok ? 'ok' : 'error');
       return response;
@@ -111,6 +112,7 @@ export function installHyperbeamFetchDebug() {
             device: hyperbeamDevice(url),
             deviceLayer: hyperbeamDeviceLayer(url),
             sourceLayer: isHyperbeam ? hyperbeamFallbackLayer(url) : 'original',
+            requestKey,
             error: String(error?.message || error),
             elapsedMs: Math.round(performance.now() - startedAt),
           },
@@ -124,10 +126,7 @@ export function installHyperbeamFetchDebug() {
 }
 
 function hyperbeamFallbackLayer(url: string) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.pathname === '/~odysee@1.0/sdk') return 'fallback:sdk_proxy';
-  } catch {}
+  void url;
   return undefined;
 }
 
@@ -167,9 +166,12 @@ function requestSummary(
     devicePath: devicePath(url),
     device: hyperbeamDevice(url),
     deviceLayer: hyperbeamDeviceLayer(url),
+    nativePath: nativeSourcePath(url),
+    nativeSource: nativeSourceKind(url),
     url: sanitizeUrl(url),
     sourceLayer: fallbackSourceLayer,
     bodyBytes: typeof init?.body === 'string' ? init.body.length : undefined,
+    requestKey: requestBodyKey(url, init),
   };
 }
 
@@ -178,7 +180,8 @@ async function responseSummary(
   response: Response,
   elapsedMs: number,
   fallbackSourceLayer?: string,
-  pageContext: Record<string, any> = pageContextSummary()
+  pageContext: Record<string, any> = pageContextSummary(),
+  requestKey?: string
 ) {
   const summary: Record<string, any> = {
     ...pageContext,
@@ -188,6 +191,8 @@ async function responseSummary(
     devicePath: devicePath(url),
     device: hyperbeamDevice(url),
     deviceLayer: hyperbeamDeviceLayer(url),
+    nativePath: nativeSourcePath(url),
+    nativeSource: nativeSourceKind(url),
     contentType: response.headers.get('content-type'),
     contentLength: response.headers.get('content-length'),
     contentRange: response.headers.get('content-range'),
@@ -197,6 +202,7 @@ async function responseSummary(
     responseDevice: response.headers.get('device'),
     sourceLayer: response.headers.get('x-odysee-source-layer') || fallbackSourceLayer,
     sourceReason: redactSensitive(response.headers.get('x-odysee-source-reason') || undefined),
+    requestKey,
   };
   const signatureInput = response.headers.get('signature-input') || '';
   summary.sourceAlg = nativeResponseDevice(response.headers.get('device'));
@@ -243,27 +249,105 @@ function sourceLayer(body: any) {
 
   if (!layer) return undefined;
   if (layer.native === true) {
-    if (layer.source === 'backend_api_proxy' || String(layer.source?.source || '').startsWith('backend_api_proxy')) {
-      return 'native:sdk-proxy';
-    }
     return 'native-device';
   }
   if (layer.native === false) {
     if (layer.fallback === false && layer.source) return 'native-failed';
     const fallback = String(layer.fallback || layer.materialized_from || 'unknown');
-    if (fallback.startsWith('sdk_proxy')) return 'native:sdk-proxy';
     return `fallback:${fallback}`;
   }
   return layer;
 }
 
 function sourceCommitmentAlg(signatureInput: string) {
-  const match = signatureInput.match(/alg="(lbry-[^"]+)"/);
+  const match = signatureInput.match(/alg="([^"]+)"/);
   return match?.[1];
 }
 
+function requestBodyKey(url: string, init?: RequestInit) {
+  if (typeof init?.body !== 'string') return undefined;
+
+  try {
+    const body = JSON.parse(init.body);
+    const device = hyperbeamDevice(url);
+    if (device === '~odysee-claim@1.0') {
+      if (body.uri) return `uri:${limitDebugString(body.uri, 120)}`;
+      if (body.urls) return `urls:${limitDebugString(String(body.urls), 120)}`;
+      if (body.uris) return `uris:${limitDebugString(String(body.uris), 120)}`;
+      return `search:${limitDebugString(stableDebugString(body), 180)}`;
+    }
+    if (body.claim_id || body.claim_ids)
+      return `claim:${limitDebugString(String(body.claim_id || body.claim_ids), 120)}`;
+    if (body.comment_ids) return `comments:${limitDebugString(String(body.comment_ids), 120)}`;
+  } catch (_error) {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function stableDebugString(value: any): string {
+  if (!value || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableDebugString).join(',')}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableDebugString(value[key])}`)
+    .join(',')}}`;
+}
+
+function limitDebugString(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
 function nativeResponseDevice(device: string | null) {
-  return device?.startsWith('lbry-') ? device : undefined;
+  return device?.startsWith('lbry-') || device?.startsWith('odysee-') ? device : undefined;
+}
+
+function nativeSourcePath(url: string) {
+  const source = nativeSourceParts(url);
+  if (!source) return undefined;
+  return source.value ? `${source.kind}:${source.value}` : source.kind;
+}
+
+function nativeSourceKind(url: string) {
+  return nativeSourceParts(url)?.kind;
+}
+
+function nativeSourceParts(url: string) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname;
+    if (path.endsWith('/~odysee-claim@1.0/transaction')) {
+      return {
+        kind: 'transaction',
+        value: parsed.searchParams.get('txid') || parsed.searchParams.get('id') || undefined,
+      };
+    }
+    if (path.endsWith('/~odysee-claim-output@1.0/fetch')) {
+      const txid = parsed.searchParams.get('txid');
+      const nout = parsed.searchParams.get('nout');
+      return {
+        kind: 'claim-output',
+        value: txid && nout !== null ? `${txid}:${nout}` : txid || undefined,
+      };
+    }
+    if (path.endsWith('/~odysee-stream-descriptor@1.0/fetch')) {
+      return {
+        kind: 'stream-descriptor',
+        value: parsed.searchParams.get('sd-hash') || parsed.searchParams.get('sd_hash') || undefined,
+      };
+    }
+    if (path.endsWith('/~odysee-blob@1.0/fetch')) {
+      return {
+        kind: 'blob',
+        value: parsed.searchParams.get('blob-hash') || parsed.searchParams.get('blob_hash') || undefined,
+      };
+    }
+  } catch (_error) {
+    return undefined;
+  }
+
+  return undefined;
 }
 
 function previewBody(text: string) {
@@ -292,11 +376,8 @@ function hyperbeamDevice(url: string) {
 function hyperbeamDeviceLayer(url: string) {
   const device = hyperbeamDevice(url);
   if (!device) return undefined;
-  if (NATIVE_DEVICE_NAMES.has(device)) return 'native-device';
   return 'compat-device';
 }
-
-const NATIVE_DEVICE_NAMES = new Set(['~odysee@1.0']);
 
 export function sanitizeHyperbeamDebugValue(value: any): any {
   return redactSensitive(value);

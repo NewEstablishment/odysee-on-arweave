@@ -2,6 +2,10 @@
 require('proxy-polyfill');
 
 const { PROXY_URL_NO_CF } = require('../config.cjs');
+const {
+  hyperbeamNodeConfigured,
+  hyperbeamNodeSdkCall: hyperbeamNodeGenericSdkCall,
+} = require('./src/odyseeHyperbeamNode');
 
 const CHECK_DAEMON_STARTED_TRY_NUMBER = 200;
 //
@@ -187,6 +191,11 @@ function checkAndParse(response) {
 }
 
 function apiCall(method, params, resolve, reject) {
+  const nodeRead = hyperbeamNodeSdkCall(method, params);
+  if (nodeRead) {
+    return nodeRead.then(resolve, reject);
+  }
+
   const counter = new Date().getTime();
   const options = {
     method: 'POST',
@@ -228,6 +237,11 @@ function apiCall(method, params, resolve, reject) {
       return resolve(response.result);
     })
     .catch(reject);
+}
+
+function hyperbeamNodeSdkCall(method, params) {
+  if (!hyperbeamNodeConfigured()) return null;
+  return hyperbeamNodeGenericSdkCall(method, params, Lbry.apiRequestHeaders);
 }
 
 function daemonCallWithResult(name, params = {}) {
