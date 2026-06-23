@@ -578,7 +578,7 @@ export function doGetAndPopulatePreferences(syncId?: number) {
     let preferenceKey;
     // TODO: the logic should match `runPreferences`, but since this function is
     // only hit as a successful sync callback, it doesn't matter for now.
-    preferenceKey = syncEnabled && hasVerifiedEmail ? 'shared' : 'local';
+    preferenceKey = 'shared';
 
     function successCb(savedPreferences) {
       const successState = getState();
@@ -596,8 +596,17 @@ export function doGetAndPopulatePreferences(syncId?: number) {
     }
 
     function failCb(er) {
-      dispatch(doSetPrefsReady());
-      return true;
+      dispatch(
+        doToast({
+          isError: true,
+          message: __('Unable to load your saved preferences.'),
+        })
+      );
+      dispatch({
+        type: ACTIONS.SYNC_FATAL_ERROR,
+        error: er,
+      });
+      return false;
     }
 
     return dispatch(doPreferenceGet(preferenceKey, successCb, failCb));

@@ -26,7 +26,7 @@ import {
   selectClaimsByUri,
   selectClaimSearchByQuery,
   selectClaimSearchByQueryLastPageReached,
-  selectFetchingClaimSearchByQuery,
+  selectFetchingClaimSearch,
 } from 'redux/selectors/claims';
 import {
   doClaimSearch as doClaimSearchAction,
@@ -38,7 +38,6 @@ import { selectFollowedTags } from 'redux/selectors/tags';
 import { selectMutedAndBlockedChannelIds } from 'redux/selectors/blocked';
 import { doFetchOdyseeMembershipForChannelIds as doFetchOdyseeMembershipForChannelIdsAction } from 'redux/actions/memberships';
 import { selectClientSetting, selectShowMatureContent, selectLanguage } from 'redux/selectors/settings';
-import { debugHyperbeamNode } from 'lbry';
 
 function resolveHideMembersOnly(global: any, override: any) {
   return override === undefined || override === null ? global : override;
@@ -251,6 +250,7 @@ function ClaimListDiscover(props: Props) {
   const claimSearchByQueryLastPageReached = useAppSelector(selectClaimSearchByQueryLastPageReached);
   const claimsByUri = useAppSelector(selectClaimsByUri);
   const claimsById = useAppSelector(selectById);
+  const loading = props.loading !== undefined ? props.loading : useAppSelector(selectFetchingClaimSearch);
   const showNsfw = useAppSelector(selectShowMatureContent);
   const hideMembersOnly = resolveHideMembersOnly(
     useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_MEMBERS_ONLY_CONTENT)),
@@ -568,8 +568,6 @@ function ClaimListDiscover(props: Props) {
   const searchKey = createNormalizedClaimSearchKey(options);
   const claimSearchResult = claimSearchByQuery[searchKey];
   const claimSearchResultLastPageReached = claimSearchByQueryLastPageReached[searchKey];
-  const fetchingClaimSearchByQuery = useAppSelector((state) => selectFetchingClaimSearchByQuery(state)[searchKey]);
-  const loading = props.loading !== undefined ? props.loading : fetchingClaimSearchByQuery;
   const isUnfetchedClaimSearch = claimSearchResult === undefined;
   // uncomment to fix an item on a page
   //   const fixUri = 'lbry://@corbettreport#0/lbryodysee#5';
@@ -779,31 +777,6 @@ function ClaimListDiscover(props: Props) {
     } // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimSearchResult, claimType, doFetchThumbnailClaimsForCollectionIds]);
   React.useEffect(() => {
-    if (pathname === '/$/following') {
-      debugHyperbeamNode({
-        event: 'CLAIM_LIST_DISCOVER_SEARCH_DECISION',
-        source: Array.isArray(channelIds)
-          ? 'following-main'
-          : Array.isArray(uris)
-            ? 'direct-uris'
-            : Array.isArray(excludedChannelIds)
-              ? 'discover-fallback'
-              : 'unknown',
-        pathname,
-        channelIdsProp: Array.isArray(channelIds) ? channelIds.length : null,
-        channelIdsParam: Array.isArray(channelIdsParam) ? channelIdsParam.length : null,
-        optionChannelIds: Array.isArray(options.channel_ids) ? options.channel_ids.length : null,
-        excludedChannelIds: Array.isArray(excludedChannelIds) ? excludedChannelIds.length : null,
-        uris: Array.isArray(uris) ? uris.length : null,
-        claimIds: Array.isArray(options.claim_ids) ? options.claim_ids.length : null,
-        hasResult: claimSearchResult !== undefined,
-        resultCount: Array.isArray(claimSearchResult) ? claimSearchResult.length : null,
-        loading: Boolean(loading),
-        shouldPerformSearch,
-        page: options.page,
-      });
-    }
-
     if (shouldPerformSearch) {
       const searchOptions = JSON.parse(optionsStringForEffect);
       const searchSettings = fetchViewCount
@@ -816,21 +789,7 @@ function ClaimListDiscover(props: Props) {
       doClaimSearch(searchOptions, searchSettings);
     } else {
     }
-  }, [
-    doClaimSearch,
-    shouldPerformSearch,
-    optionsStringForEffect,
-    forceRefresh,
-    fetchViewCount,
-    pathname,
-    channelIds,
-    channelIdsParam,
-    options.channel_ids,
-    options.claim_ids,
-    claimSearchResult,
-    loading,
-    searchKey,
-  ]);
+  }, [doClaimSearch, shouldPerformSearch, optionsStringForEffect, forceRefresh, fetchViewCount]);
   const headerToUse = header || (
     <ClaimListHeader
       channelIds={channelIds}

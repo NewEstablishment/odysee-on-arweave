@@ -53,11 +53,8 @@ export function hyperchatColor(amount: number): [number, number, number] {
   return [255, 162, 54];
 }
 
-function hexByte(n: number) {
-  return n.toString(16).padStart(2, '0');
-}
-
 export function hyperchatColorHex(amount: number): string {
   const [r, g, b] = hyperchatColor(amount);
-  return `#${hexByte(r)}${hexByte(g)}${hexByte(b)}`;
+  const hex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
 }

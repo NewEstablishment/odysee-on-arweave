@@ -169,18 +169,6 @@ const StreamClaimPage = (props: Props) => {
   const disableShortsViewSetting = useAppSelector((state) => selectClientSetting(state, SETTINGS.DISABLE_SHORTS_VIEW));
   const isClaimFiltered = isClaimFilteredValue;
   const isClaimShortValue = isClaimShort(claim);
-  const hyperbeamClaimDebugAttrs =
-    claim && claim.claim_id
-      ? {
-          'data-hyperbeam-claim-id': claim.claim_id,
-          'data-hyperbeam-claim-title': claim.value?.title || claim.name || '',
-          'data-hyperbeam-claim-uri': claim.canonical_url || claim.permanent_url || uri || '',
-          'data-hyperbeam-claim-txid': claim.txid || '',
-          'data-hyperbeam-claim-nout': claim.nout ?? '',
-          'data-hyperbeam-claim-type': claim.value_type || '',
-          'data-hyperbeam-claim-sd-hash': claim.value?.source?.sd_hash || '',
-        }
-      : {};
   const doToggleAppDrawer = (type: string) => dispatch(doToggleAppDrawerAction(type));
   const isMobile = useIsMobile();
   const isLandscapeRotated = useIsMobileLandscape();
@@ -241,41 +229,33 @@ const StreamClaimPage = (props: Props) => {
 
   if (!isHidden && isMarkdown) {
     return (
-      <div {...hyperbeamClaimDebugAttrs}>
-        <React.Suspense fallback={null}>
-          <MarkdownPostPage uri={uri} accessStatus={accessStatus} />
-        </React.Suspense>
-      </div>
+      <React.Suspense fallback={null}>
+        <MarkdownPostPage uri={uri} accessStatus={accessStatus} />
+      </React.Suspense>
     );
   }
 
   if (!isHidden && RENDER_MODES.FLOATING_MODES.includes(renderMode)) {
     if (isLivestream) {
       return (
-        <div {...hyperbeamClaimDebugAttrs}>
-          <React.Suspense fallback={null}>
-            <LivestreamPage uri={uri} accessStatus={accessStatus} />
-          </React.Suspense>
-        </div>
+        <React.Suspense fallback={null}>
+          <LivestreamPage uri={uri} accessStatus={accessStatus} />
+        </React.Suspense>
       );
     }
 
     if (isShortVideo) {
       return (
-        <div {...hyperbeamClaimDebugAttrs}>
-          <React.Suspense fallback={null}>
-            <ShortsPage uri={uri} accessStatus={accessStatus} />
-          </React.Suspense>
-        </div>
+        <React.Suspense fallback={null}>
+          <ShortsPage uri={uri} accessStatus={accessStatus} />
+        </React.Suspense>
       );
     }
 
     return (
-      <div {...hyperbeamClaimDebugAttrs}>
-        <React.Suspense fallback={null}>
-          <VideoPlayersPage uri={uri} accessStatus={accessStatus} />
-        </React.Suspense>
-      </div>
+      <React.Suspense fallback={null}>
+        <VideoPlayersPage uri={uri} accessStatus={accessStatus} />
+      </React.Suspense>
     );
   }
 
@@ -331,7 +311,7 @@ const StreamClaimPage = (props: Props) => {
   };
   return (
     <>
-      <div className={classnames('section card-stack', `file-page__${renderMode}`)} {...hyperbeamClaimDebugAttrs}>
+      <div className={classnames('section card-stack', `file-page__${renderMode}`)}>
         {!isHidden && renderClaimLayout()}
         {(isClaimBlackListed && dmcaInfo()) || (isClaimFiltered && filteredInfo())}
 

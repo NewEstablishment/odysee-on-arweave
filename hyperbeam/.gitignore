@@ -48,10 +48,3 @@ mkdocs-site-id.txt
 mkdocs-site-manifest.csv
 
 !test/config.json
-!test/config.flat
-!test/key-*.json
-!test/arbundles.js/*.bin
-!metrics/grafana/provisioning/dashboards/*.json
-!native/lib/secp256k1/CMakePresets.json
-!native/lib/secp256k1/cmake/config.cmake.in
-!native/lib/secp256k1/src/wycheproof/*.json

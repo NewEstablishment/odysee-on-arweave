@@ -98,42 +98,18 @@ export default handleActions(
       }
     ) => {
       const { subscriptions, following } = action.data;
-      const subscriptionUris = Array.isArray(subscriptions)
-        ? subscriptions
-        : Array.isArray(following)
-          ? following
-              .map((item) => {
-                if (typeof item === 'string') {
-                  return item;
-                }
 
-                return item && typeof item.uri === 'string' ? item.uri : null;
-              })
-              .filter(Boolean)
-          : null;
-
-      if (!Array.isArray(subscriptionUris)) {
+      if (!Array.isArray(subscriptions)) {
         return { ...state };
       }
 
-      const newSubscriptions = subscriptionUris
-        .map((uri) => {
-          try {
-            const { channelName, channelClaimId } = parseURI(uri);
-
-            if (!channelClaimId) {
-              return null;
-            }
-
-            return {
-              uri,
-              channelName: channelName ? `@${channelName}` : '',
-            };
-          } catch (e) {
-            return null;
-          }
-        })
-        .filter(Boolean);
+      const newSubscriptions = subscriptions.map((uri) => {
+        const { channelName } = parseURI(uri);
+        return {
+          uri,
+          channelName: channelName ? `@${channelName}` : '',
+        };
+      });
       let newFollowing;
 
       if (!Array.isArray(following)) {

@@ -46,7 +46,6 @@ import {
 import { doUserSetReferrerForUri } from 'redux/actions/user';
 import { doSetLastViewedAnnouncement } from 'redux/actions/content';
 import { selectUser, selectUserLocale, selectUserVerifiedEmail } from 'redux/selectors/user';
-import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 import { selectMyChannelClaimIds } from 'redux/selectors/claims';
 import {
   selectLanguage,
@@ -69,7 +68,6 @@ import {
 } from 'redux/actions/settings';
 import { doToast } from 'redux/actions/notifications';
 import { doSyncLoop } from 'redux/actions/sync';
-import HyperbeamDebugConsole from 'component/hyperbeamDebugConsole';
 import {
   doSignIn,
   doSetIncognito,
@@ -376,7 +374,7 @@ function App() {
       }
     }
 
-    if (user === null && !embedPath && !isHyperbeamFullMode()) {
+    if (user === null && !embedPath) {
       return <NagNoUser />;
     }
 
@@ -386,7 +384,7 @@ function App() {
       }
     }
 
-    if (syncFatalError && isAuthenticated) {
+    if (syncFatalError) {
       if (!retryingSync) {
         return (
           <Nag
@@ -696,7 +694,6 @@ function App() {
   // ready for sync syncs, however after signin when hasVerifiedEmail, that syncs too.
   useEffect(() => {
     if (embedPath) return;
-    if (isHyperbeamFullMode()) return;
     const syncLoopWithoutInterval = () => dispatch(doSyncLoop(true));
 
     if (hasSignedIn && hasVerifiedEmail) {
@@ -822,7 +819,6 @@ function App() {
               )}
               {getStatusNag()}
               {useDebugLog && <DebugLog />}
-              {useDebugLog && <HyperbeamDebugConsole />}
             </React.Suspense>
           </AppContext.Provider>
         )}

@@ -19,7 +19,6 @@ import { selectUser } from 'redux/selectors/user';
 import { selectClientSetting } from 'redux/selectors/settings';
 import * as SETTINGS from 'constants/settings';
 import analytics from 'analytics';
-import { HYPERBEAM_DEVICE, hyperbeamDeviceUrl } from 'util/hyperbeamDevices';
 
 const previewViewedUris = new Set<string>();
 
@@ -43,11 +42,6 @@ const FALLBACK = MISSING_THUMB_DEFAULT
       thumbnail: MISSING_THUMB_DEFAULT,
     })
   : undefined;
-
-function hyperbeamNodeMediaUrl(uri?: string) {
-  if (!uri) return '';
-  return hyperbeamDeviceUrl(HYPERBEAM_DEVICE.odysee, 'media', { target: uri });
-}
 
 function isMissingThumbLike(url: string | null | undefined) {
   if (!url) return false;
@@ -121,7 +115,6 @@ function FileThumbnail(props: Props) {
   // VOD hover preview: get streaming URL and duration for non-livestream video content
   const claim = useAppSelector((state) => (uri ? selectClaimForUri(state, uri) : undefined));
   const streamingUrl = useAppSelector((state) => (uri ? selectStreamingUrlForUri(state, uri) : undefined));
-  const previewStreamingUrl = hyperbeamNodeMediaUrl(uri) || streamingUrl;
   const isVideoContent = Boolean(claim?.value?.video || claim?.value?.source?.media_type?.startsWith('video'));
   const videoDuration = claim?.value?.video?.duration || 0;
   const canPreviewOnHover =
@@ -142,7 +135,7 @@ function FileThumbnail(props: Props) {
     progress: hlsProgress,
     thumbnailBasePath,
   } = useHlsVideoPreview(
-    canPreviewOnHover ? previewStreamingUrl || null : null,
+    canPreviewOnHover ? streamingUrl || null : null,
     canPreviewOnHover ? uri : undefined,
     isHovering && canPreviewOnHover
   );
@@ -151,7 +144,7 @@ function FileThumbnail(props: Props) {
 
   const liveFrameUrl = useLiveThumbnailFrame(liveThumbnail, Boolean(isHovering && liveThumbnail));
   const vodPreview = useVideoPreviewOnHover(
-    shouldUseFallbackFrames ? previewStreamingUrl || null : null,
+    shouldUseFallbackFrames ? streamingUrl || null : null,
     shouldUseFallbackFrames ? uri : undefined,
     videoDuration,
     isHovering && shouldUseFallbackFrames
@@ -413,7 +406,7 @@ function FileThumbnail(props: Props) {
         isLiveRefreshing={isLiveRefreshing}
         hoverHandlers={hoverHandlers}
       >
-        {canPreviewOnHover && (
+        {isHovering && canPreviewOnHover && (
           <div
             className={classnames('media__thumb-video-wrap', {
               'media__thumb-video-wrap--active': hlsPreviewActive,

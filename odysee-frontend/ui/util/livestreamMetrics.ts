@@ -1,4 +1,4 @@
-import Livestream from 'livestream';
+import { LIVESTREAM_SERVER_API } from 'config';
 
 // -- Types --
 
@@ -48,15 +48,23 @@ export async function fetchStreamMetrics(
   signingTs: string,
   signal?: AbortSignal
 ): Promise<StreamMetrics | null> {
-  if (!channelClaimId || !signature || !signingTs) return null;
+  if (!LIVESTREAM_SERVER_API || !channelClaimId || !signature || !signingTs) return null;
+
+  const encodedName = encodeURIComponent(channelName);
+  const url =
+    `${LIVESTREAM_SERVER_API}/stream/metrics` +
+    `?channel_claim_id=${channelClaimId}` +
+    `&channel_name=${encodedName}` +
+    `&signature=${signature}` +
+    `&signature_ts=${signingTs}`;
 
   try {
-    const metrics: StreamMetrics = await Livestream.call('stream', 'metrics', {
-      channel_claim_id: channelClaimId,
-      channel_name: channelName,
-      signature,
-      signature_ts: signingTs,
-    });
+    const res = await fetch(url, { method: 'POST', signal });
+    if (res.status === 503) return null; // OME not configured
+    if (!res.ok) return null;
+    const json = await res.json();
+    // API wraps response in { success, error, data }
+    const metrics: StreamMetrics = json?.data || json;
     return metrics;
   } catch {
     return null;

@@ -1,5 +1,4 @@
-import { ODYSEE_HYPERBEAM_NODE_API, SHORT_URL_API } from 'config';
-import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64 } from 'util/hyperbeamDevices';
+import { SHORT_URL_API } from 'config';
 const ShortUrl = {
   url: SHORT_URL_API,
   enabled: Boolean(SHORT_URL_API),
@@ -13,7 +12,6 @@ function callApi(body) {
     return Promise.reject('ShortUrl currently disabled');
   }
 
-  const node = String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
   assert(SHORT_URL_API, 'SHORT_URL_API required');
   const options = {
     method: 'POST',
@@ -23,8 +21,7 @@ function callApi(body) {
     },
     body: JSON.stringify(body),
   };
-  const request = node ? hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.productEvents, 'short_url', body || {}) : null;
-  return (request || fetch(`${ShortUrl.url}`, options))
+  return fetch(`${ShortUrl.url}`, options)
     .then((res) => res.json())
     .then((res) => {
       if (res?.error) {

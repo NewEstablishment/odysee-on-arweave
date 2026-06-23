@@ -14,10 +14,7 @@ import { selectClientSetting } from 'redux/selectors/settings';
 import { getSavedPassword, getAuthToken } from 'util/saved-passwords';
 import { doHandleSyncComplete } from 'redux/actions/app';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
-import { selectSubscriptionIds } from 'redux/selectors/subscriptions';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
-import { HYPERBEAM_DEVICE, hyperbeamDevicePostJson } from 'util/hyperbeamDevices';
-import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 let syncTimer = null;
 const SYNC_INTERVAL = 1000 * 60 * 5; // 5 minutes
 
@@ -157,10 +154,6 @@ export const doGetSyncDesktop =
  */
 export function doSyncLoop(noInterval?: boolean, syncId?: number) {
   return (dispatch: Dispatch, getState: GetState) => {
-    if (isHyperbeamFullMode()) {
-      return;
-    }
-
     if (!noInterval && syncTimer) clearInterval(syncTimer);
     const state = getState();
     const hasVerifiedEmail = selectUserVerifiedEmail(state);
@@ -193,12 +186,6 @@ export function doSyncUnsubscribe() {
   };
 }
 export function doGetSync(passedPassword?: string, callback?: (arg0: any, arg1: boolean | null | undefined) => void) {
-  if (isHyperbeamFullMode()) {
-    return () => {
-      if (callback) callback(null, false);
-    };
-  }
-
   const password = passedPassword === null || passedPassword === undefined ? '' : passedPassword;
 
   function handleCallback(error: any, hasNewData?: boolean | null) {
@@ -594,89 +581,9 @@ type SharedData = {
   };
 };
 
-function decodeSharedStateValue(value: any) {
-  if (typeof value !== 'string') {
-    return value;
-  }
-
-  try {
-    return JSON.parse(value);
-  } catch (e) {
-    return value;
-  }
-}
-
-function unwrapSharedState(rawObj: any) {
-  const decoded = decodeSharedStateValue(rawObj);
-
-  if (!decoded) {
-    return null;
-  }
-
-  if (decoded.version === '0.1' && decoded.value) {
-    return {
-      ...decoded,
-      value: decodeSharedStateValue(decoded.value),
-    };
-  }
-
-  if (decoded.shared) {
-    return unwrapSharedState(decoded.shared);
-  }
-
-  if (decoded.type && decoded.value) {
-    return unwrapSharedState(decoded.value);
-  }
-
-  if (typeof decoded === 'object') {
-    return {
-      version: '0.1',
-      value: decoded,
-    };
-  }
-
-  return null;
-}
-
-function followingToSubscriptions(following: any) {
-  if (!Array.isArray(following)) {
-    return undefined;
-  }
-
-  return following
-    .map((item) => {
-      if (typeof item === 'string') {
-        return item;
-      }
-
-      return item && typeof item.uri === 'string' ? item.uri : null;
-    })
-    .filter(Boolean);
-}
-
-function debugHyperbeamSharedState(data: any) {
-  try {
-    const encoded = base64UrlEncode(JSON.stringify(data || {}));
-    hyperbeamDevicePostJson(HYPERBEAM_DEVICE.internalApis, 'debug', { params64: encoded })?.catch(() => {});
-  } catch (e) {}
-}
-
-function base64UrlEncode(value: string) {
-  const bytes = new TextEncoder().encode(value);
-  let binary = '';
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
 function extractUserState(rawObj: SharedData) {
-  const sharedState = unwrapSharedState(rawObj);
-
-  if (sharedState && sharedState.version === '0.1' && sharedState.value) {
-    const value = sharedState.value;
-    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(value, key);
+  if (rawObj && rawObj.version === '0.1' && rawObj.value) {
+    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(rawObj.value, key);
 
     const {
       subscriptions,
@@ -694,13 +601,11 @@ function extractUserState(rawObj: SharedData) {
       savedCollectionIds,
       autoPublishById,
       lastViewedAnnouncement,
-    } = value;
-    const derivedSubscriptions = Array.isArray(subscriptions) ? subscriptions : followingToSubscriptions(following);
-
+    } = rawObj.value;
     return {
-      ...(Array.isArray(derivedSubscriptions)
+      ...(hasOwn('subscriptions')
         ? {
-            subscriptions: derivedSubscriptions,
+            subscriptions,
           }
         : {}),
       ...(hasOwn('following')
@@ -780,7 +685,7 @@ function extractUserState(rawObj: SharedData) {
 }
 
 export function doPopulateSharedUserState(sharedSettings: any) {
-  return (dispatch: Dispatch, getState: GetState) => {
+  return (dispatch: Dispatch) => {
     const {
       subscriptions,
       following,
@@ -798,24 +703,6 @@ export function doPopulateSharedUserState(sharedSettings: any) {
       autoPublishById,
       lastViewedAnnouncement,
     } = extractUserState(sharedSettings);
-
-    // HyperBEAM migration diagnostic: verifies whether normalized shared state reaches Redux.
-    console.info('odysee_hyperbeam USER_STATE_POPULATE', {
-      subscriptions: Array.isArray(subscriptions) ? subscriptions.length : null,
-      following: Array.isArray(following) ? following.length : null,
-      firstSubscription: Array.isArray(subscriptions) ? subscriptions[0] : null,
-    });
-    debugHyperbeamSharedState({
-      event: 'USER_STATE_POPULATE',
-      subscriptions: Array.isArray(subscriptions) ? subscriptions.length : null,
-      following: Array.isArray(following) ? following.length : null,
-      firstSubscription: Array.isArray(subscriptions) ? subscriptions[0] : null,
-    });
-
-    dispatch({
-      type: ACTIONS.CLEAR_CLAIM_SEARCH_HISTORY,
-    });
-
     dispatch({
       type: ACTIONS.USER_STATE_POPULATE,
       data: {
@@ -836,40 +723,10 @@ export function doPopulateSharedUserState(sharedSettings: any) {
         lastViewedAnnouncement,
       },
     });
-
-    const selectedSubscriptionIds = selectSubscriptionIds(getState());
-    debugHyperbeamSharedState({
-      event: 'USER_STATE_POPULATE_REDUX',
-      subscriptionIds: Array.isArray(selectedSubscriptionIds) ? selectedSubscriptionIds.length : null,
-      firstSubscriptionId: Array.isArray(selectedSubscriptionIds) ? selectedSubscriptionIds[0] : null,
-    });
   };
 }
 
 const SYNC_DEFERRED_MARKER = { __syncDeferred: true } as const;
-
-function normalizePreferenceValue(preference: any) {
-  let normalized = preference;
-
-  if (typeof normalized === 'string') {
-    try {
-      normalized = JSON.parse(normalized);
-    } catch (e) {
-      return preference;
-    }
-  }
-
-  if (normalized && normalized.type === 'object' && typeof normalized.value === 'string') {
-    try {
-      return {
-        ...normalized,
-        value: JSON.parse(normalized.value),
-      };
-    } catch (e) {}
-  }
-
-  return normalized;
-}
 
 function isSyncApplyUnsafe(walletStatus: any, password: string | null | undefined): boolean {
   return (
@@ -950,6 +807,11 @@ export function doPreferenceSet(
           await syncSharedPreferenceWrite(dispatch, getState, previousSyncHash, syncHash);
         } catch (syncError) {
           console.error('Failed to sync shared preferences after preference_set', syncError); // eslint-disable-line no-console
+
+          dispatch({
+            type: ACTIONS.SYNC_FATAL_ERROR,
+            error: syncError,
+          });
         }
       }
 
@@ -959,17 +821,10 @@ export function doPreferenceSet(
 
       return preference;
     } catch (err) {
-      if (key === 'local') {
-        dispatch({ type: ACTIONS.SET_PREFS_READY, data: true });
-
-        if (fail) {
-          fail();
-        }
-
-        return null;
-      }
-
-      dispatch({ type: ACTIONS.SET_PREFS_READY, data: true });
+      dispatch({
+        type: ACTIONS.SYNC_FATAL_ERROR,
+        error: err,
+      });
 
       if (fail) {
         fail();
@@ -989,13 +844,18 @@ export function doPreferenceGet(
     return Lbry.preference_get(options)
       .then((result) => {
         if (result) {
-          const preference = normalizePreferenceValue(result[key]);
+          const preference = result[key];
           return success(preference);
         }
 
         return success(null);
       })
       .catch((err) => {
+        dispatch({
+          type: ACTIONS.SYNC_FATAL_ERROR,
+          error: err,
+        });
+
         if (fail) {
           fail(err);
         }

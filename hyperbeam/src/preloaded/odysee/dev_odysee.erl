@@ -1348,7 +1348,7 @@ codec(Device, Msg, Req, Opts) ->
     ).
 
 with_target(Base, Req, Opts, Fun) ->
-    case target_param(Base, Req, Opts) of
+    case param(Base, Req, target_keys(), Opts) of
         {ok, Target} -> {ok, Fun(Target)};
         Error -> error_response(Error)
     end.
@@ -1458,36 +1458,9 @@ target_keys() ->
         <<"claim_id">>,
         <<"claim">>,
         <<"url">>,
-        <<"uri">>,
         <<"name">>,
         <<"target">>
     ].
-
-encoded_target_keys() ->
-    [
-        <<"uri64">>,
-        <<"url64">>,
-        <<"target64">>
-    ].
-
-target_param(Base, Req, Opts) ->
-    case param(Base, Req, target_keys(), Opts) of
-        {ok, Target} ->
-            {ok, Target};
-        Error ->
-            case param(Base, Req, encoded_target_keys(), Opts) of
-                {ok, Encoded} -> decode_target_param(Encoded);
-                _ -> Error
-            end
-    end.
-
-decode_target_param(Encoded) ->
-    try hb_util:decode(Encoded) of
-        Target when is_binary(Target), byte_size(Target) > 0 -> {ok, Target};
-        _ -> {error, invalid_target_encoding}
-    catch
-        _:_ -> {error, invalid_target_encoding}
-    end.
 
 param(Base, Req, Keys, Opts) ->
     case hb_maps:get_first(param_paths(Base, Req, Keys), not_found, Opts) of
@@ -1709,7 +1682,6 @@ error_map(Reason) ->
 
 status_for({missing_required, _}) -> 400;
 status_for({error, Reason}) -> status_for(Reason);
-status_for(invalid_target_encoding) -> 400;
 status_for(missing_native_source_id) -> 400;
 status_for(unsupported_native_source_id) -> 400;
 status_for(conflicting_native_source_id) -> 400;

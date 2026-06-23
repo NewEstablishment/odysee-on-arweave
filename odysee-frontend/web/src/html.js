@@ -62,6 +62,13 @@ function insertToHead(fullHtml, htmlToInsert) {
   }
 }
 
+function getCanonicalUrl(path = '') {
+  const canonicalBase = SITE_CANONICAL_URL || URL;
+  const absoluteBase = /^https?:\/\//i.test(canonicalBase) ? canonicalBase : `https://${canonicalBase}`;
+  const normalizedBase = absoluteBase.replace(/\/+$/, '');
+  return `${normalizedBase}${path}`;
+}
+
 function truncateDescription(description, maxChars = 200) {
   description = description.trim().split('\n');
   description = description[0].trim();
@@ -162,7 +169,7 @@ function buildOgMetadata(overrideOptions = {}) {
       getThumbnailCardCdnUrl(image) || OG_IMAGE_URL || `${BASE}/public/v2-og.png`
     }"/>\n` +
     '<meta property="fb:app_id" content="1673146449633983" />\n' +
-    `<link rel="canonical" content="${SITE_CANONICAL_URL || URL}"/>` +
+    `<link rel="canonical" href="${getCanonicalUrl()}"/>` +
     `<link rel="search" type="application/opensearchdescription+xml" title="${
       SITE_NAME || SITE_TITLE
     }" href="${URL}/opensearch.xml">`;
@@ -231,22 +238,9 @@ function addPWA() {
   head += '<link rel="manifest" href="/public/pwa/manifest.json"/>';
   head += '<link rel="apple-touch-icon" sizes="180x180" href="/public/pwa/icon-180.png">';
   head += `<script>
-      (function() {
-        var isLocal = /^(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0)$/.test(window.location.hostname);
-        if (!("serviceWorker" in navigator)) return;
-        if (isLocal) {
-          navigator.serviceWorker.getRegistrations().then(function(registrations) {
-            registrations.forEach(function(registration) { registration.unregister(); });
-          });
-          if (window.caches) caches.keys().then(function(names) {
-            names.forEach(function(name) { caches.delete(name); });
-          });
-          return;
-        }
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register("/sw.js", { scope: "/" });
-        });
-      })();
+      window.addEventListener('load', function() {
+        if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js", { scope: "/" })}
+      });
     </script>`;
   return head;
 }
@@ -340,6 +334,7 @@ async function buildClaimOgMetadata(uri, claim, overrideOptions = {}, referrerQu
   const description = overrideOptions.description || claimDescription;
   const cleanDescription = removeMd(description);
   const claimPath = `${BASE}/${claim.canonical_url.replace('lbry://', '').replace(/#/g, ':')}`;
+  const canonicalClaimPath = getCanonicalUrl(`/${claim.canonical_url.replace('lbry://', '').replace(/#/g, ':')}`);
   let head = '';
   head += `${addFavicon()}`;
   head += '<meta charset="utf8"/>';
@@ -361,7 +356,7 @@ async function buildClaimOgMetadata(uri, claim, overrideOptions = {}, referrerQu
   head += `<meta property="og:type" content="${getOgType(value?.stream_type, liveStream)}"/>`;
   head += `<meta property="og:title" content="${title}"/>`;
   head += `<meta property="og:url" content="${claimPath}"/>`;
-  head += `<link rel="canonical" content="${claimPath}"/>`;
+  head += `<link rel="canonical" href="${canonicalClaimPath}"/>`;
   head += `<link rel="alternate" type="application/json+oembed" href="${BASE}/$/oembed?url=${encodeURIComponent(
     claimPath
   )}&format=json${referrerQuery ? `&r=${encodeURIComponent(referrerQuery)}` : ''}" title="${title}" />`;

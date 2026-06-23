@@ -106,49 +106,6 @@ media_device_resolves_claim_target_with_total_test() ->
         hb_mock_server:stop(Handle)
     end.
 
-resolve_device_accepts_uri64_target_test() ->
-    ClaimID = <<"0123456789abcdef0123456789abcdef01234567">>,
-    DescriptorHash = hb_util:to_hex(crypto:hash(sha384, <<"descriptor">>)),
-    Claim = #{
-        <<"claim_id">> => ClaimID,
-        <<"name">> => <<"sample">>,
-        <<"value">> => #{
-            <<"source">> => #{
-                <<"sd_hash">> => DescriptorHash,
-                <<"size">> => <<"42">>,
-                <<"media_type">> => <<"video/mp4">>,
-                <<"name">> => <<"sample.mp4">>
-            }
-        }
-    },
-    URI = <<"lbry://sample#", ClaimID/binary>>,
-    Response =
-        hb_json:encode(#{
-            <<"jsonrpc">> => <<"2.0">>,
-            <<"result">> => #{ URI => Claim },
-            <<"id">> => 1
-        }),
-    {ok, Server, Handle} = hb_mock_server:start([
-        {"/api/v1/proxy", proxy, {200, Response}}
-    ]),
-    try
-        Opts = (opts(Server))#{ <<"lbry-proxy-node">> => Server },
-        {ok, Resolved} =
-            hb_ao:raw(
-                <<"odysee@1.0">>,
-                <<"resolve">>,
-                #{},
-                #{ <<"uri64">> => hb_util:encode(URI) },
-                Opts
-            ),
-        ?assertEqual(ClaimID, maps:get(<<"claim-id">>, Resolved)),
-        Raw = maps:get(<<"raw">>, Resolved),
-        Source = hb_util:deep_get([<<"value">>, <<"source">>], Raw, #{}),
-        ?assertEqual(DescriptorHash, maps:get(<<"sd_hash">>, Source))
-    after
-        hb_mock_server:stop(Handle)
-    end.
-
 range_device_requires_explicit_range_test() ->
     {ok, Response} =
         hb_ao:raw(
