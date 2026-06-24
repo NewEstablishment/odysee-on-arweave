@@ -1,4 +1,3 @@
-import { Lbryio } from 'lbryinc';
 import * as ACTIONS from 'constants/action_types';
 import { fetchHyperbeamSubCount, fetchHyperbeamViewCount } from 'util/hyperbeam';
 const FETCH_SUB_COUNT_MIN_INTERVAL_MS = 5 * 60 * 1000;
@@ -8,7 +7,10 @@ export const doFetchViewCount = (claimIdCsv: string) => (dispatch: Dispatch) => 
     type: ACTIONS.FETCH_VIEW_COUNT_STARTED,
   });
   return fetchHyperbeamViewCount(claimIdCsv)
-    .then((result) => result || Lbryio.call('file', 'view_count', { claim_id: claimIdCsv }))
+    .then((result) => {
+      if (!result) throw new Error('HyperBEAM file view_count returned no counts');
+      return result;
+    })
     .then((result: Array<number>) => {
       const viewCounts = result;
       dispatch({
@@ -31,7 +33,7 @@ const executeFetchSubCount = (claimIdCsv: string) => (dispatch: Dispatch, getSta
   const state = getState();
   const subCountLastFetchedById = state.stats.subCountLastFetchedById;
   const now = Date.now();
-  const claimIds = claimIdCsv.split(',').filter((id) => {
+  const claimIds = Array.from(new Set(claimIdCsv.split(',').filter(Boolean))).filter((id) => {
     const prev = subCountLastFetchedById[id];
     return !prev || now - prev > FETCH_SUB_COUNT_MIN_INTERVAL_MS;
   });
@@ -45,7 +47,10 @@ const executeFetchSubCount = (claimIdCsv: string) => (dispatch: Dispatch, getSta
   });
   const filteredClaimIdCsv = claimIds.join(',');
   return fetchHyperbeamSubCount(filteredClaimIdCsv)
-    .then((result) => result || Lbryio.call('subscription', 'sub_count', { claim_id: filteredClaimIdCsv }))
+    .then((result) => {
+      if (!result) throw new Error('HyperBEAM subscription sub_count returned no counts');
+      return result;
+    })
     .then((result: Array<number>) => {
       const subCounts = result;
       dispatch({

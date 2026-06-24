@@ -1,8 +1,16 @@
-import { HYPERBEAM_BASE_URL, LBRY_API_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { X_LBRY_AUTH_TOKEN } from 'constants/token';
+import Lbry from 'lbry';
+import { Lbryio } from 'lbryinc';
+import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
+import { parseURI } from 'util/lbryURI';
+import { getAuthToken } from 'util/saved-passwords';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
+const HYPERBEAM_FAILED_READ_CACHE_MS = 10 * 1000;
+const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const CLAIM_DEVICE = '~odysee-claim@1.0';
 const COMMENT_DEVICE = '~odysee-comment@1.0';
 const REACTION_DEVICE = '~odysee-reaction@1.0';
@@ -14,6 +22,8 @@ const STREAM_DEVICE = '~odysee-stream@1.0';
 const PRIVATE_PARAM_KEYS = new Set([
   'accesstoken',
   'authorization',
+  'auth-token',
+  'auth_token',
   'authtoken',
   'includeismyoutput',
   'includepurchasereceipt',
@@ -21,19 +31,30 @@ const PRIVATE_PARAM_KEYS = new Set([
   'ismyoutput',
   'purchasereceipt',
   'refreshtoken',
+  'x-lbry-auth-token',
+  'x-odysee-auth-token',
 ]);
+const NORMALIZED_PRIVATE_PARAM_KEYS = new Set(
+  Array.from(PRIVATE_PARAM_KEYS).map((key) => key.replace(/[-_]/g, '').toLowerCase())
+);
 const deviceReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
+let localAuthTokenPromise: Promise<string | null> | null = null;
+const tracedAuthSources = new Set<string>();
+const AUTH_REQUIRED_DEVICE_PATHS = new Set([
+  `${FILE_DEVICE}/view-count`,
+  `${FILE_REACTION_DEVICE}/list`,
+  `${SUBSCRIPTION_DEVICE}/sub-count`,
+]);
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const urls = urlsFromResolveParams(params);
   if (!urls.length) return null;
 
-  const { channelUris, resolveUris } = splitClaimIdChannelUris(urls);
-  const channelEntries =
-    channelUris.length > 1 ? await fetchClaimIdChannelEntries(channelUris) : await fetchResolveEntries(channelUris);
+  const { batchedUris, resolveUris } = splitBatchedResolveUris(urls);
+  const batchedEntries = batchedUris.length ? await fetchBatchedResolveEntries(batchedUris) : [];
   const resolveEntries = await fetchResolveEntries(resolveUris);
 
-  return Object.fromEntries([...channelEntries, ...resolveEntries].filter(([, claim]) => claim));
+  return Object.fromEntries([...batchedEntries, ...resolveEntries].filter(([, claim]) => claim));
 }
 
 async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
@@ -46,27 +67,11 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
   );
 }
 
-async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[string, any]>> {
-  const uriByClaimId = new Map<string, string>();
-  urls.forEach((uri) => {
-    const claimId = claimIdFromChannelUri(uri);
-    if (claimId) uriByClaimId.set(claimId.toLowerCase(), uri);
-  });
+async function fetchBatchedResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
+  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { urls });
+  const result = responsePayload(response);
 
-  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, {
-    claim_ids: Array.from(uriByClaimId.keys()),
-  });
-  const search = sdkSearchFromHyperbeam(responsePayload(response));
-  const items = Array.isArray(search?.items) ? search.items : [];
-
-  return items
-    .map((item: any): [string, any] | null => {
-      const claim = sdkClaimFromHyperbeam(item);
-      const claimId = value(claim, 'claim_id', 'claim-id');
-      const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
-      return uri ? [uri, claim] : null;
-    })
-    .filter(Boolean) as Array<[string, any]>;
+  return urls.map((uri): [string, any] => [uri, sdkClaimFromHyperbeam(result?.[uri] || result)]);
 }
 
 export async function fetchHyperbeamGet(params: any): Promise<any | null> {
@@ -124,33 +129,20 @@ export async function fetchHyperbeamCommentById(params: CommentByIdParams): Prom
 
 export async function fetchHyperbeamReactionList(params: ReactionListParams): Promise<ReactionListResponse | null> {
   const response = await fetchDeviceJson(`${REACTION_DEVICE}/list`, params);
-  const result = responsePayload(response);
-  const myReactions = value(result, 'my_reactions', 'my-reactions');
-  const othersReactions = value(result, 'others_reactions', 'others-reactions');
-
-  return isObject(myReactions) && isObject(othersReactions)
-    ? { my_reactions: myReactions, others_reactions: othersReactions }
-    : null;
+  return reactionListFromHyperbeam(responsePayload(response));
 }
 
 export async function fetchHyperbeamFileReactionList(params: { claim_ids: string }): Promise<any | null> {
   const response = await fetchDeviceJson(`${FILE_REACTION_DEVICE}/list`, params);
-  const result = responsePayload(response);
-  const myReactions = value(result, 'my_reactions', 'my-reactions');
-  const othersReactions = value(result, 'others_reactions', 'others-reactions');
-
-  return isObject(myReactions) && isObject(othersReactions)
-    ? { my_reactions: myReactions, others_reactions: othersReactions }
-    : null;
+  return reactionListFromHyperbeam(responsePayload(response));
 }
 
 export async function fetchHyperbeamViewCount(claimIdCsv: string): Promise<Array<number> | null> {
   const response = await fetchDeviceJson(`${FILE_DEVICE}/view-count`, {
     claim_id: claimIdCsv,
-    odysee_api_url: LBRY_API_URL,
   });
   const result = responsePayload(response);
-  const counts = Array.isArray(result) ? result : value(result, 'counts', 'view-counts');
+  const counts = countArray(result, 'view-counts') || countArray(response, 'view-counts');
 
   return Array.isArray(counts) ? counts : null;
 }
@@ -160,17 +152,24 @@ export async function fetchHyperbeamSubCount(claimIdCsv: string): Promise<Array<
     `${SUBSCRIPTION_DEVICE}/sub-count`,
     compactParams({
       claim_id: claimIdCsv,
-      odysee_api_url: LBRY_API_URL,
     })
   );
   const result = responsePayload(response);
-  const counts = Array.isArray(result) ? result : value(result, 'counts', 'sub-counts');
+  const counts = countArray(result, 'sub-counts') || countArray(response, 'sub-counts');
 
   return Array.isArray(counts) ? counts : null;
 }
 
 export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params);
+  const result = sdkSearchFromHyperbeam(responsePayload(response));
+  const items = result && result.items;
+
+  return Array.isArray(items) ? result : null;
+}
+
+export async function fetchHyperbeamResolveClaimIds(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
+  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, params);
   const result = sdkSearchFromHyperbeam(responsePayload(response));
   const items = result && result.items;
 
@@ -210,11 +209,23 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
   }
 
   try {
-    const params = stripPrivateParams(compactParams(body));
+    if (AUTH_REQUIRED_DEVICE_PATHS.has(path)) {
+      const authToken = await getOdyseeAuthToken(path);
+      return await fetchAuthDeviceJson(path, withAuthParams(stripPrivateParams(compactParams(body)), authToken));
+    }
+
+    const authToken = await getOdyseeAuthToken(path);
+    const params = withAuthParams(stripPrivateParams(compactParams(body)), authToken);
+    traceAuthDeviceRequest(path, authToken);
+    traceAuthRequestBody(path, params, authToken);
 
     const response = await fetch(buildDeviceUrl(baseUrl, path), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: hyperbeamFetchCredentials(baseUrl),
+      headers: {
+        'Content-Type': 'application/json',
+        ...authTokenHeader(authToken),
+      },
       body: JSON.stringify(params),
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
@@ -230,6 +241,206 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
   }
 }
 
+async function fetchAuthDeviceJson(path: string, body: Record<string, any>): Promise<any | null> {
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const devicePath = `/${path}`;
+  const device = path.split('/')[0];
+  const url = `${HYPERBEAM_AUTH_DEVICE_PROXY_BASE}/${path}`;
+
+  pushHyperbeamDebug(
+    'request',
+    {
+      method: 'POST',
+      devicePath,
+      device,
+      deviceLayer: 'native-device',
+      sourceLayer: 'native-device:auth',
+      authRequired: true,
+      requestKey: requestKeyForAuthDevice(path, body),
+      url,
+    },
+    'info'
+  );
+
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+  });
+  const elapsedMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
+  const responseText = await response.text();
+  const contentType = response.headers.get('content-type') || '';
+
+  pushHyperbeamDebug(
+    'response',
+    {
+      status: response.status,
+      ok: response.ok,
+      devicePath,
+      device,
+      deviceLayer: 'native-device',
+      sourceLayer: 'native-device:auth',
+      authRequired: true,
+      requestKey: requestKeyForAuthDevice(path, body),
+      contentType,
+      elapsedMs,
+      response: parseJsonString(responseText) || undefined,
+    },
+    response.ok ? 'ok' : 'error'
+  );
+
+  if (!response.ok) {
+    if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
+    return null;
+  }
+
+  return parseJsonString(responseText);
+}
+
+function requestKeyForAuthDevice(path: string, body: Record<string, any>) {
+  const claimId = body.claim_id || body.claim_ids || body['claim-id'] || body['claim-ids'];
+  return claimId ? `claim:${claimId}` : `${path}:${stableJson(body).slice(0, 180)}`;
+}
+
+function authTokenHeader(token: string | null): Record<string, string> {
+  return token ? { 'x-odysee-auth-token': token } : {};
+}
+
+function withAuthParams(params: Record<string, any>, token: string | null): Record<string, any> {
+  return token ? { ...params, auth_token: token } : params;
+}
+
+async function getOdyseeAuthToken(path?: string): Promise<string | null> {
+  if (path && AUTH_REQUIRED_DEVICE_PATHS.has(path)) {
+    const localAuthToken = await getLocalAuthToken();
+    traceAuthSource(path, 'same-origin-cookie', localAuthToken);
+    if (localAuthToken) return localAuthToken;
+  }
+
+  const apiHeaders = Lbry.getApiRequestHeaders && Lbry.getApiRequestHeaders();
+  const apiHeaderToken = apiHeaders && (apiHeaders[X_LBRY_AUTH_TOKEN] || apiHeaders[X_LBRY_AUTH_TOKEN.toLowerCase()]);
+  traceAuthSource(path, 'lbry-header', apiHeaderToken);
+  if (apiHeaderToken) return String(apiHeaderToken);
+
+  const cookieToken = getAuthToken();
+  traceAuthSource(path, 'document-cookie', cookieToken);
+  if (cookieToken) return cookieToken;
+
+  try {
+    const state = typeof window !== 'undefined' && window.store ? window.store.getState() : undefined;
+    const stateToken = state?.auth?.authToken;
+    traceAuthSource(path, 'redux-auth', stateToken);
+    if (stateToken) return stateToken;
+  } catch (_e) {
+    // Fall through to the normal lbryinc override.
+  }
+
+  try {
+    const lbryioToken = await Lbryio.getAuthToken();
+    traceAuthSource(path, 'lbryio', lbryioToken);
+    if (lbryioToken) return lbryioToken;
+  } catch (_e) {
+    // Fall through to the same-origin probe.
+  }
+
+  const localAuthToken = await getLocalAuthToken();
+  traceAuthSource(path, 'same-origin-cookie', localAuthToken);
+  if (localAuthToken) return localAuthToken;
+
+  return null;
+}
+
+async function getLocalAuthToken(): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+  if (!localAuthTokenPromise) {
+    localAuthTokenPromise = fetch('/$/api/auth-token/v1/get', {
+      credentials: 'include',
+      cache: 'no-store',
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result) => result?.auth_token || null)
+      .catch(() => null)
+      .finally(() => {
+        window.setTimeout(() => {
+          localAuthTokenPromise = null;
+        }, 10000);
+      });
+  }
+
+  return localAuthTokenPromise;
+}
+
+function traceAuthDeviceRequest(path: string, token: string | null) {
+  if (!AUTH_REQUIRED_DEVICE_PATHS.has(path)) return;
+
+  const traceKey = `${path}:${token ? 'present' : 'missing'}`;
+  if (tracedAuthSources.has(traceKey)) return;
+  tracedAuthSources.add(traceKey);
+
+  pushHyperbeamDebug(
+    'auth token',
+    {
+      authRequired: true,
+      authPresent: Boolean(token),
+      devicePath: `/${path}`,
+      device: path.split('/')[0],
+      deviceLayer: 'native-device',
+      sourceLayer: 'native-device:auth',
+    },
+    token ? 'ok' : 'warn'
+  );
+}
+
+function traceAuthRequestBody(path: string, params: Record<string, any>, token: string | null) {
+  if (!AUTH_REQUIRED_DEVICE_PATHS.has(path)) return;
+
+  const bodyKeys = Object.keys(params).sort().join(',');
+  const traceKey = `${path}:body:${token ? 'present' : 'missing'}:${bodyKeys}`;
+  if (tracedAuthSources.has(traceKey)) return;
+  tracedAuthSources.add(traceKey);
+
+  pushHyperbeamDebug(
+    'auth request',
+    {
+      authRequired: true,
+      authPresent: Boolean(token),
+      hasAuthParam: Boolean(params.auth_token),
+      bodyKeys: Object.keys(params).sort(),
+      devicePath: `/${path}`,
+      device: path.split('/')[0],
+      deviceLayer: 'native-device',
+      sourceLayer: 'native-device:auth',
+    },
+    token && params.auth_token ? 'ok' : 'warn'
+  );
+}
+
+function traceAuthSource(path: string | undefined, source: string, token: any) {
+  if (!path || !AUTH_REQUIRED_DEVICE_PATHS.has(path)) return;
+
+  const traceKey = `${path}:${source}:${token ? 'present' : 'missing'}`;
+  if (tracedAuthSources.has(traceKey)) return;
+  tracedAuthSources.add(traceKey);
+
+  pushHyperbeamDebug(
+    'auth source',
+    {
+      authRequired: true,
+      authPresent: Boolean(token),
+      authSource: source,
+      devicePath: `/${path}`,
+      device: path.split('/')[0],
+      deviceLayer: 'native-device',
+      sourceLayer: 'native-device:auth',
+    },
+    token ? 'ok' : 'warn'
+  );
+}
+
 function fetchCachedDeviceJson(path: string, body: Record<string, any>): Promise<any | null> {
   const key = `${path}:${stableJson(stripPrivateParams(compactParams(body)))}`;
   const now = Date.now();
@@ -237,7 +448,9 @@ function fetchCachedDeviceJson(path: string, body: Record<string, any>): Promise
   if (cached && cached.expiresAt > now) return cached.promise;
 
   const promise = fetchDeviceJson(path, body).catch((error) => {
-    deviceReadCache.delete(key);
+    const failed = Promise.reject(error);
+    failed.catch(() => {});
+    deviceReadCache.set(key, { expiresAt: Date.now() + HYPERBEAM_FAILED_READ_CACHE_MS, promise: failed });
     throw error;
   });
   deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
@@ -250,6 +463,16 @@ function hyperbeamBaseUrl(): string {
 
 function buildDeviceUrl(baseUrl: string, path: string): string {
   return `${baseUrl}/${path}`;
+}
+
+function hyperbeamFetchCredentials(baseUrl: string): RequestCredentials {
+  if (typeof window === 'undefined') return 'include';
+
+  try {
+    return new URL(baseUrl, window.location.href).origin === window.location.origin ? 'include' : 'omit';
+  } catch (_e) {
+    return 'omit';
+  }
 }
 
 function compactParams(params: Record<string, any>): Record<string, any> {
@@ -265,7 +488,7 @@ function stripPrivateParams(source: any): any {
 
   return Object.fromEntries(
     Object.entries(source)
-      .filter(([key]) => !PRIVATE_PARAM_KEYS.has(key.replace(/[-_]/g, '').toLowerCase()))
+      .filter(([key]) => !NORMALIZED_PRIVATE_PARAM_KEYS.has(key.replace(/[-_]/g, '').toLowerCase()))
       .map(([key, value]) => [key, stripPrivateParams(value)])
   );
 }
@@ -309,7 +532,49 @@ function commentFromHyperbeam(comment: any): any {
 
 function responsePayload(response: any): any {
   if (!response) return null;
-  return response.result || response;
+  const body = parseJsonString(response.body);
+  const payload = body || response;
+
+  if (payload && payload.jsonrpc && payload.result !== undefined) return payload.result;
+  if (payload && payload.success === true && payload.data !== undefined) return payload.data;
+  if (payload && payload.result !== undefined) return payload.result;
+  if (payload && payload.data !== undefined) return payload.data;
+
+  return payload;
+}
+
+function countArray(source: any, countKey: string): Array<number> | null {
+  if (Array.isArray(source)) return source;
+  if (typeof source === 'number') return [source];
+
+  const counts = value(source, 'counts', countKey);
+  if (Array.isArray(counts)) return counts;
+  if (typeof counts === 'number') return [counts];
+
+  const result = value(source, 'result');
+  if (Array.isArray(result)) return result;
+  if (typeof result === 'number') return [result];
+
+  return null;
+}
+
+function reactionListFromHyperbeam(result: any): any | null {
+  const myReactions = value(result, 'my_reactions', 'my-reactions');
+  const othersReactions = value(result, 'others_reactions', 'others-reactions');
+  const my = isObject(myReactions) ? myReactions : {};
+  const others = isObject(othersReactions) ? othersReactions : {};
+
+  return Object.keys(my).length || Object.keys(others).length ? { my_reactions: my, others_reactions: others } : null;
+}
+
+function parseJsonString(value: any): any {
+  if (typeof value !== 'string') return null;
+
+  try {
+    return JSON.parse(value);
+  } catch (_e) {
+    return null;
+  }
 }
 
 function urlsFromResolveParams(params: any): Array<string> {
@@ -318,19 +583,24 @@ function urlsFromResolveParams(params: any): Array<string> {
   return source ? [source] : [];
 }
 
-function splitClaimIdChannelUris(urls: Array<string>): { channelUris: Array<string>; resolveUris: Array<string> } {
+function splitBatchedResolveUris(urls: Array<string>): { batchedUris: Array<string>; resolveUris: Array<string> } {
   return urls.reduce(
     (groups, uri) => {
-      groups[claimIdFromChannelUri(uri) ? 'channelUris' : 'resolveUris'].push(uri);
+      groups[claimIdFromUri(uri) ? 'batchedUris' : 'resolveUris'].push(uri);
       return groups;
     },
-    { channelUris: [], resolveUris: [] } as { channelUris: Array<string>; resolveUris: Array<string> }
+    { batchedUris: [], resolveUris: [] } as { batchedUris: Array<string>; resolveUris: Array<string> }
   );
 }
 
-function claimIdFromChannelUri(uri: string): string | null {
-  const match = String(uri).match(/^lbry:\/\/@[^/]+#([0-9a-f]{40})$/i);
-  return match ? match[1] : null;
+function claimIdFromUri(uri: string): string | null {
+  try {
+    const parsed = parseURI(String(uri));
+    const claimId = parsed.streamClaimId || parsed.channelClaimId;
+    return claimId ? String(claimId) : null;
+  } catch (_e) {
+    return null;
+  }
 }
 
 function sdkClaimFromHyperbeam(result: any): any {

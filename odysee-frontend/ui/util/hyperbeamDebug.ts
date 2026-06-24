@@ -12,13 +12,21 @@ export type HyperbeamDebugEvent = {
 
 const EVENT_NAME = 'odysee-hyperbeam-debug';
 const MAX_BUFFERED_EVENTS = 320;
+const AUTH_REQUIRED_DEVICE_PATHS = new Set([
+  '/~odysee-file@1.0/view-count',
+  '/~odysee-file@1.0/view_count',
+  '/~odysee-file-reaction@1.0/list',
+  '/~odysee-subscription@1.0/sub-count',
+  '/~odysee-subscription@1.0/sub_count',
+]);
 let installed = false;
 const bufferedEvents: Array<HyperbeamDebugEvent> = [];
 
 export function hyperbeamDebugColor(level: HyperbeamDebugLevel, sourceLayer?: string) {
   const source = String(sourceLayer || '');
-  if (source === 'native-device') return '#0ea5e9';
   if (level === 'error' || source === 'native-failed' || source === 'native-missing') return '#ff4d7d';
+  if (source === 'native-device:auth') return '#22c55e';
+  if (source === 'native-device') return '#0ea5e9';
   if (source === 'original') return '#94a3b8';
   if (
     level === 'warn' ||
@@ -28,7 +36,7 @@ export function hyperbeamDebugColor(level: HyperbeamDebugLevel, sourceLayer?: st
   ) {
     return '#ffb020';
   }
-  if (level === 'ok') return '#22c55e';
+  if (level === 'ok') return 'rgba(255,255,255,0.76)';
   return 'rgba(255,255,255,0.76)';
 }
 
@@ -111,6 +119,7 @@ export function installHyperbeamFetchDebug() {
             devicePath: devicePath(url),
             device: hyperbeamDevice(url),
             deviceLayer: hyperbeamDeviceLayer(url),
+            authRequired: isAuthRequiredUrl(url),
             sourceLayer: isHyperbeam ? hyperbeamFallbackLayer(url) : 'original',
             requestKey,
             error: String(error?.message || error),
@@ -166,6 +175,7 @@ function requestSummary(
     devicePath: devicePath(url),
     device: hyperbeamDevice(url),
     deviceLayer: hyperbeamDeviceLayer(url),
+    authRequired: isAuthRequiredUrl(url),
     nativePath: nativeSourcePath(url),
     nativeSource: nativeSourceKind(url),
     url: sanitizeUrl(url),
@@ -191,6 +201,7 @@ async function responseSummary(
     devicePath: devicePath(url),
     device: hyperbeamDevice(url),
     deviceLayer: hyperbeamDeviceLayer(url),
+    authRequired: isAuthRequiredUrl(url),
     nativePath: nativeSourcePath(url),
     nativeSource: nativeSourceKind(url),
     contentType: response.headers.get('content-type'),
@@ -362,6 +373,10 @@ function previewBody(text: string) {
 
 function devicePath(url: string) {
   return sanitizePath(url);
+}
+
+function isAuthRequiredUrl(url: string) {
+  return AUTH_REQUIRED_DEVICE_PATHS.has(devicePath(url));
 }
 
 function hyperbeamDevice(url: string) {

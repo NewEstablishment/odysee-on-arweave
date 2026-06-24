@@ -632,13 +632,15 @@ for(var i=0;i<els.length;i++)els[i].parentNode.removeChild(els[i]);
 var s=document.createElement('script');s.src='/${legacyFilename}';document.head.appendChild(s)}})();
 </script>`;
 
-        const updatedHtml = html.replace('<head>', `<head>\n    ${detectorScript}`);
+        const htmlWithoutOldDetector = stripLegacyFallbackDetectors(html);
+        const updatedHtml = htmlWithoutOldDetector.replace('<head>', `<head>\n    ${detectorScript}`);
         fs.writeFileSync(builtHtml, updatedHtml, 'utf8');
 
         const templateHtml = path.join(outDir, 'index-web.html');
         if (fs.existsSync(templateHtml)) {
           const tmpl = fs.readFileSync(templateHtml, 'utf8');
-          const updatedTmpl = tmpl.replace('<head>', `<head>\n    ${detectorScript}`);
+          const tmplWithoutOldDetector = stripLegacyFallbackDetectors(tmpl);
+          const updatedTmpl = tmplWithoutOldDetector.replace('<head>', `<head>\n    ${detectorScript}`);
           fs.writeFileSync(templateHtml, updatedTmpl, 'utf8');
         }
 
@@ -648,6 +650,13 @@ var s=document.createElement('script');s.src='/${legacyFilename}';document.head.
       },
     },
   };
+}
+
+function stripLegacyFallbackDetectors(html: string) {
+  return html.replace(
+    /\s*<script>\s*\(function\(\)\{try\{if\(location\.search\.indexOf\('legacy=1'\)!==-1\)throw 1;[\s\S]*?legacy-[^'"]+\.js';document\.head\.appendChild\(s\)\}\}\)\(\);\s*<\/script>/g,
+    ''
+  );
 }
 
 // Post-build plugin: injects Vite-built asset tags into the SSR template (`index-web.html`)
@@ -680,12 +689,19 @@ function ssrTemplatePlugin() {
 
         if (assetTags.length === 0) return;
 
-        // Insert asset tags before </head> in the SSR template
-        const injected = template.replace('</head>', `    ${assetTags.join('\n    ')}\n  </head>`);
+        const cleanTemplate = stripInjectedAssetTags(template);
+        const injected = cleanTemplate.replace('</head>', `    ${assetTags.join('\n    ')}\n  </head>`);
         fs.writeFileSync(templateHtml, injected, 'utf8');
       },
     },
   };
+}
+
+function stripInjectedAssetTags(html: string) {
+  return html.replace(
+    /\s*(?:<script\b[^>]*\bsrc="\/public\/assets\/[^"]+\.js"[^>]*><\/script>|<link\b[^>]*\bhref="\/public\/assets\/[^"]+\.(?:css|js)"[^>]*>)/g,
+    ''
+  );
 }
 
 const codeSplittingGroups = [

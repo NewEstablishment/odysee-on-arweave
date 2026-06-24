@@ -117,7 +117,8 @@ function ContentTab(props: Props) {
       ? claimType.every((ct) => TYPES_TO_ALLOW_FILTER.includes(ct))
       : TYPES_TO_ALLOW_FILTER.includes(claimType));
   const isLargeScreen = useIsLargeScreen();
-  const dynamicPageSize = isLargeScreen ? Math.ceil(defaultPageSize * 3) : defaultPageSize;
+  const basePageSize = defaultPageSize || PAGE_SIZE;
+  const dynamicPageSize = isLargeScreen ? Math.ceil(basePageSize * 3) : basePageSize;
   const showScheduledLiveStreams = claimType !== 'collection' && !shortsOnly; // i.e. not on the playlist page.
 
   const scheduledChanIds = React.useMemo(() => [claimId], [claimId]);
@@ -184,7 +185,7 @@ function ContentTab(props: Props) {
           <HiddenNsfwClaims uri={uri} className={undefined} />
         </React.Suspense>
       )}
-      {!fetching && (
+      {
         <ClaimSearchFilterContext.Provider value={claimSearchFilterCtx}>
           <ClaimListDiscover
             ignoreSearchInLanguage
@@ -272,7 +273,7 @@ function ContentTab(props: Props) {
             contentType={filters && filters.file_type}
           />
         </ClaimSearchFilterContext.Provider>
-      )}
+      }
     </Fragment>
   );
 }

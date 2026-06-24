@@ -2,7 +2,12 @@ import analytics from 'analytics';
 import { FETCH_TIMEOUT, SDK_FETCH_TIMEOUT } from 'constants/errors';
 import { NO_AUTH, X_LBRY_AUTH_TOKEN } from 'constants/token';
 import fetchWithTimeout from 'util/fetch';
-import { fetchHyperbeamClaimSearch, fetchHyperbeamGet, fetchHyperbeamResolve } from 'util/hyperbeam';
+import {
+  fetchHyperbeamClaimSearch,
+  fetchHyperbeamGet,
+  fetchHyperbeamResolve,
+  fetchHyperbeamResolveClaimIds,
+} from 'util/hyperbeam';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { PROXY_URL_NO_CF } from 'config';
 
@@ -355,10 +360,11 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
   switch (method) {
     case 'resolve':
       return fetchHyperbeamResolve(stripHyperbeamNodeOnlyParams(params || {})).then(requireHyperbeamResult(method));
-    case 'claim_search':
-      return fetchHyperbeamClaimSearch(stripHyperbeamNodeOnlyParams(claimSearchParamHook(params || {}))).then(
-        requireHyperbeamResult(method)
-      );
+    case 'claim_search': {
+      const searchParams = stripHyperbeamNodeOnlyParams(claimSearchParamHook(params || {}));
+      const search = shouldResolveClaimIds(searchParams) ? fetchHyperbeamResolveClaimIds : fetchHyperbeamClaimSearch;
+      return search(searchParams).then(requireHyperbeamResult(method));
+    }
     case 'get':
       return fetchHyperbeamGet(stripHyperbeamNodeOnlyParams(params || {})).then(requireHyperbeamResult(method));
     default:
@@ -409,6 +415,13 @@ function stripHyperbeamNodeOnlyParams(params: Record<string, any>) {
   const clean = { ...params };
   delete clean[NO_AUTH];
   return clean;
+}
+
+function shouldResolveClaimIds(params: Record<string, any>) {
+  const claimIds = params.claim_ids;
+  if (!Array.isArray(claimIds) || claimIds.length === 0) return false;
+
+  return Object.keys(params).every((key) => ['claim_ids', 'page', 'page_size', 'no_totals'].includes(key));
 }
 
 function hyperbeamLocalSdkResult(method: string, params: any): Promise<any> | null {

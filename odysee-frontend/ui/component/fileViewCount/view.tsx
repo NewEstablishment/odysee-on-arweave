@@ -11,6 +11,8 @@ import { doFetchViewCount, selectViewCountForUri } from 'lbryinc';
 type Props = {
   uri: string;
 };
+const RETRY_COUNT_MAX = 6;
+const RETRY_INTERVAL_MS = 5000;
 
 function FileViewCount(props: Props) {
   const { uri } = props;
@@ -27,6 +29,7 @@ function FileViewCount(props: Props) {
   const countCompact = Number.isInteger(count) ? toCompactNotation(count, lang, 10000) : null;
   const countFullResolution = Number(count).toLocaleString();
   const Placeholder = <Skeleton variant="text" animation="wave" className="file-view-count-placeholder" />;
+  const retryCountRef = React.useRef(0);
 
   function getRegularViewCountElem() {
     if (Number.isInteger(viewCount)) {
@@ -56,6 +59,23 @@ function FileViewCount(props: Props) {
       dispatch(doFetchViewCount(claimId));
     }
   }, [claimId, dispatch]);
+
+  React.useEffect(() => {
+    retryCountRef.current = 0;
+  }, [claimId]);
+
+  React.useEffect(() => {
+    if (!claimId || isLivestreamClaim || Number.isInteger(viewCount) || retryCountRef.current >= RETRY_COUNT_MAX) {
+      return;
+    }
+
+    const retryTimer = window.setTimeout(() => {
+      retryCountRef.current += 1;
+      dispatch(doFetchViewCount(claimId));
+    }, RETRY_INTERVAL_MS);
+
+    return () => window.clearTimeout(retryTimer);
+  }, [claimId, dispatch, isLivestreamClaim, viewCount]);
   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Tooltip title={countFullResolution} followCursor placement="top">

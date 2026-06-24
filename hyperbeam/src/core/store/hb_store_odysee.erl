@@ -12,7 +12,6 @@
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--define(ODYSEE_COMMITMENT_DEVICE, <<"odysee@1.0">>).
 -define(LBRY_BLOB_COMMITMENT_DEVICE, <<"lbry-blob@1.0">>).
 -define(LBRY_STREAM_DESCRIPTOR_COMMITMENT_DEVICE, <<"lbry-stream-descriptor@1.0">>).
 -define(LBRY_CLAIM_OUTPUT_COMMITMENT_DEVICE, <<"lbry-claim-output@1.0">>).
@@ -357,19 +356,33 @@ commit_result(Bin, _Type, _Opts) when is_binary(Bin) ->
 commit_surface_result(Msg0, Type, Opts) ->
     Msg = source_message(Type, Msg0),
     CommitmentDevice = commitment_device(Type),
-    case has_commitment_device(Msg, CommitmentDevice, Opts)
-        andalso hb_message:verify(
-            Msg,
-            #{ <<"committers">> => <<"none">>, <<"commitment-ids">> => <<"all">> },
-            Opts
-        )
-    of
-        true ->
-            committed_surface(Msg, Opts);
-        false ->
-            case hb_ao:raw(CommitmentDevice, <<"commit">>, Msg, #{ <<"type">> => Type }, Opts) of
-                {ok, Committed} -> committed_surface(Committed, Opts);
-                Error -> Error
+    case CommitmentDevice of
+        undefined ->
+            {ok, Msg};
+        _ ->
+            case has_commitment_device(Msg, CommitmentDevice, Opts)
+                andalso hb_message:verify(
+                    Msg,
+                    #{
+                        <<"committers">> => <<"none">>,
+                        <<"commitment-ids">> => <<"all">>
+                    },
+                    Opts
+                )
+            of
+                true ->
+                    committed_surface(Msg, Opts);
+                false ->
+                    case hb_ao:raw(
+                        CommitmentDevice,
+                        <<"commit">>,
+                        Msg,
+                        #{ <<"type">> => Type },
+                        Opts
+                    ) of
+                        {ok, Committed} -> committed_surface(Committed, Opts);
+                        Error -> Error
+                    end
             end
     end.
 
@@ -385,7 +398,7 @@ commitment_device(<<"claim-proof">>) ->
 commitment_device(<<"transaction">>) ->
     ?LBRY_TRANSACTION_COMMITMENT_DEVICE;
 commitment_device(_Type) ->
-    ?ODYSEE_COMMITMENT_DEVICE.
+    undefined.
 
 source_message(<<"blob">>, Msg) ->
     Msg#{ <<"device">> => ?LBRY_BLOB_COMMITMENT_DEVICE };

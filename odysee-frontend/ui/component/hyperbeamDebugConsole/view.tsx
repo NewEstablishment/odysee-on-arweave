@@ -13,11 +13,13 @@ import ClaimTrace from './claimTrace';
 
 const MAX_EVENTS = 1200;
 const MAX_RELEVANT_EVENTS = 24;
+const MAX_EVENTS_PER_FRAME = 80;
 const FILTERS = [
   { key: 'get', label: 'get', color: 'rgba(255,255,255,0.76)' },
   { key: 'failed', label: 'failed', color: '#ff4d7d' },
   { key: 'original', label: 'legacy', color: '#94a3b8' },
   { key: 'native-device', label: 'native-device', color: '#0ea5e9' },
+  { key: 'native-device:auth', label: 'native-device:auth', color: '#22c55e' },
   { key: 'fallback', label: 'fallback', color: '#ffb020' },
 ] as const;
 
@@ -35,31 +37,35 @@ export default function HyperbeamDebugConsole() {
   const [copied, setCopied] = React.useState(false);
   const [copiedRelevant, setCopiedRelevant] = React.useState(false);
   const logRef = React.useRef<HTMLDivElement | null>(null);
+  const pendingEventsRef = React.useRef<Array<HyperbeamDebugEvent>>([]);
+  const flushFrameRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     installHyperbeamFetchDebug();
-    return addHyperbeamDebugListener((event) => {
-      setEvents((current) => {
-        const key = eventKey(event);
-        const existingIndex = current.findLastIndex((currentEvent) => eventKey(currentEvent) === key);
-        if (existingIndex !== -1) {
-          const existing = current[existingIndex];
-          const next = [...current];
-          next[existingIndex] = {
-            ...event,
-            data: {
-              ...event.data,
-              repeatCount: Number(existing.data?.repeatCount || 1) + 1,
-              firstSeen: existing.data?.firstSeen || existing.time,
-              lastSeen: event.time,
-            },
-          };
-          return next;
-        }
-
-        return [...current.slice(-(MAX_EVENTS - 1)), event];
-      });
+    const flushEvents = () => {
+      flushFrameRef.current = null;
+      const pending = pendingEventsRef.current.splice(0, MAX_EVENTS_PER_FRAME);
+      if (pending.length) {
+        setEvents((current) => mergeEvents(current, pending));
+      }
+      if (pendingEventsRef.current.length) {
+        flushFrameRef.current = window.requestAnimationFrame(flushEvents);
+      }
+    };
+    const removeListener = addHyperbeamDebugListener((event) => {
+      pendingEventsRef.current.push(event);
+      if (flushFrameRef.current === null) {
+        flushFrameRef.current = window.requestAnimationFrame(flushEvents);
+      }
     });
+    return () => {
+      removeListener();
+      if (flushFrameRef.current !== null) {
+        window.cancelAnimationFrame(flushFrameRef.current);
+        flushFrameRef.current = null;
+      }
+      pendingEventsRef.current = [];
+    };
   }, []);
 
   React.useEffect(() => {
@@ -425,27 +431,67 @@ function TabButton({ active, children, onClick }: { active: boolean; children: R
 
 function eventColor(event: HyperbeamDebugEvent) {
   if (isFailedEvent(event)) return hyperbeamDebugColor('error');
+  if (event.data?.authRequired) return hyperbeamDebugColor(event.level, 'native-device:auth');
   if (event.label === 'request') return hyperbeamDebugColor('info');
   return hyperbeamDebugColor(event.level, event.data?.sourceLayer || nativeLayer(event) || event.data?.deviceLayer);
+}
+
+function mergeEvents(current: Array<HyperbeamDebugEvent>, incoming: Array<HyperbeamDebugEvent>) {
+  let next = current;
+
+  incoming.forEach((event) => {
+    const key = eventKey(event);
+    const existingIndex = next.findLastIndex((currentEvent) => eventKey(currentEvent) === key);
+    if (existingIndex !== -1) {
+      const existing = next[existingIndex];
+      next = [...next];
+      next[existingIndex] = {
+        ...event,
+        data: {
+          ...event.data,
+          repeatCount: Number(existing.data?.repeatCount || 1) + 1,
+          firstSeen: existing.data?.firstSeen || existing.time,
+          lastSeen: event.time,
+        },
+      };
+      return;
+    }
+
+    next = [...next.slice(-(MAX_EVENTS - 1)), event];
+  });
+
+  return next;
 }
 
 function eventSummary(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
   const data = event.data || {};
   const path = data.nativePath || data.devicePath;
-  const bits = [
+  const bits = uniqueSummaryBits([
     mode,
+    data.authRequired ? '🔒' : undefined,
     data.repeatCount ? `x${data.repeatCount}` : undefined,
     data.method,
     data.status ? String(data.status) : undefined,
-    data.deviceLayer,
+    data.authRequired ? 'native-device:auth' : data.deviceLayer,
     data.nativeSource,
     data.sourceLayer,
     data.sourceAlg,
     data.elapsedMs !== undefined ? `${data.elapsedMs}ms` : undefined,
     path,
     data.requestKey,
-  ].filter(Boolean);
+  ]);
   return bits.length ? `- ${bits.join(' ')}` : '';
+}
+
+function uniqueSummaryBits(bits: Array<string | number | undefined | null | false>) {
+  const seen = new Set<string>();
+  return bits.filter((bit) => {
+    if (!bit) return false;
+    const value = String(bit);
+    if (seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  }) as Array<string>;
 }
 
 function modeLabel(mode: HyperbeamMode) {
@@ -453,7 +499,7 @@ function modeLabel(mode: HyperbeamMode) {
     case HYPERBEAM_MODES.original:
       return 'Legacy wiring';
     case HYPERBEAM_MODES.hyperbeam:
-      return 'HyperBEAM wiring';
+      return 'HyperBEAM';
     default:
       return mode;
   }
@@ -461,10 +507,7 @@ function modeLabel(mode: HyperbeamMode) {
 
 function modeEndpointLabel(mode: HyperbeamMode) {
   if (mode === HYPERBEAM_MODES.original) return `${modeLabel(mode)} · normal Odysee/API calls`;
-  return `${modeLabel(mode)} · supported public reads through ${String(ODYSEE_HYPERBEAM_NODE_API).replace(
-    /\/+$/,
-    ''
-  )}; unsupported SDK routes do not fall back`;
+  return String(ODYSEE_HYPERBEAM_NODE_API).replace(/\/+$/, '');
 }
 
 function modeWaitLabel(mode: HyperbeamMode) {
@@ -511,7 +554,10 @@ function eventMatchesFilter(event: HyperbeamDebugEvent, filter: FilterKey) {
       return sourceLayer === 'original';
     case 'native-device':
       if (isPlainRequest) return false;
-      return deviceLayer === 'native-device' || isNative;
+      return !data.authRequired && (deviceLayer === 'native-device' || isNative);
+    case 'native-device:auth':
+      if (isPlainRequest) return false;
+      return Boolean(data.authRequired);
     case 'fallback':
       if (isPlainRequest) return false;
       return sourceLayer.startsWith('fallback') || sourceLayer === 'device:fallback';
@@ -613,6 +659,7 @@ function compactEvent(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
     deviceLayer: data.deviceLayer,
     nativePath: compactPath(data.nativePath),
     nativeSource: data.nativeSource,
+    authRequired: data.authRequired,
     requestKey: compactPath(data.requestKey),
     sourceAlg: data.sourceAlg,
     sourceLayer: data.sourceLayer,
@@ -628,6 +675,7 @@ function compactEvent(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
 
 function nativeLayer(event: HyperbeamDebugEvent) {
   const data = event.data || {};
+  if (data.authRequired) return 'native-device:auth';
   if (data.nativePath || data.nativeSource || data.sourceAlg) return 'native-device';
   return undefined;
 }

@@ -4,7 +4,7 @@
 %%% AO-Core messages. Follow/unfollow mutations remain outside this adapter.
 -module(dev_odysee_subscription).
 -implements(<<"odysee-subscription@1.0">>).
--export([info/1, sub_count/3, normalize/3]).
+-export([info/1, 'sub-count'/3, sub_count/3, normalize/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -16,6 +16,9 @@ info(_Opts) ->
     #{ exports => [<<"sub-count">>, <<"normalize">>] }.
 
 %% @doc Return normalized `/subscription/sub_count' data.
+'sub-count'(Base, Req, Opts) ->
+    sub_count(Base, Req, Opts).
+
 sub_count(Base, Req, Opts) ->
     safe(fun() ->
         maybe
@@ -98,6 +101,8 @@ result_from_fields([_ | Rest], Opts) ->
 
 result_from_value(Value, Opts) when is_list(Value) ->
     result_from_counts(Value, hb_json:encode(Value), Opts);
+result_from_value(Value, Opts) when is_number(Value) ->
+    result_from_counts([Value], hb_json:encode(Value), Opts);
 result_from_value(Value, Opts) when is_map(Value) ->
     case result_from_map(Value, hb_json:encode(Value), Opts) of
         {ok, _Counts, _Raw} = Result -> Result;
@@ -113,6 +118,8 @@ result_from_value(_Value, _Opts) ->
 
 result_from_decoded(Decoded, Raw, Opts) when is_list(Decoded) ->
     result_from_counts(Decoded, Raw, Opts);
+result_from_decoded(Decoded, Raw, Opts) when is_number(Decoded) ->
+    result_from_counts([Decoded], Raw, Opts);
 result_from_decoded(Decoded, Raw, Opts) when is_map(Decoded) ->
     case result_from_map(Decoded, Raw, Opts) of
         {ok, _Counts, _Raw} = Result -> Result;
@@ -124,6 +131,8 @@ result_from_decoded(_Decoded, _Raw, _Opts) ->
 result_from_map(Msg, Raw, Opts) when is_map(Msg) ->
     case hb_maps:get(<<"error">>, Msg, not_found, Opts) of
         not_found -> result_from_success_map(Msg, Raw, Opts);
+        null -> result_from_success_map(Msg, Raw, Opts);
+        undefined -> result_from_success_map(Msg, Raw, Opts);
         Error -> {error, {subscription_api_error, Error}}
     end;
 result_from_map(_Msg, _Raw, _Opts) ->
@@ -139,11 +148,19 @@ result_from_success_map(Msg, Raw, Opts) ->
                 case Result0 of
                     ResultMsg when is_map(ResultMsg) -> hb_maps:get(<<"result">>, ResultMsg, ResultMsg, Opts);
                     _ -> Result0
-                end,
+            end,
             case Result of
                 Counts when is_list(Counts) -> result_from_counts(Counts, Raw, Opts);
+                Count when is_number(Count) -> result_from_counts([Count], Raw, Opts);
+                CountMap when is_map(CountMap) -> result_from_count_map(CountMap, Raw);
                 _ -> {error, invalid_sub_count_result}
             end
+    end.
+
+result_from_count_map(CountMap, Raw) ->
+    case numeric_map_values(CountMap) of
+        [] -> {error, invalid_sub_count_result};
+        _Values -> {ok, CountMap, Raw}
     end.
 
 result_from_counts(Counts, Raw, _Opts) ->
@@ -152,6 +169,11 @@ result_from_counts(Counts, Raw, _Opts) ->
         false -> {error, invalid_sub_count_result}
     end.
 
+normalize_counts(CountMap, Raw, ClaimIDs) when is_map(CountMap) ->
+    case counts_from_map(CountMap, ClaimIDs, [<<"sub_count">>, <<"sub-count">>, <<"followers">>, <<"count">>, <<"total">>]) of
+        {ok, Counts} -> normalize_counts(Counts, Raw, ClaimIDs);
+        error -> {error, invalid_sub_count_result}
+    end;
 normalize_counts(Counts, Raw, ClaimIDs) ->
     case length(Counts) =:= length(ClaimIDs) of
         true ->
@@ -169,16 +191,49 @@ normalize_counts(Counts, Raw, ClaimIDs) ->
             {error, sub_count_claim_id_mismatch}
     end.
 
-count_params(Base, Req, Opts) ->
-    case private_credential_present(Base, Req, Opts) of
+counts_from_map(CountMap, ClaimIDs, SingleKeys) ->
+    Ordered = [map_number(CountMap, ClaimID) || ClaimID <- ClaimIDs],
+    case lists:all(fun is_number/1, Ordered) of
         true ->
-            {error, private_credentials_not_allowed};
+            {ok, Ordered};
         false ->
-            Params = api_params(maps:merge(map_or_empty(Base), map_or_empty(Req)), Opts),
-            case hb_maps:get(<<"claim_id">>, Params, not_found, Opts) of
-                not_found -> {error, claim_id_not_found};
-                _ClaimID -> {ok, Params}
+            case ClaimIDs of
+                [_OneClaim] -> single_count_from_map(CountMap, SingleKeys);
+                _ -> error
             end
+    end.
+
+map_number(CountMap, Key) ->
+    BinKey = hb_util:bin(Key),
+    case maps:get(BinKey, CountMap, not_found) of
+        Value when is_number(Value) -> Value;
+        _ ->
+            StringKey = binary_to_list(BinKey),
+            case maps:get(StringKey, CountMap, not_found) of
+                Value when is_number(Value) -> Value;
+                _ -> not_found
+            end
+    end.
+
+single_count_from_map(CountMap, Keys) ->
+    KeyValues = [maps:get(Key, CountMap, not_found) || Key <- Keys],
+    case [Value || Value <- KeyValues, is_number(Value)] of
+        [Value | _] -> {ok, [Value]};
+        [] ->
+            case numeric_map_values(CountMap) of
+                [Only] -> {ok, [Only]};
+                _ -> error
+            end
+    end.
+
+numeric_map_values(CountMap) ->
+    [Value || {_Key, Value} <- maps:to_list(CountMap), is_number(Value)].
+
+count_params(Base, Req, Opts) ->
+    Params = api_params(request_params(Base, Req, Opts), Opts),
+    case hb_maps:get(<<"claim_id">>, Params, not_found, Opts) of
+        not_found -> {error, claim_id_not_found};
+        _ClaimID -> {ok, Params}
     end.
 
 api_params(Params0, Opts) ->
@@ -214,8 +269,10 @@ request_metadata_keys() ->
     [
         <<"accept">>,
         <<"accept-bundle">>,
+        <<"accept-encoding">>,
         <<"accept-language">>,
         <<"authorization">>,
+        <<"commitments">>,
         <<"connection">>,
         <<"content-length">>,
         <<"cookie">>,
@@ -229,6 +286,7 @@ request_metadata_keys() ->
         <<"sec-fetch-dest">>,
         <<"sec-fetch-mode">>,
         <<"sec-fetch-site">>,
+        <<"sec-gpc">>,
         <<"user-agent">>
     ].
 
@@ -236,15 +294,15 @@ private_credential_keys() ->
     [
         <<"auth_token">>,
         <<"auth-token">>,
+        <<"odysee-auth-token">>,
+        <<"x-odysee-auth-token">>,
+        <<"x-lbry-auth-token">>,
         <<"authorization">>,
         <<"access_token">>,
         <<"access-token">>,
         <<"refresh_token">>,
         <<"refresh-token">>
     ].
-
-private_credential_present(Base, Req, Opts) ->
-    first_param(private_credential_keys(), Base, Req, Opts) =/= not_found.
 
 put_alias(Target, Source, Params, Opts) ->
     case hb_maps:get(Target, Params, not_found, Opts) of
@@ -258,14 +316,13 @@ put_alias(Target, Source, Params, Opts) ->
     end.
 
 api_request(Params, Base, Req, Opts) ->
-    Body = form_body(Params),
-    Msg = #{
-        <<"method">> => <<"POST">>,
-        <<"path">> => sub_count_url(Base, Req, Opts),
-        <<"content-type">> => <<"application/x-www-form-urlencoded">>,
-        <<"body">> => Body
-    },
-    case hb_http:request(Msg, Opts) of
+    URL = sub_count_url(Base, Req, Opts),
+    AuthedMsg =
+        case is_proxy_url(URL) of
+            true -> proxy_api_msg(URL, <<"subscription_sub_count">>, Params, Base, Req, Opts);
+            false -> legacy_api_msg(URL, Params, Base, Req, Opts)
+        end,
+    case hb_http:request(AuthedMsg, Opts) of
         {ok, #{ <<"body">> := RespBody }} when is_binary(RespBody) -> decode_api_body(RespBody, Opts);
         {ok, RespBody} when is_binary(RespBody) -> decode_api_body(RespBody, Opts);
         {ok, Other} -> {error, {subscription_response_without_body, Other}};
@@ -276,7 +333,12 @@ decode_api_body(Body, Opts) ->
     maybe
         {ok, Decoded} ?= try_decode_json(Body),
         case Decoded of
+            #{ <<"jsonrpc">> := _, <<"result">> := Counts } when is_list(Counts) ->
+                result_from_counts(Counts, Body, Opts);
+            #{ <<"jsonrpc">> := _, <<"error">> := Error } ->
+                {error, {subscription_api_error, Error}};
             Counts when is_list(Counts) -> result_from_counts(Counts, Body, Opts);
+            Count when is_number(Count) -> result_from_counts([Count], Body, Opts);
             Msg when is_map(Msg) -> result_from_map(Msg, Body, Opts);
             _ -> {error, invalid_sub_count_result}
         end
@@ -292,7 +354,12 @@ sub_count_url(Base, Req, Opts) ->
         ],
         Opts
     ) of
-        not_found -> <<(trim_trailing_slash(api_url(Base, Req, Opts)))/binary, "/subscription/sub_count">>;
+        not_found ->
+            ApiURL = trim_trailing_slash(api_url(Base, Req, Opts)),
+            case is_proxy_url(ApiURL) of
+                true -> ApiURL;
+                false -> <<ApiURL/binary, "/subscription/sub_count">>
+            end;
         URL -> URL
     end.
 
@@ -311,7 +378,8 @@ api_url(Base, Req, Opts) ->
     end.
 
 claim_ids(Base, Req, Counts, Opts) ->
-    case first_param([<<"claim_id">>, <<"claim-id">>, <<"claim_ids">>, <<"claim-ids">>], Base, Req, Opts) of
+    Params = request_params(Base, Req, Opts),
+    case first_param([<<"claim_id">>, <<"claim-id">>, <<"claim_ids">>, <<"claim-ids">>], #{}, Params, Opts) of
         not_found ->
             case Counts of
                 [_ | _] -> {error, claim_id_not_found};
@@ -360,6 +428,133 @@ form_value(Value) -> hb_util:bin(Value).
 map_or_empty(Map) when is_map(Map) -> Map;
 map_or_empty(_Value) -> #{}.
 
+legacy_api_msg(URL, Params, Base, Req, Opts) ->
+    Body = form_body(legacy_api_params(Params, Base, Req, Opts)),
+    Msg = #{
+        <<"method">> => <<"POST">>,
+        <<"path">> => URL,
+        <<"content-type">> => <<"application/x-www-form-urlencoded">>,
+        <<"body">> => Body
+    },
+    maps:merge(Msg, legacy_api_headers(Base, Req, Opts)).
+
+proxy_api_msg(URL, Method, Params, Base, Req, Opts) ->
+    ProxyParams = legacy_api_params(Params, Base, Req, Opts),
+    Msg = #{
+        <<"method">> => <<"POST">>,
+        <<"path">> => URL,
+        <<"content-type">> => <<"application/json">>,
+        <<"body">> => hb_json:encode(#{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => Method,
+            <<"params">> => ProxyParams,
+            <<"id">> => 0
+        })
+    },
+    maps:merge(Msg, proxy_api_headers(Base, Req, Opts)).
+
+proxy_api_headers(Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            #{ <<"x-lbry-auth-token">> => Token };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> #{ <<"x-lbry-auth-token">> => Token };
+                {error, not_found} -> #{}
+            end
+    end.
+
+legacy_api_headers(Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+                {error, not_found} -> #{}
+            end
+    end.
+
+legacy_api_params(Params, Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            Params#{ <<"auth_token">> => Token };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> Params#{ <<"auth_token">> => Token };
+                {error, not_found} -> Params
+            end
+    end.
+
+find_auth_token(Msg, Opts) ->
+    AuthKeys = [<<"x-odysee-auth-token">>, <<"x-lbry-auth-token">>, <<"odysee-auth-token">>, <<"auth_token">>],
+    case first_param(AuthKeys, #{}, Msg, Opts) of
+        not_found ->
+            case first_param(AuthKeys, #{}, body_params(Msg, Opts), Opts) of
+                not_found -> find_auth_cookie(Msg, Opts);
+                Token -> {ok, token_value(Token)}
+            end;
+        Token ->
+            {ok, token_value(Token)}
+    end.
+
+find_auth_cookie(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:find(<<"cookie">>, Msg, Opts) of
+        {ok, Cookie} -> token_from_cookie(hb_util:bin(Cookie));
+        error -> {error, not_found}
+    end;
+find_auth_cookie(_Msg, _Opts) ->
+    {error, not_found}.
+
+token_from_cookie(Cookie) ->
+    token_from_cookie_parts(binary:split(Cookie, <<";">>, [global])).
+
+token_from_cookie_parts([]) ->
+    {error, not_found};
+token_from_cookie_parts([Part | Rest]) ->
+    case binary:split(Part, <<"=">>) of
+        [Name, Value] ->
+            case trim_bin(Name) of
+                <<"auth_token">> -> {ok, trim_bin(Value)};
+                _ -> token_from_cookie_parts(Rest)
+            end;
+        _ ->
+            token_from_cookie_parts(Rest)
+    end.
+
+token_value(#{ <<"value">> := Value }) ->
+    hb_util:bin(Value);
+token_value(Value) ->
+    hb_util:bin(Value).
+
+trim_bin(Bin) ->
+    list_to_binary(string:trim(binary_to_list(Bin))).
+
+is_proxy_url(URL) when is_binary(URL) ->
+    binary:match(URL, <<"/api/v1/proxy">>) =/= nomatch;
+is_proxy_url(URL) ->
+    is_proxy_url(hb_util:bin(URL)).
+
+request_params(Base, Req, Opts) ->
+    BaseParams = maps:merge(map_or_empty(Base), body_params(Base, Opts)),
+    ReqParams = maps:merge(body_params(Req, Opts), map_or_empty(Req)),
+    maps:merge(BaseParams, ReqParams).
+
+body_params(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:get(<<"body">>, Msg, not_found, Opts) of
+        Body when is_map(Body) ->
+            Body;
+        Body when is_binary(Body) ->
+            case try_decode_json(Body) of
+                {ok, Decoded} when is_map(Decoded) -> Decoded;
+                _ -> #{}
+            end;
+        _ ->
+            #{}
+    end;
+body_params(_Msg, _Opts) ->
+    #{}.
+
 first_param(Keys, Base, Req, Opts) ->
     first_found([{Req, Key} || Key <- Keys] ++ [{Base, Key} || Key <- Keys], Opts).
 
@@ -383,6 +578,7 @@ try_decode_json(Raw) ->
 sub_count_internal_api_json_test() ->
     Raw = hb_json:encode(#{
         <<"success">> => true,
+        <<"error">> => null,
         <<"data">> => [169000, 42]
     }),
     {ok, Msg} = sub_count(
@@ -402,6 +598,37 @@ sub_count_accepts_supplied_counts_test() ->
     ),
     ?assertEqual([7, 8], hb_maps:get(<<"sub-counts">>, Msg, #{})).
 
+sub_count_reads_claim_ids_from_json_body_test() ->
+    {ok, Msg} = sub_count(
+        #{},
+        #{
+            <<"body">> => <<"{\"claim_ids\":[\"channel-1\",\"channel-2\"]}">>,
+            <<"counts">> => [7, 8]
+        },
+        #{}
+    ),
+    ?assertEqual([7, 8], hb_maps:get(<<"sub-counts">>, Msg, #{})),
+    ?assertEqual([<<"channel-1">>, <<"channel-2">>], hb_maps:get(<<"claim-ids">>, Msg, #{})).
+
+sub_count_accepts_claim_count_map_test() ->
+    Raw = hb_json:encode(#{
+        <<"success">> => true,
+        <<"error">> => null,
+        <<"data">> => #{
+            <<"channel-1">> => 7,
+            <<"channel-2">> => 8
+        }
+    }),
+    {ok, Msg} = sub_count(
+        #{},
+        #{
+            <<"body">> => hb_json:encode(#{ <<"claim_ids">> => [<<"channel-1">>, <<"channel-2">>] }),
+            <<"result">> => Raw
+        },
+        #{}
+    ),
+    ?assertEqual([7, 8], hb_maps:get(<<"sub-counts">>, Msg, #{})).
+
 sub_count_rejects_mismatched_claim_ids_test() ->
     ?assertEqual(
         {error, sub_count_claim_id_mismatch},
@@ -416,10 +643,59 @@ count_params_normalizes_aliases_and_strips_control_fields_test() ->
     ),
     ?assertEqual(#{ <<"claim_id">> => <<"channel-1">> }, Params).
 
-count_params_rejects_private_credentials_test() ->
+count_params_strips_private_credentials_test() ->
+    {ok, Params} = count_params(
+        #{ <<"claim-id">> => <<"channel-1">> },
+        #{
+            <<"auth_token">> => <<"tok">>,
+            <<"x-odysee-auth-token">> => <<"tok">>,
+            <<"accept-encoding">> => <<"gzip">>,
+            <<"commitments">> => #{ <<"sig">> => <<"value">> },
+            <<"sec-gpc">> => <<"1">>
+        },
+        #{}
+    ),
+    ?assertEqual(#{ <<"claim_id">> => <<"channel-1">> }, Params).
+
+legacy_api_headers_forwards_odysee_auth_token_test() ->
     ?assertEqual(
-        {error, private_credentials_not_allowed},
-        count_params(#{ <<"claim-id">> => <<"channel-1">> }, #{ <<"auth_token">> => <<"tok">> }, #{})
+        #{ <<"cookie">> => <<"auth_token=token-1">> },
+        legacy_api_headers(#{}, #{ <<"x-odysee-auth-token">> => <<"token-1">> }, #{})
+    ).
+
+legacy_api_headers_extracts_auth_cookie_test() ->
+    ?assertEqual(
+        #{ <<"cookie">> => <<"auth_token=token-2">> },
+        legacy_api_headers(#{}, #{ <<"cookie">> => <<"other=1; auth_token=token-2; x=3">> }, #{})
+    ).
+
+count_params_reads_json_body_test() ->
+    {ok, Params} = count_params(
+        #{},
+        #{ <<"body">> => <<"{\"claim_id\":\"channel-1\",\"x-odysee-auth-token\":\"tok\"}">> },
+        #{}
+    ),
+    ?assertEqual(#{ <<"claim_id">> => <<"channel-1">> }, Params).
+
+legacy_api_params_forwards_odysee_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"claim_id">> => <<"channel-1">>, <<"auth_token">> => <<"token-1">> },
+        legacy_api_params(
+            #{ <<"claim_id">> => <<"channel-1">> },
+            #{},
+            #{ <<"x-odysee-auth-token">> => <<"token-1">> },
+            #{}
+        )
+    ).
+
+proxy_api_headers_reads_json_body_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"x-lbry-auth-token">> => <<"token-1">> },
+        proxy_api_headers(
+            #{},
+            #{ <<"body">> => <<"{\"claim_id\":\"channel-1\",\"auth_token\":\"token-1\"}">> },
+            #{}
+        )
     ).
 
 form_body_encodes_params_test() ->

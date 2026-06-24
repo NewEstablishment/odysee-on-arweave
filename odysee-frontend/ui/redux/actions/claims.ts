@@ -29,8 +29,25 @@ import { createNormalizedClaimSearchKey, getChannelIdFromClaim, isClaimProtected
 import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
+import { fetchHyperbeamResolveClaimIds } from 'util/hyperbeam';
 let onChannelConfirmCallback;
 let checkPendingInterval;
+
+const HYPERBEAM_CLAIM_ID_BATCH_DELAY_MS = 25;
+const HYPERBEAM_CLAIM_ID_BATCH_SIZE = 50;
+const hyperbeamClaimIdBatches: Map<string, HyperbeamClaimIdBatch> = new Map();
+
+type HyperbeamClaimIdBatch = {
+  ids: Set<string>;
+  options: any;
+  timeout: any;
+  waiters: Array<{
+    cachedClaims: ResolveResponse | {};
+    resolve: (value: any) => void;
+    reject: (error: any) => void;
+  }>;
+};
 
 type CostInfo = {
   claimId: string;
@@ -287,6 +304,10 @@ export function doResolveClaimIds(claimIds: Array<string>, returnCachedClaims: b
       return Promise.resolve(cachedClaims);
     }
 
+    if (isHyperbeamEnabled()) {
+      return scheduleHyperbeamClaimIdResolve(dispatch, idsToResolve, cachedClaims, options);
+    }
+
     return dispatch(
       doClaimSearch(
         {
@@ -302,6 +323,122 @@ export function doResolveClaimIds(claimIds: Array<string>, returnCachedClaims: b
       )
     ).then((response: ClaimSearchResponse) => ({ ...response, ...cachedClaims }));
   };
+}
+
+function scheduleHyperbeamClaimIdResolve(
+  dispatch: Dispatch,
+  claimIds: Array<string>,
+  cachedClaims: ResolveResponse | {},
+  options?: {}
+) {
+  const batchOptions = options || {};
+  const batchKey = stableJson(batchOptions);
+  let batch = hyperbeamClaimIdBatches.get(batchKey);
+
+  if (!batch) {
+    batch = {
+      ids: new Set(),
+      options: batchOptions,
+      timeout: undefined,
+      waiters: [],
+    };
+    hyperbeamClaimIdBatches.set(batchKey, batch);
+    batch.timeout = setTimeout(() => flushHyperbeamClaimIdBatch(dispatch, batchKey), HYPERBEAM_CLAIM_ID_BATCH_DELAY_MS);
+  }
+
+  claimIds.forEach((claimId) => batch.ids.add(claimId));
+
+  return new Promise((resolve, reject) => {
+    batch.waiters.push({ cachedClaims, resolve, reject });
+  });
+}
+
+function flushHyperbeamClaimIdBatch(dispatch: Dispatch, batchKey: string) {
+  const batch = hyperbeamClaimIdBatches.get(batchKey);
+  if (!batch) return;
+
+  hyperbeamClaimIdBatches.delete(batchKey);
+  const claimIds = Array.from(batch.ids);
+  const chunks = chunk(claimIds, HYPERBEAM_CLAIM_ID_BATCH_SIZE);
+
+  Promise.all(chunks.map((ids) => fetchHyperbeamClaimIdChunk(dispatch, ids, batch.options)))
+    .then((responses) => Object.assign({}, ...responses.filter(Boolean)))
+    .then((response) => {
+      batch.waiters.forEach(({ cachedClaims, resolve }) => resolve({ ...response, ...cachedClaims }));
+    })
+    .catch((error) => {
+      batch.waiters.forEach(({ reject }) => reject(error));
+    });
+}
+
+async function fetchHyperbeamClaimIdChunk(dispatch: Dispatch, claimIds: Array<string>, options: any) {
+  const searchOptions = {
+    ...options,
+    claim_ids: claimIds,
+    page: 1,
+    page_size: claimIds.length,
+    no_totals: true,
+  };
+  const query = createNormalizedClaimSearchKey(searchOptions);
+
+  dispatch({
+    type: ACTIONS.CLAIM_SEARCH_STARTED,
+    data: { query },
+  });
+
+  try {
+    const data = await fetchHyperbeamResolveClaimIds(searchOptions);
+    if (!data) throw new Error('HyperBEAM claim-id resolve returned no data');
+
+    const resolveInfo = {};
+    const urls = [];
+    data.items.forEach((claim: Claim) => {
+      const claimUrl = claim.canonical_url || claim.permanent_url || claim.short_url || claim.claim_id;
+      resolveInfo[claimUrl] = { stream: claim };
+      urls.push(claimUrl);
+    });
+
+    dispatch({
+      type: ACTIONS.CLAIM_SEARCH_COMPLETED,
+      data: {
+        query,
+        resolveInfo,
+        urls,
+        append: false,
+        page: searchOptions.page,
+        pageSize: searchOptions.page_size,
+        totalItems: data.total_items,
+        totalPages: data.total_pages,
+      },
+    });
+
+    return resolveInfo;
+  } catch (error) {
+    dispatch({
+      type: ACTIONS.CLAIM_SEARCH_FAILED,
+      data: { query },
+      error,
+    });
+    throw error;
+  }
+}
+
+function chunk<T>(items: Array<T>, size: number): Array<Array<T>> {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function stableJson(value: any): string {
+  if (!value || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+    .join(',')}}`;
 }
 export const doResolveClaimId = (claimId: ClaimId, returnCachedClaims: boolean = true, options: {} = {}) =>
   doResolveClaimIds([claimId], returnCachedClaims, options);

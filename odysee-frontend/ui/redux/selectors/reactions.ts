@@ -21,6 +21,7 @@ export const selectMyReactionForUri = (state, uri) => {
 
   const claimId = claim.claim_id;
   const myReactions = reactions.my_reactions[claimId];
+  if (!myReactions) return undefined;
 
   if (myReactions[REACTION_TYPES.LIKE]) {
     return REACTION_TYPES.LIKE;
@@ -35,19 +36,19 @@ export const selectLikeCountForUri = (state, uri) => {
   const claim = selectClaimForUri(state, uri);
   const reactions = selectReactionsForUri(state, uri);
 
-  if (!claim || !reactions || !reactions.my_reactions || !reactions.others_reactions) {
+  if (!claim || !reactions || (!reactions.my_reactions && !reactions.others_reactions)) {
     return undefined;
   }
 
   const claimId = claim.claim_id;
   let count = 0;
 
-  if (reactions.others_reactions) {
+  if (reactions.others_reactions && reactions.others_reactions[claimId]) {
     const likeCount = reactions.others_reactions[claimId][REACTION_TYPES.LIKE] || 0;
     count += likeCount;
   }
 
-  if (reactions.my_reactions) {
+  if (reactions.my_reactions && reactions.my_reactions[claimId]) {
     const likeCount = reactions.my_reactions[claimId][REACTION_TYPES.LIKE] || 0;
     count += likeCount;
   }
@@ -58,19 +59,19 @@ export const selectDislikeCountForUri = (state, uri) => {
   const claim = selectClaimForUri(state, uri);
   const reactions = selectReactionsForUri(state, uri);
 
-  if (!claim || !reactions || !reactions.my_reactions || !reactions.others_reactions) {
+  if (!claim || !reactions || (!reactions.my_reactions && !reactions.others_reactions)) {
     return undefined;
   }
 
   const claimId = claim.claim_id;
   let count = 0;
 
-  if (reactions.others_reactions) {
+  if (reactions.others_reactions && reactions.others_reactions[claimId]) {
     const dislikeCount = reactions.others_reactions[claimId][REACTION_TYPES.DISLIKE] || 0;
     count += dislikeCount;
   }
 
-  if (reactions.my_reactions) {
+  if (reactions.my_reactions && reactions.my_reactions[claimId]) {
     const dislikeCount = reactions.my_reactions[claimId][REACTION_TYPES.DISLIKE] || 0;
     count += dislikeCount;
   }

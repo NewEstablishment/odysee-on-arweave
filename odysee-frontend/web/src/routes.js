@@ -3,6 +3,8 @@ const { fetchStreamUrl } = require('./fetchStreamUrl');
 const config = require('../../config.cjs');
 
 const crypto = require('node:crypto');
+const http = require('node:http');
+const https = require('node:https');
 
 const { getHomepage } = require('./homepageApi');
 
@@ -31,6 +33,416 @@ global.fetch = globalThis.fetch;
 const router = new Router();
 const RSS_MEDIA_AUTH_DEFAULT_TTL_SECONDS = 600;
 const RSS_MEDIA_AUTH_MAX_TTL_SECONDS = 600;
+const AUTH_TOKEN_COOKIE = 'auth_token';
+const HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
+const HYPERBEAM_UPLOAD_PATH = '/~odysee-upload@1.0/write?!=true';
+const HYPERBEAM_UPLOAD_CHUNK_PATH = '/~odysee-upload@1.0/chunk?!=true';
+const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/~odysee-upload@1.0/finalize?!=true';
+const HYPERBEAM_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
+const HYPERBEAM_UPLOAD_MANIFEST_TYPE = 'application/vnd.odysee.hyperbeam-upload-manifest+json';
+const HYPERBEAM_UPLOAD_MANIFEST_KIND = 'odysee-hyperbeam-chunked-upload';
+const HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
+  '/~odysee-file@1.0/view-count',
+  '/~odysee-file-reaction@1.0/list',
+  '/~odysee-subscription@1.0/sub-count',
+]);
+
+function getCookieValue(cookieHeader, name) {
+  if (!cookieHeader) return null;
+
+  const prefix = `${name}=`;
+  const cookies = String(cookieHeader).split(';');
+  for (const cookie of cookies) {
+    const trimmed = cookie.trim();
+    if (trimmed.startsWith(prefix)) {
+      return decodeURIComponent(trimmed.slice(prefix.length));
+    }
+  }
+
+  return null;
+}
+
+function hyperbeamNodeUrl() {
+  return String(config.HYPERBEAM_BASE_URL || config.ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+}
+
+async function readJsonBody(ctx) {
+  const chunks = [];
+  await new Promise((resolve, reject) => {
+    ctx.req.on('data', (chunk) => chunks.push(chunk));
+    ctx.req.on('end', resolve);
+    ctx.req.on('error', reject);
+  });
+
+  const raw = Buffer.concat(chunks).toString('utf8');
+  if (!raw) return {};
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+async function postHyperbeamAuthDevice(ctx) {
+  const devicePath = `/${ctx.params.device}/${ctx.params.method}`;
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl || !HYPERBEAM_AUTH_DEVICE_PATHS.has(devicePath)) {
+    ctx.status = 404;
+    ctx.body = { error: 'unsupported hyperbeam auth device path' };
+    return;
+  }
+
+  const cookieHeader = ctx.get('cookie');
+  const authToken = ctx.cookies.get(AUTH_TOKEN_COOKIE) || getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE);
+  const requestBody = await readJsonBody(ctx);
+  const body = authToken ? { ...requestBody, auth_token: authToken } : requestBody;
+
+  const response = await postJson(`${nodeUrl}${devicePath}`, body);
+
+  ctx.status = response.statusCode;
+  ctx.set('Cache-Control', 'no-store');
+  ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
+  ctx.body = response.body;
+}
+
+async function postHyperbeamUpload(ctx) {
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl) {
+    ctx.status = 404;
+    ctx.body = { error: 'hyperbeam node unavailable' };
+    return;
+  }
+
+  const cookieHeader = ctx.get('cookie');
+  const authToken = ctx.cookies.get(AUTH_TOKEN_COOKIE) || getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE);
+
+  const response = await postStream(`${nodeUrl}${HYPERBEAM_UPLOAD_PATH}`, ctx.req, {
+    'content-type': ctx.get('content-type') || 'application/octet-stream',
+    ...(ctx.get('content-length') ? { 'content-length': ctx.get('content-length') } : {}),
+    ...(authToken ? { 'x-odysee-auth-token': authToken } : {}),
+  });
+
+  ctx.status = response.statusCode;
+  ctx.set('Cache-Control', 'no-store');
+  copyHeader(ctx, response.headers, 'content-type');
+  copyHeader(ctx, response.headers, 'id');
+  copyHeader(ctx, response.headers, 'path');
+  copyHeader(ctx, response.headers, 'read-path');
+  copyHeader(ctx, response.headers, 'url');
+  copyHeader(ctx, response.headers, 'signers');
+  copyHeader(ctx, response.headers, 'signers+link');
+  ctx.body = response.body;
+}
+
+async function postHyperbeamLargeUpload(ctx) {
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl) {
+    ctx.status = 404;
+    ctx.body = { error: 'hyperbeam node unavailable' };
+    return;
+  }
+
+  const authToken = getRequestAuthToken(ctx);
+  if (!authToken) {
+    ctx.status = 401;
+    ctx.set('Cache-Control', 'no-store');
+    ctx.body = { error: 'auth_token cookie required' };
+    return;
+  }
+
+  const startedAt = Date.now();
+  const contentType = ctx.get('content-type') || 'application/octet-stream';
+  const filename = ctx.get('x-odysee-filename') || null;
+  const chunks = [];
+  const fileHash = crypto.createHash('sha256');
+  let pending = Buffer.alloc(0);
+  let totalBytes = 0;
+
+  for await (const part of ctx.req) {
+    pending = Buffer.concat([pending, part]);
+
+    while (pending.length >= HYPERBEAM_UPLOAD_CHUNK_SIZE) {
+      const chunk = pending.subarray(0, HYPERBEAM_UPLOAD_CHUNK_SIZE);
+      pending = pending.subarray(HYPERBEAM_UPLOAD_CHUNK_SIZE);
+      chunks.push(await writeHyperbeamUploadChunk(nodeUrl, authToken, chunk, chunks.length));
+      fileHash.update(chunk);
+      totalBytes += chunk.length;
+    }
+  }
+
+  if (pending.length) {
+    chunks.push(await writeHyperbeamUploadChunk(nodeUrl, authToken, pending, chunks.length));
+    fileHash.update(pending);
+    totalBytes += pending.length;
+  }
+
+  const manifest = {
+    type: HYPERBEAM_UPLOAD_MANIFEST_KIND,
+    version: 1,
+    filename,
+    content_type: contentType,
+    size: totalBytes,
+    sha256: fileHash.digest('hex'),
+    chunk_size: HYPERBEAM_UPLOAD_CHUNK_SIZE,
+    chunk_count: chunks.length,
+    chunks,
+    created_at: new Date(startedAt).toISOString(),
+  };
+  const manifestBody = Buffer.from(JSON.stringify(manifest));
+  const finalizeResponse = await postBuffer(`${nodeUrl}${HYPERBEAM_UPLOAD_FINALIZE_PATH}`, manifestBody, {
+    'content-type': HYPERBEAM_UPLOAD_MANIFEST_TYPE,
+    'content-length': manifestBody.length,
+    'x-odysee-auth-token': authToken,
+  });
+  const finalizeJson = parseJsonBuffer(finalizeResponse.body);
+
+  ctx.status = finalizeResponse.statusCode;
+  ctx.set('Cache-Control', 'no-store');
+  copyHeader(ctx, finalizeResponse.headers, 'content-type');
+  copyHeader(ctx, finalizeResponse.headers, 'id');
+  copyHeader(ctx, finalizeResponse.headers, 'path');
+  copyHeader(ctx, finalizeResponse.headers, 'read-path');
+  copyHeader(ctx, finalizeResponse.headers, 'url');
+  copyHeader(ctx, finalizeResponse.headers, 'signers');
+  copyHeader(ctx, finalizeResponse.headers, 'signers+link');
+  ctx.body = {
+    id: finalizeJson && finalizeJson.id ? finalizeJson.id : finalizeResponse.headers.id,
+    read_path: finalizeJson && finalizeJson.read_path ? finalizeJson.read_path : finalizeResponse.headers['read-path'],
+    size: totalBytes,
+    sha256: manifest.sha256,
+    chunk_size: HYPERBEAM_UPLOAD_CHUNK_SIZE,
+    chunk_count: chunks.length,
+    chunks,
+  };
+}
+
+async function getHyperbeamLargeUpload(ctx) {
+  const nodeUrl = hyperbeamNodeUrl();
+  const id = ctx.params.id;
+
+  if (!nodeUrl) {
+    ctx.status = 404;
+    ctx.body = { error: 'hyperbeam node unavailable' };
+    return;
+  }
+
+  const manifestResponse = await getBuffer(`${nodeUrl}/${encodeURIComponent(id)}`);
+  const manifest = parseJsonBuffer(manifestResponse.body);
+
+  if (!manifest || manifest.type !== HYPERBEAM_UPLOAD_MANIFEST_KIND || !Array.isArray(manifest.chunks)) {
+    ctx.status = manifestResponse.statusCode;
+    copyHeader(ctx, manifestResponse.headers, 'content-type');
+    ctx.body = manifestResponse.body;
+    return;
+  }
+
+  if (ctx.method === 'HEAD') {
+    ctx.status = 200;
+    ctx.set('Cache-Control', 'no-store');
+    ctx.set('Content-Type', manifest.content_type || 'application/octet-stream');
+    ctx.set('X-Odysee-Hyperbeam-Upload-Id', id);
+    ctx.set('X-Odysee-Hyperbeam-Chunk-Count', String(manifest.chunks.length));
+    if (Number.isFinite(manifest.size)) {
+      ctx.set('Content-Length', String(manifest.size));
+    }
+    return;
+  }
+
+  ctx.respond = false;
+  ctx.res.statusCode = 200;
+  ctx.res.setHeader('Cache-Control', 'no-store');
+  ctx.res.setHeader('Content-Type', manifest.content_type || 'application/octet-stream');
+  ctx.res.setHeader('X-Odysee-Hyperbeam-Upload-Id', id);
+  ctx.res.setHeader('X-Odysee-Hyperbeam-Chunk-Count', String(manifest.chunks.length));
+  if (Number.isFinite(manifest.size)) {
+    ctx.res.setHeader('Content-Length', String(manifest.size));
+  }
+
+  try {
+    for (const chunk of manifest.chunks) {
+      const chunkResponse = await getBuffer(`${nodeUrl}/${encodeURIComponent(chunk.id)}`);
+      ctx.res.write(chunkResponse.body);
+    }
+    ctx.res.end();
+  } catch (error) {
+    ctx.res.destroy(error);
+  }
+}
+
+function getRequestAuthToken(ctx) {
+  const cookieHeader = ctx.get('cookie');
+  return ctx.cookies.get(AUTH_TOKEN_COOKIE) || getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE);
+}
+
+async function writeHyperbeamUploadChunk(nodeUrl, authToken, chunk, index) {
+  const sha256 = crypto.createHash('sha256').update(chunk).digest('hex');
+  const response = await postBuffer(`${nodeUrl}${HYPERBEAM_UPLOAD_CHUNK_PATH}`, chunk, {
+    'content-type': 'application/octet-stream',
+    'content-length': chunk.length,
+    'x-odysee-auth-token': authToken,
+    'x-odysee-upload-chunk-index': String(index),
+    'x-odysee-upload-chunk-sha256': sha256,
+  });
+  const body = parseJsonBuffer(response.body);
+  const id = body && body.id ? body.id : response.headers.id;
+
+  if (response.statusCode < 200 || response.statusCode >= 300 || !id) {
+    throw new Error(`HyperBEAM chunk write failed at ${index}: ${response.statusCode}`);
+  }
+
+  return {
+    index,
+    id,
+    size: chunk.length,
+    sha256,
+  };
+}
+
+function copyHeader(ctx, headers, name) {
+  const value = headers[name];
+  if (value) ctx.set(name, value);
+}
+
+function parseJsonBuffer(body) {
+  try {
+    return JSON.parse(Buffer.isBuffer(body) ? body.toString('utf8') : String(body));
+  } catch {
+    return null;
+  }
+}
+
+function postJson(url, payload, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const body = JSON.stringify(payload);
+    const client = target.protocol === 'https:' ? https : http;
+    const req = client.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'POST',
+        insecureHTTPParser: true,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+          ...extraHeaders,
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({
+            statusCode: res.statusCode || 502,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+function postStream(url, stream, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const client = target.protocol === 'https:' ? https : http;
+    const req = client.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'POST',
+        insecureHTTPParser: true,
+        headers: extraHeaders,
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({
+            statusCode: res.statusCode || 502,
+            headers: res.headers,
+            body: Buffer.concat(chunks),
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    stream.on('error', reject);
+    stream.pipe(req);
+  });
+}
+
+function postBuffer(url, body, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const client = target.protocol === 'https:' ? https : http;
+    const req = client.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'POST',
+        insecureHTTPParser: true,
+        headers: extraHeaders,
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({
+            statusCode: res.statusCode || 502,
+            headers: res.headers,
+            body: Buffer.concat(chunks),
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+function getBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const client = target.protocol === 'https:' ? https : http;
+    const req = client.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'GET',
+        insecureHTTPParser: true,
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({
+            statusCode: res.statusCode || 502,
+            headers: res.headers,
+            body: Buffer.concat(chunks),
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 async function getStreamUrl(ctx) {
   const { claimName, claimId } = ctx.params;
@@ -276,6 +688,26 @@ router.get(`/$/favicon`, async (ctx) => {
 });
 
 router.get(`/$/minVersion/v1/get`, async (ctx) => getMinVersion(ctx));
+router.get(`/$/api/auth-token/v1/get`, async (ctx) => {
+  const cookieHeader = ctx.get('cookie');
+  const authToken = ctx.cookies.get(AUTH_TOKEN_COOKIE) || getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE);
+  const cookieNames = cookieHeader
+    .split(';')
+    .map((part) => part.trim().split('=')[0])
+    .filter(Boolean);
+
+  ctx.set('Cache-Control', 'no-store');
+  ctx.body = {
+    auth_token: authToken,
+    auth_cookie_present: Boolean(authToken),
+    cookie_names: cookieNames,
+  };
+});
+router.post(`${HYPERBEAM_AUTH_DEVICE_PREFIX}/:device/:method`, postHyperbeamAuthDevice);
+router.post(`/$/api/hyperbeam-upload/v1/write`, postHyperbeamUpload);
+router.post(`/$/api/hyperbeam-upload/v1/large`, postHyperbeamLargeUpload);
+router.head(`/$/api/hyperbeam-upload/v1/read/:id`, getHyperbeamLargeUpload);
+router.get(`/$/api/hyperbeam-upload/v1/read/:id`, getHyperbeamLargeUpload);
 router.get(`/$/api/content/v1/get`, async (ctx) => getHomepage(ctx, 1));
 router.get(`/$/api/content/v2/get`, async (ctx) => getHomepage(ctx, 2));
 router.get(`/$/download/:claimName/:claimId`, async (ctx) => {

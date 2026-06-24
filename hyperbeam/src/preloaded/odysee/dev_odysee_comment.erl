@@ -692,10 +692,11 @@ signature_response(IsValid) ->
     }.
 
 api_request(Method, Params, Base, Req, Opts) ->
+    LegacyParams = legacy_api_params(Params, Base, Req, Opts),
     Payload = hb_json:encode(#{
         <<"jsonrpc">> => <<"2.0">>,
         <<"method">> => Method,
-        <<"params">> => Params,
+        <<"params">> => LegacyParams,
         <<"id">> => 1
     }),
     Msg = #{
@@ -704,7 +705,8 @@ api_request(Method, Params, Base, Req, Opts) ->
         <<"content-type">> => <<"application/json">>,
         <<"body">> => Payload
     },
-    case hb_http:request(Msg, Opts) of
+    AuthedMsg = maps:merge(Msg, legacy_api_headers(Base, Req, Opts)),
+    case hb_http:request(AuthedMsg, Opts) of
         {ok, #{ <<"body">> := Body }} when is_binary(Body) -> decode_api_body(Body, Opts);
         {ok, Body} when is_binary(Body) -> decode_api_body(Body, Opts);
         {ok, Other} -> {error, {comment_response_without_body, Other}};
@@ -784,6 +786,69 @@ has_any([Key | Rest], Map, Opts) ->
 put_optional({_Key, not_found}, Msg) -> Msg;
 put_optional({Key, Value}, Msg) -> Msg#{ Key => Value }.
 
+legacy_api_headers(Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+                {error, not_found} -> #{}
+            end
+    end.
+
+legacy_api_params(Params, Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            Params#{ <<"auth_token">> => Token };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> Params#{ <<"auth_token">> => Token };
+                {error, not_found} -> Params
+            end
+    end.
+
+find_auth_token(Msg, Opts) ->
+    case first_found(
+        [{Msg, Key} || Key <- [<<"x-odysee-auth-token">>, <<"x-lbry-auth-token">>, <<"odysee-auth-token">>, <<"auth_token">>]],
+        Opts
+    ) of
+        not_found -> find_auth_cookie(Msg, Opts);
+        Token -> {ok, token_value(Token)}
+    end.
+
+find_auth_cookie(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:find(<<"cookie">>, Msg, Opts) of
+        {ok, Cookie} -> token_from_cookie(hb_util:bin(Cookie));
+        error -> {error, not_found}
+    end;
+find_auth_cookie(_Msg, _Opts) ->
+    {error, not_found}.
+
+token_from_cookie(Cookie) ->
+    token_from_cookie_parts(binary:split(Cookie, <<";">>, [global])).
+
+token_from_cookie_parts([]) ->
+    {error, not_found};
+token_from_cookie_parts([Part | Rest]) ->
+    case binary:split(Part, <<"=">>) of
+        [Name, Value] ->
+            case trim_bin(Name) of
+                <<"auth_token">> -> {ok, trim_bin(Value)};
+                _ -> token_from_cookie_parts(Rest)
+            end;
+        _ ->
+            token_from_cookie_parts(Rest)
+    end.
+
+token_value(#{ <<"value">> := Value }) ->
+    hb_util:bin(Value);
+token_value(Value) ->
+    hb_util:bin(Value).
+
+trim_bin(Bin) ->
+    list_to_binary(string:trim(binary_to_list(Bin))).
+
 try_decode_json(Raw) ->
     try {ok, hb_json:decode(Raw)}
     catch _:_ -> {error, invalid_json}
@@ -859,6 +924,42 @@ normalize_verifies_comment_with_public_key_test() ->
 
 list_requires_claim_or_author_for_fetch_test() ->
     ?assertEqual({error, claim_id_not_found}, list(#{}, #{}, #{})).
+
+list_params_do_not_expose_auth_token_test() ->
+    {ok, Params} = list_params(
+        #{},
+        #{
+            <<"claim-id">> => <<"claim-1">>,
+            <<"x-odysee-auth-token">> => <<"token-1">>,
+            <<"auth_token">> => <<"token-2">>,
+            <<"cookie">> => <<"auth_token=token-3">>
+        },
+        #{}
+    ),
+    ?assertEqual(#{ <<"claim_id">> => <<"claim-1">> }, Params).
+
+legacy_api_headers_forwards_odysee_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"cookie">> => <<"auth_token=token-1">> },
+        legacy_api_headers(#{}, #{ <<"x-odysee-auth-token">> => <<"token-1">> }, #{})
+    ).
+
+legacy_api_headers_extracts_auth_cookie_test() ->
+    ?assertEqual(
+        #{ <<"cookie">> => <<"auth_token=token-2">> },
+        legacy_api_headers(#{}, #{ <<"cookie">> => <<"other=1; auth_token=token-2; x=3">> }, #{})
+    ).
+
+legacy_api_params_forwards_odysee_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"claim_id">> => <<"claim-1">>, <<"auth_token">> => <<"token-1">> },
+        legacy_api_params(
+            #{ <<"claim_id">> => <<"claim-1">> },
+            #{},
+            #{ <<"x-odysee-auth-token">> => <<"token-1">> },
+            #{}
+        )
+    ).
 
 commentron_vector() ->
     #{

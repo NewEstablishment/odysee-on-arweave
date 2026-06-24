@@ -333,8 +333,10 @@ async function buildClaimOgMetadata(uri, claim, overrideOptions = {}, referrerQu
   const title = overrideOptions.title || claimTitle;
   const description = overrideOptions.description || claimDescription;
   const cleanDescription = removeMd(description);
-  const claimPath = `${BASE}/${claim.canonical_url.replace('lbry://', '').replace(/#/g, ':')}`;
-  const canonicalClaimPath = getCanonicalUrl(`/${claim.canonical_url.replace('lbry://', '').replace(/#/g, ':')}`);
+  const claimUrl = claim.canonical_url || claim.permanent_url || uri;
+  const claimUrlPath = claimUrl.replace('lbry://', '').replace(/#/g, ':');
+  const claimPath = `${BASE}/${claimUrlPath}`;
+  const canonicalClaimPath = getCanonicalUrl(`/${claimUrlPath}`);
   let head = '';
   head += `${addFavicon()}`;
   head += '<meta charset="utf8"/>';
@@ -410,7 +412,7 @@ async function buildClaimOgMetadata(uri, claim, overrideOptions = {}, referrerQu
   try {
     const splashImageUrl = FARCASTER_ICON_URL || `https://odysee.com/public/favicon_128.png`;
     // Use a literal, unencoded embed URL (clients seem to prefer this format)
-    const embedUriPath = claim.canonical_url.replace('lbry://', '').replace(/#/g, ':');
+    const embedUriPath = claimUrlPath;
     const embedUrl = `${BASE}/$/embed/${embedUriPath}`;
     const miniApp = {
       version: '1',

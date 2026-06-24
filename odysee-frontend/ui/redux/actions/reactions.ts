@@ -12,7 +12,7 @@ export const doFetchReactions = (claimId: string) => (dispatch: Dispatch) => {
   const params = {
     claim_ids: claimId,
   };
-  return Lbryio.getAuthToken()
+  return Promise.resolve()
     .then(() => {
       if (!isHyperbeamEnabled()) return null;
       return fetchHyperbeamFileReactionList(params).then((result) => {

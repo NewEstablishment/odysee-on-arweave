@@ -511,13 +511,48 @@ raw_default_message() ->
                         <<"device">> => <<"auth-hook@1.0">>,
                         <<"path">> => <<"request">>,
                         <<"when">> => #{
-                            <<"keys">> => [<<"authorization">>, <<"!">>]
+                            <<"keys">> =>
+                                [
+                                    <<"!">>,
+                                    <<"odysee-auth-token">>,
+                                    <<"x-odysee-auth-token">>,
+                                    <<"x-lbry-auth-token">>
+                                ]
                         },
+                        <<"ignored-keys">> =>
+                            [
+                                <<"secret">>,
+                                <<"cookie">>,
+                                <<"set-cookie">>,
+                                <<"auth_token">>,
+                                <<"odysee-auth-token">>,
+                                <<"x-odysee-auth-token">>,
+                                <<"x-lbry-auth-token">>,
+                                <<"path">>,
+                                <<"method">>,
+                                <<"authorization">>,
+                                <<"host">>,
+                                <<"accept">>,
+                                <<"accept-bundle">>,
+                                <<"ao-peer">>,
+                                <<"user-agent">>,
+                                <<"connection">>,
+                                <<"content-type">>,
+                                <<"content-length">>,
+                                <<"transfer-encoding">>,
+                                <<"content-digest">>,
+                                <<"iterations">>,
+                                <<"key-length">>,
+                                <<"salt">>,
+                                <<"alg">>,
+                                <<"ignored-keys">>,
+                                <<"!">>
+                            ],
                         <<"secret-provider">> =>
                             #{
-                                <<"device">> => <<"http-auth@1.0">>,
+                                <<"device">> => <<"odysee-auth@1.0">>,
                                 <<"access-control">> =>
-                                    #{ <<"device">> => <<"http-auth@1.0">> }
+                                    #{ <<"device">> => <<"odysee-auth@1.0">> }
                             }
                     },
                     #{
