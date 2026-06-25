@@ -28,8 +28,16 @@ export const populateAuthTokenHeader = (store: Store) => {
       case ACTIONS.USER_LOGGED_IN_BROADCAST:
         const isVerifyPage = location.href.includes(PAGES.AUTH_VERIFY) && !location.href.includes(PAGES.REWARDS_VERIFY);
         const isNewAccount = LocalStorage.getItem(LS.IS_NEW_ACCOUNT) === 'true';
-        const xAuth = (Lbry.getApiRequestHeaders() || {})[X_LBRY_AUTH_TOKEN] || '';
+        let xAuth = (Lbry.getApiRequestHeaders() || {})[X_LBRY_AUTH_TOKEN] || '';
         const state = getState();
+
+        if (!xAuth) {
+          const authToken = getAuthToken();
+          if (authToken) {
+            Lbry.setApiHeader(X_LBRY_AUTH_TOKEN, authToken);
+            xAuth = authToken;
+          }
+        }
 
         if (!xAuth && !state.user.authenticationIsPending) {
           if (isVerifyPage) {
@@ -40,6 +48,11 @@ export const populateAuthTokenHeader = (store: Store) => {
               window.location.assign('/');
             }
           } else {
+            const reloadKey = '__authHeaderReload';
+            const previousReload = Number(sessionStorage.getItem(reloadKey) || 0);
+            const now = Date.now();
+            if (now - previousReload < 30000) break;
+            sessionStorage.setItem(reloadKey, String(now));
             window.location.reload();
           }
         }

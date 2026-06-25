@@ -44,8 +44,8 @@ authenticated_owner(Req, Opts) ->
                 <<"body">> => <<"Signed request required.">>
             }};
         Signers ->
-            case hb_message:verify(Req, signers, Opts) of
-                true -> {ok, hd(Signers)};
+            case request_signature_valid(Req, Opts) of
+                true -> {ok, owner_identity(Req, Opts, hd(Signers))};
                 _ ->
                     {error, #{
                         <<"status">> => 401,
@@ -53,6 +53,75 @@ authenticated_owner(Req, Opts) ->
                     }}
             end
     end.
+
+owner_identity(Req, Opts, Fallback) ->
+    case auth_token(Req, Opts) of
+        {ok, Token} -> token_secret(Token);
+        not_found -> auth_owner(Req, Opts, Fallback)
+    end.
+
+auth_owner(Req, Opts, Fallback) ->
+    case first_field([<<"odysee-auth-owner">>, <<"odysee_auth_owner">>], Req, Opts) of
+        not_found -> secret_owner(Req, Opts, Fallback);
+        Owner -> hb_util:bin(Owner)
+    end.
+
+secret_owner(Req, Opts, Fallback) ->
+    case first_field([<<"secret">>], Req, Opts) of
+        not_found -> Fallback;
+        Secret -> hb_util:bin(Secret)
+    end.
+
+auth_token(Req, Opts) ->
+    case authorization_token(Req, Opts) of
+        {ok, _Token} = Found -> Found;
+        not_found -> token_field(Req, Opts)
+    end.
+
+authorization_token(Req, Opts) ->
+    case first_field([<<"authorization">>], Req, Opts) of
+        not_found -> not_found;
+        Auth ->
+            try authorization_value(hb_util:bin(Auth))
+            catch _:_ -> not_found
+            end
+    end.
+
+authorization_value(Auth) ->
+    case binary:split(string:trim(Auth), <<" ">>) of
+        [Scheme, Value0] ->
+            Value = string:trim(Value0, leading),
+            case hb_util:to_lower(Scheme) of
+                <<"bearer">> when Value =/= <<>> -> {ok, Value};
+                <<"token">> when Value =/= <<>> -> {ok, Value};
+                _ -> not_found
+            end;
+        _ ->
+            not_found
+    end.
+
+token_field(Req, Opts) ->
+    case first_field(token_keys(), Req, Opts) of
+        not_found -> not_found;
+        Token -> {ok, Token}
+    end.
+
+token_secret(Token0) ->
+    Token = hb_util:bin(Token0),
+    hb_util:encode(hb_crypto:sha256(<<"odysee-auth:", Token/binary>>)).
+
+token_keys() ->
+    [
+        <<"auth-token">>,
+        <<"auth_token">>,
+        <<"authtoken">>,
+        <<"lbry-auth-token">>,
+        <<"lbry_auth_token">>,
+        <<"x-lbry-auth-token">>,
+        <<"x_lbry_auth_token">>,
+        <<"odysee-auth-token">>,
+        <<"odysee_auth_token">>
+    ].
 
 request_signers(Req, Opts) ->
     lists:usort(signers(Req, Opts)).
@@ -63,6 +132,21 @@ signers(Msg, Opts) when is_map(Msg) ->
     end;
 signers(_Msg, _Opts) ->
     [].
+
+request_signature_valid(Req, Opts) ->
+    hb_message:verify(Req, signers, Opts)
+        orelse hb_message:verify(hb_maps:without(auth_hook_ignored_keys(), Req, Opts), signers, Opts).
+
+auth_hook_ignored_keys() ->
+    [
+        <<"secret">>,
+        <<"cookie">>,
+        <<"set-cookie">>,
+        <<"path">>,
+        <<"method">>,
+        <<"authorization">>,
+        <<"!">>
+    ].
 
 request_payload(Req, Opts) ->
     case first_field([<<"params64">>, <<"params-64">>], Req, Opts) of
@@ -112,12 +196,15 @@ comment_call(Owner, Payload, State, Opts) ->
     Params = params(Payload, Opts),
     case Method of
         <<"comment_create">> -> comment_create(Owner, Params, State, Opts);
+        <<"comment_list">> -> comment_list(Params, State, Opts);
+        <<"comment_by_id">> -> comment_by_id(Params, State, Opts);
+        <<"comment_byid">> -> comment_by_id(Params, State, Opts);
         <<"comment_edit">> -> comment_edit(Params, State, Opts);
         <<"comment_abandon">> -> comment_abandon(Params, State, Opts);
         <<"comment_pin">> -> comment_pin(Params, State, Opts);
         <<"reaction_react">> -> reaction_react(Params, State, Opts);
         <<"setting_get">> -> comment_setting_get(Params, State, Opts);
-        <<"setting_list">> -> comment_setting_list(State);
+        <<"setting_list">> -> comment_setting_list(Params, State, Opts);
         <<"setting_update">> -> comment_setting_update(Params, State, Opts);
         <<"setting_block_word">> -> comment_block_word(Params, State, Opts);
         <<"setting_blockword">> -> comment_block_word(Params, State, Opts);
@@ -279,6 +366,46 @@ comment_create(Owner, Params, State, Opts) ->
         {ok, Comment, Next}
     end.
 
+comment_list(Params, State, Opts) ->
+    Comments = maps:values(section(<<"comments">>, State, Opts)),
+    Filtered = sort_comments([Comment || Comment <- Comments, comment_matches(Params, Comment, Opts)], Params, Opts),
+    Page = integer_param(Params, <<"page">>, 1, Opts),
+    PageSize = integer_param(Params, <<"page_size">>, 50, Opts),
+    Items = page_items(Filtered, Page, PageSize),
+    Total = length(Filtered),
+    {ok,
+        #{
+            <<"items">> => Items,
+            <<"page">> => Page,
+            <<"page_size">> => PageSize,
+            <<"total_items">> => Total,
+            <<"total_filtered_items">> => Total,
+            <<"total_pages">> => total_pages(Total, PageSize),
+            <<"has_hidden_comments">> => false
+        },
+        State}.
+
+comment_by_id(Params, State, Opts) ->
+    maybe
+        {ok, CommentID} ?= required_param(<<"comment_id">>, Params, Opts),
+        Comments = section(<<"comments">>, State, Opts),
+        case hb_maps:get(CommentID, Comments, not_found, Opts) of
+            not_found ->
+                {error, #{
+                    <<"status">> => 404,
+                    <<"body">> => <<"comment for id ", CommentID/binary, " could not be found">>
+                }};
+            Comment ->
+                {ok,
+                    #{
+                        <<"item">> => Comment,
+                        <<"items">> => [Comment],
+                        <<"ancestors">> => comment_ancestors(Comment, Comments, Opts)
+                    },
+                    State}
+        end
+    end.
+
 comment_edit(Params, State, Opts) ->
     maybe
         {ok, CommentID} ?= required_param(<<"comment_id">>, Params, Opts),
@@ -341,22 +468,117 @@ reaction_react(Params, State, Opts) ->
         ),
     {ok, #{ <<"ok">> => true }, put_section(<<"comment-reactions">>, Reactions, State)}.
 
+comment_matches(Params, Comment, Opts) ->
+    comment_matches_claim(Params, Comment, Opts)
+        andalso comment_matches_author(Params, Comment, Opts)
+        andalso comment_matches_parent(Params, Comment, Opts).
+
+comment_matches_claim(Params, Comment, Opts) ->
+    case first_field([<<"claim_id">>, <<"claim-id">>], Params, Opts) of
+        not_found -> true;
+        ClaimID -> same_field(ClaimID, first_field([<<"claim_id">>, <<"claim-id">>], Comment, Opts))
+    end.
+
+comment_matches_author(Params, Comment, Opts) ->
+    case first_field([<<"author_claim_id">>, <<"author-claim-id">>], Params, Opts) of
+        not_found -> true;
+        ChannelID -> same_field(ChannelID, first_field([<<"channel_id">>, <<"channel-id">>], Comment, Opts))
+    end.
+
+comment_matches_parent(Params, Comment, Opts) ->
+    case first_field([<<"parent_id">>, <<"parent-id">>], Params, Opts) of
+        not_found ->
+            case truthy(first_field([<<"top_level">>, <<"top-level">>], Params, Opts)) of
+                true -> not has_comment_parent(Comment, Opts);
+                false -> true
+            end;
+        ParentID ->
+            same_field(ParentID, first_field([<<"parent_id">>, <<"parent-id">>], Comment, Opts))
+    end.
+
+sort_comments(Comments, Params, Opts) ->
+    SortBy = integer_param(Params, <<"sort_by">>, 0, Opts),
+    case SortBy of
+        1 -> lists:sort(fun(A, B) -> comment_sort_key(A, Opts) =< comment_sort_key(B, Opts) end, Comments);
+        _ -> lists:sort(fun(A, B) -> comment_sort_key(A, Opts) >= comment_sort_key(B, Opts) end, Comments)
+    end.
+
+comment_sort_key(Comment, Opts) ->
+    {
+        integer_value(first_field([<<"timestamp">>, <<"created_at">>, <<"created-at">>], Comment, Opts), 0),
+        hb_util:bin(value_or(first_field([<<"comment_id">>, <<"comment-id">>, <<"id">>], Comment, Opts), <<>>))
+    }.
+
+comment_ancestors(Comment, Comments, Opts) ->
+    comment_ancestors(Comment, Comments, Opts, [], 0).
+
+comment_ancestors(_Comment, _Comments, _Opts, Acc, Depth) when Depth >= 20 ->
+    lists:reverse(Acc);
+comment_ancestors(Comment, Comments, Opts, Acc, Depth) ->
+    case normalized_field(first_field([<<"parent_id">>, <<"parent-id">>], Comment, Opts)) of
+        not_found ->
+            lists:reverse(Acc);
+        ParentID ->
+            case hb_maps:get(ParentID, Comments, not_found, Opts) of
+                not_found -> lists:reverse(Acc);
+                Parent -> comment_ancestors(Parent, Comments, Opts, [Parent | Acc], Depth + 1)
+            end
+    end.
+
+has_comment_parent(Comment, Opts) ->
+    normalized_field(first_field([<<"parent_id">>, <<"parent-id">>], Comment, Opts)) =/= not_found.
+
+same_field(Expected, Actual) ->
+    normalized_field(Expected) =:= normalized_field(Actual).
+
+normalized_field(not_found) -> not_found;
+normalized_field(undefined) -> not_found;
+normalized_field(null) -> not_found;
+normalized_field(<<>>) -> not_found;
+normalized_field(Value) -> hb_util:bin(Value).
+
+integer_value(Value, _Default) when is_integer(Value) ->
+    Value;
+integer_value(Value, Default) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ -> Default
+    end;
+integer_value(_Value, Default) ->
+    Default.
+
 comment_setting_get(Params, State, Opts) ->
     Settings = section(<<"comment-settings">>, State, Opts),
     ChannelID = first_field([<<"channel_id">>, <<"channel-id">>], Params, Opts),
-    {ok, hb_maps:get(ChannelID, Settings, #{}, Opts), State}.
+    {ok, comment_settings_for_channel(ChannelID, Settings, Opts), State}.
 
-comment_setting_list(State) ->
-    {ok, maps:values(section(<<"comment-settings">>, State, #{})), State}.
+comment_setting_list(Params, State, Opts) ->
+    Settings = section(<<"comment-settings">>, State, Opts),
+    case first_field([<<"channel_id">>, <<"channel-id">>], Params, Opts) of
+        not_found -> {ok, maps:values(Settings), State};
+        ChannelID -> {ok, comment_settings_for_channel(ChannelID, Settings, Opts), State}
+    end.
 
 comment_setting_update(Params, State, Opts) ->
     maybe
         {ok, ChannelID} ?= required_param(<<"channel_id">>, Params, Opts),
         Settings = section(<<"comment-settings">>, State, Opts),
-        Existing = hb_maps:get(ChannelID, Settings, #{}, Opts),
+        Existing = comment_settings_for_channel(ChannelID, Settings, Opts),
         Updated = maps:merge(Existing, without_control_keys(Params)),
         {ok, Updated, put_section(<<"comment-settings">>, Settings#{ ChannelID => Updated }, State)}
     end.
+
+comment_settings_for_channel(not_found, _Settings, _Opts) ->
+    default_comment_settings();
+comment_settings_for_channel(ChannelID, Settings, Opts) ->
+    maps:merge(default_comment_settings(), hb_maps:get(ChannelID, Settings, #{}, Opts)).
+
+default_comment_settings() ->
+    #{
+        <<"comments_enabled">> => true,
+        <<"comments_members_only">> => false,
+        <<"livestream_chat_members_only">> => false,
+        <<"words">> => <<"">>
+    }.
 
 comment_block_word(Params, State, Opts) ->
     Word = value_or(first_field([<<"word">>, <<"blocked_word">>, <<"blocked-word">>], Params, Opts), <<>>),
@@ -843,6 +1065,29 @@ comment_create_edit_abandon_test() ->
     Comment = hb_maps:get(<<"result">>, CreateRes, Opts),
     CommentID = hb_maps:get(<<"comment_id">>, Comment, Opts),
     ?assertEqual(<<"hello">>, hb_maps:get(<<"comment">>, Comment, Opts)),
+    ListReq = signed_call(
+        #{
+            <<"kind">> => <<"comment">>,
+            <<"method">> => <<"comment.List">>,
+            <<"params">> => #{ <<"claim_id">> => <<"claim-1">>, <<"top_level">> => true }
+        },
+        Opts
+    ),
+    {ok, ListRes} = call(#{}, ListReq, Opts),
+    List = hb_maps:get(<<"result">>, ListRes, Opts),
+    [ListedComment] = hb_maps:get(<<"items">>, List, Opts),
+    ?assertEqual(1, hb_maps:get(<<"total_items">>, List, Opts)),
+    ?assertEqual(CommentID, hb_maps:get(<<"comment_id">>, ListedComment, Opts)),
+    ByIDReq = signed_call(
+        #{
+            <<"kind">> => <<"comment">>,
+            <<"method">> => <<"comment.ByID">>,
+            <<"params">> => #{ <<"comment_id">> => CommentID, <<"with_ancestors">> => true }
+        },
+        Opts
+    ),
+    {ok, ByIDRes} = call(#{}, ByIDReq, Opts),
+    ?assertEqual(CommentID, hb_maps:get(<<"comment_id">>, hb_maps:get(<<"item">>, hb_maps:get(<<"result">>, ByIDRes, Opts), Opts), Opts)),
     EditReq = signed_call(
         #{
             <<"kind">> => <<"comment">>,

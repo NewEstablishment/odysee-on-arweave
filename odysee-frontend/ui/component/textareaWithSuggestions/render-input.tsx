@@ -68,7 +68,11 @@ const TextareaSuggestionsInput = (props: Props) => {
               button="primary"
               icon={ICONS.SUBMIT}
               iconColor="red"
-              onClick={() => handleSubmit()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleSubmit();
+              }}
             />
           </div>
         </Zoom>

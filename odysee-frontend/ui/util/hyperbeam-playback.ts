@@ -1,13 +1,15 @@
-import { HYPERBEAM_PLAYBACK_URL } from 'config';
+import { HYPERBEAM_PLAYBACK_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 
 const HYPERBEAM_TIMEOUT_MS = 5000;
 
 export function buildHyperbeamPlaybackUrl(uri: string): string {
-  if (!HYPERBEAM_PLAYBACK_URL) return '';
+  const playbackUrl = hyperbeamPlaybackUrl();
+  if (!playbackUrl) return '';
 
   try {
-    const url = new URL(HYPERBEAM_PLAYBACK_URL);
+    const url = new URL(playbackUrl);
     url.searchParams.set('url', uri);
+    url.searchParams.set('mode', 'hyperbeam');
     if (!url.searchParams.has('media-base-url')) {
       url.searchParams.set('media-base-url', url.origin);
     }
@@ -15,6 +17,12 @@ export function buildHyperbeamPlaybackUrl(uri: string): string {
   } catch {
     return '';
   }
+}
+
+function hyperbeamPlaybackUrl() {
+  if (HYPERBEAM_PLAYBACK_URL) return HYPERBEAM_PLAYBACK_URL;
+  const node = String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  return node ? `${node}/~odysee-stream@1.0/playback` : '';
 }
 
 export async function fetchHyperbeamPlaybackUrl(uri: string): Promise<string> {

@@ -48,7 +48,7 @@ generate(_Base, #{ <<"secret">> := Secret }, _Opts) ->
 generate(Base, Req, Opts) ->
     case auth_secret(Base, Req, Opts) of
         {ok, Secret} ->
-            {ok, (strip_sensitive(Req, Opts))#{ <<"secret">> => Secret }};
+            {ok, (strip_sensitive(Req, Opts))#{ <<"secret">> => Secret, <<"odysee-auth-owner">> => Secret }};
         {error, _} = Error ->
             Error
     end.

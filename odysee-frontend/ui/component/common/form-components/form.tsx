@@ -35,9 +35,10 @@ export const Form = (props: Props) => {
       onKeyDown={(event) => (pressedEnter.current = event.keyCode === KEYCODES.ENTER)}
       onSubmit={(event) => {
         event.preventDefault();
+        event.stopPropagation();
 
         if (!disableSubmitOnEnter || !pressedEnter.current) {
-          onSubmit(event);
+          onSubmit?.(event);
         }
       }}
       {...otherProps}

@@ -81,8 +81,12 @@ function ChannelThumbnail(props: Props) {
       className: isChannel ? 'profile-badge__tooltip' : undefined,
     };
   }, [hideTooltip, isChannel, odyseeMembership]);
-  // Generate a random color class based on the first letter of the channel name
-  const { channelName } = parseURI(uri);
+  let channelName;
+
+  try {
+    channelName = uri ? parseURI(uri).channelName : undefined;
+  } catch (e) {}
+
   let initializer;
   let colorClassName;
 

@@ -1,4 +1,5 @@
 import { HYPERBEAM_BASE_URL, LBRY_API_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { callHyperbeamComment } from 'services/hyperbeamUserState';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
@@ -23,6 +24,15 @@ const PRIVATE_PARAM_KEYS = new Set([
   'refreshtoken',
 ]);
 const deviceReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
+
+function hyperbeamCommentDebug(message: string, data?: any) {
+  if (typeof window === 'undefined' || window.localStorage?.getItem('odysee:comment-debug') !== '1') return;
+  console.info('[odysee-comment]', message, data);
+}
+
+function debugError(error: any) {
+  return error instanceof Error ? { name: error.name, message: error.message } : error;
+}
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const urls = urlsFromResolveParams(params);
@@ -73,7 +83,11 @@ export async function fetchHyperbeamGet(params: any): Promise<any | null> {
   const uri = params?.uri || params?.url;
   if (!uri) return null;
 
-  const response = await fetchDeviceJson(`${STREAM_DEVICE}/playback`, { uri });
+  const response = await fetchDeviceJson(`${STREAM_DEVICE}/playback`, {
+    uri,
+    mode: 'hyperbeam',
+    media_base_url: hyperbeamBaseUrl(),
+  });
   return playbackPayloadFromHyperbeam(responsePayload(response));
 }
 
@@ -92,8 +106,38 @@ type HyperbeamChannel = {
 };
 
 export async function fetchHyperbeamCommentList(params: CommentListParams): Promise<CommentListResponse | null> {
-  const response = await fetchDeviceJson(`${COMMENT_DEVICE}/list`, params);
-  const result = responsePayload(response);
+  let publicError;
+  hyperbeamCommentDebug('list:hyperbeam:start', {
+    claim_id: params.claim_id,
+    parent_id: params.parent_id,
+    page: params.page,
+    page_size: params.page_size,
+  });
+  const [publicResult, localResult] = await Promise.all([
+    fetchDeviceJson(`${COMMENT_DEVICE}/list`, params)
+      .then(responsePayload)
+      .catch((error) => {
+        publicError = error;
+        return null;
+      }),
+    fetchHyperbeamLocalCommentList(params),
+  ]);
+  const publicList = commentListFromHyperbeam(publicResult, params);
+  const localList = commentListFromHyperbeam(localResult, params);
+  const merged = mergeCommentLists(publicList, localList);
+  hyperbeamCommentDebug('list:hyperbeam:done', {
+    publicItems: publicList?.items.length || 0,
+    localItems: localList?.items.length || 0,
+    mergedItems: merged?.items.length || 0,
+    publicError: publicError ? debugError(publicError) : undefined,
+  });
+
+  if (merged) return merged;
+  if (publicError && isHyperbeamEnabled()) throw publicError;
+  return null;
+}
+
+function commentListFromHyperbeam(result: any, params: CommentListParams): CommentListResponse | null {
   const comments = result && (result.comments || result.items);
   if (!Array.isArray(comments)) return null;
 
@@ -109,8 +153,14 @@ export async function fetchHyperbeamCommentList(params: CommentListParams): Prom
 }
 
 export async function fetchHyperbeamCommentById(params: CommentByIdParams): Promise<CommentByIdResponse | null> {
+  const local = commentByIdFromHyperbeam(await fetchHyperbeamLocalCommentById(params));
+  if (local) return local;
+
   const response = await fetchDeviceJson(`${COMMENT_DEVICE}/by-id`, params);
-  const result = responsePayload(response);
+  return commentByIdFromHyperbeam(responsePayload(response));
+}
+
+function commentByIdFromHyperbeam(result: any): CommentByIdResponse | null {
   const comment = result && (result.comment || result.item || result.items);
   const item = Array.isArray(comment) ? comment[0] : comment;
   if (!item) return null;
@@ -120,6 +170,54 @@ export async function fetchHyperbeamCommentById(params: CommentByIdParams): Prom
     items: [commentFromHyperbeam(item)],
     ancestors: Array.isArray(result.ancestors) ? result.ancestors.map(commentFromHyperbeam) : [],
   };
+}
+
+async function fetchHyperbeamLocalCommentList(params: CommentListParams): Promise<any | null> {
+  try {
+    const result = await callHyperbeamComment('comment.List', params);
+    hyperbeamCommentDebug('list:local:success', {
+      claim_id: params.claim_id,
+      items: Array.isArray(result?.items) ? result.items.length : undefined,
+      total_items: result?.total_items,
+    });
+    return result;
+  } catch (error) {
+    hyperbeamCommentDebug('list:local:failed', debugError(error));
+    return null;
+  }
+}
+
+async function fetchHyperbeamLocalCommentById(params: CommentByIdParams): Promise<any | null> {
+  try {
+    return await callHyperbeamComment('comment.ByID', params);
+  } catch (error) {
+    hyperbeamCommentDebug('by-id:local:failed', debugError(error));
+    return null;
+  }
+}
+
+function mergeCommentLists(publicList: CommentListResponse | null, localList: CommentListResponse | null) {
+  if (!publicList) return localList;
+  if (!localList || !localList.items.length) return publicList;
+
+  const publicIds = new Set(publicList.items.map((comment) => comment.comment_id).filter(Boolean));
+  const localOnlyItems = localList.items.filter((comment) => comment.comment_id && !publicIds.has(comment.comment_id));
+  if (!localOnlyItems.length) return publicList;
+
+  return {
+    ...publicList,
+    items: [...localOnlyItems, ...publicList.items],
+    total_items: publicList.total_items + localOnlyItems.length,
+    total_filtered_items: publicList.total_filtered_items + localOnlyItems.length,
+    total_pages: Math.max(
+      publicList.total_pages,
+      totalPages(publicList.total_items + localOnlyItems.length, publicList.page_size)
+    ),
+  };
+}
+
+function totalPages(totalItems: number, pageSize: number) {
+  return Math.max(1, Math.ceil(totalItems / Math.max(1, pageSize || 1)));
 }
 
 export async function fetchHyperbeamReactionList(params: ReactionListParams): Promise<ReactionListResponse | null> {
@@ -218,12 +316,14 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
       body: JSON.stringify(params),
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
+    const text = await response.text();
+    const json = parseDeviceJson(text);
 
     if (!response.ok) {
       if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
       return null;
     }
-    return await response.json();
+    return json;
   } catch (error) {
     if (isHyperbeamEnabled()) throw error;
     return null;
@@ -280,6 +380,28 @@ function stableJson(value: any): string {
     .join(',')}}`;
 }
 
+function parseDeviceJson(text: string): any {
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { body: text };
+  }
+}
+
+function commentChannelUrl(comment: any): string | undefined {
+  const existing = value(comment, 'channel-url', 'channel_url');
+  if (existing) return existing;
+
+  const channelName = value(comment, 'channel-name', 'channel_name');
+  const channelId = value(comment, 'channel-id', 'channel_id');
+  if (!channelName || !channelId) return undefined;
+
+  const normalizedName = String(channelName).startsWith('@') ? String(channelName) : `@${channelName}`;
+  return `lbry://${normalizedName}#${channelId}`;
+}
+
 function commentFromHyperbeam(comment: any): any {
   return compactParams({
     ...comment.source,
@@ -289,7 +411,7 @@ function commentFromHyperbeam(comment: any): any {
     parent_id: value(comment, 'parent-id', 'parent_id'),
     channel_id: value(comment, 'channel-id', 'channel_id'),
     channel_name: value(comment, 'channel-name', 'channel_name'),
-    channel_url: value(comment, 'channel-url', 'channel_url'),
+    channel_url: commentChannelUrl(comment),
     timestamp: value(comment, 'timestamp', 'created_at'),
     updated_at: value(comment, 'updated-at', 'updated_at'),
     signature: value(comment, 'signature'),

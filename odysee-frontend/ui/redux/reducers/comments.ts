@@ -7,6 +7,8 @@ import { isURIEqual } from 'util/lbryURI';
 type CommentData = {
   comment_id: string;
   parent_id?: string;
+  channel_name?: string;
+  channel_url?: string;
   channel_id?: string;
   replies?: number;
   [key: string]: any;
@@ -83,10 +85,41 @@ function immPrefixArrayInObject(obj, key, valueToInsert) {
 } // ****************************************************************************
 // ****************************************************************************
 
+function localHyperbeamCommentIds(previousIds, previousCommentById, claimId, parentId) {
+  return (previousIds || []).filter((commentId) => {
+    const comment = previousCommentById[commentId];
+    if (!comment || !comment.hyperbeam_owner || comment.claim_id !== claimId) return false;
+    return parentId ? comment.parent_id === parentId : !comment.parent_id;
+  });
+}
+
+function channelUrlFromComment(comment?: CommentData): string | undefined {
+  const existing = typeof comment?.channel_url === 'string' ? comment.channel_url.trim() : '';
+  if (existing) return existing;
+
+  const rawName = typeof comment?.channel_name === 'string' ? comment.channel_name.trim() : '';
+  const channelId = typeof comment?.channel_id === 'string' ? comment.channel_id.trim() : '';
+  if (!rawName || !channelId) return undefined;
+
+  const channelName = rawName.startsWith('@') ? rawName : `@${rawName}`;
+  return `lbry://${channelName}#${channelId}`;
+}
+
+function normalizeComment(comment: CommentData): CommentData {
+  const channelUrl = channelUrlFromComment(comment);
+  return channelUrl && channelUrl !== comment.channel_url ? { ...comment, channel_url: channelUrl } : comment;
+}
+
+function prefixMissingCommentIds(existingIds, idsToPrefix) {
+  const existing = new Set(existingIds || []);
+  const missing = idsToPrefix.filter((commentId) => !existing.has(commentId));
+  return missing.length ? [...missing, ...(existingIds || [])] : existingIds || [];
+}
+
 const commonUpdateAction = (comment, commentById, commentIds, index) => {
-  // map the comment_ids to the new comments
-  commentById[comment.comment_id] = comment;
-  commentIds[index] = comment.comment_id;
+  const normalizedComment = normalizeComment(comment);
+  commentById[normalizedComment.comment_id] = normalizedComment;
+  commentIds[index] = normalizedComment.comment_id;
 };
 
 function deleteReacts(reactObj, commentIdsToRemove) {
@@ -112,7 +145,7 @@ export default handleActions(
     [ACTIONS.COMMENT_CREATE_FAILED]: (state: CommentsState, action: any) => ({ ...state, isCommenting: false }),
     [ACTIONS.COMMENT_CREATE_COMPLETED]: (state: CommentsState, action: any): CommentsState => {
       const {
-        comment,
+        comment: rawComment,
         claimId,
         livestream,
       }: {
@@ -121,6 +154,7 @@ export default handleActions(
         uri: string;
         livestream: boolean;
       } = action.data;
+      const comment = normalizeComment(rawComment);
       const commentById = Object.assign({}, state.commentById);
       const byId = Object.assign({}, state.byId);
       const totalCommentsById = Object.assign({}, state.totalCommentsById);
@@ -278,6 +312,7 @@ export default handleActions(
       const pinnedCommentsById = Object.assign({}, state.pinnedCommentsById);
       const repliesTotalPagesByParentId = Object.assign({}, state.repliesTotalPagesByParentId);
       const isLoadingByParentId = Object.assign({}, state.isLoadingByParentId);
+      let localOnlyCommentIds: Array<string> = [];
 
       if (parentId) {
         isLoadingByParentId[parentId] = false;
@@ -297,10 +332,17 @@ export default handleActions(
           // in reality this doesn't matter and we can just
           // sort comments by their timestamp
           const commentIds = Array(comments.length);
+          const incomingCommentIds = new Set(comments.map((comment) => comment.comment_id));
 
           // --- Top-level comments ---
           if (!parentId) {
             if (page === 1) {
+              localOnlyCommentIds = localHyperbeamCommentIds(
+                state.topLevelCommentsById[claimId],
+                state.commentById,
+                claimId,
+                parentId
+              ).filter((commentId) => !incomingCommentIds.has(commentId));
               topLevelCommentsById[claimId] = [];
               pinnedCommentsById[claimId] = [];
               byId[claimId] = [];
@@ -318,6 +360,15 @@ export default handleActions(
             }
           } else // --- Replies ---
           {
+            if (page === 1) {
+              localOnlyCommentIds = localHyperbeamCommentIds(
+                state.repliesByParentId[parentId],
+                state.commentById,
+                claimId,
+                parentId
+              ).filter((commentId) => !incomingCommentIds.has(commentId));
+            }
+
             for (let i = 0; i < comments.length; ++i) {
               const comment = comments[i];
               commonUpdateAction(comment, commentById, commentIds, i);
@@ -326,6 +377,29 @@ export default handleActions(
           }
 
           immConcatToArrayInObject(byId, claimId, commentIds);
+
+          if (localOnlyCommentIds.length > 0) {
+            localOnlyCommentIds.forEach((commentId) => {
+              commentById[commentId] = state.commentById[commentId];
+            });
+
+            byId[claimId] = prefixMissingCommentIds(byId[claimId], localOnlyCommentIds);
+
+            if (parentId) {
+              repliesByParentId[parentId] = prefixMissingCommentIds(repliesByParentId[parentId], localOnlyCommentIds);
+            } else {
+              topLevelCommentsById[claimId] = prefixMissingCommentIds(
+                topLevelCommentsById[claimId],
+                localOnlyCommentIds
+              );
+            }
+
+            if (!parentId) {
+              totalCommentsById[claimId] = (totalCommentsById[claimId] || 0) + localOnlyCommentIds.length;
+              topLevelTotalCommentsById[claimId] =
+                (topLevelTotalCommentsById[claimId] || 0) + localOnlyCommentIds.length;
+            }
+          }
         }
       }
 
@@ -346,7 +420,8 @@ export default handleActions(
     },
     [ACTIONS.COMMENT_BY_ID_STARTED]: (state) => ({ ...state, isLoadingById: true }),
     [ACTIONS.COMMENT_BY_ID_COMPLETED]: (state: CommentsState, action: any) => {
-      const { comment, ancestors } = action.data;
+      const { comment: rawComment, ancestors } = action.data;
+      const comment = normalizeComment(rawComment);
       const claimId = comment.claim_id;
       const commentById = Object.assign({}, state.commentById);
       const byId = Object.assign({}, state.byId);
@@ -360,17 +435,18 @@ export default handleActions(
 
       // eslint-disable-next-line unicorn/consistent-function-scoping
       const updateStore = (comment, commentById, byId, repliesByParentId, topLevelCommentsById) => {
-        commentById[comment.comment_id] = comment;
-        immPrefixArrayInObject(byId, claimId, comment.comment_id);
-        const parentId = comment.parent_id;
+        const normalizedComment = normalizeComment(comment);
+        commentById[normalizedComment.comment_id] = normalizedComment;
+        immPrefixArrayInObject(byId, claimId, normalizedComment.comment_id);
+        const parentId = normalizedComment.parent_id;
 
-        if (comment.parent_id) {
-          immPushToArrayInObject(repliesByParentId, parentId, comment.comment_id);
+        if (normalizedComment.parent_id) {
+          immPushToArrayInObject(repliesByParentId, parentId, normalizedComment.comment_id);
         } else {
-          if (comment.is_pinned) {
-            immPushToArrayInObject(pinnedCommentsById, claimId, comment.comment_id);
+          if (normalizedComment.is_pinned) {
+            immPushToArrayInObject(pinnedCommentsById, claimId, normalizedComment.comment_id);
           } else {
-            immPushToArrayInObject(topLevelCommentsById, claimId, comment.comment_id);
+            immPushToArrayInObject(topLevelCommentsById, claimId, normalizedComment.comment_id);
           }
         }
       };
@@ -454,7 +530,8 @@ export default handleActions(
       };
     },
     [ACTIONS.COMMENT_RECEIVED]: (state: CommentsState, action: any) => {
-      const { uri, claimId, comment } = action.data;
+      const { uri, claimId, comment: rawComment } = action.data;
+      const comment = normalizeComment(rawComment);
       const commentsByClaimId = Object.assign({}, state.byId);
       const allCommentsById = Object.assign({}, state.commentById);
       const topLevelCommentsById = Object.assign({}, state.topLevelCommentsById);
@@ -581,7 +658,8 @@ export default handleActions(
     [ACTIONS.COMMENT_ABANDON_FAILED]: (state: CommentsState, action: any) => ({ ...state, isCommenting: false }),
     [ACTIONS.COMMENT_UPDATE_STARTED]: (state: CommentsState, action: any) => ({ ...state, isCommenting: true }),
     [ACTIONS.COMMENT_UPDATE_COMPLETED]: (state: CommentsState, action: any) => {
-      const { comment } = action.data;
+      const { comment: rawComment } = action.data;
+      const comment = normalizeComment(rawComment);
       const commentById = Object.assign({}, state.commentById);
       commentById[comment.comment_id] = comment;
       return { ...state, commentById, isCommenting: false };

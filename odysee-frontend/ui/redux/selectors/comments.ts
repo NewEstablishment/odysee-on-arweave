@@ -71,7 +71,8 @@ export const selectPinnedCommentsForUri = createCachedSelector(
 
     if (pinnedCommentIds) {
       pinnedCommentIds.forEach((commentId) => {
-        pinnedComments.push(byId[commentId]);
+        const comment = byId[commentId];
+        if (comment) pinnedComments.push(comment);
       });
     }
 
@@ -116,11 +117,12 @@ export const selectCommentsByClaimId = createSelector(selectState, selectComment
   const comments = {};
   // replace every comment_id in the list with the actual comment object
   Object.keys(byClaimId).forEach((claimId: string) => {
-    const commentIds = byClaimId[claimId];
-    comments[claimId] = Array(commentIds === null ? 0 : commentIds.length);
+    const commentIds = byClaimId[claimId] || EMPTY_ARRAY;
+    comments[claimId] = [];
 
     for (let i = 0; i < commentIds.length; i++) {
-      comments[claimId][i] = byId[commentIds[i]];
+      const comment = byId[commentIds[i]];
+      if (comment) comments[claimId].push(comment);
     }
   });
   return comments;
@@ -134,11 +136,12 @@ export const selectTopLevelCommentsByClaimId = createSelector(
     const comments = {};
     // replace every comment_id in the list with the actual comment object
     Object.keys(byClaimId).forEach((claimId) => {
-      const commentIds = byClaimId[claimId];
-      comments[claimId] = Array(commentIds === null ? 0 : commentIds.length);
+      const commentIds = byClaimId[claimId] || EMPTY_ARRAY;
+      comments[claimId] = [];
 
       for (let i = 0; i < commentIds.length; i++) {
-        comments[claimId][i] = byId[commentIds[i]];
+        const comment = byId[commentIds[i]];
+        if (comment) comments[claimId].push(comment);
       }
     });
     return comments;
@@ -267,7 +270,8 @@ export const selectRepliesForParentId = (createCachedSelector as any)(
     if (!replyIdsForParent.length) return EMPTY_ARRAY;
     const comments = [];
     replyIdsForParent.forEach((cid) => {
-      comments.push(commentsById[cid]);
+      const comment = commentsById[cid];
+      if (comment) comments.push(comment);
     });
     // const comments = byParentId && byParentId[id];
     return filterComments(comments, undefined, filterInputs);

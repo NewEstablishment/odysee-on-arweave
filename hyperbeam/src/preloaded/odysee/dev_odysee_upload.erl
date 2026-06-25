@@ -81,7 +81,7 @@ authenticated_owner(_Base, Req, Opts) ->
                 <<"body">> => <<"Signed request required.">>
             }};
         Signers ->
-            case hb_message:verify(Req, signers, Opts) of
+            case request_signature_valid(Req, Opts) of
                 true -> {ok, hd(Signers)};
                 _ -> {error, #{
                     <<"status">> => 401,
@@ -99,6 +99,21 @@ signers(Msg, Opts) when is_map(Msg) ->
     end;
 signers(_Msg, _Opts) ->
     [].
+
+request_signature_valid(Req, Opts) ->
+    hb_message:verify(Req, signers, Opts)
+        orelse hb_message:verify(hb_maps:without(auth_hook_ignored_keys(), Req, Opts), signers, Opts).
+
+auth_hook_ignored_keys() ->
+    [
+        <<"secret">>,
+        <<"cookie">>,
+        <<"set-cookie">>,
+        <<"path">>,
+        <<"method">>,
+        <<"authorization">>,
+        <<"!">>
+    ].
 
 request_payload(Base, Req, Opts) ->
     Raw = maps:merge(map_or_empty(Base), map_or_empty(Req)),

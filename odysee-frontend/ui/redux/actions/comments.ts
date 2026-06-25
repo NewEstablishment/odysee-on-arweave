@@ -36,10 +36,27 @@ import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
 import { getStripeEnvironment } from 'util/stripe';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 const stripeEnvironment = getStripeEnvironment();
 const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
 const PROMISE_FULFILLED = 'fulfilled';
 const MENTION_REGEX = /(?:^| |\n)@[^\s=&#$@%?:;/"<>%{}|^~[]*(?::[\w]+)?/gm;
+
+function parseStoredJson<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function commentDebug(message: string, data?: any) {
+  if (typeof window === 'undefined' || window.localStorage?.getItem('odysee:comment-debug') !== '1') return;
+  console.info('[odysee-comment]', message, data);
+}
+
 export function doCommentList(
   uri: string,
   parentId: string | null | undefined,
@@ -75,6 +92,15 @@ export function doCommentList(
     const { claim_id: creatorClaimId, name: channelName } = creatorChannelClaim || {};
     let channelSignature: { signature?: string; signing_ts?: string } = {};
     let myChannelClaim;
+
+    commentDebug('list:start', {
+      claimId,
+      parentId,
+      page,
+      pageSize,
+      sortBy,
+      hyperbeam: isHyperbeamEnabled(),
+    });
 
     if (isProtected) {
       if (!myChannelClaims) {
@@ -126,6 +152,15 @@ export function doCommentList(
     })
       .then((result: CommentListResponse) => {
         const { items: comments, total_items, total_filtered_items, total_pages } = result;
+        commentDebug('list:success', {
+          claimId,
+          parentId,
+          page,
+          items: comments?.length,
+          total_items,
+          total_filtered_items,
+          total_pages,
+        });
 
         const returnResult = () => {
           dispatch({
@@ -155,6 +190,7 @@ export function doCommentList(
       })
       .catch((error) => {
         const { message } = error;
+        commentDebug('list:failed', error);
 
         switch (message) {
           case 'comments are disabled by the creator':
@@ -817,7 +853,7 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
     } = params;
     const state = getState();
     const activeChannelClaim = selectActiveChannelClaim(state);
-    const myCommentedChannelIds = selectMyCommentedChannelIdsForId(state, claim_id);
+    let myCommentedChannelIds = selectMyCommentedChannelIdsForId(state, claim_id);
     const mentionedChannels: Array<MentionedChannel> = [];
     const claim = selectClaimForClaimId(state, claim_id);
     const targetClaimId = claim.signing_channel ? claim.signing_channel.claim_id : claim_id; // claim_id is for anonymous content and on channel page comments
@@ -826,6 +862,25 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
       console.error('Unable to create comment. No activeChannel is set.'); // eslint-disable-line
 
       return;
+    }
+
+    commentDebug('create:start', {
+      claim_id,
+      channel_id: activeChannelClaim.claim_id,
+      parent_id,
+      hyperbeam: isHyperbeamEnabled(),
+      myCommentedChannelIds,
+    });
+
+    if (myCommentedChannelIds === undefined && isHyperbeamEnabled()) {
+      myCommentedChannelIds = [];
+      dispatch({
+        type: ACTIONS.COMMENT_FETCH_MY_COMMENTED_CHANNELS_COMPLETE,
+        data: {
+          contentClaimId: claim_id,
+          commentedChannelIds: [],
+        },
+      });
     }
 
     if (myCommentedChannelIds === undefined) {
@@ -846,7 +901,7 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
       claim_id: string;
       name: string;
       last_comment_timestamp: number;
-    } | null = previousCommenterChannelRaw ? JSON.parse(previousCommenterChannelRaw) : null;
+    } | null = parseStoredJson(previousCommenterChannelRaw, null);
 
     if (
       previousCommenterChannel &&
@@ -920,7 +975,9 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
       }
     }
 
+    commentDebug('create:sign:start', { channel_id: activeChannelClaim.claim_id });
     const signatureData = await ChannelSign.sign(activeChannelClaim.claim_id, comment, false);
+    commentDebug('create:sign:done', { ok: Boolean(signatureData), signing_ts: signatureData?.signing_ts });
 
     if (!signatureData) {
       dispatch(
@@ -929,6 +986,7 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
           message: __('Unable to verify your channel. Please try again.'),
         })
       );
+      commentDebug('create:sign:failed');
       return;
     }
 
@@ -944,11 +1002,13 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
       dispatch(doSeeNotifications([notification.id]));
     }
 
+    commentDebug('create:request:start');
     return Comments.comment_create({
       comment: comment,
       claim_id: claim_id,
       channel_id: activeChannelClaim.claim_id,
       channel_name: activeChannelClaim.name,
+      channel_url: activeChannelClaim.permanent_url || activeChannelClaim.canonical_url || activeChannelClaim.short_url,
       parent_id: parent_id,
       signature: signatureData.signature,
       signing_ts: signatureData.signing_ts,
@@ -975,6 +1035,10 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
         : {}),
     } as unknown as CommentCreateParams)
       .then((result: CommentCreateResponse) => {
+        commentDebug('create:request:success', {
+          comment_id: result?.comment_id,
+          hasSignature: Boolean(result?.signature),
+        });
         if (dry_run) {
           return result;
         }
@@ -986,7 +1050,7 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
         };
         LocalStorage.setItem(`commenter_${targetClaimId}`, JSON.stringify(previousCommenterChannel));
         const lastCommentedClaimsRaw = LocalStorage.getItem('lastCommentedClaims');
-        const lastCommentedClaims: Array<string> = lastCommentedClaimsRaw ? JSON.parse(lastCommentedClaimsRaw) : [];
+        const lastCommentedClaims: Array<string> = parseStoredJson(lastCommentedClaimsRaw, []);
 
         if (!lastCommentedClaims.includes(claim_id)) {
           lastCommentedClaims.push(claim_id);
@@ -1011,6 +1075,7 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
         return result;
       })
       .catch((error) => {
+        commentDebug('create:request:failed', error);
         if (!dry_run) {
           dispatch({
             type: ACTIONS.COMMENT_CREATE_FAILED,

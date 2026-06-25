@@ -65,6 +65,11 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 
 const stripeEnvironment = getStripeEnvironment();
 
+function commentDebug(message: string, data?: any) {
+  if (typeof window === 'undefined' || window.localStorage?.getItem('odysee:comment-debug') !== '1') return;
+  console.info('[odysee-comment]', message, data);
+}
+
 function getCommentsMembersOnlyRestriction(
   claimId: string | undefined,
   channelClaimId: string | undefined,
@@ -363,7 +368,7 @@ export function CommentCreate(props: Props) {
   }, [claimIsMine, addEmoteToComment, handleSelectSticker, showSelectors.open, showSelectors.tab]);
   const submitButtonProps = {
     button: 'primary',
-    type: 'submit',
+    type: 'button',
     requiresAuth: true,
   };
   const actionButtonProps = {
@@ -719,13 +724,21 @@ export function CommentCreate(props: Props) {
     dryRun = false
   ) {
     if (isSubmitting || disableInput || !claimId) return;
+    commentDebug('component:create:start', { claimId, channelClaimId, isLivestream, dryRun });
     // do another creator settings fetch here to make sure that on submit, the setting did not change
-    const commentsAreMembersOnly = await getCommentsMembersOnlyRestriction(
-      claimId,
-      channelClaimId,
-      isLivestream,
-      doFetchCreatorSettings
-    );
+    let commentsAreMembersOnly;
+
+    try {
+      commentsAreMembersOnly = await getCommentsMembersOnlyRestriction(
+        claimId,
+        channelClaimId,
+        isLivestream,
+        doFetchCreatorSettings
+      );
+    } catch {
+      commentsAreMembersOnly = undefined;
+    }
+    commentDebug('component:create:settings', { commentsAreMembersOnly });
 
     if (commentsAreMembersOnly === undefined) {
       doToast({
@@ -739,6 +752,7 @@ export function CommentCreate(props: Props) {
     if (notAuthedToLiveChat && commentsAreMembersOnly) return handleJoinMembersOnlyChat();
     setSubmitting(true);
     const stickerValue = selectedSticker && buildValidSticker(selectedSticker.name);
+    commentDebug('component:create:dispatch', { hasSticker: Boolean(stickerValue), parentId });
     return doCommentCreate(uri, isLivestream, {
       comment: stickerValue || commentValue,
       claim_id: claimId,
@@ -754,6 +768,7 @@ export function CommentCreate(props: Props) {
       dry_run: dryRun,
     } as any)
       .then((res) => {
+        commentDebug('component:create:done', { comment_id: res?.comment_id, hasSignature: Boolean(res?.signature) });
         setSubmitting(false);
 
         if (dryRun) {
@@ -774,6 +789,7 @@ export function CommentCreate(props: Props) {
         }
       })
       .catch(() => {
+        commentDebug('component:create:failed');
         setSubmitting(false);
 
         if (dryRun) {
@@ -984,7 +1000,11 @@ export function CommentCreate(props: Props) {
       />
 
       <Form
-        onSubmit={() => {}}
+        onSubmit={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          commentDebug('component:form:submit');
+        }}
         className={classnames('comment-create', {
           'comment-create--reply': isReply,
           'comment-create--nestedReply': isNested,
@@ -1130,11 +1150,17 @@ export function CommentCreate(props: Props) {
                                 ? __('Commenting...')
                                 : __('Comment --[button to submit something]--')
                         }
-                        onClick={() =>
-                          selectedSticker
-                            ? handleSubmitSticker()
-                            : handleCreateComment(undefined, undefined, undefined, undefined)
-                        }
+                        onClick={(event) => {
+                          event.preventDefault();
+                          commentDebug('component:button:click', { selectedSticker: Boolean(selectedSticker) });
+
+                          if (selectedSticker) {
+                            handleSubmitSticker();
+                            return;
+                          }
+
+                          handleCreateComment(undefined, undefined, undefined, undefined);
+                        }}
                       />
                     )}
                   </>
