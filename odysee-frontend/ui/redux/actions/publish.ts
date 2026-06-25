@@ -141,7 +141,9 @@ export const doPublishDesktop = (filePath?: any, preview?: boolean) => {
         }
       };
 
-      if (!isHyperbeamUploadClaim(pendingClaim)) {
+      const hyperbeamUpload = isHyperbeamUploadClaim(pendingClaim);
+
+      if (!hyperbeamUpload) {
         analytics.apiLog.publish(pendingClaim, apiLogSuccessCb);
       }
       const { permanent_url: url } = pendingClaim;
@@ -159,16 +161,26 @@ export const doPublishDesktop = (filePath?: any, preview?: boolean) => {
       const isMatch = (claim: any) => claim.claim_id === pendingClaim.claim_id;
 
       const isEdit = myClaims.some(isMatch);
-      actions.push({
-        type: ACTIONS.UPDATE_PENDING_CLAIMS,
-        data: {
-          claims: [pendingClaim],
-          options: {
-            overrideTags: true,
-            overrideSigningChannel: true,
-          },
-        },
-      } as UpdatePendingClaimsAction);
+      actions.push(
+        hyperbeamUpload
+          ? {
+              type: ACTIONS.UPDATE_CONFIRMED_CLAIMS,
+              data: {
+                claims: [pendingClaim],
+                pending: state.claims.pendingById || {},
+              },
+            }
+          : ({
+              type: ACTIONS.UPDATE_PENDING_CLAIMS,
+              data: {
+                claims: [pendingClaim],
+                options: {
+                  overrideTags: true,
+                  overrideSigningChannel: true,
+                },
+              },
+            } as UpdatePendingClaimsAction)
+      );
       dispatch(batchActions(...actions));
       dispatch(
         doOpenModal(MODALS.PUBLISH, {

@@ -116,6 +116,8 @@ function normalizePublishResponse(
           short_url: publishedUri,
         }
       : {}),
+    confirmations: outputs[0].confirmations > 0 ? outputs[0].confirmations : 1,
+    is_my_output: true,
     is_channel_signature_valid: Boolean(signingChannel) || outputs[0].is_channel_signature_valid,
     signing_channel: signingChannel ? channelSummary(signingChannel) : outputs[0].signing_channel,
     streaming_url: mediaUrl,

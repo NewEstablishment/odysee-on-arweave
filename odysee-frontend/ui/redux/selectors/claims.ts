@@ -37,6 +37,10 @@ export function selectClaimsStates(state: State) {
 
 const selectState = (state: State) => state.claims || EMPTY_OBJECT;
 
+function isHyperbeamUploadClaim(claim: any) {
+  return claim?.hyperbeam?.device === 'odysee-upload@1.0' || claim?.hyperbeam?.device === '~odysee-upload@1.0';
+}
+
 export const selectById = (state: State) => selectState(state).byId || EMPTY_OBJECT;
 export const selectPendingClaimsById = (state: State) => selectState(state).pendingById || EMPTY_OBJECT;
 export const selectClaimsById = createSelector(selectById, selectPendingClaimsById, (byId, pendingById) => {
@@ -121,21 +125,24 @@ export const selectAllClaimsByChannel = createSelector(
 export const selectPendingIds = createSelector(selectState, (state) => Object.keys(state.pendingById) || []);
 export const selectPendingClaims = createSelector(selectPendingClaimsById, (pendingById) => Object.values(pendingById));
 export const selectClaimIsPendingForId = (state: State, claimId: string) => {
-  return Boolean(selectPendingClaimsById(state)[claimId]);
+  const claim = selectPendingClaimsById(state)[claimId];
+  return Boolean(claim && !isHyperbeamUploadClaim(claim));
 };
 export const makeSelectClaimIsPending = (uri: string) =>
   createSelector(selectClaimIdsByUri, selectPendingClaimsById, (idsByUri, pendingById) => {
     const claimId = idsByUri[normalizeURI(uri)];
 
     if (claimId) {
-      return Boolean(pendingById[claimId]);
+      const claim = pendingById[claimId];
+      return Boolean(claim && !isHyperbeamUploadClaim(claim));
     }
 
     return false;
   });
 export const makeSelectClaimIdIsPending = (claimId: string) =>
   createSelector(selectPendingClaimsById, (pendingById) => {
-    return Boolean(pendingById[claimId]);
+    const claim = pendingById[claimId];
+    return Boolean(claim && !isHyperbeamUploadClaim(claim));
   });
 export const selectClaimIdForUri = (state: State, uri: string) => selectClaimIdsByUri(state)[uri];
 export const selectReflectingById = (state: State) => selectState(state).reflectingById;
