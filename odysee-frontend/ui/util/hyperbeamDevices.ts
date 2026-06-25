@@ -12,6 +12,8 @@ export const HYPERBEAM_DEVICE = {
   stream: '~odysee-stream@1.0',
   streamDescriptor: '~odysee-stream-descriptor@1.0',
   subscription: '~odysee-subscription@1.0',
+  upload: '~odysee-upload@1.0',
+  userState: '~odysee-user-state@1.0',
 };
 
 export function hyperbeamNodeBase() {
@@ -51,15 +53,16 @@ export function hyperbeamDevicePostJson(
 ) {
   const base = hyperbeamDeviceBase(device);
   if (!base) return null;
+  const { path, fields } = hyperbeamKeyFields(key);
 
-  return fetch(`${base}/${key}`, {
+  return fetch(`${base}/${path}`, {
     method: 'POST',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
       ...headers,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...fields, ...body }),
   });
 }
 
@@ -73,17 +76,38 @@ export function hyperbeamDevicePostParams64(
   return hyperbeamDevicePostJson(device, key, { [paramName]: base64Url(JSON.stringify(value || {})) }, headers);
 }
 
+function hyperbeamKeyFields(key: string) {
+  const [path, ...parts] = key.split('&');
+  const fields = parts.reduce<Record<string, any>>((acc, part) => {
+    if (!part) return acc;
+
+    const equals = part.indexOf('=');
+    const name = decodeURIComponent(equals === -1 ? part : part.slice(0, equals));
+    const value = equals === -1 ? true : decodeURIComponent(part.slice(equals + 1));
+    acc[name] = value;
+    return acc;
+  }, {});
+
+  return { path, fields };
+}
+
 export function hyperbeamSdkPostParams64(
   method: string,
   value: any,
   headers: Record<string, string> = {},
   paramName = 'params64'
 ) {
-  void method;
-  void value;
-  void headers;
-  void paramName;
-  return null;
+  return hyperbeamDevicePostParams64(
+    HYPERBEAM_DEVICE.userState,
+    'call&!',
+    {
+      kind: 'sdk',
+      method,
+      params: value || {},
+    },
+    headers,
+    paramName
+  );
 }
 
 const HYPERBEAM_ROUTED_METHODS = new Set([
@@ -92,12 +116,23 @@ const HYPERBEAM_ROUTED_METHODS = new Set([
   'get',
   'stream_list',
   'blob_list',
+  'channel_sign',
   'comment_list',
   'comment_by_id',
   'comment_get_channel_from_comment_id',
+  'collection_create',
+  'collection_list',
+  'collection_update',
+  'preference_get',
+  'preference_set',
   'reaction_list',
+  'settings_clear',
+  'settings_get',
+  'settings_set',
   'setting_get',
   'setting_list',
+  'sync_apply',
+  'sync_hash',
   'commentron',
 ]);
 
@@ -106,6 +141,21 @@ export function isHyperbeamMethodEnabled(method: string) {
 }
 
 export function hyperbeamMethodDevice(method: string) {
-  void method;
+  if (
+    method === 'channel_sign' ||
+    method === 'collection_create' ||
+    method === 'collection_list' ||
+    method === 'collection_update' ||
+    method === 'preference_get' ||
+    method === 'preference_set' ||
+    method === 'settings_clear' ||
+    method === 'settings_get' ||
+    method === 'settings_set' ||
+    method === 'sync_apply' ||
+    method === 'sync_hash'
+  ) {
+    return HYPERBEAM_DEVICE.userState;
+  }
+
   return HYPERBEAM_DEVICE.claim;
 }

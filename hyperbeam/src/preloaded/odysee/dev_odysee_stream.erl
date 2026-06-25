@@ -123,23 +123,34 @@ derive_stream(ClaimMsg, Base, Req, Opts) ->
         {ok, ClaimID} ?= required(<<"claim-id">>, ClaimMsg, Opts),
         {ok, ClaimName} ?= required(<<"claim-name">>, ClaimMsg, Opts),
         Ext = file_extension(MediaType, Source, Opts),
-        PlayerServer = player_server(Base, Req, Opts),
-        StreamingURL = streaming_url(PlayerServer, ClaimName, ClaimID, SDHash, Ext),
-        DownloadURL = download_url(PlayerServer, ClaimID, SDHash, Ext),
-        Stream = stream_message(
-            Claim,
-            ClaimMsg,
-            Value,
-            Source,
-            ClaimID,
-            ClaimName,
-            SDHash,
-            MediaType,
-            Ext,
-            StreamingURL,
-            DownloadURL,
-            Opts
-        ),
+        {StreamingURL, DownloadURL, NativeUploadRecordID} =
+            case native_upload_media_url(Claim, Base, Req, Opts) of
+                {ok, UploadURL, RecordID} ->
+                    {UploadURL, UploadURL, RecordID};
+                not_found ->
+                    PlayerServer = player_server(Base, Req, Opts),
+                    {
+                        streaming_url(PlayerServer, ClaimName, ClaimID, SDHash, Ext),
+                        download_url(PlayerServer, ClaimID, SDHash, Ext),
+                        not_found
+                    }
+            end,
+        Stream0 =
+            stream_message(
+                Claim,
+                ClaimMsg,
+                Value,
+                Source,
+                ClaimID,
+                ClaimName,
+                SDHash,
+                MediaType,
+                Ext,
+                StreamingURL,
+                DownloadURL,
+                Opts
+            ),
+        Stream = put_optional({<<"native-upload-record-id">>, NativeUploadRecordID}, Stream0),
         Stream#{ <<"body">> => hb_json:encode(playback_payload(Stream, Opts)) }
     end.
 
@@ -325,11 +336,16 @@ descriptor_media_request(Stream, Base, Req, Opts) ->
     ).
 
 media_response(Stream, Base, Req, Opts) ->
-    case prefer_player_proxy(Base, Req, Opts) of
-        true ->
-            player_media_response(Stream, Base, Req, Opts);
-        false ->
-            descriptor_or_player_media(Stream, Base, Req, Opts)
+    case native_upload_record_id(Stream, Opts) of
+        not_found ->
+            case prefer_player_proxy(Base, Req, Opts) of
+                true ->
+                    player_media_response(Stream, Base, Req, Opts);
+                false ->
+                    descriptor_or_player_media(Stream, Base, Req, Opts)
+            end;
+        RecordID ->
+            dev_odysee_upload:media(#{ <<"id">> => RecordID }, Req, Opts)
     end.
 
 media_response_with_policy(Stream, Base, Req, Opts) ->
@@ -972,6 +988,41 @@ media_url(Stream, Base, Req, Opts) ->
                 ++ media_query_params(Base, Req, Opts)
         ),
     <<Origin/binary, "/~odysee-stream@1.0/media?", Query/binary>>.
+
+native_upload_media_url(Claim, Base, Req, Opts) ->
+    case native_upload_record_id(Claim, Opts) of
+        not_found ->
+            not_found;
+        RecordID ->
+            Origin = trim_trailing_slash(media_base_url(Base, Req, Opts)),
+            {ok, <<Origin/binary, "/~odysee-upload@1.0/media?id=", (url_encode(RecordID))/binary>>, RecordID}
+    end.
+
+native_upload_record_id(Msg, Opts) ->
+    Hyperbeam = hb_maps:get(<<"hyperbeam">>, Msg, #{}, Opts),
+    Device = hb_maps:get(<<"device">>, Hyperbeam, <<>>, Opts),
+    case Device of
+        <<"odysee-upload@1.0">> -> native_upload_record_id_from_hyperbeam(Msg, Hyperbeam, Opts);
+        <<"~odysee-upload@1.0">> -> native_upload_record_id_from_hyperbeam(Msg, Hyperbeam, Opts);
+        _ -> hb_maps:get(<<"native-upload-record-id">>, Msg, not_found, Opts)
+    end.
+
+native_upload_record_id_from_hyperbeam(Msg, Hyperbeam, Opts) ->
+    case
+        first_value(
+            [
+                <<"record-id">>,
+                <<"record_id">>,
+                <<"claim-id">>,
+                <<"claim_id">>
+            ],
+            Hyperbeam,
+            Opts
+        )
+    of
+        not_found -> first_value([<<"claim-id">>, <<"claim_id">>], Msg, Opts);
+        RecordID -> RecordID
+    end.
 
 media_query_params(Base, Req, Opts) ->
     Params =

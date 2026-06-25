@@ -15,6 +15,7 @@ import { getSavedPassword, getAuthToken } from 'util/saved-passwords';
 import { doHandleSyncComplete } from 'redux/actions/app';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 let syncTimer = null;
 const SYNC_INTERVAL = 1000 * 60 * 5; // 5 minutes
 
@@ -741,6 +742,10 @@ async function syncSharedPreferenceWrite(
   previousSyncHash: string | null | undefined,
   currentSyncHash: string | null | undefined
 ) {
+  if (isHyperbeamEnabled()) {
+    return;
+  }
+
   const state = getState();
   const syncEnabled = selectClientSetting(state, SETTINGS.ENABLE_SYNC);
   const hasVerifiedEmail = selectUserVerifiedEmail(state);

@@ -4,6 +4,8 @@
 !/odysee-frontend/.env.defaults
 
 /tmp/
+/_build/
+/.pnpm-store/
 
 hyperbeam/_build/
 hyperbeam/deps/

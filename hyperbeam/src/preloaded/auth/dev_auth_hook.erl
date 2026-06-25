@@ -228,12 +228,23 @@ is_relevant_from_keys(Base, Request, Opts) ->
         RelevantKeys ->
             lists:any(
                 fun(Key) ->
-                    case hb_maps:find(Key, Request, Opts) of
-                        {ok, _} -> true;
-                        error -> false
-                    end
+                    has_relevant_key(Key, Request, Opts)
                 end,
                 RelevantKeys
+            )
+    end.
+
+has_relevant_key(Key, Request, Opts) ->
+    case hb_maps:find(Key, Request, Opts) of
+        {ok, _} ->
+            true;
+        error ->
+            LowerKey = hb_util:to_lower(hb_ao:normalize_key(Key)),
+            lists:any(
+                fun(RequestKey) ->
+                    hb_util:to_lower(hb_ao:normalize_key(RequestKey)) =:= LowerKey
+                end,
+                hb_maps:keys(Request, Opts)
             )
     end.
 
@@ -373,7 +384,10 @@ finalize(KeyProvider, SignedReq, MessageSequence, Opts) ->
 
 %% @doc Refresh the options and log an event if they have changed.
 refresh_opts(Opts) ->
-    NewOpts = hb_http_server:get_opts(Opts),
+    NewOpts =
+        try hb_http_server:get_opts(Opts)
+        catch _:_ -> Opts
+        end,
     case NewOpts of
         Opts -> ?event(auth_hook_no_opts_change);
         _ ->

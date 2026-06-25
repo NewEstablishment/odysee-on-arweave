@@ -2,6 +2,7 @@ import * as ACTIONS from 'constants/action_types';
 import Lbry from 'lbry';
 // Use browser-native URLSearchParams instead of Node's querystring module
 import analytics from 'analytics';
+import { callHyperbeamLbryio, canCallHyperbeamLbryio } from 'services/hyperbeamUserState';
 const Lbryio: {
   enabled: boolean;
   authenticationPromise: Promise<any> | null;
@@ -91,43 +92,61 @@ Lbryio.call = (resource, action, params = {}, method = 'post') => {
   }
 
   return Lbryio.getAuthToken().then((token) => {
-    const fullParams = {
-      auth_token: token,
-      ...params,
-    };
-    Object.keys(fullParams).forEach((key) => {
-      const value = fullParams[key];
+    const requestLegacy = () => {
+      const fullParams = {
+        auth_token: token,
+        ...params,
+      };
+      Object.keys(fullParams).forEach((key) => {
+        const value = fullParams[key];
 
-      if (typeof value === 'object') {
-        fullParams[key] = JSON.stringify(value);
+        if (typeof value === 'object') {
+          fullParams[key] = JSON.stringify(value);
+        }
+      });
+      const qs = new URLSearchParams(fullParams).toString();
+      let url = `${Lbryio.CONNECTION_STRING}${resource}/${action}?${qs}`;
+      let options = {
+        method: 'GET',
+      };
+
+      if (method === 'post') {
+        options = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: qs,
+        } as any;
+        url = `${Lbryio.CONNECTION_STRING}${resource}/${action}`;
       }
-    });
-    const qs = new URLSearchParams(fullParams).toString();
-    let url = `${Lbryio.CONNECTION_STRING}${resource}/${action}?${qs}`;
-    let options = {
-      method: 'GET',
+
+      return makeRequest(url, options)
+        .then((response) => {
+          sendCallAnalytics(resource, action, params);
+          return response.data;
+        })
+        .catch((error) => {
+          sendFailedCallAnalytics(resource, action, params, error);
+          throw error;
+        });
     };
 
-    if (method === 'post') {
-      options = {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: qs,
-      } as any;
-      url = `${Lbryio.CONNECTION_STRING}${resource}/${action}`;
+    if (canCallHyperbeamLbryio(resource, action)) {
+      return callHyperbeamLbryio(resource, action, params, token)
+        .then((response) => {
+          if (response === null) return requestLegacy();
+
+          sendCallAnalytics(resource, action, params);
+          return response;
+        })
+        .catch((error) => {
+          sendFailedCallAnalytics(resource, action, params, error);
+          throw error;
+        });
     }
 
-    return makeRequest(url, options)
-      .then((response) => {
-        sendCallAnalytics(resource, action, params);
-        return response.data;
-      })
-      .catch((error) => {
-        sendFailedCallAnalytics(resource, action, params, error);
-        throw error;
-      });
+    return requestLegacy();
   });
 };
 

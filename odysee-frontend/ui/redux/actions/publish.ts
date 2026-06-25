@@ -3,7 +3,7 @@ import * as RENDER_MODES from 'constants/file_render_modes';
 import * as MODALS from 'constants/modal_types';
 import * as ACTIONS from 'constants/action_types';
 import * as PAGES from 'constants/pages';
-import { NO_FILE, PAYWALL } from 'constants/publish';
+import { BITRATE, NO_FILE, PAYWALL } from 'constants/publish';
 import * as PUBLISH_TYPES from 'constants/publish_types';
 import { batchActions } from 'util/batch-actions';
 import { THUMBNAIL_CDN_SIZE_LIMIT_BYTES, WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
@@ -38,8 +38,10 @@ import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { sanitizeName, buildURI } from 'util/lbryURI';
 import { getVideoBitrate, resolvePublishPayload } from 'util/publish';
 import { parsePurchaseTag, parseRentalTag, TO_SECONDS } from 'util/stripe';
+import { canPublishThroughHyperbeam, publishThroughHyperbeam } from 'services/hyperbeamUpload';
 import Lbry from 'lbry';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
+import { getAuthToken as getSavedAuthToken } from 'util/saved-passwords';
 // import LbryFirst from 'extras/lbry-first/lbry-first';
 import { isClaimNsfw, getChannelIdFromClaim, isStreamPlaceholderClaim } from 'util/claim';
 import { MEMBERS_ONLY_CONTENT_TAG, SCHEDULED_TAGS, VISIBILITY_TAGS } from 'constants/tags';
@@ -48,6 +50,34 @@ const PUBLISH_PATH_MAP = Object.freeze({
   post: PAGES.POST,
   livestream: PAGES.LIVESTREAM,
 });
+
+function getAuthToken() {
+  const headers = Lbry.getApiRequestHeaders();
+  return headers && Object.keys(headers).includes(X_LBRY_AUTH_TOKEN)
+    ? headers[X_LBRY_AUTH_TOKEN]
+    : getSavedAuthToken() || '';
+}
+
+function isHyperbeamUploadClaim(claim) {
+  return claim?.hyperbeam?.device === 'odysee-upload@1.0' || claim?.hyperbeam?.device === '~odysee-upload@1.0';
+}
+
+function preserveBrowserFile(filePath: any, state: State) {
+  const currentFilePath = selectPublishFormValue(state, 'filePath');
+  return typeof filePath === 'string' &&
+    typeof File !== 'undefined' &&
+    currentFilePath instanceof File &&
+    currentFilePath.name === filePath
+    ? currentFilePath
+    : filePath;
+}
+
+function needsLegacyUploadPreparation(publishData: PublishState) {
+  const fileFormat = publishData.fileFormat || '';
+  const needsConvert = fileFormat && fileFormat.toLowerCase() === 'mkv' && !publishData.skipConvert;
+  const needsOptimize = publishData.fileBitrate > BITRATE.RECOMMENDED && !publishData.skipOptimize;
+  return needsConvert || needsOptimize;
+}
 
 function resolveClaimTypeForAnalytics(claim) {
   if (!claim) {
@@ -72,7 +102,7 @@ function resolveClaimTypeForAnalytics(claim) {
   }
 }
 
-export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
+export const doPublishDesktop = (filePath?: any, preview?: boolean) => {
   return (dispatch: Dispatch, getState: () => State) => {
     const publishPreviewFn = (publishPayload, previewResponse) => {
       dispatch(
@@ -83,8 +113,9 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
       );
     };
 
-    const noFileParam = !filePath || filePath === NO_FILE;
     const state: State = getState();
+    const publishFilePath = preserveBrowserFile(filePath, state);
+    const noFileParam = !publishFilePath || publishFilePath === NO_FILE;
     const editingUri = selectPublishFormValue(state, 'editingURI') || '';
     const remoteUrl = selectPublishFormValue(state, 'remoteFileUrl');
     const { memberRestrictionTierIds, name } = state.publish;
@@ -110,7 +141,9 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
         }
       };
 
-      analytics.apiLog.publish(pendingClaim, apiLogSuccessCb);
+      if (!isHyperbeamUploadClaim(pendingClaim)) {
+        analytics.apiLog.publish(pendingClaim, apiLogSuccessCb);
+      }
       const { permanent_url: url } = pendingClaim;
       const actions: Array<any> = [];
       actions.push({
@@ -141,7 +174,7 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
         doOpenModal(MODALS.PUBLISH, {
           uri: url,
           isEdit,
-          filePath,
+          filePath: publishFilePath,
           lbryFirstError,
         })
       );
@@ -177,6 +210,7 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
     };
 
     if (preview) {
+      if (!noFileParam) dispatch(doUpdatePublishForm({ filePath: publishFilePath } as any));
       dispatch(doPublish(publishSuccess, publishFail, publishPreviewFn));
       return;
     }
@@ -185,6 +219,7 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
       navigateTo(`/$/${PAGES.UPLOADS}`);
     }
 
+    if (!noFileParam) dispatch(doUpdatePublishForm({ filePath: publishFilePath } as any));
     dispatch(doPublish(publishSuccess, publishFail));
   };
 };
@@ -1331,10 +1366,14 @@ export const doPublish =
       resolvePublishPayload(publishData, myClaimForUri, myChannels, memberRestrictionStatus, Boolean(previewFn));
     const { channel_id: channelClaimId } = publishPayload;
     const existingClaimId = myClaimForUri?.claim_id || '';
+    const publishFile = publishData.filePath;
+    const publishThroughHyperbeamEnabled =
+      !needsLegacyUploadPreparation(publishData) &&
+      canPublishThroughHyperbeam(publishFile, publishPayload, publishData.type);
 
     // hit backend to save restricted memberships
     // hit the backend immediately to save the data, we will overwrite it if publish succeeds
-    if (channelClaimId && !previewFn) {
+    if (channelClaimId && !previewFn && !publishThroughHyperbeamEnabled) {
       dispatch(
         doSaveMembershipRestrictionsForContent(
           channelClaimId,
@@ -1358,6 +1397,10 @@ export const doPublish =
       } else {
         return previewFn(publishPayload, null);
       }
+    }
+
+    if (publishThroughHyperbeamEnabled) {
+      return publishThroughHyperbeam(publishFile, publishPayload, getAuthToken(), myChannels).then(success, fail);
     }
 
     return Lbry.publish(publishPayload).then((response: PublishResponse) => {

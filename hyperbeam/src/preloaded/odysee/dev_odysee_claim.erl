@@ -64,10 +64,14 @@ find_or_fetch_claim(Base, Req, Opts) ->
         {ok, Claim, Raw} ->
             {ok, Claim, Raw};
         not_found ->
-            maybe
-                {ok, URI} ?= claim_uri(Base, Req, Opts),
-                {ok, Raw} ?= resolve_proxy(URI, Base, Req, Opts),
-                claim_from_proxy(URI, Raw, Opts)
+            case native_upload_claim(Base, Req, Opts) of
+                {ok, Claim, Raw} -> {ok, Claim, Raw};
+                not_found ->
+                    maybe
+                        {ok, URI} ?= claim_uri(Base, Req, Opts),
+                        {ok, Raw} ?= resolve_proxy(URI, Base, Req, Opts),
+                        claim_from_proxy(URI, Raw, Opts)
+                    end
             end
     end.
 
@@ -76,9 +80,23 @@ find_or_fetch_search(Base, Req, Opts) ->
         {ok, _Result, _Raw} = Search ->
             Search;
         not_found ->
-            maybe
-                {ok, Raw} ?= search_proxy(search_params(Base, Req), Base, Req, Opts),
-                search_from_proxy(Raw, Opts)
+            Params = search_params(Base, Req),
+            NativeSearch = native_upload_search(Params, Opts),
+            case search_proxy(Params, Base, Req, Opts) of
+                {ok, Raw} ->
+                    case {NativeSearch, search_from_proxy(Raw, Opts)} of
+                        {{ok, NativeResult, _NativeRaw}, {ok, Result, ProxyRaw}} ->
+                            merge_native_search(NativeResult, Result, ProxyRaw, Opts);
+                        {not_found, Search} ->
+                            Search;
+                        {{ok, _NativeResult, _NativeRaw} = Search, _ProxyError} ->
+                            Search
+                    end;
+                ProxyError ->
+                    case NativeSearch of
+                        not_found -> ProxyError;
+                        Search -> Search
+                    end
             end
     end.
 
@@ -263,6 +281,214 @@ candidate_from_decoded(Decoded, URI, Raw, Opts) when is_map(Decoded) ->
     end;
 candidate_from_decoded(_Decoded, _URI, _Raw, _Opts) ->
     not_found.
+
+native_upload_claim(Base, Req, Opts) ->
+    case native_upload_record_id(Base, Req, Opts) of
+        {ok, RecordID} ->
+            native_upload_claim_from_id(RecordID, Opts);
+        not_found ->
+            case claim_uri(Base, Req, Opts) of
+                {ok, URI} -> native_upload_claim_from_index(<<"uri">>, URI, Opts);
+                _ -> not_found
+            end
+    end.
+
+native_upload_record_id(Base, Req, Opts) ->
+    case
+        first_found(
+            [
+                {Req, <<"record-id">>},
+                {Req, <<"record_id">>},
+                {Req, <<"claim-id">>},
+                {Req, <<"claim_id">>},
+                {Req, <<"id">>},
+                {Base, <<"record-id">>},
+                {Base, <<"record_id">>},
+                {Base, <<"claim-id">>},
+                {Base, <<"claim_id">>},
+                {Base, <<"id">>}
+            ],
+            Opts
+        )
+    of
+        not_found -> not_found;
+        ID ->
+            case native_upload_claim_from_id(ID, Opts) of
+                {ok, _Claim, _Raw} -> {ok, ID};
+                not_found -> native_upload_id_from_index(<<"claim-id">>, ID, Opts)
+            end
+    end.
+
+native_upload_claim_from_index(Type, Value, Opts) ->
+    case native_upload_id_from_index(Type, Value, Opts) of
+        {ok, RecordID} -> native_upload_claim_from_id(RecordID, Opts);
+        not_found -> not_found
+    end.
+
+native_upload_id_from_index(Type, Value, Opts) when is_binary(Value) ->
+    Store = hb_opts:get(store, no_viable_store, Opts),
+    case hb_store:read(Store, native_upload_index_path(Type, Value), maps:without([<<"store">>, store], Opts)) of
+        {ok, RecordID} when is_binary(RecordID) -> {ok, RecordID};
+        RecordID when is_binary(RecordID) -> {ok, RecordID};
+        _ -> not_found
+    end;
+native_upload_id_from_index(_Type, _Value, _Opts) ->
+    not_found.
+
+native_upload_claim_from_id(RecordID, Opts) when is_binary(RecordID) ->
+    case hb_cache:read(RecordID, Opts) of
+        {ok, Record0} when is_map(Record0) ->
+            Record = native_upload_enrich_record(RecordID, hb_cache:ensure_all_loaded(Record0, Opts), Opts),
+            case hb_maps:get(<<"claim">>, Record, not_found, Opts) of
+                Claim when is_map(Claim) -> {ok, Claim, hb_json:encode(Claim)};
+                _ -> not_found
+            end;
+        _ -> not_found
+    end;
+native_upload_claim_from_id(_RecordID, _Opts) ->
+    not_found.
+
+native_upload_enrich_record(RecordID, Record0, Opts) ->
+    Claim0 = hb_maps:get(<<"claim">>, Record0, #{}, Opts),
+    Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim0, #{}, Opts),
+    Claim = Claim0#{
+        <<"claim_id">> => RecordID,
+        <<"claim-id">> => RecordID,
+        <<"txid">> => RecordID,
+        <<"hyperbeam">> => Hyperbeam0#{
+            <<"record-id">> => RecordID
+        }
+    },
+    Record0#{
+        <<"id">> => RecordID,
+        <<"record-id">> => RecordID,
+        <<"claim">> => Claim
+    }.
+
+native_upload_index_path(Type, Value) ->
+    <<"odysee/upload/", Type/binary, "/", (hb_util:encode(hb_crypto:sha256(Value)))/binary>>.
+
+native_upload_search(Params, Opts) ->
+    Claims =
+        dedupe_claims(
+            lists:filtermap(
+                fun({Type, Value}) ->
+                    case native_upload_search_claim(Type, Value, Opts) of
+                        {ok, Claim, _Raw} -> {true, Claim};
+                        not_found -> false
+                    end
+                end,
+                native_upload_search_keys(Params, Opts)
+            ),
+            Opts
+        ),
+    case Claims of
+        [] ->
+            not_found;
+        _ ->
+            Result = #{
+                <<"items">> => Claims,
+                <<"page">> => 1,
+                <<"page_size">> => length(Claims),
+                <<"total_items">> => length(Claims),
+                <<"total_pages">> => 1
+            },
+            {ok, Result, hb_json:encode(#{ <<"result">> => Result })}
+    end.
+
+native_upload_search_claim(<<"record-id">>, Value, Opts) ->
+    native_upload_claim_from_id(Value, Opts);
+native_upload_search_claim(Type, Value, Opts) ->
+    native_upload_claim_from_index(Type, Value, Opts).
+
+native_upload_search_keys(Params, Opts) ->
+    IDs =
+        list_values(
+            first_found(
+                [
+                    {Params, <<"claim_ids">>},
+                    {Params, <<"claim-id">>},
+                    {Params, <<"claim_id">>},
+                    {Params, <<"txid">>}
+                ],
+                Opts
+            )
+        ),
+    Names =
+        list_values(
+            first_found(
+                [
+                    {Params, <<"name">>},
+                    {Params, <<"claim-name">>},
+                    {Params, <<"claim_name">>}
+                ],
+                Opts
+            )
+        ),
+    URIs =
+        normalized_uri_values(
+            list_values(
+                first_found(
+                    [
+                        {Params, <<"uri">>},
+                        {Params, <<"uris">>},
+                        {Params, <<"url">>},
+                        {Params, <<"urls">>}
+                    ],
+                    Opts
+                )
+            )
+        ),
+    [{<<"record-id">>, ID} || ID <- IDs]
+        ++ [{<<"claim-id">>, ID} || ID <- IDs]
+        ++ [{<<"name">>, Name} || Name <- Names]
+        ++ [{<<"uri">>, URI} || URI <- URIs].
+
+normalized_uri_values(Values) ->
+    lists:filtermap(
+        fun(Value) ->
+            case normalize_uri(Value) of
+                {ok, URI} -> {true, URI};
+                _ -> false
+            end
+        end,
+        Values
+    ).
+
+merge_native_search(NativeResult, Result, Raw, Opts) ->
+    NativeItems = search_items(NativeResult, Opts),
+    Items = dedupe_claims(NativeItems ++ search_items(Result, Opts), Opts),
+    Merged = Result#{
+        <<"items">> => Items,
+        <<"page_size">> => length(Items),
+        <<"total_items">> => length(Items),
+        <<"total_pages">> => 1
+    },
+    {ok, Merged, Raw}.
+
+dedupe_claims(Claims, Opts) ->
+    {Items, _Seen} =
+        lists:foldl(
+            fun(Claim, {Acc, Seen}) ->
+                ID = first_value([<<"claim_id">>, <<"claim-id">>], Claim, Opts),
+                case lists:member(ID, Seen) of
+                    true -> {Acc, Seen};
+                    false -> {[Claim | Acc], [ID | Seen]}
+                end
+            end,
+            {[], []},
+            Claims
+        ),
+    lists:reverse(Items).
+
+list_values(not_found) ->
+    [];
+list_values(Value) when is_list(Value) ->
+    lists:flatmap(fun list_values/1, Value);
+list_values(Value) when is_binary(Value) ->
+    [Part || Part <- binary:split(Value, <<",">>, [global]), Part =/= <<>>];
+list_values(Value) ->
+    [Value].
 
 claim_uri(Base, Req, Opts) ->
     case first_found(
