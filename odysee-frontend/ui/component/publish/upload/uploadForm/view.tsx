@@ -46,6 +46,7 @@ import {
   doUpdatePublishForm,
   doPublishDesktop,
   doPublishWithEarlyUpload,
+  doPublishWithHyperbeamUpload,
   doCreateClaimForEarlyUpload,
 } from 'redux/actions/publish';
 import { doResolveUri, doCheckPublishNameAvailability } from 'redux/actions/claims';
@@ -73,6 +74,7 @@ import { selectClientSetting } from 'redux/selectors/settings';
 import { makeSelectFileRenderModeForUri } from 'redux/selectors/content';
 import { doFetchCreatorSettings } from 'redux/actions/comments';
 import { selectUploadTemplatesForChannelId } from 'redux/selectors/comments';
+import { shouldUseHyperbeamUploadDemo } from 'util/hyperbeamLegacyAuth';
 
 const loadSelectThumbnail = () => import('component/selectThumbnail' /* webpackChunkName: "selectThumbnail" */);
 const SelectThumbnail: React.LazyExoticComponent<React.ComponentType<any>> = lazyImport(loadSelectThumbnail);
@@ -160,6 +162,7 @@ function UploadForm(props: Props) {
   const emptyPostError = mode === PUBLISH_MODES.POST && (!fileText || fileText.trim() === '');
   const formDisabled = emptyPostError || publishing;
   const isInProgress = filePath || editingURI || name || title;
+  const useHyperbeamUploadDemo = shouldUseHyperbeamUploadDemo();
 
   React.useEffect(() => {
     if (!isInProgress) return;
@@ -347,6 +350,16 @@ function UploadForm(props: Props) {
       const pipelineStage = activePipelineItem?.stage;
       dispatch(doUpdatePipelineItem(pipelineId, { publishStarted: true }));
 
+      if (mode === PUBLISH_MODES.FILE && useHyperbeamUploadDemo && outputFile instanceof File) {
+        if (pipelineStage && ['queued', 'converting', 'optimizing', 'paused', 'pausing'].includes(pipelineStage)) {
+          dispatch(doUpdatePipelineItem(pipelineId, { stage: pipelineStage }));
+          return;
+        }
+
+        dispatch(doPublishWithHyperbeamUpload(outputFile, pipelineId));
+        return;
+      }
+
       if (
         mode === PUBLISH_MODES.FILE &&
         pipelineStage &&
@@ -529,6 +542,14 @@ function UploadForm(props: Props) {
 
   function beginEarlyUpload(file: File, pipelineId: string, progressScale?: (p: number) => number) {
     dispatch(doUpdatePipelineItem(pipelineId, { stage: 'uploading', progress: progressScale ? progressScale(0) : 0 }));
+    if (useHyperbeamUploadDemo) {
+      earlyUploadPromiseRef.current = null;
+      earlyUploadAbortRef.current = null;
+      release(pipelineId, 'uploading');
+      dispatch(doUpdatePipelineItem(pipelineId, { stage: 'ready', progress: 100 }));
+      return;
+    }
+
     import('web/setup/publish-v4-early-upload').then(({ startEarlyUpload }) => {
       const handle = startEarlyUpload(file, {
         onProgress: (percent, bytesPerSecond) => {

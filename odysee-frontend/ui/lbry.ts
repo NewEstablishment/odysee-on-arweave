@@ -6,10 +6,12 @@ import { PROXY_URL_NO_CF } from 'config';
 import { getAuthToken } from 'util/saved-passwords';
 import {
   HYPERBEAM_DEVICE,
+  hyperbeamDevicePostParams64,
   hyperbeamNodeBase,
   hyperbeamSdkPostParams64,
   isHyperbeamMethodEnabled,
 } from 'util/hyperbeamDevices';
+import { hyperbeamLegacyAuthDemoHeaders, shouldUseHyperbeamUploadDemo } from 'util/hyperbeamLegacyAuth';
 import { isHyperbeamFullMode, shouldSendHyperbeamAuthHeaders } from 'util/hyperbeamMode';
 
 import 'proxy-polyfill';
@@ -380,13 +382,21 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
         'params64',
         stripHyperbeamNodeOnlyParams(claimSearchParamHook(params || {}))
       );
+    case 'claim_list':
+      if (!isHyperbeamFullMode() && !shouldUseHyperbeamUploadDemo()) return null;
+      return hyperbeamNodeFetchJson(method, 'params64', stripHyperbeamNodeOnlyParams(params || {}));
+    case 'channel_list':
+      return hyperbeamDeviceFetchJson(
+        HYPERBEAM_DEVICE.channel,
+        'channel_list',
+        'params64',
+        withHyperbeamAuthTokenParam(stripHyperbeamNodeOnlyParams(params || {}))
+      );
     case 'status':
     case 'version':
     case 'get':
     case 'collection_resolve':
     case 'collection_list':
-    case 'claim_list':
-    case 'channel_list':
     case 'channel_sign':
     case 'stream_list':
     case 'support_list':
@@ -428,7 +438,9 @@ export function debugHyperbeamNode(data: any) {
 
   try {
     fetch(
-      `${hyperbeamNodeBase()}/${HYPERBEAM_DEVICE.odysee}/sdk?method=debug&params64=${base64Url(JSON.stringify(data || {}))}`,
+      `${hyperbeamNodeBase()}/${HYPERBEAM_DEVICE.odysee}/sdk?sdk-method=debug&params64=${base64Url(
+        JSON.stringify(data || {})
+      )}`,
       {
         method: 'POST',
         headers: { accept: 'application/json' },
@@ -441,6 +453,12 @@ function stripHyperbeamNodeOnlyParams(params: Record<string, any>) {
   const clean = { ...params };
   delete clean[NO_AUTH];
   return clean;
+}
+
+function withHyperbeamAuthTokenParam(params: Record<string, any>) {
+  const demoAuthToken = hyperbeamLegacyAuthDemoHeaders()[X_LBRY_AUTH_TOKEN];
+  const authToken = demoAuthToken || getAuthToken() || Lbry.apiRequestHeaders[X_LBRY_AUTH_TOKEN];
+  return authToken ? { ...params, auth_token: authToken } : params;
 }
 
 function hyperbeamNodeFetchJson(key: string, paramName: string, value: any): Promise<any> | null {
@@ -471,8 +489,22 @@ function hyperbeamNodeFetchJson(key: string, paramName: string, value: any): Pro
   });
 }
 
+function hyperbeamDeviceFetchJson(device: string, key: string, paramName: string, value: any): Promise<any> | null {
+  const request = hyperbeamDevicePostParams64(device, key, value, hyperbeamNodeRequestHeaders(), paramName);
+  if (!request) return null;
+
+  return fetchWithTimeout(60000, request).then((response: Response | string) => {
+    if (typeof response !== 'object') {
+      throw new Error(`${key}: HyperBEAM device fetch failed`);
+    }
+
+    return checkAndParse(response, key).then(unwrapJsonRpcResult);
+  });
+}
+
 function hyperbeamNodeRequestHeaders() {
   const headers: Record<string, string> = { accept: 'application/json' };
+  Object.assign(headers, hyperbeamLegacyAuthDemoHeaders());
   if (!shouldSendHyperbeamAuthHeaders()) return headers;
 
   const savedAuthToken = getAuthToken();
@@ -512,7 +544,6 @@ function hyperbeamFullModeLocalSdkResult(method: string, params: any): Promise<a
       return Promise.resolve({ is_encrypted: false, is_locked: false });
     case 'wallet_list':
     case 'account_list':
-    case 'channel_list':
     case 'collection_list':
     case 'purchase_list':
     case 'file_list':

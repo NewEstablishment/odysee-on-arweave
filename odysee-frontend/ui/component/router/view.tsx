@@ -24,6 +24,7 @@ import { doSetHasNavigated, doSetActiveChannel } from 'redux/actions/app';
 import { doUserSetReferrerForUri } from 'redux/actions/user';
 import { selectHasUnclaimedRefereeReward } from 'redux/selectors/rewards';
 import { selectUnseenNotificationCount } from 'redux/selectors/notifications';
+import { shouldUseHyperbeamUploadDemo } from 'util/hyperbeamLegacyAuth';
 const PLAYLIST_PATH = getPathForPage(PAGES.PLAYLIST);
 const Code2257Page = lazyImport(
   () =>
@@ -613,6 +614,7 @@ function AppRouter(props: Props) {
 
   const currentScroll = useAppSelector(selectScrollStartingPosition);
   const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isHyperbeamUploadDemoAuthenticated = shouldUseHyperbeamUploadDemo();
   const isGlobalMod = Boolean(useAppSelector(selectUser)?.global_mod);
   const hasNavigated = useAppSelector(selectHasNavigated);
   const hasUnclaimedRefereeReward = useAppSelector(selectHasUnclaimedRefereeReward);
@@ -871,7 +873,12 @@ function AppRouter(props: Props) {
         />
         <Route
           path={`/$/${PAGES.UPLOADS}`}
-          element={<PrivateRoute component={FileListPublished} isAuthenticated={isAuthenticated} />}
+          element={
+            <PrivateRoute
+              component={FileListPublished}
+              isAuthenticated={isAuthenticated || isHyperbeamUploadDemoAuthenticated}
+            />
+          }
         />
         <Route
           path={`/$/${PAGES.CREATOR_DASHBOARD}`}
@@ -879,7 +886,12 @@ function AppRouter(props: Props) {
         />
         <Route
           path={`/$/${PAGES.UPLOAD}`}
-          element={<PrivateRoute component={UploadPage} isAuthenticated={isAuthenticated} />}
+          element={
+            <PrivateRoute
+              component={UploadPage}
+              isAuthenticated={isAuthenticated || isHyperbeamUploadDemoAuthenticated}
+            />
+          }
         />
         <Route
           path={`/$/${PAGES.POST}`}

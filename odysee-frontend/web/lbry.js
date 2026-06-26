@@ -322,7 +322,6 @@ function hyperbeamFullModeLocalSdkResult(method, params) {
       return Promise.resolve({ is_encrypted: false, is_locked: false });
     case 'wallet_list':
     case 'account_list':
-    case 'channel_list':
     case 'collection_list':
     case 'purchase_list':
     case 'file_list':

@@ -9,6 +9,7 @@
 -export([
     info/1,
     index/3,
+    sdk/3,
     resolve/3,
     claim/3,
     source/3,
@@ -41,6 +42,7 @@ info(_Opts) ->
     #{
         exports => [
             <<"index">>,
+            <<"sdk">>,
             <<"resolve">>,
             <<"claim">>,
             <<"source">>,
@@ -63,6 +65,7 @@ index(_Base, _Req, _Opts) ->
     {ok, #{
         <<"device">> => ?DEVICE,
         <<"paths">> => #{
+            <<"sdk">> => [<<"sdk-method">>, <<"params64">>],
             <<"resolve">> => [<<"claim-id">>, <<"name">>, <<"url">>],
             <<"claim">> => [<<"claim-id">>, <<"name">>, <<"url">>],
             <<"source">> => [<<"id">>, <<"native-id">>, <<"kind">>],
@@ -108,6 +111,472 @@ resolve(Base, Req, Opts) ->
 
 claim(Base, Req, Opts) ->
     resolve(Base, Req, Opts).
+
+sdk(Base, Req, Opts) ->
+    case safe(fun() ->
+        Method = sdk_method(Base, Req, Opts),
+        Params = sdk_params(Base, Req, Opts),
+        sdk_dispatch(Method, Params, Base, Req, Opts)
+    end) of
+        {error, Reason} -> sdk_error(Reason);
+        Res -> Res
+    end.
+
+sdk_method(Base, Req, Opts) ->
+    Msgs = sdk_request_messages(Base, Req, Opts),
+    case first_message_value([<<"sdk-method">>, <<"sdk_method">>, <<"m">>], Msgs, Opts) of
+        not_found ->
+            case first_message_value([<<"method">>], Msgs, Opts) of
+                Method when Method =:= <<"POST">>; Method =:= <<"GET">>; Method =:= <<"post">>; Method =:= <<"get">> ->
+                    <<"status">>;
+                not_found ->
+                    <<"status">>;
+                Method ->
+                    hb_util:bin(Method)
+            end;
+        Method ->
+            hb_util:bin(Method)
+    end.
+
+sdk_params(Base, Req, Opts) ->
+    Msgs = sdk_request_messages(Base, Req, Opts),
+    case first_message_value([<<"params64">>, <<"params-64">>], Msgs, Opts) of
+        not_found ->
+            case first_message_value([<<"params">>], Msgs, Opts) of
+                Params when is_map(Params) -> Params;
+                not_found -> #{};
+                Params -> decoded_json_params(hb_util:bin(Params))
+            end;
+        Encoded ->
+            decoded_params64(Encoded)
+    end.
+
+sdk_request_messages(Base, Req, Opts) ->
+    [Req, sdk_body_message(Req, Opts), Base, sdk_body_message(Base, Opts)].
+
+sdk_body_message(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:get(<<"body">>, Msg, not_found, Opts) of
+        Body when is_binary(Body) ->
+            case try_decode_json_body(Body) of
+                Decoded when is_map(Decoded) -> Decoded;
+                _ -> #{}
+            end;
+        Body when is_map(Body) ->
+            Body;
+        _ ->
+            #{}
+    end;
+sdk_body_message(_Msg, _Opts) ->
+    #{}.
+
+try_decode_json_body(Body) ->
+    try hb_json:decode(Body)
+    catch _:_ -> #{}
+    end.
+
+decoded_params64(Encoded) ->
+    try hb_json:decode(hb_util:decode(hb_util:bin(Encoded))) of
+        Params when is_map(Params) -> Params;
+        _ -> #{}
+    catch
+        _:_ -> #{}
+    end.
+
+decoded_json_params(JSON) ->
+    try hb_json:decode(JSON) of
+        Params when is_map(Params) -> Params;
+        _ -> #{}
+    catch
+        _:_ -> #{}
+    end.
+
+sdk_dispatch(<<"status">>, _Params, _Base, _Req, _Opts) ->
+    sdk_result(#{
+        <<"is_running">> => true,
+        <<"installation_id">> => <<"hyperbeam-odysee-demo">>,
+        <<"wallet_is_encrypted">> => false,
+        <<"wallet_is_locked">> => false
+    });
+sdk_dispatch(<<"version">>, _Params, _Base, _Req, _Opts) ->
+    sdk_result(#{ <<"version">> => <<"hyperbeam-odysee-demo">> });
+sdk_dispatch(<<"setting_get">>, _Params, _Base, _Req, _Opts) ->
+    sdk_result(#{});
+sdk_dispatch(<<"setting_list">>, _Params, _Base, _Req, _Opts) ->
+    sdk_result(#{});
+sdk_dispatch(<<"settings_get">>, _Params, _Base, _Req, _Opts) ->
+    sdk_result(#{});
+sdk_dispatch(<<"settings_set">>, Params, _Base, _Req, _Opts) ->
+    sdk_result(Params);
+sdk_dispatch(<<"settings_clear">>, _Params, _Base, _Req, _Opts) ->
+    sdk_result(#{});
+sdk_dispatch(<<"resolve">>, Params, Base, Req, Opts) ->
+    sdk_result(sdk_resolve_result(sdk_urls(Params, Opts), Base, Req, Opts));
+sdk_dispatch(<<"claim_search">>, Params, Base, _Req, Opts) ->
+    case hb_ao:raw(<<"odysee-claim@1.0">>, <<"search">>, Base, Params, Opts) of
+        {ok, Msg} ->
+            sdk_result(hb_maps:get(<<"result">>, Msg, #{}, Opts));
+        {error, Reason} ->
+            sdk_error(Reason)
+    end;
+sdk_dispatch(<<"claim_list">>, Params, _Base, Req, Opts) ->
+    sdk_result(sdk_claim_list_result(Params, Req, Opts));
+sdk_dispatch(<<"recsys_fyp">>, _Params, _Base, _Req, _Opts) ->
+    sdk_result(#{});
+sdk_dispatch(<<"debug">>, _Params, _Base, _Req, _Opts) ->
+    sdk_result(#{ <<"ok">> => true });
+sdk_dispatch(Method, _Params, _Base, _Req, _Opts) ->
+    sdk_error({unsupported_sdk_method, Method}).
+
+sdk_urls(Params, Opts) ->
+    case first_value([<<"urls">>, <<"uris">>, <<"url">>, <<"uri">>], Params, Opts) of
+        not_found -> [];
+        Values when is_list(Values) -> [hb_util:bin(Value) || Value <- Values];
+        Value -> [hb_util:bin(Value)]
+    end.
+
+sdk_resolve_result(URLs, Base, Req, Opts) ->
+    maps:from_list([
+        {URL, sdk_resolve_value(URL, Base, Req, Opts)}
+    ||
+        URL <- URLs
+    ]).
+
+sdk_resolve_value(URL, Base, Req, Opts) ->
+    ResolveReq = maps:merge(maps:without([<<"params64">>, <<"params-64">>], Req), #{ <<"uri">> => URL }),
+    case hb_ao:raw(<<"odysee-claim@1.0">>, <<"resolve">>, Base, ResolveReq, Opts) of
+        {ok, Msg} ->
+            hb_maps:get(<<"claim">>, Msg, Msg, Opts);
+        {error, Reason} ->
+            #{ <<"error">> => hb_util:bin(io_lib:format("~p", [Reason])) }
+    end.
+
+sdk_claim_list_result(Params, Req, Opts) ->
+    Page = max(1, int_param(Params, <<"page">>, 1, Opts)),
+    PageSize = max(1, int_param(Params, <<"page_size">>, 20, Opts)),
+    Items0 = sdk_native_user_claim_items(Req, Opts),
+    Items = sdk_filter_claim_list_items(Items0, Params, Opts),
+    TotalItems = length(Items),
+    #{
+        <<"items">> => page_slice(Items, Page, PageSize),
+        <<"page">> => Page,
+        <<"page_size">> => PageSize,
+        <<"total_items">> => TotalItems,
+        <<"total_pages">> => total_pages(TotalItems, PageSize)
+    }.
+
+sdk_native_user_claim_items(Req, Opts) ->
+    case hb_maps:get(<<"legacy-user-id">>, Req, not_found, Opts) of
+        not_found ->
+            [];
+        LegacyUserID ->
+            case sdk_path_id(LegacyUserID) of
+                {ok, SafeUserID} -> sdk_user_upload_claim_items(SafeUserID, Opts);
+                _ -> []
+            end
+    end.
+
+sdk_user_upload_claim_items(LegacyUserID, Opts) ->
+    lists:filtermap(
+        fun(UploadID) ->
+            case hb_cache:read(sdk_user_upload_path(LegacyUserID, UploadID), Opts) of
+                {ok, Upload} when is_map(Upload) ->
+                    {true, sdk_upload_claim_item(UploadID, hb_cache:ensure_all_loaded(Upload, Opts), Opts)};
+                _ ->
+                    false
+            end
+        end,
+        hb_cache:list(sdk_user_upload_root(LegacyUserID), Opts)
+    ).
+
+sdk_upload_claim_item(UploadID, Upload, Opts) ->
+    Body = hb_maps:get(<<"body">>, Upload, <<>>, Opts),
+    ClaimName = sdk_upload_claim_name(Upload, Opts),
+    ContentType = sdk_upload_content_type(Upload, Opts),
+    CanonicalURL = sdk_upload_canonical_url(Upload, UploadID, ClaimName, Opts),
+    Source = #{
+        <<"media_type">> => ContentType,
+        <<"name">> => sdk_upload_filename(Upload, Opts),
+        <<"size">> => byte_size(Body),
+        <<"sha256">> => hb_util:to_hex(crypto:hash(sha256, Body)),
+        <<"hyperbeam_upload_id">> => UploadID,
+        <<"hyperbeam_body_path">> => sdk_upload_body_path(Body, Opts)
+    },
+    Value =
+        sdk_put_optional_pairs(#{
+            <<"title">> => sdk_upload_title(Upload, ClaimName, Opts),
+            <<"source">> => Source,
+            <<"stream_type">> => sdk_upload_stream_type(ContentType)
+        }, [
+            {<<"description">>, first_value([<<"description">>], Upload, Opts)},
+            {<<"tags">>, sdk_upload_tags(Upload, Opts)},
+            {<<"thumbnail">>, sdk_upload_thumbnail(Upload, Opts)}
+        ]),
+    sdk_put_optional_pairs(#{
+        <<"claim_id">> => UploadID,
+        <<"name">> => ClaimName,
+        <<"normalized_name">> => ClaimName,
+        <<"type">> => <<"claim">>,
+        <<"claim_op">> => <<"create">>,
+        <<"value_type">> => <<"stream">>,
+        <<"canonical_url">> => CanonicalURL,
+        <<"permanent_url">> => CanonicalURL,
+        <<"short_url">> => CanonicalURL,
+        <<"value">> => Value,
+        <<"meta">> => #{ <<"effective_amount">> => <<"0">> },
+        <<"address">> => <<>>,
+        <<"amount">> => <<"0.0">>,
+        <<"height">> => 0,
+        <<"confirmations">> => 0,
+        <<"timestamp">> => hb_maps:get(<<"upload-timestamp">>, Upload, erlang:system_time(second), Opts),
+        <<"txid">> => UploadID,
+        <<"nout">> => 0,
+        <<"is_my_output">> => true,
+        <<"hyperbeam_upload_id">> => UploadID,
+        <<"is_hyperbeam_upload">> => true
+    }, [
+        {<<"signing_channel">>, sdk_upload_signing_channel(Upload, Opts)}
+    ]).
+
+sdk_upload_filename(Upload, Opts) ->
+    case first_value([<<"filename">>, <<"file-name">>, <<"name">>], Upload, Opts) of
+        not_found -> <<"hyperbeam-upload-demo.bin">>;
+        Value -> hb_util:bin(Value)
+    end.
+
+sdk_upload_content_type(Upload, Opts) ->
+    case first_value([<<"content-type">>, <<"file-type">>, <<"mime-type">>], Upload, Opts) of
+        not_found -> <<"application/octet-stream">>;
+        Value -> hb_util:bin(Value)
+    end.
+
+sdk_upload_claim_name(Upload, Opts) ->
+    case first_value([<<"claim-name">>, <<"claim_name">>, <<"name">>, <<"title">>, <<"filename">>], Upload, Opts) of
+        not_found -> <<"hyperbeam-upload">>;
+        Value -> sdk_upload_safe_name(hb_util:bin(Value))
+    end.
+
+sdk_upload_title(Upload, ClaimName, Opts) ->
+    case hb_maps:get(<<"title">>, Upload, not_found, Opts) of
+        not_found -> ClaimName;
+        Value -> hb_util:bin(Value)
+    end.
+
+sdk_upload_tags(Upload, Opts) ->
+    case first_value([<<"tags">>, <<"tag">>], Upload, Opts) of
+        not_found -> not_found;
+        Value -> value_list(Value)
+    end.
+
+sdk_upload_thumbnail(Upload, Opts) ->
+    case first_value([<<"thumbnail-url">>, <<"thumbnail_url">>], Upload, Opts) of
+        not_found -> not_found;
+        URL -> #{ <<"url">> => hb_util:bin(URL) }
+    end.
+
+sdk_upload_body_path(Body, Opts) when is_binary(Body) ->
+    <<"data/", (hb_path:hashpath(Body, Opts))/binary>>;
+sdk_upload_body_path(_Body, _Opts) ->
+    <<>>.
+
+sdk_upload_stream_type(<<"video/", _/binary>>) ->
+    <<"video">>;
+sdk_upload_stream_type(<<"audio/", _/binary>>) ->
+    <<"audio">>;
+sdk_upload_stream_type(<<"image/", _/binary>>) ->
+    <<"image">>;
+sdk_upload_stream_type(<<"text/", _/binary>>) ->
+    <<"document">>;
+sdk_upload_stream_type(_ContentType) ->
+    <<"binary">>.
+
+sdk_upload_signing_channel(Upload, Opts) ->
+    case hb_maps:get(<<"channel-id">>, Upload, not_found, Opts) of
+        not_found ->
+            not_found;
+        ChannelID ->
+            #{
+                <<"claim_id">> => hb_util:bin(ChannelID),
+                <<"name">> => sdk_upload_channel_name(Upload, Opts),
+                <<"value_type">> => <<"channel">>
+            }
+    end.
+
+sdk_upload_canonical_url(Upload, UploadID, ClaimName, Opts) ->
+    case hb_maps:get(<<"channel-id">>, Upload, not_found, Opts) of
+        not_found ->
+            <<"lbry://", ClaimName/binary, "#", UploadID/binary>>;
+        ChannelID ->
+            <<
+                "lbry://",
+                (sdk_upload_channel_name(Upload, Opts))/binary,
+                "#",
+                (hb_util:bin(ChannelID))/binary,
+                "/",
+                ClaimName/binary,
+                "#",
+                UploadID/binary
+            >>
+    end.
+
+sdk_upload_channel_name(Upload, Opts) ->
+    case hb_maps:get(<<"channel-name">>, Upload, not_found, Opts) of
+        not_found -> <<"@hyperbeam">>;
+        Name -> sdk_upload_ensure_channel_name(hb_util:bin(Name))
+    end.
+
+sdk_upload_ensure_channel_name(<<"@", _/binary>> = Name) ->
+    sdk_upload_safe_name(Name);
+sdk_upload_ensure_channel_name(Name) ->
+    <<"@", (sdk_upload_safe_name(Name))/binary>>.
+
+sdk_upload_safe_name(Bin) ->
+    Trimmed = trim(Bin),
+    Normalized = iolist_to_binary([sdk_upload_safe_name_char(sdk_upload_char_lower(C)) || C <- binary_to_list(Trimmed)]),
+    case sdk_upload_trim_hyphens(Normalized) of
+        <<>> -> <<"hyperbeam-upload">>;
+        Name -> Name
+    end.
+
+sdk_upload_safe_name_char(C) when C >= $a, C =< $z ->
+    C;
+sdk_upload_safe_name_char(C) when C >= $0, C =< $9 ->
+    C;
+sdk_upload_safe_name_char($@) ->
+    $@;
+sdk_upload_safe_name_char(_) ->
+    $-.
+
+sdk_upload_char_lower(C) when C >= $A, C =< $Z ->
+    C + 32;
+sdk_upload_char_lower(C) ->
+    C.
+
+sdk_upload_trim_hyphens(<<"-", Rest/binary>>) ->
+    sdk_upload_trim_hyphens(Rest);
+sdk_upload_trim_hyphens(Bin) when byte_size(Bin) > 0 ->
+    Size = byte_size(Bin),
+    case binary:last(Bin) of
+        $- -> sdk_upload_trim_hyphens(binary:part(Bin, 0, Size - 1));
+        _ -> Bin
+    end;
+sdk_upload_trim_hyphens(Bin) ->
+    Bin.
+
+sdk_put_optional_pairs(Msg, []) ->
+    Msg;
+sdk_put_optional_pairs(Msg, [{_Key, not_found} | Rest]) ->
+    sdk_put_optional_pairs(Msg, Rest);
+sdk_put_optional_pairs(Msg, [{_Key, <<>>} | Rest]) ->
+    sdk_put_optional_pairs(Msg, Rest);
+sdk_put_optional_pairs(Msg, [{Key, Value} | Rest]) ->
+    sdk_put_optional_pairs(Msg#{ Key => Value }, Rest).
+
+sdk_path_id(Value) ->
+    Bin = hb_util:bin(Value),
+    case Bin =/= <<>> andalso binary:match(Bin, <<"/">>) =:= nomatch of
+        true -> {ok, Bin};
+        false -> {error, invalid_id}
+    end.
+
+sdk_user_upload_root(LegacyUserID) ->
+    <<"odysee/hyperbeam-user/", LegacyUserID/binary, "/uploads">>.
+
+sdk_user_upload_path(LegacyUserID, UploadID) ->
+    <<(sdk_user_upload_root(LegacyUserID))/binary, "/", UploadID/binary>>.
+
+sdk_filter_claim_list_items(Items, Params, Opts) ->
+    ClaimIDs = sdk_list_filter([<<"claim_id">>, <<"claim_ids">>, <<"claim-id">>, <<"claim-ids">>], Params, Opts),
+    ChannelIDs = sdk_list_filter([<<"channel_id">>, <<"channel_ids">>, <<"channel-id">>, <<"channel-ids">>], Params, Opts),
+    ClaimTypes = sdk_list_filter([<<"claim_type">>, <<"claim-type">>], Params, Opts),
+    lists:filter(
+        fun(Item) ->
+            sdk_claim_id_matches(Item, ClaimIDs, Opts)
+                andalso sdk_channel_id_matches(Item, ChannelIDs, Opts)
+                andalso sdk_claim_type_matches(Item, ClaimTypes, Opts)
+        end,
+        Items
+    ).
+
+sdk_claim_id_matches(_Item, [], _Opts) ->
+    true;
+sdk_claim_id_matches(Item, ClaimIDs, Opts) ->
+    lists:member(hb_maps:get(<<"claim_id">>, Item, <<>>, Opts), ClaimIDs).
+
+sdk_channel_id_matches(_Item, [], _Opts) ->
+    true;
+sdk_channel_id_matches(Item, ChannelIDs, Opts) ->
+    SigningChannel = hb_maps:get(<<"signing_channel">>, Item, #{}, Opts),
+    lists:member(hb_maps:get(<<"claim_id">>, SigningChannel, <<>>, Opts), ChannelIDs).
+
+sdk_claim_type_matches(_Item, [], _Opts) ->
+    true;
+sdk_claim_type_matches(Item, ClaimTypes, Opts) ->
+    lists:member(hb_maps:get(<<"value_type">>, Item, <<>>, Opts), ClaimTypes).
+
+sdk_list_filter(Keys, Params, Opts) ->
+    case first_value(Keys, Params, Opts) of
+        not_found -> [];
+        Value -> value_list(Value)
+    end.
+
+value_list(Values) when is_list(Values) ->
+    [hb_util:bin(Value) || Value <- Values, hb_util:bin(Value) =/= <<>>];
+value_list(Value) when is_binary(Value) ->
+    [trim(Part) || Part <- binary:split(Value, <<",">>, [global]), trim(Part) =/= <<>>];
+value_list(Value) ->
+    [hb_util:bin(Value)].
+
+trim(Bin) ->
+    iolist_to_binary(string:trim(binary_to_list(Bin))).
+
+int_param(Map, Key, Default, Opts) ->
+    case hb_maps:get(Key, Map, Default, Opts) of
+        Int when is_integer(Int) -> Int;
+        Bin when is_binary(Bin) ->
+            try binary_to_integer(Bin)
+            catch
+                _:_ -> Default
+            end;
+        _ -> Default
+    end.
+
+page_slice(Items, Page, PageSize) ->
+    Start = (Page - 1) * PageSize,
+    lists:sublist(drop_items(Start, Items), PageSize).
+
+drop_items(0, Items) ->
+    Items;
+drop_items(_Count, []) ->
+    [];
+drop_items(Count, [_ | Rest]) when Count > 0 ->
+    drop_items(Count - 1, Rest).
+
+total_pages(0, _PageSize) ->
+    0;
+total_pages(TotalItems, PageSize) ->
+    (TotalItems + PageSize - 1) div PageSize.
+
+sdk_result(Result) ->
+    sdk_json(200, #{ <<"jsonrpc">> => <<"2.0">>, <<"result">> => Result, <<"id">> => 1 }).
+
+sdk_error(Reason) ->
+    sdk_json(status_for(Reason), #{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"error">> => #{
+            <<"code">> => status_for(Reason),
+            <<"message">> => hb_util:bin(io_lib:format("~p", [Reason]))
+        },
+        <<"id">> => 1
+    }).
+
+sdk_json(Status, JSON) ->
+    Body = hb_json:encode(JSON),
+    {ok, (cors_headers())#{
+        <<"status">> => Status,
+        <<"content-type">> => <<"application/json">>,
+        <<"content-length">> => byte_size(Body),
+        <<"body">> => Body
+    }}.
 
 %% @doc Read a committed public Odysee/LBRY source object by native identifier.
 source(Base, Req, Opts) ->
@@ -1700,11 +2169,18 @@ error_response(Reason) ->
     {ok, error_map(Reason)}.
 
 error_map(Reason) ->
-    #{
+    (cors_headers())#{
         <<"status">> => status_for(Reason),
         <<"content-type">> => <<"text/plain">>,
         <<"error">> => error_term(Reason),
         <<"body">> => hb_util:bin(io_lib:format("~p", [Reason]))
+    }.
+
+cors_headers() ->
+    #{
+        <<"access-control-allow-origin">> => <<"*">>,
+        <<"access-control-allow-methods">> => <<"GET, POST, OPTIONS">>,
+        <<"access-control-allow-headers">> => <<"accept, content-type, authorization, x-lbry-auth-token">>
     }.
 
 status_for({missing_required, _}) -> 400;
@@ -1716,6 +2192,7 @@ status_for(conflicting_native_source_id) -> 400;
 status_for(missing_range) -> 416;
 status_for(invalid_range) -> 416;
 status_for(invalid_integer) -> 400;
+status_for({unsupported_sdk_method, _}) -> 400;
 status_for(not_found) -> 404;
 status_for({http_status, 403, _}) -> 403;
 status_for(protected) -> 403;
@@ -1889,6 +2366,154 @@ store_fixture_read_keeps_verifiable_commitment_test() ->
     {ok, Msg} = hb_store:read(Store, <<"/odysee/claim/test">>, #{}),
     ?assertEqual(false, hb_maps:is_key(<<"claim">>, Msg, #{})),
     ?assert(hb_message:verify(Msg, source_verify_req(Msg), #{})).
+
+sdk_status_returns_jsonrpc_result_test() ->
+    {ok, Res} = sdk(#{}, #{ <<"sdk-method">> => <<"status">> }, #{}),
+    Body = hb_json:decode(maps:get(<<"body">>, Res)),
+    Result = maps:get(<<"result">>, Body),
+    ?assertEqual(true, maps:get(<<"is_running">>, Result)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)).
+
+sdk_settings_methods_return_local_defaults_test() ->
+    {ok, GetRes} = sdk(#{}, #{ <<"sdk-method">> => <<"settings_get">> }, #{}),
+    GetBody = hb_json:decode(maps:get(<<"body">>, GetRes)),
+    ?assertEqual(#{}, maps:get(<<"result">>, GetBody)),
+    {ok, SetRes} =
+        sdk(#{}, #{
+            <<"sdk-method">> => <<"settings_set">>,
+            <<"params64">> => test_params64(#{ <<"example">> => true })
+        }, #{}),
+    SetBody = hb_json:decode(maps:get(<<"body">>, SetRes)),
+    ?assertEqual(#{ <<"example">> => true }, maps:get(<<"result">>, SetBody)).
+
+sdk_recsys_fyp_returns_empty_result_test() ->
+    {ok, Res} = sdk(#{}, #{ <<"sdk-method">> => <<"recsys_fyp">> }, #{}),
+    Body = hb_json:decode(maps:get(<<"body">>, Res)),
+    ?assertEqual(#{}, maps:get(<<"result">>, Body)),
+    ?assertEqual(200, maps:get(<<"status">>, Res)).
+
+sdk_accepts_params64_from_json_body_test() ->
+    {ok, Res} =
+        sdk(
+            #{},
+            #{
+                <<"sdk-method">> => <<"settings_set">>,
+                <<"content-type">> => <<"application/json">>,
+                <<"body">> => hb_json:encode(#{
+                    <<"params64">> => test_params64(#{ <<"body-param">> => true })
+                })
+            },
+            #{}
+        ),
+    Body = hb_json:decode(maps:get(<<"body">>, Res)),
+    ?assertEqual(#{ <<"body-param">> => true }, maps:get(<<"result">>, Body)).
+
+sdk_claim_list_returns_native_user_uploads_test() ->
+    Store = hb_test_utils:test_store(hb_store_volatile, <<"odysee-sdk-claim-list-native">>),
+    ok = hb_store:start(Store),
+    Wallet = ar_wallet:new(),
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => Wallet },
+    UploadReq0 = hb_message:commit(#{
+        <<"path">> => <<"/~odysee-upload-demo@1.0/upload">>,
+        <<"method">> => <<"POST">>,
+        <<"legacy-user-id">> => <<"42">>,
+        <<"channel-id">> => <<"channel-list">>,
+        <<"channel-name">> => <<"@native-demo">>,
+        <<"title">> => <<"Listed native upload">>,
+        <<"description">> => <<"Native upload listed by claim_list">>,
+        <<"tags">> => <<"hb,claim-list">>,
+        <<"thumbnail-url">> => <<"https://example.test/list-thumb.jpg">>,
+        <<"claim-name">> => <<"listed-native-upload">>,
+        <<"filename">> => <<"listed-native.mp4">>,
+        <<"content-type">> => <<"video/mp4">>,
+        <<"body">> => <<"native claim list bytes">>
+    }, Opts),
+    UploadReq = UploadReq0#{ <<"upload-timestamp">> => 1234567890 },
+    {ok, UploadID} = hb_cache:write(UploadReq, Opts),
+    ok = hb_cache:link(UploadID, sdk_user_upload_path(<<"42">>, UploadID), Opts),
+    {ok, Res} =
+        sdk(
+            #{},
+            #{
+                <<"sdk-method">> => <<"claim_list">>,
+                <<"legacy-user-id">> => <<"42">>,
+                <<"params64">> => test_params64(#{
+                    <<"page">> => 1,
+                    <<"page_size">> => 20,
+                    <<"claim_type">> => [<<"stream">>]
+                })
+            },
+            Opts
+        ),
+    Body = hb_json:decode(maps:get(<<"body">>, Res)),
+    Result = maps:get(<<"result">>, Body),
+    ?assertEqual(1, maps:get(<<"total_items">>, Result)),
+    [Item] = maps:get(<<"items">>, Result),
+    ?assertEqual(UploadID, maps:get(<<"claim_id">>, Item)),
+    ?assertEqual(<<"listed-native-upload">>, maps:get(<<"name">>, Item)),
+    ?assertEqual(
+        <<"lbry://@native-demo#channel-list/listed-native-upload#", UploadID/binary>>,
+        maps:get(<<"permanent_url">>, Item)
+    ),
+    Value = maps:get(<<"value">>, Item),
+    ?assertEqual(<<"Listed native upload">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(<<"Native upload listed by claim_list">>, maps:get(<<"description">>, Value)),
+    ?assertEqual([<<"hb">>, <<"claim-list">>], maps:get(<<"tags">>, Value)),
+    ?assertEqual(
+        #{ <<"url">> => <<"https://example.test/list-thumb.jpg">> },
+        maps:get(<<"thumbnail">>, Value)
+    ),
+    Source = maps:get(<<"source">>, Value),
+    ?assertEqual(UploadID, maps:get(<<"hyperbeam_upload_id">>, Source)),
+    ?assertEqual(false, maps:is_key(<<"sd_hash">>, Source)).
+
+sdk_claim_search_returns_legacy_result_test() ->
+    Claim = stream_source_fixture(),
+    Raw = search_response([Claim]),
+    {ok, MockServer, ServerHandle} =
+        hb_mock_server:start([
+            {"/", claim_search, {200, Raw}}
+        ]),
+    try
+        Req = #{
+            <<"sdk-method">> => <<"claim_search">>,
+            <<"params64">> => test_params64(#{ <<"page">> => 1, <<"page_size">> => 1 })
+        },
+        {ok, Res} = sdk(#{ <<"proxy-url">> => MockServer }, Req, #{}),
+        Body = hb_json:decode(maps:get(<<"body">>, Res)),
+        Result = maps:get(<<"result">>, Body),
+        ?assertEqual([Claim], maps:get(<<"items">>, Result)),
+        ?assertEqual(1, maps:get(<<"total_items">>, Result)),
+        [_Request] = hb_mock_server:get_requests(claim_search, 1, ServerHandle)
+    after
+        hb_mock_server:stop(ServerHandle)
+    end.
+
+sdk_resolve_returns_url_claim_map_test() ->
+    URI = <<"lbry://@example#1">>,
+    Claim = channel_source_fixture(),
+    Raw = hb_json:encode(#{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"result">> => #{ URI => Claim },
+        <<"id">> => 1
+    }),
+    {ok, MockServer, ServerHandle} =
+        hb_mock_server:start([
+            {"/", resolve, {200, Raw}}
+        ]),
+    try
+        Req = #{
+            <<"sdk-method">> => <<"resolve">>,
+            <<"params64">> => test_params64(#{ <<"urls">> => [URI] })
+        },
+        {ok, Res} = sdk(#{ <<"proxy-url">> => MockServer }, Req, #{}),
+        Body = hb_json:decode(maps:get(<<"body">>, Res)),
+        Result = maps:get(<<"result">>, Body),
+        ?assertEqual(Claim, maps:get(URI, Result)),
+        [_Request] = hb_mock_server:get_requests(resolve, 1, ServerHandle)
+    after
+        hb_mock_server:stop(ServerHandle)
+    end.
 
 store_fixture_read_commits_channel_comment_blob_and_descriptor_test() ->
     {Blob, _Body, BlobHash} = blob_fixture(),
@@ -2316,6 +2941,9 @@ odysee_commitment_ids(Msg) ->
 
 has_commitment_device(Msg, Device) ->
     lists:member(Device, hb_message:commitment_devices(Msg, #{})).
+
+test_params64(Params) ->
+    hb_util:encode(hb_json:encode(Params)).
 
 commitment_ids_by_device(Msg, Device) ->
     [

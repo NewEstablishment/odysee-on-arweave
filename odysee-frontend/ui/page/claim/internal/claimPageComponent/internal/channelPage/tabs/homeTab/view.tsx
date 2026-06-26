@@ -33,7 +33,7 @@ function HomeTab(props: Props) {
     dispatch(doUpdateCreatorSettingsAction(channelClaim, settings));
   const claimId = claim && claim.claim_id;
   const rawHomepageSettings =
-    settingsByChannelId && settingsByChannelId[claim.claim_id] && settingsByChannelId[claim.claim_id].homepage_settings;
+    claimId && settingsByChannelId && settingsByChannelId[claimId] && settingsByChannelId[claimId].homepage_settings;
   // Backward compat: homepage_settings can be an array (old) or object (new { sections, upload_templates }).
   const homepageSections = React.useMemo(() => {
     if (!rawHomepageSettings) return null;
@@ -122,6 +122,8 @@ function HomeTab(props: Props) {
   }
 
   function handleSaveHomeSection() {
+    if (!claim) return;
+
     setHome(home);
     // Preserve any non-section data in homepage_settings (e.g. upload_templates)
     const existingObj = rawHomepageSettings && !Array.isArray(rawHomepageSettings) ? rawHomepageSettings : {};
@@ -137,7 +139,8 @@ function HomeTab(props: Props) {
   }
 
   return (
-    settingsByChannelId && (
+    settingsByChannelId &&
+    claimId && (
       <div className="home-tab">
         {editMode && (
           <div className="channel_sections__actions">

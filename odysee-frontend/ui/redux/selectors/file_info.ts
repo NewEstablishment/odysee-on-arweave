@@ -14,6 +14,7 @@ import { buildURI } from 'util/lbryURI';
 import { getChannelFromClaim } from 'util/claim';
 import Lbry from 'lbry';
 import { PAGE_SIZE } from 'constants/claim';
+import { hyperbeamUploadReadUrlFromClaim, isHyperbeamUploadClaim } from 'util/hyperbeamNativeUpload';
 export const selectState = (state) => state.fileInfo || EMPTY_OBJECT;
 export const selectFileInfosByOutpoint = createSelector(selectState, (state) => state.byOutpoint || EMPTY_OBJECT);
 export const selectIsFetchingFileList = (state) => selectState(state).isFetchingFileList;
@@ -171,6 +172,12 @@ export const selectStreamingUrlForUri = (state, uri) => {
     const activeLivestreamForChannel = selectActiveLivestreamForChannel(state, channel.claim_id);
     const { videoUrl: livestreamVideoUrl } = activeLivestreamForChannel || {};
     return livestreamVideoUrl;
+  }
+
+  const claim = selectClaimForUri(state, uri);
+  if (isHyperbeamUploadClaim(claim)) {
+    const nativeStreamingUrl = hyperbeamUploadReadUrlFromClaim(claim);
+    if (nativeStreamingUrl) return nativeStreamingUrl;
   }
 
   const fileInfo = selectFileInfoForUri(state, uri);

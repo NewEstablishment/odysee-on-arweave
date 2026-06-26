@@ -31,6 +31,7 @@ import { MEMBERS_ONLY_CONTENT_TAG, RESTRICTED_CHAT_COMMENTS_TAG } from 'constant
 import { getGeoRestrictionForClaim } from 'util/geoRestriction';
 import { parsePurchaseTag, parseRentalTag } from 'util/stripe';
 import { removeInternalStringTags } from 'util/tags';
+import { hyperbeamUploadOutpointFromClaim, isHyperbeamUploadClaim } from 'util/hyperbeamNativeUpload';
 export function selectClaimsStates(state: State) {
   return state.claims || EMPTY_OBJECT;
 }
@@ -123,9 +124,19 @@ export const selectPendingClaims = createSelector(selectPendingClaimsById, (pend
 export const selectClaimIsPendingForId = (state: State, claimId: string) => {
   return Boolean(selectPendingClaimsById(state)[claimId]);
 };
+const safelyNormalizeUri = (uri: string | null | undefined) => {
+  if (!uri) return undefined;
+
+  try {
+    return normalizeURI(uri);
+  } catch {
+    return undefined;
+  }
+};
 export const makeSelectClaimIsPending = (uri: string) =>
   createSelector(selectClaimIdsByUri, selectPendingClaimsById, (idsByUri, pendingById) => {
-    const claimId = idsByUri[normalizeURI(uri)];
+    const normalizedUri = safelyNormalizeUri(uri);
+    const claimId = normalizedUri && idsByUri[normalizedUri];
 
     if (claimId) {
       return Boolean(pendingById[claimId]);
@@ -182,6 +193,7 @@ export const selectClaimForUri = createCachedSelector(
 export const selectClaimOutpointForUri = (state: State, uri: string) => {
   const claim = selectClaimForUri(state, uri);
   if (!claim) return claim;
+  if (isHyperbeamUploadClaim(claim)) return hyperbeamUploadOutpointFromClaim(claim);
   const outpoint = `${claim.txid}:${claim.nout}`;
   return outpoint;
 };
@@ -267,7 +279,8 @@ export const makeSelectAbandoningClaimById = (claimId: string) =>
   createSelector(selectAbandoningIds, (ids) => ids.includes(claimId));
 export const makeSelectIsAbandoningClaimForUri = (uri: string) =>
   createSelector(selectClaimIdsByUri, selectAbandoningIds, (claimIdsByUri, abandoningById) => {
-    const claimId = claimIdsByUri[normalizeURI(uri)];
+    const normalizedUri = safelyNormalizeUri(uri);
+    const claimId = normalizedUri && claimIdsByUri[normalizedUri];
     return abandoningById.indexOf(claimId) >= 0;
   });
 export const selectMyActiveClaims = createSelector(
@@ -563,8 +576,8 @@ export const selectThumbnailForId = (state: State, claimId: string) => {
 };
 export const makeSelectCoverForUri = (uri: string) =>
   createSelector(makeSelectClaimForUri(uri), (claim) => {
-    if (claim && claim.value.cover) {
-      const cover = claim && claim.value && claim.value.cover;
+    if (claim?.value?.cover) {
+      const cover = claim.value.cover;
       return cover && cover.url ? cover.url.trim().replace(/^http:\/\//i, 'https://') : undefined;
     } else {
       const cover = claim && claim.signing_channel && claim.signing_channel.value && claim.signing_channel.value.cover;
@@ -573,8 +586,8 @@ export const makeSelectCoverForUri = (uri: string) =>
   });
 export const makeSelectAvatarForUri = (uri: string) =>
   createSelector(makeSelectClaimForUri(uri), (claim) => {
-    if (claim && claim.value.cover) {
-      const avatar = claim && claim.value && claim.value.thumbnail && claim.value.thumbnail;
+    if (claim?.value?.cover) {
+      const avatar = claim.value.thumbnail;
       return avatar && avatar.url ? avatar.url.trim().replace(/^http:\/\//i, 'https://') : undefined;
     } else {
       const avatar =
@@ -745,12 +758,15 @@ export const makeSelectPendingClaimForUri = (uri: string) =>
     return matchingClaim || null;
   });
 export const makeSelectTotalItemsForChannel = (uri: string) =>
-  createSelector(selectChannelClaimCounts, (byUri) => byUri && byUri[normalizeURI(uri)]);
+  createSelector(selectChannelClaimCounts, (byUri) => {
+    const normalizedUri = safelyNormalizeUri(uri);
+    return normalizedUri && byUri && byUri[normalizedUri];
+  });
 export const makeSelectTotalPagesForChannel = (uri: string, pageSize: number = 10) =>
-  createSelector(
-    selectChannelClaimCounts,
-    (byUri) => byUri && byUri[uri] && Math.ceil(byUri[normalizeURI(uri)] / pageSize)
-  );
+  createSelector(selectChannelClaimCounts, (byUri) => {
+    const normalizedUri = safelyNormalizeUri(uri);
+    return normalizedUri && byUri && byUri[normalizedUri] && Math.ceil(byUri[normalizedUri] / pageSize);
+  });
 export const makeSelectNsfwCountFromUris = (uris: Array<string>) =>
   createSelector(selectClaimsByUri, (claims) =>
     uris.reduce((acc, uri) => {
@@ -971,7 +987,8 @@ export const selectUpdatingChannel = (state: State) => selectState(state).updati
 export const selectUpdateChannelError = (state: State) => selectState(state).updateChannelError;
 export const makeSelectReflectingClaimForUri = (uri: string) =>
   createSelector(selectClaimIdsByUri, selectReflectingById, (claimIdsByUri, reflectingById) => {
-    const claimId = claimIdsByUri[normalizeURI(uri)];
+    const normalizedUri = safelyNormalizeUri(uri);
+    const claimId = normalizedUri && claimIdsByUri[normalizedUri];
     return reflectingById[claimId];
   });
 export const makeSelectMyStreamUrlsForPage = (page: number = 1) =>

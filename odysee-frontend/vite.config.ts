@@ -18,8 +18,9 @@ const useLocalUsagi = process.env.USE_LOCAL_USAGI === 'true';
 
 const UI_ROOT = path.resolve(__dirname, 'ui');
 const WEB_ROOT = path.resolve(__dirname, 'web');
-const CUSTOM_HOMEPAGES_ROOT = path.resolve(__dirname, 'custom/homepages/v2');
-const CUSTOM_MEMES_ROOT = path.resolve(__dirname, 'custom/homepages/meme/index');
+const CUSTOM_HOMEPAGES_CHECKOUT_ROOT = path.resolve(__dirname, 'custom/homepages/v2');
+const CUSTOM_HOMEPAGES_ROOT = path.resolve(CUSTOM_HOMEPAGES_CHECKOUT_ROOT, 'homepages/v2');
+const CUSTOM_MEMES_ROOT = path.resolve(CUSTOM_HOMEPAGES_CHECKOUT_ROOT, 'homepages/meme/index');
 const useCustomHomepages = process.env.CUSTOM_HOMEPAGE === 'true' && fs.existsSync(CUSTOM_HOMEPAGES_ROOT);
 const useCustomMemes = process.env.CUSTOM_HOMEPAGE === 'true' && fs.existsSync(CUSTOM_MEMES_ROOT);
 // Resolve pnpm's nested node_modules directories for SCSS loadPaths.

@@ -202,7 +202,7 @@ export function resolvePublishPayload(
         }
       : {}),
   };
-  const tagSet = new Set(tags.map((t) => t.name));
+  const tagSet = new Set(tags.map((t: any) => (typeof t === 'string' ? t : t?.name)).filter(Boolean));
   PAYLOAD.tags.useLbryUploader(tagSet, publishData);
   PAYLOAD.tags.scheduledLivestream(tagSet, publishData, publishPayload.release_time, nowTimeStamp);
   PAYLOAD.tags.fiatPaywall(tagSet, publishData);

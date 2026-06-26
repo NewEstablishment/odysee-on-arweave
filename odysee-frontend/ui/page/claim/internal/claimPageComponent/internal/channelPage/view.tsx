@@ -10,6 +10,7 @@ import ClaimShareButton from 'component/claimShareButton';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'component/common/tabs';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Button from 'component/button';
+import Spinner from 'component/spinner';
 import Lbry from 'lbry';
 import { formatLbryUrlForWeb } from 'util/url';
 import { CHANNEL_PAGE } from 'constants/urlParams';
@@ -59,6 +60,7 @@ import { selectMembershipMineFetched, selectUserOdyseeMembership } from 'redux/s
 import { getThumbnailFromClaim, isClaimNsfw } from 'util/claim';
 import { doMembershipMine as doMembershipMineAction } from 'redux/actions/memberships';
 import { PREFERENCE_EMBED } from 'constants/tags';
+import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 const HiddenNsfwClaims = lazyImport(
   () =>
     import(
@@ -112,9 +114,13 @@ function ChannelPage(props: Props) {
   const isGlobalMod = Boolean(useAppSelector(selectUser)?.global_mod);
   const hideShorts = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_SHORTS));
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
-  const { meta } = claim;
+  const meta = claim?.meta || {};
   const { claims_in_channel } = meta;
-  const showClaims = Boolean(claims_in_channel) && !preferEmbed && !banState.filtered && !banState.blacklisted;
+  const showClaims =
+    (Boolean(claims_in_channel) || isHyperbeamFullMode()) &&
+    !preferEmbed &&
+    !banState.filtered &&
+    !banState.blacklisted;
   const channelIsBlackListed = banState.blacklisted;
   // Show About tab for blacklisted channels (DMCA message) or channels with content
   const hideAboutTab = !showClaims && !isGlobalMod && !channelIsBlackListed;
@@ -133,8 +139,8 @@ function ChannelPage(props: Props) {
 
   const editing = currentView === CHANNEL_PAGE.VIEWS.EDIT;
   const { channelName } = parseURI(uri);
-  const { permanent_url: permanentUrl } = claim;
-  const claimId = claim.claim_id;
+  const permanentUrl = claim?.permanent_url || uri;
+  const claimId = claim?.claim_id;
   const hyperbeamClaimDebugAttrs =
     claim && claim.claim_id
       ? {
@@ -396,7 +402,9 @@ function ChannelPage(props: Props) {
   //   // eslint-disable-next-line react-hooks/exhaustive-deps
   // }, [claim]);
   React.useEffect(() => {
-    dispatch(doFetchSubCount(claimId));
+    if (claimId) {
+      dispatch(doFetchSubCount(claimId));
+    }
   }, [uri, dispatch, claimId]);
   React.useEffect(() => {
     if (!myMembershipsFetched) {
@@ -411,6 +419,14 @@ function ChannelPage(props: Props) {
       navigate(`${url}${search}`);
     }
   }, [hideShorts, currentView, uri, navigate, isEmbedPath]);
+
+  if (!claim) {
+    return (
+      <section className="main--empty">
+        <Spinner delayed />
+      </section>
+    );
+  }
 
   if (editing) {
     return <ChannelEdit uri={uri} onDone={() => navigate(-1)} disabled={false} />;
@@ -511,7 +527,7 @@ function ChannelPage(props: Props) {
             {!(isBlocked || isMuted || isMature) && (!channelIsBlackListed || isSubscribed) && (
               <SubscribeButton uri={permanentUrl} shrinkOnMobile />
             )}
-            <ClaimMenuList uri={claim.permanent_url} inline collectionId="" />
+            <ClaimMenuList uri={permanentUrl} inline collectionId="" />
           </div>
           <div className="channel__primary-info">
             <h1 className="channel__title">

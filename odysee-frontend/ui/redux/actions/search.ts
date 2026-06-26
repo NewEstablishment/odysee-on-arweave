@@ -23,12 +23,12 @@ import { SEARCH_OPTIONS } from 'constants/search';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
-import { HYPERBEAM_DEVICE, hyperbeamDeviceBase, hyperbeamSdkPostParams64 } from 'util/hyperbeamDevices';
+import { HYPERBEAM_DEVICE, hyperbeamDeviceBase, hyperbeamDevicePostParams64 } from 'util/hyperbeamDevices';
 import { shouldAllowOriginalNetworkFallback } from 'util/hyperbeamMode';
 const isDev = process.env.NODE_ENV !== 'production';
 
 function hyperbeamNodeBase() {
-  return hyperbeamDeviceBase(HYPERBEAM_DEVICE.odysee);
+  return hyperbeamDeviceBase(HYPERBEAM_DEVICE.search);
 }
 
 function hyperbeamNodeConfigured() {
@@ -46,7 +46,7 @@ function hyperbeamNodeFetchJson(key: string, params: any, authToken?: string | n
     headers[X_LBRY_AUTH_TOKEN] = authToken;
   }
 
-  const request = hyperbeamSdkPostParams64(key, params || {}, headers);
+  const request = hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.search, key, params || {}, headers);
   if (!request) return Promise.reject(new Error('Odysee HyperBEAM search device is not configured.'));
 
   return request.then((response) => {
@@ -54,7 +54,13 @@ function hyperbeamNodeFetchJson(key: string, params: any, authToken?: string | n
       throw new Error(`HyperBEAM device ${key} failed with ${response.status}`);
     }
 
-    return response.json();
+    return response.json().then((json) => {
+      if (json?.error) {
+        throw new Error(json.error.message || json.error);
+      }
+
+      return json && Object.prototype.hasOwnProperty.call(json, 'result') ? json.result : json;
+    });
   });
 }
 

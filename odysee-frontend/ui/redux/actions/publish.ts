@@ -5,9 +5,10 @@ import * as ACTIONS from 'constants/action_types';
 import * as PAGES from 'constants/pages';
 import { NO_FILE, PAYWALL } from 'constants/publish';
 import * as PUBLISH_TYPES from 'constants/publish_types';
+import { MY_CLAIMS_PAGE_SIZE } from 'constants/claim';
 import { batchActions } from 'util/batch-actions';
 import { THUMBNAIL_CDN_SIZE_LIMIT_BYTES, WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
-import { doCheckPendingClaims, doResolveClaimIds } from 'redux/actions/claims';
+import { doCheckPendingClaims, doFetchClaimListMine, doResolveClaimIds } from 'redux/actions/claims';
 import { lighthouse } from 'redux/actions/search';
 import { selectProtectedContentMembershipsForContentClaimId } from 'redux/selectors/memberships';
 import { doSaveMembershipRestrictionsForContent, doMembershipContentforStreamClaimId } from 'redux/actions/memberships';
@@ -1571,6 +1572,86 @@ export const doPublishWithEarlyUpload =
         type: ACTIONS.PUBLISH_PIPELINE_UPDATE,
         data: { id: guid, updates: { stage: 'error', error: error?.message } },
       });
+      dispatch(doError({ message: typeof error === 'string' ? error : error.message, cause: error.cause }));
+    }
+  };
+
+export const doPublishWithHyperbeamUpload =
+  (file: File, guid: string) => async (dispatch: Dispatch, getState: GetState) => {
+    const state = getState();
+    const myClaimForUri = state.publish.claimToEdit;
+    const myChannels = selectMyChannelClaims(state) as Array<ChannelClaim> | null | undefined;
+    const publishData = selectPublishFormValues(state);
+    const memberRestrictionStatus = selectMemberRestrictionStatus(state);
+
+    dispatch({ type: ACTIONS.PUBLISH_START });
+
+    try {
+      dispatch({
+        type: ACTIONS.PUBLISH_PIPELINE_UPDATE,
+        data: { id: guid, updates: { stage: 'uploading', progress: 0 } },
+      });
+
+      const publishPayload = resolvePublishPayload(
+        publishData,
+        myClaimForUri,
+        myChannels,
+        memberRestrictionStatus,
+        false
+      );
+      const channelId = publishPayload.channel_id || publishData.channelId;
+      const signingChannel = myChannels?.find((channel: any) => channel.claim_id === channelId);
+      const { publishHyperbeamUploadDemo } = await import('util/hyperbeamLegacyAuth');
+      const result = await publishHyperbeamUploadDemo({
+        file,
+        filename: file.name || publishPayload.name,
+        contentType: publishData.fileMime || file.type || 'application/octet-stream',
+        channelId,
+        channelName: channelId ? signingChannel?.name || publishData.channel : undefined,
+        claimName: publishPayload.name,
+        title: publishPayload.title || publishData.title,
+        description: publishPayload.description || publishData.description,
+        tags: publishPayload.tags,
+        thumbnailUrl: publishPayload.thumbnail_url || publishData.thumbnail,
+      });
+      const pendingClaim = result.claim;
+
+      dispatch({
+        type: ACTIONS.UPDATE_PENDING_CLAIMS,
+        data: {
+          claims: [pendingClaim],
+          options: { overrideTags: true, overrideSigningChannel: true },
+        },
+      } as UpdatePendingClaimsAction);
+      dispatch({ type: ACTIONS.PUBLISH_SET_ACTIVE_FORM, data: { id: null } });
+      dispatch({ type: ACTIONS.PUBLISH_SUCCESS, data: { type: resolveClaimTypeForAnalytics(pendingClaim) } });
+      dispatch({
+        type: ACTIONS.PUBLISH_PIPELINE_UPDATE,
+        data: {
+          id: guid,
+          updates: {
+            stage: 'published',
+            progress: 100,
+            uri: pendingClaim.canonical_url || pendingClaim.permanent_url,
+          },
+        },
+      });
+      dispatch(doFetchClaimListMine(1, MY_CLAIMS_PAGE_SIZE, true, ['stream'], true, channelId ? [channelId] : []));
+      navigateTo(`/$/${PAGES.UPLOADS}`);
+    } catch (error: any) {
+      dispatch({ type: ACTIONS.PUBLISH_FAIL });
+      dispatch({
+        type: ACTIONS.PUBLISH_PIPELINE_UPDATE,
+        data: { id: guid, updates: { stage: 'error', error: error?.message } },
+      });
+      dispatch(
+        doToast({
+          isError: true,
+          message: __('Publish failed.'),
+          subMessage: error?.message || __('HyperBEAM upload failed.'),
+          duration: 'long',
+        })
+      );
       dispatch(doError({ message: typeof error === 'string' ? error : error.message, cause: error.cause }));
     }
   };

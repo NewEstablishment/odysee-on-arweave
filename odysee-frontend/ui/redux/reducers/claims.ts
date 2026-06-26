@@ -580,6 +580,8 @@ reducers[ACTIONS.FETCH_CHANNEL_CLAIMS_COMPLETED] = (state: ClaimsState, action: 
       currentPageClaimIds.push(claim.claim_id);
       updateIfClaimChanged(state.byId, byIdDelta, claim.claim_id, claim);
       updateIfValueChanged(state.claimsByUri, claimsByUriDelta, claim.canonical_url, claim.claim_id);
+      updateIfValueChanged(state.claimsByUri, claimsByUriDelta, claim.permanent_url, claim.claim_id);
+      updateIfValueChanged(state.claimsByUri, claimsByUriDelta, claim.short_url, claim.claim_id);
     });
   }
 

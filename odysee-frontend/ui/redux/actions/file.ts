@@ -21,6 +21,7 @@ import { makeSelectFileInfoForUri, selectOutpointFetchingForUri } from 'redux/se
 import { getStripeEnvironment } from 'util/stripe';
 import { getChannelIdFromClaim, isClaimUnlisted } from 'util/claim';
 import { toHex } from 'util/hex';
+import { hyperbeamUploadFileInfoFromClaim } from 'util/hyperbeamNativeUpload';
 const stripeEnvironment = getStripeEnvironment();
 
 async function getOwnedClaimAccessKey(
@@ -156,8 +157,28 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
     const state: State = getState();
     const alreadyFetching = selectOutpointFetchingForUri(state, uri);
     const fileInfo = makeSelectFileInfoForUri(uri)(state);
+    const claim = selectClaimForUri(state, uri);
+    const nativeFileInfo = hyperbeamUploadFileInfoFromClaim(claim);
 
     if (alreadyFetching && !onSuccess) {
+      return;
+    }
+
+    if (nativeFileInfo) {
+      const outpoint = nativeFileInfo.outpoint;
+      if (!fileInfo || !fileInfo.is_hyperbeam_upload) {
+        dispatch({
+          type: ACTIONS.FETCH_FILE_INFO_COMPLETED,
+          data: {
+            fileInfo: nativeFileInfo,
+            outpoint,
+          },
+        });
+      }
+
+      if (onSuccess) {
+        onSuccess(fileInfo || nativeFileInfo);
+      }
       return;
     }
 

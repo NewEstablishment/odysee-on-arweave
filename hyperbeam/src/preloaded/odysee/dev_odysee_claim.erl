@@ -29,11 +29,13 @@ resolve(Base, Req, Opts) ->
 %% @doc Search claims using the SDK proxy `claim_search' method.
 search(Base, Req, Opts) ->
     safe(fun() ->
-        maybe
-            {ok, Result, Raw} ?= find_or_fetch_search(Base, Req, Opts),
-            ok_message(normalize_search_result(Result, Raw, Opts))
-        else
-            Error -> Error
+        Params = search_params(Base, Req),
+        case find_or_fetch_search(Base, Req, Opts) of
+            {ok, Result0, Raw} ->
+                Result = merge_native_upload_search(Result0, Params, Opts),
+                ok_message(normalize_search_result(Result, Raw, Opts));
+            {error, Reason} ->
+                search_fallback(Params, Reason, Opts)
         end
     end).
 
@@ -63,6 +65,14 @@ find_or_fetch_claim(Base, Req, Opts) ->
     case claim_candidate(Base, Req, Opts) of
         {ok, Claim, Raw} ->
             {ok, Claim, Raw};
+        not_found ->
+            find_or_fetch_native_or_proxy_claim(Base, Req, Opts)
+    end.
+
+find_or_fetch_native_or_proxy_claim(Base, Req, Opts) ->
+    case native_claim_candidate(Base, Req, Opts) of
+        {ok, _Claim, _Raw} = Claim ->
+            Claim;
         not_found ->
             maybe
                 {ok, URI} ?= claim_uri(Base, Req, Opts),
@@ -132,7 +142,11 @@ search_candidate(Base, Req, Opts) ->
     ],
     case search_candidate_from_value(Base, Opts) of
         {ok, _Result, _Raw} = Search -> Search;
-        not_found -> search_candidate_from_fields(Candidates, Opts)
+        not_found ->
+            case search_candidate_from_value(Req, Opts) of
+                {ok, _Result, _Raw} = Search -> Search;
+                not_found -> search_candidate_from_fields(Candidates, Opts)
+            end
     end.
 
 transaction_candidate(Base, Req, Opts) ->
@@ -368,6 +382,472 @@ search_params(Base, Req) ->
 
 map_or_empty(Map) when is_map(Map) -> Map;
 map_or_empty(_Value) -> #{}.
+
+merge_native_upload_search(Result, Params, Opts) ->
+    append_native_upload_items(Result, native_upload_search_items(Params, Opts), Opts).
+
+search_fallback(Params, Reason, Opts) ->
+    NativeItems = native_upload_search_items(Params, Opts),
+    Result = append_native_upload_items(empty_search_result(Params, Reason, Opts), NativeItems, Opts),
+    Raw = hb_json:encode(#{ <<"jsonrpc">> => <<"2.0">>, <<"result">> => Result, <<"id">> => 1 }),
+    ok_message(normalize_search_result(Result, Raw, Opts)).
+
+native_upload_search_items(Params, Opts) ->
+    ChannelIDs = native_upload_channel_ids(Params, Opts),
+    case native_upload_search_allowed(ChannelIDs, Params, Opts) of
+        true ->
+            lists:append([
+                native_channel_claim_items(ChannelID, Opts)
+            ||
+                ChannelID <- ChannelIDs
+            ]);
+        false ->
+            []
+    end.
+
+empty_search_result(Params, Reason, Opts) ->
+    #{
+        <<"items">> => [],
+        <<"page">> => int_or_default(first_value([<<"page">>], Params, Opts), 1),
+        <<"page_size">> => int_or_default(first_value([<<"page_size">>, <<"page-size">>], Params, Opts), 20),
+        <<"total_items">> => 0,
+        <<"total_pages">> => 0,
+        <<"hyperbeam_proxy_error">> => hb_util:bin(io_lib:format("~p", [Reason]))
+    }.
+
+native_upload_search_allowed([], _Params, _Opts) ->
+    false;
+native_upload_search_allowed(_ChannelIDs, Params, Opts) ->
+    first_page(Params, Opts) andalso stream_claim_search(Params, Opts).
+
+native_upload_channel_ids(Params, Opts) ->
+    case first_value(
+        [
+            <<"channel_ids">>,
+            <<"channel-ids">>,
+            <<"channel_id">>,
+            <<"channel-id">>,
+            <<"channel_claim_id">>,
+            <<"channel-claim-id">>
+        ],
+        Params,
+        Opts
+    ) of
+        not_found -> [];
+        Value -> value_list(Value)
+    end.
+
+append_native_upload_items(Result, [], _Opts) ->
+    Result;
+append_native_upload_items(Result, NativeItems, Opts) ->
+    Items = search_items(Result, Opts),
+    Result1 = Result#{ <<"items">> => Items ++ NativeItems },
+    increment_total_items(Result1, length(NativeItems), Opts).
+
+increment_total_items(Result, Count, Opts) ->
+    case first_value([<<"total_items">>, <<"total-items">>], Result, Opts) of
+        not_found ->
+            Result;
+        Value ->
+            Result#{ <<"total_items">> => int_value(Value) + Count }
+    end.
+
+first_page(Params, Opts) ->
+    int_value(first_value([<<"page">>], Params, Opts)) =< 1.
+
+stream_claim_search(Params, Opts) ->
+    case first_value([<<"claim_type">>, <<"claim-type">>], Params, Opts) of
+        not_found ->
+            true;
+        Value ->
+            lists:member(<<"stream">>, value_list(Value))
+    end.
+
+value_list(Values) when is_list(Values) ->
+    [hb_util:bin(Value) || Value <- Values, hb_util:bin(Value) =/= <<>>];
+value_list(Value) when is_binary(Value) ->
+    [trim(Part) || Part <- binary:split(Value, <<",">>, [global]), trim(Part) =/= <<>>];
+value_list(Value) ->
+    [hb_util:bin(Value)].
+
+int_value(Value) when is_integer(Value) ->
+    Value;
+int_value(Value) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ -> 1
+    end;
+int_value(_Value) ->
+    1.
+
+int_or_default(Value, _Default) when is_integer(Value) ->
+    Value;
+int_or_default(Value, Default) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ -> Default
+    end;
+int_or_default(_Value, Default) ->
+    Default.
+
+native_claim_candidate(Base, Req, Opts) ->
+    case native_upload_id(Base, Req, Opts) of
+        not_found -> not_found;
+        UploadID -> native_upload_claim_from_id(UploadID, Opts)
+    end.
+
+native_upload_id(Base, Req, Opts) ->
+    case first_found(
+        [
+            {Req, <<"upload-id">>},
+            {Req, <<"upload_id">>},
+            {Req, <<"hyperbeam-upload-id">>},
+            {Req, <<"hyperbeam_upload_id">>},
+            {Req, <<"claim-id">>},
+            {Req, <<"claim_id">>},
+            {Base, <<"upload-id">>},
+            {Base, <<"upload_id">>},
+            {Base, <<"hyperbeam-upload-id">>},
+            {Base, <<"hyperbeam_upload_id">>},
+            {Base, <<"claim-id">>},
+            {Base, <<"claim_id">>}
+        ],
+        Opts
+    ) of
+        not_found -> native_upload_id_from_uri(Base, Req, Opts);
+        Value -> hb_util:bin(Value)
+    end.
+
+native_upload_id_from_uri(Base, Req, Opts) ->
+    case first_found(
+        [
+            {Req, <<"uri">>},
+            {Req, <<"url">>},
+            {Base, <<"uri">>},
+            {Base, <<"url">>}
+        ],
+        Opts
+    ) of
+        not_found -> not_found;
+        URI -> native_upload_id_from_uri_value(hb_util:bin(URI))
+    end.
+
+native_upload_id_from_uri_value(<<"hb://upload/", UploadID/binary>>) ->
+    UploadID;
+native_upload_id_from_uri_value(URI) ->
+    case binary:split(URI, <<"#">>, [global]) of
+        [_] ->
+            not_found;
+        Parts ->
+            lists:last(Parts)
+    end.
+
+native_upload_claim_from_id(UploadID0, Opts) ->
+    case native_path_id(UploadID0) of
+        {ok, UploadID} ->
+            case native_read_upload(UploadID, Opts) of
+                {ok, Upload} ->
+                    Claim = native_upload_claim_item(UploadID, Upload, Opts),
+                    {ok, Claim, hb_json:encode(Claim)};
+                _ ->
+                    not_found
+            end;
+        _ ->
+            not_found
+    end.
+
+native_read_upload(UploadID, Opts) ->
+    case read_native_upload_record(native_upload_path(UploadID), Opts) of
+        {ok, _Upload} = Found -> Found;
+        _ -> read_native_upload_record(UploadID, Opts)
+    end.
+
+native_channel_claim_items(ChannelID, Opts) ->
+    case native_path_id(ChannelID) of
+        {ok, SafeChannelID} ->
+            lists:filtermap(
+                fun(UploadID) ->
+                    case native_upload_for_channel(SafeChannelID, UploadID, Opts) of
+                        {ok, Upload} when is_map(Upload) ->
+                            {true, native_upload_claim_item(UploadID, Upload, Opts)};
+                        _ ->
+                            false
+                    end
+                end,
+                lists:usort(
+                    native_upload_id_index(native_channel_upload_index_path(SafeChannelID), Opts)
+                        ++ hb_cache:list(native_channel_upload_root(SafeChannelID), Opts)
+                        ++ native_upload_ids(Opts)
+                )
+            );
+        _ ->
+            []
+    end.
+
+native_upload_id_index(Path, Opts) ->
+    case hb_cache:read(Path, Opts) of
+        {ok, Stored} -> decode_native_upload_id_index(hb_cache:ensure_all_loaded(Stored, Opts));
+        _ -> []
+    end.
+
+decode_native_upload_id_index(Stored) when is_list(Stored) ->
+    [hb_util:bin(ID) || ID <- Stored, hb_util:bin(ID) =/= <<>>];
+decode_native_upload_id_index(Stored) when is_binary(Stored) ->
+    try hb_json:decode(Stored) of
+        IDs when is_list(IDs) -> decode_native_upload_id_index(IDs);
+        _ -> []
+    catch
+        _:_ -> []
+    end;
+decode_native_upload_id_index(_Stored) ->
+    [].
+
+native_upload_ids(Opts) ->
+    hb_cache:list(native_upload_root(), Opts).
+
+native_upload_for_channel(ChannelID, UploadID, Opts) ->
+    case read_native_upload_record(native_channel_upload_path(ChannelID, UploadID), Opts) of
+        {ok, _Upload} = Found ->
+            Found;
+        _ ->
+            case read_native_upload_record(native_upload_path(UploadID), Opts) of
+                {ok, Upload} ->
+                    case first_value([<<"channel-id">>, <<"channel_id">>], Upload, Opts) of
+                        ChannelID -> {ok, Upload};
+                        _ -> not_found
+                    end;
+                Other ->
+                    Other
+            end
+    end.
+
+read_native_upload_record(Path, Opts) ->
+    case hb_cache:read(Path, Opts) of
+        {ok, Stored} -> decode_native_upload_record(hb_cache:ensure_all_loaded(Stored, Opts));
+        Error -> Error
+    end.
+
+decode_native_upload_record(Stored) when is_map(Stored) ->
+    {ok, Stored};
+decode_native_upload_record(Stored) when is_binary(Stored) ->
+    try hb_json:decode(Stored) of
+        Upload when is_map(Upload) -> {ok, Upload};
+        _ -> {ok, Stored}
+    catch
+        _:_ -> {ok, Stored}
+    end;
+decode_native_upload_record(Stored) ->
+    {ok, Stored}.
+
+native_upload_claim_item(UploadID, Upload, Opts) ->
+    Body = hb_maps:get(<<"body">>, Upload, <<>>, Opts),
+    ClaimName = native_upload_claim_name(Upload, Opts),
+    ContentType = native_upload_content_type(Upload, Opts),
+    Source = #{
+        <<"media_type">> => ContentType,
+        <<"name">> => native_upload_filename(Upload, Opts),
+        <<"size">> => native_upload_size(Upload, Body, Opts),
+        <<"sha256">> => native_upload_sha256(Upload, Body, Opts),
+        <<"hyperbeam_upload_id">> => UploadID,
+        <<"hyperbeam_body_path">> => native_upload_body_path(Upload, Body, Opts)
+    },
+    Value =
+        lists:foldl(fun put_if_found_pair/2, #{
+            <<"title">> => native_upload_title(Upload, ClaimName, Opts),
+            <<"source">> => Source,
+            <<"stream_type">> => native_upload_stream_type(ContentType)
+        }, [
+            {<<"description">>, first_value([<<"description">>], Upload, Opts)},
+            {<<"tags">>, native_upload_tags(Upload, Opts)},
+            {<<"thumbnail">>, native_upload_thumbnail(Upload, Opts)}
+        ]),
+    lists:foldl(fun put_if_found_pair/2, #{
+        <<"claim_id">> => UploadID,
+        <<"name">> => ClaimName,
+        <<"type">> => <<"claim">>,
+        <<"value_type">> => <<"stream">>,
+        <<"canonical_url">> => native_upload_canonical_url(Upload, UploadID, ClaimName, Opts),
+        <<"permanent_url">> => native_upload_canonical_url(Upload, UploadID, ClaimName, Opts),
+        <<"value">> => Value,
+        <<"meta">> => #{},
+        <<"hyperbeam_upload_id">> => UploadID,
+        <<"is_hyperbeam_upload">> => true,
+        <<"is_channel_signature_valid">> => native_upload_has_channel(Upload, Opts)
+    }, [
+        {<<"signing_channel">>, native_upload_signing_channel(Upload, Opts)}
+    ]).
+
+native_path_id(Value) ->
+    Bin = hb_util:bin(Value),
+    case Bin =/= <<>> andalso binary:match(Bin, <<"/">>) =:= nomatch of
+        true -> {ok, Bin};
+        false -> {error, invalid_id}
+    end.
+
+native_channel_upload_root(ChannelID) ->
+    <<"odysee/hyperbeam-channel/", ChannelID/binary, "/uploads">>.
+
+native_channel_upload_index_path(ChannelID) ->
+    <<"odysee/hyperbeam-channel/", ChannelID/binary, "/upload-ids">>.
+
+native_channel_upload_path(ChannelID, UploadID) ->
+    <<(native_channel_upload_root(ChannelID))/binary, "/", UploadID/binary>>.
+
+native_upload_path(UploadID) ->
+    <<"odysee/hyperbeam-upload/", UploadID/binary>>.
+
+native_upload_root() ->
+    <<"odysee/hyperbeam-upload">>.
+
+native_upload_size(Upload, Body, Opts) ->
+    case hb_maps:get(<<"size">>, Upload, not_found, Opts) of
+        not_found -> byte_size(Body);
+        Size -> Size
+    end.
+
+native_upload_sha256(Upload, Body, Opts) ->
+    case hb_maps:get(<<"sha256">>, Upload, not_found, Opts) of
+        not_found -> hb_util:to_hex(crypto:hash(sha256, Body));
+        Sha -> Sha
+    end.
+
+native_upload_filename(Upload, Opts) ->
+    case first_value([<<"filename">>, <<"file-name">>, <<"name">>], Upload, Opts) of
+        not_found -> <<"hyperbeam-upload-demo.bin">>;
+        Value -> hb_util:bin(Value)
+    end.
+
+native_upload_content_type(Upload, Opts) ->
+    case first_value([<<"content-type">>, <<"file-type">>, <<"mime-type">>], Upload, Opts) of
+        not_found -> <<"application/octet-stream">>;
+        Value -> hb_util:bin(Value)
+    end.
+
+native_upload_claim_name(Upload, Opts) ->
+    case first_value([<<"claim-name">>, <<"claim_name">>, <<"name">>, <<"title">>, <<"filename">>], Upload, Opts) of
+        not_found -> <<"hyperbeam-upload">>;
+        Value -> native_safe_name(hb_util:bin(Value))
+    end.
+
+native_upload_title(Upload, ClaimName, Opts) ->
+    case first_value([<<"title">>], Upload, Opts) of
+        not_found -> ClaimName;
+        Value -> hb_util:bin(Value)
+    end.
+
+native_upload_tags(Upload, Opts) ->
+    case first_value([<<"tags">>, <<"tag">>], Upload, Opts) of
+        not_found -> not_found;
+        Value -> value_list(Value)
+    end.
+
+native_upload_thumbnail(Upload, Opts) ->
+    case first_value([<<"thumbnail-url">>, <<"thumbnail_url">>], Upload, Opts) of
+        not_found -> not_found;
+        URL -> #{ <<"url">> => hb_util:bin(URL) }
+    end.
+
+native_upload_body_path(Upload, Body, Opts) ->
+    case hb_maps:get(<<"body-path">>, Upload, not_found, Opts) of
+        not_found -> native_upload_body_path(Body, Opts);
+        BodyPath -> BodyPath
+    end.
+
+native_upload_body_path(Body, Opts) when is_binary(Body) ->
+    <<"data/", (hb_path:hashpath(Body, Opts))/binary>>;
+native_upload_body_path(_Body, _Opts) ->
+    not_found.
+
+native_upload_stream_type(<<"video/", _/binary>>) ->
+    <<"video">>;
+native_upload_stream_type(<<"audio/", _/binary>>) ->
+    <<"audio">>;
+native_upload_stream_type(<<"image/", _/binary>>) ->
+    <<"image">>;
+native_upload_stream_type(_ContentType) ->
+    <<"binary">>.
+
+native_upload_signing_channel(Upload, Opts) ->
+    case first_value([<<"channel-id">>, <<"channel_id">>], Upload, Opts) of
+        not_found ->
+            not_found;
+        ChannelID ->
+            ChannelIDBin = hb_util:bin(ChannelID),
+            ChannelName = native_upload_channel_name(Upload, Opts),
+            ChannelURL = <<"lbry://", ChannelName/binary, "#", ChannelIDBin/binary>>,
+            #{
+                <<"claim_id">> => ChannelIDBin,
+                <<"name">> => ChannelName,
+                <<"normalized_name">> => ChannelName,
+                <<"value_type">> => <<"channel">>,
+                <<"canonical_url">> => ChannelURL,
+                <<"permanent_url">> => ChannelURL,
+                <<"short_url">> => ChannelURL,
+                <<"value">> => #{ <<"title">> => ChannelName }
+            }
+    end.
+
+native_upload_has_channel(Upload, Opts) ->
+    first_value([<<"channel-id">>, <<"channel_id">>], Upload, Opts) =/= not_found.
+
+native_upload_canonical_url(Upload, UploadID, ClaimName, Opts) ->
+    case first_value([<<"channel-id">>, <<"channel_id">>], Upload, Opts) of
+        not_found ->
+            <<"lbry://", ClaimName/binary, "#", UploadID/binary>>;
+        ChannelID ->
+            <<
+                "lbry://",
+                (native_upload_channel_name(Upload, Opts))/binary,
+                "#",
+                (hb_util:bin(ChannelID))/binary,
+                "/",
+                ClaimName/binary,
+                "#",
+                UploadID/binary
+            >>
+    end.
+
+native_upload_channel_name(Upload, Opts) ->
+    case first_value([<<"channel-name">>, <<"channel_name">>], Upload, Opts) of
+        not_found -> <<"@hyperbeam">>;
+        Name -> native_upload_ensure_channel_name(hb_util:bin(Name))
+    end.
+
+native_upload_ensure_channel_name(<<"@", _/binary>> = Name) ->
+    native_safe_name(Name);
+native_upload_ensure_channel_name(Name) ->
+    <<"@", (native_safe_name(Name))/binary>>.
+
+native_safe_name(Bin) ->
+    Trimmed = trim(Bin),
+    Normalized = iolist_to_binary([native_safe_name_char(native_char_lower(C)) || C <- binary_to_list(Trimmed)]),
+    case native_trim_hyphens(Normalized) of
+        <<>> -> <<"hyperbeam-upload">>;
+        Name -> Name
+    end.
+
+native_safe_name_char(C) when C >= $a, C =< $z ->
+    C;
+native_safe_name_char(C) when C >= $0, C =< $9 ->
+    C;
+native_safe_name_char($@) ->
+    $@;
+native_safe_name_char(_) ->
+    $-.
+
+native_char_lower(C) when C >= $A, C =< $Z ->
+    C + 32;
+native_char_lower(C) ->
+    C.
+
+native_trim_hyphens(<<"-", Rest/binary>>) ->
+    native_trim_hyphens(Rest);
+native_trim_hyphens(Bin) when byte_size(Bin) > 0 ->
+    Size = byte_size(Bin),
+    case binary:last(Bin) of
+        $- -> native_trim_hyphens(binary:part(Bin, 0, Size - 1));
+        _ -> Bin
+    end;
+native_trim_hyphens(Bin) ->
+    Bin.
 
 search_reserved_keys() ->
     [
@@ -611,7 +1091,9 @@ base_claim_message(Claim, Raw, ClaimID, ClaimName, Value, CanonicalURL, ValueTyp
         {<<"txid">>, first_value([<<"txid">>], Claim, Opts)},
         {<<"nout">>, first_value([<<"nout">>], Claim, Opts)},
         {<<"height">>, first_value([<<"height">>], Claim, Opts)},
-        {<<"claim-op">>, first_value([<<"claim_op">>, <<"claim-op">>], Claim, Opts)}
+        {<<"claim-op">>, first_value([<<"claim_op">>, <<"claim-op">>], Claim, Opts)},
+        {<<"is-channel-signature-valid">>,
+            first_value([<<"is_channel_signature_valid">>, <<"is-channel-signature-valid">>], Claim, Opts)}
     ],
     lists:foldl(fun put_if_found_pair/2, Msg3, Optional).
 
@@ -685,6 +1167,9 @@ first_found([{Msg, Key} | Rest], Opts) when is_map(Msg) ->
 first_found([_ | Rest], Opts) ->
     first_found(Rest, Opts).
 
+trim(Bin) ->
+    iolist_to_binary(string:trim(binary_to_list(Bin))).
+
 put_if_found(_Key, not_found, Msg) -> Msg;
 put_if_found(Key, Value, Msg) -> Msg#{ Key => Value }.
 
@@ -722,6 +1207,40 @@ resolve_proxy_result_test() ->
     ),
     ?assertEqual(<<"stream">>, hb_maps:get(<<"value-type">>, Msg, #{})).
 
+resolve_native_upload_id_test() ->
+    Store = hb_test_utils:test_store(hb_store_volatile, <<"odysee-claim-native-resolve">>),
+    ok = hb_store:start(Store),
+    Wallet = ar_wallet:new(),
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => Wallet },
+    UploadReq = hb_message:commit(#{
+        <<"path">> => <<"/~odysee-upload-demo@1.0/upload">>,
+        <<"method">> => <<"POST">>,
+        <<"legacy-user-id">> => <<"42">>,
+        <<"channel-id">> => <<"channel-resolve">>,
+        <<"channel-name">> => <<"@native-demo">>,
+        <<"title">> => <<"Resolvable native video">>,
+        <<"description">> => <<"Resolve native metadata">>,
+        <<"tags">> => <<"hb,resolve">>,
+        <<"thumbnail-url">> => <<"https://example.test/resolve-thumb.jpg">>,
+        <<"claim-name">> => <<"resolvable-native-video">>,
+        <<"filename">> => <<"resolvable-native.mp4">>,
+        <<"content-type">> => <<"video/mp4">>,
+        <<"body">> => <<"resolvable native bytes">>
+    }, Opts),
+    {ok, UploadID} = hb_cache:write(UploadReq, Opts),
+    ok = hb_cache:link(UploadID, native_upload_path(UploadID), Opts),
+    {ok, Msg} = resolve(#{}, #{ <<"claim-id">> => UploadID }, Opts),
+    ?assertEqual(UploadID, hb_maps:get(<<"claim-id">>, Msg, #{})),
+    ?assertEqual(<<"stream">>, hb_maps:get(<<"value-type">>, Msg, #{})),
+    ?assertEqual(true, hb_maps:get(<<"is-channel-signature-valid">>, Msg, #{})),
+    Value = hb_maps:get(<<"value">>, Msg, #{}),
+    ?assertEqual(<<"Resolvable native video">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(<<"Resolve native metadata">>, maps:get(<<"description">>, Value)),
+    ?assertEqual([<<"hb">>, <<"resolve">>], maps:get(<<"tags">>, Value)),
+    Source = maps:get(<<"source">>, Value),
+    ?assertEqual(UploadID, maps:get(<<"hyperbeam_upload_id">>, Source)),
+    ?assertEqual(false, maps:is_key(<<"sd_hash">>, Source)).
+
 search_proxy_result_test() ->
     Claim = target_claim(),
     Result = #{
@@ -750,6 +1269,68 @@ search_accepts_supplied_result_test() ->
     {ok, Msg} = search(#{}, #{ <<"result">> => Result }, #{}),
     ?assertEqual(2, hb_maps:get(<<"page">>, Msg, #{})),
     ?assertEqual(1, length(hb_maps:get(<<"claims">>, Msg, #{}))).
+
+search_merges_native_channel_uploads_test() ->
+    Store = hb_test_utils:test_store(hb_store_volatile, <<"odysee-claim-native-channel">>),
+    ok = hb_store:start(Store),
+    Wallet = ar_wallet:new(),
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => Wallet },
+    UploadReq = hb_message:commit(#{
+        <<"path">> => <<"/~odysee-upload-demo@1.0/upload">>,
+        <<"method">> => <<"POST">>,
+        <<"legacy-user-id">> => <<"42">>,
+        <<"channel-id">> => <<"channel-merge">>,
+        <<"channel-name">> => <<"@native-demo">>,
+        <<"title">> => <<"Native merged video">>,
+        <<"description">> => <<"Native item metadata">>,
+        <<"tags">> => <<"hb,upload">>,
+        <<"thumbnail-url">> => <<"https://example.test/native-thumb.jpg">>,
+        <<"claim-name">> => <<"native-merged-video">>,
+        <<"filename">> => <<"native-merged.mp4">>,
+        <<"content-type">> => <<"video/mp4">>,
+        <<"body">> => <<"native video bytes">>
+    }, Opts),
+    {ok, UploadID} = hb_cache:write(UploadReq, Opts),
+    ok = hb_cache:link(UploadID, native_upload_path(UploadID), Opts),
+    Result = #{
+        <<"items">> => [target_claim()],
+        <<"page">> => 1,
+        <<"page_size">> => 20,
+        <<"total_items">> => 1
+    },
+    {ok, Msg} =
+        search(
+            #{},
+            #{
+                <<"result">> => Result,
+                <<"channel_ids">> => [<<"channel-merge">>],
+                <<"claim_type">> => [<<"stream">>]
+            },
+            Opts
+        ),
+    ClaimIDs = hb_maps:get(<<"claim-ids">>, Msg, #{}),
+    ?assert(lists:member(<<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>, ClaimIDs)),
+    ?assert(lists:member(UploadID, ClaimIDs)),
+    ?assertEqual(2, hb_maps:get(<<"total-items">>, Msg, #{})),
+    [NativeItem] =
+        [
+            Item
+        ||
+            Item <- hb_maps:get(<<"items">>, Msg, #{}),
+            maps:get(<<"claim_id">>, Item, not_found) =:= UploadID
+        ],
+    NativeValue = maps:get(<<"value">>, NativeItem),
+    ?assertEqual(true, maps:get(<<"is_channel_signature_valid">>, NativeItem)),
+    ?assertEqual(<<"Native merged video">>, maps:get(<<"title">>, NativeValue)),
+    ?assertEqual(<<"Native item metadata">>, maps:get(<<"description">>, NativeValue)),
+    ?assertEqual([<<"hb">>, <<"upload">>], maps:get(<<"tags">>, NativeValue)),
+    ?assertEqual(
+        #{ <<"url">> => <<"https://example.test/native-thumb.jpg">> },
+        maps:get(<<"thumbnail">>, NativeValue)
+    ),
+    NativeSource = maps:get(<<"source">>, NativeValue),
+    ?assertEqual(UploadID, maps:get(<<"hyperbeam_upload_id">>, NativeSource)),
+    ?assertEqual(false, maps:is_key(<<"sd_hash">>, NativeSource)).
 
 transaction_accepts_supplied_result_test() ->
     Result = #{

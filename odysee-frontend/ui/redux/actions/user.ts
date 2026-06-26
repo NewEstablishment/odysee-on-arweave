@@ -24,7 +24,14 @@ import { doMembershipMine } from 'redux/actions/memberships';
 import { selectDefaultChannelId } from 'redux/selectors/settings';
 import { ODYSEE_TIER_NAMES } from 'constants/memberships';
 import { HYPERBEAM_DEVICE, hyperbeamDeviceBase } from 'util/hyperbeamDevices';
+import {
+  isLegacyAuthRejected,
+  normalizeLegacyAuthToken,
+  rememberHyperbeamLegacyAuthDemoToken,
+  runHyperbeamLegacyAuthDemo,
+} from 'util/hyperbeamLegacyAuth';
 import { shouldAllowOriginalNetworkFallback } from 'util/hyperbeamMode';
+import { getAuthToken, setAuthToken } from 'util/saved-passwords';
 export let sessionStorageAvailable = false;
 const CHECK_INTERVAL = 200;
 const AUTH_WAIT_TIMEOUT = 10000;
@@ -292,6 +299,79 @@ export function doAuthenticate(
       });
   };
 }
+
+export function doHyperbeamLegacyAuthSignIn(authToken?: string) {
+  return async (dispatch, getState) => {
+    dispatch({
+      type: ACTIONS.AUTHENTICATION_STARTED,
+    });
+
+    try {
+      const resolvedAuthToken = normalizeLegacyAuthToken(authToken);
+      const result = await runHyperbeamLegacyAuthDemo(resolvedAuthToken);
+      const user = hyperbeamLegacyUserFromIdentity(result.identity);
+      if (resolvedAuthToken) {
+        if (Lbryio.overrides?.setAuthToken) {
+          Lbryio.overrides.setAuthToken(resolvedAuthToken);
+        } else {
+          setAuthToken(resolvedAuthToken);
+        }
+        Lbryio.authToken = resolvedAuthToken;
+        Lbryio.authenticationPromise = null;
+      }
+      dispatch({
+        type: ACTIONS.AUTHENTICATION_SUCCESS,
+        data: {
+          user,
+          accessToken: resolvedAuthToken,
+        },
+      });
+      dispatch(doMembershipMine());
+      return result;
+    } catch (error) {
+      if (isLegacyAuthRejected(error)) {
+        rememberHyperbeamLegacyAuthDemoToken('');
+      }
+      const currentUser = selectUser(getState());
+      if (currentUser) {
+        dispatch({
+          type: ACTIONS.AUTHENTICATION_SUCCESS,
+          data: {
+            user: currentUser,
+            accessToken: getAuthToken(),
+          },
+        });
+      } else {
+        dispatch({
+          type: ACTIONS.AUTHENTICATION_FAILURE,
+          data: {
+            error,
+          },
+        });
+      }
+      throw error;
+    }
+  };
+}
+
+function hyperbeamLegacyUserFromIdentity(identity: any) {
+  const legacyUser = identity && (identity['legacy-user'] || identity.legacy_user || identity.user);
+  const legacyUserId = identity && (identity['legacy-user-id'] || identity.legacy_user_id || identity.id);
+  const user = legacyUser && typeof legacyUser === 'object' ? { ...legacyUser } : {};
+  if (!user.id && legacyUserId) user.id = numericId(legacyUserId);
+  if (!user.has_verified_email) user.has_verified_email = true;
+  if (!user.primary_email && !user.latest_claimed_email && user.id) {
+    user.latest_claimed_email = `odysee-user-${user.id}`;
+  }
+  user.hyperbeam_legacy_auth = true;
+  return user;
+}
+
+function numericId(value: any) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : value;
+}
+
 export function doUserFetch() {
   return (dispatch) =>
     new Promise((resolve, reject) => {

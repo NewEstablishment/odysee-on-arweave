@@ -85,16 +85,18 @@ request_token(Base, Req, Opts) ->
         not_found ->
             case cookie_token(Base, Req, Opts) of
                 not_found -> {error, authentication_required};
-                Token -> {ok, Token, <<"cookie">>}
+                Token -> {ok, normalize_token(Token), <<"cookie">>}
             end;
         {Token, Key} ->
-            {ok, hb_util:bin(Token), Key}
+            {ok, normalize_token(Token), Key}
     end.
 
 token_keys() ->
     [
         <<"auth_token">>,
         <<"auth-token">>,
+        <<"x-odysee-demo-auth-token">>,
+        <<"X-Odysee-Demo-Auth-Token">>,
         <<"x-lbry-auth-token">>,
         <<"X-Lbry-Auth-Token">>
     ].
@@ -145,6 +147,28 @@ strip_quotes(<<"\"", Value/binary>>) ->
 strip_quotes(Value) ->
     Value.
 
+normalize_token(Value) ->
+    Token = strip_quotes(trim(hb_util:bin(Value))),
+    case extracted_token(Token) of
+        not_found -> Token;
+        Extracted -> Extracted
+    end.
+
+extracted_token(Token) ->
+    Patterns = [
+        <<"(?i)(?:auth[_-]?token)\\s*=\\s*['\\\"]?([A-Za-z0-9_-]+)">>,
+        <<"(?i)(?:x-lbry-auth-token)\\s*:\\s*['\\\"]?([A-Za-z0-9_-]+)">>,
+        <<"(?i)(?:x-odysee-demo-auth-token)\\s*:\\s*['\\\"]?([A-Za-z0-9_-]+)">>,
+        <<"(?i)bearer\\s+([A-Za-z0-9_-]+)">>
+    ],
+    find_in_list(fun(Pattern) -> captured_token(Pattern, Token) end, Patterns).
+
+captured_token(Pattern, Token) ->
+    case re:run(Token, Pattern, [{capture, [1], binary}]) of
+        {match, [Captured]} -> Captured;
+        nomatch -> not_found
+    end.
+
 trim(Bin) ->
     iolist_to_binary(string:trim(binary_to_list(Bin))).
 
@@ -158,14 +182,20 @@ valid_token(_Token) ->
 valid_token_char(Char) when Char >= $0, Char =< $9 -> true;
 valid_token_char(Char) when Char >= $A, Char =< $Z -> true;
 valid_token_char(Char) when Char >= $a, Char =< $z -> true;
+valid_token_char($-) -> true;
+valid_token_char($_) -> true;
 valid_token_char(_Char) -> false.
 
 token_identity(Token, Source, Base, Req, Opts) ->
     case trusted_token_users(Base, Req, Opts) of
         not_found ->
             case verifier_url(Base, Req, Opts) of
-                not_found -> {error, legacy_auth_verifier_not_configured};
-                URL -> verifier_identity(URL, Token, Source, Opts)
+                not_found ->
+                    case demo_verifier_url(Source) of
+                        not_found -> {error, legacy_auth_verifier_not_configured};
+                        URL -> verifier_identity(URL, Token, Source, Base, Req, Opts)
+                    end;
+                URL -> verifier_identity(URL, Token, Source, Base, Req, Opts)
             end;
         TokenUsers ->
             case hb_maps:get(Token, TokenUsers, not_found, Opts) of
@@ -173,6 +203,13 @@ token_identity(Token, Source, Base, Req, Opts) ->
                 Value -> identity_from_value(Value, Source, Opts)
             end
     end.
+
+demo_verifier_url(<<"x-odysee-demo-auth-token">>) ->
+    <<"https://api.odysee.com/user/me">>;
+demo_verifier_url(<<"X-Odysee-Demo-Auth-Token">>) ->
+    <<"https://api.odysee.com/user/me">>;
+demo_verifier_url(_Source) ->
+    not_found.
 
 trusted_token_users(Base, Req, Opts) ->
     first_config(
@@ -202,11 +239,26 @@ verifier_url(Base, Req, Opts) ->
         Opts
     ).
 
-verifier_identity(URL, Token, Source, Opts) ->
-    Msg = #{
-        <<"method">> => <<"GET">>,
-        <<"path">> => append_auth_token(URL, Token)
-    },
+verifier_token_mode(Base, Req, Opts) ->
+    case first_config(
+        [
+            <<"legacy-auth-token-mode">>,
+            <<"legacy_auth_token_mode">>,
+            <<"legacy-auth-verifier-token-mode">>,
+            <<"legacy_auth_verifier_token_mode">>,
+            <<"odysee-legacy-auth-token-mode">>,
+            <<"odysee_legacy_auth_token_mode">>
+        ],
+        Base,
+        Req,
+        Opts
+    ) of
+        not_found -> <<"form">>;
+        Mode -> hb_util:to_lower(hb_util:bin(Mode))
+    end.
+
+verifier_identity(URL, Token, Source, Base, Req, Opts) ->
+    Msg = verifier_request(URL, Token, verifier_token_mode(Base, Req, Opts)),
     case hb_http:request(Msg, Opts) of
         {ok, #{ <<"body">> := Body }} when is_binary(Body) ->
             decoded_identity(Body, Source, Opts);
@@ -217,6 +269,42 @@ verifier_identity(URL, Token, Source, Opts) ->
         Error ->
             Error
     end.
+
+verifier_request(URL, Token, <<"query">>) ->
+    #{
+        <<"method">> => <<"GET">>,
+        <<"path">> => append_auth_token(URL, Token),
+        <<"accept">> => <<"application/json">>
+    };
+verifier_request(URL, Token, <<"form">>) ->
+    #{
+        <<"method">> => <<"POST">>,
+        <<"path">> => URL,
+        <<"accept">> => <<"application/json">>,
+        <<"content-type">> => <<"application/x-www-form-urlencoded">>,
+        <<"body">> => <<"auth_token=", Token/binary>>
+    };
+verifier_request(URL, Token, <<"bearer">>) ->
+    #{
+        <<"method">> => <<"GET">>,
+        <<"path">> => URL,
+        <<"accept">> => <<"application/json">>,
+        <<"authorization">> => <<"Bearer ", Token/binary>>
+    };
+verifier_request(URL, Token, <<"cookie">>) ->
+    #{
+        <<"method">> => <<"GET">>,
+        <<"path">> => URL,
+        <<"accept">> => <<"application/json">>,
+        <<"cookie">> => <<"auth_token=", Token/binary>>
+    };
+verifier_request(URL, Token, _Mode) ->
+    #{
+        <<"method">> => <<"GET">>,
+        <<"path">> => URL,
+        <<"accept">> => <<"application/json">>,
+        <<"x-lbry-auth-token">> => Token
+    }.
 
 append_auth_token(URL, Token) ->
     Sep =
@@ -239,14 +327,27 @@ identity_from_value(Value, Source, _Opts) when is_integer(Value); is_binary(Valu
         <<"auth-source">> => hb_util:bin(Source)
     }};
 identity_from_value(Msg, Source, Opts) when is_map(Msg) ->
-    Value =
-        case hb_maps:get(<<"data">>, Msg, not_found, Opts) of
-            not_found -> Msg;
-            Data -> Data
-        end,
-    identity_from_map(Value, Source, Opts);
+    case legacy_auth_success(Msg, Opts) of
+        false ->
+            {error, legacy_auth_rejected};
+        true ->
+            Value =
+                case hb_maps:get(<<"data">>, Msg, not_found, Opts) of
+                    not_found -> Msg;
+                    Data -> Data
+                end,
+            identity_from_map(Value, Source, Opts)
+    end;
 identity_from_value(_Value, _Source, _Opts) ->
     {error, invalid_legacy_identity}.
+
+legacy_auth_success(Msg, Opts) ->
+    case hb_maps:get(<<"success">>, Msg, true, Opts) of
+        false -> false;
+        <<"false">> -> false;
+        0 -> false;
+        _ -> true
+    end.
 
 identity_from_map(Msg, Source, Opts) when is_map(Msg) ->
     case first_value([<<"legacy-user-id">>, <<"legacy_user_id">>, <<"user-id">>, <<"user_id">>, <<"id">>], Msg, Opts) of
@@ -255,11 +356,57 @@ identity_from_map(Msg, Source, Opts) when is_map(Msg) ->
         UserID ->
             {ok, #{
                 <<"legacy-user-id">> => hb_util:bin(UserID),
-                <<"auth-source">> => hb_util:bin(Source)
+                <<"auth-source">> => hb_util:bin(Source),
+                <<"legacy-user">> => legacy_user(Msg, UserID, Opts)
             }}
     end;
 identity_from_map(_Value, _Source, _Opts) ->
     {error, invalid_legacy_identity}.
+
+legacy_user(Msg, UserID, Opts) ->
+    User0 = allowlisted_user_fields(Msg, Opts),
+    User1 =
+        case maps:is_key(<<"id">>, User0) of
+            true -> User0;
+            false -> User0#{ <<"id">> => UserID }
+        end,
+    case maps:is_key(<<"has_verified_email">>, User1) of
+        true -> User1;
+        false -> User1#{ <<"has_verified_email">> => true }
+    end.
+
+allowlisted_user_fields(Msg, Opts) ->
+    lists:foldl(
+        fun(Key, Acc) ->
+            case hb_maps:get(Key, Msg, not_found, Opts) of
+                not_found -> Acc;
+                Value -> Acc#{ Key => Value }
+            end
+        end,
+        #{},
+        [
+            <<"id">>,
+            <<"primary_email">>,
+            <<"latest_claimed_email">>,
+            <<"has_verified_email">>,
+            <<"is_identity_verified">>,
+            <<"is_reward_approved">>,
+            <<"experimental_ui">>,
+            <<"global_mod">>,
+            <<"odysee_live_disabled">>,
+            <<"country">>,
+            <<"country_code">>,
+            <<"created_at">>,
+            <<"device_types">>,
+            <<"channels">>,
+            <<"channel_claims">>,
+            <<"channel_claim_ids">>,
+            <<"channel_claim_id">>,
+            <<"default_channel_claim_id">>,
+            <<"primary_channel_claim_id">>,
+            <<"youtube_channels">>
+        ]
+    ).
 
 identity_secret(Identity, Base, Req, Opts) ->
     case legacy_auth_pepper(Base, Req, Opts) of
@@ -367,7 +514,13 @@ sensitive_keys() ->
         <<"legacy-auth-url">>,
         <<"legacy_auth_url">>,
         <<"odysee-legacy-auth-url">>,
-        <<"odysee_legacy_auth_url">>
+        <<"odysee_legacy_auth_url">>,
+        <<"legacy-auth-token-mode">>,
+        <<"legacy_auth_token_mode">>,
+        <<"legacy-auth-verifier-token-mode">>,
+        <<"legacy_auth_verifier_token_mode">>,
+        <<"odysee-legacy-auth-token-mode">>,
+        <<"odysee_legacy_auth_token_mode">>
     ].
 
 first_param(Keys, Base, Req, Opts) ->
@@ -417,12 +570,23 @@ extracts_token_from_header_test() ->
     Req = #{ <<"x-lbry-auth-token">> => <<"abc123">> },
     ?assertEqual({ok, <<"abc123">>, <<"x-lbry-auth-token">>}, request_token(#{}, Req, #{})).
 
+extracts_token_from_bearer_header_value_test() ->
+    Req = #{ <<"x-lbry-auth-token">> => <<"Bearer abc123_DEF">> },
+    ?assertEqual({ok, <<"abc123_DEF">>, <<"x-lbry-auth-token">>}, request_token(#{}, Req, #{})).
+
+extracts_token_from_form_style_value_test() ->
+    Req = #{ <<"X-Odysee-Demo-Auth-Token">> => <<"auth_token=abc123_DEF">> },
+    ?assertEqual({ok, <<"abc123_DEF">>, <<"X-Odysee-Demo-Auth-Token">>}, request_token(#{}, Req, #{})).
+
 extracts_token_from_cookie_test() ->
     Req = #{ <<"cookie">> => <<"other=1; auth_token=\"abc123\"; theme=dark">> },
     ?assertEqual({ok, <<"abc123">>, <<"cookie">>}, request_token(#{}, Req, #{})).
 
 rejects_missing_token_test() ->
     ?assertEqual({error, authentication_required}, authenticated_identity(#{}, #{}, #{})).
+
+accepts_url_safe_token_chars_test() ->
+    ?assertEqual(true, valid_token(<<"abc-123_DEF">>)).
 
 stable_secret_uses_identity_not_token_test() ->
     Base = test_base(),
@@ -499,12 +663,58 @@ auth_hook_legacy_tokens_share_signer_test() ->
 internal_api_user_me_response_test() ->
     Body = hb_json:encode(#{
         <<"success">> => true,
-        <<"data">> => #{ <<"id">> => 123 }
+        <<"data">> => #{
+            <<"id">> => 123,
+            <<"primary_email">> => <<"demo@example.test">>,
+            <<"has_verified_email">> => true,
+            <<"auth_token">> => <<"must-not-leak">>
+        }
     }),
-    ?assertMatch(
-        {ok, #{ <<"legacy-user-id">> := <<"123">> }},
-        decoded_identity(Body, <<"verifier">>, #{})
-    ).
+    {ok, Identity} = decoded_identity(Body, <<"verifier">>, #{}),
+    ?assertEqual(<<"123">>, maps:get(<<"legacy-user-id">>, Identity)),
+    User = maps:get(<<"legacy-user">>, Identity),
+    ?assertEqual(123, maps:get(<<"id">>, User)),
+    ?assertEqual(<<"demo@example.test">>, maps:get(<<"primary_email">>, User)),
+    ?assertEqual(true, maps:get(<<"has_verified_email">>, User)),
+    ?assertEqual(false, maps:is_key(<<"auth_token">>, User)).
+
+internal_api_user_me_failure_test() ->
+    Body = hb_json:encode(#{
+        <<"success">> => false,
+        <<"error">> => <<"invalid auth token">>
+    }),
+    ?assertEqual({error, legacy_auth_rejected}, decoded_identity(Body, <<"verifier">>, #{})).
+
+verifier_token_mode_defaults_to_form_test() ->
+    ?assertEqual(<<"form">>, verifier_token_mode(#{}, #{}, #{})).
+
+verifier_request_uses_form_body_for_user_me_test() ->
+    Req = verifier_request(<<"https://example.test/user/me">>, <<"tokenA">>, <<"form">>),
+    ?assertEqual(<<"POST">>, maps:get(<<"method">>, Req)),
+    ?assertEqual(<<"https://example.test/user/me">>, maps:get(<<"path">>, Req)),
+    ?assertEqual(<<"application/x-www-form-urlencoded">>, maps:get(<<"content-type">>, Req)),
+    ?assertEqual(<<"auth_token=tokenA">>, maps:get(<<"body">>, Req)),
+    ?assertEqual(false, binary:match(maps:get(<<"path">>, Req), <<"tokenA">>) =/= nomatch).
+
+demo_header_uses_user_me_verifier_by_default_test() ->
+    Req = #{ <<"X-Odysee-Demo-Auth-Token">> => <<"tokenA">> },
+    {ok, Token, Source} = request_token(#{}, Req, #{}),
+    ?assertEqual(<<"tokenA">>, Token),
+    ?assertEqual(<<"X-Odysee-Demo-Auth-Token">>, Source),
+    ?assertEqual(<<"https://api.odysee.com/user/me">>, demo_verifier_url(Source)).
+
+verifier_request_can_use_auth_header_test() ->
+    Req = verifier_request(<<"https://example.test/user/me">>, <<"tokenA">>, <<"header">>),
+    ?assertEqual(<<"GET">>, maps:get(<<"method">>, Req)),
+    ?assertEqual(<<"https://example.test/user/me">>, maps:get(<<"path">>, Req)),
+    ?assertEqual(<<"tokenA">>, maps:get(<<"x-lbry-auth-token">>, Req)),
+    ?assertEqual(false, maps:is_key(<<"authorization">>, Req)),
+    ?assertEqual(false, binary:match(maps:get(<<"path">>, Req), <<"tokenA">>) =/= nomatch).
+
+verifier_request_can_use_query_mode_test() ->
+    Req = verifier_request(<<"https://example.test/user/me">>, <<"tokenA">>, <<"query">>),
+    ?assertEqual(<<"https://example.test/user/me?auth_token=tokenA">>, maps:get(<<"path">>, Req)),
+    ?assertEqual(false, maps:is_key(<<"x-lbry-auth-token">>, Req)).
 
 test_base() ->
     #{

@@ -1,18 +1,23 @@
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
-import { isHyperbeamDeviceEnabled, isHyperbeamFullMode, isHyperbeamHybridMode } from 'util/hyperbeamMode';
+import { isHyperbeamDeviceEnabled, isHyperbeamEnabled } from 'util/hyperbeamMode';
 
 export const HYPERBEAM_DEVICE = {
   odysee: '~odysee@1.0',
-  claim: '~lbry-claim@1.0',
-  channel: '~lbry-channel@1.0',
+  claim: '~odysee-claim@1.0',
+  channel: '~odysee-channel@1.0',
   comment: '~odysee-comment@1.0',
+  file: '~odysee-file@1.0',
+  fileReaction: '~odysee-file-reaction@1.0',
   internalApis: '~odysee-internal-apis@1.0',
   legacyAuth: '~odysee-legacy-auth@1.0',
   livestream: '~odysee-livestream@1.0',
   productEvents: '~odysee-product-events@1.0',
+  reaction: '~odysee-reaction@1.0',
   search: '~odysee-search@1.0',
-  stream: '~lbry-stream@1.0',
-  streamDescriptor: '~lbry-stream-descriptor@1.0',
+  stream: '~odysee-stream@1.0',
+  streamDescriptor: '~odysee-stream-descriptor@1.0',
+  subscription: '~odysee-subscription@1.0',
+  uploadDemo: '~odysee-upload-demo@1.0',
 };
 
 export function hyperbeamNodeBase() {
@@ -86,34 +91,20 @@ export function hyperbeamSdkPostParams64(
   const params = paramName === 'urls64' ? { urls: value } : value || {};
   const params64 = base64Url(JSON.stringify(params));
 
-  return fetch(`${base}/sdk?method=${encodeURIComponent(method)}&params64=${params64}`, {
+  return fetch(`${base}/sdk?sdk-method=${encodeURIComponent(method)}`, {
     method: 'POST',
     headers: {
       accept: 'application/json',
+      'content-type': 'application/json',
       ...headers,
     },
+    body: JSON.stringify({ params64 }),
   });
 }
 
-const HYBRID_PUBLIC_READ_METHODS = new Set([
-  'resolve',
-  'claim_search',
-  'get',
-  'stream_list',
-  'blob_list',
-  'comment_list',
-  'comment_by_id',
-  'comment_get_channel_from_comment_id',
-  'reaction_list',
-  'setting_get',
-  'setting_list',
-  'commentron',
-]);
-
 export function isHyperbeamMethodEnabled(method: string) {
-  if (isHyperbeamFullMode()) return true;
-  if (isHyperbeamHybridMode()) return HYBRID_PUBLIC_READ_METHODS.has(method);
-  return false;
+  void method;
+  return isHyperbeamEnabled();
 }
 
 export function hyperbeamMethodDevice(method: string) {

@@ -21,6 +21,7 @@ import { ODYSEE_HYPERBEAM_NODE_API } from '../../../../config';
 import { HYPERBEAM_DEVICE, hyperbeamDeviceUrl } from 'util/hyperbeamDevices';
 import { verifySecp256k1Signature } from 'util/hyperbeamSecp256k1';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
+import { isHyperbeamUploadClaim } from 'util/hyperbeamNativeUpload';
 
 const PLAY_POSITION_SAVE_INTERVAL_MS = 15000;
 const POSITION_SYNC_INTERVAL_MS = 30000;
@@ -259,7 +260,10 @@ function hyperbeamDescriptorVerification(body: any, expectedSdHash?: string) {
   const actualSdHash =
     fields?.sd_hash || body?.['sd-hash'] || body?.['computed-sd-hash'] || body?.verification?.sd_hash;
   const status = hyperbeamVerificationStatus(body);
-  const descriptorVerified = status === 'verified' || body?.device === 'lbry-stream-descriptor@1.0';
+  const descriptorVerified =
+    status === 'verified' ||
+    body?.device === 'odysee-stream-descriptor@1.0' ||
+    body?.device === 'lbry-stream-descriptor@1.0';
   const checks = {
     expectedSdHash,
     descriptorSdHash: actualSdHash,
@@ -1063,8 +1067,11 @@ function VideoViewer(props: Props) {
   const isAudio = Boolean(contentType?.includes('audio'));
   const forcePlayer = Boolean(contentType && FORCE_CONTENT_TYPE_PLAYER.includes(contentType));
   const claimSdHash = hyperbeamClaimSdHash(claim);
+  const isHyperbeamUpload = isHyperbeamUploadClaim(claim);
   const playerSource =
-    !isLivestreamClaim && !isProtectedContent && !isAudio ? hyperbeamNodeMediaUrl(uri, claimSdHash) : source;
+    !isHyperbeamUpload && !isLivestreamClaim && !isProtectedContent && !isAudio
+      ? hyperbeamNodeMediaUrl(uri, claimSdHash)
+      : source;
   const enableInlineHyperbeamNodeDebug = isHyperbeamNodeMediaUrl(playerSource);
 
   const { search } = useLocation();

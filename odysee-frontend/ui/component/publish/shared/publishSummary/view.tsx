@@ -76,6 +76,11 @@ export default function PublishSummary() {
   } = pf;
 
   const channelClaim: any = myChannels && myChannels.find((x: any) => x.name === channel);
+  const publishTags = React.useMemo(
+    () =>
+      (tags || []).map((tag: any) => (typeof tag === 'string' ? { name: tag } : tag)).filter((tag: any) => tag?.name),
+    [tags]
+  );
   const previewUri = React.useMemo(() => {
     const name = pf.name || 'untitled';
     if (!isNameValid(name)) return null;
@@ -130,7 +135,7 @@ export default function PublishSummary() {
         description,
         thumbnail: { url: thumbnail },
         languages: language ? [language] : [],
-        tags: tags.map((t: any) => t.name),
+        tags: publishTags.map((t: any) => t.name),
         source: sourceMediaType ? { media_type: sourceMediaType } : undefined,
         ...streamMetadata,
       },
@@ -172,7 +177,7 @@ export default function PublishSummary() {
     channel,
     pf.name,
     language,
-    tags,
+    publishTags,
     channelClaim,
     previewBlobUrl,
     fileMime,
@@ -237,7 +242,7 @@ export default function PublishSummary() {
     return licenseType ? __(licenseType) : '';
   }
 
-  const visibleTags = removeInternalTags(tags);
+  const visibleTags = removeInternalTags(publishTags);
 
   return (
     <div className="publish-summary">

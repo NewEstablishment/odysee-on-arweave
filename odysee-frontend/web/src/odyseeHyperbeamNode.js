@@ -3,6 +3,7 @@ const { ODYSEE_HYPERBEAM_NODE_API } = require('../../config.cjs');
 const HYPERBEAM_NODE_TIMEOUT_MS = 15000;
 const HYPERBEAM_MODE_STORAGE_KEY = 'odysee-hyperbeam-mode';
 const HYPERBEAM_DEVICE_ODYSEE = '~odysee@1.0';
+const HYPERBEAM_DEVICE_SEARCH = '~odysee-search@1.0';
 
 function hyperbeamNodeBase() {
   return (ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
@@ -40,9 +41,9 @@ function methodDevice(method) {
       'txo_list',
     ].includes(method)
   )
-    return '~lbry-claim@1.0';
-  if (['channel_list', 'channel_sign'].includes(method)) return '~lbry-channel@1.0';
-  if (['stream_list', 'blob_list'].includes(method)) return '~lbry-stream@1.0';
+    return '~odysee-claim@1.0';
+  if (['channel_list', 'channel_sign'].includes(method)) return '~odysee-channel@1.0';
+  if (['stream_list', 'blob_list'].includes(method)) return '~odysee-stream@1.0';
   if (
     [
       'comment_list',
@@ -55,7 +56,7 @@ function methodDevice(method) {
     ].includes(method)
   )
     return '~odysee-comment@1.0';
-  if (['search', 'recsys_fyp', 'recsys_entry'].includes(method)) return '~odysee-search@1.0';
+  if (usesDirectSearchDevice(method)) return HYPERBEAM_DEVICE_SEARCH;
   if (
     [
       'short_url',
@@ -73,7 +74,7 @@ function methodDevice(method) {
 }
 
 function hyperbeamNodeJsonPath(key, paramName, value) {
-  if (hyperbeamMode() === 'hyperbeam') {
+  if (hyperbeamMode() === 'hyperbeam' && !usesDirectDevice(key)) {
     const base = deviceBase(HYPERBEAM_DEVICE_ODYSEE);
     if (!base) return '';
 
@@ -162,10 +163,11 @@ async function hyperbeamNodeClaimSearch(params, extraHeaders) {
 async function hyperbeamNodeSdkCall(method, params, extraHeaders) {
   if (!hyperbeamNodeConfigured()) return null;
 
-  const base = deviceBase(hyperbeamMode() === 'hyperbeam' ? HYPERBEAM_DEVICE_ODYSEE : methodDevice(method));
+  const useDirectDevice = hyperbeamMode() !== 'hyperbeam' || usesDirectDevice(method);
+  const base = deviceBase(useDirectDevice ? methodDevice(method) : HYPERBEAM_DEVICE_ODYSEE);
   if (!base) return null;
-  const encoded = base64Url(JSON.stringify(params || {}));
-  if (hyperbeamMode() === 'hyperbeam') {
+  const encoded = base64Url(JSON.stringify(withAuthTokenParam(method, params || {}, extraHeaders)));
+  if (!useDirectDevice) {
     return hyperbeamNodeFetchJson(
       {
         body: {},
@@ -184,6 +186,18 @@ async function hyperbeamNodeSdkCall(method, params, extraHeaders) {
     },
     extraHeaders
   );
+}
+
+function withAuthTokenParam(method, params, extraHeaders) {
+  if (method !== 'channel_list' || params.auth_token) return params;
+
+  const authToken =
+    extraHeaders &&
+    (extraHeaders['X-Lbry-Auth-Token'] ||
+      extraHeaders['x-lbry-auth-token'] ||
+      extraHeaders.Authorization ||
+      extraHeaders.authorization);
+  return authToken ? { ...params, auth_token: authToken } : params;
 }
 
 async function hyperbeamNodeFetchJson(request, extraHeaders) {
@@ -227,6 +241,14 @@ function sdkParamsFor(paramName, value) {
   return value || {};
 }
 
+function usesDirectSearchDevice(method) {
+  return ['search', 'recsys_fyp', 'recsys_entry'].includes(method);
+}
+
+function usesDirectDevice(method) {
+  return usesDirectSearchDevice(method) || method === 'channel_list';
+}
+
 function hyperbeamNodeMediaUrl(uri) {
   if (!hyperbeamNodeConfigured()) return '';
   return hyperbeamNodePath('media', uri);
@@ -236,13 +258,29 @@ function hyperbeamMode() {
   if (!ODYSEE_HYPERBEAM_NODE_API) return 'original';
   if (typeof window === 'undefined') return 'hyperbeam';
   const value = window.localStorage && window.localStorage.getItem(HYPERBEAM_MODE_STORAGE_KEY);
-  return value === 'original' || value === 'hybrid' || value === 'hyperbeam' ? value : 'hyperbeam';
+  if (value === 'original') return 'original';
+  if (value === 'hybrid' || value === 'hyperbeam' || value === 'demo' || value === 'local-demo') return 'hyperbeam';
+  return 'hyperbeam';
 }
 
 function isHyperbeamDeviceEnabled(device) {
   const mode = hyperbeamMode();
   if (mode === 'original') return false;
-  return device === HYPERBEAM_DEVICE_ODYSEE;
+  return [
+    HYPERBEAM_DEVICE_ODYSEE,
+    '~odysee-channel@1.0',
+    '~odysee-claim@1.0',
+    '~odysee-comment@1.0',
+    '~odysee-file-reaction@1.0',
+    '~odysee-file@1.0',
+    '~odysee-legacy-auth@1.0',
+    '~odysee-reaction@1.0',
+    HYPERBEAM_DEVICE_SEARCH,
+    '~odysee-stream-descriptor@1.0',
+    '~odysee-stream@1.0',
+    '~odysee-subscription@1.0',
+    '~odysee-upload-demo@1.0',
+  ].includes(device);
 }
 
 module.exports = {

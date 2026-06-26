@@ -511,6 +511,26 @@ raw_default_message() ->
                         <<"device">> => <<"auth-hook@1.0">>,
                         <<"path">> => <<"request">>,
                         <<"when">> => #{
+                            <<"keys">> => [
+                                <<"x-odysee-demo-auth-token">>,
+                                <<"X-Odysee-Demo-Auth-Token">>
+                            ]
+                        },
+                        <<"secret-provider">> =>
+                            #{
+                                <<"device">> => <<"odysee-legacy-auth@1.0">>,
+                                <<"legacy-auth-pepper">> => <<"local-demo-odysee-legacy-auth">>,
+                                <<"access-control">> =>
+                                    #{
+                                        <<"device">> => <<"odysee-legacy-auth@1.0">>,
+                                        <<"legacy-auth-pepper">> => <<"local-demo-odysee-legacy-auth">>
+                                    }
+                            }
+                    },
+                    #{
+                        <<"device">> => <<"auth-hook@1.0">>,
+                        <<"path">> => <<"request">>,
+                        <<"when">> => #{
                             <<"keys">> => [<<"authorization">>, <<"!">>]
                         },
                         <<"secret-provider">> =>

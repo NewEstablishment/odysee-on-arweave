@@ -10,6 +10,8 @@ type Props = {
 };
 type State = {
   hasError: boolean;
+  errorMessage: string | null | undefined;
+  errorStack: string | null | undefined;
   sentryEventId: string | null | undefined;
 };
 
@@ -18,6 +20,8 @@ class ErrorBoundary extends React.Component<Props, State> {
     super(props);
     this.state = {
       hasError: false,
+      errorMessage: undefined,
+      errorStack: undefined,
       sentryEventId: undefined,
     };
   }
@@ -28,15 +32,6 @@ class ErrorBoundary extends React.Component<Props, State> {
     };
   }
 
-  componentDidUpdate(_prevProps: Props, prevState: State) {
-    if (this.state.hasError && !prevState.hasError && this.retryCount < 5) {
-      this.retryCount++;
-      this.retryTimer = setTimeout(() => {
-        this.setState({ hasError: false, sentryEventId: undefined });
-      }, 200);
-    }
-  }
-
   componentWillUnmount() {
     clearTimeout(this.retryTimer);
   }
@@ -45,10 +40,22 @@ class ErrorBoundary extends React.Component<Props, State> {
   private retryCount = 0;
   private reloading = false;
 
+  scheduleRetry() {
+    this.retryCount++;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = setTimeout(() => {
+      this.setState({ hasError: false, errorMessage: undefined, errorStack: undefined, sentryEventId: undefined });
+    }, 200);
+  }
+
   componentDidCatch(error, errorInfo) {
+    const errorMessage = error?.message || error?.toString?.() || 'Unknown error';
+    const errorStack = error?.stack || '';
     console.error('[ErrorBoundary] Caught:', error?.message, error?.stack); // eslint-disable-line no-console
+    this.setState({ errorMessage, errorStack });
+
     if (error?.name === 'NotFoundError' || error?.message?.includes('object can not be found')) {
-      this.setState({ hasError: false });
+      this.setState({ hasError: false, errorMessage: undefined, errorStack: undefined });
       return;
     }
     if (
@@ -57,23 +64,36 @@ class ErrorBoundary extends React.Component<Props, State> {
         error.message
       )
     ) {
-      // Cancel any retry timer scheduled by componentDidUpdate so the children
-      // don't re-render and trigger the error UI before the reload navigates away.
       clearTimeout(this.retryTimer);
-      this.reloading = true;
       const key = `__staleChunkReload:${window.location.pathname}`;
+      let reloadAllowed = false;
       try {
         const prev = sessionStorage.getItem(key);
         const now = Date.now();
         if (!prev || now - Number(prev) > 30000) {
           sessionStorage.setItem(key, String(now));
-          this.retryCount = 999;
-          window.location.reload();
-          return;
+          reloadAllowed = true;
         }
       } catch {}
+
+      if (reloadAllowed) {
+        this.reloading = true;
+        this.retryCount = 999;
+        window.location.reload();
+        return;
+      }
+
+      this.reloading = false;
+      this.retryCount = 5;
+      this.setState({ hasError: true, errorMessage, errorStack, sentryEventId: null });
       return;
     }
+
+    if (this.retryCount < 5) {
+      this.scheduleRetry();
+      return;
+    }
+
     try {
       sessionStorage.setItem(
         '__errorBoundary',
@@ -98,15 +118,33 @@ class ErrorBoundary extends React.Component<Props, State> {
   render() {
     const { hasError } = this.state;
     const { sentryEventId } = this.state;
-    const errorWasReported = sentryEventId !== null;
+    const { errorMessage } = this.state;
+    const { errorStack } = this.state;
+    const errorWasReported = Boolean(sentryEventId);
+    const errorDebugAttrs =
+      process.env.NODE_ENV !== 'production'
+        ? {
+            'data-error-boundary-message': errorMessage || '',
+            'data-error-boundary-stack': errorStack || '',
+          }
+        : {};
 
     if (hasError && (this.retryCount < 5 || this.reloading)) {
-      return null;
+      return (
+        <div
+          className="main--empty"
+          {...errorDebugAttrs}
+          data-error-boundary-retry-count={this.retryCount}
+          data-error-boundary-reloading={this.reloading ? 'true' : 'false'}
+        >
+          {__('Loading...')}
+        </div>
+      );
     }
 
     if (hasError) {
       return (
-        <div className="main main--full-width main--empty">
+        <div className="main main--full-width main--empty" {...errorDebugAttrs}>
           <Yrbl
             type="sad"
             title={__('Aw shucks!')}

@@ -6,6 +6,7 @@ import { Lbryio, doFetchViewCount } from 'lbryinc';
 import Lbry, { debugHyperbeamNode } from 'lbry';
 import { normalizeURI } from 'util/lbryURI';
 import { doToast } from 'redux/actions/notifications';
+import { doSetActiveChannel, doSetIncognito } from 'redux/actions/app';
 import {
   selectMyClaimsRaw,
   selectResolvingUris,
@@ -20,6 +21,7 @@ import {
   selectResolvingIds,
   selectIsFetchingClaimSearchForQuery,
 } from 'redux/selectors/claims';
+import { selectActiveChannelClaimId, selectIncognito } from 'redux/selectors/app';
 import { doCheckIfPurchasedClaimIds } from 'redux/actions/payments';
 import { doFetchTxoPage } from 'redux/actions/wallet';
 import { doMembershipContentForStreamClaimIds, doFetchOdyseeMembershipForChannelIds } from 'redux/actions/memberships';
@@ -28,7 +30,8 @@ import { creditsToString } from 'util/format-credits';
 import { createNormalizedClaimSearchKey, getChannelIdFromClaim, isClaimProtected } from 'util/claim';
 import { hasFiatTags } from 'util/tags';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
-import { HYPERBEAM_DEVICE, hyperbeamDeviceUrl } from 'util/hyperbeamDevices';
+import { shouldUseHyperbeamUploadDemo } from 'util/hyperbeamLegacyAuth';
+import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
 let onChannelConfirmCallback;
@@ -90,34 +93,6 @@ function pushResolvedClaimsDebug(source: string, claims: Array<any>, pageContext
 
 function isTraceableClaim(claim: any) {
   return claim && (claim.value_type === 'stream' || claim.value_type === 'channel') && (claim.claim_id || claim.txid);
-}
-
-const materializedHyperbeamEvidence = new Set<string>();
-
-async function materializeHyperbeamClaimEvidence(claims: Array<any>) {
-  if (typeof window === 'undefined') return;
-
-  const requests: Array<Promise<Response | null>> = [];
-  const enqueue = (key: string, url: string) => {
-    if (!url || materializedHyperbeamEvidence.has(key)) return;
-    materializedHyperbeamEvidence.add(key);
-    requests.push(fetch(url, { headers: { accept: 'application/json' } }).catch(() => null));
-  };
-
-  claims.filter(isTraceableClaim).forEach((claim) => {
-    const txid = claim.txid;
-    const sdHash = claim.value?.source?.sd_hash;
-
-    if (txid) {
-      enqueue(`tx:${txid}`, hyperbeamDeviceUrl(HYPERBEAM_DEVICE.odysee, 'transaction', { txid }));
-    }
-
-    if (claim.value_type === 'stream' && sdHash) {
-      enqueue(`descriptor:${sdHash}`, hyperbeamDeviceUrl(HYPERBEAM_DEVICE.odysee, 'descriptor', { 'sd-hash': sdHash }));
-    }
-  });
-
-  await Promise.allSettled(requests);
 }
 
 function claimDebugPageContext() {
@@ -304,7 +279,6 @@ export function doResolveUris(
           [info?.stream, info?.channel, info?.collection].filter(Boolean)
         );
 
-        await materializeHyperbeamClaimEvidence(resolvedClaims);
         pushResolvedClaimsDebug('resolve', resolvedClaims, debugPageContext);
 
         // Batch synchronous actions into a single commit
@@ -904,12 +878,23 @@ export const doFetchChannelListMine =
     });
 
     const callback = (response: ChannelListResponse) => {
+      const channels = Array.isArray(response.items) ? response.items : [];
       dispatch({
         type: ACTIONS.FETCH_CHANNEL_LIST_COMPLETED,
         data: {
-          claims: response.items,
+          claims: channels,
         },
       });
+      const updatedState = getState();
+      const firstChannelId = channels[0] && channels[0].claim_id;
+      const shouldSelectFirstChannel =
+        (isHyperbeamFullMode() || shouldUseHyperbeamUploadDemo()) &&
+        firstChannelId &&
+        (selectIncognito(updatedState) || !selectActiveChannelClaimId(updatedState));
+      if (shouldSelectFirstChannel) {
+        dispatch(doSetActiveChannel(firstChannelId, true));
+        dispatch(doSetIncognito(false));
+      }
       dispatch(doUserHasPremium()); // depends on channel list
     };
 
@@ -968,7 +953,6 @@ export function doClaimSearch(
     });
 
     const success = async (data: ClaimSearchResponse) => {
-      await materializeHyperbeamClaimEvidence(data.items || []);
       pushResolvedClaimsDebug('claim_search', data.items || [], debugPageContext);
 
       const resolveInfo = {};

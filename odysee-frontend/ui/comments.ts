@@ -1,5 +1,5 @@
 import { COMMENT_SERVER_API } from 'config';
-import { HYPERBEAM_DEVICE, hyperbeamSdkPostParams64 } from 'util/hyperbeamDevices';
+import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamSdkPostParams64 } from 'util/hyperbeamDevices';
 import { isHyperbeamDeviceEnabled, shouldAllowOriginalNetworkFallback } from 'util/hyperbeamMode';
 // prettier-ignore
 const Comments = {
@@ -40,7 +40,7 @@ function fetchHyperbeamNodeCommentRead(
     | 'setting_list',
   params: {}
 ) {
-  const request = hyperbeamSdkPostParams64(endpoint, params || {});
+  const request = hyperbeamCommentReadRequest(endpoint, params || {});
   if (!request) {
     if (!shouldAllowOriginalNetworkFallback()) {
       return Promise.resolve(emptyHyperbeamCommentResult(endpoint));
@@ -60,6 +60,19 @@ function fetchHyperbeamNodeCommentRead(
       if (!shouldAllowOriginalNetworkFallback()) return emptyHyperbeamCommentResult(endpoint);
       return fetchCommentsApi(commentReadMethod(endpoint), params || {});
     });
+}
+
+function hyperbeamCommentReadRequest(endpoint: string, params: {}) {
+  switch (endpoint) {
+    case 'comment_list':
+      return hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.comment, 'list', params);
+    case 'comment_by_id':
+      return hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.comment, 'by-id', params);
+    case 'reaction_list':
+      return hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.reaction, 'list', params);
+    default:
+      return hyperbeamSdkPostParams64(endpoint, params);
+  }
 }
 
 function commentReadMethod(endpoint: string) {

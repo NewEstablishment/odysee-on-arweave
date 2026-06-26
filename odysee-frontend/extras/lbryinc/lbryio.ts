@@ -2,10 +2,15 @@ import * as ACTIONS from 'constants/action_types';
 import Lbry from 'lbry';
 // Use browser-native URLSearchParams instead of Node's querystring module
 import analytics from 'analytics';
-import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { getAuthToken as getSavedAuthToken } from 'util/saved-passwords';
-import { HYPERBEAM_DEVICE, hyperbeamDeviceBase, hyperbeamDeviceUrl } from 'util/hyperbeamDevices';
-import { isHyperbeamHybridMode } from 'util/hyperbeamMode';
+import {
+  HYPERBEAM_DEVICE,
+  hyperbeamDeviceBase,
+  hyperbeamDevicePostParams64,
+  hyperbeamDeviceUrl,
+} from 'util/hyperbeamDevices';
+import { legacyAuthIdentifyHeaders } from 'util/hyperbeamLegacyAuth';
+import { isHyperbeamEnabled, shouldAllowOriginalNetworkFallback } from 'util/hyperbeamMode';
 const Lbryio: {
   enabled: boolean;
   authenticationPromise: Promise<any> | null;
@@ -86,16 +91,96 @@ function hyperbeamNodeFetchJson(key: string, params: any = {}, authToken: string
   });
 }
 
+function hyperbeamDeviceFetchJson(device: string, key: string, params: any = {}, headers: Record<string, string> = {}) {
+  const request = hyperbeamDevicePostParams64(device, key, params, headers);
+  if (!request) return null;
+
+  return request.then(async (response) => {
+    const json = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const error = new Error(json?.error || `HyperBEAM device ${key} failed with ${response.status}`);
+      (error as any).response = response;
+      (error as any).status = response.status;
+      (error as any).body = json;
+      throw error;
+    }
+
+    return unwrapJsonRpcResult(json);
+  });
+}
+
+function hyperbeamLegacyAuthUser(authToken: string) {
+  const base = hyperbeamDeviceBase(HYPERBEAM_DEVICE.legacyAuth);
+  if (!base) return null;
+
+  return fetch(`${base}/identify`, {
+    method: 'GET',
+    headers: legacyAuthIdentifyHeaders(authToken),
+  }).then(async (response) => {
+    const json = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const error = new Error(json?.error || `legacy-auth/identify failed with ${response.status}`);
+      (error as any).response = response;
+      (error as any).status = response.status;
+      (error as any).body = json;
+      throw error;
+    }
+
+    return hyperbeamLegacyIdentityUser(unwrapJsonRpcResult(json));
+  });
+}
+
+function hyperbeamLegacyIdentityUser(identity: any) {
+  const candidate = identity?.['legacy-user'] || identity?.legacy_user || identity?.user || identity?.data || identity;
+  const user = candidate && typeof candidate === 'object' ? { ...candidate } : {};
+  const legacyUserId = identity?.['legacy-user-id'] || identity?.legacy_user_id || identity?.user_id;
+  if (!user.id && legacyUserId) user.id = legacyUserId;
+  if (!user.has_verified_email) user.has_verified_email = true;
+  return user;
+}
+
 function hyperbeamProductMethod(resource: string, action: string) {
   return `${resource}_${action}`.replace(/[^a-zA-Z0-9_]+/g, '_');
 }
 
-function signedOutHybridFallback(resource: string, action: string, params: any) {
+function hyperbeamOptionalApiFallback(resource: string, action: string, params: any) {
   if (resource === 'membership_v2' && action === 'list') return [];
   if (resource === 'membership_v2' && action === 'check') return {};
+  if (resource === 'membership_v2/subscription' && action === 'list') return [];
   if (resource === 'user' && action === 'has_premium') return {};
+  if (resource === 'user' && action === 'invite_status') {
+    return {
+      invitees: [],
+      invites_remaining: 0,
+    };
+  }
+  if (resource === 'user' && action === 'view_history') {
+    return {
+      has_more: false,
+      items: [],
+      page: params?.page || 1,
+    };
+  }
+  if (resource === 'user' && action === 'view_history/delete') return {};
+  if (resource === 'user_referral_code' && action === 'list') return '';
   if (resource === 'account' && action === 'check') return {};
+  if (resource === 'account' && action === 'status') {
+    return {
+      arweave: {
+        addresses: [],
+        default_address: null,
+      },
+      stripe: null,
+    };
+  }
   if (resource === 'reaction' && action === 'list') return {};
+  if (resource === 'customer' && action === 'status') return null;
+  if (resource === 'reward' && action === 'list') return [];
+  if (resource === 'reward' && action === 'list_featured') return [];
+  if (resource === 'notification' && action === 'list') return [];
+  if (resource === 'notification' && action === 'categories') return [];
   if (resource === 'file' && action === 'last_positions') return {};
   if (resource === 'file' && action === 'view_count') {
     const claimIds = String(params?.claim_id || params?.claim_ids || '')
@@ -112,6 +197,10 @@ function signedOutHybridFallback(resource: string, action: string, params: any) 
   return undefined;
 }
 
+function hyperbeamFallbackFor(resource: string, action: string, params: any) {
+  return isHyperbeamEnabled() ? hyperbeamOptionalApiFallback(resource, action, params) : undefined;
+}
+
 function hyperbeamNodeProductApiCall(
   resource: string,
   action: string,
@@ -121,6 +210,19 @@ function hyperbeamNodeProductApiCall(
   const nodeParams = authToken ? { auth_token: authToken, ...params } : params;
 
   return hyperbeamNodeFetchJson(hyperbeamProductMethod(resource, action), nodeParams, authToken);
+}
+
+function hyperbeamNativeProductApiCall(resource: string, action: string, params: any = {}) {
+  if (resource === 'file' && action === 'view_count') {
+    return hyperbeamDeviceFetchJson(HYPERBEAM_DEVICE.file, 'view-count', params);
+  }
+  if (resource === 'subscription' && action === 'sub_count') {
+    return hyperbeamDeviceFetchJson(HYPERBEAM_DEVICE.subscription, 'sub-count', params);
+  }
+  if (resource === 'reaction' && action === 'list') {
+    return hyperbeamDeviceFetchJson(HYPERBEAM_DEVICE.reaction, 'list', params);
+  }
+  return null;
 }
 
 // We can't use env's because they aren't passed into node_modules
@@ -222,14 +324,34 @@ Lbryio.call = (resource, action, params = {}, method = 'post', noAuth = false) =
           return response.data;
         })
         .catch((error) => {
-          const fallback = isHyperbeamHybridMode() ? signedOutHybridFallback(resource, action, params) : undefined;
-          if ((error?.response?.status === 401 || error?.response?.status === 403) && fallback !== undefined) {
+          const fallback = hyperbeamFallbackFor(resource, action, params);
+          if (
+            fallback !== undefined &&
+            (!error?.response || error?.response?.status === 401 || error?.response?.status === 403)
+          ) {
             return fallback;
           }
           sendFailedCallAnalytics(resource, action, params, error);
           throw error;
         });
     };
+
+    const nativeProductRequest = hyperbeamNativeProductApiCall(resource, action, params);
+    if (nativeProductRequest) {
+      return nativeProductRequest
+        .then((response) => {
+          sendCallAnalytics(resource, action, params);
+          return response;
+        })
+        .catch((error) => {
+          const fallback = hyperbeamFallbackFor(resource, action, params);
+          if (fallback !== undefined) {
+            return fallback;
+          }
+          sendFailedCallAnalytics(resource, action, params, error);
+          throw error;
+        });
+    }
 
     if (hyperbeamNodeConfigured()) {
       return hyperbeamNodeProductApiCall(resource, action, params, nodeAuthToken)
@@ -238,9 +360,21 @@ Lbryio.call = (resource, action, params = {}, method = 'post', noAuth = false) =
           return response;
         })
         .catch((error) => {
+          const fallback = hyperbeamFallbackFor(resource, action, params);
+          if (fallback !== undefined) {
+            return fallback;
+          }
           sendFailedCallAnalytics(resource, action, params, error);
           throw error;
         });
+    }
+
+    const fallback = hyperbeamFallbackFor(resource, action, params);
+    if (fallback !== undefined) {
+      return Promise.resolve(fallback);
+    }
+    if (!shouldAllowOriginalNetworkFallback()) {
+      return Promise.reject(new Error(`HyperBEAM product API device is not configured for ${resource}/${action}`));
     }
 
     return directRequest();
@@ -283,8 +417,10 @@ Lbryio.getAuthToken = () =>
 
 Lbryio.getCurrentUser = () =>
   Lbryio.getAuthToken().then((token) => {
-    if (hyperbeamNodeConfigured() && token) {
-      return hyperbeamNodeFetchJson('user_me', {}, token);
+    if (isHyperbeamEnabled() && token) {
+      const user = hyperbeamLegacyAuthUser(token);
+      if (user) return user;
+      return Promise.reject(new Error('HyperBEAM legacy auth device is not configured.'));
     }
 
     return Lbryio.call('user', 'me');

@@ -97,7 +97,7 @@ export function installHyperbeamFetchDebug() {
         isHyperbeam ? hyperbeamFallbackLayer(url) : 'original',
         pageContext
       );
-      pushHyperbeamDebug('response', summary, response.ok ? 'ok' : 'error');
+      pushHyperbeamDebug('response', summary, responseDebugLevel(summary, response));
       return response;
     } catch (error: any) {
       if (shouldLog) {
@@ -218,6 +218,20 @@ async function responseSummary(
   return summary;
 }
 
+function responseDebugLevel(summary: Record<string, any>, response: Response): HyperbeamDebugLevel {
+  if (response.ok) return 'ok';
+  if (isProtectedDescriptorResponse(summary)) return 'warn';
+  return 'error';
+}
+
+function isProtectedDescriptorResponse(summary: Record<string, any>) {
+  return (
+    summary.status === 403 &&
+    String(summary.devicePath || '').startsWith('/~odysee@1.0/descriptor') &&
+    String(summary.body || '').toLowerCase() === 'protected'
+  );
+}
+
 function pageContextSummary() {
   if (typeof window === 'undefined') return {};
 
@@ -335,12 +349,13 @@ function sanitizeParsedPath(parsed: URL) {
 }
 
 function sanitizeUrlLikeString(value: string) {
-  return value.replace(/([?&](?:params64|urls64|auth_token|token|signature|uri64)=)[^&\s]+/gi, '$1...');
+  return value.replace(/([?&](?:metadata64|params64|urls64|auth_token|token|signature|uri64)=)[^&\s]+/gi, '$1...');
 }
 
 function isSensitiveQueryName(name: string) {
   const key = name.toLowerCase();
   return (
+    key === 'metadata64' ||
     key === 'params64' ||
     key === 'urls64' ||
     key === 'uri64' ||
@@ -386,5 +401,5 @@ function redactSensitiveString(value: string) {
     .replace(/(auth[_-]?token["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[redacted]')
     .replace(/(authorization["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[redacted]')
     .replace(/(x[-_]?lbry[-_]?auth[-_]?token["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[redacted]')
-    .replace(/([?&](?:params64|urls64|auth_token|token|signature|uri64)=)[^&\s]+/gi, '$1...');
+    .replace(/([?&](?:metadata64|params64|urls64|auth_token|token|signature|uri64)=)[^&\s]+/gi, '$1...');
 }

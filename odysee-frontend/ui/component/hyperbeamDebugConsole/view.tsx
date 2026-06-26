@@ -10,11 +10,20 @@ import {
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { getHyperbeamMode, HYPERBEAM_MODES, setHyperbeamMode, type HyperbeamMode } from 'util/hyperbeamMode';
 import {
+  hasHyperbeamLegacyAuthToken,
+  hyperbeamLegacyAuthDemoToken,
   hyperbeamLegacyAuthTrust,
   installHyperbeamLegacyAuthDemoGlobal,
-  runHyperbeamLegacyAuthDemo,
+  isLegacyAuthRejected,
+  normalizeLegacyAuthToken,
+  rememberHyperbeamLegacyAuthDemoToken,
+  runHyperbeamCallDemo,
+  runHyperbeamLegacyAuthUploadDemo,
   type LegacyAuthTrust,
 } from 'util/hyperbeamLegacyAuth';
+import { doHyperbeamLegacyAuthSignIn } from 'redux/actions/user';
+import { useAppDispatch, useAppSelector } from 'redux/hooks';
+import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import ClaimTrace from './claimTrace';
 
 const MAX_EVENTS = 1200;
@@ -33,7 +42,9 @@ type FilterKey = (typeof FILTERS)[number]['key'];
 type ConsoleTab = 'trace' | 'requests';
 
 export default function HyperbeamDebugConsole() {
-  const [open, setOpen] = React.useState(true);
+  const dispatch = useAppDispatch();
+  const authenticated = useAppSelector(selectUserVerifiedEmail);
+  const [open, setOpen] = React.useState(false);
   const [maximized, setMaximized] = React.useState(false);
   const [mode, setMode] = React.useState<HyperbeamMode>(() => getHyperbeamMode());
   const [activeTab, setActiveTab] = React.useState<ConsoleTab>('trace');
@@ -43,10 +54,35 @@ export default function HyperbeamDebugConsole() {
   const [activeFilters, setActiveFilters] = React.useState<Set<FilterKey>>(() => new Set());
   const [copied, setCopied] = React.useState(false);
   const [copiedRelevant, setCopiedRelevant] = React.useState(false);
+  const [legacyAuthTokenInput, setLegacyAuthTokenInput] = React.useState('');
+  const [legacyUploadChannelIdInput, setLegacyUploadChannelIdInput] = React.useState('');
+  const [legacyUploadChannelNameInput, setLegacyUploadChannelNameInput] = React.useState('');
+  const [legacyUploadTitleInput, setLegacyUploadTitleInput] = React.useState('Native HyperBEAM upload');
+  const [legacyUploadDescriptionInput, setLegacyUploadDescriptionInput] = React.useState(
+    'Stored directly in the HyperBEAM native upload store'
+  );
+  const [legacyUploadTagsInput, setLegacyUploadTagsInput] = React.useState('hyperbeam,native');
+  const [legacyUploadThumbnailInput, setLegacyUploadThumbnailInput] = React.useState('');
   const [legacyAuthRunning, setLegacyAuthRunning] = React.useState(false);
   const [legacyAuthResult, setLegacyAuthResult] = React.useState<any>(null);
   const [legacyAuthError, setLegacyAuthError] = React.useState<string | null>(null);
+  const [legacyUploadRunning, setLegacyUploadRunning] = React.useState(false);
+  const [legacyUploadFile, setLegacyUploadFile] = React.useState<File | null>(null);
+  const [legacyUploadResult, setLegacyUploadResult] = React.useState<any>(null);
+  const [legacyUploadError, setLegacyUploadError] = React.useState<string | null>(null);
+  const [callDemoRunning, setCallDemoRunning] = React.useState(false);
+  const [callDemoResult, setCallDemoResult] = React.useState<any>(null);
+  const [callDemoError, setCallDemoError] = React.useState<string | null>(null);
   const logRef = React.useRef<HTMLDivElement | null>(null);
+  const legacyAuthTokenInputRef = React.useRef<HTMLInputElement | null>(null);
+  const legacyAuthBootstrapped = React.useRef(false);
+  const clearLegacyAuthTokenInput = React.useCallback(() => {
+    setLegacyAuthTokenInput('');
+    if (legacyAuthTokenInputRef.current) {
+      legacyAuthTokenInputRef.current.value = '';
+    }
+    rememberHyperbeamLegacyAuthDemoToken('');
+  }, []);
 
   React.useEffect(() => {
     installHyperbeamFetchDebug();
@@ -80,6 +116,30 @@ export default function HyperbeamDebugConsole() {
     if (!open || !logRef.current) return;
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [events, open]);
+
+  React.useEffect(() => {
+    if (legacyAuthBootstrapped.current || authenticated || !hyperbeamLegacyAuthTrust().allowed) return;
+    if (!hasHyperbeamLegacyAuthToken()) return;
+
+    const authToken = hyperbeamLegacyAuthDemoToken();
+    if (!authToken) return;
+
+    legacyAuthBootstrapped.current = true;
+    setLegacyAuthRunning(true);
+    setLegacyAuthError(null);
+    dispatch(doHyperbeamLegacyAuthSignIn(authToken) as any)
+      .then((result) => {
+        setLegacyAuthResult(result);
+      })
+      .catch((error: any) => {
+        if (isLegacyAuthRejected(error)) {
+          clearLegacyAuthTokenInput();
+        }
+        setLegacyAuthResult(error?.result || error?.body || null);
+        setLegacyAuthError(String(error?.message || error));
+      })
+      .finally(() => setLegacyAuthRunning(false));
+  }, [authenticated, clearLegacyAuthTokenInput, dispatch]);
 
   if (!ODYSEE_HYPERBEAM_NODE_API) return null;
 
@@ -144,19 +204,111 @@ export default function HyperbeamDebugConsole() {
     setFilterCounts(emptyFilterCounts());
     window.location.reload();
   };
+  const currentLegacyAuthTokenInput = React.useCallback(() => {
+    const inputToken = legacyAuthTokenInput || legacyAuthTokenInputRef.current?.value || '';
+    const authToken = inputToken || hyperbeamLegacyAuthDemoToken();
+    if (inputToken && inputToken !== legacyAuthTokenInput) {
+      setLegacyAuthTokenInput(inputToken);
+    }
+    if (inputToken) {
+      rememberHyperbeamLegacyAuthDemoToken(inputToken);
+    }
+    return authToken || undefined;
+  }, [legacyAuthTokenInput]);
   const runLegacyAuthDemo = () => {
+    const authToken = currentLegacyAuthTokenInput();
+    runLegacyAuthSignIn(authToken);
+  };
+  const runLegacyAuthSignIn = (authToken?: string) => {
     setLegacyAuthRunning(true);
     setLegacyAuthError(null);
-    runHyperbeamLegacyAuthDemo()
+    dispatch(doHyperbeamLegacyAuthSignIn(authToken) as any)
       .then((result) => {
         setLegacyAuthResult(result);
       })
       .catch((error: any) => {
+        if (isLegacyAuthRejected(error)) {
+          clearLegacyAuthTokenInput();
+        }
         setLegacyAuthResult(error?.result || error?.body || null);
         setLegacyAuthError(String(error?.message || error));
       })
       .finally(() => setLegacyAuthRunning(false));
   };
+  const pasteLegacyAuthToken = React.useCallback(
+    (value: string) => {
+      const authToken = normalizeLegacyAuthToken(value);
+      if (!authToken) return;
+      setLegacyAuthTokenInput(authToken);
+      rememberHyperbeamLegacyAuthDemoToken(authToken);
+      runLegacyAuthSignIn(authToken);
+    },
+    [dispatch]
+  );
+  const runLegacyAuthUploadDemo = () => {
+    const authToken = currentLegacyAuthTokenInput();
+    setLegacyUploadRunning(true);
+    setLegacyUploadError(null);
+    runHyperbeamLegacyAuthUploadDemo({
+      authToken,
+      channelId: legacyUploadChannelIdInput || undefined,
+      channelName: legacyUploadChannelNameInput || undefined,
+      description: legacyUploadDescriptionInput || undefined,
+      legacyClaimIds: ['legacy-demo-claim-a', 'legacy-demo-claim-b'],
+      file: legacyUploadFile,
+      tags: legacyUploadTagsInput || undefined,
+      thumbnailUrl: legacyUploadThumbnailInput || undefined,
+      title: legacyUploadTitleInput || undefined,
+    })
+      .then((result) => {
+        setLegacyUploadResult(result);
+      })
+      .catch((error: any) => {
+        if (isLegacyAuthRejected(error)) {
+          clearLegacyAuthTokenInput();
+        }
+        setLegacyUploadResult(error?.result || error?.body || null);
+        setLegacyUploadError(String(error?.message || error));
+      })
+      .finally(() => setLegacyUploadRunning(false));
+  };
+  const runCallDemo = () => {
+    const authToken = currentLegacyAuthTokenInput();
+    setCallDemoRunning(true);
+    setCallDemoError(null);
+    runHyperbeamCallDemo({
+      authToken,
+      description: legacyUploadDescriptionInput || undefined,
+      file: legacyUploadFile,
+      tags: legacyUploadTagsInput || undefined,
+      thumbnailUrl: legacyUploadThumbnailInput || undefined,
+      title: legacyUploadTitleInput || undefined,
+    })
+      .then((result) => {
+        setCallDemoResult(result);
+        setLegacyAuthResult(result.auth);
+        setLegacyUploadResult({
+          upload: result.upload,
+          channel: result.channel,
+          readback: result.readback,
+          nativeClaim: result.nativeClaim,
+        });
+        if (result.selectedChannel?.claim_id) setLegacyUploadChannelIdInput(result.selectedChannel.claim_id);
+        if (result.selectedChannel?.name) setLegacyUploadChannelNameInput(result.selectedChannel.name);
+      })
+      .catch((error: any) => {
+        if (isLegacyAuthRejected(error)) {
+          clearLegacyAuthTokenInput();
+        }
+        setCallDemoResult(error?.result || error?.body || null);
+        setCallDemoError(String(error?.message || error));
+      })
+      .finally(() => setCallDemoRunning(false));
+  };
+  const updateLegacyAuthTokenInput = React.useCallback((value: string) => {
+    setLegacyAuthTokenInput(value);
+    rememberHyperbeamLegacyAuthDemoToken(value);
+  }, []);
 
   return (
     <div
@@ -244,7 +396,6 @@ export default function HyperbeamDebugConsole() {
           }}
         >
           <option value={HYPERBEAM_MODES.original}>Original</option>
-          <option value={HYPERBEAM_MODES.hybrid}>Hybrid</option>
           <option value={HYPERBEAM_MODES.hyperbeam}>HyperBEAM</option>
         </select>
         <button
@@ -280,10 +431,36 @@ export default function HyperbeamDebugConsole() {
             </div>
             <LegacyAuthDemoPanel
               error={legacyAuthError}
+              uploadError={legacyUploadError}
+              uploadFile={legacyUploadFile}
+              uploadResult={legacyUploadResult}
+              uploadRunning={legacyUploadRunning}
+              callDemoError={callDemoError}
+              callDemoResult={callDemoResult}
+              callDemoRunning={callDemoRunning}
               result={legacyAuthResult}
               running={legacyAuthRunning}
+              channelIdValue={legacyUploadChannelIdInput}
+              channelNameValue={legacyUploadChannelNameInput}
+              descriptionValue={legacyUploadDescriptionInput}
+              tagsValue={legacyUploadTagsInput}
+              thumbnailValue={legacyUploadThumbnailInput}
+              titleValue={legacyUploadTitleInput}
+              tokenValue={legacyAuthTokenInput}
               trust={legacyAuthTrust}
+              tokenInputRef={legacyAuthTokenInputRef}
+              onFileChange={setLegacyUploadFile}
               onRun={runLegacyAuthDemo}
+              onRunCallDemo={runCallDemo}
+              onRunUpload={runLegacyAuthUploadDemo}
+              onChannelIdChange={setLegacyUploadChannelIdInput}
+              onChannelNameChange={setLegacyUploadChannelNameInput}
+              onDescriptionChange={setLegacyUploadDescriptionInput}
+              onTagsChange={setLegacyUploadTagsInput}
+              onThumbnailChange={setLegacyUploadThumbnailInput}
+              onTitleChange={setLegacyUploadTitleInput}
+              onTokenChange={updateLegacyAuthTokenInput}
+              onTokenPaste={pasteLegacyAuthToken}
             />
           </div>
           {activeTab === 'trace' && <ClaimTrace events={events} />}
@@ -463,16 +640,68 @@ function TabButton({ active, children, onClick }: { active: boolean; children: R
 
 function LegacyAuthDemoPanel({
   error,
+  uploadError,
+  uploadFile,
+  uploadResult,
+  uploadRunning,
+  callDemoError,
+  callDemoResult,
+  callDemoRunning,
   result,
   running,
+  channelIdValue,
+  channelNameValue,
+  descriptionValue,
+  tagsValue,
+  thumbnailValue,
+  titleValue,
+  tokenValue,
   trust,
+  tokenInputRef,
+  onFileChange,
   onRun,
+  onRunCallDemo,
+  onRunUpload,
+  onChannelIdChange,
+  onChannelNameChange,
+  onDescriptionChange,
+  onTagsChange,
+  onThumbnailChange,
+  onTitleChange,
+  onTokenChange,
+  onTokenPaste,
 }: {
   error: string | null;
+  uploadError: string | null;
+  uploadFile: File | null;
+  uploadResult: any;
+  uploadRunning: boolean;
+  callDemoError: string | null;
+  callDemoResult: any;
+  callDemoRunning: boolean;
   result: any;
   running: boolean;
+  channelIdValue: string;
+  channelNameValue: string;
+  descriptionValue: string;
+  tagsValue: string;
+  thumbnailValue: string;
+  titleValue: string;
+  tokenValue: string;
   trust: LegacyAuthTrust;
+  tokenInputRef: React.Ref<HTMLInputElement>;
+  onFileChange: (file: File | null) => void;
   onRun: () => void;
+  onRunCallDemo: () => void;
+  onRunUpload: () => void;
+  onChannelIdChange: (value: string) => void;
+  onChannelNameChange: (value: string) => void;
+  onDescriptionChange: (value: string) => void;
+  onTagsChange: (value: string) => void;
+  onThumbnailChange: (value: string) => void;
+  onTitleChange: (value: string) => void;
+  onTokenChange: (value: string) => void;
+  onTokenPaste: (value: string) => void;
 }) {
   return (
     <div
@@ -484,6 +713,156 @@ function LegacyAuthDemoPanel({
         background: 'rgba(255,255,255,0.045)',
       }}
     >
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 7 }}>
+        <input
+          ref={tokenInputRef}
+          type="password"
+          value={tokenValue}
+          onChange={(event) => onTokenChange(event.currentTarget.value)}
+          onPaste={(event) => {
+            event.preventDefault();
+            onTokenPaste(event.clipboardData.getData('text'));
+          }}
+          placeholder="optional auth token"
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            flex: '1 1 180px',
+            minWidth: 0,
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 4,
+            padding: '3px 6px',
+            background: 'rgba(12,10,12,0.72)',
+            color: '#f9fafb',
+            font: 'inherit',
+          }}
+        />
+        <input
+          type="file"
+          onChange={(event) => onFileChange(event.currentTarget.files?.[0] || null)}
+          title={uploadFile ? uploadFile.name : 'Choose upload demo file'}
+          style={{
+            flex: '0 1 220px',
+            minWidth: 150,
+            color: 'rgba(255,255,255,0.72)',
+            font: 'inherit',
+          }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 7 }}>
+        <input
+          type="text"
+          value={channelIdValue}
+          onChange={(event) => onChannelIdChange(event.currentTarget.value)}
+          placeholder="native channel id"
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            flex: '1 1 180px',
+            minWidth: 0,
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 4,
+            padding: '3px 6px',
+            background: 'rgba(12,10,12,0.72)',
+            color: '#f9fafb',
+            font: 'inherit',
+          }}
+        />
+        <input
+          type="text"
+          value={channelNameValue}
+          onChange={(event) => onChannelNameChange(event.currentTarget.value)}
+          placeholder="channel name"
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            flex: '1 1 160px',
+            minWidth: 0,
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 4,
+            padding: '3px 6px',
+            background: 'rgba(12,10,12,0.72)',
+            color: '#f9fafb',
+            font: 'inherit',
+          }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 7 }}>
+        <input
+          type="text"
+          value={titleValue}
+          onChange={(event) => onTitleChange(event.currentTarget.value)}
+          placeholder="upload title"
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            flex: '1 1 180px',
+            minWidth: 0,
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 4,
+            padding: '3px 6px',
+            background: 'rgba(12,10,12,0.72)',
+            color: '#f9fafb',
+            font: 'inherit',
+          }}
+        />
+        <input
+          type="text"
+          value={tagsValue}
+          onChange={(event) => onTagsChange(event.currentTarget.value)}
+          placeholder="tags"
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            flex: '0 1 180px',
+            minWidth: 120,
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 4,
+            padding: '3px 6px',
+            background: 'rgba(12,10,12,0.72)',
+            color: '#f9fafb',
+            font: 'inherit',
+          }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 7 }}>
+        <input
+          type="text"
+          value={descriptionValue}
+          onChange={(event) => onDescriptionChange(event.currentTarget.value)}
+          placeholder="description"
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            flex: '1 1 240px',
+            minWidth: 0,
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 4,
+            padding: '3px 6px',
+            background: 'rgba(12,10,12,0.72)',
+            color: '#f9fafb',
+            font: 'inherit',
+          }}
+        />
+        <input
+          type="url"
+          value={thumbnailValue}
+          onChange={(event) => onThumbnailChange(event.currentTarget.value)}
+          placeholder="thumbnail url"
+          autoComplete="off"
+          spellCheck={false}
+          style={{
+            flex: '1 1 180px',
+            minWidth: 0,
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 4,
+            padding: '3px 6px',
+            background: 'rgba(12,10,12,0.72)',
+            color: '#f9fafb',
+            font: 'inherit',
+          }}
+        />
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <strong style={{ color: trust.allowed ? '#86efac' : '#ffb020' }}>{trust.label}</strong>
         <span style={{ color: 'rgba(255,255,255,0.66)', overflowWrap: 'anywhere' }}>{trust.node}</span>
@@ -503,7 +882,41 @@ function LegacyAuthDemoPanel({
             font: 'inherit',
           }}
         >
-          {running ? 'running' : 'run legacy auth demo'}
+          {running ? 'signing in' : 'sign in with token'}
+        </button>
+        <button
+          type="button"
+          disabled={uploadRunning || !trust.allowed}
+          onClick={onRunUpload}
+          title={trust.allowed ? 'Upload a small file through the configured HyperBEAM node' : trust.reason}
+          style={{
+            border: `1px solid ${trust.allowed ? 'rgba(14,165,233,0.68)' : 'rgba(255,255,255,0.14)'}`,
+            borderRadius: 4,
+            padding: '2px 8px',
+            background: trust.allowed ? 'rgba(14,165,233,0.16)' : 'rgba(255,255,255,0.035)',
+            color: trust.allowed ? '#e0f2fe' : 'rgba(255,255,255,0.36)',
+            cursor: uploadRunning || !trust.allowed ? 'default' : 'pointer',
+            font: 'inherit',
+          }}
+        >
+          {uploadRunning ? 'uploading' : 'upload demo'}
+        </button>
+        <button
+          type="button"
+          disabled={callDemoRunning || !trust.allowed}
+          onClick={onRunCallDemo}
+          title={trust.allowed ? 'Run the tomorrow call demo sequence' : trust.reason}
+          style={{
+            border: `1px solid ${trust.allowed ? 'rgba(250,204,21,0.68)' : 'rgba(255,255,255,0.14)'}`,
+            borderRadius: 4,
+            padding: '2px 8px',
+            background: trust.allowed ? 'rgba(250,204,21,0.14)' : 'rgba(255,255,255,0.035)',
+            color: trust.allowed ? '#fef9c3' : 'rgba(255,255,255,0.36)',
+            cursor: callDemoRunning || !trust.allowed ? 'default' : 'pointer',
+            font: 'inherit',
+          }}
+        >
+          {callDemoRunning ? 'running demo' : 'run call demo'}
         </button>
       </div>
       <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.62)', overflowWrap: 'anywhere' }}>{trust.reason}</div>
@@ -519,6 +932,52 @@ function LegacyAuthDemoPanel({
           }}
         >
           {JSON.stringify(result, null, 2)}
+        </pre>
+      )}
+      {uploadError && <div style={{ marginTop: 6, color: '#ff8aa8', overflowWrap: 'anywhere' }}>{uploadError}</div>}
+      {uploadResult && (
+        <pre
+          style={{
+            maxHeight: 170,
+            overflow: 'auto',
+            margin: '7px 0 0',
+            whiteSpace: 'pre-wrap',
+            color: 'rgba(255,255,255,0.78)',
+          }}
+        >
+          {JSON.stringify(uploadResult, null, 2)}
+        </pre>
+      )}
+      {callDemoError && <div style={{ marginTop: 6, color: '#ff8aa8', overflowWrap: 'anywhere' }}>{callDemoError}</div>}
+      {callDemoResult?.checks && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 7 }}>
+          {Object.entries(callDemoResult.checks).map(([key, value]) => (
+            <span
+              key={key}
+              style={{
+                border: `1px solid ${value ? 'rgba(34,197,94,0.58)' : 'rgba(255,77,125,0.58)'}`,
+                borderRadius: 4,
+                padding: '1px 5px',
+                color: value ? '#bbf7d0' : '#ffb3c5',
+                background: value ? 'rgba(34,197,94,0.1)' : 'rgba(255,77,125,0.1)',
+              }}
+            >
+              {key}: {value ? 'ok' : 'check'}
+            </span>
+          ))}
+        </div>
+      )}
+      {callDemoResult && (
+        <pre
+          style={{
+            maxHeight: 220,
+            overflow: 'auto',
+            margin: '7px 0 0',
+            whiteSpace: 'pre-wrap',
+            color: 'rgba(255,255,255,0.78)',
+          }}
+        >
+          {JSON.stringify(callDemoResult, null, 2)}
         </pre>
       )}
     </div>
@@ -549,8 +1008,6 @@ function modeLabel(mode: HyperbeamMode) {
   switch (mode) {
     case HYPERBEAM_MODES.original:
       return 'Original wiring';
-    case HYPERBEAM_MODES.hybrid:
-      return 'Hybrid read path';
     case HYPERBEAM_MODES.hyperbeam:
       return 'HyperBEAM wiring';
     default:
@@ -560,33 +1017,19 @@ function modeLabel(mode: HyperbeamMode) {
 
 function modeEndpointLabel(mode: HyperbeamMode) {
   if (mode === HYPERBEAM_MODES.original) return `${modeLabel(mode)} · normal Odysee/API calls`;
-  if (mode === HYPERBEAM_MODES.hybrid) {
-    return `${modeLabel(mode)} · public reads through ${String(ODYSEE_HYPERBEAM_NODE_API).replace(
-      /\/+$/,
-      ''
-    )}; private/internal calls stay original`;
-  }
-  return `${modeLabel(mode)} · canonical reads through ${String(ODYSEE_HYPERBEAM_NODE_API).replace(
+  return `${modeLabel(mode)} · authed calls and public devices through ${String(ODYSEE_HYPERBEAM_NODE_API).replace(
     /\/+$/,
     ''
   )}; original fallback disabled`;
 }
 
 function modeWaitLabel(mode: HyperbeamMode) {
-  return mode === HYPERBEAM_MODES.original ? 'Original' : mode === HYPERBEAM_MODES.hybrid ? 'Hybrid' : 'HyperBEAM';
+  return mode === HYPERBEAM_MODES.original ? 'Original' : 'HyperBEAM';
 }
 
 function filterDisabledInMode(filter: FilterKey, mode: HyperbeamMode) {
   if (mode === HYPERBEAM_MODES.original) {
     return filter !== 'get' && filter !== 'failed' && filter !== 'original' && filter !== 'legacy-auth';
-  }
-
-  if (mode === HYPERBEAM_MODES.hybrid) {
-    if (filter === 'original') return false;
-    if (filter === 'native-device') return false;
-    if (filter === 'native:sdk-proxy') return false;
-    if (filter === 'fallback') return true;
-    return false;
   }
 
   return false;
@@ -640,7 +1083,9 @@ function eventMatchesFilter(event: HyperbeamDebugEvent, filter: FilterKey) {
       return (
         label.includes('legacy auth') ||
         device === '~odysee-legacy-auth@1.0' ||
-        devicePath.includes('~odysee-legacy-auth@1.0')
+        device === '~odysee-upload-demo@1.0' ||
+        devicePath.includes('~odysee-legacy-auth@1.0') ||
+        devicePath.includes('~odysee-upload-demo@1.0')
       );
     case 'fallback':
       if (isPlainRequest) return false;
@@ -708,7 +1153,9 @@ function isRelevant(event: HyperbeamDebugEvent) {
     deviceLayer === 'native-device' ||
     label.includes('legacy auth') ||
     device === '~odysee-legacy-auth@1.0' ||
+    device === '~odysee-upload-demo@1.0' ||
     devicePath.includes('~odysee-legacy-auth@1.0') ||
+    devicePath.includes('~odysee-upload-demo@1.0') ||
     sourceLayer.startsWith('fallback') ||
     sourceLayer === 'native-missing' ||
     sourceLayer === 'native-failed' ||
@@ -775,7 +1222,7 @@ function compactBody(body: any) {
 function compactPath(value: any) {
   const path = String(value || '');
   return limitString(
-    path.replace(/([?&](?:params64|urls64|uri64|auth_token|token|signature)=)[^&\s]+/gi, '$1...'),
+    path.replace(/([?&](?:metadata64|params64|urls64|uri64|auth_token|token|signature)=)[^&\s]+/gi, '$1...'),
     260
   );
 }

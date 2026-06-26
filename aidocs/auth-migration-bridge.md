@@ -18,7 +18,7 @@ Legacy auth is cookie-first. `odysee-frontend/ui/util/saved-passwords.ts` stores
 
 Legacy internal API calls use the token in more than one shape. `odysee-frontend/extras/lbryinc/lbryio.ts` adds `auth_token` to query/body params for direct `api.lbry.com` calls, and its HyperBEAM helper is already shaped to send both `X-Lbry-Auth-Token` and `auth_token` when a node-backed internal API device exists.
 
-HyperBEAM full mode can forward auth headers. `odysee-frontend/ui/lbry.ts` builds HyperBEAM node request headers from the saved `auth_token`, `X-Lbry-Auth-Token`, `X-Odysee-User-Id`, and `Authorization`, but only when `shouldSendHyperbeamAuthHeaders()` is true. In `odysee-frontend/ui/util/hyperbeamMode.ts`, that currently means full HyperBEAM mode, not hybrid mode.
+HyperBEAM mode can forward auth headers. `odysee-frontend/ui/lbry.ts` builds HyperBEAM node request headers from the saved `auth_token`, `X-Lbry-Auth-Token`, `X-Odysee-User-Id`, and `Authorization` when `shouldSendHyperbeamAuthHeaders()` is true. In `odysee-frontend/ui/util/hyperbeamMode.ts`, legacy stored `hybrid` values are normalized to `hyperbeam`; `original` is now the only mode that permits direct Odysee/API fallback.
 
 The current HyperBEAM bridge is intentionally public/read-first. `hyperbeam/docs/build/odysee-hyperbeam-bridge.md` says authenticated search flags like `include_purchase_receipt` and `include_is_my_output` stay on the existing SDK/proxy path until authenticated HyperBEAM forwarding is added. The actual Odysee HB devices reinforce that: `~odysee-claim@1.0/search` strips credential-like fields and those authenticated flags, while `~odysee-file@1.0`, `~odysee-subscription@1.0`, and `~odysee-file-reaction@1.0` reject private credentials for their public count/reaction reads.
 
@@ -184,6 +184,7 @@ Implementation status:
 - supported credential inputs are `Cookie: auth_token=...`, `X-Lbry-Auth-Token`, `x-lbry-auth-token`, `auth_token`, and `auth-token`
 - local/dev verification can use a configured `trusted-token-users` map
 - production verification can point `legacy-auth-url` or `odysee-legacy-auth-url` at an internal-apis style `user/me` endpoint
+- verifier calls use POST form auth by default through `legacy-auth-token-mode=form`, matching `https://api.odysee.com/user/me`; header and query-string forwarding exist only as explicit compatibility modes
 - hosted-wallet secret derivation requires `legacy-auth-pepper` or `odysee-legacy-auth-pepper`
 - the provider strips raw credentials and emits `legacy-user-id`, `auth-source`, `legacy-auth-path`, and `legacy-auth-proof`
 - the access-control side accepts either fresh token authentication or the request-scoped proof generated during the auth-hook flow
@@ -216,7 +217,7 @@ Local/dev path:
 
 - keep forwarding `X-Lbry-Auth-Token` from the current frontend helpers
 - use full HyperBEAM mode for authenticated tests
-- keep hybrid mode public/read-mostly until authenticated devices are actually present
+- route authenticated demo calls through HyperBEAM auth devices and keep `original` as the only direct Odysee/API fallback mode
 
 Frontend demo path:
 
