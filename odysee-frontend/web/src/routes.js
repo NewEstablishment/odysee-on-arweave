@@ -38,6 +38,8 @@ const HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
 const HYPERBEAM_UPLOAD_PATH = '/~odysee-upload@1.0/write?!=true';
 const HYPERBEAM_UPLOAD_CHUNK_PATH = '/~odysee-upload@1.0/chunk?!=true';
 const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/~odysee-upload@1.0/finalize?!=true';
+const HYPERBEAM_UPLOAD_INDEX_PATH = '/~odysee-upload@1.0/index?!=true';
+const HYPERBEAM_UPLOAD_LIST_PATH = '/~odysee-upload@1.0/list?!=true';
 const HYPERBEAM_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 const HYPERBEAM_UPLOAD_MANIFEST_TYPE = 'application/vnd.odysee.hyperbeam-upload-manifest+json';
 const HYPERBEAM_UPLOAD_MANIFEST_KIND = 'odysee-hyperbeam-chunked-upload';
@@ -240,6 +242,68 @@ async function postHyperbeamLargeUpload(ctx) {
     chunk_count: chunks.length,
     chunks,
   };
+}
+
+async function postHyperbeamUploadIndex(ctx) {
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl) {
+    ctx.status = 404;
+    ctx.body = { error: 'hyperbeam node unavailable' };
+    return;
+  }
+
+  const authToken = getRequestAuthToken(ctx);
+  if (!authToken) {
+    ctx.status = 401;
+    ctx.set('Cache-Control', 'no-store');
+    ctx.body = { error: 'auth_token cookie required' };
+    return;
+  }
+
+  const requestBody = await readJsonBody(ctx);
+  const claim = requestBody.claim || requestBody;
+  const encodedClaim = Buffer.from(JSON.stringify(claim)).toString('base64url');
+  const response = await postJson(`${nodeUrl}${HYPERBEAM_UPLOAD_INDEX_PATH}`, requestBody, {
+    'x-odysee-auth-token': authToken,
+    'x-odysee-upload-claim': encodedClaim,
+  });
+
+  ctx.status = response.statusCode;
+  ctx.set('Cache-Control', 'no-store');
+  ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
+  ctx.body = response.body;
+}
+
+async function postHyperbeamUploadList(ctx) {
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl) {
+    ctx.status = 404;
+    ctx.body = { error: 'hyperbeam node unavailable' };
+    return;
+  }
+
+  const authToken = getRequestAuthToken(ctx);
+  if (!authToken) {
+    ctx.status = 401;
+    ctx.set('Cache-Control', 'no-store');
+    ctx.body = { error: 'auth_token cookie required' };
+    return;
+  }
+
+  const response = await postJson(
+    `${nodeUrl}${HYPERBEAM_UPLOAD_LIST_PATH}`,
+    {},
+    {
+      'x-odysee-auth-token': authToken,
+    }
+  );
+
+  ctx.status = response.statusCode;
+  ctx.set('Cache-Control', 'no-store');
+  ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
+  ctx.body = response.body;
 }
 
 async function getHyperbeamLargeUpload(ctx) {
@@ -732,6 +796,8 @@ router.get(`/$/api/auth-token/v1/get`, async (ctx) => {
 router.post(`${HYPERBEAM_AUTH_DEVICE_PREFIX}/:device/:method`, postHyperbeamAuthDevice);
 router.post(`/$/api/hyperbeam-upload/v1/write`, postHyperbeamUpload);
 router.post(`/$/api/hyperbeam-upload/v1/large`, postHyperbeamLargeUpload);
+router.post(`/$/api/hyperbeam-upload/v1/index`, postHyperbeamUploadIndex);
+router.post(`/$/api/hyperbeam-upload/v1/list`, postHyperbeamUploadList);
 router.head(`/$/api/hyperbeam-upload/v1/read/:id`, getHyperbeamLargeUpload);
 router.get(`/$/api/hyperbeam-upload/v1/read/:id`, getHyperbeamLargeUpload);
 router.get(`/$/api/content/v1/get`, async (ctx) => getHomepage(ctx, 1));

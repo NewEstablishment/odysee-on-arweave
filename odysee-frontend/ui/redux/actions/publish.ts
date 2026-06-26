@@ -50,6 +50,12 @@ const PUBLISH_PATH_MAP = Object.freeze({
   livestream: PAGES.LIVESTREAM,
 });
 
+function isHyperbeamUploadClaim(claim) {
+  return (
+    claim?.hyperbeam?.upload_device === '~odysee-upload@1.0' || claim?.hyperbeam?.upload_device === 'odysee-upload@1.0'
+  );
+}
+
 function resolveClaimTypeForAnalytics(claim) {
   if (!claim) {
     return 'undefined_claim';
@@ -111,7 +117,11 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
         }
       };
 
-      analytics.apiLog.publish(pendingClaim, apiLogSuccessCb);
+      const hyperbeamUpload = isHyperbeamUploadClaim(pendingClaim);
+
+      if (!hyperbeamUpload) {
+        analytics.apiLog.publish(pendingClaim, apiLogSuccessCb);
+      }
       const { permanent_url: url } = pendingClaim;
       const actions: Array<any> = [];
       actions.push({
@@ -127,16 +137,26 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
       const isMatch = (claim: any) => claim.claim_id === pendingClaim.claim_id;
 
       const isEdit = myClaims.some(isMatch);
-      actions.push({
-        type: ACTIONS.UPDATE_PENDING_CLAIMS,
-        data: {
-          claims: [pendingClaim],
-          options: {
-            overrideTags: true,
-            overrideSigningChannel: true,
-          },
-        },
-      } as UpdatePendingClaimsAction);
+      actions.push(
+        hyperbeamUpload
+          ? {
+              type: ACTIONS.UPDATE_CONFIRMED_CLAIMS,
+              data: {
+                claims: [pendingClaim],
+                pending: state.claims.pendingById || {},
+              },
+            }
+          : ({
+              type: ACTIONS.UPDATE_PENDING_CLAIMS,
+              data: {
+                claims: [pendingClaim],
+                options: {
+                  overrideTags: true,
+                  overrideSigningChannel: true,
+                },
+              },
+            } as UpdatePendingClaimsAction)
+      );
       dispatch(batchActions(...actions));
       dispatch(
         doOpenModal(MODALS.PUBLISH, {

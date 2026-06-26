@@ -10,6 +10,8 @@ import {
 import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 
 const HYPERBEAM_UPLOAD_URL = '/$/api/hyperbeam-upload/v1/large';
+const HYPERBEAM_UPLOAD_INDEX_URL = '/$/api/hyperbeam-upload/v1/index';
+const HYPERBEAM_UPLOAD_LIST_URL = '/$/api/hyperbeam-upload/v1/list';
 
 const UNSUPPORTED_EXACT_TAGS = new Set([
   ...MEMBERS_ONLY_TAGS,
@@ -57,7 +59,32 @@ export async function publishThroughHyperbeam(
     throw new Error(errorMessage(json, response.status));
   }
 
-  return normalizePublishResponse(json, publishPayload, file, myChannels);
+  const publishResponse = normalizePublishResponse(json, publishPayload, file, myChannels);
+  await indexHyperbeamPublish(publishResponse.outputs[0]);
+  return publishResponse;
+}
+
+export async function listHyperbeamPublishes(): Promise<Array<StreamClaim>> {
+  if (!isHyperbeamFullMode()) return [];
+
+  const response = await fetch(HYPERBEAM_UPLOAD_LIST_URL, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: '{}',
+  });
+  const json = await responseJson(response);
+
+  if (!response.ok) {
+    return [];
+  }
+
+  const result = resultPayload(json);
+  const items = Array.isArray(result?.items) ? result.items : [];
+  return items.filter((item) => item && item.value_type === 'stream');
 }
 
 function normalizePublishResponse(
@@ -78,6 +105,7 @@ function normalizePublishResponse(
     streaming_url?: string;
     download_url?: string;
     hyperbeam_upload?: any;
+    hyperbeam?: any;
   } = {
     address: '',
     amount: '0',
@@ -91,7 +119,7 @@ function normalizePublishResponse(
     short_url: publishedUri,
     type: 'claim',
     value_type: 'stream',
-    confirmations: 0,
+    confirmations: 1,
     is_my_output: true,
     is_channel_signature_valid: Boolean(signingChannel),
     signing_channel: signingChannel || undefined,
@@ -123,9 +151,48 @@ function normalizePublishResponse(
     },
     timestamp: publishPayload.release_time || now,
     hyperbeam_upload: json,
+    hyperbeam: {
+      upload_device: '~odysee-upload@1.0',
+      upload_id: uploadId,
+      read_path: json?.read_path,
+    },
   };
 
   return { outputs: [claim] };
+}
+
+async function indexHyperbeamPublish(claim: Claim) {
+  const response = await fetch(HYPERBEAM_UPLOAD_INDEX_URL, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ claim }),
+  });
+  const json = await responseJson(response);
+
+  if (!response.ok) {
+    throw new Error(errorMessage(json, response.status));
+  }
+}
+
+function resultPayload(json: any) {
+  const parsed = parseBody(json);
+  if (parsed && Object.prototype.hasOwnProperty.call(parsed, 'result')) return parsed.result;
+  if (json && Object.prototype.hasOwnProperty.call(json, 'result')) return json.result;
+  return parsed || json;
+}
+
+function parseBody(json: any) {
+  if (typeof json?.body !== 'string') return null;
+
+  try {
+    return JSON.parse(json.body);
+  } catch {
+    return null;
+  }
 }
 
 function signingChannelFromPayload(publishPayload: PublishParams, myChannels?: Array<ChannelClaim> | null) {
