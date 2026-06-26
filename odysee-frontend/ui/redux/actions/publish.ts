@@ -38,6 +38,7 @@ import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { sanitizeName, buildURI } from 'util/lbryURI';
 import { getVideoBitrate, resolvePublishPayload } from 'util/publish';
 import { parsePurchaseTag, parseRentalTag, TO_SECONDS } from 'util/stripe';
+import { canPublishThroughHyperbeam, publishThroughHyperbeam } from 'services/hyperbeamUpload';
 import Lbry from 'lbry';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 // import LbryFirst from 'extras/lbry-first/lbry-first';
@@ -1358,6 +1359,11 @@ export const doPublish =
       } else {
         return previewFn(publishPayload, null);
       }
+    }
+
+    const publishFile = publishData.filePath;
+    if (canPublishThroughHyperbeam(publishFile, publishPayload, publishData.type)) {
+      return publishThroughHyperbeam(publishFile, publishPayload, myChannels).then(success, fail);
     }
 
     return Lbry.publish(publishPayload).then((response: PublishResponse) => {

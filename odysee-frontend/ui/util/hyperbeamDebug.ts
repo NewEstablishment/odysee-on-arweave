@@ -13,6 +13,11 @@ export type HyperbeamDebugEvent = {
 const EVENT_NAME = 'odysee-hyperbeam-debug';
 const MAX_BUFFERED_EVENTS = 320;
 const AUTH_REQUIRED_DEVICE_PATHS = new Set([
+  '/~odysee-account@1.0/preference-get',
+  '/~odysee-account@1.0/preference-set',
+  '/~odysee-account@1.0/settings-get',
+  '/~odysee-account@1.0/settings-set',
+  '/~odysee-account@1.0/settings-clear',
   '/~odysee-file@1.0/view-count',
   '/~odysee-file@1.0/view_count',
   '/~odysee-file-reaction@1.0/list',

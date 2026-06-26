@@ -1,5 +1,6 @@
 import React from 'react';
 import { sanitizeHyperbeamDebugValue, sanitizeHyperbeamDebugUrl, type HyperbeamDebugEvent } from 'util/hyperbeamDebug';
+import { fetchHyperbeamAccountSdk } from 'util/hyperbeam';
 import { HYPERBEAM_DEVICE, hyperbeamDeviceUrl } from 'util/hyperbeamDevices';
 
 type TraceStatus = 'pending' | 'running' | 'ok' | 'warn' | 'failed' | 'skipped';
@@ -16,6 +17,8 @@ type TraceStep = {
   sourceAlg?: string;
   response?: any;
 };
+
+const AUTH_TRACE_TARGET = 'auth:~odysee-account@1.0/preference-get:enable-sync';
 
 type DiscoveredClaim = {
   key: string;
@@ -41,6 +44,11 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
   const [target, setTarget] = React.useState('');
   const [steps, setSteps] = React.useState<Array<TraceStep>>(() => initialSteps(''));
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
+  const [profile, setProfile] = React.useState<{
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  }>({ status: 'pending', detail: 'loading authenticated account preference' });
   const materializedEvidence = React.useRef<Set<string>>(new Set());
   const displayedClaims = pageClaims.length === 0 ? observedClaims : pageClaims;
   const displayedClaimLabel = pageClaims.length === 0 ? 'current page responses' : 'page / visible';
@@ -81,9 +89,13 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
   }, [discoveredClaims.length, events, observedClaims, pageClaims, target]);
 
   React.useEffect(() => {
+    if (target === AUTH_TRACE_TARGET) {
+      setSteps(authTraceSteps(profile, events));
+      return;
+    }
     if (!target || !selectedClaim) return;
     setSteps(initialSteps(target, selectedClaim, events));
-  }, [events, selectedClaim, target]);
+  }, [events, profile, selectedClaim, target]);
 
   React.useEffect(() => {
     if (!selectedClaim) return;
@@ -116,6 +128,32 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
     if (requests.length !== 0) Promise.allSettled(requests);
   }, [events, selectedClaim]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    setProfile({ status: 'running', detail: 'requesting authenticated account preference' });
+
+    fetchHyperbeamAccountSdk('preference_get', { key: 'enable-sync' })
+      .then((response) => {
+        if (cancelled) return;
+        setProfile({
+          status: response !== null ? 'ok' : 'warn',
+          detail: response !== null ? 'authenticated account preference loaded' : 'no account preference returned',
+          response: profileSummary(response),
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setProfile({
+          status: 'failed',
+          detail: String(error?.message || error),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selectClaim = React.useCallback(
     (claim: DiscoveredClaim) => {
       setTarget(claim.traceTarget);
@@ -123,6 +161,10 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
     },
     [events]
   );
+  const selectProfile = React.useCallback(() => {
+    setTarget(AUTH_TRACE_TARGET);
+    setSteps(authTraceSteps(profile, events));
+  }, [events, profile]);
 
   return (
     <div
@@ -155,6 +197,7 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
             background: 'rgba(0,0,0,0.1)',
           }}
         >
+          <ProfileTraceRow profile={profile} selected={target === AUTH_TRACE_TARGET} onSelect={selectProfile} />
           <ClaimGroup label={displayedClaimLabel} claims={displayedClaims} target={target} onSelect={selectClaim} />
         </div>
       )}
@@ -280,6 +323,73 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
         })}
       </div>
     </div>
+  );
+}
+
+function ProfileTraceRow({
+  onSelect,
+  profile,
+  selected,
+}: {
+  onSelect: () => void;
+  profile: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  };
+  selected: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title="authenticated account preference request"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '76px 54px minmax(0, 1fr) minmax(92px, 148px)',
+        gap: 6,
+        alignItems: 'center',
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        border: `1px solid ${selected ? 'rgba(34,197,94,0.78)' : 'rgba(34,197,94,0.5)'}`,
+        borderRadius: 4,
+        padding: '3px 5px',
+        background: selected ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.09)',
+        color: '#f9fafb',
+        cursor: 'pointer',
+        font: 'inherit',
+        textAlign: 'left',
+      }}
+    >
+      <span style={{ color: '#22c55e', overflow: 'hidden', textOverflow: 'ellipsis' }}>auth</span>
+      <span
+        style={{
+          color: '#22c55e',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        user
+      </span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        user profile / account preference
+        {profile.detail ? ` · ${profile.detail}` : ''}
+      </span>
+      <span
+        style={{
+          color: statusColor(profile.status),
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {profile.status}
+      </span>
+    </button>
   );
 }
 
@@ -1028,6 +1138,92 @@ function initialSteps(
   ];
 }
 
+function authTraceSteps(
+  profile: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  },
+  events: Array<HyperbeamDebugEvent>
+): Array<TraceStep> {
+  const authEvents = accountPreferenceAuthEvents(events);
+  const requestEvent = authEvents.find((event) => event.label === 'request');
+  const responseEvent = [...authEvents].reverse().find((event) => event.label === 'response');
+  const authSourceEvent = [...events]
+    .reverse()
+    .find((event) => event.label === 'auth source' && event.data?.devicePath === '/~odysee-account@1.0/preference-get');
+  const authRequestEvent = [...events]
+    .reverse()
+    .find(
+      (event) => event.label === 'auth request' && event.data?.devicePath === '/~odysee-account@1.0/preference-get'
+    );
+  const responseData = responseEvent?.data || {};
+
+  return [
+    {
+      key: 'auth-target',
+      label: 'Select authenticated account request',
+      kind: 'input',
+      status: 'ok',
+      detail: 'preference_get key enable-sync',
+      response: sanitizeHyperbeamDebugValue({
+        target: AUTH_TRACE_TARGET,
+        devicePath: '/~odysee-account@1.0/preference-get',
+        authRequired: true,
+      }),
+    },
+    {
+      key: 'auth-source',
+      label: 'Resolve auth token source',
+      kind: 'transport',
+      status: authSourceEvent?.data?.authPresent ? 'ok' : authSourceEvent ? 'warn' : 'pending',
+      detail: authSourceEvent?.data?.authSource || 'waiting for auth source event',
+      response: sanitizeHyperbeamDebugValue(authSourceEvent?.data),
+    },
+    {
+      key: 'auth-request-body',
+      label: 'Build server-side auth request body',
+      kind: 'transport',
+      status: authRequestEvent?.data?.authPresent ? 'ok' : authRequestEvent ? 'warn' : 'pending',
+      detail: authRequestEvent?.data?.authTransport || 'waiting for auth request event',
+      response: sanitizeHyperbeamDebugValue(authRequestEvent?.data),
+    },
+    {
+      key: 'auth-proxy-request',
+      label: 'Send request through same-origin auth bridge',
+      kind: 'transport',
+      status: requestEvent ? 'ok' : 'pending',
+      detail: requestEvent?.data?.requestKey || 'waiting for request event',
+      url: requestEvent?.data?.url,
+      response: sanitizeHyperbeamDebugValue(requestEvent?.data),
+    },
+    {
+      key: 'auth-device-response',
+      label: 'Read account device response',
+      kind: 'facade',
+      status: responseEvent ? (responseData.ok ? 'ok' : 'failed') : profile.status === 'failed' ? 'failed' : 'pending',
+      detail: responseEvent
+        ? `${responseData.status || 'unknown status'} · ${responseData.contentType || 'unknown content-type'}`
+        : profile.detail,
+      url: responseData.url,
+      statusCode: responseData.status,
+      sourceAlg: responseData.sourceAlg,
+      response: sanitizeHyperbeamDebugValue(responseData.response || responseData.body || profile.response),
+    },
+  ];
+}
+
+function accountPreferenceAuthEvents(events: Array<HyperbeamDebugEvent>) {
+  return events.filter((event) => {
+    const data = event.data || {};
+    return (
+      data.authRequired === true &&
+      data.devicePath === '/~odysee-account@1.0/preference-get' &&
+      String(data.requestKey || '').includes('enable-sync')
+    );
+  });
+}
+
 function cachedSourceObservation(events: Array<HyperbeamDebugEvent>, id: string | undefined) {
   if (!id) return undefined;
   const encodedId = encodeURIComponent(id).toLowerCase();
@@ -1247,6 +1443,22 @@ function claimSummary(value: any) {
           canonical_url: value.signing_channel.canonical_url,
         }
       : undefined,
+  });
+}
+
+function profileSummary(value: any) {
+  const result = value?.result || value?.body?.result || value;
+  return sanitizeHyperbeamDebugValue({
+    hasProfile: result !== undefined && result !== null,
+    preferenceKey: 'enable-sync',
+    keys: result && typeof result === 'object' ? Object.keys(result).slice(0, 24) : undefined,
+    preferenceValue: result && typeof result === 'object' ? result['enable-sync'] : result,
+    channelClaimId: stringField(result, ['channel_claim_id', 'channel.claim_id', 'default_channel.claim_id']),
+    channelName: stringField(result, ['channel_name', 'channel.name', 'default_channel.name']),
+    email: stringField(result, ['email', 'user.email']),
+    language: stringField(result, ['language', 'settings.language']),
+    mature: result?.show_mature || result?.settings?.show_mature,
+    raw: result,
   });
 }
 
