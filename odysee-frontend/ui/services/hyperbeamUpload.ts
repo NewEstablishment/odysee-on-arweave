@@ -11,11 +11,13 @@ import {
 import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 import {
   HYPERBEAM_DEVICE,
+  base64Url,
   hyperbeamDeviceBase,
   hyperbeamDevicePostParams64,
   hyperbeamNodeBase,
 } from 'util/hyperbeamDevices';
 
+const LARGE_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;
 const UNSUPPORTED_EXACT_TAGS = new Set([
   ...MEMBERS_ONLY_TAGS,
   PURCHASE_TAG,
@@ -52,18 +54,34 @@ export async function publishThroughHyperbeam(
   if (!authToken) throw new Error('HyperBEAM upload requires an Odysee auth token.');
 
   const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
+  const uploadPayload = {
+    filename: fileName(file, publishPayload),
+    content_type: file.type || publishPayload.content_type || 'application/octet-stream',
+    size: file.size,
+    name: publishPayload.name,
+    metadata: {
+      ...publishMetadata(publishPayload),
+      ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
+    },
+  };
+  const response =
+    file.size >= LARGE_UPLOAD_THRESHOLD_BYTES
+      ? (await largeUploadResponse(file, { ...uploadPayload, chunked_manifest: true }, authToken)) ||
+        (await directUploadResponse(file, uploadPayload, authToken))
+      : await directUploadResponse(file, uploadPayload, authToken);
+  const json = await responseJson(response);
+  if (!response.ok) throw new Error(errorMessage(json, response.status));
+
+  return normalizePublishResponse(json, publishPayload, file, myChannels);
+}
+
+async function directUploadResponse(file: Blob, uploadPayload: Record<string, any>, authToken: string) {
   const request = hyperbeamDevicePostParams64(
     HYPERBEAM_DEVICE.upload,
     'submit&!',
     {
-      filename: fileName(file, publishPayload),
-      content_type: file.type || publishPayload.content_type || 'application/octet-stream',
+      ...uploadPayload,
       content_base64: await blobToBase64(file),
-      name: publishPayload.name,
-      metadata: {
-        ...publishMetadata(publishPayload),
-        ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
-      },
     },
     {
       Authorization: `Bearer ${authToken}`,
@@ -72,11 +90,27 @@ export async function publishThroughHyperbeam(
   );
   if (!request) throw new Error('HyperBEAM upload device is not configured.');
 
-  const response = await request;
-  const json = await responseJson(response);
-  if (!response.ok) throw new Error(errorMessage(json, response.status));
+  return request;
+}
 
-  return normalizePublishResponse(json, publishPayload, file, myChannels);
+async function largeUploadResponse(file: Blob, uploadPayload: Record<string, any>, authToken: string) {
+  const response = await fetch('/$/api/hyperbeam-upload/v1/large', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': uploadPayload.content_type || 'application/octet-stream',
+      'x-odysee-filename': uploadPayload.filename || 'upload',
+      'x-odysee-upload-params64': base64Url(JSON.stringify(uploadPayload || {})),
+      Authorization: `Bearer ${authToken}`,
+      [X_LBRY_AUTH_TOKEN]: authToken,
+    },
+    body: file,
+  });
+  const contentType = response.headers.get('content-type') || '';
+
+  if (response.status === 404 || contentType.includes('text/html')) return null;
+  return response;
 }
 
 function publishMetadata(publishPayload: PublishParams) {

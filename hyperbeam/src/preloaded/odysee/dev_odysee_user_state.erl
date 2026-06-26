@@ -6,6 +6,7 @@
 
 -define(DEVICE, <<"odysee-user-state@1.0">>).
 -define(DEFAULT_COMMENT_URL, <<"https://comments.odysee.com/api/v2">>).
+-define(DEFAULT_PROXY_URL, <<"https://api.na-backend.odysee.com/api/v1/proxy">>).
 
 info(_Opts) ->
     #{ exports => [<<"call">>] }.
@@ -18,9 +19,10 @@ call(_Base, Req, Opts) ->
             safe(fun() ->
                 maybe
                     {ok, Owner} ?= authenticated_owner(Req, Opts),
+                    AuthToken = auth_token(Req, Opts),
                     {ok, Payload} ?= request_payload(Req, Opts),
                     {ok, State0} ?= read_state(Owner, Opts),
-                    {ok, Result, State1} ?= dispatch(Owner, Payload, State0, Opts),
+                    {ok, Result, State1} ?= dispatch(Owner, AuthToken, Payload, State0, Opts),
                     ok ?= write_state(Owner, State1, Opts),
                     {ok, response(Result)}
                 else
@@ -170,24 +172,24 @@ try_decode_json(Raw) ->
     catch _:_ -> {error, invalid_comment_backend_json}
     end.
 
-dispatch(Owner, Payload, State, Opts) ->
+dispatch(Owner, AuthToken, Payload, State, Opts) ->
     Kind = hb_util:to_lower(hb_util:bin(first_field([<<"kind">>], Payload, Opts))),
     case Kind of
-        <<"sdk">> -> sdk_call(Owner, Payload, State, Opts);
-        <<"comment">> -> comment_call(Owner, Payload, State, Opts);
+        <<"sdk">> -> sdk_call(Owner, AuthToken, Payload, State, Opts);
+        <<"comment">> -> comment_call(Owner, AuthToken, Payload, State, Opts);
         <<"lbryio">> -> lbryio_call(Owner, Payload, State, Opts);
         _ -> {error, unsupported_user_state_kind}
     end.
 
-sdk_call(Owner, Payload, State, Opts) ->
+sdk_call(Owner, AuthToken, Payload, State, Opts) ->
     Method = method_name(first_field([<<"method">>], Payload, Opts)),
     Params = params(Payload, Opts),
     case Method of
-        <<"preference_get">> -> preference_get(Params, State, Opts);
-        <<"preference_set">> -> preference_set(Params, State, Opts);
-        <<"settings_get">> -> settings_get(State);
-        <<"settings_set">> -> settings_set(Params, State, Opts);
-        <<"settings_clear">> -> settings_clear(Params, State, Opts);
+        <<"preference_get">> -> preference_get(Params, State, AuthToken, Opts);
+        <<"preference_set">> -> preference_set(Params, State, AuthToken, Opts);
+        <<"settings_get">> -> settings_get(Params, State, AuthToken, Opts);
+        <<"settings_set">> -> settings_set(Params, State, AuthToken, Opts);
+        <<"settings_clear">> -> settings_clear(Params, State, AuthToken, Opts);
         <<"sync_hash">> -> sync_hash(State, Opts);
         <<"sync_apply">> -> sync_apply(Params, State, Opts);
         <<"channel_sign">> -> channel_sign(Owner, Params, State, Opts);
@@ -197,39 +199,39 @@ sdk_call(Owner, Payload, State, Opts) ->
         _ -> {error, #{ <<"status">> => 501, <<"body">> => <<"Unsupported SDK method.">> }}
     end.
 
-comment_call(Owner, Payload, State, Opts) ->
+comment_call(Owner, AuthToken, Payload, State, Opts) ->
     Method = method_name(first_field([<<"method">>], Payload, Opts)),
     Params = params(Payload, Opts),
     case Method of
-        <<"comment_create">> -> comment_create(Owner, Params, State, Opts);
+        <<"comment_create">> -> comment_create(Owner, Params, State, AuthToken, Opts);
         <<"comment_list">> -> comment_list(Params, State, Opts);
         <<"comment_by_id">> -> comment_by_id(Params, State, Opts);
         <<"comment_byid">> -> comment_by_id(Params, State, Opts);
-        <<"comment_edit">> -> comment_edit(Owner, Params, State, Opts);
-        <<"comment_abandon">> -> comment_abandon(Owner, Params, State, Opts);
-        <<"comment_pin">> -> comment_pin(Owner, Params, State, Opts);
-        <<"reaction_react">> -> reaction_react(Params, State, Opts);
-        <<"setting_get">> -> comment_setting_get(Params, State, Opts);
-        <<"setting_list">> -> comment_setting_list(Params, State, Opts);
-        <<"setting_update">> -> comment_setting_update(Params, State, Opts);
-        <<"setting_block_word">> -> comment_block_word(Params, State, Opts);
-        <<"setting_blockword">> -> comment_block_word(Params, State, Opts);
-        <<"setting_unblock_word">> -> comment_unblock_word(Params, State, Opts);
-        <<"setting_unblockword">> -> comment_unblock_word(Params, State, Opts);
-        <<"setting_list_blocked_words">> -> comment_list_blocked_words(State, Opts);
-        <<"setting_listblockedwords">> -> comment_list_blocked_words(State, Opts);
-        <<"moderation_block">> -> moderation_put(<<"blocks">>, Params, State, Opts);
-        <<"moderation_unblock">> -> moderation_remove(<<"blocks">>, Params, State, Opts);
-        <<"moderation_blockedlist">> -> moderation_list(<<"blocks">>, State, Opts);
-        <<"moderation_add_delegate">> -> moderation_put(<<"delegates">>, Params, State, Opts);
-        <<"moderation_adddelegate">> -> moderation_put(<<"delegates">>, Params, State, Opts);
-        <<"moderation_remove_delegate">> -> moderation_remove(<<"delegates">>, Params, State, Opts);
-        <<"moderation_removedelegate">> -> moderation_remove(<<"delegates">>, Params, State, Opts);
-        <<"moderation_blocked_list">> -> moderation_list(<<"blocks">>, State, Opts);
-        <<"moderation_list_delegates">> -> moderation_list(<<"delegates">>, State, Opts);
-        <<"moderation_listdelegates">> -> moderation_list(<<"delegates">>, State, Opts);
-        <<"moderation_am_i">> -> {ok, #{ <<"is_moderator">> => false }, State};
-        <<"moderation_ami">> -> {ok, #{ <<"is_moderator">> => false }, State};
+        <<"comment_edit">> -> comment_edit(Owner, Params, State, AuthToken, Opts);
+        <<"comment_abandon">> -> comment_abandon(Owner, Params, State, AuthToken, Opts);
+        <<"comment_pin">> -> comment_pin(Owner, Params, State, AuthToken, Opts);
+        <<"reaction_react">> -> reaction_react(Params, State, AuthToken, Opts);
+        <<"setting_get">> -> comment_setting_get(Params, State, AuthToken, Opts);
+        <<"setting_list">> -> comment_setting_list(Params, State, AuthToken, Opts);
+        <<"setting_update">> -> comment_setting_update(Params, State, AuthToken, Opts);
+        <<"setting_block_word">> -> comment_block_word(Params, State, AuthToken, Opts);
+        <<"setting_blockword">> -> comment_block_word(Params, State, AuthToken, Opts);
+        <<"setting_unblock_word">> -> comment_unblock_word(Params, State, AuthToken, Opts);
+        <<"setting_unblockword">> -> comment_unblock_word(Params, State, AuthToken, Opts);
+        <<"setting_list_blocked_words">> -> comment_list_blocked_words(Params, State, AuthToken, Opts);
+        <<"setting_listblockedwords">> -> comment_list_blocked_words(Params, State, AuthToken, Opts);
+        <<"moderation_block">> -> moderation_put(<<"blocks">>, <<"moderation.Block">>, Params, State, AuthToken, Opts);
+        <<"moderation_unblock">> -> moderation_remove(<<"blocks">>, <<"moderation.UnBlock">>, Params, State, AuthToken, Opts);
+        <<"moderation_blockedlist">> -> moderation_list(<<"blocks">>, <<"moderation.BlockedList">>, Params, State, AuthToken, Opts);
+        <<"moderation_add_delegate">> -> moderation_put(<<"delegates">>, <<"moderation.AddDelegate">>, Params, State, AuthToken, Opts);
+        <<"moderation_adddelegate">> -> moderation_put(<<"delegates">>, <<"moderation.AddDelegate">>, Params, State, AuthToken, Opts);
+        <<"moderation_remove_delegate">> -> moderation_remove(<<"delegates">>, <<"moderation.RemoveDelegate">>, Params, State, AuthToken, Opts);
+        <<"moderation_removedelegate">> -> moderation_remove(<<"delegates">>, <<"moderation.RemoveDelegate">>, Params, State, AuthToken, Opts);
+        <<"moderation_blocked_list">> -> moderation_list(<<"blocks">>, <<"moderation.BlockedList">>, Params, State, AuthToken, Opts);
+        <<"moderation_list_delegates">> -> moderation_list(<<"delegates">>, <<"moderation.ListDelegates">>, Params, State, AuthToken, Opts);
+        <<"moderation_listdelegates">> -> moderation_list(<<"delegates">>, <<"moderation.ListDelegates">>, Params, State, AuthToken, Opts);
+        <<"moderation_am_i">> -> comment_backend_or_local(<<"moderation.AmI">>, Params, AuthToken, #{ <<"is_moderator">> => false }, State, Opts);
+        <<"moderation_ami">> -> comment_backend_or_local(<<"moderation.AmI">>, Params, AuthToken, #{ <<"is_moderator">> => false }, State, Opts);
         _ -> {error, #{ <<"status">> => 501, <<"body">> => <<"Unsupported comment method.">> }}
     end.
 
@@ -254,44 +256,67 @@ lbryio_call(Owner, Payload, State, Opts) ->
         _ -> {error, #{ <<"status">> => 501, <<"body">> => <<"Unsupported membership API method.">> }}
     end.
 
-preference_get(Params, State, Opts) ->
+preference_get(Params, State, AuthToken, Opts) ->
     Preferences = section(<<"preferences">>, State, Opts),
-    case first_field([<<"key">>], Params, Opts) of
-        not_found -> {ok, Preferences, State};
-        Key -> {ok, #{ Key => hb_maps:get(Key, Preferences, null, Opts) }, State}
-    end.
+    Local =
+        case first_field([<<"key">>], Params, Opts) of
+            not_found -> Preferences;
+            Key -> #{ Key => hb_maps:get(Key, Preferences, null, Opts) }
+        end,
+    account_backend_or_local(<<"preference_get">>, Params, AuthToken, Local, State, Opts).
 
-preference_set(Params, State, Opts) ->
+preference_set(Params, State, AuthToken, Opts) ->
     maybe
         {ok, Key} ?= required_param(<<"key">>, Params, Opts),
         Value = hb_maps:get(<<"value">>, Params, null, Opts),
         Preferences = section(<<"preferences">>, State, Opts),
         Next = put_section(<<"preferences">>, Preferences#{ Key => Value }, State),
-        {ok, #{ Key => Value }, Next}
+        account_backend_or_local(<<"preference_set">>, Params, AuthToken, #{ Key => Value }, Next, Opts)
     end.
 
-settings_get(State) ->
-    {ok, section(<<"settings">>, State, #{}), State}.
+settings_get(Params, State, AuthToken, Opts) ->
+    account_backend_or_local(<<"settings_get">>, Params, AuthToken, section(<<"settings">>, State, #{}), State, Opts).
 
-settings_set(Params, State, Opts) ->
+settings_set(Params, State, AuthToken, Opts) ->
     Settings = section(<<"settings">>, State, Opts),
     case first_field([<<"key">>], Params, Opts) of
         not_found ->
             NextSettings = maps:merge(Settings, without_control_keys(Params)),
-            {ok, NextSettings, put_section(<<"settings">>, NextSettings, State)};
+            account_backend_or_local(
+                <<"settings_set">>,
+                Params,
+                AuthToken,
+                NextSettings,
+                put_section(<<"settings">>, NextSettings, State),
+                Opts
+            );
         Key ->
             Value = hb_maps:get(<<"value">>, Params, null, Opts),
             NextSettings = Settings#{ Key => Value },
-            {ok, #{ Key => Value }, put_section(<<"settings">>, NextSettings, State)}
+            account_backend_or_local(
+                <<"settings_set">>,
+                Params,
+                AuthToken,
+                #{ Key => Value },
+                put_section(<<"settings">>, NextSettings, State),
+                Opts
+            )
     end.
 
-settings_clear(Params, State, Opts) ->
+settings_clear(Params, State, AuthToken, Opts) ->
     Settings = section(<<"settings">>, State, Opts),
     case first_field([<<"key">>], Params, Opts) of
-        not_found -> {ok, Settings, State};
+        not_found -> account_backend_or_local(<<"settings_clear">>, Params, AuthToken, Settings, State, Opts);
         Key ->
             NextSettings = maps:remove(Key, Settings),
-            {ok, NextSettings, put_section(<<"settings">>, NextSettings, State)}
+            account_backend_or_local(
+                <<"settings_clear">>,
+                Params,
+                AuthToken,
+                NextSettings,
+                put_section(<<"settings">>, NextSettings, State),
+                Opts
+            )
     end.
 
 sync_hash(State, Opts) ->
@@ -348,12 +373,12 @@ collection_update(Owner, Params, State, Opts) ->
     Collection = maps:merge(Existing, collection_claim(ID, Params, Opts)),
     {ok, Collection, put_section(<<"collections">>, Collections#{ ID => Collection }, State)}.
 
-comment_create(Owner, Params, State, Opts) ->
+comment_create(Owner, Params, State, AuthToken, Opts) ->
     maybe
         {ok, ClaimID} ?= required_param(<<"claim_id">>, Params, Opts),
         FallbackID = generated_id(<<"comment">>, Owner, Params),
         DryRun = truthy(first_field([<<"dry_run">>, <<"dry-run">>], Params, Opts)),
-        case {DryRun, comment_backend_write(<<"comment.Create">>, Params, Opts)} of
+        case {DryRun, comment_backend_write(<<"comment.Create">>, Params, AuthToken, Opts)} of
             {true, {ok, BackendResult}} ->
                 {ok, BackendResult, State};
             {false, {ok, BackendResult}} ->
@@ -415,12 +440,12 @@ comment_by_id(Params, State, Opts) ->
         end
     end.
 
-comment_edit(Owner, Params, State, Opts) ->
+comment_edit(Owner, Params, State, AuthToken, Opts) ->
     maybe
         {ok, CommentID} ?= required_param(<<"comment_id">>, Params, Opts),
         Comments = section(<<"comments">>, State, Opts),
         Existing = hb_maps:get(CommentID, Comments, #{ <<"comment_id">> => CommentID }, Opts),
-        case comment_backend_write(<<"comment.Edit">>, Params, Opts) of
+        case comment_backend_write(<<"comment.Edit">>, Params, AuthToken, Opts) of
             {ok, BackendResult} ->
                 case comment_from_write_result(BackendResult, Opts) of
                     BackendComment when is_map(BackendComment) ->
@@ -453,12 +478,12 @@ comment_edit(Owner, Params, State, Opts) ->
         end
     end.
 
-comment_abandon(Owner, Params, State, Opts) ->
+comment_abandon(Owner, Params, State, AuthToken, Opts) ->
     maybe
         {ok, CommentID} ?= required_param(<<"comment_id">>, Params, Opts),
         Comments = section(<<"comments">>, State, Opts),
         Existing = hb_maps:get(CommentID, Comments, #{ <<"comment_id">> => CommentID }, Opts),
-        case comment_backend_write(<<"comment.Abandon">>, Params, Opts) of
+        case comment_backend_write(<<"comment.Abandon">>, Params, AuthToken, Opts) of
             {ok, BackendResult} ->
                 case truthy(value_or(first_field([<<"abandoned">>], BackendResult, Opts), true)) of
                     true ->
@@ -484,13 +509,13 @@ comment_abandon(Owner, Params, State, Opts) ->
         end
     end.
 
-comment_pin(Owner, Params, State, Opts) ->
+comment_pin(Owner, Params, State, AuthToken, Opts) ->
     maybe
         {ok, CommentID} ?= required_param(<<"comment_id">>, Params, Opts),
         Comments = section(<<"comments">>, State, Opts),
         Existing = hb_maps:get(CommentID, Comments, #{ <<"comment_id">> => CommentID }, Opts),
         Remove = truthy(hb_maps:get(<<"remove">>, Params, false, Opts)),
-        case comment_backend_write(<<"comment.Pin">>, Params, Opts) of
+        case comment_backend_write(<<"comment.Pin">>, Params, AuthToken, Opts) of
             {ok, BackendResult} ->
                 case comment_from_write_result(BackendResult, Opts) of
                     BackendComment when is_map(BackendComment) ->
@@ -618,12 +643,100 @@ comment_from_write_result(Result, Opts) when is_map(Result) ->
 comment_from_write_result(_Result, _Opts) ->
     not_found.
 
-comment_backend_write(Method, Params, Opts) ->
+account_backend_or_local(Method, Params, AuthToken, LocalResult, State, Opts) ->
+    case account_backend_request(Method, Params, AuthToken, Opts) of
+        {ok, BackendResult} -> {ok, account_result(Method, BackendResult, LocalResult), State};
+        {fallback, _Reason} -> {ok, LocalResult, State};
+        {error, Reason} -> {error, Reason}
+    end.
+
+account_result(<<"preference_get">>, BackendResult, _LocalResult) ->
+    BackendResult;
+account_result(<<"settings_get">>, BackendResult, _LocalResult) ->
+    BackendResult;
+account_result(_Method, _BackendResult, LocalResult) ->
+    LocalResult.
+
+account_backend_request(_Method, _Params, not_found, _Opts) ->
+    {fallback, auth_token_not_found};
+account_backend_request(Method, Params, AuthToken, Opts) ->
+    case account_write_through_enabled(Opts) of
+        false ->
+            {fallback, disabled};
+        true ->
+            case account_api_request(Method, Params, AuthToken, Opts) of
+                {ok, Result} -> {ok, Result};
+                {error, {account_api_error, Error}} -> {error, account_api_error_response(Error, Opts)};
+                {error, Reason} -> {fallback, Reason}
+            end
+    end.
+
+account_write_through_enabled(Opts) ->
+    case hb_opts:get(<<"odysee-account-write-through">>, true, Opts) of
+        false -> false;
+        0 -> false;
+        <<"0">> -> false;
+        <<"false">> -> false;
+        <<"False">> -> false;
+        _ -> true
+    end.
+
+account_api_request(Method, Params, AuthToken, Opts) ->
+    Payload = hb_json:encode(#{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"method">> => Method,
+        <<"params">> => auth_params(without_control_keys(Params), AuthToken),
+        <<"id">> => 1
+    }),
+    Msg = #{
+        <<"method">> => <<"POST">>,
+        <<"path">> => account_proxy_url(Opts),
+        <<"content-type">> => <<"application/json">>,
+        <<"body">> => Payload
+    },
+    case hb_http:request(maps:merge(Msg, auth_headers(AuthToken)), Opts) of
+        {ok, #{ <<"body">> := Body }} when is_binary(Body) -> decode_account_api_body(Body, Opts);
+        {ok, Body} when is_binary(Body) -> decode_account_api_body(Body, Opts);
+        {ok, _Other} -> {error, account_backend_response_without_body};
+        Error -> Error
+    end.
+
+decode_account_api_body(Body, Opts) ->
+    maybe
+        {ok, Decoded} ?= try_decode_json(Body),
+        case hb_maps:get(<<"error">>, Decoded, not_found, Opts) of
+            not_found -> {ok, hb_maps:get(<<"result">>, Decoded, Decoded, Opts)};
+            Error -> {error, {account_api_error, Error}}
+        end
+    end.
+
+account_proxy_url(Opts) ->
+    hb_util:bin(hb_opts:get(<<"lbry-proxy-url">>, ?DEFAULT_PROXY_URL, Opts)).
+
+account_api_error_response(Error, Opts) when is_map(Error) ->
+    #{
+        <<"status">> => 400,
+        <<"body">> => value_or(first_field([<<"message">>, <<"error">>, <<"body">>], Error, Opts), <<"Account backend rejected request.">>),
+        <<"details">> => Error
+    };
+account_api_error_response(Error, _Opts) when is_binary(Error) ->
+    #{ <<"status">> => 400, <<"body">> => Error };
+account_api_error_response(_Error, _Opts) ->
+    #{ <<"status">> => 400, <<"body">> => <<"Account backend rejected request.">> }.
+
+comment_backend_or_local(Method, Params, AuthToken, LocalResult, State, Opts) ->
+    case comment_backend_write(Method, Params, AuthToken, Opts) of
+        {ok, BackendResult} -> {ok, BackendResult, State};
+        {fallback, _Reason} -> {ok, LocalResult, State};
+        {error, Reason} -> {error, Reason}
+    end.
+
+comment_backend_write(Method, Params, AuthToken, Opts) ->
     case comment_write_through_enabled(Opts) of
         false ->
             {fallback, disabled};
         true ->
-            case comment_api_request(Method, Params, Opts) of
+            case comment_api_request(Method, Params, AuthToken, Opts) of
                 {ok, Result} -> {ok, Result};
                 {error, {comment_api_error, Error}} -> {error, comment_api_error_response(Error, Opts)};
                 {error, Reason} -> {fallback, Reason}
@@ -640,11 +753,11 @@ comment_write_through_enabled(Opts) ->
         _ -> true
     end.
 
-comment_api_request(Method, Params, Opts) ->
+comment_api_request(Method, Params, AuthToken, Opts) ->
     Payload = hb_json:encode(#{
         <<"jsonrpc">> => <<"2.0">>,
         <<"method">> => Method,
-        <<"params">> => Params,
+        <<"params">> => auth_params(without_control_keys(Params), AuthToken),
         <<"id">> => 1
     }),
     Msg = #{
@@ -653,7 +766,7 @@ comment_api_request(Method, Params, Opts) ->
         <<"content-type">> => <<"application/json">>,
         <<"body">> => Payload
     },
-    case hb_http:request(Msg, Opts) of
+    case hb_http:request(maps:merge(Msg, auth_headers(AuthToken)), Opts) of
         {ok, #{ <<"body">> := Body }} when is_binary(Body) -> decode_comment_api_body(Body, Opts);
         {ok, Body} when is_binary(Body) -> decode_comment_api_body(Body, Opts);
         {ok, _Other} -> {error, comment_backend_response_without_body};
@@ -689,7 +802,20 @@ comment_api_error_response(Error, _Opts) when is_binary(Error) ->
 comment_api_error_response(_Error, _Opts) ->
     #{ <<"status">> => 400, <<"body">> => <<"Comment backend rejected request.">> }.
 
-reaction_react(Params, State, Opts) ->
+auth_params(Params, {ok, Token}) ->
+    Params#{ <<"auth_token">> => Token };
+auth_params(Params, _AuthToken) ->
+    Params.
+
+auth_headers({ok, Token}) ->
+    #{
+        <<"x-lbry-auth-token">> => Token,
+        <<"cookie">> => <<"auth_token=", Token/binary>>
+    };
+auth_headers(_AuthToken) ->
+    #{}.
+
+reaction_react(Params, State, AuthToken, Opts) ->
     CommentIDs = csv(first_field([<<"comment_ids">>, <<"comment-id">>, <<"comment_id">>], Params, Opts)),
     Type = value_or(first_field([<<"type">>], Params, Opts), <<"like">>),
     Clear = csv(first_field([<<"clear_types">>, <<"clear-types">>], Params, Opts)),
@@ -704,7 +830,14 @@ reaction_react(Params, State, Opts) ->
             Reactions0,
             CommentIDs
         ),
-    {ok, #{ <<"ok">> => true }, put_section(<<"comment-reactions">>, Reactions, State)}.
+    comment_backend_or_local(
+        <<"reaction.React">>,
+        Params,
+        AuthToken,
+        #{ <<"ok">> => true },
+        put_section(<<"comment-reactions">>, Reactions, State),
+        Opts
+    ).
 
 comment_matches(Params, Comment, Opts) ->
     comment_matches_claim(Params, Comment, Opts)
@@ -784,25 +917,41 @@ integer_value(Value, Default) when is_binary(Value) ->
 integer_value(_Value, Default) ->
     Default.
 
-comment_setting_get(Params, State, Opts) ->
+comment_setting_get(Params, State, AuthToken, Opts) ->
     Settings = section(<<"comment-settings">>, State, Opts),
     ChannelID = first_field([<<"channel_id">>, <<"channel-id">>], Params, Opts),
-    {ok, comment_settings_for_channel(ChannelID, Settings, Opts), State}.
+    comment_backend_or_local(
+        <<"setting.Get">>,
+        Params,
+        AuthToken,
+        comment_settings_for_channel(ChannelID, Settings, Opts),
+        State,
+        Opts
+    ).
 
-comment_setting_list(Params, State, Opts) ->
+comment_setting_list(Params, State, AuthToken, Opts) ->
     Settings = section(<<"comment-settings">>, State, Opts),
-    case first_field([<<"channel_id">>, <<"channel-id">>], Params, Opts) of
-        not_found -> {ok, maps:values(Settings), State};
-        ChannelID -> {ok, comment_settings_for_channel(ChannelID, Settings, Opts), State}
-    end.
+    Local =
+        case first_field([<<"channel_id">>, <<"channel-id">>], Params, Opts) of
+            not_found -> maps:values(Settings);
+            ChannelID -> comment_settings_for_channel(ChannelID, Settings, Opts)
+        end,
+    comment_backend_or_local(<<"setting.List">>, Params, AuthToken, Local, State, Opts).
 
-comment_setting_update(Params, State, Opts) ->
+comment_setting_update(Params, State, AuthToken, Opts) ->
     maybe
         {ok, ChannelID} ?= required_param(<<"channel_id">>, Params, Opts),
         Settings = section(<<"comment-settings">>, State, Opts),
         Existing = comment_settings_for_channel(ChannelID, Settings, Opts),
         Updated = maps:merge(Existing, without_control_keys(Params)),
-        {ok, Updated, put_section(<<"comment-settings">>, Settings#{ ChannelID => Updated }, State)}
+        comment_backend_or_local(
+            <<"setting.Update">>,
+            Params,
+            AuthToken,
+            Updated,
+            put_section(<<"comment-settings">>, Settings#{ ChannelID => Updated }, State),
+            Opts
+        )
     end.
 
 comment_settings_for_channel(not_found, _Settings, _Opts) ->
@@ -818,34 +967,34 @@ default_comment_settings() ->
         <<"words">> => <<"">>
     }.
 
-comment_block_word(Params, State, Opts) ->
+comment_block_word(Params, State, AuthToken, Opts) ->
     Word = value_or(first_field([<<"word">>, <<"blocked_word">>, <<"blocked-word">>], Params, Opts), <<>>),
     Words = lists:usort([Word | blocked_words(State, Opts)]),
     Next = put_section(<<"blocked-words">>, Words, State),
-    {ok, Words, Next}.
+    comment_backend_or_local(<<"setting.BlockWord">>, Params, AuthToken, Words, Next, Opts).
 
-comment_unblock_word(Params, State, Opts) ->
+comment_unblock_word(Params, State, AuthToken, Opts) ->
     Word = value_or(first_field([<<"word">>, <<"blocked_word">>, <<"blocked-word">>], Params, Opts), <<>>),
     Words = [W || W <- blocked_words(State, Opts), W =/= Word],
     Next = put_section(<<"blocked-words">>, Words, State),
-    {ok, Words, Next}.
+    comment_backend_or_local(<<"setting.UnBlockWord">>, Params, AuthToken, Words, Next, Opts).
 
-comment_list_blocked_words(State, Opts) ->
-    {ok, blocked_words(State, Opts), State}.
+comment_list_blocked_words(Params, State, AuthToken, Opts) ->
+    comment_backend_or_local(<<"setting.ListBlockedWords">>, Params, AuthToken, blocked_words(State, Opts), State, Opts).
 
-moderation_put(Section, Params, State, Opts) ->
+moderation_put(Section, Method, Params, State, AuthToken, Opts) ->
     ID = value_or(first_field([<<"blocked_channel_id">>, <<"delegate_channel_id">>, <<"channel_id">>], Params, Opts), generated_id(Section, <<"moderation">>, Params)),
     Items = section(Section, State, Opts),
     Updated = Items#{ ID => without_control_keys(Params) },
-    {ok, maps:values(Updated), put_section(Section, Updated, State)}.
+    comment_backend_or_local(Method, Params, AuthToken, maps:values(Updated), put_section(Section, Updated, State), Opts).
 
-moderation_remove(Section, Params, State, Opts) ->
+moderation_remove(Section, Method, Params, State, AuthToken, Opts) ->
     ID = value_or(first_field([<<"blocked_channel_id">>, <<"delegate_channel_id">>, <<"channel_id">>], Params, Opts), <<>>),
     Items = maps:remove(ID, section(Section, State, Opts)),
-    {ok, maps:values(Items), put_section(Section, Items, State)}.
+    comment_backend_or_local(Method, Params, AuthToken, maps:values(Items), put_section(Section, Items, State), Opts).
 
-moderation_list(Section, State, Opts) ->
-    {ok, maps:values(section(Section, State, Opts)), State}.
+moderation_list(Section, Method, Params, State, AuthToken, Opts) ->
+    comment_backend_or_local(Method, Params, AuthToken, maps:values(section(Section, State, Opts)), State, Opts).
 
 membership_check(Params, State, Opts) ->
     ClaimIDs = csv(first_field([<<"claim_ids">>, <<"claim-id">>, <<"claim_id">>], Params, Opts)),
@@ -1276,7 +1425,12 @@ control_keys() ->
     [
         <<"!">>,
         <<"accept">>,
+        <<"access-token">>,
+        <<"access_token">>,
         <<"authorization">>,
+        <<"auth-token">>,
+        <<"auth_token">>,
+        <<"authtoken">>,
         <<"body">>,
         <<"connection">>,
         <<"content-type">>,
@@ -1288,8 +1442,11 @@ control_keys() ->
         <<"params-64">>,
         <<"path">>,
         <<"priv">>,
+        <<"refresh-token">>,
+        <<"refresh_token">>,
         <<"user-agent">>,
-        <<"x-lbry-auth-token">>
+        <<"x-lbry-auth-token">>,
+        <<"x-odysee-auth-token">>
     ].
 
 method(Req, Opts) ->

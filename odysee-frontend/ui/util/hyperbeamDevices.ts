@@ -1,5 +1,6 @@
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { isHyperbeamDeviceEnabled, isHyperbeamFullMode } from 'util/hyperbeamMode';
+import { getAuthToken } from 'util/saved-passwords';
 
 export const HYPERBEAM_DEVICE = {
   claim: '~odysee-claim@1.0',
@@ -58,13 +59,20 @@ export function hyperbeamDevicePostJson(
 
   return fetch(`${base}/${path}`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
+      ...authTokenHeader(),
       ...headers,
     },
     body: JSON.stringify({ ...fields, ...body }),
   });
+}
+
+function authTokenHeader(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { 'x-odysee-auth-token': token } : {};
 }
 
 export function hyperbeamDevicePostParams64(

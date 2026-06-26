@@ -1,6 +1,6 @@
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
-import { HYPERBEAM_DEVICE, hyperbeamDeviceBase, hyperbeamDevicePostParams64 } from 'util/hyperbeamDevices';
+import { HYPERBEAM_DEVICE, base64Url, hyperbeamDeviceBase, hyperbeamDevicePostParams64 } from 'util/hyperbeamDevices';
 
 const HYPERBEAM_LBRYIO_METHODS = new Set([
   'membership/content',
@@ -50,14 +50,34 @@ async function callHyperbeamUserState(payload: Record<string, any>, token?: stri
   const authToken = token || getAuthToken();
   if (!authToken) throw new Error('HyperBEAM authenticated state requires an Odysee auth token.');
 
-  const request = hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.userState, 'call&!', payload, authHeaders(authToken));
-  if (!request) return null;
-
-  const response = await request;
+  const response = await proxiedUserStateCall(payload, authToken);
   const json = await responseJson(response);
   if (!response.ok) throw new Error(errorMessage(json, response.status));
 
   return resultPayload(json);
+}
+
+async function proxiedUserStateCall(payload: Record<string, any>, authToken: string): Promise<Response> {
+  const proxyResponse = await fetch(`/$/api/hyperbeam-auth-device/v1/${HYPERBEAM_DEVICE.userState}/call`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...authHeaders(authToken),
+    },
+    body: JSON.stringify({
+      '!': true,
+      params64: base64Url(JSON.stringify(payload || {})),
+    }),
+  });
+
+  const contentType = proxyResponse.headers.get('content-type') || '';
+  if (proxyResponse.status !== 404 && !contentType.includes('text/html')) return proxyResponse;
+
+  const direct = hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.userState, 'call&!', payload, authHeaders(authToken));
+  if (!direct) throw new Error('HyperBEAM user-state device is not configured.');
+  return direct;
 }
 
 function authHeaders(token: string): Record<string, string> {

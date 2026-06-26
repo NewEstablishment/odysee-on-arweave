@@ -1,17 +1,38 @@
 -module(dev_odysee_upload).
 -implements(<<"odysee-upload@1.0">>).
--export([info/1, submit/3, upload/3, record/3, media/3, list/3]).
+-export([info/1, submit/3, upload/3, write/3, chunk/3, finalize/3, record/3, media/3, list/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -define(DEVICE, <<"odysee-upload@1.0">>).
 -define(DEFAULT_MAX_BYTES, 104857600).
+-define(CHUNKED_MANIFEST_KIND, <<"odysee-hyperbeam-chunked-upload">>).
 
 info(_Opts) ->
-    #{ exports => [<<"submit">>, <<"upload">>, <<"record">>, <<"media">>, <<"list">>] }.
+    #{
+        exports => [
+            <<"submit">>,
+            <<"upload">>,
+            <<"write">>,
+            <<"chunk">>,
+            <<"finalize">>,
+            <<"record">>,
+            <<"media">>,
+            <<"list">>
+        ]
+    }.
 
 upload(Base, Req, Opts) ->
     submit(Base, Req, Opts).
+
+write(Base, Req, Opts) ->
+    raw_write(Base, Req, Opts).
+
+chunk(Base, Req, Opts) ->
+    raw_write(Base, Req, Opts).
+
+finalize(Base, Req, Opts) ->
+    raw_write(Base, Req, Opts).
 
 submit(Base, Req, Opts) ->
     case method(Req, Opts) of
@@ -30,6 +51,24 @@ submit(Base, Req, Opts) ->
                     Record = enrich_record(RecordID, Record0, Opts),
                     ok ?= write_indexes(Record, Opts),
                     {ok, response(Record, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
+raw_write(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Bytes} ?= raw_body(Req, Opts),
+                    ok ?= enforce_size(Bytes, Base, Req, Opts),
+                    {ok, ID} ?= hb_cache:write(Bytes, Opts),
+                    {ok, raw_write_response(ID, Owner)}
                 else
                     Error -> Error
                 end
@@ -84,7 +123,8 @@ media(Base, Req, Opts) ->
                     {ok, Record} ?= read_record(Base, Req, Opts),
                     {ok, DataID} ?= field(<<"data-id">>, Record, Opts),
                     {ok, Bytes} ?= hb_cache:read(DataID, Opts),
-                    {ok, media_response(Record, Bytes, Req, Opts)}
+                    {ok, MediaBytes} ?= media_bytes(Record, Bytes, Opts),
+                    {ok, media_response(Record, MediaBytes, Req, Opts)}
                 else
                     Error -> Error
                 end
@@ -178,6 +218,12 @@ payload_bytes(Payload, Req, Opts) ->
             end
     end.
 
+raw_body(Req, Opts) ->
+    case hb_maps:get(<<"body">>, Req, not_found, Opts) of
+        Body when is_binary(Body) -> {ok, Body};
+        _ -> {error, upload_content_not_found}
+    end.
+
 decode_params64(Encoded) ->
     try {ok, hb_json:decode(hb_util:decode(Encoded))}
     catch _:_ -> {error, invalid_upload_params64}
@@ -211,13 +257,24 @@ upload_record(Owner, DataID, Bytes, Payload, Opts) ->
     Filename = first_field([<<"filename">>, <<"file-name">>, <<"file_name">>], Payload, Opts),
     ReleaseTime = first_field([<<"release-time">>, <<"release_time">>], Metadata, Opts),
     RecordFilename = value_or(Filename, value_or(Name, <<"upload">>)),
+    DataKind =
+        case truthy(first_field([<<"chunked-manifest">>, <<"chunked_manifest">>], Payload, Opts)) of
+            true -> <<"chunked-manifest">>;
+            false -> <<"bytes">>
+        end,
+    Size =
+        integer_value(
+            first_field([<<"size">>, <<"file-size">>, <<"file_size">>], Payload, Opts),
+            byte_size(Bytes)
+        ),
     #{
         <<"device">> => ?DEVICE,
         <<"type">> => <<"odysee-upload">>,
         <<"version">> => <<"1">>,
         <<"owner">> => Owner,
         <<"data-id">> => DataID,
-        <<"byte-size">> => byte_size(Bytes),
+        <<"data-kind">> => DataKind,
+        <<"byte-size">> => Size,
         <<"content-type">> => value_or(MediaType, <<"application/octet-stream">>),
         <<"filename">> => RecordFilename,
         <<"created-at">> => integer_to_binary(erlang:system_time(second)),
@@ -232,7 +289,7 @@ upload_record(Owner, DataID, Bytes, Payload, Opts) ->
                 ReleaseTime,
                 MediaType,
                 RecordFilename,
-                byte_size(Bytes),
+                Size,
                 Opts
             )
     }.
@@ -327,6 +384,26 @@ response(Record, Opts) ->
         <<"result">> => #{ <<"outputs">> => [Claim] }
     },
     Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+raw_write_response(ID, Owner) ->
+    ReadPath = <<"/", ID/binary>>,
+    Body = #{
+        <<"id">> => ID,
+        <<"path">> => ID,
+        <<"read_path">> => ReadPath,
+        <<"read-path">> => ReadPath
+    },
+    (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"id">> => ID,
+        <<"path">> => ID,
+        <<"read-path">> => ReadPath,
+        <<"url">> => ReadPath,
+        <<"signers">> => [Owner],
+        <<"body">> => hb_json:encode(Body)
+    }.
 
 enrich_record(RecordID, Record0, Opts) ->
     Claim0 = hb_maps:get(<<"claim">>, Record0, #{}, Opts),
@@ -700,6 +777,51 @@ media_response(Record, Bytes, Req, Opts) ->
             end
     end.
 
+media_bytes(Record, Bytes, Opts) ->
+    case hb_maps:get(<<"data-kind">>, Record, <<"bytes">>, Opts) of
+        <<"chunked-manifest">> -> chunked_manifest_bytes(Bytes, Opts);
+        _ -> {ok, Bytes}
+    end.
+
+chunked_manifest_bytes(Bytes, Opts) ->
+    maybe
+        {ok, Manifest} ?= decode_manifest(Bytes),
+        true ?= hb_maps:get(<<"type">>, Manifest, not_found, Opts) =:= ?CHUNKED_MANIFEST_KIND,
+        Chunks = hb_maps:get(<<"chunks">>, Manifest, [], Opts),
+        {ok, Parts} ?= read_manifest_chunks(Chunks, Opts, []),
+        {ok, iolist_to_binary(Parts)}
+    else
+        false -> {error, invalid_upload_manifest};
+        Error -> Error
+    end.
+
+decode_manifest(Bytes) ->
+    try hb_json:decode(Bytes) of
+        Manifest when is_map(Manifest) -> {ok, Manifest};
+        _ -> {error, invalid_upload_manifest}
+    catch _:_ ->
+        {error, invalid_upload_manifest}
+    end.
+
+read_manifest_chunks([], _Opts, Acc) ->
+    {ok, lists:reverse(Acc)};
+read_manifest_chunks([Chunk | Rest], Opts, Acc) ->
+    maybe
+        {ok, ID} ?= manifest_chunk_id(Chunk, Opts),
+        {ok, Bytes} ?= hb_cache:read(ID, Opts),
+        read_manifest_chunks(Rest, Opts, [Bytes | Acc])
+    end.
+
+manifest_chunk_id(Chunk, Opts) when is_map(Chunk) ->
+    case first_field([<<"id">>, <<"path">>, <<"chunk-id">>, <<"chunk_id">>], Chunk, Opts) of
+        not_found -> {error, invalid_upload_manifest_chunk};
+        ID -> {ok, ID}
+    end;
+manifest_chunk_id(ID, _Opts) when is_binary(ID) ->
+    {ok, ID};
+manifest_chunk_id(_Chunk, _Opts) ->
+    {error, invalid_upload_manifest_chunk}.
+
 media_headers(Record, Bytes, Opts) ->
     (cors_headers())#{
         <<"status">> => 200,
@@ -829,6 +951,29 @@ integer_param(Base, Req, Key, Default, Opts) ->
             end;
         _ -> Default
     end.
+
+integer_value(not_found, Default) ->
+    Default;
+integer_value(Int, _Default) when is_integer(Int), Int >= 0 ->
+    Int;
+integer_value(Bin, Default) when is_binary(Bin) ->
+    try
+        Int = binary_to_integer(Bin),
+        case Int >= 0 of
+            true -> Int;
+            false -> Default
+        end
+    catch _:_ ->
+        Default
+    end;
+integer_value(_Value, Default) ->
+    Default.
+
+truthy(true) -> true;
+truthy(<<"true">>) -> true;
+truthy(<<"1">>) -> true;
+truthy(1) -> true;
+truthy(_Value) -> false.
 
 release_time_or_now(not_found) ->
     erlang:system_time(second);
@@ -1049,6 +1194,48 @@ upload_accepts_params64_base64_content_test() ->
     {ok, Res} = submit(#{}, Req, Opts),
     {ok, Media} = media(#{}, #{ <<"id">> => hb_maps:get(<<"record-id">>, Res, Opts) }, Opts),
     ?assertEqual(<<"hello64">>, hb_maps:get(<<"body">>, Media, Opts)).
+
+upload_chunked_manifest_reads_media_test() ->
+    Opts = test_opts(),
+    {ok, Chunk1} = chunk(#{}, signed(#{ <<"body">> => <<"hello ">> }, Opts), Opts),
+    {ok, Chunk2} = chunk(#{}, signed(#{ <<"body">> => <<"world">> }, Opts), Opts),
+    ChunkID1 = hb_maps:get(<<"id">>, Chunk1, Opts),
+    ChunkID2 = hb_maps:get(<<"id">>, Chunk2, Opts),
+    Manifest =
+        hb_json:encode(#{
+            <<"type">> => ?CHUNKED_MANIFEST_KIND,
+            <<"version">> => 1,
+            <<"size">> => 11,
+            <<"chunks">> => [
+                #{ <<"id">> => ChunkID1, <<"size">> => 6 },
+                #{ <<"id">> => ChunkID2, <<"size">> => 5 }
+            ]
+        }),
+    Req =
+        signed(
+            #{
+                <<"body">> => Manifest,
+                <<"name">> => <<"chunked-demo">>,
+                <<"content-type">> => <<"text/plain">>,
+                <<"chunked_manifest">> => true,
+                <<"size">> => 11
+            },
+            Opts
+        ),
+    {ok, Res} = submit(#{}, Req, Opts),
+    Record = hb_maps:get(<<"record">>, Res, Opts),
+    ?assertEqual(<<"chunked-manifest">>, hb_maps:get(<<"data-kind">>, Record, Opts)),
+    ?assertEqual(11, hb_maps:get(<<"byte-size">>, Record, Opts)),
+    Source =
+        hb_maps:get(
+            <<"source">>,
+            hb_maps:get(<<"value">>, hd(hb_maps:get(<<"outputs">>, Res, Opts)), Opts),
+            Opts
+        ),
+    ?assertEqual(<<"11">>, hb_maps:get(<<"size">>, Source, Opts)),
+    {ok, Media} = media(#{}, #{ <<"id">> => hb_maps:get(<<"record-id">>, Res, Opts) }, Opts),
+    ?assertEqual(<<"hello world">>, hb_maps:get(<<"body">>, Media, Opts)),
+    ?assertEqual(<<"text/plain">>, hb_maps:get(<<"content-type">>, Media, Opts)).
 
 upload_resolves_native_claim_and_stream_media_test() ->
     Opts = test_opts(),
