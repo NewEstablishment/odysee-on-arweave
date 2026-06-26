@@ -6,6 +6,7 @@ const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const CLAIM_DEVICE = '~odysee-claim@1.0';
 const COMMENT_DEVICE = '~odysee-comment@1.0';
+const UPLOAD_DEVICE = '~odysee-upload@1.0';
 const REACTION_DEVICE = '~odysee-reaction@1.0';
 const FILE_DEVICE = '~odysee-file@1.0';
 const FILE_REACTION_DEVICE = '~odysee-file-reaction@1.0';
@@ -268,11 +269,38 @@ export async function fetchHyperbeamSubCount(claimIdCsv: string): Promise<Array<
 }
 
 export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
-  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params);
+  const localParams = localUploadSearchParams(params);
+  const [response, localUploads] = await Promise.all([
+    fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params),
+    localParams ? fetchHyperbeamUploadList(localParams).catch(() => null) : Promise.resolve(null),
+  ]);
   const result = sdkSearchFromHyperbeam(responsePayload(response));
-  const items = result && result.items;
+  const publicResult = Array.isArray(result?.items) ? result : null;
 
-  return Array.isArray(items) ? result : null;
+  return mergeClaimSearchResults(publicResult, localUploads, params);
+}
+
+export async function fetchHyperbeamUploadList(params: ClaimSearchOptions = {}): Promise<ClaimSearchResponse | null> {
+  const response = await fetchDeviceJson(`${UPLOAD_DEVICE}/list`, params);
+  const result = sdkSearchFromHyperbeam(responsePayload(response));
+  const sourceItems = result && result.items;
+  if (!Array.isArray(sourceItems)) return null;
+
+  const items = sourceItems.map(uploadClaimFromHyperbeam).filter((claim) => claimMatchesSearchParams(claim, params));
+  const pageSize = toNumber(value(result, 'page_size', 'page-size'), params.page_size || items.length || 1);
+  const totalItems = toNumber(value(result, 'total_items', 'total-items'), items.length);
+
+  return {
+    ...result,
+    items,
+    page: toNumber(result.page, params.page || 1),
+    page_size: pageSize,
+    total_items: Math.max(totalItems, items.length),
+    total_pages: toNumber(
+      value(result, 'total_pages', 'total-pages'),
+      totalPages(Math.max(totalItems, items.length), pageSize)
+    ),
+  };
 }
 
 export async function fetchHyperbeamVerifyClaimSignature(
@@ -298,6 +326,127 @@ export async function fetchHyperbeamStreamVerification(
 ): Promise<any | null> {
   const result = await fetchDeviceJson(`${STREAM_DEVICE}/verified-stream`, compactParams({ claim, url: uri }));
   return responsePayload(result);
+}
+
+function localUploadSearchParams(params: ClaimSearchOptions): ClaimSearchOptions | null {
+  const hasTarget =
+    paramValues(params, 'channel_ids', 'channel-ids', 'channel_id', 'channel-id').length > 0 ||
+    paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id', 'txid').length > 0 ||
+    paramValues(params, 'name', 'claim-name', 'claim_name').length > 0 ||
+    paramValues(params, 'uri', 'uris', 'url', 'urls').length > 0;
+
+  return hasTarget ? params : null;
+}
+
+function mergeClaimSearchResults(
+  publicResult: ClaimSearchResponse | null,
+  localResult: ClaimSearchResponse | null,
+  params: ClaimSearchOptions
+): ClaimSearchResponse | null {
+  if (!publicResult) return localResult;
+  if (!localResult || !localResult.items.length) return publicResult;
+
+  const publicItems = Array.isArray(publicResult.items) ? publicResult.items : [];
+  const localOnlyItems = localResult.items.filter((claim) => !publicItems.some((item) => sameClaim(item, claim)));
+  if (!localOnlyItems.length) return publicResult;
+
+  const items = [...localOnlyItems, ...publicItems];
+  const publicTotal = toNumber(publicResult.total_items, publicItems.length);
+  const totalItems = publicTotal + localOnlyItems.length;
+  const pageSize = toNumber(publicResult.page_size, params.page_size || items.length || 1);
+
+  return {
+    ...publicResult,
+    items,
+    page: toNumber(publicResult.page, params.page || 1),
+    page_size: pageSize,
+    total_items: totalItems,
+    total_pages: Math.max(toNumber(publicResult.total_pages, 1), totalPages(totalItems, pageSize)),
+  };
+}
+
+function uploadClaimFromHyperbeam(item: any): any {
+  const claim = sdkClaimFromHyperbeam(item);
+  if (!claim) return claim;
+
+  const hyperbeam = claim.hyperbeam || {};
+  const recordId = value(hyperbeam, 'record-id', 'record_id') || claim.claim_id;
+  const mediaUrl = recordId ? `${hyperbeamBaseUrl()}/${UPLOAD_DEVICE}/media?id=${encodeURIComponent(recordId)}` : '';
+  const claimValue = claim.value || {};
+  const source = claimValue.source || {};
+  const releaseTime = value(claimValue, 'release_time', 'release-time') || claim.timestamp;
+
+  return {
+    ...claim,
+    confirmations: Number(claim.confirmations) > 0 ? claim.confirmations : 1,
+    is_my_output: claim.is_my_output !== undefined ? claim.is_my_output : true,
+    streaming_url: claim.streaming_url || mediaUrl,
+    download_url: claim.download_url || mediaUrl,
+    value: {
+      ...claimValue,
+      release_time: releaseTime,
+      source: {
+        ...source,
+        url: source.url || mediaUrl,
+      },
+    },
+  };
+}
+
+function claimMatchesSearchParams(claim: any, params: ClaimSearchOptions): boolean {
+  return (
+    claimTypeMatches(claim, params) &&
+    claimIdsMatch(claim, params) &&
+    claimNameMatches(claim, params) &&
+    claimChannelMatches(claim, params) &&
+    claimTagsMatch(claim, params)
+  );
+}
+
+function claimTypeMatches(claim: any, params: ClaimSearchOptions): boolean {
+  const types = paramValues(params, 'claim_type', 'claim-type', 'type');
+  return types.length === 0 || types.includes(claim.value_type);
+}
+
+function claimIdsMatch(claim: any, params: ClaimSearchOptions): boolean {
+  const ids = paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id', 'txid');
+  return ids.length === 0 || ids.includes(claim.claim_id);
+}
+
+function claimNameMatches(claim: any, params: ClaimSearchOptions): boolean {
+  const names = paramValues(params, 'name', 'claim-name', 'claim_name');
+  return names.length === 0 || names.includes(claim.name);
+}
+
+function claimChannelMatches(claim: any, params: ClaimSearchOptions): boolean {
+  const channelIds = paramValues(params, 'channel_ids', 'channel-ids', 'channel_id', 'channel-id');
+  const channelId = value(claim.signing_channel, 'claim_id', 'claim-id', 'id');
+  return channelIds.length === 0 || channelIds.includes(channelId);
+}
+
+function claimTagsMatch(claim: any, params: ClaimSearchOptions): boolean {
+  const tags = paramValues(claim.value || {}, 'tags');
+  const anyTags = paramValues(params, 'any_tags', 'any-tags');
+  const notTags = paramValues(params, 'not_tags', 'not-tags');
+  return (
+    (anyTags.length === 0 || anyTags.some((tag) => tags.includes(tag))) && !notTags.some((tag) => tags.includes(tag))
+  );
+}
+
+function paramValues(source: any, ...keys: string[]): Array<string> {
+  const raw = value(source, ...keys);
+  if (raw === undefined || raw === null || raw === '') return [];
+  if (Array.isArray(raw)) return raw.flatMap((item) => paramValues({ item }, 'item'));
+  return String(raw)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function sameClaim(a: any, b: any): boolean {
+  const aId = value(a, 'claim_id', 'claim-id');
+  const bId = value(b, 'claim_id', 'claim-id');
+  return Boolean(aId && bId && aId === bId);
 }
 
 async function fetchDeviceJson(path: string, body: Record<string, any>): Promise<any | null> {

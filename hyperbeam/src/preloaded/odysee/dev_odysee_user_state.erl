@@ -5,6 +5,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(DEVICE, <<"odysee-user-state@1.0">>).
+-define(DEFAULT_COMMENT_URL, <<"https://comments.odysee.com/api/v2">>).
 
 info(_Opts) ->
     #{ exports => [<<"call">>] }.
@@ -164,6 +165,11 @@ decode_params64(Encoded) ->
     catch _:_ -> {error, invalid_user_state_params64}
     end.
 
+try_decode_json(Raw) ->
+    try {ok, hb_json:decode(Raw)}
+    catch _:_ -> {error, invalid_comment_backend_json}
+    end.
+
 dispatch(Owner, Payload, State, Opts) ->
     Kind = hb_util:to_lower(hb_util:bin(first_field([<<"kind">>], Payload, Opts))),
     case Kind of
@@ -199,9 +205,9 @@ comment_call(Owner, Payload, State, Opts) ->
         <<"comment_list">> -> comment_list(Params, State, Opts);
         <<"comment_by_id">> -> comment_by_id(Params, State, Opts);
         <<"comment_byid">> -> comment_by_id(Params, State, Opts);
-        <<"comment_edit">> -> comment_edit(Params, State, Opts);
-        <<"comment_abandon">> -> comment_abandon(Params, State, Opts);
-        <<"comment_pin">> -> comment_pin(Params, State, Opts);
+        <<"comment_edit">> -> comment_edit(Owner, Params, State, Opts);
+        <<"comment_abandon">> -> comment_abandon(Owner, Params, State, Opts);
+        <<"comment_pin">> -> comment_pin(Owner, Params, State, Opts);
         <<"reaction_react">> -> reaction_react(Params, State, Opts);
         <<"setting_get">> -> comment_setting_get(Params, State, Opts);
         <<"setting_list">> -> comment_setting_list(Params, State, Opts);
@@ -345,25 +351,28 @@ collection_update(Owner, Params, State, Opts) ->
 comment_create(Owner, Params, State, Opts) ->
     maybe
         {ok, ClaimID} ?= required_param(<<"claim_id">>, Params, Opts),
-        CommentID = generated_id(<<"comment">>, Owner, Params),
-        Timestamp = erlang:system_time(second),
-        Comment = compact(#{
-            <<"comment_id">> => CommentID,
-            <<"id">> => CommentID,
-            <<"claim_id">> => ClaimID,
-            <<"comment">> => value_or(first_field([<<"comment">>, <<"body">>], Params, Opts), <<>>),
-            <<"parent_id">> => first_field([<<"parent_id">>, <<"parent-id">>], Params, Opts),
-            <<"channel_id">> => first_field([<<"channel_id">>, <<"channel-id">>], Params, Opts),
-            <<"channel_name">> => first_field([<<"channel_name">>, <<"channel-name">>], Params, Opts),
-            <<"signature">> => first_field([<<"signature">>], Params, Opts),
-            <<"signing_ts">> => first_field([<<"signing_ts">>, <<"signing-ts">>], Params, Opts),
-            <<"timestamp">> => Timestamp,
-            <<"updated_at">> => Timestamp,
-            <<"hyperbeam_owner">> => Owner
-        }),
-        Comments = section(<<"comments">>, State, Opts),
-        Next = put_section(<<"comments">>, Comments#{ CommentID => Comment }, State),
-        {ok, Comment, Next}
+        FallbackID = generated_id(<<"comment">>, Owner, Params),
+        DryRun = truthy(first_field([<<"dry_run">>, <<"dry-run">>], Params, Opts)),
+        case {DryRun, comment_backend_write(<<"comment.Create">>, Params, Opts)} of
+            {true, {ok, BackendResult}} ->
+                {ok, BackendResult, State};
+            {false, {ok, BackendResult}} ->
+                Comment = comment_record(
+                    Owner,
+                    FallbackID,
+                    ClaimID,
+                    Params,
+                    comment_from_write_result(BackendResult, Opts),
+                    Opts
+                ),
+                store_comment(Comment, State, Opts);
+            {true, {fallback, _Reason}} ->
+                {ok, local_comment(Owner, FallbackID, ClaimID, Params, Opts), State};
+            {false, {fallback, _Reason}} ->
+                store_comment(local_comment(Owner, FallbackID, ClaimID, Params, Opts), State, Opts);
+            {_DryRun, {error, Reason}} ->
+                {error, Reason}
+        end
     end.
 
 comment_list(Params, State, Opts) ->
@@ -406,50 +415,279 @@ comment_by_id(Params, State, Opts) ->
         end
     end.
 
-comment_edit(Params, State, Opts) ->
+comment_edit(Owner, Params, State, Opts) ->
     maybe
         {ok, CommentID} ?= required_param(<<"comment_id">>, Params, Opts),
         Comments = section(<<"comments">>, State, Opts),
         Existing = hb_maps:get(CommentID, Comments, #{ <<"comment_id">> => CommentID }, Opts),
-        Comment = Existing#{
-            <<"comment">> => value_or(first_field([<<"comment">>, <<"body">>], Params, Opts), <<>>),
-            <<"updated_at">> => erlang:system_time(second),
-            <<"signature">> => first_field([<<"signature">>], Params, Opts),
-            <<"signing_ts">> => first_field([<<"signing_ts">>, <<"signing-ts">>], Params, Opts)
-        },
-        Next = put_section(<<"comments">>, Comments#{ CommentID => compact(Comment) }, State),
-        {ok, compact(Comment), Next}
+        case comment_backend_write(<<"comment.Edit">>, Params, Opts) of
+            {ok, BackendResult} ->
+                case comment_from_write_result(BackendResult, Opts) of
+                    BackendComment when is_map(BackendComment) ->
+                        ClaimID = value_or(
+                            first_field([<<"claim_id">>, <<"claim-id">>], Existing, Opts),
+                            first_field([<<"claim_id">>, <<"claim-id">>], BackendComment, Opts)
+                        ),
+                        Comment = comment_record(
+                            Owner,
+                            CommentID,
+                            ClaimID,
+                            Params,
+                            maps:merge(Existing, BackendComment),
+                            Opts
+                        ),
+                        store_comment(Comment, State, Opts);
+                    _ ->
+                        {ok, BackendResult, State}
+                end;
+            {fallback, _Reason} ->
+                Comment = compact(Existing#{
+                    <<"comment">> => value_or(first_field([<<"comment">>, <<"body">>], Params, Opts), <<>>),
+                    <<"updated_at">> => erlang:system_time(second),
+                    <<"signature">> => first_field([<<"signature">>], Params, Opts),
+                    <<"signing_ts">> => first_field([<<"signing_ts">>, <<"signing-ts">>], Params, Opts)
+                }),
+                store_comment(Comment, State, Opts);
+            {error, Reason} ->
+                {error, Reason}
+        end
     end.
 
-comment_abandon(Params, State, Opts) ->
+comment_abandon(Owner, Params, State, Opts) ->
     maybe
         {ok, CommentID} ?= required_param(<<"comment_id">>, Params, Opts),
         Comments = section(<<"comments">>, State, Opts),
         Existing = hb_maps:get(CommentID, Comments, #{ <<"comment_id">> => CommentID }, Opts),
-        Comment = compact(Existing#{
-            <<"comment_id">> => CommentID,
-            <<"removed">> => true,
-            <<"abandoned">> => true,
-            <<"updated_at">> => erlang:system_time(second)
-        }),
-        Next = put_section(<<"comments">>, Comments#{ CommentID => Comment }, State),
-        {ok, #{ <<"abandoned">> => true, <<"claim_id">> => hb_maps:get(<<"claim_id">>, Comment, <<>>, Opts) }, Next}
+        case comment_backend_write(<<"comment.Abandon">>, Params, Opts) of
+            {ok, BackendResult} ->
+                case truthy(value_or(first_field([<<"abandoned">>], BackendResult, Opts), true)) of
+                    true ->
+                        Comment = abandoned_comment(
+                            Owner,
+                            CommentID,
+                            Existing,
+                            Params,
+                            comment_from_write_result(BackendResult, Opts),
+                            Opts
+                        ),
+                        {ok, _Stored, Next} = store_comment(Comment, State, Opts),
+                        {ok, abandon_response(Comment, BackendResult, Opts), Next};
+                    false ->
+                        {ok, BackendResult, State}
+                end;
+            {fallback, _Reason} ->
+                Comment = abandoned_comment(Owner, CommentID, Existing, Params, #{}, Opts),
+                {ok, _Stored, Next} = store_comment(Comment, State, Opts),
+                {ok, abandon_response(Comment, #{}, Opts), Next};
+            {error, Reason} ->
+                {error, Reason}
+        end
     end.
 
-comment_pin(Params, State, Opts) ->
+comment_pin(Owner, Params, State, Opts) ->
     maybe
         {ok, CommentID} ?= required_param(<<"comment_id">>, Params, Opts),
         Comments = section(<<"comments">>, State, Opts),
         Existing = hb_maps:get(CommentID, Comments, #{ <<"comment_id">> => CommentID }, Opts),
         Remove = truthy(hb_maps:get(<<"remove">>, Params, false, Opts)),
-        Comment = compact(Existing#{
-            <<"comment_id">> => CommentID,
-            <<"is_pinned">> => not Remove,
-            <<"updated_at">> => erlang:system_time(second)
-        }),
-        Next = put_section(<<"comments">>, Comments#{ CommentID => Comment }, State),
-        {ok, #{ <<"items">> => [Comment] }, Next}
+        case comment_backend_write(<<"comment.Pin">>, Params, Opts) of
+            {ok, BackendResult} ->
+                case comment_from_write_result(BackendResult, Opts) of
+                    BackendComment when is_map(BackendComment) ->
+                        ClaimID = value_or(
+                            first_field([<<"claim_id">>, <<"claim-id">>], Existing, Opts),
+                            first_field([<<"claim_id">>, <<"claim-id">>], BackendComment, Opts)
+                        ),
+                        Comment = comment_record(
+                            Owner,
+                            CommentID,
+                            ClaimID,
+                            Params,
+                            maps:merge(Existing, BackendComment#{ <<"is_pinned">> => not Remove }),
+                            Opts
+                        ),
+                        {ok, _Stored, Next} = store_comment(Comment, State, Opts),
+                        {ok, BackendResult, Next};
+                    _ ->
+                        {ok, BackendResult, State}
+                end;
+            {fallback, _Reason} ->
+                Comment = compact(Existing#{
+                    <<"comment_id">> => CommentID,
+                    <<"is_pinned">> => not Remove,
+                    <<"updated_at">> => erlang:system_time(second)
+                }),
+                {ok, _Stored, Next} = store_comment(Comment, State, Opts),
+                {ok, #{ <<"items">> => [Comment] }, Next};
+            {error, Reason} ->
+                {error, Reason}
+        end
     end.
+
+local_comment(Owner, CommentID, ClaimID, Params, Opts) ->
+    Timestamp = erlang:system_time(second),
+    compact(#{
+        <<"comment_id">> => CommentID,
+        <<"id">> => CommentID,
+        <<"claim_id">> => ClaimID,
+        <<"comment">> => value_or(first_field([<<"comment">>, <<"body">>], Params, Opts), <<>>),
+        <<"parent_id">> => first_field([<<"parent_id">>, <<"parent-id">>], Params, Opts),
+        <<"channel_id">> => first_field([<<"channel_id">>, <<"channel-id">>], Params, Opts),
+        <<"channel_name">> => first_field([<<"channel_name">>, <<"channel-name">>], Params, Opts),
+        <<"channel_url">> => first_field([<<"channel_url">>, <<"channel-url">>], Params, Opts),
+        <<"signature">> => first_field([<<"signature">>], Params, Opts),
+        <<"signing_ts">> => first_field([<<"signing_ts">>, <<"signing-ts">>], Params, Opts),
+        <<"timestamp">> => Timestamp,
+        <<"updated_at">> => Timestamp,
+        <<"hyperbeam_owner">> => Owner
+    }).
+
+comment_record(Owner, FallbackID, FallbackClaimID, Params, BackendComment0, Opts) ->
+    BackendComment =
+        case BackendComment0 of
+            Value when is_map(Value) -> Value;
+            _ -> #{}
+        end,
+    CommentID = value_or(first_field([<<"comment_id">>, <<"comment-id">>, <<"id">>], BackendComment, Opts), FallbackID),
+    ClaimID = value_or(first_field([<<"claim_id">>, <<"claim-id">>], BackendComment, Opts), FallbackClaimID),
+    Timestamp = value_or(
+        first_field([<<"timestamp">>, <<"created_at">>, <<"created-at">>], BackendComment, Opts),
+        erlang:system_time(second)
+    ),
+    UpdatedAt = value_or(first_field([<<"updated_at">>, <<"updated-at">>], BackendComment, Opts), Timestamp),
+    compact((maps:merge(local_comment(Owner, CommentID, ClaimID, Params, Opts), BackendComment))#{
+        <<"comment_id">> => CommentID,
+        <<"id">> => CommentID,
+        <<"claim_id">> => ClaimID,
+        <<"timestamp">> => Timestamp,
+        <<"updated_at">> => UpdatedAt,
+        <<"hyperbeam_owner">> => Owner
+    }).
+
+abandoned_comment(Owner, CommentID, Existing, Params, BackendComment0, Opts) ->
+    BackendComment =
+        case BackendComment0 of
+            Value when is_map(Value) -> Value;
+            _ -> #{}
+        end,
+    ClaimID = value_or(
+        first_field([<<"claim_id">>, <<"claim-id">>], Existing, Opts),
+        value_or(first_field([<<"claim_id">>, <<"claim-id">>], BackendComment, Opts), first_field([<<"claim_id">>, <<"claim-id">>], Params, Opts))
+    ),
+    Comment = comment_record(Owner, CommentID, ClaimID, Params, maps:merge(Existing, BackendComment), Opts),
+    compact(Comment#{
+        <<"comment_id">> => CommentID,
+        <<"id">> => CommentID,
+        <<"removed">> => true,
+        <<"abandoned">> => true,
+        <<"updated_at">> => erlang:system_time(second)
+    }).
+
+abandon_response(Comment, BackendResult0, Opts) ->
+    BackendResult =
+        case BackendResult0 of
+            Value when is_map(Value) -> Value;
+            _ -> #{}
+        end,
+    BackendResult#{
+        <<"abandoned">> => true,
+        <<"claim_id">> => value_or(first_field([<<"claim_id">>, <<"claim-id">>], BackendResult, Opts), hb_maps:get(<<"claim_id">>, Comment, <<>>, Opts))
+    }.
+
+store_comment(Comment, State, Opts) ->
+    case first_field([<<"comment_id">>, <<"comment-id">>, <<"id">>], Comment, Opts) of
+        not_found ->
+            {error, #{ <<"status">> => 500, <<"body">> => <<"Comment response did not include an id.">> }};
+        CommentID ->
+            _ = write_public_comment(Comment, Opts),
+            Comments = section(<<"comments">>, State, Opts),
+            {ok, Comment, put_section(<<"comments">>, Comments#{ CommentID => Comment }, State)}
+    end.
+
+comment_from_write_result(Result, Opts) when is_map(Result) ->
+    case first_field([<<"comment">>, <<"item">>], Result, Opts) of
+        Comment when is_map(Comment) ->
+            Comment;
+        _ ->
+            case first_field([<<"items">>], Result, Opts) of
+                [Comment | _] when is_map(Comment) -> Comment;
+                Comment when is_map(Comment) -> Comment;
+                _ -> Result
+            end
+    end;
+comment_from_write_result(_Result, _Opts) ->
+    not_found.
+
+comment_backend_write(Method, Params, Opts) ->
+    case comment_write_through_enabled(Opts) of
+        false ->
+            {fallback, disabled};
+        true ->
+            case comment_api_request(Method, Params, Opts) of
+                {ok, Result} -> {ok, Result};
+                {error, {comment_api_error, Error}} -> {error, comment_api_error_response(Error, Opts)};
+                {error, Reason} -> {fallback, Reason}
+            end
+    end.
+
+comment_write_through_enabled(Opts) ->
+    case hb_opts:get(<<"odysee-comment-write-through">>, true, Opts) of
+        false -> false;
+        0 -> false;
+        <<"0">> -> false;
+        <<"false">> -> false;
+        <<"False">> -> false;
+        _ -> true
+    end.
+
+comment_api_request(Method, Params, Opts) ->
+    Payload = hb_json:encode(#{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"method">> => Method,
+        <<"params">> => Params,
+        <<"id">> => 1
+    }),
+    Msg = #{
+        <<"method">> => <<"POST">>,
+        <<"path">> => comment_url(Method, Opts),
+        <<"content-type">> => <<"application/json">>,
+        <<"body">> => Payload
+    },
+    case hb_http:request(Msg, Opts) of
+        {ok, #{ <<"body">> := Body }} when is_binary(Body) -> decode_comment_api_body(Body, Opts);
+        {ok, Body} when is_binary(Body) -> decode_comment_api_body(Body, Opts);
+        {ok, _Other} -> {error, comment_backend_response_without_body};
+        Error -> Error
+    end.
+
+decode_comment_api_body(Body, Opts) ->
+    maybe
+        {ok, Decoded} ?= try_decode_json(Body),
+        case hb_maps:get(<<"error">>, Decoded, not_found, Opts) of
+            not_found -> {ok, hb_maps:get(<<"result">>, Decoded, Decoded, Opts)};
+            Error -> {error, {comment_api_error, Error}}
+        end
+    end.
+
+comment_url(Method, Opts) ->
+    URL = hb_util:bin(hb_opts:get(<<"odysee-comment-url">>, ?DEFAULT_COMMENT_URL, Opts)),
+    Separator =
+        case binary:match(URL, <<"?">>) of
+            nomatch -> <<"?">>;
+            _ -> <<"&">>
+        end,
+    <<URL/binary, Separator/binary, "m=", Method/binary>>.
+
+comment_api_error_response(Error, Opts) when is_map(Error) ->
+    #{
+        <<"status">> => 400,
+        <<"body">> => value_or(first_field([<<"message">>, <<"error">>, <<"body">>], Error, Opts), <<"Comment backend rejected request.">>),
+        <<"details">> => Error
+    };
+comment_api_error_response(Error, _Opts) when is_binary(Error) ->
+    #{ <<"status">> => 400, <<"body">> => Error };
+comment_api_error_response(_Error, _Opts) ->
+    #{ <<"status">> => 400, <<"body">> => <<"Comment backend rejected request.">> }.
 
 reaction_react(Params, State, Opts) ->
     CommentIDs = csv(first_field([<<"comment_ids">>, <<"comment-id">>, <<"comment_id">>], Params, Opts)),
@@ -733,6 +971,93 @@ state_path(Owner) ->
 
 owner_key(Owner) ->
     hb_util:encode(hb_crypto:sha256(Owner)).
+
+write_public_comment(Comment, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    CommentID = first_field([<<"comment_id">>, <<"comment-id">>, <<"id">>], Comment, Opts),
+    case {Store, CommentID} of
+        {[], _} ->
+            ok;
+        {_, not_found} ->
+            ok;
+        _ ->
+            case hb_store:write(Store, #{ public_comment_record_path(CommentID) => hb_json:encode(Comment) }, Opts) of
+                ok -> write_public_comment_indexes(Store, Comment, Opts);
+                Error -> Error
+            end
+    end.
+
+write_public_comment_indexes(Store, Comment, Opts) ->
+    CommentID = first_field([<<"comment_id">>, <<"comment-id">>, <<"id">>], Comment, Opts),
+    Paths = public_comment_list_indexes(Comment, Opts),
+    lists:foldl(
+        fun(Path, ok) -> append_public_comment_index(Store, Path, CommentID, Opts);
+           (_Path, Error) -> Error
+        end,
+        ok,
+        Paths
+    ).
+
+public_comment_list_indexes(Comment, Opts) ->
+    ClaimID = first_field([<<"claim_id">>, <<"claim-id">>], Comment, Opts),
+    ChannelID = first_field([<<"channel_id">>, <<"channel-id">>], Comment, Opts),
+    Values = [
+        {<<"all">>, <<"all">>},
+        {<<"claim">>, ClaimID},
+        {<<"channel">>, ChannelID}
+    ],
+    lists:usort(
+        [
+            public_comment_list_index_path(Type, Value)
+        ||
+            {Type, Value} <- Values,
+            is_binary(Value),
+            Value =/= <<>>,
+            Value =/= not_found
+        ]
+    ).
+
+append_public_comment_index(Store, Path, CommentID, Opts) ->
+    Existing = read_public_comment_index(Store, Path, Opts),
+    Updated = dedupe_binaries([CommentID | Existing]),
+    hb_store:write(Store, #{ Path => hb_json:encode(Updated) }, Opts).
+
+read_public_comment_index(Store, Path, Opts) ->
+    case hb_store:read(Store, Path, maps:without([<<"store">>, store], Opts)) of
+        {ok, Raw} -> decode_public_comment_index(Raw);
+        Raw when is_binary(Raw) -> decode_public_comment_index(Raw);
+        _ -> []
+    end.
+
+decode_public_comment_index(Raw) when is_binary(Raw) ->
+    try hb_json:decode(Raw) of
+        IDs when is_list(IDs) -> [ID || ID <- IDs, is_binary(ID), ID =/= <<>>];
+        _ -> []
+    catch _:_ ->
+        []
+    end;
+decode_public_comment_index(_Raw) ->
+    [].
+
+public_comment_record_path(CommentID) ->
+    <<"odysee/comment/local/id/", (hb_util:encode(hb_crypto:sha256(CommentID)))/binary>>.
+
+public_comment_list_index_path(Type, Value) ->
+    <<"odysee/comment/local/list/", Type/binary, "/", (hb_util:encode(hb_crypto:sha256(Value)))/binary>>.
+
+dedupe_binaries(Values) ->
+    {Items, _Seen} =
+        lists:foldl(
+            fun(Value, {Acc, Seen}) ->
+                case is_binary(Value) andalso Value =/= <<>> andalso not lists:member(Value, Seen) of
+                    true -> {[Value | Acc], [Value | Seen]};
+                    false -> {Acc, Seen}
+                end
+            end,
+            {[], []},
+            Values
+        ),
+    lists:reverse(Items).
 
 default_state() ->
     #{
@@ -1056,7 +1381,8 @@ comment_create_edit_abandon_test() ->
                 <<"claim_id">> => <<"claim-1">>,
                 <<"comment">> => <<"hello">>,
                 <<"channel_id">> => <<"chan-1">>,
-                <<"channel_name">> => <<"@chan">>
+                <<"channel_name">> => <<"@chan">>,
+                <<"channel_url">> => <<"lbry://@chan#chan-1">>
             }
         },
         Opts
@@ -1088,6 +1414,20 @@ comment_create_edit_abandon_test() ->
     ),
     {ok, ByIDRes} = call(#{}, ByIDReq, Opts),
     ?assertEqual(CommentID, hb_maps:get(<<"comment_id">>, hb_maps:get(<<"item">>, hb_maps:get(<<"result">>, ByIDRes, Opts), Opts), Opts)),
+    {ok, PublicListRes} = dev_odysee_comment:list(
+        #{},
+        #{
+            <<"claim_id">> => <<"claim-1">>,
+            <<"top_level">> => true,
+            <<"comment-url">> => <<"http://127.0.0.1:1">>
+        },
+        Opts
+    ),
+    [PublicComment] = hb_maps:get(<<"comments">>, PublicListRes, Opts),
+    ?assertEqual(CommentID, hb_maps:get(<<"comment-id">>, PublicComment, Opts)),
+    ?assertEqual(<<"lbry://@chan#chan-1">>, hb_maps:get(<<"channel-url">>, PublicComment, Opts)),
+    {ok, PublicByIDRes} = dev_odysee_comment:by_id(#{}, #{ <<"comment_id">> => CommentID }, Opts),
+    ?assertEqual(CommentID, hb_maps:get(<<"comment-id">>, PublicByIDRes, Opts)),
     EditReq = signed_call(
         #{
             <<"kind">> => <<"comment">>,
@@ -1168,6 +1508,7 @@ test_opts() ->
     ok = hb_store:reset(Store),
     #{
         <<"store">> => Store,
+        <<"odysee-comment-write-through">> => false,
         <<"cache-control">> => [<<"no-cache">>, <<"no-store">>],
         <<"store-all-signed">> => false
     }.

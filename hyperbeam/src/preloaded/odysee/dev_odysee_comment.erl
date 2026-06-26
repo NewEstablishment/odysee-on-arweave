@@ -120,7 +120,15 @@ list_result(Base, Req, Opts) ->
         not_found ->
             maybe
                 {ok, Params} ?= list_params(Base, Req, Opts),
-                api_request(<<"comment.List">>, Params, Base, Req, Opts)
+                Local = local_comment_list(Params, Opts),
+                case api_request(<<"comment.List">>, Params, Base, Req, Opts) of
+                    {ok, Result, Raw} -> merge_local_comment_list(Local, Result, Raw, Opts);
+                    Error ->
+                        case Local of
+                            {ok, _LocalResult, _LocalRaw} = LocalResult -> LocalResult;
+                            not_found -> Error
+                        end
+                end
             end
     end.
 
@@ -131,23 +139,310 @@ by_id_result(Base, Req, Opts) ->
         not_found ->
             maybe
                 {ok, CommentID} ?= comment_id(Base, Req, Opts),
-                Params0 = #{ <<"comment_id">> => CommentID },
-                Params =
-                    put_optional(
-                        {<<"with_ancestors">>, first_found(
-                            [
-                                {Req, <<"with-ancestors">>},
-                                {Req, <<"with_ancestors">>},
-                                {Base, <<"with-ancestors">>},
-                                {Base, <<"with_ancestors">>}
-                            ],
-                            Opts
-                        )},
-                        Params0
-                    ),
-                api_request(<<"comment.ByID">>, Params, Base, Req, Opts)
+                case local_comment_by_id(CommentID, Opts) of
+                    {ok, _LocalResult, _LocalRaw} = LocalResult ->
+                        LocalResult;
+                    not_found ->
+                        Params0 = #{ <<"comment_id">> => CommentID },
+                        Params =
+                            put_optional(
+                                {<<"with_ancestors">>, first_found(
+                                    [
+                                        {Req, <<"with-ancestors">>},
+                                        {Req, <<"with_ancestors">>},
+                                        {Base, <<"with-ancestors">>},
+                                        {Base, <<"with_ancestors">>}
+                                    ],
+                                    Opts
+                                )},
+                                Params0
+                            ),
+                        api_request(<<"comment.ByID">>, Params, Base, Req, Opts)
+                end
             end
     end.
+
+local_comment_list(Params, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] ->
+            not_found;
+        _ ->
+            IDs = local_comment_ids(Store, Params, Opts),
+            case IDs of
+                [] ->
+                    not_found;
+                _ ->
+                    Comments = local_comments_from_ids(Store, IDs, Opts),
+                    Filtered = sort_local_comments(
+                        [Comment || Comment <- Comments, local_comment_matches(Params, Comment, Opts)],
+                        Params,
+                        Opts
+                    ),
+                    Page = integer_param(Params, <<"page">>, 1, Opts),
+                    PageSize = integer_param(Params, <<"page_size">>, 50, Opts),
+                    Total = length(Filtered),
+                    Items = page_items(Filtered, Page, PageSize),
+                    Result = #{
+                        <<"items">> => Items,
+                        <<"page">> => Page,
+                        <<"page_size">> => PageSize,
+                        <<"total_items">> => Total,
+                        <<"total_filtered_items">> => Total,
+                        <<"total_pages">> => total_pages(Total, PageSize),
+                        <<"has_hidden_comments">> => false
+                    },
+                    {ok, Result, hb_json:encode(Result)}
+            end
+    end.
+
+local_comment_by_id(CommentID, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] ->
+            not_found;
+        _ ->
+            case read_local_comment(Store, CommentID, Opts) of
+                {ok, Comment} ->
+                    Result = #{
+                        <<"item">> => Comment,
+                        <<"items">> => [Comment],
+                        <<"ancestors">> => local_comment_ancestors(Store, Comment, Opts)
+                    },
+                    {ok, Result, hb_json:encode(Result)};
+                not_found ->
+                    not_found
+            end
+    end.
+
+merge_local_comment_list(not_found, Result, Raw, _Opts) ->
+    {ok, Result, Raw};
+merge_local_comment_list({ok, LocalResult, _LocalRaw}, Result, _Raw, Opts) ->
+    PublicItems = list_items(Result, Opts),
+    PublicIDs = [local_comment_id(Comment, Opts) || Comment <- PublicItems],
+    LocalItems = list_items(LocalResult, Opts),
+    LocalOnly = [
+        Comment
+    ||
+        Comment <- LocalItems,
+        local_comment_id(Comment, Opts) =/= not_found,
+        not lists:member(local_comment_id(Comment, Opts), PublicIDs)
+    ],
+    case LocalOnly of
+        [] ->
+            {ok, Result, hb_json:encode(Result)};
+        _ ->
+            Items = LocalOnly ++ PublicItems,
+            Page = integer_value(first_value([<<"page">>], Result, Opts), 1),
+            PageSize = integer_value(first_value([<<"page_size">>, <<"page-size">>], Result, Opts), length(Items)),
+            PublicTotal = integer_value(first_value([<<"total_items">>, <<"total-items">>], Result, Opts), length(PublicItems)),
+            PublicFiltered = integer_value(
+                first_value([<<"total_filtered_items">>, <<"total-filtered-items">>], Result, Opts),
+                PublicTotal
+            ),
+            Total = PublicTotal + length(LocalOnly),
+            FilteredTotal = PublicFiltered + length(LocalOnly),
+            Merged = Result#{
+                <<"items">> => Items,
+                <<"page">> => Page,
+                <<"page_size">> => PageSize,
+                <<"total_items">> => Total,
+                <<"total_filtered_items">> => FilteredTotal,
+                <<"total_pages">> => total_pages(Total, PageSize)
+            },
+            {ok, Merged, hb_json:encode(Merged)}
+    end.
+
+local_comment_ids(Store, Params, Opts) ->
+    Paths = local_comment_index_paths(Params, Opts),
+    dedupe_binaries(lists:flatmap(fun(Path) -> read_local_comment_index(Store, Path, Opts) end, Paths)).
+
+local_comment_index_paths(Params, Opts) ->
+    case normalized_field(first_value([<<"claim_id">>, <<"claim-id">>], Params, Opts)) of
+        ClaimID when is_binary(ClaimID) ->
+            [local_comment_list_index_path(<<"claim">>, ClaimID)];
+        not_found ->
+            case normalized_field(
+                first_value([<<"author_claim_id">>, <<"author-claim-id">>, <<"channel_id">>, <<"channel-id">>], Params, Opts)
+            ) of
+                ChannelID when is_binary(ChannelID) ->
+                    [local_comment_list_index_path(<<"channel">>, ChannelID)];
+                not_found ->
+                    [local_comment_list_index_path(<<"all">>, <<"all">>)]
+            end
+    end.
+
+local_comments_from_ids(Store, IDs, Opts) ->
+    lists:filtermap(
+        fun(ID) ->
+            case read_local_comment(Store, ID, Opts) of
+                {ok, Comment} -> {true, Comment};
+                not_found -> false
+            end
+        end,
+        IDs
+    ).
+
+read_local_comment(Store, CommentID, Opts) ->
+    case hb_store:read(Store, local_comment_record_path(CommentID), maps:without([<<"store">>, store], Opts)) of
+        {ok, Raw} -> decode_local_comment(Raw);
+        Raw when is_binary(Raw) -> decode_local_comment(Raw);
+        _ -> not_found
+    end.
+
+decode_local_comment(Raw) when is_binary(Raw) ->
+    try hb_json:decode(Raw) of
+        Comment when is_map(Comment) -> {ok, Comment};
+        _ -> not_found
+    catch _:_ ->
+        not_found
+    end;
+decode_local_comment(_Raw) ->
+    not_found.
+
+read_local_comment_index(Store, Path, Opts) ->
+    case hb_store:read(Store, Path, maps:without([<<"store">>, store], Opts)) of
+        {ok, Raw} -> decode_local_comment_index(Raw);
+        Raw when is_binary(Raw) -> decode_local_comment_index(Raw);
+        _ -> []
+    end.
+
+decode_local_comment_index(Raw) when is_binary(Raw) ->
+    try hb_json:decode(Raw) of
+        IDs when is_list(IDs) -> [ID || ID <- IDs, is_binary(ID), ID =/= <<>>];
+        _ -> []
+    catch _:_ ->
+        []
+    end;
+decode_local_comment_index(_Raw) ->
+    [].
+
+local_comment_matches(Params, Comment, Opts) ->
+    local_comment_matches_claim(Params, Comment, Opts)
+        andalso local_comment_matches_author(Params, Comment, Opts)
+        andalso local_comment_matches_parent(Params, Comment, Opts).
+
+local_comment_matches_claim(Params, Comment, Opts) ->
+    case normalized_field(first_value([<<"claim_id">>, <<"claim-id">>], Params, Opts)) of
+        not_found -> true;
+        ClaimID -> ClaimID =:= normalized_field(first_value([<<"claim_id">>, <<"claim-id">>], Comment, Opts))
+    end.
+
+local_comment_matches_author(Params, Comment, Opts) ->
+    case normalized_field(first_value([<<"author_claim_id">>, <<"author-claim-id">>], Params, Opts)) of
+        not_found -> true;
+        ChannelID -> ChannelID =:= normalized_field(first_value([<<"channel_id">>, <<"channel-id">>], Comment, Opts))
+    end.
+
+local_comment_matches_parent(Params, Comment, Opts) ->
+    case normalized_field(first_value([<<"parent_id">>, <<"parent-id">>], Params, Opts)) of
+        not_found ->
+            case truthy(first_value([<<"top_level">>, <<"top-level">>], Params, Opts)) of
+                true -> not has_comment_parent(Comment, Opts);
+                false -> true
+            end;
+        ParentID ->
+            ParentID =:= normalized_field(first_value([<<"parent_id">>, <<"parent-id">>], Comment, Opts))
+    end.
+
+sort_local_comments(Comments, Params, Opts) ->
+    SortBy = integer_param(Params, <<"sort_by">>, 0, Opts),
+    case SortBy of
+        1 -> lists:sort(fun(A, B) -> comment_sort_key(A, Opts) =< comment_sort_key(B, Opts) end, Comments);
+        _ -> lists:sort(fun(A, B) -> comment_sort_key(A, Opts) >= comment_sort_key(B, Opts) end, Comments)
+    end.
+
+comment_sort_key(Comment, Opts) ->
+    {
+        integer_value(first_value([<<"timestamp">>, <<"created_at">>, <<"created-at">>], Comment, Opts), 0),
+        hb_util:bin(value_or(first_value([<<"comment_id">>, <<"comment-id">>, <<"id">>], Comment, Opts), <<>>))
+    }.
+
+local_comment_ancestors(Store, Comment, Opts) ->
+    local_comment_ancestors(Store, Comment, Opts, [], 0).
+
+local_comment_ancestors(_Store, _Comment, _Opts, Acc, Depth) when Depth >= 20 ->
+    lists:reverse(Acc);
+local_comment_ancestors(Store, Comment, Opts, Acc, Depth) ->
+    case normalized_field(first_value([<<"parent_id">>, <<"parent-id">>], Comment, Opts)) of
+        not_found ->
+            lists:reverse(Acc);
+        ParentID ->
+            case read_local_comment(Store, ParentID, Opts) of
+                {ok, Parent} -> local_comment_ancestors(Store, Parent, Opts, [Parent | Acc], Depth + 1);
+                not_found -> lists:reverse(Acc)
+            end
+    end.
+
+has_comment_parent(Comment, Opts) ->
+    normalized_field(first_value([<<"parent_id">>, <<"parent-id">>], Comment, Opts)) =/= not_found.
+
+local_comment_id(Comment, Opts) ->
+    normalized_field(first_value([<<"comment_id">>, <<"comment-id">>, <<"id">>], Comment, Opts)).
+
+local_comment_record_path(CommentID) ->
+    <<"odysee/comment/local/id/", (hb_util:encode(hb_crypto:sha256(CommentID)))/binary>>.
+
+local_comment_list_index_path(Type, Value) ->
+    <<"odysee/comment/local/list/", Type/binary, "/", (hb_util:encode(hb_crypto:sha256(Value)))/binary>>.
+
+page_items(Items, Page, PageSize) ->
+    Offset = max(0, (Page - 1) * PageSize),
+    case Offset >= length(Items) of
+        true -> [];
+        false -> lists:sublist(lists:nthtail(Offset, Items), PageSize)
+    end.
+
+total_pages(Total, _PageSize) when Total =< 0 ->
+    0;
+total_pages(Total, PageSize) when PageSize =< 0 ->
+    Total;
+total_pages(Total, PageSize) ->
+    (Total + PageSize - 1) div PageSize.
+
+integer_param(Params, Key, Default, Opts) ->
+    integer_value(hb_maps:get(Key, Params, Default, Opts), Default).
+
+integer_value(Value, _Default) when is_integer(Value) ->
+    Value;
+integer_value(Value, Default) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ -> Default
+    end;
+integer_value(_Value, Default) ->
+    Default.
+
+dedupe_binaries(Values) ->
+    {Items, _Seen} =
+        lists:foldl(
+            fun(Value, {Acc, Seen}) ->
+                case is_binary(Value) andalso Value =/= <<>> andalso not lists:member(Value, Seen) of
+                    true -> {[Value | Acc], [Value | Seen]};
+                    false -> {Acc, Seen}
+                end
+            end,
+            {[], []},
+            Values
+        ),
+    lists:reverse(Items).
+
+normalized_field(not_found) -> not_found;
+normalized_field(undefined) -> not_found;
+normalized_field(null) -> not_found;
+normalized_field(<<>>) -> not_found;
+normalized_field(Value) -> hb_util:bin(Value).
+
+truthy(true) -> true;
+truthy(<<"true">>) -> true;
+truthy(<<"1">>) -> true;
+truthy(1) -> true;
+truthy(_Value) -> false.
+
+value_or(not_found, Default) -> Default;
+value_or(undefined, Default) -> Default;
+value_or(<<>>, Default) -> Default;
+value_or(null, Default) -> Default;
+value_or(Value, _Default) -> Value.
 
 result_candidate(Base, Req, Opts) ->
     Candidates = [

@@ -5,6 +5,7 @@ import * as TAGS from 'constants/tags';
 import { Lbryio, doFetchViewCount } from 'lbryinc';
 import Lbry from 'lbry';
 import { normalizeURI } from 'util/lbryURI';
+import { fetchHyperbeamUploadList } from 'util/hyperbeam';
 import { doToast } from 'redux/actions/notifications';
 import {
   selectMyClaimsRaw,
@@ -39,6 +40,52 @@ type CostInfo = {
   feeCurrency?: string;
   usdCost?: number;
 };
+
+async function fetchClaimListMineWithLocalUploads(
+  result: StreamListResponse,
+  page: number,
+  pageSize: number,
+  claimTypes: Array<string>,
+  channelIds: Array<string | null | undefined>
+): Promise<StreamListResponse> {
+  if (!claimTypes.includes('stream')) return result;
+
+  try {
+    const normalizedChannelIds = channelIds.filter(Boolean);
+    const localUploads = await fetchHyperbeamUploadList({
+      page,
+      page_size: pageSize,
+      claim_type: ['stream'],
+      ...(normalizedChannelIds.length ? { channel_ids: normalizedChannelIds } : {}),
+    });
+    const localItems = Array.isArray(localUploads?.items) ? localUploads.items : [];
+    if (!localItems.length) return result;
+
+    const items = mergeClaims(localItems, result.items || []);
+    return {
+      ...result,
+      items,
+      total_items:
+        Math.max(result.total_items || 0, result.items?.length || 0) + items.length - (result.items?.length || 0),
+      total_pages: Math.max(result.total_pages || 1, Math.ceil(items.length / Math.max(1, pageSize))),
+    };
+  } catch {
+    return result;
+  }
+}
+
+function mergeClaims(...claimGroups: Array<Array<Claim>>): Array<Claim> {
+  const seen = new Set<string>();
+  const claims: Array<Claim> = [];
+
+  claimGroups.flat().forEach((claim) => {
+    if (!claim || !claim.claim_id || seen.has(claim.claim_id)) return;
+    seen.add(claim.claim_id);
+    claims.push(claim);
+  });
+
+  return claims;
+}
 
 async function getCostInfoForFee(claimId: string, fee: Fee | undefined): Promise<CostInfo> {
   if (fee === undefined) {
@@ -340,8 +387,9 @@ export function doFetchClaimListMine(
       resolve,
     })
       .then(async (result: StreamListResponse) => {
+        const mergedResult = await fetchClaimListMineWithLocalUploads(result, page, pageSize, claimTypes, channelIds);
         // Log stuck claims
-        const claims = result.items;
+        const claims = mergedResult.items;
         const pendingClaimsById = selectPendingClaimsById(state);
 
         for (let i = 0; i < claims.length - 1; i++) {
@@ -360,7 +408,7 @@ export function doFetchClaimListMine(
         dispatch({
           type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
           data: {
-            result,
+            result: mergedResult,
             resolve,
             setNewPageItems: pageSize !== FILE_LIST.PAGE_SIZE_ALL_ITEMS,
             isAllMyClaimsFetched: pageSize === FILE_LIST.PAGE_SIZE_ALL_ITEMS,
@@ -371,7 +419,7 @@ export function doFetchClaimListMine(
         const membersOnlyClaimIds = new Set([]);
         const channelClaimIds = new Set([]);
         const costInfos = new Set<Promise<CostInfo>>();
-        result.items.forEach((item) => {
+        mergedResult.items.forEach((item) => {
           claimIds.push(item.claim_id);
 
           if (item.value_type !== 'channel' && item.value_type !== 'collection') {

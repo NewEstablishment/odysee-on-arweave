@@ -1,6 +1,6 @@
 -module(dev_odysee_upload).
 -implements(<<"odysee-upload@1.0">>).
--export([info/1, submit/3, upload/3, record/3, media/3]).
+-export([info/1, submit/3, upload/3, record/3, media/3, list/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -8,7 +8,7 @@
 -define(DEFAULT_MAX_BYTES, 104857600).
 
 info(_Opts) ->
-    #{ exports => [<<"submit">>, <<"upload">>, <<"record">>, <<"media">>] }.
+    #{ exports => [<<"submit">>, <<"upload">>, <<"record">>, <<"media">>, <<"list">>] }.
 
 upload(Base, Req, Opts) ->
     submit(Base, Req, Opts).
@@ -47,6 +47,32 @@ record(Base, Req, Opts) ->
             Error -> Error
         end
     end).
+
+list(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                Params = maps:merge(map_or_empty(Base), map_or_empty(Req)),
+                IDs = upload_list_ids(Params, Opts),
+                Claims0 = upload_claims_from_ids(IDs, Opts),
+                Claims = sort_claims(filter_claims(Claims0, Params, Opts), Params, Opts),
+                Page = max(1, integer_param(Base, Req, <<"page">>, 1, Opts)),
+                PageSize =
+                    max(
+                        1,
+                        integer_param(
+                            Base,
+                            Req,
+                            <<"page-size">>,
+                            integer_param(Base, Req, <<"page_size">>, 50, Opts),
+                            Opts
+                        )
+                    ),
+                {ok, list_response(page_items(Claims, Page, PageSize), length(Claims), Page, PageSize)}
+            end)
+    end.
 
 media(Base, Req, Opts) ->
     case method(Req, Opts) of
@@ -231,6 +257,7 @@ claim_summary(Name0, Title0, Metadata, DataID, Owner, ReleaseTime, MediaType0, F
     Name = value_or(Name0, <<"upload">>),
     Title = value_or(Title0, Name),
     Filename = value_or(Filename0, Name),
+    Timestamp = release_time_or_now(ReleaseTime),
     ClaimURI = claim_uri(Name, Metadata, Opts),
     SigningChannel = signing_channel(Metadata, Opts),
     Tags = list_value(first_field([<<"tags">>], Metadata, Opts)),
@@ -255,14 +282,18 @@ claim_summary(Name0, Title0, Metadata, DataID, Owner, ReleaseTime, MediaType0, F
         <<"is_channel_signature_valid">> => SigningChannel =/= not_found,
         <<"txid">> => DataID,
         <<"nout">> => 0,
-        <<"timestamp">> => release_time_or_now(ReleaseTime),
-        <<"meta">> => #{ <<"effective_amount">> => <<"0">> },
+        <<"timestamp">> => Timestamp,
+        <<"meta">> => #{
+            <<"creation_timestamp">> => Timestamp,
+            <<"effective_amount">> => <<"0">>
+        },
         <<"value">> => #{
             <<"title">> => Title,
             <<"description">> => Description,
             <<"thumbnail">> => thumbnail_value(Thumbnail),
             <<"tags">> => Tags,
             <<"languages">> => Languages,
+            <<"release_time">> => Timestamp,
             <<"source">> => #{
                 <<"media_type">> => MediaType,
                 <<"media-type">> => MediaType,
@@ -322,7 +353,10 @@ write_indexes(Record, Opts) ->
         {_, not_found} -> ok;
         _ ->
             Indexes = upload_indexes(Record, Opts),
-            hb_store:write(Store, maps:from_list([{Path, RecordID} || Path <- Indexes]), Opts)
+            case hb_store:write(Store, maps:from_list([{Path, RecordID} || Path <- Indexes]), Opts) of
+                ok -> write_list_indexes(Store, Record, Opts);
+                Error -> Error
+            end
     end.
 
 upload_indexes(Record, Opts) ->
@@ -360,6 +394,251 @@ claim_uris(Claim, Opts) ->
 
 index_path(Type, Value) ->
     <<"odysee/upload/", Type/binary, "/", (hb_util:encode(hb_crypto:sha256(Value)))/binary>>.
+
+write_list_indexes(Store, Record, Opts) ->
+    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+    Paths = upload_list_indexes(Record, Opts),
+    lists:foldl(
+        fun(Path, ok) -> append_list_index(Store, Path, RecordID, Opts);
+           (_Path, Error) -> Error
+        end,
+        ok,
+        Paths
+    ).
+
+upload_list_indexes(Record, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
+    Owner = hb_maps:get(<<"owner">>, Record, not_found, Opts),
+    SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
+    ChannelID = first_field([<<"claim_id">>, <<"claim-id">>, <<"id">>], SigningChannel, Opts),
+    Values = [
+        {<<"all">>, <<"all">>},
+        {<<"owner">>, Owner},
+        {<<"channel">>, ChannelID}
+    ],
+    lists:usort(
+        [
+            list_index_path(Type, Value)
+        ||
+            {Type, Value} <- Values,
+            is_binary(Value),
+            Value =/= <<>>,
+            Value =/= not_found
+        ]
+    ).
+
+append_list_index(Store, Path, RecordID, Opts) ->
+    Existing = read_list_index(Store, Path, Opts),
+    Updated = dedupe_binaries([RecordID | Existing]),
+    hb_store:write(Store, #{ Path => hb_json:encode(Updated) }, Opts).
+
+read_list_index(Store, Path, Opts) ->
+    case hb_store:read(Store, Path, maps:without([<<"store">>, store], Opts)) of
+        {ok, Raw} -> decode_list_index(Raw);
+        Raw when is_binary(Raw) -> decode_list_index(Raw);
+        _ -> []
+    end.
+
+decode_list_index(Raw) when is_binary(Raw) ->
+    try hb_json:decode(Raw) of
+        IDs when is_list(IDs) -> [ID || ID <- IDs, is_binary(ID), ID =/= <<>>];
+        #{ <<"ids">> := IDs } when is_list(IDs) -> [ID || ID <- IDs, is_binary(ID), ID =/= <<>>];
+        _ -> []
+    catch _:_ ->
+        []
+    end;
+decode_list_index(_Raw) ->
+    [].
+
+list_index_path(Type, Value) ->
+    <<"odysee/upload/list/", Type/binary, "/", (hb_util:encode(hb_crypto:sha256(Value)))/binary>>.
+
+upload_list_ids(Params, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] ->
+            [];
+        _ ->
+            ChannelIDs =
+                list_value(
+                    first_field(
+                        [
+                            <<"channel_ids">>,
+                            <<"channel-ids">>,
+                            <<"channel_id">>,
+                            <<"channel-id">>
+                        ],
+                        Params,
+                        Opts
+                    )
+                ),
+            Owners =
+                list_value(
+                    first_field(
+                        [<<"owner">>, <<"owners">>, <<"hyperbeam-owner">>, <<"hyperbeam_owner">>],
+                        Params,
+                        Opts
+                    )
+                ),
+            Paths =
+                case {ChannelIDs, Owners} of
+                    {[_ | _], _} -> [list_index_path(<<"channel">>, ID) || ID <- ChannelIDs, is_binary(ID)];
+                    {_, [_ | _]} -> [list_index_path(<<"owner">>, Owner) || Owner <- Owners, is_binary(Owner)];
+                    _ -> [list_index_path(<<"all">>, <<"all">>)]
+                end,
+            dedupe_binaries(lists:flatmap(fun(Path) -> read_list_index(Store, Path, Opts) end, Paths))
+    end.
+
+upload_claims_from_ids(IDs, Opts) ->
+    lists:filtermap(
+        fun(ID) ->
+            case hb_cache:read(ID, Opts) of
+                {ok, Record0} when is_map(Record0) ->
+                    Record = enrich_record(ID, hb_cache:ensure_all_loaded(Record0, Opts), Opts),
+                    case hb_maps:get(<<"claim">>, Record, not_found, Opts) of
+                        Claim when is_map(Claim) -> {true, Claim};
+                        _ -> false
+                    end;
+                _ -> false
+            end
+        end,
+        IDs
+    ).
+
+filter_claims(Claims, Params, Opts) ->
+    lists:filter(fun(Claim) -> claim_matches(Claim, Params, Opts) end, Claims).
+
+claim_matches(Claim, Params, Opts) ->
+    claim_type_matches(Claim, Params, Opts)
+        andalso claim_ids_match(Claim, Params, Opts)
+        andalso name_matches(Claim, Params, Opts)
+        andalso channel_matches(Claim, Params, Opts)
+        andalso tags_match(Claim, Params, Opts).
+
+claim_type_matches(Claim, Params, Opts) ->
+    Types = list_value(first_field([<<"claim_type">>, <<"claim-type">>, <<"type">>], Params, Opts)),
+    Types =:= []
+        orelse lists:member(hb_maps:get(<<"value_type">>, Claim, not_found, Opts), Types)
+        orelse lists:member(hb_maps:get(<<"value-type">>, Claim, not_found, Opts), Types).
+
+claim_ids_match(Claim, Params, Opts) ->
+    IDs =
+        list_value(
+            first_field(
+                [<<"claim_ids">>, <<"claim-ids">>, <<"claim_id">>, <<"claim-id">>, <<"txid">>],
+                Params,
+                Opts
+            )
+        ),
+    IDs =:= []
+        orelse lists:any(
+            fun(ID) ->
+                ID =:= hb_maps:get(<<"claim_id">>, Claim, not_found, Opts)
+                    orelse ID =:= hb_maps:get(<<"claim-id">>, Claim, not_found, Opts)
+            end,
+            IDs
+        ).
+
+name_matches(Claim, Params, Opts) ->
+    Names = list_value(first_field([<<"name">>, <<"claim-name">>, <<"claim_name">>], Params, Opts)),
+    Names =:= [] orelse lists:member(hb_maps:get(<<"name">>, Claim, not_found, Opts), Names).
+
+channel_matches(Claim, Params, Opts) ->
+    ChannelIDs =
+        list_value(
+            first_field(
+                [<<"channel_ids">>, <<"channel-ids">>, <<"channel_id">>, <<"channel-id">>],
+                Params,
+                Opts
+            )
+        ),
+    SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
+    ChannelID = first_field([<<"claim_id">>, <<"claim-id">>, <<"id">>], SigningChannel, Opts),
+    ChannelIDs =:= [] orelse lists:member(ChannelID, ChannelIDs).
+
+tags_match(Claim, Params, Opts) ->
+    Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
+    Tags = list_value(hb_maps:get(<<"tags">>, Value, [], Opts)),
+    AnyTags = list_value(first_field([<<"any_tags">>, <<"any-tags">>], Params, Opts)),
+    NotTags = list_value(first_field([<<"not_tags">>, <<"not-tags">>], Params, Opts)),
+    (AnyTags =:= [] orelse lists:any(fun(Tag) -> lists:member(Tag, Tags) end, AnyTags))
+        andalso not lists:any(fun(Tag) -> lists:member(Tag, Tags) end, NotTags).
+
+sort_claims(Claims, Params, Opts) ->
+    OrderBy = list_value(first_field([<<"order_by">>, <<"order-by">>], Params, Opts)),
+    case OrderBy =:= [] orelse lists:member(<<"release_time">>, OrderBy) of
+        true ->
+            lists:sort(fun(A, B) -> claim_time(A, Opts) >= claim_time(B, Opts) end, Claims);
+        false ->
+            Claims
+    end.
+
+claim_time(Claim, Opts) ->
+    Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
+    case hb_maps:get(<<"release_time">>, Value, not_found, Opts) of
+        ReleaseInt when is_integer(ReleaseInt) -> ReleaseInt;
+        ReleaseBin when is_binary(ReleaseBin) ->
+            try binary_to_integer(ReleaseBin)
+            catch _:_ -> 0
+            end;
+        _ ->
+            case hb_maps:get(<<"timestamp">>, Claim, 0, Opts) of
+                TimestampInt when is_integer(TimestampInt) -> TimestampInt;
+                TimestampBin when is_binary(TimestampBin) ->
+                    try binary_to_integer(TimestampBin)
+                    catch _:_ -> 0
+                    end;
+                _ -> 0
+            end
+    end.
+
+page_items(Items, Page, PageSize) ->
+    Offset = (Page - 1) * PageSize,
+    case Offset >= length(Items) of
+        true -> [];
+        false -> lists:sublist(lists:nthtail(Offset, Items), PageSize)
+    end.
+
+list_response(Items, Total, Page, PageSize) ->
+    TotalPages = max(1, ceil_div(Total, PageSize)),
+    Result = #{
+        <<"items">> => Items,
+        <<"page">> => Page,
+        <<"page_size">> => PageSize,
+        <<"total_items">> => Total,
+        <<"total_pages">> => TotalPages
+    },
+    Msg = (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"result">> => Result,
+        <<"items">> => Items,
+        <<"page">> => Page,
+        <<"page_size">> => PageSize,
+        <<"total_items">> => Total,
+        <<"total_pages">> => TotalPages
+    },
+    Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+ceil_div(0, _Denom) ->
+    0;
+ceil_div(Value, Denom) ->
+    (Value + Denom - 1) div Denom.
+
+dedupe_binaries(Values) ->
+    {Items, _Seen} =
+        lists:foldl(
+            fun(Value, {Acc, Seen}) ->
+                case is_binary(Value) andalso Value =/= <<>> andalso not lists:member(Value, Seen) of
+                    true -> {[Value | Acc], [Value | Seen]};
+                    false -> {Acc, Seen}
+                end
+            end,
+            {[], []},
+            Values
+        ),
+    lists:reverse(Items).
 
 read_record(Base, Req, Opts) ->
     maybe
@@ -806,6 +1085,52 @@ upload_resolves_native_claim_and_stream_media_test() ->
     ),
     {ok, StreamMedia} = dev_odysee_stream:media(#{}, #{ <<"uri">> => URI }, Opts),
     ?assertEqual(<<"native media">>, hb_maps:get(<<"body">>, StreamMedia, Opts)).
+
+upload_list_indexes_all_channel_and_name_test() ->
+    Opts = test_opts(),
+    Req1 = signed(#{
+        <<"body">> => <<"one">>,
+        <<"name">> => <<"first-upload">>,
+        <<"metadata">> => #{
+            <<"title">> => <<"First Upload">>,
+            <<"release_time">> => 100,
+            <<"channel">> => #{
+                <<"claim_id">> => <<"channel-1">>,
+                <<"name">> => <<"@one">>,
+                <<"short_url">> => <<"lbry://@one#channel-1">>
+            }
+        }
+    }, Opts),
+    Req2 = signed(#{
+        <<"body">> => <<"two">>,
+        <<"name">> => <<"second-upload">>,
+        <<"metadata">> => #{
+            <<"title">> => <<"Second Upload">>,
+            <<"release_time">> => 200,
+            <<"channel">> => #{
+                <<"claim_id">> => <<"channel-2">>,
+                <<"name">> => <<"@two">>,
+                <<"short_url">> => <<"lbry://@two#channel-2">>
+            }
+        }
+    }, Opts),
+    {ok, Res1} = submit(#{}, Req1, Opts),
+    {ok, Res2} = submit(#{}, Req2, Opts),
+    RecordID1 = hb_maps:get(<<"record-id">>, Res1, Opts),
+    RecordID2 = hb_maps:get(<<"record-id">>, Res2, Opts),
+    {ok, All} = list(#{}, #{ <<"page_size">> => 10 }, Opts),
+    AllBody = hb_json:decode(hb_maps:get(<<"body">>, All, Opts)),
+    AllItems = hb_maps:get(<<"items">>, AllBody, Opts),
+    ?assertEqual(2, length(AllItems)),
+    ?assertEqual(RecordID2, hb_maps:get(<<"claim_id">>, hd(AllItems), Opts)),
+    {ok, ChannelList} = list(#{}, #{ <<"channel_ids">> => [<<"channel-1">>] }, Opts),
+    ChannelBody = hb_json:decode(hb_maps:get(<<"body">>, ChannelList, Opts)),
+    [ChannelItem] = hb_maps:get(<<"items">>, ChannelBody, Opts),
+    ?assertEqual(RecordID1, hb_maps:get(<<"claim_id">>, ChannelItem, Opts)),
+    {ok, NameList} = list(#{}, #{ <<"name">> => <<"second-upload">> }, Opts),
+    NameBody = hb_json:decode(hb_maps:get(<<"body">>, NameList, Opts)),
+    [NameItem] = hb_maps:get(<<"items">>, NameBody, Opts),
+    ?assertEqual(RecordID2, hb_maps:get(<<"claim_id">>, NameItem, Opts)).
 
 upload_options_response_test() ->
     {ok, Res} = submit(#{}, #{ <<"method">> => <<"OPTIONS">> }, #{}),
