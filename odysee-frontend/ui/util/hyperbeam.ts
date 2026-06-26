@@ -12,6 +12,7 @@ const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const HYPERBEAM_FAILED_READ_CACHE_MS = 10 * 1000;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const CLAIM_DEVICE = '~odysee-claim@1.0';
+const ACCOUNT_DEVICE = '~odysee-account@1.0';
 const COMMENT_DEVICE = '~odysee-comment@1.0';
 const REACTION_DEVICE = '~odysee-reaction@1.0';
 const FILE_DEVICE = '~odysee-file@1.0';
@@ -37,6 +38,7 @@ const PRIVATE_PARAM_KEYS = new Set([
 const NORMALIZED_PRIVATE_PARAM_KEYS = new Set(
   Array.from(PRIVATE_PARAM_KEYS).map((key) => key.replace(/[-_]/g, '').toLowerCase())
 );
+const SAME_ORIGIN_COOKIE_AUTH = '__same_origin_cookie_auth__';
 const deviceReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
 let localAuthTokenPromise: Promise<string | null> | null = null;
 const tracedAuthSources = new Set<string>();
@@ -44,6 +46,29 @@ const AUTH_REQUIRED_DEVICE_PATHS = new Set([
   `${FILE_DEVICE}/view-count`,
   `${FILE_REACTION_DEVICE}/list`,
   `${SUBSCRIPTION_DEVICE}/sub-count`,
+  `${ACCOUNT_DEVICE}/preference-get`,
+  `${ACCOUNT_DEVICE}/preference-set`,
+  `${ACCOUNT_DEVICE}/settings-get`,
+  `${ACCOUNT_DEVICE}/settings-set`,
+  `${ACCOUNT_DEVICE}/settings-clear`,
+  `${COMMENT_DEVICE}/create`,
+  `${COMMENT_DEVICE}/edit`,
+  `${COMMENT_DEVICE}/pin`,
+  `${COMMENT_DEVICE}/abandon`,
+  `${COMMENT_DEVICE}/reaction-react`,
+  `${COMMENT_DEVICE}/setting-get`,
+  `${COMMENT_DEVICE}/setting-list`,
+  `${COMMENT_DEVICE}/setting-update`,
+  `${COMMENT_DEVICE}/setting-block-word`,
+  `${COMMENT_DEVICE}/setting-unblock-word`,
+  `${COMMENT_DEVICE}/setting-list-blocked-words`,
+  `${COMMENT_DEVICE}/moderation-block`,
+  `${COMMENT_DEVICE}/moderation-unblock`,
+  `${COMMENT_DEVICE}/moderation-block-list`,
+  `${COMMENT_DEVICE}/moderation-add-delegate`,
+  `${COMMENT_DEVICE}/moderation-remove-delegate`,
+  `${COMMENT_DEVICE}/moderation-list-delegates`,
+  `${COMMENT_DEVICE}/moderation-am-i`,
 ]);
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
@@ -80,6 +105,13 @@ export async function fetchHyperbeamGet(params: any): Promise<any | null> {
 
   const response = await fetchDeviceJson(`${STREAM_DEVICE}/playback`, { uri });
   return playbackPayloadFromHyperbeam(responsePayload(response));
+}
+
+export async function fetchHyperbeamAccountSdk(method: string, params: Record<string, any>): Promise<any | null> {
+  const key = method.replace(/_/g, '-');
+  const response = await fetchDeviceJson(`${ACCOUNT_DEVICE}/${key}`, params || {});
+  const result = responsePayload(response);
+  return result || null;
 }
 
 type HyperbeamChannel = {
@@ -125,6 +157,90 @@ export async function fetchHyperbeamCommentById(params: CommentByIdParams): Prom
     items: [commentFromHyperbeam(item)],
     ancestors: Array.isArray(result.ancestors) ? result.ancestors.map(commentFromHyperbeam) : [],
   };
+}
+
+export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): Promise<CommentCreateResponse | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/create`, params);
+}
+
+export async function fetchHyperbeamCommentEdit(params: CommentEditParams): Promise<CommentEditResponse | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/edit`, params);
+}
+
+export async function fetchHyperbeamCommentPin(params: CommentPinParams): Promise<CommentPinResponse | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/pin`, params);
+}
+
+export async function fetchHyperbeamCommentAbandon(
+  params: CommentAbandonParams
+): Promise<CommentAbandonResponse | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/abandon`, params);
+}
+
+export async function fetchHyperbeamReactionReact(params: ReactionReactParams): Promise<ReactionReactResponse | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/reaction-react`, params);
+}
+
+export async function fetchHyperbeamSettingGet(params: SettingsParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/setting-get`, params);
+}
+
+export async function fetchHyperbeamSettingList(params: SettingsParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/setting-list`, params);
+}
+
+export async function fetchHyperbeamSettingUpdate(params: UpdateSettingsParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/setting-update`, params);
+}
+
+export async function fetchHyperbeamSettingBlockWord(params: BlockWordParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/setting-block-word`, params);
+}
+
+export async function fetchHyperbeamSettingUnblockWord(params: BlockWordParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/setting-unblock-word`, params);
+}
+
+export async function fetchHyperbeamSettingListBlockedWords(params: SettingsParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/setting-list-blocked-words`, params);
+}
+
+export async function fetchHyperbeamModerationBlock(params: ModerationBlockParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-block`, params);
+}
+
+export async function fetchHyperbeamModerationUnblock(params: ModerationBlockParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-unblock`, params);
+}
+
+export async function fetchHyperbeamModerationBlockList(params: BlockedListArgs): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-block-list`, params);
+}
+
+export async function fetchHyperbeamModerationAddDelegate(params: ModerationAddDelegateParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-add-delegate`, params);
+}
+
+export async function fetchHyperbeamModerationRemoveDelegate(
+  params: ModerationRemoveDelegateParams
+): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-remove-delegate`, params);
+}
+
+export async function fetchHyperbeamModerationListDelegates(
+  params: ModerationListDelegatesParams
+): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-list-delegates`, params);
+}
+
+export async function fetchHyperbeamModerationAmI(params: ModerationAmIParams): Promise<any | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-am-i`, params);
+}
+
+async function fetchHyperbeamCommentron(path: string, params: Record<string, any>): Promise<any | null> {
+  const response = await fetchDeviceJson(path, params);
+  const result = responsePayload(response);
+  return result || null;
 }
 
 export async function fetchHyperbeamReactionList(params: ReactionListParams): Promise<ReactionListResponse | null> {
@@ -211,7 +327,9 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
   try {
     if (AUTH_REQUIRED_DEVICE_PATHS.has(path)) {
       const authToken = await getOdyseeAuthToken(path);
-      return await fetchAuthDeviceJson(path, withAuthParams(stripPrivateParams(compactParams(body)), authToken));
+      traceAuthDeviceRequest(path, authToken);
+      traceAuthRequestBody(path, stripPrivateParams(compactParams(body)), authToken);
+      return await fetchAuthDeviceJson(path, stripPrivateParams(compactParams(body)), authToken);
     }
 
     const authToken = await getOdyseeAuthToken(path);
@@ -241,7 +359,11 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
   }
 }
 
-async function fetchAuthDeviceJson(path: string, body: Record<string, any>): Promise<any | null> {
+async function fetchAuthDeviceJson(
+  path: string,
+  body: Record<string, any>,
+  authToken: string | null
+): Promise<any | null> {
   const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const devicePath = `/${path}`;
   const device = path.split('/')[0];
@@ -267,6 +389,7 @@ async function fetchAuthDeviceJson(path: string, body: Record<string, any>): Pro
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...authTokenHeader(authToken),
     },
     body: JSON.stringify(body),
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
@@ -307,11 +430,11 @@ function requestKeyForAuthDevice(path: string, body: Record<string, any>) {
 }
 
 function authTokenHeader(token: string | null): Record<string, string> {
-  return token ? { 'x-odysee-auth-token': token } : {};
+  return token && token !== SAME_ORIGIN_COOKIE_AUTH ? { 'x-odysee-auth-token': token } : {};
 }
 
 function withAuthParams(params: Record<string, any>, token: string | null): Record<string, any> {
-  return token ? { ...params, auth_token: token } : params;
+  return token && token !== SAME_ORIGIN_COOKIE_AUTH ? { ...params, auth_token: token } : params;
 }
 
 async function getOdyseeAuthToken(path?: string): Promise<string | null> {
@@ -362,7 +485,7 @@ async function getLocalAuthToken(): Promise<string | null> {
       cache: 'no-store',
     })
       .then((response) => (response.ok ? response.json() : null))
-      .then((result) => result?.auth_token || null)
+      .then((result) => (result?.auth_cookie_present ? SAME_ORIGIN_COOKIE_AUTH : null))
       .catch(() => null)
       .finally(() => {
         window.setTimeout(() => {
@@ -408,14 +531,15 @@ function traceAuthRequestBody(path: string, params: Record<string, any>, token: 
     {
       authRequired: true,
       authPresent: Boolean(token),
-      hasAuthParam: Boolean(params.auth_token),
+      authTransport: token === SAME_ORIGIN_COOKIE_AUTH ? 'server-cookie' : token ? 'server-body' : 'missing',
+      hasVisibleAuthParam: Boolean(params.auth_token),
       bodyKeys: Object.keys(params).sort(),
       devicePath: `/${path}`,
       device: path.split('/')[0],
       deviceLayer: 'native-device',
       sourceLayer: 'native-device:auth',
     },
-    token && params.auth_token ? 'ok' : 'warn'
+    token ? 'ok' : 'warn'
   );
 }
 

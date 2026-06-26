@@ -3,6 +3,7 @@ import { FETCH_TIMEOUT, SDK_FETCH_TIMEOUT } from 'constants/errors';
 import { NO_AUTH, X_LBRY_AUTH_TOKEN } from 'constants/token';
 import fetchWithTimeout from 'util/fetch';
 import {
+  fetchHyperbeamAccountSdk,
   fetchHyperbeamClaimSearch,
   fetchHyperbeamGet,
   fetchHyperbeamResolve,
@@ -367,6 +368,14 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
     }
     case 'get':
       return fetchHyperbeamGet(stripHyperbeamNodeOnlyParams(params || {})).then(requireHyperbeamResult(method));
+    case 'preference_get':
+    case 'preference_set':
+    case 'settings_get':
+    case 'settings_set':
+    case 'settings_clear':
+      return fetchHyperbeamAccountSdk(method, stripHyperbeamNodeOnlyParams(params || {})).then(
+        requireHyperbeamResult(method)
+      );
     default:
       return Promise.reject(new Error(`HyperBEAM mode does not support SDK method ${method}`));
   }
@@ -383,11 +392,6 @@ const LEGACY_ONLY_SDK_METHODS = new Set([
   'collection_list',
   'file_list',
   'purchase_list',
-  'preference_get',
-  'preference_set',
-  'settings_get',
-  'settings_set',
-  'settings_clear',
   'stream_list',
   'sync_get',
   'sync_set',

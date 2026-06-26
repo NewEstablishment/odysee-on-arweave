@@ -42,6 +42,29 @@ const HYPERBEAM_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 const HYPERBEAM_UPLOAD_MANIFEST_TYPE = 'application/vnd.odysee.hyperbeam-upload-manifest+json';
 const HYPERBEAM_UPLOAD_MANIFEST_KIND = 'odysee-hyperbeam-chunked-upload';
 const HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
+  '/~odysee-account@1.0/preference-get',
+  '/~odysee-account@1.0/preference-set',
+  '/~odysee-account@1.0/settings-get',
+  '/~odysee-account@1.0/settings-set',
+  '/~odysee-account@1.0/settings-clear',
+  '/~odysee-comment@1.0/create',
+  '/~odysee-comment@1.0/edit',
+  '/~odysee-comment@1.0/pin',
+  '/~odysee-comment@1.0/abandon',
+  '/~odysee-comment@1.0/reaction-react',
+  '/~odysee-comment@1.0/setting-get',
+  '/~odysee-comment@1.0/setting-list',
+  '/~odysee-comment@1.0/setting-update',
+  '/~odysee-comment@1.0/setting-block-word',
+  '/~odysee-comment@1.0/setting-unblock-word',
+  '/~odysee-comment@1.0/setting-list-blocked-words',
+  '/~odysee-comment@1.0/moderation-block',
+  '/~odysee-comment@1.0/moderation-unblock',
+  '/~odysee-comment@1.0/moderation-block-list',
+  '/~odysee-comment@1.0/moderation-add-delegate',
+  '/~odysee-comment@1.0/moderation-remove-delegate',
+  '/~odysee-comment@1.0/moderation-list-delegates',
+  '/~odysee-comment@1.0/moderation-am-i',
   '/~odysee-file@1.0/view-count',
   '/~odysee-file-reaction@1.0/list',
   '/~odysee-subscription@1.0/sub-count',
@@ -94,8 +117,7 @@ async function postHyperbeamAuthDevice(ctx) {
     return;
   }
 
-  const cookieHeader = ctx.get('cookie');
-  const authToken = ctx.cookies.get(AUTH_TOKEN_COOKIE) || getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE);
+  const authToken = getRequestAuthToken(ctx);
   const requestBody = await readJsonBody(ctx);
   const body = authToken ? { ...requestBody, auth_token: authToken } : requestBody;
 
@@ -275,7 +297,12 @@ async function getHyperbeamLargeUpload(ctx) {
 
 function getRequestAuthToken(ctx) {
   const cookieHeader = ctx.get('cookie');
-  return ctx.cookies.get(AUTH_TOKEN_COOKIE) || getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE);
+  return (
+    ctx.cookies.get(AUTH_TOKEN_COOKIE) ||
+    getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE) ||
+    ctx.get('x-odysee-auth-token') ||
+    ctx.get('x-lbry-auth-token')
+  );
 }
 
 async function writeHyperbeamUploadChunk(nodeUrl, authToken, chunk, index) {
@@ -698,7 +725,6 @@ router.get(`/$/api/auth-token/v1/get`, async (ctx) => {
 
   ctx.set('Cache-Control', 'no-store');
   ctx.body = {
-    auth_token: authToken,
     auth_cookie_present: Boolean(authToken),
     cookie_names: cookieNames,
   };

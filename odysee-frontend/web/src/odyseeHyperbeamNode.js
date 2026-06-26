@@ -4,7 +4,9 @@ const HYPERBEAM_NODE_TIMEOUT_MS = 15000;
 const HYPERBEAM_MODE_STORAGE_KEY = 'odysee-hyperbeam-mode';
 const HYPERBEAM_DEVICE_CLAIM = '~odysee-claim@1.0';
 const HYPERBEAM_DEVICE_STREAM = '~odysee-stream@1.0';
+const HYPERBEAM_DEVICE_ACCOUNT = '~odysee-account@1.0';
 const HYPERBEAM_DEVICES = new Set([
+  HYPERBEAM_DEVICE_ACCOUNT,
   HYPERBEAM_DEVICE_CLAIM,
   HYPERBEAM_DEVICE_STREAM,
   '~odysee-channel@1.0',
@@ -133,6 +135,15 @@ async function hyperbeamNodeGet(params, extraHeaders) {
   return playbackPayloadFromHyperbeam(result);
 }
 
+async function hyperbeamNodeAccount(method, params, extraHeaders) {
+  const key = method.replace(/_/g, '-');
+  const result = await hyperbeamNodeFetchJson(
+    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_ACCOUNT, key, params || {}),
+    extraHeaders
+  );
+  return result && Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result;
+}
+
 async function hyperbeamNodeSdkCall(method, params, extraHeaders) {
   if (!hyperbeamNodeConfigured()) return null;
 
@@ -147,6 +158,12 @@ async function hyperbeamNodeSdkCall(method, params, extraHeaders) {
       return hyperbeamNodeClaimSearch(params || {}, extraHeaders);
     case 'get':
       return hyperbeamNodeGet(params || {}, extraHeaders);
+    case 'preference_get':
+    case 'preference_set':
+    case 'settings_get':
+    case 'settings_set':
+    case 'settings_clear':
+      return hyperbeamNodeAccount(method, params || {}, extraHeaders);
     default:
       return Promise.reject(new Error(`HyperBEAM mode does not support SDK method ${method}`));
   }
@@ -163,11 +180,6 @@ const LEGACY_ONLY_SDK_METHODS = new Set([
   'collection_list',
   'file_list',
   'purchase_list',
-  'preference_get',
-  'preference_set',
-  'settings_get',
-  'settings_set',
-  'settings_clear',
   'stream_list',
   'sync_get',
   'sync_set',
