@@ -43,6 +43,11 @@ const deviceReadCache = new Map<string, { expiresAt: number; promise: Promise<an
 let localAuthTokenPromise: Promise<string | null> | null = null;
 const tracedAuthSources = new Set<string>();
 const AUTH_REQUIRED_DEVICE_PATHS = new Set([
+  `${ACCOUNT_DEVICE}/user-exists`,
+  `${ACCOUNT_DEVICE}/user-new`,
+  `${ACCOUNT_DEVICE}/user-signin`,
+  `${ACCOUNT_DEVICE}/user-me`,
+  `${ACCOUNT_DEVICE}/user-email-resend-token`,
   `${FILE_DEVICE}/view-count`,
   `${FILE_REACTION_DEVICE}/list`,
   `${SUBSCRIPTION_DEVICE}/sub-count`,
@@ -75,16 +80,28 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const urls = urlsFromResolveParams(params);
   if (!urls.length) return null;
 
-  const { batchedUris, resolveUris } = splitBatchedResolveUris(urls);
+  const uploadEntries = await fetchHyperbeamUploadResolveEntries(urls);
+  const uploadResolvedUris = new Set(uploadEntries.map(([uri]) => uri));
+  const unresolvedUrls = urls.filter((uri) => !uploadResolvedUris.has(uri));
+  const { batchedUris, resolveUris } = splitBatchedResolveUris(unresolvedUrls);
   const batchedEntries = batchedUris.length ? await fetchBatchedResolveEntries(batchedUris) : [];
   const resolveEntries = await fetchResolveEntries(resolveUris);
 
-  return Object.fromEntries([...batchedEntries, ...resolveEntries].filter(([, claim]) => claim));
+  return Object.fromEntries([...uploadEntries, ...batchedEntries, ...resolveEntries].filter(([, claim]) => claim));
 }
 
 async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
   return Promise.all(
     urls.map(async (uri): Promise<[string, any]> => {
+      const claimId = claimIdFromUri(uri);
+      if (claimId) {
+        try {
+          const result = responsePayload(await fetchCacheJson(cacheReadPath(claimId)));
+          const claim = sdkClaimFromHyperbeam(cacheReadClaim(result));
+          if (claim) return [uri, claim];
+        } catch (_e) {}
+      }
+
       const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { uri });
       const result = responsePayload(response);
       return [uri, sdkClaimFromHyperbeam(result?.[uri] || result)];
@@ -99,6 +116,34 @@ async function fetchBatchedResolveEntries(urls: Array<string>): Promise<Array<[s
   return urls.map((uri): [string, any] => [uri, sdkClaimFromHyperbeam(result?.[uri] || result)]);
 }
 
+async function fetchHyperbeamUploadResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
+  const streamClaimIds = urls.map(streamClaimIdFromUri).filter(Boolean);
+  const directClaims = streamClaimIds.length ? await fetchHyperbeamUploadClaimsForIds(streamClaimIds) : [];
+  const directClaimsById = new Map(directClaims.map((claim) => [claim.claim_id, claim]));
+  const entries: Array<[string, any]> = [];
+  const unresolvedUris: Array<string> = [];
+
+  urls.forEach((uri) => {
+    const claimId = streamClaimIdFromUri(uri);
+    const claim = claimId ? directClaimsById.get(claimId) : null;
+    if (claim) {
+      entries.push([uri, sdkClaimFromHyperbeam(claim)]);
+    } else {
+      unresolvedUris.push(uri);
+    }
+  });
+
+  if (!unresolvedUris.length) return entries;
+
+  const uploads = await fetchHyperbeamUploadClaims({});
+  unresolvedUris.forEach((uri) => {
+    const claim = uploads.find((item) => uploadClaimMatchesUri(item, uri));
+    if (claim) entries.push([uri, sdkClaimFromHyperbeam(claim)]);
+  });
+
+  return entries;
+}
+
 export async function fetchHyperbeamGet(params: any): Promise<any | null> {
   const uri = params?.uri || params?.url;
   if (!uri) return null;
@@ -110,6 +155,12 @@ export async function fetchHyperbeamGet(params: any): Promise<any | null> {
 export async function fetchHyperbeamAccountSdk(method: string, params: Record<string, any>): Promise<any | null> {
   const key = method.replace(/_/g, '-');
   const response = await fetchDeviceJson(`${ACCOUNT_DEVICE}/${key}`, params || {});
+  const result = responsePayload(response);
+  return result || null;
+}
+
+export async function fetchHyperbeamAccountApi(action: string, params: Record<string, any> = {}): Promise<any | null> {
+  const response = await fetchDeviceJson(`${ACCOUNT_DEVICE}/${action}`, params || {});
   const result = responsePayload(response);
   return result || null;
 }
@@ -277,6 +328,9 @@ export async function fetchHyperbeamSubCount(claimIdCsv: string): Promise<Array<
 }
 
 export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
+  const storeResult = await fetchHyperbeamChannelClaimSearch(params);
+  if (storeResult) return storeResult;
+
   const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params);
   const result = sdkSearchFromHyperbeam(responsePayload(response));
   const items = result && result.items;
@@ -284,12 +338,121 @@ export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Pro
   return Array.isArray(items) ? result : null;
 }
 
-export async function fetchHyperbeamResolveClaimIds(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
-  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, params);
-  const result = sdkSearchFromHyperbeam(responsePayload(response));
-  const items = result && result.items;
+async function fetchHyperbeamChannelClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
+  const channelIds = stringList((params as any).channel_ids || (params as any).channelIds);
+  if (!channelIds.length) return null;
 
-  return Array.isArray(items) ? result : null;
+  try {
+    const page = toNumber((params as any).page, 1);
+    const pageSize = toNumber((params as any).page_size || (params as any)['page-size'], 20);
+    const uploadClaims = await fetchHyperbeamUploadClaimsForChannels(channelIds);
+    const claimIds = (
+      await Promise.all(
+        channelIds.map(async (channelId) => {
+          const result = responsePayload(
+            await fetchCacheJson(cacheListPath(`${channelId}/claims`, { page, page_size: pageSize }))
+          );
+          return Array.isArray(result?.items) ? result.items : [];
+        })
+      )
+    ).flat();
+
+    if (!claimIds.length && !uploadClaims.length) {
+      return {
+        items: [],
+        page,
+        page_size: pageSize,
+        total_items: 0,
+        total_pages: 0,
+      } as any;
+    }
+
+    const storeItems = (
+      await Promise.all(
+        claimIds.slice(0, pageSize).map(async (claimId) => {
+          const result = responsePayload(await fetchCacheJson(cacheReadPath(claimId)));
+          return sdkClaimFromHyperbeam(cacheReadClaim(result));
+        })
+      )
+    ).filter(Boolean);
+    const existingIds = new Set(storeItems.map((claim) => claim.claim_id));
+    const items = [...uploadClaims.filter((claim) => !existingIds.has(claim.claim_id)), ...storeItems].slice(
+      0,
+      pageSize
+    );
+    const totalItems = claimIds.length + uploadClaims.filter((claim) => !existingIds.has(claim.claim_id)).length;
+
+    return {
+      items,
+      page,
+      page_size: pageSize,
+      total_items: totalItems,
+      total_pages: Math.max(1, Math.ceil(totalItems / pageSize)),
+    } as any;
+  } catch (_e) {
+    return null;
+  }
+}
+
+async function fetchHyperbeamUploadClaimsForChannels(channelIds: Array<string>): Promise<Array<Claim>> {
+  return fetchHyperbeamUploadClaims({ channel_ids: channelIds }, { 'x-odysee-channel-ids': channelIds.join(',') });
+}
+
+async function fetchHyperbeamUploadClaimsForIds(claimIds: Array<string>): Promise<Array<Claim>> {
+  const ids = claimIds.filter(Boolean);
+  if (!ids.length) return [];
+
+  return fetchHyperbeamUploadClaims({ claim_ids: ids }, { 'x-odysee-claim-ids': ids.join(',') });
+}
+
+async function fetchHyperbeamUploadClaims(body: Record<string, any>, headers: Record<string, string> = {}) {
+  try {
+    const response = await fetch('/$/api/hyperbeam-upload/v1/list', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) return [];
+
+    const json = await response.json();
+    const result = responsePayload(json);
+    return Array.isArray(result?.items) ? result.items.filter((claim) => claim?.value_type === 'stream') : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchHyperbeamResolveClaimIds(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
+  const claimIds = stringList((params as any).claim_ids || (params as any).claimIds);
+  const uploadItems = claimIds.length ? await fetchHyperbeamUploadClaimsForIds(claimIds) : [];
+  let result: any = null;
+
+  try {
+    const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, params);
+    result = sdkSearchFromHyperbeam(responsePayload(response));
+  } catch (_e) {
+    result = null;
+  }
+
+  const items = Array.isArray(result?.items) ? result.items : [];
+  const existingIds = new Set(items.map((claim) => claim?.claim_id).filter(Boolean));
+  const mergedItems = [...uploadItems.filter((claim) => !existingIds.has(claim.claim_id)), ...items];
+
+  if (!mergedItems.length && !Array.isArray(result?.items)) return null;
+
+  return {
+    ...result,
+    items: mergedItems,
+    page: result?.page || 1,
+    page_size: result?.page_size || mergedItems.length,
+    total_items: Math.max(result?.total_items || 0, mergedItems.length),
+    total_pages: Math.max(result?.total_pages || 0, mergedItems.length ? 1 : 0),
+  };
 }
 
 export async function fetchHyperbeamVerifyClaimSignature(
@@ -589,6 +752,44 @@ function buildDeviceUrl(baseUrl: string, path: string): string {
   return `${baseUrl}/${path}`;
 }
 
+function buildCacheUrl(baseUrl: string, path: string): string {
+  return `${baseUrl}/~cache@1.0/${path}`;
+}
+
+async function fetchCacheJson(path: string): Promise<any | null> {
+  const baseUrl = hyperbeamBaseUrl();
+  if (!baseUrl) {
+    if (isHyperbeamEnabled()) throw new Error('HyperBEAM node is not configured');
+    return null;
+  }
+
+  const response = await fetch(buildCacheUrl(baseUrl, path), {
+    method: 'GET',
+    credentials: hyperbeamFetchCredentials(baseUrl),
+    headers: { Accept: 'application/json' },
+    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ~cache@1.0/${path} failed with ${response.status}`);
+    return null;
+  }
+
+  return await response.json();
+}
+
+function cacheReadPath(id: string): string {
+  return `read?read=${encodeURIComponent(String(id).replace(/^\//, ''))}`;
+}
+
+function cacheListPath(path: string, params: Record<string, any> = {}): string {
+  const urlParams = new URLSearchParams({ list: String(path).replace(/^\//, '') });
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') urlParams.set(key, String(value));
+  });
+  return `list?${urlParams.toString()}`;
+}
+
 function hyperbeamFetchCredentials(baseUrl: string): RequestCredentials {
   if (typeof window === 'undefined') return 'include';
 
@@ -727,6 +928,53 @@ function claimIdFromUri(uri: string): string | null {
   }
 }
 
+function streamClaimIdFromUri(uri: string): string | null {
+  try {
+    const parsed = parseURI(String(uri));
+    return parsed.streamClaimId ? String(parsed.streamClaimId) : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function uploadClaimMatchesUri(claim: any, uri: string): boolean {
+  if (!claim) return false;
+
+  const variants = [
+    claim.canonical_url,
+    claim.permanent_url,
+    claim.short_url,
+    uriWithClaimId(claim.canonical_url, claim.claim_id),
+    uriWithClaimId(claim.permanent_url, claim.claim_id),
+    uriWithClaimId(claim.short_url, claim.claim_id),
+    uriWithoutStreamClaimId(claim.canonical_url),
+    uriWithoutStreamClaimId(claim.permanent_url),
+    uriWithoutStreamClaimId(claim.short_url),
+  ];
+
+  return variants.filter(Boolean).some((variant) => variant === uri);
+}
+
+function uriWithClaimId(uri: any, claimId: any): string | null {
+  if (!uri || !claimId) return null;
+  const text = String(uri);
+  const lastSegment = text.split('/').pop() || text;
+  return lastSegment.includes('#') ? text : `${text}#${claimId}`;
+}
+
+function uriWithoutStreamClaimId(uri: any): string | null {
+  if (!uri) return null;
+
+  try {
+    const parsed = parseURI(String(uri));
+    if (!parsed.streamClaimId) return String(uri);
+    const suffix = `#${parsed.streamClaimId}`;
+    return String(uri).endsWith(suffix) ? String(uri).slice(0, -suffix.length) : String(uri);
+  } catch (_e) {
+    return null;
+  }
+}
+
 function sdkClaimFromHyperbeam(result: any): any {
   if (!result) return null;
   const claim = result.claim || result;
@@ -742,6 +990,12 @@ function sdkClaimFromHyperbeam(result: any): any {
     short_url: value(claim, 'short_url', 'short-url') || claim.short_url,
     value_type: value(claim, 'value_type', 'value-type') || claim.value_type,
   };
+}
+
+function cacheReadClaim(result: any): any {
+  if (Array.isArray(result?.items) && result.items.length) return result.items[0];
+  if (Array.isArray(result?.claims) && result.claims.length) return result.claims[0];
+  return result;
 }
 
 function sdkSearchFromHyperbeam(result: any): any {
@@ -801,6 +1055,11 @@ function value(source: any, ...keys: string[]): any {
   for (const key of keys) {
     if (source && source[key] !== undefined && source[key] !== null) return source[key];
   }
+}
+
+function stringList(source: any): Array<string> {
+  if (Array.isArray(source)) return source.map(String).filter(Boolean);
+  return source ? [String(source)] : [];
 }
 
 function isObject(source: any): boolean {

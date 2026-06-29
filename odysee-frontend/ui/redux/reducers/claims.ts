@@ -180,6 +180,14 @@ function selectClaimIsMine(state: ClaimsState, claim: Claim) {
   return false;
 }
 
+function isSyntheticPendingClaimId(id: string, claim?: any) {
+  return (
+    id.startsWith('pending-') ||
+    String(claim?.claim_id || '').startsWith('pending-') ||
+    String(claim?.txid || '').startsWith('pending-')
+  );
+}
+
 // ****************************************************************************
 // handleClaimAction
 // ****************************************************************************
@@ -408,7 +416,10 @@ reducers[ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED] = (state: ClaimsState, action:
       value_type: valueType,
     } = claim;
 
-    if (claim.type && claim.type.match(/claim|update/)) {
+    if (
+      (claim.type && claim.type.match(/claim|update/)) ||
+      ((claim as any).hyperbeam_upload && claimId && permanentUri)
+    ) {
       urlsForCurrentPage.push(permanentUri);
       const includesMeta = Object.keys(claim.meta || {}).length > 0;
 
@@ -675,8 +686,26 @@ reducers[ACTIONS.REMOVE_PENDING_CLAIM_BY_ID] = (state: ClaimsState, action: any)
   const { claimId } = action.data;
   if (!state.pendingById[claimId]) return state;
   const pendingById = { ...state.pendingById };
+  const pendingClaim = pendingById[claimId];
   delete pendingById[claimId];
-  return { ...state, pendingById };
+  if (!isSyntheticPendingClaimId(claimId, pendingClaim)) return { ...state, pendingById };
+
+  const byId = { ...state.byId };
+  const claimsByUri = { ...state.claimsByUri };
+  delete byId[claimId];
+  Object.keys(claimsByUri).forEach((uri) => {
+    if (claimsByUri[uri] === claimId) {
+      delete claimsByUri[uri];
+    }
+  });
+
+  return {
+    ...state,
+    byId,
+    pendingById,
+    claimsByUri,
+    myClaims: state.myClaims?.filter((id: string) => id !== claimId),
+  };
 };
 
 reducers[ACTIONS.UPDATE_CONFIRMED_CLAIMS] = (state: ClaimsState, action: any): ClaimsState => {
@@ -715,7 +744,7 @@ reducers[ACTIONS.UPDATE_CONFIRMED_CLAIMS] = (state: ClaimsState, action: any): C
   const removedPendingUrls: string[] = [];
   for (const [id, claim] of Object.entries(cleanedPending)) {
     if (
-      id.startsWith('pending-') &&
+      isSyntheticPendingClaimId(id, claim) &&
       (confirmedUrls.has((claim as any).permanent_url) || confirmedNames.has((claim as any).name))
     ) {
       removedPendingUrls.push((claim as any).permanent_url);
@@ -1088,20 +1117,30 @@ reducers[ACTIONS.REHYDRATE] = (state: ClaimsState, action: any) => {
   const pendingById = incoming.pendingById ? { ...incoming.pendingById } : {};
 
   Object.keys(byId).forEach((id) => {
-    if (id.startsWith('__preview_')) {
+    if (id.startsWith('__preview_') || isSyntheticPendingClaimId(id, byId[id] || pendingById[id])) {
       delete byId[id];
       delete pendingById[id];
     }
   });
+  Object.keys(pendingById).forEach((id) => {
+    if (isSyntheticPendingClaimId(id, pendingById[id])) {
+      delete pendingById[id];
+      delete byId[id];
+    }
+  });
   Object.keys(claimsByUri).forEach((uri) => {
+    const claimId = claimsByUri[uri];
     if (
-      claimsByUri[uri]?.startsWith?.('__preview_') ||
-      (typeof claimsByUri[uri] === 'string' && claimsByUri[uri].startsWith('__preview_'))
+      claimId?.startsWith?.('__preview_') ||
+      (typeof claimId === 'string' &&
+        (claimId.startsWith('__preview_') || isSyntheticPendingClaimId(claimId, byId[claimId] || pendingById[claimId])))
     ) {
       delete claimsByUri[uri];
     }
   });
-  const filteredMyClaims = myClaims?.filter((id: string) => !id.startsWith('__preview_'));
+  const filteredMyClaims = myClaims?.filter(
+    (id: string) => !id.startsWith('__preview_') && !isSyntheticPendingClaimId(id, byId[id] || pendingById[id])
+  );
 
   return {
     ...defaultState,

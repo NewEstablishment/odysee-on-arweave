@@ -2,6 +2,7 @@ import * as ACTIONS from 'constants/action_types';
 import * as PAGES from 'constants/pages';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import Lbry from 'lbry';
+import { Lbryio } from 'lbryinc';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
 type Store = {
@@ -16,11 +17,23 @@ export const populateAuthTokenHeader = (store: Store) => {
       case ACTIONS.USER_FETCH_SUCCESS:
       case ACTIONS.AUTHENTICATION_SUCCESS:
         if (action.data.user.has_verified_email === true) {
-          const authToken = getAuthToken();
-          Lbry.setApiHeader(X_LBRY_AUTH_TOKEN, authToken);
-          dispatch({
-            type: ACTIONS.USER_LOGGED_IN_BROADCAST,
-          });
+          const actionToken = action.data.accessToken;
+          const cookieToken = actionToken || getAuthToken();
+          if (cookieToken) Lbry.setApiHeader(X_LBRY_AUTH_TOKEN, cookieToken);
+
+          Lbryio.getAuthToken()
+            .then((token) => token || cookieToken || getAuthToken())
+            .then((authToken) => {
+              if (authToken) Lbry.setApiHeader(X_LBRY_AUTH_TOKEN, authToken);
+              dispatch({
+                type: ACTIONS.USER_LOGGED_IN_BROADCAST,
+              });
+            })
+            .catch(() => {
+              dispatch({
+                type: ACTIONS.USER_LOGGED_IN_BROADCAST,
+              });
+            });
         }
 
         break;

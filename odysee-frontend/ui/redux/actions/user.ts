@@ -19,6 +19,7 @@ import rewards from 'rewards';
 import { Lbryio } from 'lbryinc';
 import { DOMAIN, LOCALE_API } from 'config';
 import { getDefaultLanguage } from 'util/default-languages';
+import { fetchHyperbeamAccountApi } from 'util/hyperbeam';
 import { LocalStorage, LS } from 'util/storage';
 import { doMembershipMine } from 'redux/actions/memberships';
 import { selectDefaultChannelId } from 'redux/selectors/settings';
@@ -26,6 +27,96 @@ import { ODYSEE_TIER_NAMES } from 'constants/memberships';
 export let sessionStorageAvailable = false;
 const CHECK_INTERVAL = 200;
 const AUTH_WAIT_TIMEOUT = 10000;
+
+function getAppId(domain: string, status: any = {}) {
+  const installationId = status.installation_id || getHyperbeamInstallationId();
+  if (domain && domain !== 'lbry.tv' && status.installation_id) {
+    return (domain.replace(/[.]/gi, '') + installationId).slice(0, 66);
+  }
+
+  const prefix = domain && domain !== 'lbry.tv' ? domain.replace(/[^a-z0-9]/gi, '') : 'odyseecom';
+  return ((prefix || 'odyseecom') + installationId).slice(0, 66);
+}
+
+function getHyperbeamInstallationId() {
+  const existing = LocalStorage.getItem(LS.HYPERBEAM_APP_INSTALLATION_ID);
+  if (existing) return existing;
+
+  const generated = randomHex(64);
+  LocalStorage.setItem(LS.HYPERBEAM_APP_INSTALLATION_ID, generated);
+  return generated;
+}
+
+function randomHex(length: number) {
+  const bytes = new Uint8Array(Math.ceil(length / 2));
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, length);
+}
+
+function installAuthTokenFromResponse(response: any) {
+  const authToken =
+    response &&
+    (response.auth_token ||
+      response.authToken ||
+      response.accessToken ||
+      response.access_token ||
+      response.data?.auth_token ||
+      response.data?.authToken ||
+      response.data?.accessToken ||
+      response.data?.access_token);
+  if (authToken && (Lbryio as any).overrides?.setAuthToken) {
+    (Lbryio as any).overrides.setAuthToken(authToken);
+    (Lbryio as any).authToken = authToken;
+  }
+}
+
+function callOdyseeAccountApi(resource: string, action: string, params: any = {}, _method = 'post') {
+  return fetchHyperbeamAccountApi(`${resource}-${action}`.replace(/_/g, '-'), params).catch((error) => {
+    const status = Number(String(error?.message || '').match(/failed with ([0-9]+)/)?.[1]);
+    if (status) error.response = { status };
+    throw error;
+  });
+}
+
+function authenticateThroughHyperbeam(domain: string, language: string, dispatch: Dispatch) {
+  return Lbryio.getAuthToken()
+    .then((token) => {
+      if (!token || token.length > 60) return false;
+      return callOdyseeAccountApi('user', 'me').catch(() => false);
+    })
+    .then((user) => {
+      if (user) return user;
+
+      return Lbry.status()
+        .then((status) => {
+          return callOdyseeAccountApi('user', 'new', {
+            auth_token: '',
+            language,
+            app_id: getAppId(domain, status),
+          });
+        })
+        .then((newUser) => {
+          installAuthTokenFromResponse(newUser);
+          if (newUser?.auth_token) {
+            dispatch({
+              type: ACTIONS.GENERATE_AUTH_TOKEN_SUCCESS,
+              data: {
+                authToken: newUser.auth_token,
+              },
+            });
+          }
+          return newUser || callOdyseeAccountApi('user', 'me');
+        });
+    });
+}
+
 export function doFetchInviteStatus(shouldCallRewardList = true) {
   return (dispatch) => {
     dispatch({
@@ -63,10 +154,7 @@ export function doInstallNew(appVersion, callbackForUsersWhoAreSharingData, doma
     domain,
   };
   Lbry.status().then((status) => {
-    payload.app_id =
-      domain && domain !== 'lbry.tv'
-        ? (domain.replace(/[.]/gi, '') + status.installation_id).slice(0, 66)
-        : status.installation_id;
+    payload.app_id = getAppId(domain, status);
     payload.node_id = status.lbry_id;
     Lbry.version()
       .then((version) => {
@@ -237,7 +325,7 @@ export function doAuthenticate(
     checkAuthBusy()
       .then(() => {
         dispatch(doFetchGeoBlockedList());
-        return Lbryio.authenticate(DOMAIN, getDefaultLanguage());
+        return authenticateThroughHyperbeam(DOMAIN, getDefaultLanguage(), dispatch);
       })
       .then((user) => {
         LocalStorage.removeItem(LS.AUTH_IN_PROGRESS);
@@ -277,7 +365,7 @@ export function doUserFetch() {
       dispatch({
         type: ACTIONS.USER_FETCH_STARTED,
       });
-      Lbryio.getCurrentUser()
+      callOdyseeAccountApi('user', 'me')
         .then((user) => {
           dispatch({
             type: ACTIONS.USER_FETCH_SUCCESS,
@@ -301,7 +389,7 @@ export function doUserFetch() {
 export function doUserCheckEmailVerified() {
   // This will happen in the background so we don't need loading booleans
   return (dispatch) => {
-    Lbryio.getCurrentUser().then((user) => {
+    callOdyseeAccountApi('user', 'me').then((user) => {
       if (user.has_verified_email) {
         dispatch(doRewardList());
         dispatch({
@@ -415,7 +503,8 @@ export function doUserEmailNew(email) {
       email,
     });
 
-    const success = () => {
+    const success = (response) => {
+      installAuthTokenFromResponse(response);
       dispatch({
         type: ACTIONS.USER_EMAIL_NEW_SUCCESS,
         data: {
@@ -512,7 +601,7 @@ export function doUserCheckIfEmailExists(email) {
         },
       });
 
-    Lbryio.call(
+    callOdyseeAccountApi(
       'user',
       'exists',
       {
@@ -542,7 +631,8 @@ export function doUserSignIn(email, password) {
       email,
     });
 
-    const success = () => {
+    const success = (response) => {
+      installAuthTokenFromResponse(response);
       dispatch({
         type: ACTIONS.USER_EMAIL_NEW_SUCCESS,
         data: {
@@ -560,7 +650,7 @@ export function doUserSignIn(email, password) {
         },
       });
 
-    Lbryio.call(
+    callOdyseeAccountApi(
       'user',
       'signin',
       {
@@ -578,7 +668,7 @@ export function doUserSignIn(email, password) {
           dispatch({
             type: ACTIONS.USER_EMAIL_NEW_EXISTS,
           });
-          return Lbryio.call(
+          return callOdyseeAccountApi(
             'user_email',
             'resend_token',
             {
@@ -594,7 +684,7 @@ export function doUserSignIn(email, password) {
           dispatch({
             type: ACTIONS.USER_EMAIL_NEW_EXISTS,
           });
-          return Lbryio.call(
+          return callOdyseeAccountApi(
             'user_email',
             'resend_token',
             {

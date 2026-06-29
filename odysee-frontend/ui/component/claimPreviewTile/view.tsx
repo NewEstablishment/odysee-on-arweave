@@ -203,6 +203,23 @@ function ClaimPreviewTile(props: Props) {
     return null;
   }
 
+  const hyperbeamTraceAttrs =
+    claim && claim.claim_id
+      ? {
+          'data-hyperbeam-claim-id': claim.claim_id,
+          'data-hyperbeam-claim-txid': claim.txid,
+          'data-hyperbeam-claim-nout': claim.nout,
+          'data-hyperbeam-claim-sd-hash': claim.value?.source?.sd_hash,
+          'data-hyperbeam-claim-uri': canonicalUrl || claim.permanent_url || uri,
+          'data-hyperbeam-claim-title': title || claim.name,
+          'data-hyperbeam-claim-type': claim.value_type,
+          'data-hyperbeam-signing-channel-id': claim.signing_channel?.claim_id,
+          'data-hyperbeam-signing-channel-uri':
+            claim.signing_channel?.canonical_url || claim.signing_channel?.permanent_url,
+          'data-hyperbeam-signing-channel-title': channelTitle || claim.signing_channel?.name,
+        }
+      : {};
+
   if (placeholder || claim === undefined) {
     return (
       <li
@@ -236,6 +253,7 @@ function ClaimPreviewTile(props: Props) {
 
   return (
     <li
+      {...hyperbeamTraceAttrs}
       onClick={handleClick}
       onMouseEnter={() => setTileHover(true)}
       onMouseLeave={() => setTileHover(false)}

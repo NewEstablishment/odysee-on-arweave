@@ -415,6 +415,22 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
       ),
     [banState.muted, claimIsMine, hideJoin, isChannelUri, showUserBlocked, type, uri]
   );
+  const hyperbeamTraceAttrs =
+    claim && claim.claim_id
+      ? {
+          'data-hyperbeam-claim-id': claim.claim_id,
+          'data-hyperbeam-claim-txid': claim.txid,
+          'data-hyperbeam-claim-nout': claim.nout,
+          'data-hyperbeam-claim-sd-hash': claim.value?.source?.sd_hash,
+          'data-hyperbeam-claim-uri': claim.canonical_url || claim.permanent_url || uri,
+          'data-hyperbeam-claim-title': title || claim.name,
+          'data-hyperbeam-claim-type': claim.value_type,
+          'data-hyperbeam-signing-channel-id': claim.signing_channel?.claim_id,
+          'data-hyperbeam-signing-channel-uri':
+            claim.signing_channel?.canonical_url || claim.signing_channel?.permanent_url,
+          'data-hyperbeam-signing-channel-title': channelTitle || claim.signing_channel?.name,
+        }
+      : {};
 
   // **************************************************************************
   // **************************************************************************
@@ -491,6 +507,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
     <WrapperElement
       ref={ref}
       role="link"
+      {...hyperbeamTraceAttrs}
       onClick={pending || type === 'inline' ? undefined : handleOnClick}
       onMouseEnter={() => setRowHover(true)}
       onMouseLeave={() => setRowHover(false)}

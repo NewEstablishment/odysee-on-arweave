@@ -15,7 +15,6 @@ const CANONICAL_NATIVE_DEVICES = new Set([
   '~odysee-comment@1.0',
   '~odysee-file@1.0',
   '~odysee-file-reaction@1.0',
-  '~odysee-product-events@1.0',
   '~odysee-reaction@1.0',
   '~odysee-stream@1.0',
   '~odysee-subscription@1.0',

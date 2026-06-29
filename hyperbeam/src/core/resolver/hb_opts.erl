@@ -451,6 +451,10 @@ raw_default_message() ->
                     <<"name">> => <<"cache-mainnet">>
                 },
                 #{
+                    <<"store-module">> => hb_store_odysee,
+                    <<"name">> => <<"cache-odysee">>
+                },
+                #{
                     <<"store-module">> => hb_store_arweave,
                     <<"name">> => <<"cache-arweave">>,
                     <<"index-store">> => [?DEFAULT_PRIMARY_STORE],

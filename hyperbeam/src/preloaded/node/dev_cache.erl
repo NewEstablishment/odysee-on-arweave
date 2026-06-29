@@ -3,7 +3,7 @@
 %%% supports writing messages to the store, if the node message has the
 %%% writer's address in its `cache_writers' key.
 -module(dev_cache).
--export([read/3, write/3, link/3, group/3]).
+-export([read/3, write/3, link/3, group/3, list/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -156,6 +156,21 @@ group(_Base, Req, Opts) ->
             );
         false ->
             {error, not_authorized}
+    end.
+
+list(_Base, Req, Opts) ->
+    Store = hb_opts:get(store, no_viable_store, Opts),
+    case hb_store:list(Store, Req, Opts) of
+        {ok, Items} when is_list(Items) ->
+            {ok,
+                #{
+                    <<"body">> => hb_json:encode(#{ <<"items">> => Items }),
+                    <<"content-type">> => <<"application/json">>,
+                    <<"items">> => Items
+                }
+            };
+        Other ->
+            Other
     end.
 
 %% @doc Helper function to write a single data item to the cache.

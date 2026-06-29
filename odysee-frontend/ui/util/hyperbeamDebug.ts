@@ -18,6 +18,11 @@ const AUTH_REQUIRED_DEVICE_PATHS = new Set([
   '/~odysee-account@1.0/settings-get',
   '/~odysee-account@1.0/settings-set',
   '/~odysee-account@1.0/settings-clear',
+  '/~odysee-account@1.0/user-exists',
+  '/~odysee-account@1.0/user-new',
+  '/~odysee-account@1.0/user-signin',
+  '/~odysee-account@1.0/user-me',
+  '/~odysee-account@1.0/user-email-resend-token',
   '/~odysee-file@1.0/view-count',
   '/~odysee-file@1.0/view_count',
   '/~odysee-file-reaction@1.0/list',
@@ -25,13 +30,17 @@ const AUTH_REQUIRED_DEVICE_PATHS = new Set([
   '/~odysee-subscription@1.0/sub_count',
 ]);
 let installed = false;
+let resourceDebugInstalled = false;
+let fetchDebugCallId = 0;
 const bufferedEvents: Array<HyperbeamDebugEvent> = [];
+const seenResourceEvents = new Set<string>();
 
 export function hyperbeamDebugColor(level: HyperbeamDebugLevel, sourceLayer?: string) {
   const source = String(sourceLayer || '');
   if (level === 'error' || source === 'native-failed' || source === 'native-missing') return '#ff4d7d';
   if (source === 'native-device:auth') return '#22c55e';
   if (source === 'native-device') return '#0ea5e9';
+  if (source === 'browser-resource') return '#38bdf8';
   if (source === 'original') return '#94a3b8';
   if (
     level === 'warn' ||
@@ -80,6 +89,7 @@ export function installHyperbeamFetchDebug() {
 
   installed = true;
   const nativeFetch = window.fetch.bind(window);
+  installHyperbeamResourceDebug(nodeBase);
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
@@ -89,13 +99,13 @@ export function installHyperbeamFetchDebug() {
     const startedAt = performance.now();
     const pageContext = pageContextSummary();
     const requestKey = requestBodyKey(url, init);
+    const callId = `hb-${Date.now().toString(36)}-${(fetchDebugCallId += 1).toString(36)}`;
+    const requestData = shouldLog
+      ? requestSummary(url, input, init, isHyperbeam ? undefined : 'original', pageContext, callId)
+      : undefined;
 
     if (shouldLog) {
-      pushHyperbeamDebug(
-        'request',
-        requestSummary(url, input, init, isHyperbeam ? undefined : 'original', pageContext),
-        'info'
-      );
+      pushHyperbeamDebug('request', requestData, 'info');
     }
 
     try {
@@ -109,7 +119,9 @@ export function installHyperbeamFetchDebug() {
         elapsedMs,
         isHyperbeam ? hyperbeamFallbackLayer(url) : 'original',
         pageContext,
-        requestKey
+        requestKey,
+        requestData,
+        callId
       );
       pushHyperbeamDebug('response', summary, response.ok ? 'ok' : 'error');
       return response;
@@ -118,6 +130,7 @@ export function installHyperbeamFetchDebug() {
         pushHyperbeamDebug(
           'request failed',
           {
+            ...requestData,
             ...pageContext,
             url: sanitizeUrl(url),
             method: requestMethod(input, init),
@@ -127,6 +140,7 @@ export function installHyperbeamFetchDebug() {
             authRequired: isAuthRequiredUrl(url),
             sourceLayer: isHyperbeam ? hyperbeamFallbackLayer(url) : 'original',
             requestKey,
+            callId,
             error: String(error?.message || error),
             elapsedMs: Math.round(performance.now() - startedAt),
           },
@@ -137,6 +151,140 @@ export function installHyperbeamFetchDebug() {
       throw error;
     }
   };
+}
+
+function installHyperbeamResourceDebug(nodeBase: string) {
+  if (resourceDebugInstalled || typeof window === 'undefined' || typeof performance === 'undefined') return;
+
+  resourceDebugInstalled = true;
+
+  const processEntry = (entry: PerformanceResourceTiming) => {
+    if (!isFileResourceUrl(entry.name, entry.initiatorType, nodeBase)) return;
+
+    const key = `${entry.name}|${entry.startTime}|${entry.duration}|${entry.transferSize}`;
+    if (seenResourceEvents.has(key)) return;
+    seenResourceEvents.add(key);
+    if (seenResourceEvents.size > 700) {
+      const first = seenResourceEvents.values().next().value;
+      if (first) seenResourceEvents.delete(first);
+    }
+
+    const status = Number((entry as any).responseStatus || 0);
+    const ok = !status || status < 400;
+    const source = nativeSourceParts(entry.name);
+    const nativePath = nativeSourcePath(entry.name) || resourceNativePath(entry.name, entry.initiatorType);
+
+    pushHyperbeamDebug(
+      `${resourceEventKind(entry.initiatorType)} response`,
+      {
+        ...pageContextSummary(),
+        callId: `res-${Math.round(entry.startTime)}-${Math.round(entry.duration)}-${seenResourceEvents.size}`,
+        method: 'GET',
+        status: status || (entry.transferSize || entry.encodedBodySize || entry.decodedBodySize ? 200 : 'loaded'),
+        ok,
+        elapsedMs: Math.round(entry.duration || 0),
+        url: sanitizeUrl(entry.name),
+        urlParts: urlParts(entry.name),
+        device: hyperbeamDevice(entry.name),
+        devicePath: devicePath(entry.name),
+        deviceLayer: hyperbeamDeviceLayer(entry.name) || 'browser-resource',
+        authRequired: isAuthRequiredUrl(entry.name),
+        nativeSource: source?.kind || 'media',
+        nativePath,
+        sourceLayer: 'browser-resource',
+        requestKey: resourceRequestKey(entry.name, entry.initiatorType),
+        initiatorType: entry.initiatorType,
+        transferSize: entry.transferSize,
+        encodedBodySize: entry.encodedBodySize,
+        decodedBodySize: entry.decodedBodySize,
+        contentLength: entry.decodedBodySize || entry.encodedBodySize || undefined,
+        bodyCapture:
+          'Browser resource load; request headers, response headers, and body are not exposed to JavaScript.',
+      },
+      ok ? 'ok' : 'error'
+    );
+  };
+
+  performance
+    .getEntriesByType('resource')
+    .filter((entry): entry is PerformanceResourceTiming => 'initiatorType' in entry)
+    .forEach(processEntry);
+
+  if (typeof PerformanceObserver !== 'function') return;
+
+  try {
+    const observer = new PerformanceObserver((list) => {
+      list.getEntries().forEach((entry) => {
+        if ('initiatorType' in entry) processEntry(entry as PerformanceResourceTiming);
+      });
+    });
+    observer.observe({ type: 'resource', buffered: true });
+  } catch (_error) {
+    try {
+      const observer = new PerformanceObserver((list) => {
+        list.getEntries().forEach((entry) => {
+          if ('initiatorType' in entry) processEntry(entry as PerformanceResourceTiming);
+        });
+      });
+      observer.observe({ entryTypes: ['resource'] });
+    } catch (_ignored) {}
+  }
+}
+
+function isFileResourceUrl(url: string, initiatorType: string, nodeBase: string) {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const path = parsed.pathname;
+    const host = parsed.hostname;
+    if (
+      path.startsWith('/public/') ||
+      path.startsWith('/static/') ||
+      path.startsWith('/__') ||
+      path === '/favicon.ico' ||
+      path.endsWith('.js') ||
+      path.endsWith('.css') ||
+      path.endsWith('.map')
+    ) {
+      return false;
+    }
+
+    if (path.startsWith('/$/api/hyperbeam-upload/v1/read/')) return true;
+    if (path.includes('/~cache@1.0/read')) return true;
+    if (path.includes('/~odysee-stream@1.0/media') || path.includes('/~lbry-stream@1.0/media')) return true;
+    if (nodeBase && url.startsWith(nodeBase) && mediaInitiator(initiatorType)) return true;
+    if (
+      mediaInitiator(initiatorType) &&
+      (host === 'player.odycdn.com' ||
+        host === 'secure.odycdn.com' ||
+        host.endsWith('.secure.odycdn.com') ||
+        host === 'thumbs.odycdn.com' ||
+        host === 'thumbnails.odycdn.com')
+    ) {
+      return true;
+    }
+  } catch (_error) {
+    return false;
+  }
+
+  return false;
+}
+
+function mediaInitiator(initiatorType: string) {
+  return ['img', 'video', 'audio', 'source', 'track', 'object', 'embed'].includes(String(initiatorType || ''));
+}
+
+function resourceEventKind(initiatorType: string) {
+  switch (initiatorType) {
+    case 'img':
+      return 'image';
+    case 'video':
+    case 'audio':
+    case 'source':
+    case 'track':
+      return initiatorType;
+    default:
+      return 'resource';
+  }
 }
 
 function hyperbeamFallbackLayer(url: string) {
@@ -172,10 +320,14 @@ function requestSummary(
   input: RequestInfo | URL,
   init?: RequestInit,
   fallbackSourceLayer?: string,
-  pageContext: Record<string, any> = pageContextSummary()
+  pageContext: Record<string, any> = pageContextSummary(),
+  callId?: string
 ) {
+  const body = requestBodyPreview(init);
+
   return {
     ...pageContext,
+    callId,
     method: requestMethod(input, init),
     devicePath: devicePath(url),
     device: hyperbeamDevice(url),
@@ -186,7 +338,10 @@ function requestSummary(
     url: sanitizeUrl(url),
     sourceLayer: fallbackSourceLayer,
     bodyBytes: typeof init?.body === 'string' ? init.body.length : undefined,
+    requestHeaders: requestHeaders(input, init),
+    requestBody: body,
     requestKey: requestBodyKey(url, init),
+    urlParts: urlParts(url),
   };
 }
 
@@ -196,10 +351,14 @@ async function responseSummary(
   elapsedMs: number,
   fallbackSourceLayer?: string,
   pageContext: Record<string, any> = pageContextSummary(),
-  requestKey?: string
+  requestKey?: string,
+  requestData?: Record<string, any>,
+  callId?: string
 ) {
   const summary: Record<string, any> = {
+    ...requestData,
     ...pageContext,
+    callId,
     status: response.status,
     ok: response.ok,
     elapsedMs,
@@ -219,6 +378,8 @@ async function responseSummary(
     sourceLayer: response.headers.get('x-odysee-source-layer') || fallbackSourceLayer,
     sourceReason: redactSensitive(response.headers.get('x-odysee-source-reason') || undefined),
     requestKey,
+    responseHeaders: responseHeaders(response),
+    urlParts: urlParts(url),
   };
   const signatureInput = response.headers.get('signature-input') || '';
   summary.sourceAlg = nativeResponseDevice(response.headers.get('device'));
@@ -227,7 +388,8 @@ async function responseSummary(
     summary.sourceAlg = sourceCommitmentAlg(signatureInput) || nativeResponseDevice(response.headers.get('device'));
   }
 
-  if (!response.ok || (response.headers.get('content-type') || '').includes('application/json')) {
+  const contentType = response.headers.get('content-type') || '';
+  if (!response.ok || contentType.includes('application/json')) {
     summary.body = await response
       .clone()
       .text()
@@ -235,6 +397,8 @@ async function responseSummary(
       .then((body) => redactSensitive(body))
       .catch(() => null);
     summary.sourceLayer = summary.sourceLayer || sourceLayer(summary.body);
+  } else {
+    summary.bodyCapture = `Skipped body clone for ${contentType || 'non-JSON'} response. Headers and route were captured.`;
   }
 
   return summary;
@@ -302,6 +466,99 @@ function requestBodyKey(url: string, init?: RequestInit) {
   return undefined;
 }
 
+function resourceRequestKey(url: string, initiatorType: string) {
+  const source = nativeSourceParts(url);
+  if (source?.value) return `${source.kind}:${limitDebugString(source.value, 120)}`;
+  return `media:${limitDebugString(resourceNativePath(url, initiatorType), 140)}`;
+}
+
+function resourceNativePath(url: string, initiatorType: string) {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const path = parsed.pathname;
+    if (path.startsWith('/$/api/hyperbeam-upload/v1/read/')) {
+      return `media:${decodeURIComponent(path.split('/').filter(Boolean).pop() || '')}`;
+    }
+    if (path.includes('/~cache@1.0/read')) {
+      return `cache:${parsed.searchParams.get('id') || parsed.searchParams.get('path') || parsed.searchParams.get('key') || 'read'}`;
+    }
+    if (path.includes('/~odysee-stream@1.0/media') || path.includes('/~lbry-stream@1.0/media')) {
+      return `media:${parsed.searchParams.get('id') || parsed.searchParams.get('claim_id') || parsed.searchParams.get('uri') || path}`;
+    }
+    return `${initiatorType || 'resource'}:${parsed.hostname}${path}`;
+  } catch (_error) {
+    return `${initiatorType || 'resource'}:${limitDebugString(String(url || ''), 120)}`;
+  }
+}
+
+function requestBodyPreview(init?: RequestInit) {
+  if (typeof init?.body !== 'string') return undefined;
+
+  try {
+    return redactSensitive(JSON.parse(init.body));
+  } catch (_error) {
+    return redactSensitiveString(limitDebugString(init.body, 4000));
+  }
+}
+
+function requestHeaders(input: RequestInfo | URL, init?: RequestInit) {
+  const headers: Record<string, string> = {};
+  collectHeaders(typeof input !== 'string' && !(input instanceof URL) ? input.headers : undefined, headers);
+  collectHeaders(init?.headers, headers);
+  if (Object.keys(headers).length === 0) {
+    headers['capture-note'] = 'No script-set request headers. Browser-managed headers are not exposed to JavaScript.';
+  }
+  return redactSensitive(headers);
+}
+
+function responseHeaders(response: Response) {
+  const headers: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+  if (Object.keys(headers).length === 0) {
+    headers['capture-note'] = 'No response headers are exposed to frontend JavaScript for this response.';
+  }
+  return redactSensitive(headers);
+}
+
+function collectHeaders(source: HeadersInit | undefined, target: Record<string, string>) {
+  if (!source) return;
+  if (source instanceof Headers) {
+    source.forEach((value, key) => {
+      target[key] = value;
+    });
+    return;
+  }
+  if (Array.isArray(source)) {
+    source.forEach(([key, value]) => {
+      target[String(key).toLowerCase()] = String(value);
+    });
+    return;
+  }
+  Object.entries(source).forEach(([key, value]) => {
+    target[key.toLowerCase()] = String(value);
+  });
+}
+
+function urlParts(url: string) {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return {
+      origin: parsed.origin,
+      path: parsed.pathname,
+      query: Object.fromEntries(
+        Array.from(parsed.searchParams.entries()).map(([key, value]) => [
+          key,
+          isSensitiveQueryName(key) ? '[redacted]' : redactQueryValue(key, value),
+        ])
+      ),
+    };
+  } catch (_error) {
+    return undefined;
+  }
+}
+
 function stableDebugString(value: any): string {
   if (!value || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableDebugString).join(',')}]`;
@@ -331,8 +588,34 @@ function nativeSourceKind(url: string) {
 
 function nativeSourceParts(url: string) {
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(url, window.location.origin);
     const path = parsed.pathname;
+    if (path.startsWith('/$/api/hyperbeam-upload/v1/read/')) {
+      return {
+        kind: 'media',
+        value: decodeURIComponent(path.split('/').filter(Boolean).pop() || '') || undefined,
+      };
+    }
+    if (path.includes('/~cache@1.0/read')) {
+      return {
+        kind: 'cache',
+        value:
+          parsed.searchParams.get('id') ||
+          parsed.searchParams.get('path') ||
+          parsed.searchParams.get('key') ||
+          undefined,
+      };
+    }
+    if (path.includes('/~odysee-stream@1.0/media') || path.includes('/~lbry-stream@1.0/media')) {
+      return {
+        kind: 'media',
+        value:
+          parsed.searchParams.get('id') ||
+          parsed.searchParams.get('claim_id') ||
+          parsed.searchParams.get('uri') ||
+          undefined,
+      };
+    }
     if (path.endsWith('/~odysee-claim@1.0/transaction')) {
       return {
         kind: 'transaction',
@@ -470,6 +753,7 @@ function redactSensitive(value: any): any {
 
 function isSensitiveFieldName(name: string) {
   const key = name.toLowerCase().replace(/[-_]/g, '');
+  if (NON_SENSITIVE_DEBUG_FIELDS.has(key)) return false;
   return (
     key === 'authorization' ||
     key === 'auth' ||
@@ -481,6 +765,22 @@ function isSensitiveFieldName(name: string) {
     key.includes('password')
   );
 }
+
+const NON_SENSITIVE_DEBUG_FIELDS = new Set(
+  [
+    'acceptRanges',
+    'authRequired',
+    'authenticated',
+    'authorizationRequired',
+    'deviceLayer',
+    'nativeSource',
+    'requestKey',
+    'responseDevice',
+    'sourceAlg',
+    'sourceLayer',
+    'sourceReason',
+  ].map((key) => key.toLowerCase().replace(/[-_]/g, ''))
+);
 
 function redactSensitiveString(value: string) {
   return value

@@ -31,7 +31,7 @@ import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { fetchHyperbeamResolveClaimIds } from 'util/hyperbeam';
-import { listHyperbeamPublishes } from 'services/hyperbeamUpload';
+import { deleteHyperbeamPublish, listHyperbeamPublishes } from 'services/hyperbeamUpload';
 let onChannelConfirmCallback;
 let checkPendingInterval;
 
@@ -99,7 +99,7 @@ async function mergeHyperbeamPublishesIntoClaimList(
 ): Promise<StreamListResponse> {
   if (page !== 1) return result;
 
-  const hyperbeamClaims = await listHyperbeamPublishes();
+  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
   if (!hyperbeamClaims.length) return result;
 
   const wantedChannelIds = new Set(channelIds.filter(Boolean));
@@ -107,7 +107,7 @@ async function mergeHyperbeamPublishesIntoClaimList(
   const indexedClaims = hyperbeamClaims.filter((claim) => {
     if (existingIds.has(claim.claim_id)) return false;
     if (wantedChannelIds.size === 0) return true;
-    const channelId = getChannelIdFromClaim(claim);
+    const channelId = getHyperbeamUploadChannelId(claim);
     return Boolean(channelId && wantedChannelIds.has(channelId));
   });
 
@@ -120,6 +120,16 @@ async function mergeHyperbeamPublishesIntoClaimList(
   };
 }
 
+function emptyClaimListResult(page: number, pageSize: number): StreamListResponse {
+  return {
+    items: [],
+    page,
+    page_size: pageSize,
+    total_items: 0,
+    total_pages: 0,
+  };
+}
+
 async function mergeHyperbeamPublishesIntoChannelResult(
   result: ClaimSearchResponse,
   channelUri: string,
@@ -127,12 +137,17 @@ async function mergeHyperbeamPublishesIntoChannelResult(
 ): Promise<ClaimSearchResponse> {
   if (page !== 1) return result;
 
-  const hyperbeamClaims = await listHyperbeamPublishes();
+  const channelIds = getHyperbeamChannelIdsFromClaims(result.items || []);
+  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
   if (!hyperbeamClaims.length) return result;
 
   const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
   const indexedClaims = hyperbeamClaims.filter(
-    (claim) => !existingIds.has(claim.claim_id) && hyperbeamClaimMatchesChannelUri(claim, channelUri)
+    (claim) =>
+      !existingIds.has(claim.claim_id) &&
+      (channelIds.length
+        ? channelIds.includes(getHyperbeamUploadChannelId(claim))
+        : hyperbeamClaimMatchesChannel(claim, channelUri))
   );
 
   if (!indexedClaims.length) return result;
@@ -142,6 +157,14 @@ async function mergeHyperbeamPublishesIntoChannelResult(
     items: [...indexedClaims, ...(result.items || [])],
     total_items: Number(result.total_items || 0) + indexedClaims.length,
   };
+}
+
+function getHyperbeamChannelIdsFromClaims(claims: Array<Claim>) {
+  return Array.from(
+    new Set(
+      claims.map((claim) => getChannelIdFromClaim(claim)).filter((channelId): channelId is string => Boolean(channelId))
+    )
+  );
 }
 
 async function mergeHyperbeamPublishesIntoSearchResult(
@@ -160,14 +183,14 @@ async function mergeHyperbeamPublishesIntoSearchResult(
 
   if (!channelIds.length) return result;
 
-  const hyperbeamClaims = await listHyperbeamPublishes();
+  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
   if (!hyperbeamClaims.length) return result;
 
   const wantedChannelIds = new Set(channelIds.filter(Boolean));
   const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
   const indexedClaims = hyperbeamClaims.filter((claim) => {
     if (existingIds.has(claim.claim_id)) return false;
-    const channelId = getChannelIdFromClaim(claim);
+    const channelId = getHyperbeamUploadChannelId(claim);
     return Boolean(channelId && wantedChannelIds.has(channelId));
   });
 
@@ -180,7 +203,13 @@ async function mergeHyperbeamPublishesIntoSearchResult(
   };
 }
 
-function hyperbeamClaimMatchesChannelUri(claim: StreamClaim, channelUri: string) {
+function hyperbeamClaimMatchesChannel(claim: StreamClaim, channelUri: string) {
+  const directChannelId = getHyperbeamUploadChannelId(claim);
+  if (directChannelId && channelUri.includes(directChannelId)) return true;
+
+  const claimUrls = [claim.permanent_url, claim.canonical_url, claim.short_url].filter(Boolean);
+  if (claimUrls.some((url) => hyperbeamClaimUrlMatchesChannel(String(url), channelUri))) return true;
+
   const channel = claim.signing_channel;
   if (!channel || !channelUri) return false;
 
@@ -195,6 +224,22 @@ function hyperbeamClaimMatchesChannelUri(claim: StreamClaim, channelUri: string)
       return String(candidate) === channelUri;
     }
   });
+}
+
+function hyperbeamClaimUrlMatchesChannel(claimUrl: string, channelUri: string) {
+  if (!claimUrl || !channelUri) return false;
+
+  try {
+    const normalizedClaimUrl = normalizeURI(claimUrl);
+    const normalizedChannelUri = normalizeURI(channelUri);
+    return normalizedClaimUrl === normalizedChannelUri || normalizedClaimUrl.startsWith(`${normalizedChannelUri}/`);
+  } catch {
+    return claimUrl === channelUri || claimUrl.startsWith(`${channelUri}/`);
+  }
+}
+
+function getHyperbeamUploadChannelId(claim: StreamClaim) {
+  return (claim as any).channel_id || (claim as any).channel_claim_id || getChannelIdFromClaim(claim);
 }
 
 export function doResolveUris(
@@ -582,6 +627,7 @@ export function doFetchClaimListMine(
       channel_id: channelIds,
       resolve,
     })
+      .catch(() => emptyClaimListResult(page, pageSize))
       .then(async (result: StreamListResponse) => {
         result = await mergeHyperbeamPublishesIntoClaimList(result, page, channelIds);
         // Log stuck claims
@@ -746,6 +792,45 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
   const { txid, nout } = claim;
   const outpoint = `${txid}:${nout}`;
   return (dispatch: Dispatch, getState: GetState) => {
+    if (isHyperbeamUploadClaim(claim)) {
+      const data = {
+        claimId: claim.claim_id,
+      };
+      dispatch({
+        type: ACTIONS.ABANDON_CLAIM_STARTED,
+        data,
+      });
+
+      deleteHyperbeamPublish(claim.claim_id).then(
+        () => {
+          dispatch({
+            type: ACTIONS.ABANDON_CLAIM_SUCCEEDED,
+            data,
+          });
+          if (cb) cb(ABANDON_STATES.DONE);
+          dispatch(
+            doToast({
+              message: __('Successfully removed your upload.'),
+            })
+          );
+        },
+        () => {
+          dispatch({
+            type: ACTIONS.ABANDON_CLAIM_SUCCEEDED,
+            data,
+          });
+          dispatch(
+            doToast({
+              message: 'Error removing your HyperBEAM upload',
+              isError: true,
+            })
+          );
+          if (cb) cb(ABANDON_STATES.ERROR);
+        }
+      );
+      return;
+    }
+
     const state = getState();
     const myClaims: Array<Claim> = selectMyClaimsRaw(state);
     const mySupports: Record<string, Support> = selectSupportsByOutpoint(state);
@@ -830,6 +915,11 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
     Lbry[method](abandonParams).then(successCallback, errorCallback);
   };
 }
+
+function isHyperbeamUploadClaim(claim: Claim) {
+  return Boolean(claim && ((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id));
+}
+
 export function doFetchClaimsByChannel(uri: string, page: number = 1) {
   return (dispatch: Dispatch) => {
     dispatch({

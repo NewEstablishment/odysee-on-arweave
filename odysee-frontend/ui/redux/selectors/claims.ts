@@ -37,8 +37,20 @@ export function selectClaimsStates(state: State) {
 
 const selectState = (state: State) => state.claims || EMPTY_OBJECT;
 
+function isSyntheticPendingClaim(id: string, claim?: any) {
+  return (
+    id.startsWith('pending-') ||
+    String(claim?.claim_id || '').startsWith('pending-') ||
+    String(claim?.txid || '').startsWith('pending-')
+  );
+}
+
 export const selectById = (state: State) => selectState(state).byId || EMPTY_OBJECT;
-export const selectPendingClaimsById = (state: State) => selectState(state).pendingById || EMPTY_OBJECT;
+export const selectPendingClaimsById = createSelector(selectState, (state) => {
+  const pendingById = state.pendingById || EMPTY_OBJECT;
+  const entries = Object.entries(pendingById).filter(([id, claim]) => !isSyntheticPendingClaim(id, claim));
+  return entries.length === Object.keys(pendingById).length ? pendingById : Object.fromEntries(entries);
+});
 export const selectClaimsById = createSelector(selectById, selectPendingClaimsById, (byId, pendingById) => {
   const hasPending = pendingById && Object.keys(pendingById).length > 0;
   return hasPending ? Object.assign({}, byId, pendingById) : byId;
@@ -118,7 +130,10 @@ export const selectAllClaimsByChannel = createSelector(
   selectState,
   (state) => state.paginatedClaimsByChannel || EMPTY_OBJECT
 );
-export const selectPendingIds = createSelector(selectState, (state) => Object.keys(state.pendingById) || []);
+export const selectPendingIds = createSelector(
+  selectPendingClaimsById,
+  (pendingById) => Object.keys(pendingById) || []
+);
 export const selectPendingClaims = createSelector(selectPendingClaimsById, (pendingById) => Object.values(pendingById));
 export const selectClaimIsPendingForId = (state: State, claimId: string) => {
   return Boolean(selectPendingClaimsById(state)[claimId]);
@@ -602,7 +617,7 @@ export const selectMyClaimsPage = createSelector(selectState, (state) => {
   const pendingUris: string[] = [];
   for (const [id, claim] of Object.entries(pendingById)) {
     const c = claim as any;
-    if (id.startsWith('__preview_')) continue;
+    if (id.startsWith('__preview_') || isSyntheticPendingClaim(id, c)) continue;
     const resolved = state.byId[id];
     if (c.confirmations > 0 || (resolved && resolved.confirmations > 0)) continue;
     if (c.permanent_url && !seenUrls.has(c.permanent_url) && !seenNames.has(c.name)) {

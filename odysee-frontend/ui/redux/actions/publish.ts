@@ -56,6 +56,17 @@ function isHyperbeamUploadClaim(claim) {
   );
 }
 
+function publishErrorMessage(error: any): string {
+  if (typeof error === 'string') return error;
+  if (typeof error?.message === 'string') return error.message;
+  if (error) {
+    try {
+      return JSON.stringify(error);
+    } catch {}
+  }
+  return __('Publish failed.');
+}
+
 function resolveClaimTypeForAnalytics(claim) {
   if (!claim) {
     return 'undefined_claim';
@@ -178,7 +189,7 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
       actions.push({
         type: ACTIONS.PUBLISH_FAIL,
       });
-      let message = typeof error === 'string' ? error : error.message;
+      let message = publishErrorMessage(error);
 
       if (message.endsWith(ERRORS.SDK_FETCH_TIMEOUT)) {
         message = ERRORS.PUBLISH_TIMEOUT_BUT_LIKELY_SUCCESSFUL;
@@ -1608,7 +1619,7 @@ export const doPublishWithEarlyUpload =
         type: ACTIONS.PUBLISH_PIPELINE_UPDATE,
         data: { id: guid, updates: { stage: 'error', error: error?.message } },
       });
-      dispatch(doError({ message: typeof error === 'string' ? error : error.message, cause: error.cause }));
+      dispatch(doError({ message: publishErrorMessage(error), cause: error?.cause }));
     }
   };
 

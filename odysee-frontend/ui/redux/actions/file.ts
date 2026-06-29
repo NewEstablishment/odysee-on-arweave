@@ -88,14 +88,19 @@ export function doDeleteFile(
   claim: Claim
 ) {
   return (dispatch: Dispatch) => {
+    const isHyperbeamUpload = Boolean(
+      claim && ((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id)
+    );
     if (abandonClaim) {
       dispatch(doAbandonClaim(claim, cb));
     }
 
-    Lbry.file_delete({
-      outpoint,
-      delete_from_download_dir: deleteFromComputer,
-    });
+    if (!isHyperbeamUpload) {
+      Lbry.file_delete({
+        outpoint,
+        delete_from_download_dir: deleteFromComputer,
+      });
+    }
     dispatch({
       type: ACTIONS.FILE_DELETE,
       data: {
@@ -168,6 +173,8 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
     }
 
     const outpoint = selectClaimOutpointForUri(state, uri);
+    const claim = selectClaimForUri(state, uri);
+    const hyperbeamUploadFileInfo = localHyperbeamUploadFileInfo(claim, uri, outpoint);
     const keyFromOpt = opt && (opt as any).uriAccessKey;
     const cachedKey: UriAccessKey | null | undefined = state.content.uriAccessKeys[uri];
     let accessKey: UriAccessKey | null | undefined = keyFromOpt || cachedKey || null;
@@ -177,6 +184,21 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
         outpoint,
       },
     });
+
+    if (hyperbeamUploadFileInfo) {
+      dispatch({
+        type: ACTIONS.FETCH_FILE_INFO_COMPLETED,
+        data: {
+          fileInfo: hyperbeamUploadFileInfo,
+          outpoint: hyperbeamUploadFileInfo.outpoint,
+        },
+      });
+
+      if (onSuccess) {
+        onSuccess(hyperbeamUploadFileInfo);
+      }
+      return;
+    }
 
     if (!accessKey) {
       accessKey = (await getOwnedClaimAccessKey(dispatch, state, uri)) || null;
@@ -296,6 +318,49 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
       });
   };
 };
+
+function localHyperbeamUploadFileInfo(
+  claim: Claim | null | undefined,
+  uri: string,
+  outpoint: string | null | undefined
+) {
+  if (!claim || !((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id)) return null;
+
+  const value = (claim.value || {}) as any;
+  const source = value.source || {};
+  const mediaUrl = (claim as any).streaming_url || (claim as any).download_url || (claim as any).hyperbeam?.read_path;
+  if (!mediaUrl) return null;
+
+  const size = Number(source.size || (claim as any).hyperbeam_upload?.size || 0);
+  const resolvedOutpoint = outpoint || `${claim.txid}:${claim.nout || 0}`;
+  const signingChannel = claim.signing_channel;
+
+  return {
+    ...claim,
+    uri,
+    outpoint: resolvedOutpoint,
+    claim_id: claim.claim_id,
+    claim_name: claim.name,
+    file_name: source.name || claim.name,
+    mime_type: source.media_type || 'application/octet-stream',
+    streaming_url: mediaUrl,
+    download_url: mediaUrl,
+    download_path: mediaUrl,
+    completed: true,
+    written_bytes: size,
+    total_bytes: size,
+    blobs_completed: 1,
+    blobs_in_stream: 1,
+    channel_name: signingChannel?.name,
+    channel_claim_id: signingChannel?.claim_id || (claim as any).channel_id,
+    metadata: {
+      title: value.title,
+      description: value.description,
+      source,
+    },
+  } as any;
+}
+
 export function doPurchaseUri(
   uri: string,
   costInfo: {

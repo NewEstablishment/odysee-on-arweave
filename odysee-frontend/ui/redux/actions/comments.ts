@@ -40,6 +40,33 @@ const stripeEnvironment = getStripeEnvironment();
 const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
 const PROMISE_FULFILLED = 'fulfilled';
 const MENTION_REGEX = /(?:^| |\n)@[^\s=&#$@%?:;/"<>%{}|^~[]*(?::[\w]+)?/gm;
+
+function isLocalHyperbeamUploadClaim(claim: Claim | null | void) {
+  return Boolean(claim && ((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id));
+}
+
+function dispatchEmptyCommentList(
+  dispatch: Dispatch,
+  claimId: string,
+  uri: string,
+  parentId: string | null | undefined,
+  page: number
+) {
+  return dispatch({
+    type: ACTIONS.COMMENT_LIST_COMPLETED,
+    data: {
+      comments: [],
+      parentId,
+      totalItems: 0,
+      totalFilteredItems: 0,
+      totalPages: 0,
+      claimId,
+      uri,
+      page,
+    },
+  });
+}
+
 export function doCommentList(
   uri: string,
   parentId: string | null | undefined,
@@ -155,6 +182,10 @@ export function doCommentList(
       })
       .catch((error) => {
         const { message } = error;
+
+        if (isLocalHyperbeamUploadClaim(claim)) {
+          return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
+        }
 
         switch (message) {
           case 'comments are disabled by the creator':

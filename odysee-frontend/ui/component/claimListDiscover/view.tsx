@@ -38,6 +38,7 @@ import { selectFollowedTags } from 'redux/selectors/tags';
 import { selectMutedAndBlockedChannelIds } from 'redux/selectors/blocked';
 import { doFetchOdyseeMembershipForChannelIds as doFetchOdyseeMembershipForChannelIdsAction } from 'redux/actions/memberships';
 import { selectClientSetting, selectShowMatureContent, selectLanguage } from 'redux/selectors/settings';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 
 function resolveHideMembersOnly(global: any, override: any) {
   return override === undefined || override === null ? global : override;
@@ -600,11 +601,21 @@ function ClaimListDiscover(props: Props) {
 
   options.page = effectivePage;
 
+  const optionsStringForEffect = JSON.stringify(options);
+  const hyperbeamRefreshKeysRef = React.useRef<Set<string>>(new Set());
+  const shouldRefreshEmptyHyperbeamChannelSearch =
+    isHyperbeamEnabled() &&
+    Boolean(channelIdsParam?.length) &&
+    effectivePage === 1 &&
+    Array.isArray(claimSearchResult) &&
+    claimSearchResult.length === 0 &&
+    !hyperbeamRefreshKeysRef.current.has(optionsStringForEffect);
   const shouldPerformSearch = // -- pins alone will be resolved by the doResolveUris/doResolveClaimIds call
     hasPins && !channelIdsParam
       ? false
       : !uris &&
         (claimSearchResult === undefined ||
+          shouldRefreshEmptyHyperbeamChannelSearch ||
           didNavigateForward ||
           (!loading &&
             !claimSearchResultLastPageReached &&
@@ -614,7 +625,6 @@ function ClaimListDiscover(props: Props) {
             claimSearchResult.length % dynamicPageSize === 0));
 
   // Don't use the query from createNormalizedClaimSearchKey for the effect since that doesn't include page & release_time
-  const optionsStringForEffect = JSON.stringify(options);
   const timedOutMessage = (
     <div>
       <p>
@@ -779,6 +789,9 @@ function ClaimListDiscover(props: Props) {
   React.useEffect(() => {
     if (shouldPerformSearch) {
       const searchOptions = JSON.parse(optionsStringForEffect);
+      if (shouldRefreshEmptyHyperbeamChannelSearch) {
+        hyperbeamRefreshKeysRef.current.add(optionsStringForEffect);
+      }
       const searchSettings = fetchViewCount
         ? {
             fetch: {

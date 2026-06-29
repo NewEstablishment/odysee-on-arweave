@@ -8,10 +8,12 @@ import {
   VISIBILITY_TAGS,
 } from 'constants/tags';
 import { isHyperbeamFullMode } from 'util/hyperbeamMode';
+import { isURIValid } from 'util/lbryURI';
 
 const HYPERBEAM_UPLOAD_URL = '/$/api/hyperbeam-upload/v1/large';
 const HYPERBEAM_UPLOAD_INDEX_URL = '/$/api/hyperbeam-upload/v1/index';
 const HYPERBEAM_UPLOAD_LIST_URL = '/$/api/hyperbeam-upload/v1/list';
+const HYPERBEAM_UPLOAD_DELETE_URL = '/$/api/hyperbeam-upload/v1/delete';
 
 const UNSUPPORTED_EXACT_TAGS = new Set([
   ...MEMBERS_ONLY_TAGS,
@@ -64,27 +66,59 @@ export async function publishThroughHyperbeam(
   return publishResponse;
 }
 
-export async function listHyperbeamPublishes(): Promise<Array<StreamClaim>> {
+export async function listHyperbeamPublishes(
+  filters: { channelIds?: Array<string | null | undefined> } = {}
+): Promise<Array<StreamClaim>> {
   if (!isHyperbeamFullMode()) return [];
 
-  const response = await fetch(HYPERBEAM_UPLOAD_LIST_URL, {
+  try {
+    const channelIds = (filters.channelIds || []).filter(Boolean);
+    const response = await fetch(HYPERBEAM_UPLOAD_LIST_URL, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        ...(channelIds.length ? { 'x-odysee-channel-ids': channelIds.join(',') } : {}),
+      },
+      body: JSON.stringify({
+        channel_ids: channelIds,
+      }),
+    });
+    const json = await responseJson(response);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const result = resultPayload(json);
+    const items = Array.isArray(result?.items) ? result.items : [];
+    return items
+      .filter((item) => item && item.value_type === 'stream' && item.claim_id && item.permanent_url)
+      .map(normalizeIndexedHyperbeamClaim)
+      .filter((item) => item.permanent_url);
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteHyperbeamPublish(claimId: string) {
+  const response = await fetch(HYPERBEAM_UPLOAD_DELETE_URL, {
     method: 'POST',
     credentials: 'include',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
     },
-    body: '{}',
+    body: JSON.stringify({ claim_id: claimId }),
   });
   const json = await responseJson(response);
 
   if (!response.ok) {
-    return [];
+    throw new Error(errorMessage(json, response.status));
   }
 
-  const result = resultPayload(json);
-  const items = Array.isArray(result?.items) ? result.items : [];
-  return items.filter((item) => item && item.value_type === 'stream');
+  return resultPayload(json);
 }
 
 function normalizePublishResponse(
@@ -93,10 +127,10 @@ function normalizePublishResponse(
   file: Blob,
   myChannels?: Array<ChannelClaim> | null
 ): PublishResponse {
-  const uploadId = json?.id || json?.path || json?.read_path || `pending-${Date.now()}`;
-  const mediaUrl = mediaUrlFromResponse(json);
+  const uploadId = uploadIdFromResponse(json, file, publishPayload);
+  const mediaUrl = mediaUrlFromResponse(json, uploadId);
   const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
-  const publishedUri = publishedUriFromPayload(publishPayload, signingChannel);
+  const publishedUri = publishedUriFromPayload(publishPayload, uploadId, signingChannel);
   const sourceName = fileName(file, publishPayload);
   const sourceSize = String(file.size);
   const now = Math.floor(Date.now() / 1000);
@@ -104,6 +138,7 @@ function normalizePublishResponse(
   const claim: StreamClaim & {
     streaming_url?: string;
     download_url?: string;
+    channel_id?: string;
     hyperbeam_upload?: any;
     hyperbeam?: any;
   } = {
@@ -121,6 +156,7 @@ function normalizePublishResponse(
     value_type: 'stream',
     confirmations: 1,
     is_my_output: true,
+    channel_id: signingChannel?.claim_id,
     is_channel_signature_valid: Boolean(signingChannel),
     signing_channel: signingChannel || undefined,
     streaming_url: mediaUrl,
@@ -185,6 +221,59 @@ function resultPayload(json: any) {
   return parsed || json;
 }
 
+function normalizeIndexedHyperbeamClaim(claim: any) {
+  const permanentUrl = validIndexedUri(claim.permanent_url) ? claim.permanent_url : null;
+  const canonicalUrl = validIndexedUri(claim.canonical_url) ? claim.canonical_url : permanentUrl;
+  const shortUrl = validIndexedUri(claim.short_url) ? claim.short_url : permanentUrl || canonicalUrl;
+
+  return {
+    ...claim,
+    address: claim.address || '',
+    amount: claim.amount || '0',
+    claim_op: claim.claim_op || 'create',
+    confirmations: claim.confirmations ?? 1,
+    height: claim.height ?? 0,
+    is_my_output: claim.is_my_output ?? true,
+    nout: claim.nout ?? 0,
+    permanent_url: permanentUrl,
+    short_url: shortUrl,
+    canonical_url: canonicalUrl,
+    timestamp: claim.timestamp || claim.value?.release_time || claim.meta?.creation_timestamp || 0,
+    txid: claim.txid || claim.claim_id,
+    type: claim.type || 'claim',
+    meta: normalizeIndexedClaimMeta(claim.meta),
+    signing_channel: claim.signing_channel ? normalizeIndexedChannel(claim.signing_channel) : claim.signing_channel,
+  };
+}
+
+function validIndexedUri(uri: any) {
+  return typeof uri === 'string' && isURIValid(uri, false);
+}
+
+function normalizeIndexedChannel(channel: any) {
+  return {
+    ...channel,
+    type: channel.type || 'claim',
+    value_type: channel.value_type || 'channel',
+    meta: normalizeIndexedClaimMeta(channel.meta),
+  };
+}
+
+function normalizeIndexedClaimMeta(meta: any = {}) {
+  return {
+    activation_height: meta.activation_height ?? 0,
+    claims_in_channel: meta.claims_in_channel ?? 0,
+    creation_height: meta.creation_height ?? 0,
+    creation_timestamp: meta.creation_timestamp ?? 0,
+    effective_amount: meta.effective_amount ?? '0',
+    expiration_height: meta.expiration_height ?? 0,
+    is_controlling: meta.is_controlling ?? true,
+    reposted: meta.reposted ?? 0,
+    support_amount: meta.support_amount ?? '0',
+    ...meta,
+  };
+}
+
 function parseBody(json: any) {
   if (typeof json?.body !== 'string') return null;
 
@@ -201,19 +290,35 @@ function signingChannelFromPayload(publishPayload: PublishParams, myChannels?: A
     : undefined;
 }
 
-function publishedUriFromPayload(publishPayload: PublishParams, signingChannel?: ChannelClaim) {
-  if (!signingChannel)
-    return publishPayload.permanent_url || publishPayload.canonical_url || publishPayload.short_url || '';
+function publishedUriFromPayload(publishPayload: PublishParams, uploadId: string, signingChannel?: ChannelClaim) {
+  if (!signingChannel) {
+    const existingUri = publishPayload.permanent_url || publishPayload.canonical_url || publishPayload.short_url;
+    return existingUri ? uriWithStreamClaimId(existingUri, uploadId) : `lbry://${publishPayload.name}#${uploadId}`;
+  }
 
   const channelBaseUrl = signingChannel.short_url || signingChannel.canonical_url || signingChannel.permanent_url;
-  return channelBaseUrl ? `${channelBaseUrl}/${publishPayload.name}` : '';
+  return channelBaseUrl
+    ? `${channelBaseUrl}/${publishPayload.name}#${uploadId}`
+    : `lbry://${publishPayload.name}#${uploadId}`;
 }
 
-function mediaUrlFromResponse(json: any) {
+function uriWithStreamClaimId(uri: string, uploadId: string) {
+  const lastSegment = uri.split('/').pop() || uri;
+  return lastSegment.includes('#') ? uri : `${uri}#${uploadId}`;
+}
+
+function uploadIdFromResponse(json: any, file: Blob, publishPayload: PublishParams) {
+  const returnedId = json?.id || json?.path || json?.read_path;
+  if (returnedId) return String(returnedId).replace(/^\//, '');
+
+  const source = [publishPayload.name || fileName(file, publishPayload), file.size, file.type, Date.now()].join(':');
+  return `hyperbeam-local-${hashString(source)}`;
+}
+
+function mediaUrlFromResponse(json: any, uploadId: string) {
   const readPath = json?.read_path || json?.readPath || json?.url;
-  return readPath
-    ? `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(String(json.id || readPath).replace(/^\//, ''))}`
-    : '';
+  const id = String(json?.id || readPath || uploadId).replace(/^\//, '');
+  return id ? `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(id)}` : '';
 }
 
 function responseJson(response: Response) {
@@ -227,7 +332,20 @@ function responseJson(response: Response) {
 }
 
 function errorMessage(json: any, status: number) {
-  return json?.body || json?.details || json?.error || `HyperBEAM upload failed with ${status}`;
+  const message = json?.body || json?.details || json?.error;
+
+  if (typeof message === 'string' && /<!doctype html|<html[\s>]/i.test(message)) {
+    return `HyperBEAM upload failed with ${status}: received an HTML response instead of JSON`;
+  }
+
+  if (typeof message === 'string') return message;
+  if (message) {
+    try {
+      return JSON.stringify(message);
+    } catch {}
+  }
+
+  return `HyperBEAM upload failed with ${status}`;
 }
 
 function hasValue(value: any) {
@@ -256,4 +374,13 @@ function fileName(file: Blob, publishPayload: PublishParams) {
 
 function isBlob(value: any): value is Blob {
   return typeof Blob !== 'undefined' && value instanceof Blob;
+}
+
+function hashString(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
 }
