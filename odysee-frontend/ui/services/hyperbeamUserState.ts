@@ -58,6 +58,10 @@ async function callHyperbeamUserState(payload: Record<string, any>, token?: stri
 }
 
 async function proxiedUserStateCall(payload: Record<string, any>, authToken: string): Promise<Response> {
+  const direct = hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.userState, 'call&!', payload, authHeaders(authToken));
+  const directResponse = direct ? await direct.catch(() => null) : null;
+  if (directResponse) return directResponse;
+
   const proxyResponse = await fetch(`/$/api/hyperbeam-auth-device/v1/${HYPERBEAM_DEVICE.userState}/call`, {
     method: 'POST',
     credentials: 'include',
@@ -75,7 +79,6 @@ async function proxiedUserStateCall(payload: Record<string, any>, authToken: str
   const contentType = proxyResponse.headers.get('content-type') || '';
   if (proxyResponse.status !== 404 && !contentType.includes('text/html')) return proxyResponse;
 
-  const direct = hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.userState, 'call&!', payload, authHeaders(authToken));
   if (!direct) throw new Error('HyperBEAM user-state device is not configured.');
   return direct;
 }

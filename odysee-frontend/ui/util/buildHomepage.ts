@@ -2,7 +2,7 @@ import * as PAGES from 'constants/pages';
 import * as ICONS from 'constants/icons';
 import * as CS from 'constants/claim_search';
 import { toCapitalCase } from 'util/string';
-import { CUSTOM_HOMEPAGE } from 'config';
+import { CUSTOM_HOMEPAGE, HYPERBEAM_HOME_IMMUTABLE_IDS } from 'config';
 export type HomepageCat = {
   id?: string;
   name: string;
@@ -20,6 +20,7 @@ export type HomepageCat = {
   tags?: Array<string>;
   pinnedUrls?: Array<string>;
   pinnedClaimIds?: Array<string>;
+  immutableIds?: Array<string>;
   // takes precedence over pinnedUrls
   hideSort?: boolean;
   excludedChannelIds?: Array<string>;
@@ -155,10 +156,19 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
       searchLanguages: cat.searchLanguages,
       duration: cat.duration || undefined,
       excludeShorts: cat.exclude_shorts ? true : undefined,
+      immutableIds: cat.immutableIds,
       releaseTime: `>${getRelativeUnixTimestamp(cat.daysOfContent || 30, 'days', 'hour')}`,
     },
   };
 };
+
+function immutableHomeIds(): Array<string> {
+  return String(HYPERBEAM_HOME_IMMUTABLE_IDS || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
 export function GetLinksData(
   all: any, // HomepageData type?
   isSmallScreen: boolean,
@@ -357,6 +367,18 @@ export function GetLinksData(
       claimType: ['channel'],
     },
   };
+  const IMMUTABLE_STORE_IDS = immutableHomeIds();
+  const IMMUTABLE_STORE_ROW = {
+    id: 'HYPERBEAM_IMMUTABLE',
+    title: __('Store Picks'),
+    icon: ICONS.VIDEO,
+    hideSort: true,
+    options: {
+      pageSize: getPageSize(Math.min(Math.max(IMMUTABLE_STORE_IDS.length, 1), 12)),
+      claimType: ['stream', 'channel'],
+      immutableIds: IMMUTABLE_STORE_IDS,
+    },
+  };
   const LATEST_FROM_LBRY = {
     title: __('Latest From @lbry'),
     link: `/@lbry:3f`,
@@ -408,6 +430,10 @@ export function GetLinksData(
   }
 
   if (!CUSTOM_HOMEPAGE) {
+    if (IMMUTABLE_STORE_IDS.length) {
+      rowData.push(IMMUTABLE_STORE_ROW);
+    }
+
     if (!authenticated) {
       rowData.push(YOUTUBE_CREATOR_ROW);
     }

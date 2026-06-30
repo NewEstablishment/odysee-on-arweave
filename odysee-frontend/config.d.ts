@@ -42,6 +42,8 @@ interface Config {
   PLAYER_SERVER: string | undefined;
   HYPERBEAM_PLAYBACK_URL: string | undefined;
   HYPERBEAM_BASE_URL: string | undefined;
+  HYPERBEAM_HOME_IMMUTABLE_IDS: string | undefined;
+  HYPERBEAM_ALLOW_COMPATIBILITY_READS: boolean;
   SITE_TITLE: string | undefined;
   SITE_NAME: string | undefined;
   SITE_DESCRIPTION: string | undefined;

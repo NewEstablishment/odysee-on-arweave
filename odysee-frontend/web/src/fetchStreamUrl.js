@@ -1,6 +1,12 @@
 const Mime = require('mime-types');
 
-const { PLAYER_SERVER, HYPERBEAM_PLAYBACK_URL, URL: SITE_URL } = require('../../config.cjs');
+const {
+  PLAYER_SERVER,
+  HYPERBEAM_BASE_URL,
+  HYPERBEAM_PLAYBACK_URL,
+  ODYSEE_HYPERBEAM_NODE_API,
+  URL: SITE_URL,
+} = require('../../config.cjs');
 
 const { lbryProxy: Lbry } = require('../lbry');
 
@@ -33,7 +39,7 @@ async function fetchStreamUrl(claimName, claimId) {
     streamClaimId: claimId,
   });
 
-  const hyperbeamStreamUrl = await fetchHyperbeamStreamUrl(uri);
+  const hyperbeamStreamUrl = await fetchHyperbeamStreamUrl(uri, claimId);
   if (hyperbeamStreamUrl) {
     return hyperbeamStreamUrl;
   }
@@ -47,17 +53,34 @@ async function fetchStreamUrl(claimName, claimId) {
     });
 }
 
-async function fetchHyperbeamStreamUrl(uri) {
+async function fetchHyperbeamStreamUrl(uri, claimId) {
+  const storeUrl = buildHyperbeamStoreStreamUrl(uri, claimId);
+  const storeStreamUrl = storeUrl ? await fetchHyperbeamPlaybackPayloadUrl(storeUrl) : '';
+  if (storeStreamUrl) {
+    return storeStreamUrl;
+  }
+
   const requestUrl = buildHyperbeamPlaybackUrl(uri);
   if (!requestUrl) {
     return '';
   }
 
+  return fetchHyperbeamPlaybackPayloadUrl(requestUrl);
+}
+
+async function fetchHyperbeamPlaybackPayloadUrl(requestUrl) {
   try {
     const response = await fetch(requestUrl, { signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS) });
     if (response.ok) {
       const body = await response.json().catch(() => null);
-      return (body && (body.download_url || body['download-url'] || body.streaming_url || body['streaming-url'])) || '';
+      const payload = playbackPayload(body);
+      const mediaUrl = hyperbeamMediaUrlFromPayload(payload);
+      return (
+        mediaUrl ||
+        (payload &&
+          (payload.download_url || payload['download-url'] || payload.streaming_url || payload['streaming-url'])) ||
+        ''
+      );
     }
   } catch (error) {
     return '';
@@ -81,6 +104,51 @@ function buildHyperbeamPlaybackUrl(uri) {
   } catch (error) {
     return '';
   }
+}
+
+function buildHyperbeamStoreStreamUrl(uri, claimId) {
+  const node = String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  if (!node) return '';
+
+  const claimIdText = String(claimId || '');
+  if (/^[0-9a-f]{40}$/i.test(claimIdText)) {
+    return `${node}/odysee/stream-id/${encodeURIComponent(claimIdText)}`;
+  }
+
+  return `${node}/odysee/stream/${encodeURIComponent(uri)}`;
+}
+
+function playbackPayload(body) {
+  if (body && typeof body.body === 'string') {
+    try {
+      return playbackPayload(JSON.parse(body.body));
+    } catch (error) {
+      return body;
+    }
+  }
+
+  return (body && body.result) || body;
+}
+
+function hyperbeamMediaUrlFromPayload(payload) {
+  const node = String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  if (!node || !payload) return '';
+
+  const streamStorePath = payload['stream-store-path'] || payload.stream_store_path;
+  if (typeof streamStorePath === 'string') {
+    if (streamStorePath.startsWith('odysee/stream-id/')) {
+      return `${node}/odysee/media/stream-id/${encodeURIComponent(streamStorePath.slice('odysee/stream-id/'.length))}`;
+    }
+    if (streamStorePath.startsWith('odysee/stream/')) {
+      return `${node}/odysee/media/stream/${encodeURIComponent(streamStorePath.slice('odysee/stream/'.length))}`;
+    }
+  }
+
+  const claimId = payload.claim_id || payload['claim-id'];
+  if (claimId) return `${node}/odysee/media/stream-id/${encodeURIComponent(String(claimId))}`;
+
+  const sdHash = payload.sd_hash || payload['sd-hash'];
+  return sdHash ? `${node}/odysee/media/sd-hash/${encodeURIComponent(String(sdHash))}` : '';
 }
 
 function timeoutSignal(ms) {

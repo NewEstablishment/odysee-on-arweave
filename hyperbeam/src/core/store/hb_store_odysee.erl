@@ -18,6 +18,7 @@
 -define(LBRY_CLAIM_OUTPUT_COMMITMENT_DEVICE, <<"lbry-claim-output@1.0">>).
 -define(LBRY_TRANSACTION_COMMITMENT_DEVICE, <<"lbry-transaction@1.0">>).
 -define(SHA384_HEX_SIZE, 96).
+-define(DEFAULT_RANGE_SIZE, 1048576).
 -define(DEFAULT_BLOB_BASE_URLS, [
     <<"https://blobcache-eu.odycdn.com">>,
     <<"https://blobcache-us.odycdn.com">>,
@@ -64,15 +65,31 @@ link(_StoreOpts, _Req, _NodeOpts) ->
     {error, read_only}.
 
 %% @doc Read a public Odysee object by a stable store path.
-read(StoreOpts, #{ <<"read">> := Key }, NodeOpts) ->
+read(StoreOpts, Req = #{ <<"read">> := Key }, NodeOpts) ->
     Path = canonical_read_path(normalize_key(Key)),
-    case fixture(Path, StoreOpts, NodeOpts) of
-        {ok, Msg} ->
-            Type = infer_type(Path, Msg, NodeOpts),
-            commit_result(enrich_surface(Path, Type, Msg), Type, NodeOpts);
-        not_found ->
-            read_live(Path, StoreOpts, NodeOpts)
+    case compatibility_path_allowed(Path, StoreOpts, NodeOpts) of
+        false ->
+            {error, not_found};
+        true ->
+            case fixture(Path, StoreOpts, NodeOpts) of
+                {ok, Msg} ->
+                    Type = infer_type(Path, Msg, NodeOpts),
+                    commit_result(enrich_surface(Path, Type, Msg), Type, NodeOpts);
+                not_found ->
+                    read_live(Path, Req, StoreOpts, NodeOpts)
+            end
     end.
+
+read_live(<<"odysee/media/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
+    media_from_stream_path(<<"odysee/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
+read_live(<<"odysee/media/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
+    media_from_stream_path(<<"odysee/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
+read_live(<<"odysee/media/sd-hash/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
+    media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
+read_live(<<"odysee/media/descriptor/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
+    media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
+read_live(Path, _Req, StoreOpts, NodeOpts) ->
+    read_live(Path, StoreOpts, NodeOpts).
 
 read_live(<<"odysee/claim/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
@@ -181,24 +198,7 @@ read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
 read_live(<<"odysee/claim-proof/", Rest/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, TxID, NOut} ?= claim_proof_path(Rest),
-        {ok, Transaction} ?=
-            hb_ao:raw(
-                <<"odysee-claim@1.0">>,
-                <<"transaction">>,
-                #{},
-                #{ <<"txid">> => TxID },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        {ok, Proof} ?=
-            hb_ao:raw(
-                <<"odysee-claim-proof@1.0">>,
-                <<"verify">>,
-                Transaction,
-                #{ <<"txid">> => TxID, <<"nout">> => NOut },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        ok ?= require_valid_proof(Proof, NodeOpts),
-        commit_result(Proof, <<"claim-proof">>, NodeOpts)
+        read_native_outpoint(TxID, NOut, StoreOpts, NodeOpts)
     else
         Error -> Error
     end;
@@ -327,8 +327,273 @@ read_live(<<"odysee/blob/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     else
         Error -> Error
     end;
+read_live(<<"odysee/sha384/", Hash/binary>>, StoreOpts, NodeOpts) ->
+    read_sha384(Hash, StoreOpts, NodeOpts);
 read_live(_Path, _StoreOpts, _NodeOpts) ->
     {error, not_found}.
+
+compatibility_path_allowed(Path, StoreOpts, NodeOpts) ->
+    not compatibility_path(Path) orelse compatibility_routes_enabled(StoreOpts, NodeOpts).
+
+compatibility_path(<<"odysee/media/stream-id/", _/binary>>) -> true;
+compatibility_path(<<"odysee/media/stream/", _/binary>>) -> true;
+compatibility_path(<<"odysee/claim/", _/binary>>) -> true;
+compatibility_path(<<"odysee/claim-id/", _/binary>>) -> true;
+compatibility_path(<<"odysee/stream/", _/binary>>) -> true;
+compatibility_path(<<"odysee/stream-id/", _/binary>>) -> true;
+compatibility_path(<<"odysee/channel-id/", _/binary>>) -> true;
+compatibility_path(<<"odysee/channel/", _/binary>>) -> true;
+compatibility_path(<<"odysee/comment-id/", _/binary>>) -> true;
+compatibility_path(<<"odysee/comment/", _/binary>>) -> true;
+compatibility_path(<<"odysee/comment-reaction/", _/binary>>) -> true;
+compatibility_path(<<"odysee/file-view-count/", _/binary>>) -> true;
+compatibility_path(<<"odysee/file-reaction/", _/binary>>) -> true;
+compatibility_path(<<"odysee/subscription-count/", _/binary>>) -> true;
+compatibility_path(_Path) -> false.
+
+compatibility_routes_enabled(StoreOpts, NodeOpts) ->
+    case hb_maps:get(<<"odysee-compatibility-routes">>, StoreOpts, not_found, NodeOpts) of
+        not_found ->
+            bool_opt(hb_maps:get(<<"odysee-compatibility-routes">>, NodeOpts, true, NodeOpts), true);
+        Value ->
+            bool_opt(Value, true)
+    end.
+
+bool_opt(false, _Default) -> false;
+bool_opt(0, _Default) -> false;
+bool_opt(<<"false">>, _Default) -> false;
+bool_opt(<<"0">>, _Default) -> false;
+bool_opt("false", _Default) -> false;
+bool_opt("0", _Default) -> false;
+bool_opt(undefined, Default) -> Default;
+bool_opt(not_found, Default) -> Default;
+bool_opt(_Value, _Default) -> true.
+
+read_sha384(Hash, StoreOpts, NodeOpts) ->
+    DescPath = <<"odysee/descriptor/", Hash/binary>>,
+    BlobPath = <<"odysee/blob/", Hash/binary>>,
+    case fixture(DescPath, StoreOpts, NodeOpts) of
+        {ok, Desc} ->
+            commit_result(enrich_surface(DescPath, <<"stream-descriptor">>, Desc), <<"stream-descriptor">>, NodeOpts);
+        not_found ->
+            case fixture(BlobPath, StoreOpts, NodeOpts) of
+                {ok, Blob} ->
+                    commit_result(enrich_surface(BlobPath, <<"blob">>, Blob), <<"blob">>, NodeOpts);
+                not_found ->
+                    case read(StoreOpts, #{ <<"read">> => DescPath }, NodeOpts) of
+                        {ok, _} = OK -> OK;
+                        _ -> read(StoreOpts, #{ <<"read">> => BlobPath }, NodeOpts)
+                    end
+            end
+    end.
+
+read_native_outpoint(TxID, NOut, StoreOpts, NodeOpts) ->
+    Outpoint = <<TxID/binary, ":", (integer_to_binary(NOut))/binary>>,
+    Kinds = [
+        maps:put(<<"kind">>, <<"stream">>, StoreOpts),
+        maps:put(<<"kind">>, <<"channel">>, StoreOpts),
+        maps:remove(<<"kind">>, StoreOpts)
+    ],
+    read_native_outpoint(TxID, NOut, Outpoint, Kinds, StoreOpts, NodeOpts).
+
+read_native_outpoint(TxID, NOut, Outpoint, [KindStore | Rest], StoreOpts, NodeOpts) ->
+    case hb_store_lbry_claim_output:read(KindStore, #{ <<"read">> => Outpoint }, NodeOpts) of
+        {ok, _Msg} = OK -> OK;
+        _ -> read_native_outpoint(TxID, NOut, Outpoint, Rest, StoreOpts, NodeOpts)
+    end;
+read_native_outpoint(TxID, NOut, _Outpoint, [], StoreOpts, NodeOpts) ->
+    read_verified_claim_proof(TxID, NOut, StoreOpts, NodeOpts).
+
+read_verified_claim_proof(TxID, NOut, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Transaction} ?=
+            hb_ao:raw(
+                <<"odysee-claim@1.0">>,
+                <<"transaction">>,
+                #{},
+                #{ <<"txid">> => TxID },
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        {ok, Proof} ?=
+            hb_ao:raw(
+                <<"odysee-claim-proof@1.0">>,
+                <<"verify">>,
+                Transaction,
+                #{ <<"txid">> => TxID, <<"nout">> => NOut },
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        ok ?= require_valid_proof(Proof, NodeOpts),
+        commit_result(Proof, <<"claim-proof">>, NodeOpts)
+    end.
+
+media_from_stream_path(Path, Req, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Stream} ?= read(StoreOpts, #{ <<"read">> => Path }, NodeOpts),
+        {ok, Source} ?= stream_media_source(Stream, NodeOpts),
+        media_response(Source, Req, store_node_opts(StoreOpts, NodeOpts))
+    end.
+
+stream_media_source(Stream, Opts) ->
+    maybe
+        SDHash = first_present([<<"sd-hash">>, <<"sd_hash">>], Stream, Opts),
+        true ?= is_binary(SDHash),
+        Source0 = #{
+            <<"sd-hash">> => SDHash,
+            <<"byte-size">> =>
+                integer_or_undefined(
+                    first_present(
+                        [
+                            <<"source-size">>,
+                            <<"source_size">>,
+                            <<"byte-size">>,
+                            <<"media-size">>
+                        ],
+                        Stream,
+                        Opts
+                    )
+                ),
+            <<"content-type">> =>
+                first_present([<<"media-type">>, <<"media_type">>, <<"content-type">>], Stream, Opts),
+            <<"claim-id">> => first_present([<<"claim-id">>, <<"claim_id">>], Stream, Opts),
+            <<"filename">> => first_present([<<"source-name">>, <<"source_name">>, <<"filename">>], Stream, Opts)
+        },
+        {ok, maps:filter(fun(_Key, Value) -> present_optional(Value) end, Source0)}
+    else
+        false -> {error, missing_sd_hash};
+        not_found -> {error, missing_sd_hash}
+    end.
+
+media_response(Source, Req, Opts) ->
+    maybe
+        {ok, Start, End} ?= request_range(Req, Opts),
+        {ok, BoundedStart, BoundedEnd} ?= bounded_range(Source, Start, End),
+        SDHash = hb_maps:get(<<"sd-hash">>, Source, Opts),
+        {ok, Result} ?= hb_lbry_bridge:stream_range(SDHash, BoundedStart, BoundedEnd, Opts),
+        Body = hb_maps:get(<<"bytes">>, Result, Opts),
+        ActualEnd = hb_maps:get(<<"end">>, Result, Opts),
+        Total = hb_maps:get(<<"byte-size">>, Source, undefined, Opts),
+        {ok,
+            maps:merge(
+                #{
+                    <<"status">> => 206,
+                    <<"content-type">> =>
+                        hb_maps:get(
+                            <<"content-type">>,
+                            Source,
+                            <<"application/octet-stream">>,
+                            Opts
+                        ),
+                    <<"content-length">> => byte_size(Body),
+                    <<"accept-ranges">> => <<"bytes">>,
+                    <<"content-range">> => content_range(BoundedStart, ActualEnd, Total),
+                    <<"sd-hash">> => hb_util:to_lower(SDHash),
+                    <<"start">> => BoundedStart,
+                    <<"end">> => ActualEnd,
+                    <<"requested-end">> => hb_maps:get(<<"requested-end">>, Result, Opts),
+                    <<"body">> => Body
+                },
+                media_metadata(Source, Total)
+            )}
+    end.
+
+request_range(Req, Opts) ->
+    case {
+        integer_or_undefined(hb_maps:get(<<"start">>, Req, undefined, Opts)),
+        integer_or_undefined(hb_maps:get(<<"end">>, Req, undefined, Opts))
+    } of
+        {Start, End} when is_integer(Start), is_integer(End), End >= Start ->
+            {ok, Start, End};
+        _ ->
+            case first_present([<<"range">>, <<"Range">>], Req, Opts) of
+                Range when is_binary(Range) -> parse_range(Range, Opts);
+                _ -> {ok, 0, default_range_size(Opts) - 1}
+            end
+    end.
+
+parse_range(<<"bytes=", Spec/binary>>, Opts) ->
+    case binary:split(Spec, <<"-">>) of
+        [StartBin, EndBin] when byte_size(StartBin) > 0 ->
+            maybe
+                {ok, Start} ?= non_negative_integer(StartBin),
+                {ok, End} ?= range_end(Start, EndBin, Opts),
+                true ?= End >= Start orelse {error, invalid_range},
+                {ok, Start, End}
+            end;
+        _ ->
+            {error, invalid_range}
+    end;
+parse_range(_Range, _Opts) ->
+    {error, invalid_range}.
+
+range_end(Start, <<>>, Opts) ->
+    {ok, Start + default_range_size(Opts) - 1};
+range_end(_Start, EndBin, _Opts) ->
+    non_negative_integer(EndBin).
+
+default_range_size(Opts) ->
+    hb_maps:get(<<"odysee-default-range-size">>, Opts, ?DEFAULT_RANGE_SIZE, Opts).
+
+bounded_range(Source, Start, End) ->
+    case hb_maps:get(<<"byte-size">>, Source, undefined, #{}) of
+        undefined ->
+            {ok, Start, End};
+        Size when Start < Size ->
+            {ok, Start, min(End, Size - 1)};
+        _ ->
+            {error, invalid_range}
+    end.
+
+content_range(Start, End, undefined) ->
+    content_range(Start, End, <<"*">>);
+content_range(Start, End, Total) when is_integer(Total) ->
+    content_range(Start, End, integer_to_binary(Total));
+content_range(Start, End, Total) ->
+    iolist_to_binary([
+        <<"bytes ">>,
+        integer_to_binary(Start),
+        <<"-">>,
+        integer_to_binary(End),
+        <<"/">>,
+        Total
+    ]).
+
+media_metadata(Source, Total) ->
+    maps:from_list([
+        {Key, Value}
+     ||
+        {Key, Value} <- [
+            {<<"byte-size">>, Total},
+            {<<"claim-id">>, hb_maps:get(<<"claim-id">>, Source, undefined, #{})},
+            {<<"filename">>, hb_maps:get(<<"filename">>, Source, undefined, #{})}
+        ],
+        present_optional(Value)
+    ]).
+
+present_optional(undefined) ->
+    false;
+present_optional(not_found) ->
+    false;
+present_optional(_Value) ->
+    true.
+
+first_present([], _Msg, _Opts) ->
+    not_found;
+first_present([Key | Rest], Msg, Opts) ->
+    case hb_maps:get(Key, Msg, not_found, Opts) of
+        not_found -> first_present(Rest, Msg, Opts);
+        Value -> Value
+    end.
+
+integer_or_undefined(Value) when is_integer(Value) ->
+    Value;
+integer_or_undefined(Value) when is_binary(Value) ->
+    try binary_to_integer(Value) of
+        Int -> Int
+    catch
+        _:_ -> undefined
+    end;
+integer_or_undefined(_Value) ->
+    undefined.
 
 fixture(Path, StoreOpts, Opts) ->
     Fixtures = hb_maps:get(<<"fixtures">>, StoreOpts, #{}, Opts),
@@ -799,12 +1064,10 @@ classify_native_path(<<TxID:64/binary, ":", NOut/binary>>) ->
     end;
 classify_native_path(Path) ->
     case
-        {valid_hex_size(Path, 48), valid_hex_size(Path, 32),
-            valid_hex_size(Path, 20)}
+        {valid_hex_size(Path, 48), valid_hex_size(Path, 32)}
     of
-        {true, _, _} -> {ok, <<"odysee/blob/", Path/binary>>};
-        {_, true, _} -> {ok, <<"odysee/transaction/", Path/binary>>};
-        {_, _, true} -> {ok, <<"odysee/claim-id/", Path/binary>>};
+        {true, _} -> {ok, <<"odysee/sha384/", Path/binary>>};
+        {_, true} -> {ok, <<"odysee/transaction/", Path/binary>>};
         _ -> not_found
     end.
 
@@ -857,6 +1120,23 @@ bare_sha384_read_returns_native_blob_test() ->
         hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
     ).
 
+bare_sha384_read_returns_native_descriptor_when_hash_is_sd_hash_test() ->
+    {RawDescriptor, SDHash, _BlobHash, _BlobBytes} = media_sample_descriptor(),
+    {ok, Descriptor} = hb_lbry_commitment:descriptor_message(RawDescriptor, SDHash),
+    Store = #{
+        <<"store-module">> => ?MODULE,
+        <<"fixtures">> => #{
+            <<"odysee/descriptor/", SDHash/binary>> => Descriptor
+        }
+    },
+    {ok, Msg} = read(Store, #{ <<"read">> => SDHash }, #{}),
+    ?assertEqual(<<"lbry-stream-descriptor@1.0">>, maps:get(<<"device">>, Msg)),
+    ?assertEqual(SDHash, maps:get(<<"sd-hash">>, Msg)),
+    ?assertEqual(
+        true,
+        hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
+    ).
+
 direct_sha384_get_returns_native_blob_test() ->
     Bytes = <<"encrypted blob payload">>,
     Hash = hb_lbry_stream_descriptor:blob_hash(Bytes),
@@ -879,14 +1159,14 @@ direct_sha384_get_returns_native_blob_test() ->
     ?assertEqual(Hash, maps:get(<<"blob-hash">>, Msg)),
     ?assertEqual(Bytes, maps:get(<<"data">>, Msg)).
 
-bare_claim_id_read_returns_committed_claim_test() ->
+explicit_claim_id_read_returns_committed_claim_test() ->
     ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
     Store = claim_id_store(ClaimID),
     ?assertEqual(
-        <<"odysee/claim-id/", ClaimID/binary>>,
+        ClaimID,
         canonical_read_path(ClaimID)
     ),
-    {ok, Msg} = read(Store, #{ <<"read">> => ClaimID }, #{}),
+    {ok, Msg} = read(Store, #{ <<"read">> => <<"odysee/claim-id/", ClaimID/binary>> }, #{}),
     ?assertEqual(<<"odysee-claim@1.0">>, maps:get(<<"device">>, Msg)),
     ?assertEqual(ClaimID, maps:get(<<"claim-id">>, Msg)),
     ?assertEqual(
@@ -894,31 +1174,98 @@ bare_claim_id_read_returns_committed_claim_test() ->
         hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
     ).
 
-direct_claim_id_get_returns_committed_claim_test() ->
+bare_claim_id_get_is_not_a_store_read_test() ->
     ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
     Store = claim_id_store(ClaimID),
-    {ok, Msg} =
+    ?assertMatch(
+        {error, _},
         hb_ao:resolve(
             #{ <<"path">> => <<"/", ClaimID/binary>> },
             #{ <<"store">> => [Store] }
+        )
+    ).
+
+compatibility_store_routes_can_be_disabled_test() ->
+    ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+    Store = (claim_id_store(ClaimID))#{ <<"odysee-compatibility-routes">> => false },
+    ?assertMatch(
+        {error, not_found},
+        read(Store, #{ <<"read">> => <<"odysee/claim-id/", ClaimID/binary>> }, #{})
+    ).
+
+direct_nested_stream_id_get_returns_committed_stream_test() ->
+    ClaimID = <<"stream-1">>,
+    Store = stream_id_store(ClaimID),
+    {ok, Msg} =
+        hb_ao:resolve(
+            #{ <<"path">> => <<"/odysee/stream-id/", ClaimID/binary>> },
+            #{ <<"store">> => [Store] }
         ),
-    ?assertEqual(<<"odysee-claim@1.0">>, maps:get(<<"device">>, Msg)),
+    ?assertEqual(<<"odysee-stream@1.0">>, maps:get(<<"device">>, Msg)),
     ?assertEqual(ClaimID, maps:get(<<"claim-id">>, Msg)).
 
-direct_claim_id_http_get_returns_committed_claim_test() ->
+direct_nested_stream_id_http_get_returns_committed_stream_test() ->
     application:ensure_all_started(inets),
-    ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
-    Store = claim_id_store(ClaimID),
+    ClaimID = <<"stream-1">>,
+    Store = stream_id_store(ClaimID),
     Node = hb_http_server:start_node(#{ <<"store">> => [Store] }),
-    URL = binary_to_list(<<Node/binary, ClaimID/binary>>),
+    URL = binary_to_list(<<Node/binary, "odysee/stream-id/", ClaimID/binary>>),
     {ok, {{_, 200, _}, Headers, _Body}} =
         httpc:request(get, {URL, []}, [], [{body_format, binary}]),
     SignatureInput = http_header(<<"signature-input">>, Headers),
     ?assertNotEqual(not_found, SignatureInput),
     ?assertNotEqual(
         nomatch,
-        binary:match(SignatureInput, <<"alg=\"odysee@1.0/claim\"">>)
+        binary:match(SignatureInput, <<"alg=\"odysee@1.0/stream\"">>)
     ).
+
+store_media_stream_id_read_returns_range_test() ->
+    {RawDescriptor, SDHash, BlobHash, BlobBytes} = media_sample_descriptor(),
+    {ok, Server, Handle} = media_mock_server(RawDescriptor, SDHash, BlobHash, BlobBytes),
+    try
+        Store = stream_media_store(<<"stream-1">>, SDHash, Server),
+        {ok, Msg} =
+            read(
+                Store,
+                #{
+                    <<"read">> => <<"odysee/media/stream-id/stream-1">>,
+                    <<"range">> => <<"bytes=0-5">>
+                },
+                #{ <<"http-client">> => httpc }
+            ),
+        ?assertEqual(206, maps:get(<<"status">>, Msg)),
+        ?assertEqual(<<"video/mp4">>, maps:get(<<"content-type">>, Msg)),
+        ?assertEqual(<<"bytes 0-5/12">>, maps:get(<<"content-range">>, Msg)),
+        ?assertEqual(<<"bridge">>, maps:get(<<"body">>, Msg))
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+direct_media_stream_id_http_get_returns_range_test() ->
+    application:ensure_all_started(inets),
+    {RawDescriptor, SDHash, BlobHash, BlobBytes} = media_sample_descriptor(),
+    {ok, BlobServer, BlobHandle} =
+        media_mock_server(RawDescriptor, SDHash, BlobHash, BlobBytes),
+    try
+        Store = stream_media_store(<<"stream-1">>, SDHash, BlobServer),
+        Node = hb_http_server:start_node(#{
+            <<"store">> => [Store],
+            <<"http-client">> => httpc
+        }),
+        URL = binary_to_list(<<Node/binary, "odysee/media/stream-id/stream-1">>),
+        {ok, {{_, 206, _}, Headers, Body}} =
+            httpc:request(
+                get,
+                {URL, [{"range", "bytes=0-5"}]},
+                [],
+                [{body_format, binary}]
+            ),
+        ?assertEqual(<<"bridge">>, Body),
+        ?assertEqual(<<"bytes 0-5/12">>, http_header(<<"content-range">>, Headers)),
+        ?assertEqual(<<"video/mp4">>, http_header(<<"content-type">>, Headers))
+    after
+        hb_mock_server:stop(BlobHandle)
+    end.
 
 claim_id_store(ClaimID) ->
     Claim = #{
@@ -934,6 +1281,102 @@ claim_id_store(ClaimID) ->
             <<"odysee/claim-id/", ClaimID/binary>> => Claim
         }
     }.
+
+stream_id_store(ClaimID) ->
+    Stream = #{
+        <<"device">> => <<"odysee-stream@1.0">>,
+        <<"claim-id">> => ClaimID,
+        <<"claim-name">> => <<"sample">>,
+        <<"stream-store-path">> => <<"odysee/stream-id/", ClaimID/binary>>,
+        <<"media-type">> => <<"video/mp4">>,
+        <<"sd-hash">> =>
+            <<"6ee8f762a2eedbd2b5eeade82ca4d0a6287f55db4195563cc52fc004701b7d55edcfad277a5141084bdf5fca3adb403a">>,
+        <<"source-size">> => 1234
+    },
+    #{
+        <<"store-module">> => ?MODULE,
+        <<"fixtures">> => #{
+            <<"odysee/stream-id/", ClaimID/binary>> => Stream
+        }
+    }.
+
+stream_media_store(ClaimID, SDHash, BlobServer) ->
+    Stream = #{
+        <<"device">> => <<"odysee-stream@1.0">>,
+        <<"claim-id">> => ClaimID,
+        <<"claim-name">> => <<"sample">>,
+        <<"stream-store-path">> => <<"odysee/stream-id/", ClaimID/binary>>,
+        <<"media-type">> => <<"video/mp4">>,
+        <<"sd-hash">> => SDHash,
+        <<"source-size">> => 12
+    },
+    #{
+        <<"store-module">> => ?MODULE,
+        <<"lbry-blob-store">> => #{ <<"node">> => BlobServer },
+        <<"fixtures">> => #{
+            <<"odysee/stream-id/", ClaimID/binary>> => Stream
+        }
+    }.
+
+media_mock_server(RawDescriptor, SDHash, BlobHash, BlobBytes) ->
+    hb_mock_server:start([
+        {"/blob", blob, fun(Req) ->
+            case maps:get(<<"qs">>, Req) of
+                <<"hash=", SDHash/binary>> -> {200, RawDescriptor};
+                <<"hash=", BlobHash/binary>> -> {200, BlobBytes}
+            end
+        end}
+    ]).
+
+lbry_proxy_server(TxHex) ->
+    Response =
+        hb_json:encode(#{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"result">> => #{ <<"hex">> => TxHex },
+            <<"id">> => 1
+        }),
+    hb_mock_server:start([{"/api/v1/proxy", proxy, {200, Response}}]).
+
+media_sample_descriptor() ->
+    Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,
+    IV = <<16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31>>,
+    Plaintext = <<"bridge smoke">>,
+    BlobBytes =
+        crypto:crypto_one_time(
+            aes_128_cbc,
+            Key,
+            IV,
+            media_pkcs7_pad(Plaintext),
+            true
+        ),
+    BlobHash = hb_lbry_stream_descriptor:blob_hash(BlobBytes),
+    RawDescriptor =
+        hb_json:encode(#{
+            <<"stream_type">> => <<"lbryfile">>,
+            <<"stream_name">> => hb_util:to_hex(<<"sample.mp4">>),
+            <<"key">> => hb_util:to_hex(Key),
+            <<"suggested_file_name">> => hb_util:to_hex(<<"sample.mp4">>),
+            <<"stream_hash">> => hb_lbry_stream_descriptor:blob_hash(<<"stream">>),
+            <<"blobs">> => [
+                #{
+                    <<"length">> => byte_size(BlobBytes),
+                    <<"blob_num">> => 0,
+                    <<"iv">> => hb_util:to_hex(IV),
+                    <<"blob_hash">> => BlobHash
+                },
+                #{
+                    <<"length">> => 0,
+                    <<"blob_num">> => 1,
+                    <<"iv">> => hb_util:to_hex(<<0:128>>)
+                }
+            ]
+        }),
+    DescriptorHash = hb_lbry_stream_descriptor:blob_hash(RawDescriptor),
+    {RawDescriptor, DescriptorHash, BlobHash, BlobBytes}.
+
+media_pkcs7_pad(Plaintext) ->
+    PadLen = 16 - (byte_size(Plaintext) rem 16),
+    <<Plaintext/binary, (binary:copy(<<PadLen>>, PadLen))/binary>>.
 
 direct_sha384_http_get_exposes_native_signature_input_test() ->
     application:ensure_all_started(inets),
@@ -1062,6 +1505,30 @@ direct_outpoint_get_returns_native_claim_output_test() ->
         true,
         hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
     ).
+
+direct_outpoint_read_prefers_native_stream_claim_test() ->
+    application:ensure_all_started(inets),
+    Raw = binary:decode_hex(hb_lbry_tx:task0_tx_hex()),
+    TxID = hb_lbry_tx:txid(Raw),
+    Outpoint = <<TxID/binary, ":0">>,
+    {ok, Expected} = hb_lbry_commitment:stream_claim_message(Raw, 0),
+    SDHash = maps:get(<<"sd-hash">>, Expected),
+    {ok, Server, Handle} = lbry_proxy_server(hb_lbry_tx:task0_tx_hex()),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server
+        },
+        {ok, Msg} = read(Store, #{ <<"read">> => Outpoint }, #{ <<"http-client">> => httpc }),
+        ?assertEqual(<<"lbry-stream@1.0">>, maps:get(<<"device">>, Msg)),
+        ?assertEqual(SDHash, maps:get(<<"sd-hash">>, Msg)),
+        ?assertEqual(
+            true,
+            hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
 
 http_header(Name, Headers) ->
     LowerName = hb_util:bin(string:lowercase(hb_util:bin(Name))),

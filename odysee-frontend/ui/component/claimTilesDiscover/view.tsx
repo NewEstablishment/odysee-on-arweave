@@ -58,6 +58,7 @@ type Props = {
   tags?: Array<string>;
   notTags?: Array<string>;
   claimIds?: Array<string>;
+  immutableIds?: Array<string>;
   channelIds?: Array<string>;
   pageSize?: number;
   orderBy?: Array<string>;
@@ -133,6 +134,7 @@ function resolveSearchOptions(resolveProps: any) {
     limitClaimsPerChannel,
     timestamp,
     claimIds,
+    immutableIds,
     duration,
     contentAspectRatio,
     excludeShorts,
@@ -227,6 +229,10 @@ function resolveSearchOptions(resolveProps: any) {
 
   if (claimIds) {
     options.claim_ids = claimIds;
+  }
+
+  if (immutableIds) {
+    options.immutable_ids = immutableIds;
   }
 
   if (hideShorts || excludeShorts) {
@@ -479,7 +485,7 @@ function areEqual(prev: Props, next: Props) {
     }
   }
 
-  const ARRAY_KEYS = ['prefixUris', 'channelIds'];
+  const ARRAY_KEYS = ['prefixUris', 'channelIds', 'immutableIds'];
 
   for (let i = 0; i < ARRAY_KEYS.length; ++i) {
     const key = ARRAY_KEYS[i];

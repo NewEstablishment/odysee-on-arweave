@@ -313,7 +313,7 @@ function HomePage() {
           }}
           forceShowReposts={id !== 'FOLLOWING'}
           loading={id === 'FOLLOWING' ? fetchingActiveLivestreams : false}
-          fetchViewCount
+          fetchViewCount={!(Array.isArray(options.immutableIds) && options.immutableIds.length)}
           sectionTitle={title}
         />
       );

@@ -511,13 +511,11 @@ raw_default_message() ->
                         <<"device">> => <<"auth-hook@1.0">>,
                         <<"path">> => <<"request">>,
                         <<"when">> => #{
-                            <<"keys">> => [<<"authorization">>, <<"!">>]
+                            <<"keys">> => [<<"!">>]
                         },
                         <<"secret-provider">> =>
                             #{
-                                <<"device">> => <<"odysee-auth@1.0">>,
-                                <<"access-control">> =>
-                                    #{ <<"device">> => <<"odysee-auth@1.0">> }
+                                <<"device">> => <<"cookie@1.0">>
                             }
                     },
                     #{
@@ -969,17 +967,14 @@ global_get_test() ->
     ?assertEqual(5, ?MODULE:get(log_max_files)),
     ?assertEqual(52428800, ?MODULE:get(log_max_bytes)).
 
-default_request_auth_hook_uses_odysee_auth_test() ->
+default_request_auth_hook_uses_cookie_auth_test() ->
     Default = default_message(),
     [_, AuthHook | _] = maps:get(<<"request">>, maps:get(<<"on">>, Default)),
     Provider = maps:get(<<"secret-provider">>, AuthHook),
     ?assertEqual(<<"auth-hook@1.0">>, maps:get(<<"device">>, AuthHook)),
-    ?assertEqual([<<"authorization">>, <<"!">>], maps:get(<<"keys">>, maps:get(<<"when">>, AuthHook))),
-    ?assertEqual(<<"odysee-auth@1.0">>, maps:get(<<"device">>, Provider)),
-    ?assertEqual(
-        <<"odysee-auth@1.0">>,
-        maps:get(<<"device">>, maps:get(<<"access-control">>, Provider))
-    ).
+    ?assertEqual([<<"!">>], maps:get(<<"keys">>, maps:get(<<"when">>, AuthHook))),
+    ?assertEqual(<<"cookie@1.0">>, maps:get(<<"device">>, Provider)),
+    ?assertEqual(false, maps:is_key(<<"access-control">>, Provider)).
 
 local_get_test() ->
     Local = #{ <<"only">> => local },

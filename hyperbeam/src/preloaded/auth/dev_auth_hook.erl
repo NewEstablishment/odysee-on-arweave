@@ -139,6 +139,7 @@ request(Base, HookReq, Opts) ->
                 SignedReq,
                 NewOpts
             ),
+        ok ?= maybe_store_signed([SignedReq | MessageSequence], NewOpts),
         ?event(auth_hook_processed_messages),
         % Call the key provider to finalize the response
         {ok, FinalSequence} ?=
@@ -361,6 +362,25 @@ maybe_sign_messages(Provider, Key, [Msg | Rest], Opts) when is_map(Msg) ->
     end;
 maybe_sign_messages(Provider, Key, [Msg | Rest], Opts) ->
     [Msg | maybe_sign_messages(Provider, Key, Rest, Opts)].
+
+maybe_store_signed(Messages, Opts) ->
+    case hb_opts:get(store_all_signed, false, Opts) of
+        true -> store_signed(Messages, Opts);
+        false -> ok
+    end.
+
+store_signed([], _Opts) ->
+    ok;
+store_signed([Msg | Rest], Opts) when is_map(Msg) ->
+    case hb_message:signers(Msg, Opts) of
+        [] ->
+            store_signed(Rest, Opts);
+        _ ->
+            {ok, _} = hb_cache:write(Msg, Opts),
+            store_signed(Rest, Opts)
+    end;
+store_signed([_ | Rest], Opts) ->
+    store_signed(Rest, Opts).
 
 %% @doc Finalize the response by adding authentication state
 finalize(KeyProvider, SignedReq, MessageSequence, Opts) ->
@@ -702,6 +722,53 @@ when_test() ->
             ServerWallet
         )
     ).
+
+cookie_hook_upload_store_get_by_id_test() ->
+    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+    Store =
+        #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> => <<"_build/auth-hook-TEST/upload-", Timestamp/binary>>
+        },
+    hb_store:reset(Store),
+    Opts = #{ <<"store">> => [Store] },
+    Node =
+        hb_http_server:start_node(
+            Opts#{
+                <<"store-all-signed">> => true,
+                <<"on">> => #{
+                    <<"request">> => #{
+                        <<"device">> => <<"auth-hook@1.0">>,
+                        <<"path">> => <<"request">>,
+                        <<"when">> => #{ <<"keys">> => [<<"!">>] },
+                        <<"secret-provider">> => #{ <<"device">> => <<"cookie@1.0">> }
+                    }
+                }
+            }
+        ),
+    Body = <<"hello-sam">>,
+    {ok, UploadRes} =
+        hb_http:post(
+            Node,
+            #{
+                <<"path">> => <<"/id?!=true">>,
+                <<"body">> => Body,
+                <<"accept">> => <<"application/json">>
+            },
+            #{}
+    ),
+    ID = stored_id(UploadRes),
+    {ok, Stored} = hb_cache:read(ID, Opts),
+    ?assertEqual(Body, hb_maps:get(<<"body">>, hb_cache:ensure_all_loaded(Stored, Opts), not_found, Opts)),
+    ?assertMatch(
+        {ok, #{ <<"body">> := Body }},
+        hb_http:get(Node, <<"/", ID/binary>>, #{ <<"accept">> => <<"application/json">> })
+    ).
+
+stored_id(#{ <<"body">> := ID }) when is_binary(ID) ->
+    ID;
+stored_id(Res) when is_binary(Res) ->
+    stored_id(hb_json:decode(Res)).
 
 %% @doc The cookie hook test(s) call `GET /commitments', which returns the 
 %% commitments found on the client request during execution on the server.

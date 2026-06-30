@@ -74,6 +74,7 @@ NodeARemoteStore = #{
 NodeA = hb_http_server:start_node(#{
     <<"port">> => NodeAPort,
     <<"store">> => [NodeALocalStore, NodeARemoteStore],
+    <<"cache-allow-signed-writes">> => true,
     <<"force-signed">> => false
 }),
 
@@ -83,9 +84,9 @@ io:format("  Node B odysee source: ~s~n", [NodeB]),
 io:format("  Verification: Node A verifies Node B native commitments before caching.~n", []),
 io:format("~nFrontend env:~n", []),
 io:format("  HYPERBEAM_BASE_URL=~s~n", [NodeA]),
-io:format("  HYPERBEAM_PLAYBACK_URL=~s~s~n", [NodeA, <<"~odysee-stream@1.0/playback?mode=bytes">>]),
 io:format("~nRemote-store check:~n", []),
-io:format("  curl -sS -H 'accept: application/json' '~s~s?read=odysee/stream-id/346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169' | jq .~n", [NodeA, <<"~cache@1.0/read">>]),
+io:format("  curl -sS -H 'accept: application/json' '~sodysee/stream-id/346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169' | jq .~n", [NodeA]),
+io:format("  curl -sS -H 'range: bytes=0-1048575' '~sodysee/media/stream-id/346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169' >/tmp/hb-media-range.bin~n", [NodeA]),
 io:format("~nStore-native direct ID reads:~n", []),
 io:format("  curl -sS -H 'accept: application/json' '~s<descriptor-sd-hash>' | jq .~n", [NodeA]),
 io:format("  curl -sS -H 'accept: application/json' '~s<blob-sha384>' | jq .~n", [NodeA]),

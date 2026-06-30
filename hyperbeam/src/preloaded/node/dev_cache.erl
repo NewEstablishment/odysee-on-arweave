@@ -213,7 +213,8 @@ is_trusted_writer(Req, Opts) ->
     CacheWriters = hb_opts:get(cache_writers, [], Opts),
     ?event(dev_cache, {is_trusted_writer, {cache_writers, CacheWriters}}),
     AnyTrusted = lists:any(fun(Signer) -> lists:member(Signer, CacheWriters) end, Signers),
-    case AnyTrusted of
+    SignedWriteAllowed = signed_write_allowed(Req, Opts, Signers),
+    case AnyTrusted orelse SignedWriteAllowed of
         true ->
             ?event(dev_cache, {is_trusted_writer, {trusted, true}}),
             true;
@@ -221,6 +222,32 @@ is_trusted_writer(Req, Opts) ->
             ?event(dev_cache, {is_trusted_writer, {trusted, false}}),
             false
     end.
+
+signed_write_allowed(_Req, _Opts, []) ->
+    false;
+signed_write_allowed(Req, Opts, _Signers) ->
+    truthy(hb_opts:get(cache_allow_signed_writes, false, Opts))
+        andalso (
+            hb_message:verify(Req, signers, Opts)
+            orelse hb_message:verify(hb_maps:without(auth_hook_ignored_keys(), Req, Opts), signers, Opts)
+        ).
+
+auth_hook_ignored_keys() ->
+    [
+        <<"secret">>,
+        <<"cookie">>,
+        <<"set-cookie">>,
+        <<"path">>,
+        <<"method">>,
+        <<"authorization">>,
+        <<"!">>
+    ].
+
+truthy(true) -> true;
+truthy(<<"true">>) -> true;
+truthy(<<"1">>) -> true;
+truthy(1) -> true;
+truthy(_) -> false.
 
 %%%--------------------------------------------------------------------
 %%% Test Helpers
@@ -303,3 +330,47 @@ cache_write_binary_test() ->
     ?assertEqual(TestData, ReadData),
     ?event(dev_cache, {cache_api_test}),
     ok.
+
+cache_write_signed_request_requires_opt_in_test() ->
+    Opts = signed_write_test_opts(false),
+    Req = signed_write_req(<<"signed-data">>),
+    ?assertMatch({error, #{ <<"status">> := 403 }}, write(#{}, Req, Opts)).
+
+cache_write_signed_request_test() ->
+    Opts = signed_write_test_opts(true),
+    Req = signed_write_req(<<"signed-data">>),
+    {ok, #{ <<"path">> := Path }} = write(#{}, Req, Opts),
+    ?assertEqual({ok, <<"signed-data">>}, hb_cache:read(Path, Opts)).
+
+cache_write_unsigned_request_rejected_test() ->
+    Opts = signed_write_test_opts(true),
+    Req = #{
+        <<"path">> => <<"/~cache@1.0/write">>,
+        <<"method">> => <<"POST">>,
+        <<"body">> => <<"unsigned-data">>
+    },
+    ?assertMatch({error, #{ <<"status">> := 403 }}, write(#{}, Req, Opts)).
+
+signed_write_req(Body) ->
+    hb_message:commit(
+        #{
+            <<"path">> => <<"/~cache@1.0/write">>,
+            <<"method">> => <<"POST">>,
+            <<"body">> => Body
+        },
+        #{ <<"priv-wallet">> => ar_wallet:new() }
+    ).
+
+signed_write_test_opts(AllowSignedWrites) ->
+    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+    Store = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/signed-write-", Timestamp/binary>>
+    },
+    hb_store:reset(Store),
+    #{
+        <<"store">> => Store,
+        <<"cache-allow-signed-writes">> => AllowSignedWrites,
+        <<"cache-writers">> => [],
+        <<"store-all-signed">> => false
+    }.

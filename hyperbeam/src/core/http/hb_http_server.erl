@@ -415,14 +415,34 @@ read_body(Req0, Acc) ->
 
 %% @doc Reply to CORS preflight requests.
 cors_reply(Req, _ServerID) ->
-    Req2 = cowboy_req:reply(204, #{
-        <<"access-control-allow-origin">> => <<"*">>,
-        <<"access-control-allow-headers">> => <<"*">>,
-        <<"access-control-allow-methods">> =>
-            <<"GET, POST, PUT, DELETE, OPTIONS, PATCH">>
-    }, Req),
+    Origin = cowboy_req:header(<<"origin">>, Req, <<"">>),
+    ReqHdr = cowboy_req:header(<<"access-control-request-headers">>, Req, <<"">>),
+    Req2 = cowboy_req:reply(204, cors_headers(ReqHdr, Origin), Req),
     ?event(debug_http, {cors_reply, {req, Req}, {req2, Req2}}),
     {ok, Req2, no_state}.
+
+cors_headers(ReqHdr, Origin) ->
+    Headers0 = #{
+        <<"access-control-allow-origin">> => allow_origin(Origin),
+        <<"access-control-allow-headers">> => allow_headers(ReqHdr),
+        <<"access-control-allow-methods">> => <<"GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH">>,
+        <<"access-control-expose-headers">> =>
+            <<"Accept-Ranges, Ao-Result, Content-Digest, Content-Length, Content-Range, Location, Signature, Signature-Input">>,
+        <<"access-control-max-age">> => <<"86400">>,
+        <<"vary">> => <<"Origin, Access-Control-Request-Method, Access-Control-Request-Headers">>
+    },
+    case Origin of
+        <<>> -> Headers0;
+        _ -> Headers0#{ <<"access-control-allow-credentials">> => <<"true">> }
+    end.
+
+allow_origin(<<>>) -> <<"*">>;
+allow_origin(Origin) -> Origin.
+
+allow_headers(<<>>) ->
+    <<"Accept, Authorization, Content-Type, Range, X-Lbry-Auth-Token, X-Odysee-Auth-Token">>;
+allow_headers(ReqHdr) ->
+    ReqHdr.
 
 %% @doc Handle all non-CORS preflight requests as AO-Core requests. Execution 
 %% starts by parsing the HTTP request into HyerBEAM's message format, then

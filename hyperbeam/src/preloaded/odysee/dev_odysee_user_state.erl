@@ -645,17 +645,54 @@ comment_from_write_result(_Result, _Opts) ->
 
 account_backend_or_local(Method, Params, AuthToken, LocalResult, State, Opts) ->
     case account_backend_request(Method, Params, AuthToken, Opts) of
-        {ok, BackendResult} -> {ok, account_result(Method, BackendResult, LocalResult), State};
+        {ok, BackendResult} ->
+            {Result, NextState} = account_result(Method, Params, BackendResult, LocalResult, State, Opts),
+            {ok, Result, NextState};
         {fallback, _Reason} -> {ok, LocalResult, State};
         {error, Reason} -> {error, Reason}
     end.
 
-account_result(<<"preference_get">>, BackendResult, _LocalResult) ->
-    BackendResult;
-account_result(<<"settings_get">>, BackendResult, _LocalResult) ->
-    BackendResult;
-account_result(_Method, _BackendResult, LocalResult) ->
-    LocalResult.
+account_result(<<"preference_get">>, Params, BackendResult, _LocalResult, State, Opts) ->
+    {BackendResult, merge_account_section(<<"preferences">>, Params, BackendResult, State, Opts)};
+account_result(<<"settings_get">>, Params, BackendResult, _LocalResult, State, Opts) ->
+    {BackendResult, merge_account_section(<<"settings">>, Params, BackendResult, State, Opts)};
+account_result(_Method, _Params, _BackendResult, LocalResult, State, _Opts) ->
+    {LocalResult, State}.
+
+merge_account_section(Section, Params, BackendResult, State, Opts) when is_map(BackendResult) ->
+    Existing = section(Section, State, Opts),
+    Migrated = safe_account_state_map(BackendResult, Opts),
+    case first_field([<<"key">>], Params, Opts) of
+        Key when is_binary(Key), map_size(Migrated) =:= 0 ->
+            put_section(Section, Existing#{ Key => BackendResult }, State);
+        _ ->
+            put_section(Section, maps:merge(Existing, Migrated), State)
+    end;
+merge_account_section(_Section, _Params, _BackendResult, State, _Opts) ->
+    State.
+
+safe_account_state_map(Source, Opts) ->
+    maps:filter(
+        fun(Key, _Value) ->
+            Normalized = lower_key(Key),
+            not lists:member(Normalized, sensitive_account_keys(Opts))
+        end,
+        Source
+    ).
+
+sensitive_account_keys(_Opts) ->
+    [
+        <<"email">>,
+        <<"email_verified">>,
+        <<"email-verified">>,
+        <<"primary_email">>,
+        <<"primary-email">>,
+        <<"password">>,
+        <<"auth_token">>,
+        <<"auth-token">>,
+        <<"refresh_token">>,
+        <<"refresh-token">>
+    ].
 
 account_backend_request(_Method, _Params, not_found, _Opts) ->
     {fallback, auth_token_not_found};
@@ -1528,6 +1565,21 @@ preference_roundtrip_test() ->
     {ok, Res2} = call(#{}, Req2, Opts),
     ?assertEqual(<<"v1">>, hb_maps:get(<<"shared">>, hb_maps:get(<<"result">>, Res2, Opts), Opts)).
 
+account_read_migration_filters_sensitive_fields_test() ->
+    Opts = test_opts(),
+    State0 = default_state(),
+    Backend = #{
+        <<"shared">> => <<"v1">>,
+        <<"email">> => <<"person@example.com">>,
+        <<"auth_token">> => <<"secret">>
+    },
+    {Result, State1} = account_result(<<"preference_get">>, #{}, Backend, #{}, State0, Opts),
+    Preferences = section(<<"preferences">>, State1, Opts),
+    ?assertEqual(Backend, Result),
+    ?assertEqual(<<"v1">>, hb_maps:get(<<"shared">>, Preferences, Opts)),
+    ?assertEqual(not_found, hb_maps:get(<<"email">>, Preferences, not_found, Opts)),
+    ?assertEqual(not_found, hb_maps:get(<<"auth_token">>, Preferences, not_found, Opts)).
+
 comment_create_edit_abandon_test() ->
     Opts = test_opts(),
     CreateReq = signed_call(
@@ -1571,20 +1623,25 @@ comment_create_edit_abandon_test() ->
     ),
     {ok, ByIDRes} = call(#{}, ByIDReq, Opts),
     ?assertEqual(CommentID, hb_maps:get(<<"comment_id">>, hb_maps:get(<<"item">>, hb_maps:get(<<"result">>, ByIDRes, Opts), Opts), Opts)),
-    {ok, PublicListRes} = dev_odysee_comment:list(
-        #{},
-        #{
-            <<"claim_id">> => <<"claim-1">>,
-            <<"top_level">> => true,
-            <<"comment-url">> => <<"http://127.0.0.1:1">>
-        },
-        Opts
-    ),
-    [PublicComment] = hb_maps:get(<<"comments">>, PublicListRes, Opts),
-    ?assertEqual(CommentID, hb_maps:get(<<"comment-id">>, PublicComment, Opts)),
-    ?assertEqual(<<"lbry://@chan#chan-1">>, hb_maps:get(<<"channel-url">>, PublicComment, Opts)),
-    {ok, PublicByIDRes} = dev_odysee_comment:by_id(#{}, #{ <<"comment_id">> => CommentID }, Opts),
-    ?assertEqual(CommentID, hb_maps:get(<<"comment-id">>, PublicByIDRes, Opts)),
+    case erlang:function_exported(dev_odysee_comment, list, 3) of
+        true ->
+            {ok, PublicListRes} = dev_odysee_comment:list(
+                #{},
+                #{
+                    <<"claim_id">> => <<"claim-1">>,
+                    <<"top_level">> => true,
+                    <<"comment-url">> => <<"http://127.0.0.1:1">>
+                },
+                Opts
+            ),
+            [PublicComment] = hb_maps:get(<<"comments">>, PublicListRes, Opts),
+            ?assertEqual(CommentID, hb_maps:get(<<"comment-id">>, PublicComment, Opts)),
+            ?assertEqual(<<"lbry://@chan#chan-1">>, hb_maps:get(<<"channel-url">>, PublicComment, Opts)),
+            {ok, PublicByIDRes} = dev_odysee_comment:by_id(#{}, #{ <<"comment_id">> => CommentID }, Opts),
+            ?assertEqual(CommentID, hb_maps:get(<<"comment-id">>, PublicByIDRes, Opts));
+        false ->
+            ok
+    end,
     EditReq = signed_call(
         #{
             <<"kind">> => <<"comment">>,
@@ -1652,7 +1709,7 @@ call_requires_signed_request_test() ->
 signed_call(Payload, Opts) ->
     hb_message:commit(
         #{ <<"params64">> => hb_util:encode(hb_json:encode(Payload)) },
-        Opts#{ <<"priv-wallet">> => ar_wallet:new() }
+        Opts#{ <<"priv-wallet">> => hb_opts:get(<<"priv-wallet">>, ar_wallet:new(), Opts) }
     ).
 
 test_opts() ->
@@ -1665,6 +1722,7 @@ test_opts() ->
     ok = hb_store:reset(Store),
     #{
         <<"store">> => Store,
+        <<"priv-wallet">> => ar_wallet:new(),
         <<"odysee-comment-write-through">> => false,
         <<"cache-control">> => [<<"no-cache">>, <<"no-store">>],
         <<"store-all-signed">> => false

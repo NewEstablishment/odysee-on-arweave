@@ -509,7 +509,8 @@ reply(InitReq, TABMReq, RawStatus, RawMessage, Opts) ->
         ),
     % Get the CORS request headers from the message, if they exist.
     ReqHdr = cowboy_req:header(<<"access-control-request-headers">>, Req, <<"">>),
-    HeadersWithCors = add_cors_headers(HeadersBeforeCors, ReqHdr, Opts),
+    Origin = cowboy_req:header(<<"origin">>, Req, <<"">>),
+    HeadersWithCors = add_cors_headers(HeadersBeforeCors, ReqHdr, Origin, Opts),
     EncodedHeaders = hb_private:reset(HeadersWithCors),
     ?event(debug_http,
         {http_replying,
@@ -609,21 +610,38 @@ reply_handle_cookies(Req, Message, Opts) ->
 
 %% @doc Add permissive CORS headers to a message, if the message has not already
 %% specified CORS headers.
-add_cors_headers(Msg, ReqHdr, Opts) ->
-    CorHeaders = #{
-        <<"access-control-allow-origin">> => <<"*">>,
-        <<"access-control-allow-methods">> => <<"GET, POST, PUT, DELETE, OPTIONS">>,
-        <<"access-control-expose-headers">> => <<"*">>
+add_cors_headers(Msg, ReqHdr, Origin, Opts) ->
+    WithCors = hb_maps:merge(cors_headers(ReqHdr, Origin), Msg, Opts),
+    case Origin of
+        <<>> -> WithCors;
+        _ -> hb_maps:merge(WithCors, cors_headers(ReqHdr, Origin), Opts)
+    end.
+
+cors_headers(ReqHdr, Origin) ->
+    Headers0 = #{
+        <<"access-control-allow-origin">> => allow_origin(Origin),
+        <<"access-control-allow-methods">> => <<"GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH">>,
+        <<"access-control-allow-headers">> => allow_headers(ReqHdr),
+        <<"access-control-expose-headers">> => expose_headers(Origin),
+        <<"vary">> => <<"Origin, Access-Control-Request-Method, Access-Control-Request-Headers">>
     },
-     WithAllowHeaders = case ReqHdr of
-        <<>> -> CorHeaders;
-        _ -> CorHeaders#{
-             <<"access-control-allow-headers">> => ReqHdr
-        }
-    end,
-    % Keys in the given message will overwrite the defaults listed below if 
-    % included, due to `hb_maps:merge''s precidence order.
-    hb_maps:merge(WithAllowHeaders, Msg, Opts).
+    case Origin of
+        <<>> -> Headers0;
+        _ -> Headers0#{ <<"access-control-allow-credentials">> => <<"true">> }
+    end.
+
+allow_origin(<<>>) -> <<"*">>;
+allow_origin(Origin) -> Origin.
+
+allow_headers(<<>>) ->
+    <<"Accept, Authorization, Content-Type, Range, X-Lbry-Auth-Token, X-Odysee-Auth-Token">>;
+allow_headers(ReqHdr) ->
+    ReqHdr.
+
+expose_headers(<<>>) ->
+    <<"*">>;
+expose_headers(_) ->
+    <<"Accept-Ranges, Ao-Result, Content-Digest, Content-Length, Content-Range, Location, Signature, Signature-Input">>.
 
 %% @doc Generate the headers and body for a HTTP response message.
 encode_reply(Status, TABMReq, Message, Opts) ->
@@ -1020,16 +1038,7 @@ httpsig_to_tabm_singleton(PrimMsg, Req, Body, Opts) ->
             case Signers =/= [] andalso hb_opts:get(store_all_signed, false, Opts) of
                 true ->
                     ?event(http_verify, {storing_signed_from_wire, Decoded}),
-                    {ok, _} =
-                        hb_cache:write(Decoded,
-                            Opts#{
-                                <<"store">> =>
-                                    #{
-                                        <<"store-module">> => hb_store_fs,
-                                        <<"name">> => <<"cache-http">>
-                                    }
-                            }
-                        );
+                    {ok, _} = hb_cache:write(Decoded, Opts);
                 false ->
                     do_nothing
             end,
@@ -1304,6 +1313,28 @@ cors_get_test() ->
     ?assertEqual(
         <<"*">>,
         hb_ao:get(<<"access-control-allow-origin">>, Res, LocalOpts)
+    ).
+
+cors_credentials_get_test() ->
+    URL = hb_http_server:start_node(),
+    LocalOpts = test_opts(),
+    Origin = <<"http://localhost:9090">>,
+    {ok, Res} =
+        get(
+            URL,
+            #{
+                <<"path">> => <<"/~meta@1.0/info">>,
+                <<"origin">> => Origin
+            },
+            LocalOpts
+        ),
+    ?assertEqual(
+        Origin,
+        hb_ao:get(<<"access-control-allow-origin">>, Res, LocalOpts)
+    ),
+    ?assertEqual(
+        <<"true">>,
+        hb_ao:get(<<"access-control-allow-credentials">>, Res, LocalOpts)
     ).
 
 ans104_wasm_test() ->

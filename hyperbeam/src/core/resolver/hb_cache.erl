@@ -528,6 +528,20 @@ write_binary(Hashpath, Bin, Store, Opts) ->
 %% a richly typed map or a direct binary. If `cache-read-mode' is `raw',
 %% composite reads return lazy links without decoding `ao-types' or normalizing
 %% commitments.
+read(Req = #{ <<"read">> := _ }, Opts) ->
+    Store = hb_opts:get(store, no_viable_store, Opts),
+    case {
+        store_read(Req, Store, Opts),
+        hb_opts:get(cache_read_mode, normal, Opts)
+    } of
+        {{ok, Res}, raw} ->
+            {ok, Res};
+        {{ok, Res}, _} ->
+            hb_message:paranoid_verify(cache_read, Res, Opts),
+            {ok, hb_message:normalize_commitments(Res, Opts)};
+        {Other, _} ->
+            Other
+    end;
 read(Path, Opts) ->
     Store = hb_opts:get(store, no_viable_store, Opts),
     case {
@@ -592,11 +606,17 @@ read_all_commitments(Msg, Opts) ->
     Msg#{ <<"commitments">> => NewCommitments }.
 %% @doc List all of the subpaths of a given path and return a map of keys and
 %% links to the subpaths, including their types.
+store_read(Req = #{ <<"read">> := Path }, Store, Opts) ->
+    store_read(Path, Path, Req, Store, Opts);
 store_read(Path, Store, Opts) ->
     store_read(Path, Path, Store, Opts).
 store_read(_Target, _Path, no_viable_store, _) ->
     {error, not_found};
 store_read(Target, Path, Store, Opts) ->
+    store_read(Target, Path, #{ <<"read">> => Path }, Store, Opts).
+store_read(_Target, _Path, _Req, no_viable_store, _) ->
+    {error, not_found};
+store_read(Target, Path, Req, Store, Opts) ->
     PathBin = hb_path:to_binary(Path),
     case hb_store:resolve(Store, PathBin, Opts) of
         {ok, ResolvedFullPath} ->
@@ -605,7 +625,7 @@ store_read(Target, Path, Store, Opts) ->
                 {fully_resolved_path, ResolvedFullPath},
                 {store, Store}
             }),
-            case hb_store:read(Store, ResolvedFullPath, Opts) of
+            case hb_store:read(Store, Req#{ <<"read">> => ResolvedFullPath }, Opts) of
                 {ok, Bin} ->
                     ?event_debug({reading_data, ResolvedFullPath}),
                     {ok, Bin};

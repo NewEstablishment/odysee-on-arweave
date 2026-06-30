@@ -3,11 +3,13 @@ import { isHyperbeamDeviceEnabled, isHyperbeamFullMode } from 'util/hyperbeamMod
 import { getAuthToken } from 'util/saved-passwords';
 
 export const HYPERBEAM_DEVICE = {
+  cache: '~cache@1.0',
   claim: '~odysee-claim@1.0',
   channel: '~odysee-channel@1.0',
   comment: '~odysee-comment@1.0',
   file: '~odysee-file@1.0',
   fileReaction: '~odysee-file-reaction@1.0',
+  index: '~odysee-index@1.0',
   productEvents: '~odysee-product-events@1.0',
   reaction: '~odysee-reaction@1.0',
   stream: '~odysee-stream@1.0',
