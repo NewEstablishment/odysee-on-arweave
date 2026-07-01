@@ -881,6 +881,7 @@ function ArchitecturePanel({
     : null;
   const graphHeight = Math.max(600, architectureDeviceY(deviceRows.length - 1) + 106);
   const hasGraphFocus = Boolean(selectedEvent || activeTrace);
+  const showStaticBackendEdges = !selectedPath;
   const nodeActive = (node: string, fallback: boolean) => (selectedPath ? selectedPath.nodes.has(node) : fallback);
   const nodeFaded = (node: string, fallback: boolean) => (selectedPath ? !selectedPath.nodes.has(node) : fallback);
 
@@ -1037,6 +1038,7 @@ function ArchitecturePanel({
               detail="router / runtime"
               color="#0ea5e9"
               active={nodeActive('hyperbeam', hasGraphFocus && displayGraph.hyperbeamEvents > 0)}
+              faded={nodeFaded('hyperbeam', !displayGraph.hyperbeamEvents)}
             />
             {deviceRows.map((device, index) => (
               <ArchitectureNode
@@ -1129,15 +1131,17 @@ function ArchitecturePanel({
               active={nodeActive('media', showMediaPath)}
               faded={nodeFaded('media', !showClaimPath)}
             />
-            <ArchitectureEdge
-              x1={200}
-              y1={280}
-              x2={250}
-              y2={165}
-              label={`${displayGraph.sdkEvents} sdk`}
-              active={showClaimPath}
-              faded={!showClaimPath}
-            />
+            {(!hasGraphFocus || displayGraph.sdkEvents > 0) && (
+              <ArchitectureEdge
+                x1={200}
+                y1={280}
+                x2={250}
+                y2={165}
+                label={`${displayGraph.sdkEvents} sdk`}
+                active={displayGraph.sdkEvents > 0}
+                faded={displayGraph.sdkEvents === 0}
+              />
+            )}
             <ArchitectureEdge
               x1={200}
               y1={304}
@@ -1148,107 +1152,119 @@ function ArchitecturePanel({
               faded={!showAuthPath && !hasSsr}
               color="#0ea5e9"
             />
-            <ArchitectureEdge
-              x1={440}
-              y1={165}
-              x2={500}
-              y2={280}
-              label={`${displayGraph.deviceEvents} routed`}
-              active={showClaimPath}
-              faded={!showClaimPath}
-            />
-            {deviceRows.map((device, index) => (
+            {(!hasGraphFocus || displayGraph.deviceEvents > 0) && (
               <ArchitectureEdge
-                key={`${device}-edge`}
-                x1={670}
-                y1={291}
-                x2={720}
-                y2={architectureDeviceY(index) + 35}
-                label={displayGraph.devices[device] ? `${displayGraph.devices[device]}` : 'none'}
-                active={showClaimPath && Boolean(displayGraph.devices[device])}
-                faded={!showClaimPath || !displayGraph.devices[device]}
+                x1={440}
+                y1={165}
+                x2={500}
+                y2={280}
+                label={`${displayGraph.deviceEvents} routed`}
+                active={displayGraph.deviceEvents > 0}
+                faded={displayGraph.deviceEvents === 0}
               />
-            ))}
-            {deviceRows.map((device, index) => (
-              <ArchitectureFlow
-                key={`${device}-store-flow`}
-                active={showClaimPath && Boolean(displayGraph.devices[device])}
+            )}
+            {!hasGraphFocus &&
+              deviceRows.map((device, index) => (
+                <ArchitectureEdge
+                  key={`${device}-edge`}
+                  x1={670}
+                  y1={291}
+                  x2={720}
+                  y2={architectureDeviceY(index) + 35}
+                  label={displayGraph.devices[device] ? `${displayGraph.devices[device]}` : 'none'}
+                  active={showClaimPath && Boolean(displayGraph.devices[device])}
+                  faded={!showClaimPath || !displayGraph.devices[device]}
+                />
+              ))}
+            {!hasGraphFocus &&
+              deviceRows.map((device, index) => (
+                <ArchitectureFlow
+                  key={`${device}-store-flow`}
+                  active={showClaimPath && Boolean(displayGraph.devices[device])}
+                  color="#facc15"
+                  faded={!showClaimPath || !displayGraph.devices[device]}
+                  points={architectureDeviceStorePath(index, deviceRows.length)}
+                />
+              ))}
+            {(!hasGraphFocus || showAuthPath) && (
+              <>
+                <ArchitectureEdge
+                  x1={440}
+                  y1={415}
+                  x2={500}
+                  y2={465}
+                  label={`${displayGraph.authEvents} auth`}
+                  active={showAuthPath}
+                  faded={!showAuthPath}
+                  color="#22c55e"
+                />
+                <ArchitectureFlow
+                  active={showAuthPath}
+                  color="#22c55e"
+                  faded={!showAuthPath}
+                  points="605,424 605,332"
+                />
+              </>
+            )}
+            {showStaticBackendEdges && (!hasGraphFocus || displayGraph.cacheEvents > 0) && (
+              <ArchitectureEdge
+                x1={1145}
+                y1={146}
+                x2={1145}
+                y2={214}
+                label="cache miss"
+                active={showClaimPath && displayGraph.cacheEvents > 0}
+                faded={!showClaimPath || displayGraph.cacheEvents === 0}
                 color="#facc15"
-                faded={!showClaimPath || !displayGraph.devices[device]}
-                points={architectureDeviceStorePath(index, deviceRows.length)}
               />
-            ))}
-            <ArchitectureEdge
-              x1={440}
-              y1={415}
-              x2={500}
-              y2={465}
-              label={`${displayGraph.authEvents} auth`}
-              active={showAuthPath}
-              faded={!showAuthPath}
-              color="#22c55e"
-            />
-            <ArchitectureFlow active={showAuthPath} color="#22c55e" faded={!showAuthPath} points="605,424 605,332" />
-            <ArchitectureEdge
-              x1={1145}
-              y1={146}
-              x2={1145}
-              y2={214}
-              label="cache miss"
-              active={showClaimPath && displayGraph.cacheEvents > 0}
-              faded={!showClaimPath}
-              color="#facc15"
-            />
-            <ArchitectureEdge
-              x1={1250}
-              y1={255}
-              x2={1340}
-              y2={153}
-              label={`${displayGraph.legacyEvents} legacy store`}
-              active={showLegacyPath}
-              faded={!showClaimPath}
-              color="#94a3b8"
-            />
-            <ArchitectureEdge
-              x1={1250}
-              y1={255}
-              x2={1340}
-              y2={325}
-              label="arweave store"
-              active={showClaimPath && displayGraph.arweaveEvents > 0}
-              faded={!showClaimPath || !hasArweaveActivity}
-              color="#64748b"
-            />
-            <ArchitectureEdge
-              x1={1250}
-              y1={255}
-              x2={1340}
-              y2={497}
-              label="media bytes"
-              active={showMediaPath}
-              faded={!showClaimPath}
-              color="#fb7185"
-            />
-            <ArchitectureEdge
-              x1={710}
-              y1={465}
-              x2={1040}
-              y2={455}
-              label={`${displayGraph.uploadEvents} upload`}
-              active={displayGraph.uploadEvents > 0}
-              faded={displayGraph.uploadEvents === 0}
-              color="#0ea5e9"
-            />
-            <ArchitectureEdge
-              x1={1250}
-              y1={455}
-              x2={1340}
-              y2={497}
-              label={`${displayGraph.rangeEvents} range`}
-              active={showMediaPath}
-              faded={!showClaimPath}
-              color="#fb7185"
-            />
+            )}
+            {showStaticBackendEdges && (!hasGraphFocus || showLegacyPath) && (
+              <ArchitectureEdge
+                x1={1250}
+                y1={255}
+                x2={1340}
+                y2={153}
+                label={`${displayGraph.legacyEvents} legacy store`}
+                active={showLegacyPath}
+                faded={!showClaimPath}
+                color="#94a3b8"
+              />
+            )}
+            {showStaticBackendEdges && (!hasGraphFocus || hasArweaveActivity) && (
+              <ArchitectureEdge
+                x1={1250}
+                y1={255}
+                x2={1340}
+                y2={325}
+                label="arweave store"
+                active={showClaimPath && displayGraph.arweaveEvents > 0}
+                faded={!showClaimPath || !hasArweaveActivity}
+                color="#64748b"
+              />
+            )}
+            {showStaticBackendEdges && (!hasGraphFocus || showMediaPath) && (
+              <ArchitectureEdge
+                x1={1250}
+                y1={255}
+                x2={1340}
+                y2={497}
+                label="media bytes"
+                active={showMediaPath}
+                faded={!showClaimPath}
+                color="#fb7185"
+              />
+            )}
+            {showStaticBackendEdges && displayGraph.uploadEvents > 0 && (
+              <ArchitectureEdge
+                x1={710}
+                y1={465}
+                x2={1040}
+                y2={455}
+                label={`${displayGraph.uploadEvents} upload`}
+                active
+                color="#0ea5e9"
+              />
+            )}
             {selectedPath?.flows.map((flow, index) => (
               <ArchitectureSelectedFlow key={`${flow.label}-${index}`} {...flow} />
             ))}
@@ -1473,20 +1489,28 @@ function architectureSelectedPath(
   const path = String(selectedData.devicePath || selectedData.nativePath || selectedData.urlParts?.path || '');
   const sourceLayer = String(selectedData.sourceLayer || '');
   const nativeSource = String(selectedData.nativeSource || '');
-  const isAuth = Boolean(selectedData.authRequired || sourceLayer.includes('auth'));
+  const isUploadRead = isHyperbeamUploadReadPath(path);
+  const isAuth = !isUploadRead && Boolean(selectedData.authRequired || sourceLayer.includes('auth'));
   const isSsr = path.includes('/$/api/');
   const frontend = isSsr || isAuth ? 'ssr' : 'sdk';
-  const frontendPoint = frontend === 'ssr' ? '250,415 440,415 500,465' : '250,165 440,165 500,291';
+  const frontendPoint = isUploadRead
+    ? '250,415 440,415'
+    : frontend === 'ssr'
+      ? '250,415 440,415 500,465'
+      : '250,165 440,165 500,291';
   const uiPoint = frontend === 'ssr' ? '200,304' : '200,280';
-  const hyperbeamPoint = frontend === 'ssr' ? '500,465' : '500,291';
+  const hyperbeamPoint = isUploadRead ? '440,415' : frontend === 'ssr' ? '500,465' : '500,291';
   const routePrefix = `${uiPoint} ${frontendPoint}`;
-  const responseSuffix =
-    frontend === 'ssr' ? `${hyperbeamPoint} 440,415 250,415 200,304` : `${hyperbeamPoint} 440,165 250,165 200,280`;
+  const responseSuffix = isUploadRead
+    ? '440,415 250,415 200,304'
+    : frontend === 'ssr'
+      ? `${hyperbeamPoint} 440,415 250,415 200,304`
+      : `${hyperbeamPoint} 440,165 250,165 200,280`;
   const mediaRange = isMediaRangeEvent(selectedData, path, selectedDevice);
   const hasRequest = selectedEvents.some((event) => event.label === 'request' || event.label === 'request failed');
   const hasResponse = selectedEvents.some(isResponseLikeEvent);
   const isCache = path.includes('~cache@1.0') || nativeSource === 'cache';
-  const isUpload = path.includes('~odysee-upload@1.0') || path.includes('/hyperbeam-upload/');
+  const isUpload = path.includes('~odysee-upload@1.0') || (path.includes('/hyperbeam-upload/') && !isUploadRead);
   const isArweave = path.includes('~arweave') || sourceLayer.includes('arweave');
   const isLegacy =
     !mediaRange &&
@@ -1496,7 +1520,7 @@ function architectureSelectedPath(
     [];
 
   nodes.add(frontend);
-  if (mode !== HYPERBEAM_MODES.original) nodes.add('hyperbeam');
+  if (mode !== HYPERBEAM_MODES.original && !isUploadRead) nodes.add('hyperbeam');
   if (isAuth) nodes.add('auth');
   if (selectedDevice) nodes.add(`device:${selectedDevice}`);
 
@@ -1820,7 +1844,12 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     ) {
       counters.arweaveEvents += 1;
     }
-    if (path.includes('~odysee-upload@1.0') || path.includes('/hyperbeam-upload/')) counters.uploadEvents += 1;
+    if (
+      path.includes('~odysee-upload@1.0') ||
+      (path.includes('/hyperbeam-upload/') && !isHyperbeamUploadReadPath(path))
+    ) {
+      counters.uploadEvents += 1;
+    }
     if (mediaRange) counters.rangeEvents += 1;
     if (eventDevices.length) {
       counters.deviceEvents += eventDevices.length;
@@ -1880,11 +1909,16 @@ function isMediaRangeEvent(data: Record<string, any>, path: string, device: stri
     contentType.startsWith('video/') ||
     contentType.startsWith('audio/') ||
     contentType === 'application/octet-stream' ||
+    isHyperbeamUploadReadPath(path) ||
     path.includes('/media') ||
     path.includes('/playback') ||
     path.includes('~odysee-blob@1.0') ||
     device.includes('blob')
   );
+}
+
+function isHyperbeamUploadReadPath(path: string) {
+  return path.includes('/$/api/hyperbeam-upload/v1/read/');
 }
 
 function formatDetail(value: any) {
