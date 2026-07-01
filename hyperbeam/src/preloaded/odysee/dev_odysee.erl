@@ -118,8 +118,9 @@ source(Base, Req, Opts) ->
                 Opts
             ),
             case read_source_key(Keys, Opts) of
-                {ok, Msg} ->
-                    {ok, Msg};
+                {ok, Msg0} ->
+                    Msg = hb_cache:ensure_all_loaded(Msg0, Opts),
+                    {ok, source_view(Msg, Req, Opts)};
                 {error, Reason} ->
                     ?event(odysee_device,
                         {source_read_failed, {keys, Keys}, {reason, Reason}},
@@ -136,6 +137,13 @@ source(Base, Req, Opts) ->
         {error, Reason} ->
             ?event(odysee_device, {source_key_rejected, {reason, Reason}}, Opts),
             error_response(Reason)
+    end.
+
+source_view(Msg, Req, Opts) ->
+    case hb_maps:get(<<"view">>, Req, undefined, Opts) of
+        <<"json">> -> hex_binaries(hb_message:uncommitted(Msg, Opts));
+        <<"http">> -> hex_binaries(hb_message:uncommitted(Msg, Opts));
+        _ -> Msg
     end.
 
 read_source_key(Key, Opts) when is_binary(Key) ->
@@ -2006,6 +2014,28 @@ source_reads_prefixed_lbry_source_ids_test() ->
     ?assertEqual(TxID, hb_maps:get(<<"txid">>, ClaimMsg, #{})),
     ?assertEqual(0, hb_maps:get(<<"nout">>, ClaimMsg, #{})),
     ?assert(hb_message:verify(ClaimMsg, source_verify_req(ClaimMsg), #{})).
+
+source_json_view_reads_bare_outpoint_test() ->
+    {TxHex, TxID, _ClaimID} = proof_tx_fixture(<<"example">>, <<"raw claim">>),
+    Raw = binary:decode_hex(TxHex),
+    {ok, ClaimOutput} = hb_lbry_commitment:claim_output_message(Raw, 0),
+    Store = #{
+        <<"store-module">> => hb_store_odysee,
+        <<"fixtures">> => #{
+            <<"odysee/claim-proof/", TxID/binary, "/0">> => ClaimOutput
+        }
+    },
+    {ok, View} =
+        source(
+            #{},
+            #{ <<"id">> => <<TxID/binary, ":0">>, <<"view">> => <<"json">> },
+            #{ <<"store">> => Store }
+        ),
+    ?assertEqual(?LBRY_CLAIM_COMMITMENT_DEVICE, hb_maps:get(<<"device">>, View, #{})),
+    ?assertEqual(TxID, hb_maps:get(<<"txid">>, View, #{})),
+    ?assertEqual(0, hb_maps:get(<<"nout">>, View, #{})),
+    ?assertEqual(TxHex, hb_maps:get(<<"raw-transaction">>, View, #{})),
+    ?assertEqual(false, hb_maps:is_key(<<"commitments">>, View, #{})).
 
 source_reads_store_path_surface_objects_test() ->
     Store = surface_fixture_store(),

@@ -6,6 +6,7 @@ const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const CLAIM_DEVICE = '~odysee-claim@1.0';
 const COMMENT_DEVICE = '~odysee-comment@1.0';
+const ODYSEE_DEVICE = '~odysee@1.0';
 const INDEX_DEVICE = '~odysee-index@1.0';
 const UPLOAD_DEVICE = '~odysee-upload@1.0';
 const REACTION_DEVICE = '~odysee-reaction@1.0';
@@ -338,7 +339,7 @@ async function fetchHyperbeamImmutableList(
   const claims = (
     await Promise.all(
       uniqueIds.map(async (id) => {
-        const result = await fetchCachedStoreJsonOrNull(encodeDataPath(id)).then(responsePayload);
+        const result = await fetchCachedImmutableJsonOrNull(id).then(responsePayload);
         return immutableClaimFromHyperbeam(result, id);
       })
     )
@@ -356,6 +357,27 @@ async function fetchHyperbeamImmutableList(
     total_items: filtered.length,
     total_pages: totalPages(filtered.length, pageSize),
   };
+}
+
+function fetchCachedImmutableJsonOrNull(id: string): Promise<any | null> {
+  const key = `immutable:${id}`;
+  const now = Date.now();
+  const cached = deviceReadCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+
+  const promise = fetchImmutableJsonOrNull(id).catch((error) => {
+    deviceReadCache.delete(key);
+    throw error;
+  });
+  deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
+  return promise;
+}
+
+async function fetchImmutableJsonOrNull(id: string): Promise<any | null> {
+  const source = await fetchStoreJsonOrNull(`${ODYSEE_DEVICE}/source?id=${encodeURIComponent(id)}&view=json`);
+  if (source) return source;
+
+  return fetchStoreJsonOrNull(encodeDataPath(id));
 }
 
 export async function fetchHyperbeamVerifyClaimSignature(
@@ -464,6 +486,7 @@ function immutableClaimFromHyperbeam(result: any, immutableId: string): any | nu
   const sourceClaimId = value(payload, 'claim_id', 'claim-id') || value(claim, 'claim_id', 'claim-id');
   const txid = value(payload, 'txid');
   const nout = value(payload, 'nout');
+  const device = value(payload, 'device');
   const outpoint =
     typeof txid === 'string' && (typeof nout === 'number' || typeof nout === 'string') ? `${txid}:${nout}` : null;
   const storeId = immutableId || outpoint || value(payload, 'id') || sourceClaimId;
@@ -480,7 +503,8 @@ function immutableClaimFromHyperbeam(result: any, immutableId: string): any | nu
   const mediaType =
     value(payload, 'media_type', 'media-type', 'content-type') ||
     value(payloadSource, 'media_type', 'media-type') ||
-    value(valueSource, 'media_type', 'media-type');
+    value(valueSource, 'media_type', 'media-type') ||
+    (device === 'lbry-stream@1.0' && sdHash ? 'video/mp4' : undefined);
   const explicitMediaUrl = absoluteHyperbeamUrl(
     value(payload, 'streaming_url', 'streaming-url', 'download_url', 'download-url') ||
       value(payloadSource, 'url') ||
@@ -506,11 +530,15 @@ function immutableClaimFromHyperbeam(result: any, immutableId: string): any | nu
     value(claim, 'permanent_url', 'permanent-url') ||
     value(payload, 'permanent_url', 'permanent-url') ||
     claimUrl(name, sourceClaimId);
-  const device = value(payload, 'device');
   const valueType =
     value(claim, 'value_type', 'value-type') ||
     value(payload, 'value_type', 'value-type') ||
     (device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' ? 'channel' : 'stream');
+  const sourceName =
+    value(payloadSource, 'name') ||
+    value(valueSource, 'name') ||
+    value(payload, 'filename') ||
+    (mediaType === 'video/mp4' ? `${name}.mp4` : undefined);
 
   return compactParams({
     ...claim,
@@ -536,7 +564,7 @@ function immutableClaimFromHyperbeam(result: any, immutableId: string): any | nu
         ...valueSource,
         sd_hash: sdHash,
         media_type: mediaType,
-        name: value(payloadSource, 'name') || value(valueSource, 'name') || value(payload, 'filename'),
+        name: sourceName,
         size: value(payloadSource, 'size') || value(valueSource, 'size') || value(payload, 'byte-size', 'source-size'),
         url: mediaUrl || value(payloadSource, 'url') || value(valueSource, 'url'),
       }),
@@ -938,7 +966,10 @@ function playbackPayloadFromHyperbeam(result: any): any {
     streaming_url: value(result, 'streaming_url', 'streaming-url') || result.streaming_url,
     download_url: value(result, 'download_url', 'download-url') || result.download_url,
     sd_hash: value(result, 'sd_hash', 'sd-hash') || result.sd_hash,
-    media_type: value(result, 'media_type', 'media-type') || result.media_type,
+    media_type:
+      value(result, 'media_type', 'media-type') ||
+      result.media_type ||
+      (value(result, 'device') === 'lbry-stream@1.0' && value(result, 'sd_hash', 'sd-hash') ? 'video/mp4' : undefined),
     claim_id: value(result, 'claim_id', 'claim-id') || result.claim_id,
     claim_name: value(result, 'claim_name', 'claim-name') || result.claim_name,
   };
@@ -956,7 +987,7 @@ function hyperbeamMediaUrlFromPayload(payload: any): string {
   if (!baseUrl || !payload) return '';
 
   const sdHash = value(payload, 'sd_hash', 'sd-hash');
-  if (sdHash) return `${baseUrl}/odysee/media/sd-hash/${encodeURIComponent(String(sdHash))}`;
+  if (sdHash) return `${baseUrl}/${ODYSEE_DEVICE}/media?sd-hash=${encodeURIComponent(String(sdHash))}`;
   if (!allowHyperbeamCompatibilityReads()) return '';
 
   const streamStorePath = value(payload, 'stream-store-path', 'stream_store_path');

@@ -19,6 +19,7 @@ const CANONICAL_NATIVE_DEVICES = new Set([
   '~odysee-stream@1.0',
   '~odysee-subscription@1.0',
 ]);
+const CANONICAL_NATIVE_SOURCE_DEVICES = new Set(['~odysee@1.0']);
 const CANONICAL_WRITE_DEVICES = new Set([
   '~cache@1.0',
   '~odysee-index@1.0',
@@ -63,7 +64,11 @@ export function isHyperbeamPublicReadDevice(device: string) {
 
 export function isHyperbeamDeviceEnabled(device: string) {
   if (!isHyperbeamEnabled()) return false;
-  return isHyperbeamPublicReadDevice(device) || CANONICAL_WRITE_DEVICES.has(device);
+  return (
+    CANONICAL_NATIVE_SOURCE_DEVICES.has(device) ||
+    isHyperbeamPublicReadDevice(device) ||
+    CANONICAL_WRITE_DEVICES.has(device)
+  );
 }
 
 export function shouldSendHyperbeamAuthHeaders() {

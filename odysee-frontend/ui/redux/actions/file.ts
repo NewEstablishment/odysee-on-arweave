@@ -182,6 +182,28 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
       accessKey = (await getOwnedClaimAccessKey(dispatch, state, uri)) || null;
     }
 
+    const claim = selectClaimForUri(getState(), uri) as any;
+    const claimStreamingUrl = claim?.streaming_url || claim?.download_url || claim?.value?.source?.url;
+    const immutableId = claim?.hyperbeam?.immutable_id || claim?.hyperbeam?.['immutable-id'];
+    if (!accessKey && claimStreamingUrl && immutableId) {
+      const streamInfo = {
+        ...claim,
+        streaming_url: claimStreamingUrl,
+        download_url: claim?.download_url || claimStreamingUrl,
+      };
+      dispatch({
+        type: ACTIONS.FETCH_FILE_INFO_COMPLETED,
+        data: {
+          fileInfo: streamInfo,
+          outpoint,
+        },
+      });
+      if (onSuccess) {
+        onSuccess(streamInfo);
+      }
+      return;
+    }
+
     Lbry.get({
       uri,
       environment: stripeEnvironment,

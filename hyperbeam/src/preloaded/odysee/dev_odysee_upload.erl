@@ -1179,6 +1179,58 @@ upload_stores_signed_body_and_reads_media_test() ->
     ?assertEqual(<<"hello">>, hb_maps:get(<<"body">>, Media, Opts)),
     ?assertEqual(<<"text/plain">>, hb_maps:get(<<"content-type">>, Media, Opts)).
 
+upload_response_includes_metadata_and_signature_context_test() ->
+    Opts = test_opts(),
+    Channel = #{
+        <<"claim_id">> => <<"channel-1">>,
+        <<"name">> => <<"@demo">>,
+        <<"permanent_url">> => <<"lbry://@demo#channel-1">>,
+        <<"canonical_url">> => <<"lbry://@demo#channel-1">>,
+        <<"short_url">> => <<"lbry://@demo#channel-1">>,
+        <<"value">> => #{ <<"title">> => <<"Demo Channel">> }
+    },
+    Metadata = #{
+        <<"title">> => <<"Signed Metadata">>,
+        <<"description">> => <<"metadata survives upload">>,
+        <<"tags">> => [<<"hyperbeam">>, <<"demo">>],
+        <<"languages">> => [<<"en">>],
+        <<"thumbnail_url">> => <<"https://example.test/thumb.jpg">>,
+        <<"release_time">> => 123,
+        <<"channel">> => Channel
+    },
+    Payload = #{
+        <<"content_base64">> => base64:encode(<<"signed upload">>),
+        <<"name">> => <<"signed-demo">>,
+        <<"filename">> => <<"signed-demo.txt">>,
+        <<"content_type">> => <<"text/plain">>,
+        <<"metadata">> => Metadata
+    },
+    Req = signed(#{ <<"params64">> => hb_util:encode(hb_json:encode(Payload)) }, Opts),
+    [Owner] = hb_message:signers(Req, Opts),
+    {ok, Res} = submit(#{}, Req, Opts),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Res, Opts)),
+    Record = hb_maps:get(<<"record">>, Body, Opts),
+    [Claim] = hb_maps:get(<<"outputs">>, Body, Opts),
+    Value = hb_maps:get(<<"value">>, Claim, Opts),
+    Source = hb_maps:get(<<"source">>, Value, Opts),
+    Hyperbeam = hb_maps:get(<<"hyperbeam">>, Claim, Opts),
+    SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, Opts),
+    ?assertEqual(Owner, hb_maps:get(<<"owner">>, Record, Opts)),
+    ?assertEqual(Owner, hb_maps:get(<<"owner">>, Hyperbeam, Opts)),
+    ?assertEqual(hb_maps:get(<<"record-id">>, Body, Opts), hb_maps:get(<<"claim_id">>, Claim, Opts)),
+    ?assertEqual(Metadata, hb_maps:get(<<"metadata">>, Record, Opts)),
+    ?assertEqual(<<"Signed Metadata">>, hb_maps:get(<<"title">>, Value, Opts)),
+    ?assertEqual(<<"metadata survives upload">>, hb_maps:get(<<"description">>, Value, Opts)),
+    ?assertEqual([<<"hyperbeam">>, <<"demo">>], hb_maps:get(<<"tags">>, Value, Opts)),
+    ?assertEqual([<<"en">>], hb_maps:get(<<"languages">>, Value, Opts)),
+    ?assertEqual(#{ <<"url">> => <<"https://example.test/thumb.jpg">> }, hb_maps:get(<<"thumbnail">>, Value, Opts)),
+    ?assertEqual(123, hb_maps:get(<<"release_time">>, Value, Opts)),
+    ?assertEqual(<<"text/plain">>, hb_maps:get(<<"media_type">>, Source, Opts)),
+    ?assertEqual(<<"signed-demo.txt">>, hb_maps:get(<<"name">>, Source, Opts)),
+    ?assertEqual(<<"13">>, hb_maps:get(<<"size">>, Source, Opts)),
+    ?assertEqual(true, hb_maps:get(<<"is_channel_signature_valid">>, Claim, Opts)),
+    ?assertEqual(Channel, SigningChannel).
+
 upload_accepts_params64_base64_content_test() ->
     Opts = test_opts(),
     Params = #{

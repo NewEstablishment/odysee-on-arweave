@@ -187,6 +187,13 @@ function HomePage() {
     () => sortedRowData.filter((row: RowDataItem) => row.id !== 'WATCH_LATER' || showWatchLaterSection),
     [showWatchLaterSection, sortedRowData]
   );
+  const renderableRowData: Array<RowDataItem> = React.useMemo(
+    () =>
+      homepageFetched
+        ? visibleSortedRowData
+        : visibleSortedRowData.filter((row: RowDataItem) => row.id === 'HYPERBEAM_IMMUTABLE'),
+    [homepageFetched, visibleSortedRowData]
+  );
   type CacheLivestreamEntry = {
     livestreamUris: Array<string> | null | undefined;
   };
@@ -200,32 +207,30 @@ function HomePage() {
       hasBanner: true,
     } as Cache;
 
-    if (homepageFetched) {
-      visibleSortedRowData.forEach((row: RowDataItem, index: number) => {
-        // -- Find index of first row with a title if not already:
-        if (cache.topGrid === -1 && Boolean(row.title) && row.id !== 'UPCOMING') {
-          cache.topGrid = index;
-        }
+    renderableRowData.forEach((row: RowDataItem, index: number) => {
+      // -- Find index of first row with a title if not already:
+      if (cache.topGrid === -1 && Boolean(row.title) && row.id !== 'UPCOMING') {
+        cache.topGrid = index;
+      }
 
-        // -- Find livestreams related to the category:
-        const rowChannelIds = row.options?.channelIds;
-        const rowExcludedChannelIds = row.options?.excludedChannelIds;
-        const isFollowing = row.id === 'FOLLOWING';
-        const hideLivestreamsInCategories = hideLivestreams && !isFollowing;
-        cache[row.id] = {
-          livestreamUris: hideLivestreamsInCategories
-            ? null
-            : isFollowing
-              ? filterActiveLivestreamUris(subscribedChannelIds, rowExcludedChannelIds, al, lv)
-              : rowChannelIds
-                ? filterActiveLivestreamUris(rowChannelIds, rowExcludedChannelIds, al, lv)
-                : null,
-        };
-      });
-    }
+      // -- Find livestreams related to the category:
+      const rowChannelIds = row.options?.channelIds;
+      const rowExcludedChannelIds = row.options?.excludedChannelIds;
+      const isFollowing = row.id === 'FOLLOWING';
+      const hideLivestreamsInCategories = hideLivestreams && !isFollowing;
+      cache[row.id] = {
+        livestreamUris: hideLivestreamsInCategories
+          ? null
+          : isFollowing
+            ? filterActiveLivestreamUris(subscribedChannelIds, rowExcludedChannelIds, al, lv)
+            : rowChannelIds
+              ? filterActiveLivestreamUris(rowChannelIds, rowExcludedChannelIds, al, lv)
+              : null,
+      };
+    });
 
     return cache;
-  }, [homepageFetched, visibleSortedRowData, subscribedChannelIds, al, lv, hideLivestreams]);
+  }, [renderableRowData, subscribedChannelIds, al, lv, hideLivestreams]);
   const hasWatchLaterSection = React.useMemo(
     () => sortedRowData.some((row: RowDataItem) => row.id === 'WATCH_LATER'),
     [sortedRowData]
@@ -326,7 +331,7 @@ function HomePage() {
             <div className="homePage-wrapper__section-title">
               <SectionHeader title={__(resolveTitleOverride(title))} navigate={route || link} icon={icon} help={help} />
               {(index === cache.topGrid ||
-                (index && index - 1 === cache.topGrid && visibleSortedRowData[cache.topGrid].id === 'UPCOMING')) &&
+                (index && index - 1 === cache.topGrid && renderableRowData[cache.topGrid].id === 'UPCOMING')) &&
                 customizeButton}
             </div>
           )}
@@ -401,8 +406,8 @@ function HomePage() {
           undefined
         )}
 
-      {homepageFetched &&
-        visibleSortedRowData.map(
+      {renderableRowData.length > 0 &&
+        renderableRowData.map(
           ({ id, title, route, link, icon, help, pinnedUrls: pinUrls, pinnedClaimIds, options = {} }, index) => {
             // Check if there is a banner that should appear in this position
             const bannerForPosition =

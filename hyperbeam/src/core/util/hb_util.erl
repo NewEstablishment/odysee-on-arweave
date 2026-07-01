@@ -303,14 +303,11 @@ encode(List) when is_list(List) ->
 encode(_) ->
     error(badarg).
 
-%% @doc Decode a URL safe base64 binary or iolist into a binary. Uses the
-%% unchecked decoder: the input is assumed to be valid base64url (as produced
-%% by `encode/1'), so malformed input yields garbage rather than reliably
-%% raising.
+%% @doc Decode a URL safe base64 binary or iolist into a binary.
 decode(Bin) when is_binary(Bin) ->
-    b64veryfast:decode64_url_unchecked(Bin);
+    b64veryfast:decode64_url(Bin);
 decode(List) when is_list(List) ->
-    b64veryfast:decode64_url_unchecked(iolist_to_binary(List));
+    b64veryfast:decode64_url(iolist_to_binary(List));
 decode(_) ->
     error(badarg).
 

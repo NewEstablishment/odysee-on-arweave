@@ -32,6 +32,19 @@ commit(Msg, Req = #{ <<"type">> := ?RSA_SIGN_TYPE }, Opts) ->
             Opts
         ),
     {ok, SignedStructured};
+commit(Msg, Req = #{ <<"type">> := ?ECDSA_SIGN_TYPE }, Opts) ->
+    ?event({committing, {msg, Msg}, {req, Req}}),
+    {ok, TX} = to(hb_private:reset(Msg), Req, Opts),
+    Wallet = hb_opts:get(priv_wallet, no_viable_wallet, Opts),
+    Signed = ar_tx:sign(TX, Wallet),
+    SignedStructured =
+        hb_message:convert(
+            Signed,
+            <<"structured@1.0">>,
+            <<"tx@1.0">>,
+            Opts
+        ),
+    {ok, SignedStructured};
 commit(Msg, #{ <<"type">> := <<"unsigned-sha256">> }, Opts) ->
     % Remove the commitments from the message, convert it to an L1 TX, 
     % then back. This forces the message to be normalized and the unsigned ID
