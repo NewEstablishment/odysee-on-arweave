@@ -439,24 +439,103 @@ async function fetchHyperbeamUploadClaimsForIds(claimIds: Array<string>): Promis
 
 async function fetchHyperbeamUploadClaims(body: Record<string, any>, headers: Record<string, string> = {}) {
   try {
+    const url = '/$/api/hyperbeam-upload/v1/list';
+    const requestHeaders = {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...headers,
+    };
+    const callId = `upload-list-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    pushHyperbeamDebug(
+      'request',
+      {
+        ...debugPageContext(),
+        callId,
+        method: 'POST',
+        url,
+        devicePath: url,
+        deviceLayer: 'browser-resource',
+        sourceLayer: 'browser-resource',
+        nativeSource: 'upload-index',
+        requestHeaders,
+        requestBody: body,
+        requestKey: uploadListLifecycleKey(body),
+      },
+      'info'
+    );
     const response = await fetch('/$/api/hyperbeam-upload/v1/list', {
       method: 'POST',
       credentials: 'include',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        ...headers,
-      },
+      headers: requestHeaders,
       body: JSON.stringify(body),
     });
-    if (!response.ok) return [];
+    const json = await response.json().catch(() => null);
+    pushHyperbeamDebug(
+      'response',
+      {
+        ...debugPageContext(),
+        callId,
+        method: 'POST',
+        status: response.status,
+        ok: response.ok,
+        url,
+        devicePath: url,
+        deviceLayer: 'browser-resource',
+        sourceLayer: 'browser-resource',
+        nativeSource: 'upload-index',
+        requestHeaders,
+        requestBody: body,
+        responseHeaders: debugResponseHeaders(response),
+        contentType: response.headers.get('content-type'),
+        contentLength: response.headers.get('content-length'),
+        requestKey: uploadListLifecycleKey(body),
+        claimKeys: uploadListClaimKeys(json),
+        body: json,
+      },
+      response.ok ? 'ok' : 'error'
+    );
+    if (!response.ok || !json) return [];
 
-    const json = await response.json();
     const result = responsePayload(json);
     return Array.isArray(result?.items) ? result.items.filter((claim) => claim?.value_type === 'stream') : [];
   } catch {
     return [];
   }
+}
+
+function uploadListLifecycleKey(requestBody: Record<string, any>) {
+  if (Array.isArray(requestBody.claim_ids) && requestBody.claim_ids.length)
+    return `claim:${requestBody.claim_ids.join(',')}`;
+  if (requestBody.claim_id) return `claim:${requestBody.claim_id}`;
+  if (Array.isArray(requestBody.channel_ids) && requestBody.channel_ids.length)
+    return `channels:${requestBody.channel_ids.join(',')}`;
+  return 'upload-index:list';
+}
+
+function uploadListClaimKeys(responseBody: any) {
+  const claimIds =
+    responseBody?.result?.items?.map((item: any) => item?.claim_id).filter(Boolean) ||
+    responseBody?.items?.map((item: any) => item?.claim_id).filter(Boolean);
+  return Array.isArray(claimIds) ? claimIds.join(',') : undefined;
+}
+
+function debugPageContext() {
+  if (typeof window === 'undefined') return {};
+  return {
+    pageUrl: window.location.href,
+    pagePath: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+  };
+}
+
+function debugResponseHeaders(response: Response) {
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    responseHeaders[key] = value;
+  });
+  if (Object.keys(responseHeaders).length === 0) {
+    responseHeaders['capture-note'] = 'No response headers are exposed to frontend JavaScript for this response.';
+  }
+  return responseHeaders;
 }
 
 export async function fetchHyperbeamResolveClaimIds(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {

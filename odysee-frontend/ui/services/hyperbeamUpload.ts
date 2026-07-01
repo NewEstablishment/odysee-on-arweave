@@ -9,6 +9,7 @@ import {
 } from 'constants/tags';
 import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 import { isURIValid } from 'util/lbryURI';
+import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 
 const HYPERBEAM_UPLOAD_URL = '/$/api/hyperbeam-upload/v1/large';
 const HYPERBEAM_UPLOAD_INDEX_URL = '/$/api/hyperbeam-upload/v1/index';
@@ -73,19 +74,28 @@ export async function listHyperbeamPublishes(
 
   try {
     const channelIds = (filters.channelIds || []).filter(Boolean);
+    const requestBody = {
+      channel_ids: channelIds,
+    };
+    const requestHeaders = {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...(channelIds.length ? { 'x-odysee-channel-ids': channelIds.join(',') } : {}),
+    };
+    const callId = uploadDebugCallId('list');
+    pushHyperbeamDebug('request', uploadDebugRequest(HYPERBEAM_UPLOAD_LIST_URL, requestHeaders, requestBody, callId));
     const response = await fetch(HYPERBEAM_UPLOAD_LIST_URL, {
       method: 'POST',
       credentials: 'include',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        ...(channelIds.length ? { 'x-odysee-channel-ids': channelIds.join(',') } : {}),
-      },
-      body: JSON.stringify({
-        channel_ids: channelIds,
-      }),
+      headers: requestHeaders,
+      body: JSON.stringify(requestBody),
     });
     const json = await responseJson(response);
+    pushHyperbeamDebug(
+      'response',
+      uploadDebugResponse(HYPERBEAM_UPLOAD_LIST_URL, response, json, requestHeaders, requestBody, callId),
+      response.ok ? 'ok' : 'error'
+    );
 
     if (!response.ok) {
       return [];
@@ -438,6 +448,97 @@ function errorMessage(json: any, status: number) {
   }
 
   return `HyperBEAM upload failed with ${status}`;
+}
+
+function uploadDebugCallId(kind: string) {
+  return `upload-${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function uploadDebugRequest(url: string, headers: Record<string, string>, body: Record<string, any>, callId: string) {
+  return {
+    ...uploadDebugPageContext(),
+    callId,
+    method: 'POST',
+    url,
+    devicePath: url,
+    deviceLayer: 'browser-resource',
+    sourceLayer: 'browser-resource',
+    nativeSource: uploadDebugNativeSource(url),
+    requestHeaders: headers,
+    requestBody: body,
+    requestKey: uploadDebugLifecycleKey(body),
+  };
+}
+
+function uploadDebugResponse(
+  url: string,
+  response: Response,
+  body: any,
+  requestHeaders: Record<string, string>,
+  requestBody: Record<string, any>,
+  callId: string
+) {
+  return {
+    ...uploadDebugPageContext(),
+    callId,
+    method: 'POST',
+    status: response.status,
+    ok: response.ok,
+    url,
+    devicePath: url,
+    deviceLayer: 'browser-resource',
+    sourceLayer: 'browser-resource',
+    nativeSource: uploadDebugNativeSource(url),
+    requestHeaders,
+    requestBody,
+    responseHeaders: uploadDebugResponseHeaders(response),
+    contentType: response.headers.get('content-type'),
+    contentLength: response.headers.get('content-length'),
+    requestKey: uploadDebugLifecycleKey(requestBody),
+    claimKeys: uploadDebugClaimKeys(body),
+    body,
+  };
+}
+
+function uploadDebugLifecycleKey(requestBody: Record<string, any>) {
+  if (Array.isArray(requestBody.claim_ids) && requestBody.claim_ids.length)
+    return `claim:${requestBody.claim_ids.join(',')}`;
+  if (requestBody.claim_id) return `claim:${requestBody.claim_id}`;
+  if (Array.isArray(requestBody.channel_ids) && requestBody.channel_ids.length)
+    return `channels:${requestBody.channel_ids.join(',')}`;
+  return 'upload-index:list';
+}
+
+function uploadDebugClaimKeys(responseBody: any) {
+  const claimIds =
+    responseBody?.result?.items?.map((item: any) => item?.claim_id).filter(Boolean) ||
+    responseBody?.items?.map((item: any) => item?.claim_id).filter(Boolean);
+  return Array.isArray(claimIds) ? claimIds.join(',') : undefined;
+}
+
+function uploadDebugNativeSource(url: string) {
+  if (url.includes('/list') || url.includes('/index')) return 'upload-index';
+  if (url.includes('/read')) return 'media';
+  return 'upload';
+}
+
+function uploadDebugResponseHeaders(response: Response) {
+  const headers: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+  if (Object.keys(headers).length === 0) {
+    headers['capture-note'] = 'No response headers are exposed to frontend JavaScript for this response.';
+  }
+  return headers;
+}
+
+function uploadDebugPageContext() {
+  if (typeof window === 'undefined') return {};
+  return {
+    pageUrl: window.location.href,
+    pagePath: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+  };
 }
 
 function hasValue(value: any) {

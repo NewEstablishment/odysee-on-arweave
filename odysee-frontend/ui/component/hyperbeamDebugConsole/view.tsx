@@ -135,7 +135,7 @@ export default function HyperbeamDebugConsole() {
           FILTERS.some((filter) => activeFilters.has(filter.key) && eventMatchesFilter(event, filter.key))
         );
   const focusedEvents = activeTrace
-    ? visibleEvents.filter((event) => eventMatchesTraceFocus(event, activeTrace))
+    ? focusedEventsWithLifecyclePeers(visibleEvents, events, activeTrace)
     : visibleEvents;
   const requestFilterNeedles = React.useMemo(() => normalizedFilterNeedles(requestFilterText), [requestFilterText]);
   const requestFilteredEvents = requestFilterNeedles.length
@@ -1103,7 +1103,7 @@ function ArchitecturePanel({
               w={210}
               h={82}
               title="Upload device"
-              detail="chunks, manifest, index/list"
+              detail="chunks, manifest, writes"
               color="#0ea5e9"
               active={nodeActive('upload', displayGraph.uploadEvents > 0)}
               faded={nodeFaded('upload', hasGraphFocus && displayGraph.uploadEvents === 0)}
@@ -1396,6 +1396,28 @@ function lifecycleEventsForSelection(
   return peer ? [event, peer] : [event];
 }
 
+function focusedEventsWithLifecyclePeers(
+  visibleEvents: Array<HyperbeamDebugEvent>,
+  events: Array<HyperbeamDebugEvent>,
+  focus: TraceFocus
+) {
+  const included = new Set<HyperbeamDebugEvent>();
+  const visibleSet = new Set(visibleEvents);
+
+  visibleEvents.forEach((event) => {
+    if (!eventMatchesTraceFocus(event, focus)) return;
+
+    included.add(event);
+    const eventIndex = events.indexOf(event);
+    if (eventIndex === -1) return;
+
+    const peer = findRequestLifecyclePeer(event, eventIndex, events);
+    if (peer && visibleSet.has(peer)) included.add(peer);
+  });
+
+  return visibleEvents.filter((event) => included.has(event));
+}
+
 function eventsShareRequestLifecycle(left: HyperbeamDebugEvent, right: HyperbeamDebugEvent) {
   const leftData = left.data || {};
   const rightData = right.data || {};
@@ -1621,6 +1643,7 @@ function architectureSelectedPath(
   const sourceLayer = String(selectedData.sourceLayer || '');
   const nativeSource = String(selectedData.nativeSource || '');
   const isUploadRead = isHyperbeamUploadReadPath(path);
+  const isUploadMetadata = isHyperbeamUploadMetadataPath(path) || nativeSource === 'upload-index';
   const isAuth = !isUploadRead && Boolean(selectedData.authRequired || sourceLayer.includes('auth'));
   const isSsr = path.includes('/$/api/');
   const frontend = isSsr || isAuth ? 'ssr' : 'sdk';
@@ -1641,7 +1664,8 @@ function architectureSelectedPath(
   const hasRequest = selectedEvents.some((event) => event.label === 'request' || event.label === 'request failed');
   const hasResponse = selectedEvents.some(isResponseLikeEvent);
   const isCache = path.includes('~cache@1.0') || nativeSource === 'cache';
-  const isUpload = path.includes('~odysee-upload@1.0') || (path.includes('/hyperbeam-upload/') && !isUploadRead);
+  const isUpload =
+    path.includes('~odysee-upload@1.0') || (path.includes('/hyperbeam-upload/') && !isUploadRead && !isUploadMetadata);
   const isArweave = path.includes('~arweave') || sourceLayer.includes('arweave');
   const isLegacy =
     !mediaRange &&
@@ -1651,7 +1675,7 @@ function architectureSelectedPath(
     [];
 
   nodes.add(frontend);
-  if (mode !== HYPERBEAM_MODES.original && !isUploadRead) nodes.add('hyperbeam');
+  if (mode !== HYPERBEAM_MODES.original && !isUploadRead && !isUploadMetadata) nodes.add('hyperbeam');
   if (isAuth) nodes.add('auth');
   if (selectedDevice) nodes.add(`device:${selectedDevice}`);
 
@@ -1666,6 +1690,9 @@ function architectureSelectedPath(
   }
   if (isArweave) {
     backendFlows.push({ color: '#64748b', label: 'arweave', node: 'arweave', x: 1340, y: 325, viaStore: true });
+  }
+  if (isUploadMetadata) {
+    backendFlows.push({ color: '#facc15', label: 'store metadata', node: 'store', x: 1040, y: 255 });
   }
   if (isUpload) {
     backendFlows.push({ color: '#0ea5e9', label: 'upload', node: 'upload', x: 1040, y: 455 });
@@ -1982,7 +2009,7 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     }
     if (
       path.includes('~odysee-upload@1.0') ||
-      (path.includes('/hyperbeam-upload/') && !isHyperbeamUploadReadPath(path))
+      (path.includes('/hyperbeam-upload/') && !isHyperbeamUploadReadPath(path) && !isHyperbeamUploadMetadataPath(path))
     ) {
       counters.uploadEvents += 1;
     }
@@ -2073,6 +2100,10 @@ function isMediaRangeEvent(data: Record<string, any>, path: string, device: stri
 
 function isHyperbeamUploadReadPath(path: string) {
   return path.includes('/$/api/hyperbeam-upload/v1/read/');
+}
+
+function isHyperbeamUploadMetadataPath(path: string) {
+  return path.includes('/$/api/hyperbeam-upload/v1/list') || path.includes('/$/api/hyperbeam-upload/v1/index');
 }
 
 function formatDetail(value: any) {
@@ -2309,7 +2340,7 @@ function eventMatchesTraceFocus(event: HyperbeamDebugEvent, focus: TraceFocus) {
     return matchesDevice || matchesRequest;
   }
 
-  const haystack = eventFocusText(event);
+  const haystack = eventClaimFocusText(event);
   return traceFocusNeedles(focus).some((needle) => haystack.includes(needle));
 }
 
@@ -2390,6 +2421,30 @@ function traceFocusNeedles(focus: TraceFocus) {
 
 function eventFocusText(event: HyperbeamDebugEvent) {
   return JSON.stringify(sanitizeHyperbeamDebugValue(event)).toLowerCase();
+}
+
+function eventClaimFocusText(event: HyperbeamDebugEvent) {
+  const data = event.data || {};
+  return JSON.stringify(
+    sanitizeHyperbeamDebugValue({
+      label: event.label,
+      method: data.method,
+      url: data.url,
+      urlParts: data.urlParts,
+      device: data.device,
+      devicePath: data.devicePath,
+      nativePath: data.nativePath,
+      nativeSource: data.nativeSource,
+      mediaSource: data.mediaSource,
+      requestKey: data.requestKey,
+      claimKeys: data.claimKeys,
+      requestBody: data.requestBody,
+      body: data.body,
+      responseBody: data.responseBody,
+      response: data.response,
+      result: data.result,
+    })
+  ).toLowerCase();
 }
 
 function normalizedFilterNeedles(value: string) {
