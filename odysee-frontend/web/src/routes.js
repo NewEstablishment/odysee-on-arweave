@@ -98,6 +98,10 @@ function hyperbeamNodeUrl() {
 }
 
 async function readJsonBody(ctx) {
+  if (ctx.request && ctx.request.body && Object.keys(ctx.request.body).length) {
+    return ctx.request.body;
+  }
+
   const chunks = [];
   await new Promise((resolve, reject) => {
     ctx.req.on('data', (chunk) => chunks.push(chunk));
@@ -341,20 +345,29 @@ async function postHyperbeamUploadDelete(ctx) {
   }
 
   const requestBody = await readJsonBody(ctx);
-  const claimId = String(requestBody.claim_id || requestBody.claimId || '').trim();
-  if (!claimId) {
+  const uploadId = String(
+    requestBody.id ||
+      requestBody.immutable_id ||
+      requestBody.immutableId ||
+      requestBody.upload_id ||
+      requestBody.uploadId ||
+      requestBody.claim_id ||
+      requestBody.claimId ||
+      ''
+  ).trim();
+  if (!uploadId) {
     ctx.status = 400;
     ctx.set('Cache-Control', 'no-store');
-    ctx.body = { error: 'claim_id required' };
+    ctx.body = { error: 'upload id required' };
     return;
   }
 
   const response = await postJson(
     `${nodeUrl}${HYPERBEAM_UPLOAD_DELETE_PATH}`,
-    { claim_id: claimId },
+    { id: uploadId, immutable_id: uploadId },
     {
       'x-odysee-auth-token': authToken,
-      'x-odysee-upload-claim-id': claimId,
+      'x-odysee-upload-id': uploadId,
     }
   );
 
@@ -475,7 +488,12 @@ function parseByteRange(header, totalSize) {
 }
 
 function hyperbeamReadUrl(nodeUrl, id) {
-  return `${nodeUrl}/~cache@1.0/read?read=${encodeURIComponent(String(id).replace(/^\//, ''))}`;
+  const path = String(id)
+    .replace(/^\/+/, '')
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+  return `${nodeUrl}/${path}`;
 }
 
 function getRequestAuthToken(ctx) {
@@ -545,19 +563,12 @@ function htmlResponseDetails(body) {
 }
 
 function postJson(url, payload, extraHeaders = {}) {
-  const body = JSON.stringify(payload);
-  return fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...extraHeaders,
-    },
-    body,
-  }).then(async (res) => ({
-    statusCode: res.status,
-    headers: Object.fromEntries(res.headers.entries()),
-    body: await res.text(),
-  }));
+  const body = Buffer.from(JSON.stringify(payload));
+  return postBuffer(url, body, {
+    'content-type': 'application/json',
+    'content-length': body.length,
+    ...extraHeaders,
+  });
 }
 
 function postStream(url, stream, extraHeaders = {}) {

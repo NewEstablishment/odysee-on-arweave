@@ -25,7 +25,7 @@ import { doFetchTxoPage } from 'redux/actions/wallet';
 import { doMembershipContentForStreamClaimIds, doFetchOdyseeMembershipForChannelIds } from 'redux/actions/memberships';
 import { selectSupportsByOutpoint } from 'redux/selectors/wallet';
 import { creditsToString } from 'util/format-credits';
-import { createNormalizedClaimSearchKey, getChannelIdFromClaim, isClaimProtected } from 'util/claim';
+import { createNormalizedClaimSearchKey, getChannelIdFromClaim, getClaimTags, isClaimProtected } from 'util/claim';
 import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
@@ -190,6 +190,7 @@ async function mergeHyperbeamPublishesIntoSearchResult(
   const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
   const indexedClaims = hyperbeamClaims.filter((claim) => {
     if (existingIds.has(claim.claim_id)) return false;
+    if (!hyperbeamClaimMatchesSearchOptions(claim, options)) return false;
     const channelId = getHyperbeamUploadChannelId(claim);
     return Boolean(channelId && wantedChannelIds.has(channelId));
   });
@@ -224,6 +225,50 @@ function hyperbeamClaimMatchesChannel(claim: StreamClaim, channelUri: string) {
       return String(candidate) === channelUri;
     }
   });
+}
+
+function hyperbeamClaimMatchesSearchOptions(claim: StreamClaim, options: ClaimSearchOptions) {
+  if (!hyperbeamClaimMatchesSearchTags(claim, options)) return false;
+  if (!hyperbeamClaimMatchesReleaseTime(claim, options)) return false;
+  return true;
+}
+
+function hyperbeamClaimMatchesSearchTags(claim: StreamClaim, options: ClaimSearchOptions) {
+  const anyTags = normalizeSearchArray((options as any).any_tags || (options as any).anyTags);
+  if (!anyTags.length) return true;
+
+  const claimTags = new Set((getClaimTags(claim) || []).map(String));
+  return anyTags.some((tag) => claimTags.has(tag));
+}
+
+function hyperbeamClaimMatchesReleaseTime(claim: StreamClaim, options: ClaimSearchOptions) {
+  const filter = (options as any).release_time || (options as any).releaseTime;
+  if (!filter) return true;
+
+  const releaseTime = Number(
+    (claim.value as any)?.release_time || claim.timestamp || claim.meta?.creation_timestamp || 0
+  );
+  if (!Number.isFinite(releaseTime) || releaseTime <= 0) return false;
+
+  if (typeof filter === 'string') {
+    const text = filter.trim();
+    const target = Number(text.replace(/^[<>]=?/, ''));
+    if (!Number.isFinite(target)) return true;
+    if (text.startsWith('>=')) return releaseTime >= target;
+    if (text.startsWith('>')) return releaseTime > target;
+    if (text.startsWith('<=')) return releaseTime <= target;
+    if (text.startsWith('<')) return releaseTime < target;
+    return releaseTime === target;
+  }
+
+  if (typeof filter === 'number') return releaseTime === filter;
+  return true;
+}
+
+function normalizeSearchArray(value: any): Array<string> {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (value) return [String(value)];
+  return [];
 }
 
 function hyperbeamClaimUrlMatchesChannel(claimUrl: string, channelUri: string) {
@@ -793,6 +838,8 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
   const outpoint = `${txid}:${nout}`;
   return (dispatch: Dispatch, getState: GetState) => {
     if (isHyperbeamUploadClaim(claim)) {
+      const uploadId =
+        (claim as any).hyperbeam?.upload_id || (claim as any).immutable_id || (claim as any).outpoint || claim.claim_id;
       const data = {
         claimId: claim.claim_id,
       };
@@ -801,7 +848,7 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
         data,
       });
 
-      deleteHyperbeamPublish(claim.claim_id).then(
+      deleteHyperbeamPublish(uploadId).then(
         () => {
           dispatch({
             type: ACTIONS.ABANDON_CLAIM_SUCCEEDED,

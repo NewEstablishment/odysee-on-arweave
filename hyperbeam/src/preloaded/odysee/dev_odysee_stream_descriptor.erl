@@ -393,6 +393,10 @@ media_headers(Desc, Size, Base, Req, Opts) ->
         <<"content-type">> => media_type(Base, Req, Opts),
         <<"content-length">> => Size,
         <<"accept-ranges">> => <<"bytes">>,
+        <<"x-odysee-media-source">> => <<"lbry-stream-descriptor">>,
+        <<"x-odysee-media-verification">> => <<"descriptor-range">>,
+        <<"x-odysee-media-verification-limitations">> =>
+            <<"range response is a byte slice; full object verification requires descriptor and blob verification by the serving node">>,
         <<"sd-hash">> => hb_maps:get(<<"sd-hash">>, Desc, not_found, Opts)
     }.
 
@@ -445,6 +449,10 @@ range_required_response(Size) ->
         <<"content-length">> => byte_size(Body),
         <<"content-range">> => <<"bytes */", (integer_to_binary(Size))/binary>>,
         <<"accept-ranges">> => <<"bytes">>,
+        <<"x-odysee-media-source">> => <<"lbry-stream-descriptor">>,
+        <<"x-odysee-media-verification">> => <<"descriptor-range-required">>,
+        <<"x-odysee-media-verification-limitations">> =>
+            <<"large media requires an explicit range; no media bytes were returned">>,
         <<"body">> => Body
     }.
 
@@ -463,7 +471,7 @@ cors_headers() ->
         <<"access-control-allow-headers">> =>
             <<"Range,Content-Type,Accept,Authorization">>,
         <<"access-control-expose-headers">> =>
-            <<"Content-Length,Content-Range,Accept-Ranges,Location,Content-Digest">>
+            <<"Content-Length,Content-Range,Accept-Ranges,Location,Content-Digest,X-Odysee-Media-Source,X-Odysee-Media-Verification,X-Odysee-Media-Verification-Limitations">>
     }.
 
 read_media_range(Desc, Start, End, Size, Base, Req, Opts) ->
@@ -1578,7 +1586,15 @@ decode_rejects_out_of_order_blobs_test() ->
 verify_reports_missing_blobs_test() ->
     {JSON, _Encrypted, _Plain, BlobHash} = test_descriptor(),
     {ok, Desc} = decode(#{}, #{ <<"body">> => JSON }, #{}),
-    {ok, Verified} = verify(Desc, #{}, #{}),
+    {ok, Verified} =
+        verify(
+            Desc,
+            #{
+                <<"use-store-blobs">> => false,
+                <<"cache-blobs">> => false
+            },
+            #{}
+        ),
     ?assertEqual(false, hb_maps:get(<<"verified">>, Verified, #{})),
     ?assertEqual([BlobHash], hb_maps:get(<<"missing-blobs">>, Verified, #{})).
 
@@ -1623,6 +1639,8 @@ media_head_returns_range_metadata_test() ->
     ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"content-type">>, Head, #{})),
     ?assertEqual(byte_size(Plain), hb_maps:get(<<"content-length">>, Head, #{})),
     ?assertEqual(<<"bytes">>, hb_maps:get(<<"accept-ranges">>, Head, #{})),
+    ?assertEqual(<<"lbry-stream-descriptor">>, hb_maps:get(<<"x-odysee-media-source">>, Head, #{})),
+    ?assertEqual(<<"descriptor-range">>, hb_maps:get(<<"x-odysee-media-verification">>, Head, #{})),
     ?assertEqual(<<>>, hb_maps:get(<<"body">>, Head, #{})).
 
 media_get_returns_explicit_range_test() ->
@@ -1640,6 +1658,8 @@ media_get_returns_explicit_range_test() ->
         ),
     ?assertEqual(206, hb_maps:get(<<"status">>, Range, #{})),
     ?assertEqual(<<"bytes 6-9/31">>, hb_maps:get(<<"content-range">>, Range, #{})),
+    ?assertEqual(<<"lbry-stream-descriptor">>, hb_maps:get(<<"x-odysee-media-source">>, Range, #{})),
+    ?assertEqual(<<"descriptor-range">>, hb_maps:get(<<"x-odysee-media-verification">>, Range, #{})),
     ?assertEqual(binary:part(Plain, 6, 4), hb_maps:get(<<"body">>, Range, #{})).
 
 media_get_accepts_capital_range_test() ->
@@ -1708,7 +1728,8 @@ media_get_requires_range_for_large_media_test() ->
     ?assertEqual(
         <<"bytes */8388609">>,
         hb_maps:get(<<"content-range">>, Res, #{})
-    ).
+    ),
+    ?assertEqual(<<"descriptor-range-required">>, hb_maps:get(<<"x-odysee-media-verification">>, Res, #{})).
 
 media_get_reads_local_blob_dir_test() ->
     {JSON, Encrypted, Plain, BlobHash} = test_descriptor(),

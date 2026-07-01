@@ -46,7 +46,7 @@ commitment(Device, Type, {NativeIDType, NativeIDBytes}, Committed, Extra) ->
             #{
                 <<"commitment-device">> => Device,
                 <<"type">> => Type,
-                <<"signature">> => hb_util:encode(NativeIDBytes),
+                <<"signature">> => native_signature_encode(NativeIDBytes),
                 <<"committed">> => Committed,
                 <<"native-id">> => hb_util:to_hex(NativeIDBytes),
                 <<"native-id-type">> => NativeIDType
@@ -96,7 +96,7 @@ native_id_fields(Type, Hex) ->
     case native_id_bytes(Hex) of
         {ok, Normalized, Bytes} ->
             {ok, #{
-                <<"signature">> => hb_util:encode(Bytes),
+                <<"signature">> => native_signature_encode(Bytes),
                 <<"native-id">> => Normalized,
                 <<"native-id-type">> => Type
             }};
@@ -105,7 +105,7 @@ native_id_fields(Type, Hex) ->
     end.
 
 signature_matches(Signature, NativeIDBytes) when is_binary(Signature) ->
-    try hb_util:decode(Signature) of
+    try native_signature_decode(Signature) of
         NativeIDBytes -> true;
         _ -> false
     catch
@@ -113,6 +113,12 @@ signature_matches(Signature, NativeIDBytes) when is_binary(Signature) ->
     end;
 signature_matches(_, _) ->
     false.
+
+native_signature_encode(Bytes) ->
+    base64:encode(Bytes, #{mode => urlsafe, padding => false}).
+
+native_signature_decode(Encoded) ->
+    base64:decode(Encoded, #{mode => urlsafe, padding => false}).
 
 %% @doc Build the canonical blob message for verified encrypted blob bytes.
 %% The caller must have verified that `SHA-384(Bytes)' matches `HexHash'.
@@ -451,7 +457,7 @@ with_attestation_commitment(StreamMsg, ChannelMsg) ->
         Commitment = #{
             <<"commitment-device">> => <<"lbry-channel-attestation@1.0">>,
             <<"type">> => <<"secp256k1-sha256">>,
-            <<"signature">> => hb_util:encode(Signature),
+            <<"signature">> => native_signature_encode(Signature),
             <<"committed">> => [
                 <<"channel-evidence">>, <<"claim">>, <<"claim-id">>,
                 <<"claim-op">>, <<"device">>, <<"nout">>,
@@ -811,7 +817,7 @@ output_evidence(Base, OutpointBytes, Opts) ->
     end.
 
 decode_signature(Signature) when is_binary(Signature) ->
-    try hb_util:decode(Signature) of
+    try native_signature_decode(Signature) of
         Bytes when byte_size(Bytes) == 64 -> {ok, Bytes};
         _ -> {error, invalid_attestation_signature}
     catch
@@ -1349,7 +1355,11 @@ commitment_signature_round_trips_to_id_test() ->
             [<<"data">>],
             #{}
         ),
-    Signature = hb_util:decode(maps:get(<<"signature">>, Commitment)),
+    Signature =
+        base64:decode(
+            maps:get(<<"signature">>, Commitment),
+            #{mode => urlsafe, padding => false}
+        ),
     ?assertEqual(NativeBytes, Signature),
     ?assertEqual(ID, hb_util:human_id(crypto:hash(sha256, Signature))).
 

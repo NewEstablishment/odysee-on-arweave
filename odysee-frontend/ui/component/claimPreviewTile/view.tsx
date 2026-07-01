@@ -207,6 +207,8 @@ function ClaimPreviewTile(props: Props) {
     claim && claim.claim_id
       ? {
           'data-hyperbeam-claim-id': claim.claim_id,
+          'data-hyperbeam-immutable-id': claim.immutable_id || claim.outpoint,
+          'data-hyperbeam-store-path': claim.immutable_store_path,
           'data-hyperbeam-claim-txid': claim.txid,
           'data-hyperbeam-claim-nout': claim.nout,
           'data-hyperbeam-claim-sd-hash': claim.value?.source?.sd_hash,

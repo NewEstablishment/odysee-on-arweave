@@ -166,7 +166,8 @@ list(_Base, Req, Opts) ->
                 #{
                     <<"body">> => hb_json:encode(#{ <<"items">> => Items }),
                     <<"content-type">> => <<"application/json">>,
-                    <<"items">> => Items
+                    <<"items">> => Items,
+                    <<"status">> => 200
                 }
             };
         Other ->

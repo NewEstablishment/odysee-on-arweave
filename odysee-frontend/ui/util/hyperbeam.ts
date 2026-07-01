@@ -146,9 +146,10 @@ async function fetchHyperbeamUploadResolveEntries(urls: Array<string>): Promise<
 
 export async function fetchHyperbeamGet(params: any): Promise<any | null> {
   const uri = params?.uri || params?.url;
-  if (!uri) return null;
+  const id = params?.id || params?.outpoint || params?.immutable_id || params?.immutableId;
+  if (!uri && !id) return null;
 
-  const response = await fetchDeviceJson(`${STREAM_DEVICE}/playback`, { uri });
+  const response = await fetchDeviceJson(`${STREAM_DEVICE}/playback`, id ? { id } : { uri });
   return playbackPayloadFromHyperbeam(responsePayload(response));
 }
 
@@ -341,23 +342,36 @@ export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Pro
 async function fetchHyperbeamChannelClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   const channelIds = stringList((params as any).channel_ids || (params as any).channelIds);
   if (!channelIds.length) return null;
+  if (hasHyperbeamChannelSearchConstraints(params)) return null;
 
   try {
     const page = toNumber((params as any).page, 1);
     const pageSize = toNumber((params as any).page_size || (params as any)['page-size'], 20);
     const uploadClaims = await fetchHyperbeamUploadClaimsForChannels(channelIds);
-    const claimIds = (
+    let storeIds = (
       await Promise.all(
         channelIds.map(async (channelId) => {
           const result = responsePayload(
-            await fetchCacheJson(cacheListPath(`${channelId}/claims`, { page, page_size: pageSize }))
+            await fetchCacheJson(cacheListPath(`${channelId}/claim-outputs`, { page, page_size: pageSize }))
           );
           return Array.isArray(result?.items) ? result.items : [];
         })
       )
     ).flat();
+    if (!storeIds.length) {
+      storeIds = (
+        await Promise.all(
+          channelIds.map(async (channelId) => {
+            const result = responsePayload(
+              await fetchCacheJson(cacheListPath(`${channelId}/claims`, { page, page_size: pageSize }))
+            );
+            return Array.isArray(result?.items) ? result.items : [];
+          })
+        )
+      ).flat();
+    }
 
-    if (!claimIds.length && !uploadClaims.length) {
+    if (!storeIds.length && !uploadClaims.length) {
       return {
         items: [],
         page,
@@ -369,8 +383,8 @@ async function fetchHyperbeamChannelClaimSearch(params: ClaimSearchOptions): Pro
 
     const storeItems = (
       await Promise.all(
-        claimIds.slice(0, pageSize).map(async (claimId) => {
-          const result = responsePayload(await fetchCacheJson(cacheReadPath(claimId)));
+        storeIds.slice(0, pageSize).map(async (storeId) => {
+          const result = responsePayload(await fetchCacheJson(cacheReadPath(storeId)));
           return sdkClaimFromHyperbeam(cacheReadClaim(result));
         })
       )
@@ -380,7 +394,7 @@ async function fetchHyperbeamChannelClaimSearch(params: ClaimSearchOptions): Pro
       0,
       pageSize
     );
-    const totalItems = claimIds.length + uploadClaims.filter((claim) => !existingIds.has(claim.claim_id)).length;
+    const totalItems = storeIds.length + uploadClaims.filter((claim) => !existingIds.has(claim.claim_id)).length;
 
     return {
       items,
@@ -392,6 +406,16 @@ async function fetchHyperbeamChannelClaimSearch(params: ClaimSearchOptions): Pro
   } catch (_e) {
     return null;
   }
+}
+
+function hasHyperbeamChannelSearchConstraints(params: ClaimSearchOptions): boolean {
+  return Boolean(
+    (params as any).any_tags ||
+    (params as any).all_tags ||
+    (params as any).not_tags ||
+    (params as any).release_time ||
+    (params as any).releaseTime
+  );
 }
 
 async function fetchHyperbeamUploadClaimsForChannels(channelIds: Array<string>): Promise<Array<Claim>> {
@@ -753,6 +777,7 @@ function buildDeviceUrl(baseUrl: string, path: string): string {
 }
 
 function buildCacheUrl(baseUrl: string, path: string): string {
+  if (path.startsWith('/')) return `${baseUrl}${path}`;
   return `${baseUrl}/~cache@1.0/${path}`;
 }
 
@@ -771,7 +796,7 @@ async function fetchCacheJson(path: string): Promise<any | null> {
   });
 
   if (!response.ok) {
-    if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ~cache@1.0/${path} failed with ${response.status}`);
+    if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
     return null;
   }
 
@@ -779,7 +804,11 @@ async function fetchCacheJson(path: string): Promise<any | null> {
 }
 
 function cacheReadPath(id: string): string {
-  return `read?read=${encodeURIComponent(String(id).replace(/^\//, ''))}`;
+  return `/${String(id)
+    .replace(/^\/+/, '')
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/')}`;
 }
 
 function cacheListPath(path: string, params: Record<string, any> = {}): string {
@@ -980,16 +1009,33 @@ function sdkClaimFromHyperbeam(result: any): any {
   const claim = result.claim || result;
   const claimId = value(claim, 'claim_id', 'claim-id');
   if (!claim || !claimId) return claim;
+  const txid = value(claim, 'txid', 'tx-id');
+  const nout = value(claim, 'nout', 'n-out');
+  const outpoint = claimOutpoint(txid, nout);
 
   return {
     ...claim,
     claim_id: claimId,
+    ...(outpoint
+      ? {
+          outpoint,
+          immutable_id: outpoint,
+          immutable_store_path:
+            value(claim, 'claim-output-store-path', 'claim-proof-store-path') || `odysee/claim-output/${txid}/${nout}`,
+        }
+      : {}),
     name: value(claim, 'name', 'claim-name') || claim.name,
     canonical_url: value(claim, 'canonical_url', 'canonical-url') || claim.canonical_url,
     permanent_url: value(claim, 'permanent_url', 'permanent-url') || claim.permanent_url,
     short_url: value(claim, 'short_url', 'short-url') || claim.short_url,
     value_type: value(claim, 'value_type', 'value-type') || claim.value_type,
   };
+}
+
+function claimOutpoint(txid: any, nout: any): string | null {
+  if (!txid && txid !== 0) return null;
+  if (nout === undefined || nout === null || nout === '') return null;
+  return `${txid}:${nout}`;
 }
 
 function cacheReadClaim(result: any): any {

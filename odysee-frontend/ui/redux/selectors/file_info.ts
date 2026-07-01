@@ -11,7 +11,7 @@ import {
 } from 'redux/selectors/claims';
 import { selectActiveLivestreamForChannel } from 'redux/selectors/livestream';
 import { buildURI } from 'util/lbryURI';
-import { getChannelFromClaim } from 'util/claim';
+import { getChannelFromClaim, getClaimOutpoint } from 'util/claim';
 import Lbry from 'lbry';
 import { PAGE_SIZE } from 'constants/claim';
 export const selectState = (state) => state.fileInfo || EMPTY_OBJECT;
@@ -50,8 +50,9 @@ export const makeSelectLoadingForUri = (uri) =>
       return false;
     }
 
-    const { txid, nout } = claim;
-    const outpoint = `${txid}:${nout}`;
+    const outpoint = getClaimOutpoint(claim);
+    if (!outpoint) return false;
+
     const isFetching = fetchingByOutpoint[outpoint];
     return isFetching;
   });

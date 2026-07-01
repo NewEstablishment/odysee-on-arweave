@@ -2,12 +2,18 @@ import { HYPERBEAM_PLAYBACK_URL } from 'config';
 
 const HYPERBEAM_TIMEOUT_MS = 5000;
 
-export function buildHyperbeamPlaybackUrl(uri: string): string {
+export function buildHyperbeamPlaybackUrl(uri: string, immutableId?: string | null): string {
   if (!HYPERBEAM_PLAYBACK_URL) return '';
 
   try {
     const url = new URL(HYPERBEAM_PLAYBACK_URL);
-    url.searchParams.set('url', uri);
+    if (immutableId) {
+      url.searchParams.set('id', immutableId);
+      url.searchParams.delete('url');
+      url.searchParams.delete('uri');
+    } else {
+      url.searchParams.set('url', uri);
+    }
     if (!url.searchParams.has('media-base-url')) {
       url.searchParams.set('media-base-url', url.origin);
     }
@@ -17,8 +23,8 @@ export function buildHyperbeamPlaybackUrl(uri: string): string {
   }
 }
 
-export async function fetchHyperbeamPlaybackUrl(uri: string): Promise<string> {
-  const requestUrl = buildHyperbeamPlaybackUrl(uri);
+export async function fetchHyperbeamPlaybackUrl(uri: string, immutableId?: string | null): Promise<string> {
+  const requestUrl = buildHyperbeamPlaybackUrl(uri, immutableId);
   if (!requestUrl) return '';
 
   try {

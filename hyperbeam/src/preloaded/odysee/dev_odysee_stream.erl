@@ -65,7 +65,7 @@ media(Base, Req, Opts) ->
                     {ok, Stream} ?= from_claim(Base, Req, Opts),
                     media_response_with_policy(Stream, Base, Req, Opts)
                 else
-                    Error -> Error
+                    Error -> media_error_result(Error)
                 end
         end
     end).
@@ -109,19 +109,94 @@ ensure_claim(Base = #{ <<"claim">> := Claim }, _Req, Opts) when is_map(Claim) ->
             );
         _ -> {ok, Base}
     end;
+ensure_claim(Base = #{ <<"body">> := _Body }, _Req, Opts) ->
+    claim_message_from_read(Base, Opts);
 ensure_claim(Base, Req, Opts) ->
-    hb_ao:raw(<<"odysee-claim@1.0">>, <<"resolve">>, Base, Req, Opts).
+    case immutable_id(Base, Req, Opts) of
+        not_found ->
+            hb_ao:raw(<<"odysee-claim@1.0">>, <<"resolve">>, Base, Req, Opts);
+        ID ->
+            case valid_immutable_read_id(ID) of
+                true ->
+                    maybe
+                        {ok, Read} ?= hb_cache:read(ID, Opts),
+                        claim_message_from_read(Read, Opts)
+                    end;
+                false ->
+                    {error, invalid_immutable_id}
+            end
+    end.
+
+claim_message_from_read(Read, Opts) ->
+    case hb_maps:get(<<"value">>, Read, not_found, Opts) of
+        not_found ->
+            claim_message_from_body(Read, Opts);
+        _ ->
+            {ok, Read}
+    end.
+
+claim_message_from_body(Read, Opts) ->
+    case claim_item_from_body(hb_maps:get(<<"body">>, Read, not_found, Opts), Opts) of
+        Item when is_map(Item) ->
+            {ok, claim_message_from_item(Read, Item, Opts)};
+        not_found ->
+            {ok, Read}
+    end.
+
+claim_item_from_body(not_found, _Opts) ->
+    not_found;
+claim_item_from_body(Body, Opts) when is_binary(Body) ->
+    try claim_item_from_decoded_body(hb_json:decode(Body), Opts)
+    catch _:_ -> not_found
+    end;
+claim_item_from_body(Body, Opts) when is_map(Body) ->
+    claim_item_from_decoded_body(Body, Opts);
+claim_item_from_body(_Body, _Opts) ->
+    not_found.
+
+claim_item_from_decoded_body(Body, Opts) ->
+    case hb_maps:get(<<"body">>, Body, not_found, Opts) of
+        Nested when is_binary(Nested) ->
+            claim_item_from_body(Nested, Opts);
+        _ ->
+            Result = hb_maps:get(<<"result">>, Body, Body, Opts),
+            Items = hb_maps:get(<<"items">>, Result, [], Opts),
+            case Items of
+                [Item | _] when is_map(Item) -> Item;
+                _ -> not_found
+            end
+    end.
+
+claim_message_from_item(Read, Item, Opts) ->
+    Value = hb_maps:get(<<"value">>, Item, not_found, Opts),
+    ClaimID = first_value_in([<<"claim-id">>, <<"claim_id">>], [Read, Item], Opts),
+    ClaimName = first_value_in([<<"claim-name">>, <<"claim_name">>, <<"name">>], [Read, Item], Opts),
+    TxID = first_value_in([<<"txid">>], [Read, Item], Opts),
+    NOut = first_value_in([<<"nout">>], [Read, Item], Opts),
+    lists:foldl(
+        fun put_optional/2,
+        Read#{ <<"claim">> => Item },
+        [
+            {<<"value">>, Value},
+            {<<"claim-id">>, ClaimID},
+            {<<"claim-name">>, ClaimName},
+            {<<"txid">>, TxID},
+            {<<"nout">>, NOut}
+        ]
+    ).
 
 derive_stream(ClaimMsg, Base, Req, Opts) ->
     maybe
         Claim = hb_maps:get(<<"claim">>, ClaimMsg, ClaimMsg, Opts),
-        {ok, Value} ?= required(<<"value">>, ClaimMsg, Opts),
+        {ok, Value} ?= required_first_in([<<"value">>], [ClaimMsg, Claim], Opts),
         {ok, Source} ?= required(<<"source">>, Value, Opts),
         {ok, SDHash} ?= required_first([<<"sd_hash">>, <<"sd-hash">>], Source, Opts),
         {ok, MediaType} ?=
             required_first([<<"media_type">>, <<"media-type">>], Source, Opts),
-        {ok, ClaimID} ?= required(<<"claim-id">>, ClaimMsg, Opts),
-        {ok, ClaimName} ?= required(<<"claim-name">>, ClaimMsg, Opts),
+        {ok, ClaimID} ?=
+            required_first_in([<<"claim-id">>, <<"claim_id">>], [ClaimMsg, Claim], Opts),
+        {ok, ClaimName} ?=
+            required_first_in([<<"claim-name">>, <<"claim_name">>, <<"name">>], [ClaimMsg, Claim], Opts),
         Ext = file_extension(MediaType, Source, Opts),
         PlayerServer = player_server(Base, Req, Opts),
         StreamingURL = streaming_url(PlayerServer, ClaimName, ClaimID, SDHash, Ext),
@@ -184,6 +259,9 @@ stream_message(
         {<<"descriptor-store-path">>, <<"odysee/descriptor/", SDHash/binary>>},
         {<<"channel-store-path">>, channel_store_path(signing_channel_id(Claim, Opts))},
         {<<"claim-proof-store-path">>, claim_proof_store_path(Claim, Opts)},
+        {<<"claim-output-store-path">>, claim_output_store_path(Claim, ClaimMsg, Opts)},
+        {<<"outpoint">>, outpoint(Claim, ClaimMsg, Opts)},
+        {<<"immutable-id">>, outpoint(Claim, ClaimMsg, Opts)},
         {<<"txid">>, first_value([<<"txid">>], Claim, Opts)},
         {<<"nout">>, first_value([<<"nout">>], Claim, Opts)},
         {<<"claim-height">>, first_value([<<"height">>], Claim, Opts)},
@@ -247,6 +325,11 @@ playback_payload(Stream, Opts) ->
         {<<"source_name">>, hb_maps:get(<<"source-name">>, Stream, not_found, Opts)},
         {<<"source_hash">>, hb_maps:get(<<"source-hash">>, Stream, not_found, Opts)},
         {<<"source_size">>, hb_maps:get(<<"source-size">>, Stream, not_found, Opts)},
+        {<<"txid">>, hb_maps:get(<<"txid">>, Stream, not_found, Opts)},
+        {<<"nout">>, hb_maps:get(<<"nout">>, Stream, not_found, Opts)},
+        {<<"outpoint">>, hb_maps:get(<<"outpoint">>, Stream, not_found, Opts)},
+        {<<"immutable_id">>, hb_maps:get(<<"immutable-id">>, Stream, not_found, Opts)},
+        {<<"claim_output_store_path">>, hb_maps:get(<<"claim-output-store-path">>, Stream, not_found, Opts)},
         {<<"thumbnail_url">>, hb_maps:get(<<"thumbnail">>, Stream, not_found, Opts)},
         {<<"duration">>, hb_maps:get(<<"duration">>, Stream, not_found, Opts)},
         {<<"height">>, hb_maps:get(<<"height">>, Stream, not_found, Opts)},
@@ -334,10 +417,39 @@ media_response(Stream, Base, Req, Opts) ->
 
 media_response_with_policy(Stream, Base, Req, Opts) ->
     case policy_gate(Stream, Base, Req, Opts) of
-        allow -> media_response(Stream, Base, Req, Opts);
+        allow -> media_error_result(media_response(Stream, Base, Req, Opts));
         {deny, Res} -> {ok, Res};
         Error -> Error
     end.
+
+media_error_result({ok, Res}) ->
+    {ok, Res};
+media_error_result({error, {player_media_fetch_failed, _Errors} = Reason}) ->
+    {ok, media_error_response(502, Reason)};
+media_error_result({error, {blob_fetch_failed, _Hash, _Errors} = Reason}) ->
+    {ok, media_error_response(502, Reason)};
+media_error_result({error, Reason}) ->
+    {ok, media_error_response(media_error_status(Reason), Reason)};
+media_error_result(Reason) ->
+    {ok, media_error_response(media_error_status(Reason), Reason)}.
+
+media_error_status(not_found) -> 404;
+media_error_status({missing, _Key}) -> 400;
+media_error_status(invalid_immutable_id) -> 400;
+media_error_status(missing_immutable_outpoint) -> 400;
+media_error_status(_Reason) -> 502.
+
+media_error_response(Status, Reason) ->
+    Body = hb_json:encode(#{
+        <<"error">> => <<"media_fetch_failed">>,
+        <<"reason">> => error_summary(Reason)
+    }),
+    (cors_headers())#{
+        <<"status">> => Status,
+        <<"content-type">> => <<"application/json">>,
+        <<"content-length">> => byte_size(Body),
+        <<"body">> => Body
+    }.
 
 policy_gate(Stream, Base, Req, Opts) ->
     PolicyReq = policy_request(Base, Req, Opts),
@@ -505,6 +617,10 @@ player_head_response(Stream, Opts) ->
             <<"status">> => 200,
             <<"content-type">> => hb_maps:get(<<"media-type">>, Stream, <<"application/octet-stream">>, Opts),
             <<"accept-ranges">> => <<"bytes">>,
+            <<"x-odysee-media-source">> => <<"odysee-player-proxy">>,
+            <<"x-odysee-media-verification">> => <<"proxied-range">>,
+            <<"x-odysee-media-verification-limitations">> =>
+                <<"player proxy byte ranges are transport responses; browser did not verify the full media object">>,
             <<"body">> => <<>>
         },
     put_optional({<<"content-length">>, stream_size(Stream, Opts)}, Msg0).
@@ -543,6 +659,10 @@ player_proxy_response(Res, Stream, Opts) ->
                 ),
             <<"content-length">> => byte_size(Body),
             <<"accept-ranges">> => <<"bytes">>,
+            <<"x-odysee-media-source">> => <<"odysee-player-proxy">>,
+            <<"x-odysee-media-verification">> => <<"proxied-range">>,
+            <<"x-odysee-media-verification-limitations">> =>
+                <<"player proxy byte ranges are transport responses; browser did not verify the full media object">>,
             <<"body">> => Body
         },
     put_optional(
@@ -886,6 +1006,39 @@ claim_proof_store_path(Claim, Opts) ->
             not_found
     end.
 
+claim_output_store_path(Claim, ClaimMsg, Opts) ->
+    case outpoint_parts(Claim, ClaimMsg, Opts) of
+        {TxID, NOut} ->
+            <<"odysee/claim-output/", TxID/binary, "/", (path_int(NOut))/binary>>;
+        not_found ->
+            not_found
+    end.
+
+outpoint(Claim, ClaimMsg, Opts) ->
+    case outpoint_parts(Claim, ClaimMsg, Opts) of
+        {TxID, NOut} -> <<TxID/binary, ":", (path_int(NOut))/binary>>;
+        not_found -> not_found
+    end.
+
+outpoint_parts(Claim, ClaimMsg, Opts) ->
+    TxID =
+        case first_value([<<"txid">>], Claim, Opts) of
+            not_found -> first_value([<<"txid">>], ClaimMsg, Opts);
+            TxIDValue -> TxIDValue
+        end,
+    NOut =
+        case first_value([<<"nout">>], Claim, Opts) of
+            not_found -> first_value([<<"nout">>], ClaimMsg, Opts);
+            NOutValue -> NOutValue
+        end,
+    case {TxID, NOut} of
+        {TxIDBin, NOutPart}
+                when is_binary(TxIDBin), is_integer(NOutPart) orelse is_binary(NOutPart) ->
+            {TxIDBin, NOutPart};
+        _ ->
+            not_found
+    end.
+
 path_int(Int) when is_integer(Int) ->
     integer_to_binary(Int);
 path_int(Bin) when is_binary(Bin) ->
@@ -961,17 +1114,19 @@ playback_mode(Base, Req, Opts) ->
 
 media_url(Stream, Base, Req, Opts) ->
     Origin = trim_trailing_slash(media_base_url(Base, Req, Opts)),
-    ClaimName = hb_maps:get(<<"claim-name">>, Stream, Opts),
-    ClaimID = hb_maps:get(<<"claim-id">>, Stream, Opts),
-    Query =
-        encode_query(
-            [
-                {<<"claim-name">>, ClaimName},
-                {<<"claim-id">>, ClaimID}
-            ]
-                ++ media_query_params(Base, Req, Opts)
-        ),
+    Query = encode_query(media_identity_params(Stream, Opts) ++ media_query_params(Base, Req, Opts)),
     <<Origin/binary, "/~odysee-stream@1.0/media?", Query/binary>>.
+
+media_identity_params(Stream, Opts) ->
+    case hb_maps:get(<<"outpoint">>, Stream, not_found, Opts) of
+        Outpoint when is_binary(Outpoint) ->
+            [{<<"id">>, Outpoint}];
+        _ ->
+            [
+                {<<"claim-name">>, hb_maps:get(<<"claim-name">>, Stream, Opts)},
+                {<<"claim-id">>, hb_maps:get(<<"claim-id">>, Stream, Opts)}
+            ]
+    end.
 
 media_query_params(Base, Req, Opts) ->
     Params =
@@ -1108,7 +1263,7 @@ cors_headers() ->
         <<"access-control-allow-headers">> =>
             <<"Range,Content-Type,Accept,Authorization">>,
         <<"access-control-expose-headers">> =>
-            <<"Content-Length,Content-Range,Accept-Ranges,Location,Content-Digest">>
+            <<"Content-Length,Content-Range,Accept-Ranges,Location,Content-Digest,X-Odysee-Media-Source,X-Odysee-Media-Verification,X-Odysee-Media-Verification-Limitations">>
     }.
 
 media_base_url(Base, Req, Opts) ->
@@ -1294,11 +1449,25 @@ required_first(Keys, Map, Opts) ->
         Value -> {ok, Value}
     end.
 
+required_first_in(Keys, Maps, Opts) ->
+    case first_value_in(Keys, Maps, Opts) of
+        not_found -> {error, {missing, hd(Keys)}};
+        Value -> {ok, Value}
+    end.
+
 first_value([], _Map, _Opts) ->
     not_found;
 first_value([Key | Rest], Map, Opts) ->
     case hb_maps:get(Key, Map, not_found, Opts) of
         not_found -> first_value(Rest, Map, Opts);
+        Value -> Value
+    end.
+
+first_value_in(_Keys, [], _Opts) ->
+    not_found;
+first_value_in(Keys, [Map | Rest], Opts) ->
+    case first_value(Keys, Map, Opts) of
+        not_found -> first_value_in(Keys, Rest, Opts);
         Value -> Value
     end.
 
@@ -1311,6 +1480,59 @@ first_found([{Msg, Key} | Rest], Opts) when is_map(Msg) ->
     end;
 first_found([_ | Rest], Opts) ->
     first_found(Rest, Opts).
+
+immutable_id(Base, Req, Opts) ->
+    case first_found(
+        [
+            {Req, <<"id">>},
+            {Req, <<"outpoint">>},
+            {Req, <<"immutable-id">>},
+            {Req, <<"immutable_id">>},
+            {Base, <<"id">>},
+            {Base, <<"outpoint">>},
+            {Base, <<"immutable-id">>},
+            {Base, <<"immutable_id">>}
+        ],
+        Opts
+    ) of
+        not_found -> not_found;
+        Value -> hb_util:bin(Value)
+    end.
+
+valid_immutable_read_id(<<TxID:64/binary, ":", NOut/binary>>) ->
+    valid_hex_size(TxID, 32) andalso valid_uint(NOut);
+valid_immutable_read_id(<<"odysee/claim-output/", Rest/binary>>) ->
+    valid_outpoint_path(Rest);
+valid_immutable_read_id(<<"odysee/outpoint/", Rest/binary>>) ->
+    valid_outpoint_path(Rest);
+valid_immutable_read_id(<<"odysee/claim-proof/", Rest/binary>>) ->
+    valid_outpoint_path(Rest);
+valid_immutable_read_id(ID) ->
+    valid_hex_size(ID, 48) orelse valid_hex_size(ID, 32).
+
+valid_outpoint_path(Rest) ->
+    case binary:split(Rest, <<"/">>) of
+        [TxID, NOut] -> valid_hex_size(TxID, 32) andalso valid_uint(NOut);
+        _ -> false
+    end.
+
+valid_hex_size(Hex, Bytes) when is_binary(Hex), byte_size(Hex) =:= Bytes * 2 ->
+    try binary:decode_hex(Hex) of
+        Decoded -> byte_size(Decoded) =:= Bytes
+    catch
+        _:_ -> false
+    end;
+valid_hex_size(_Hex, _Bytes) ->
+    false.
+
+valid_uint(Bin) when is_binary(Bin), byte_size(Bin) > 0 ->
+    try binary_to_integer(Bin) of
+        Int -> Int >= 0
+    catch
+        _:_ -> false
+    end;
+valid_uint(_Bin) ->
+    false.
 
 put_optional({_Key, not_found}, Msg) -> Msg;
 put_optional({Key, Value}, Msg) -> Msg#{ Key => Value }.
@@ -1339,6 +1561,17 @@ stream_from_claim_builds_playback_url_test() ->
     ),
     Body = hb_json:decode(hb_maps:get(<<"body">>, Stream, #{})),
     ?assertEqual(expected_streaming_url(), hb_maps:get(<<"streaming_url">>, Body, #{})).
+
+stream_from_claim_output_body_surface_test() ->
+    {ok, Stream} = stream(claim_output_read(), #{}, #{}),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Stream, #{})),
+    ?assertEqual(<<"image/png">>, hb_maps:get(<<"media-type">>, Stream, #{})),
+    ?assertEqual(expected_outpoint(), hb_maps:get(<<"outpoint">>, Stream, #{})),
+    ?assertEqual(expected_outpoint(), hb_maps:get(<<"immutable_id">>, Body, #{})),
+    ?assertEqual(
+        <<"odysee/claim-output/0bdd755efd133b1e156bde4c8f13a58903310f3c7cb015b8ef30909505cd21d3/0">>,
+        hb_maps:get(<<"claim-output-store-path">>, Stream, #{})
+    ).
 
 playback_redirect_test() ->
     {ok, Redirect} =
@@ -1447,6 +1680,23 @@ playback_bytes_json_returns_media_url_in_body_test() ->
     ?assertEqual(expected_media_url(), hb_maps:get(<<"download_url">>, Body, #{})),
     ?assertEqual(not_found, hb_maps:get(<<"description">>, Res, not_found, #{})).
 
+playback_bytes_json_prefers_immutable_media_id_test() ->
+    {ok, Res} =
+        playback(
+            #{},
+            #{
+                <<"claim">> => target_claim_with_outpoint(),
+                <<"mode">> => <<"bytes">>,
+                <<"media-base-url">> => <<"http://127.0.0.1:8734">>
+            },
+            #{}
+        ),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Res, #{})),
+    ?assertEqual(expected_outpoint(), hb_maps:get(<<"outpoint">>, Body, #{})),
+    ?assertEqual(expected_outpoint(), hb_maps:get(<<"immutable_id">>, Body, #{})),
+    ?assertEqual(expected_immutable_media_url(), hb_maps:get(<<"streaming_url">>, Body, #{})),
+    ?assertEqual(expected_immutable_media_url(), hb_maps:get(<<"download_url">>, Body, #{})).
+
 playback_options_preflight_test() ->
     {ok, Res} = playback(#{}, #{ <<"method">> => <<"OPTIONS">> }, #{}),
     ?assertEqual(204, hb_maps:get(<<"status">>, Res, #{})),
@@ -1513,6 +1763,8 @@ media_player_proxy_head_uses_claim_metadata_test() ->
     ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"content-type">>, Res, #{})),
     ?assertEqual(653610679, hb_maps:get(<<"content-length">>, Res, #{})),
     ?assertEqual(<<"bytes">>, hb_maps:get(<<"accept-ranges">>, Res, #{})),
+    ?assertEqual(<<"odysee-player-proxy">>, hb_maps:get(<<"x-odysee-media-source">>, Res, #{})),
+    ?assertEqual(<<"proxied-range">>, hb_maps:get(<<"x-odysee-media-verification">>, Res, #{})),
     ?assertEqual(<<>>, hb_maps:get(<<"body">>, Res, #{})).
 
 prefer_player_proxy_skips_blob_native_test() ->
@@ -1541,12 +1793,41 @@ media_player_proxy_caps_open_range_test() ->
             ),
         ?assertEqual(206, hb_maps:get(<<"status">>, Res, #{})),
         ?assertEqual(<<"abcde">>, hb_maps:get(<<"body">>, Res, #{})),
+        ?assertEqual(<<"odysee-player-proxy">>, hb_maps:get(<<"x-odysee-media-source">>, Res, #{})),
+        ?assertEqual(<<"proxied-range">>, hb_maps:get(<<"x-odysee-media-verification">>, Res, #{})),
         [Request] = hb_mock_server:get_requests(player, 1, ServerHandle),
         Headers = hb_maps:get(<<"headers">>, Request, #{}, #{}),
         ?assertEqual(<<"bytes=0-4">>, hb_maps:get(<<"range">>, Headers, #{}, #{}))
     after
         hb_mock_server:stop(ServerHandle)
     end.
+
+media_player_proxy_failure_returns_json_test() ->
+    {ok, MockServer, ServerHandle} =
+        hb_mock_server:start([
+            {"/v6/streams/[...]", player, {401, <<"blocked">>}}
+        ]),
+    try
+        {ok, Res} =
+            media(
+                #{},
+                #{ <<"claim">> => target_claim(), <<"player-server">> => MockServer },
+                #{}
+            ),
+        Body = hb_json:decode(hb_maps:get(<<"body">>, Res, #{})),
+        ?assertEqual(502, hb_maps:get(<<"status">>, Res, #{})),
+        ?assertEqual(<<"application/json">>, hb_maps:get(<<"content-type">>, Res, #{})),
+        ?assertEqual(<<"media_fetch_failed">>, hb_maps:get(<<"error">>, Body, #{}))
+    after
+        hb_mock_server:stop(ServerHandle)
+    end.
+
+media_missing_immutable_id_returns_json_test() ->
+    {ok, Res} = media(#{}, #{ <<"id">> => <<"not-a-real-outpoint">> }, #{}),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Res, #{})),
+    ?assertEqual(400, hb_maps:get(<<"status">>, Res, #{})),
+    ?assertEqual(<<"application/json">>, hb_maps:get(<<"content-type">>, Res, #{})),
+    ?assertEqual(<<"media_fetch_failed">>, hb_maps:get(<<"error">>, Body, #{})).
 
 stream_rejects_non_stream_claim_test() ->
     Claim = target_claim(),
@@ -1629,14 +1910,24 @@ expected_media_url_with_player_proxy_false() ->
 expected_media_url_with_blob_native() ->
     <<(expected_media_url())/binary, "&blob-native=true">>.
 
+expected_immutable_media_url() ->
+    <<
+        "http://127.0.0.1:8734/~odysee-stream@1.0/media?id=",
+        "0bdd755efd133b1e156bde4c8f13a58903310f3c7cb015b8ef30909505cd21d3%3A0"
+    >>.
+
+expected_outpoint() ->
+    <<"0bdd755efd133b1e156bde4c8f13a58903310f3c7cb015b8ef30909505cd21d3:0">>.
+
 signed_odysee_policy(Rules) ->
     hb_message:commit(
         #{
             <<"device">> => <<"odysee-policy@1.0">>,
             <<"policy-version">> => <<"1">>,
-            <<"rules">> => Rules
+            <<"rules">> => hb_json:encode(Rules)
         },
-        #{ <<"priv-wallet">> => ar_wallet:new() }
+        #{ <<"priv-wallet">> => hb:wallet() },
+        <<"ans104@1.0">>
     ).
 
 policy_deny_rule() ->
@@ -1675,6 +1966,42 @@ target_claim() ->
                 <<"width">> => 1920
             }
         }
+    }.
+
+target_claim_with_outpoint() ->
+    (target_claim())#{
+        <<"txid">> => <<"0bdd755efd133b1e156bde4c8f13a58903310f3c7cb015b8ef30909505cd21d3">>,
+        <<"nout">> => 0,
+        <<"value">> => (hb_maps:get(<<"value">>, target_claim(), #{}))#{
+            <<"source">> => #{
+                <<"hash">> =>
+                    <<"27decae735a54d91e8196c3d602fb8ae5d2118bf99acaf821a155c7133281e8155a5280d465d3cbe301a07839fdf3ae1">>,
+                <<"media_type">> => <<"image/png">>,
+                <<"name">> => <<"Screenshot-8.png">>,
+                <<"sd_hash">> =>
+                    <<"c5f86d3afad668935a824cfce7bac73a7b0500c2df44775201356bb0fa30046cf40c61c4832d731b43a53ab6390a1e06">>,
+                <<"size">> => <<"5301439">>
+            },
+            <<"stream_type">> => <<"image">>
+        }
+    }.
+
+claim_output_read() ->
+    #{
+        <<"device">> => <<"lbry-claim-output@1.0">>,
+        <<"content-type">> => <<"application/json">>,
+        <<"txid">> => <<"0bdd755efd133b1e156bde4c8f13a58903310f3c7cb015b8ef30909505cd21d3">>,
+        <<"nout">> => 0,
+        <<"claim-id">> => <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+        <<"claim-name">> => <<"Screenshot-8">>,
+        <<"body">> => hb_json:encode(#{
+            <<"body">> => hb_json:encode(#{
+                <<"jsonrpc">> => <<"2.0">>,
+                <<"result">> => #{
+                    <<"items">> => [target_claim_with_outpoint()]
+                }
+            })
+        })
     }.
 
 signed_target_claim(SDHash) ->

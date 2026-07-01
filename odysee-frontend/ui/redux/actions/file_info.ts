@@ -2,12 +2,15 @@ import * as ACTIONS from 'constants/action_types';
 import Lbry from 'lbry';
 import { selectClaimsByUri } from 'redux/selectors/claims';
 import { selectIsFetchingFileList, selectUrisLoading } from 'redux/selectors/file_info';
+import { getClaimOutpoint } from 'util/claim';
+import { localHyperbeamUploadFileInfo } from 'util/hyperbeam-file-info';
 export function doFetchFileInfo(uri) {
   return (dispatch, getState) => {
     const state = getState();
     const claim = selectClaimsByUri(state)[uri];
-    const outpoint = claim ? `${claim.txid}:${claim.nout}` : null;
+    const outpoint = getClaimOutpoint(claim);
     const alreadyFetching = !!selectUrisLoading(state)[uri];
+    const hyperbeamUploadFileInfo = localHyperbeamUploadFileInfo(claim, uri, outpoint);
 
     if (!alreadyFetching) {
       dispatch({
@@ -16,6 +19,16 @@ export function doFetchFileInfo(uri) {
           outpoint,
         },
       });
+      if (hyperbeamUploadFileInfo) {
+        dispatch({
+          type: ACTIONS.FETCH_FILE_INFO_COMPLETED,
+          data: {
+            outpoint: hyperbeamUploadFileInfo.outpoint,
+            fileInfo: hyperbeamUploadFileInfo,
+          },
+        });
+        return;
+      }
       Lbry.file_list({
         outpoint,
         full_status: true,

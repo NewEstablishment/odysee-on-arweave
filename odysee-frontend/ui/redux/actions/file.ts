@@ -19,8 +19,9 @@ import { doToast } from 'redux/actions/notifications';
 import { selectBalance } from 'redux/selectors/wallet';
 import { makeSelectFileInfoForUri, selectOutpointFetchingForUri } from 'redux/selectors/file_info';
 import { getStripeEnvironment } from 'util/stripe';
-import { getChannelIdFromClaim, isClaimUnlisted } from 'util/claim';
+import { getChannelIdFromClaim, getClaimOutpoint, isClaimUnlisted } from 'util/claim';
 import { toHex } from 'util/hex';
+import { localHyperbeamUploadFileInfo } from 'util/hyperbeam-file-info';
 import { fetchHyperbeamPlaybackUrl } from 'util/hyperbeam-playback';
 const stripeEnvironment = getStripeEnvironment();
 
@@ -120,8 +121,7 @@ export function doDeleteFileAndMaybeGoBack(
     const state = getState();
     const playingUri = selectPlayingUri(state);
     const { outpoint } = makeSelectFileInfoForUri(uri)(state) || '';
-    const { nout, txid } = selectClaimForUri(state, uri);
-    const claimOutpoint = `${txid}:${nout}`;
+    const claimOutpoint = getClaimOutpoint(selectClaimForUri(state, uri));
     const actions = [];
 
     if (!abandonClaim) {
@@ -226,7 +226,9 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
             })
           );
         } else {
-          const hyperbeamPlaybackUrl = !accessKey ? await fetchHyperbeamPlaybackUrl(uri) : '';
+          const hyperbeamPlaybackUrl = !accessKey
+            ? await fetchHyperbeamPlaybackUrl(uri, claim?.immutable_id || claim?.outpoint || outpoint)
+            : '';
           const resolvedStreamInfo = hyperbeamPlaybackUrl
             ? { ...streamInfo, streaming_url: hyperbeamPlaybackUrl }
             : streamInfo;
@@ -318,48 +320,6 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
       });
   };
 };
-
-function localHyperbeamUploadFileInfo(
-  claim: Claim | null | undefined,
-  uri: string,
-  outpoint: string | null | undefined
-) {
-  if (!claim || !((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id)) return null;
-
-  const value = (claim.value || {}) as any;
-  const source = value.source || {};
-  const mediaUrl = (claim as any).streaming_url || (claim as any).download_url || (claim as any).hyperbeam?.read_path;
-  if (!mediaUrl) return null;
-
-  const size = Number(source.size || (claim as any).hyperbeam_upload?.size || 0);
-  const resolvedOutpoint = outpoint || `${claim.txid}:${claim.nout || 0}`;
-  const signingChannel = claim.signing_channel;
-
-  return {
-    ...claim,
-    uri,
-    outpoint: resolvedOutpoint,
-    claim_id: claim.claim_id,
-    claim_name: claim.name,
-    file_name: source.name || claim.name,
-    mime_type: source.media_type || 'application/octet-stream',
-    streaming_url: mediaUrl,
-    download_url: mediaUrl,
-    download_path: mediaUrl,
-    completed: true,
-    written_bytes: size,
-    total_bytes: size,
-    blobs_completed: 1,
-    blobs_in_stream: 1,
-    channel_name: signingChannel?.name,
-    channel_claim_id: signingChannel?.claim_id || (claim as any).channel_id,
-    metadata: {
-      title: value.title,
-      description: value.description,
-      source,
-    },
-  } as any;
-}
 
 export function doPurchaseUri(
   uri: string,

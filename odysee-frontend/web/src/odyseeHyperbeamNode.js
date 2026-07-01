@@ -145,23 +145,36 @@ async function hyperbeamNodeChannelClaimSearch(params, extraHeaders) {
   try {
     const page = Number(params.page || 1);
     const pageSize = Number(params.page_size || params['page-size'] || 20);
-    const claimIds = (
+    let storeIds = (
       await Promise.all(
         channelIds.map(async (channelId) => {
           const result = await hyperbeamNodeFetchJson(
-            hyperbeamCacheListPath(`${channelId}/claims`, { page, page_size: pageSize }),
+            hyperbeamCacheListPath(`${channelId}/claim-outputs`, { page, page_size: pageSize }),
             extraHeaders
           );
           return Array.isArray(result?.items) ? result.items : [];
         })
       )
     ).flat();
-    if (!claimIds.length) return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
+    if (!storeIds.length) {
+      storeIds = (
+        await Promise.all(
+          channelIds.map(async (channelId) => {
+            const result = await hyperbeamNodeFetchJson(
+              hyperbeamCacheListPath(`${channelId}/claims`, { page, page_size: pageSize }),
+              extraHeaders
+            );
+            return Array.isArray(result?.items) ? result.items : [];
+          })
+        )
+      ).flat();
+    }
+    if (!storeIds.length) return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
 
     const items = (
       await Promise.all(
-        claimIds.slice(0, pageSize).map(async (claimId) => {
-          const result = await hyperbeamNodeFetchJson(hyperbeamCacheReadPath(claimId), extraHeaders);
+        storeIds.slice(0, pageSize).map(async (storeId) => {
+          const result = await hyperbeamNodeFetchJson(hyperbeamCacheReadPath(storeId), extraHeaders);
           return sdkClaimFromHyperbeam(cacheReadClaim(result));
         })
       )
@@ -171,8 +184,8 @@ async function hyperbeamNodeChannelClaimSearch(params, extraHeaders) {
       items,
       page,
       page_size: pageSize,
-      total_items: claimIds.length,
-      total_pages: Math.max(1, Math.ceil(claimIds.length / pageSize)),
+      total_items: storeIds.length,
+      total_pages: Math.max(1, Math.ceil(storeIds.length / pageSize)),
     };
   } catch (e) {
     void e;
@@ -182,10 +195,11 @@ async function hyperbeamNodeChannelClaimSearch(params, extraHeaders) {
 
 async function hyperbeamNodeGet(params, extraHeaders) {
   const uri = params && (params.uri || params.url);
-  if (!uri) return null;
+  const id = params && (params.id || params.outpoint || params.immutable_id || params.immutableId);
+  if (!uri && !id) return null;
 
   const result = await hyperbeamNodeFetchJson(
-    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_STREAM, 'playback', { uri }),
+    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_STREAM, 'playback', id ? { id } : { uri }),
     extraHeaders
   );
   return playbackPayloadFromHyperbeam(result);
@@ -282,7 +296,7 @@ async function hyperbeamNodeFetchJson(request, extraHeaders) {
 
 function hyperbeamCacheReadPath(id) {
   const base = hyperbeamNodeBase();
-  return `${base}/~cache@1.0/read?read=${encodeURIComponent(String(id).replace(/^\//, ''))}`;
+  return `${base}/${hyperbeamDirectPath(id)}`;
 }
 
 function hyperbeamCacheListPath(path, params = {}) {
@@ -292,6 +306,14 @@ function hyperbeamCacheListPath(path, params = {}) {
     if (value !== undefined && value !== null && value !== '') urlParams.set(key, String(value));
   });
   return `${base}/~cache@1.0/list?${urlParams.toString()}`;
+}
+
+function hyperbeamDirectPath(id) {
+  return String(id)
+    .replace(/^\/+/, '')
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/');
 }
 
 function unwrapJsonRpcResult(json) {
@@ -345,9 +367,14 @@ function isHyperbeamDeviceEnabled(device) {
 function hyperbeamLocalSdkResult(method, params) {
   switch (method) {
     case 'status':
-      return Promise.resolve({ is_running: true });
+      return Promise.resolve({ is_running: true, wallet: { available_servers: 1 } });
+    case 'wallet_status':
+      return Promise.resolve({ is_locked: false, is_syncing: false });
     case 'version':
       return Promise.resolve({ lbrynet_version: 'hyperbeam' });
+    case 'resolve':
+      if (isStartupResolveProbe(params)) return Promise.resolve({});
+      return null;
     case 'ffmpeg_find':
       return Promise.reject(new Error(`${method} requires authentication`));
     default:
@@ -355,21 +382,46 @@ function hyperbeamLocalSdkResult(method, params) {
   }
 }
 
+function isStartupResolveProbe(params) {
+  const urls = params && (params.urls || params.uris || params.uri);
+  if (Array.isArray(urls)) return urls.length === 1 && urls[0] === 'lbry://one';
+  return urls === 'lbry://one';
+}
+
 function sdkClaimFromHyperbeam(result) {
   if (!result) return null;
   const claim = result.claim || result;
   const claimId = claim.claim_id || claim['claim-id'];
   if (!claim || !claimId) return claim;
+  const txid = claim.txid || claim['tx-id'];
+  const nout = claim.nout ?? claim['n-out'];
+  const outpoint = claimOutpoint(txid, nout);
 
   return {
     ...claim,
     claim_id: claimId,
+    ...(outpoint
+      ? {
+          outpoint,
+          immutable_id: outpoint,
+          immutable_store_path:
+            claim['claim-output-store-path'] ||
+            claim['claim-proof-store-path'] ||
+            `odysee/claim-output/${txid}/${nout}`,
+        }
+      : {}),
     name: claim.name || claim['claim-name'],
     canonical_url: claim.canonical_url || claim['canonical-url'],
     permanent_url: claim.permanent_url || claim['permanent-url'],
     short_url: claim.short_url || claim['short-url'],
     value_type: claim.value_type || claim['value-type'],
   };
+}
+
+function claimOutpoint(txid, nout) {
+  if (!txid && txid !== 0) return null;
+  if (nout === undefined || nout === null || nout === '') return null;
+  return `${txid}:${nout}`;
 }
 
 function cacheReadClaim(result) {

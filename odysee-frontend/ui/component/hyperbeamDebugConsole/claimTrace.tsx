@@ -94,7 +94,14 @@ export default function ClaimTrace({
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-hyperbeam-claim-id'],
+      attributeFilter: [
+        'data-hyperbeam-claim-id',
+        'data-hyperbeam-immutable-id',
+        'data-hyperbeam-store-path',
+        'data-hyperbeam-claim-txid',
+        'data-hyperbeam-claim-nout',
+        'data-hyperbeam-claim-sd-hash',
+      ],
     });
     const timer = window.setTimeout(bump, 1000);
     bump();
@@ -861,76 +868,84 @@ function renderedPageClaims(): Array<DiscoveredClaim> {
   if (typeof document === 'undefined') return [];
 
   const claims = new Map<string, DiscoveredClaim>();
-  document.querySelectorAll('[data-hyperbeam-claim-id]').forEach((element, order) => {
-    const htmlElement = element as HTMLElement;
-    if (!isVisibleElement(htmlElement)) return;
-    const onScreen = isElementInViewport(htmlElement);
+  document
+    .querySelectorAll('[data-hyperbeam-claim-id], [data-hyperbeam-immutable-id], [data-hyperbeam-store-path]')
+    .forEach((element, order) => {
+      const htmlElement = element as HTMLElement;
+      if (!isVisibleElement(htmlElement)) return;
+      const onScreen = isElementInViewport(htmlElement);
 
-    const claimId = htmlElement.dataset.hyperbeamClaimId;
-    const txid = htmlElement.dataset.hyperbeamClaimTxid;
-    const nout = htmlElement.dataset.hyperbeamClaimNout;
-    const sdHash = htmlElement.dataset.hyperbeamClaimSdHash;
-    const uri = htmlElement.dataset.hyperbeamClaimUri || '';
-    const title = htmlElement.dataset.hyperbeamClaimTitle || uri || claimId || '';
-    const valueType = htmlElement.dataset.hyperbeamClaimType;
-    if (!claimId || !isResolvedPageClaim(valueType)) return;
+      const claimId = htmlElement.dataset.hyperbeamClaimId;
+      const immutableId = htmlElement.dataset.hyperbeamImmutableId;
+      const storePath = htmlElement.dataset.hyperbeamStorePath;
+      const txid = htmlElement.dataset.hyperbeamClaimTxid;
+      const nout = htmlElement.dataset.hyperbeamClaimNout;
+      const sdHash = htmlElement.dataset.hyperbeamClaimSdHash;
+      const uri = htmlElement.dataset.hyperbeamClaimUri || '';
+      const title = htmlElement.dataset.hyperbeamClaimTitle || uri || claimId || immutableId || storePath || '';
+      const valueType = htmlElement.dataset.hyperbeamClaimType;
+      const stableId = claimId || immutableId || storePath;
+      if (!stableId || !isResolvedPageClaim(valueType)) return;
 
-    const traceTarget = txid && nout !== undefined && nout !== '' ? `${txid}:${nout}` : claimId || uri;
-    const key = `claim:${claimId}`;
-    if (claims.has(key)) return;
+      const traceTarget =
+        txid && nout !== undefined && nout !== '' ? `${txid}:${nout}` : immutableId || claimId || storePath || uri;
+      const key = `claim:${stableId}`;
+      if (claims.has(key)) return;
 
-    claims.set(key, {
-      key,
-      label: limitLabel(title),
-      traceTarget,
-      claimId,
-      txid,
-      nout,
-      sdHash,
-      provenance: renderedClaimProvenance(uri, onScreen),
-      source: onScreen ? 'visible-page' : 'rendered-claim-preview',
-      valueType,
-      order,
-      summary: sanitizeHyperbeamDebugValue({
-        title,
-        claim_id: claimId,
-        value_type: valueType,
+      claims.set(key, {
+        key,
+        label: limitLabel(title),
+        traceTarget,
+        claimId,
         txid,
         nout,
-        sd_hash: sdHash,
-        canonical_url: uri,
-        signing_channel: {
-          claim_id: htmlElement.dataset.hyperbeamSigningChannelId,
-        },
-      }),
-    });
+        sdHash,
+        provenance: renderedClaimProvenance(uri, onScreen),
+        source: onScreen ? 'visible-page' : 'rendered-claim-preview',
+        valueType,
+        order,
+        summary: sanitizeHyperbeamDebugValue({
+          title,
+          claim_id: claimId,
+          immutable_id: immutableId,
+          store_path: storePath,
+          value_type: valueType,
+          txid,
+          nout,
+          sd_hash: sdHash,
+          canonical_url: uri,
+          signing_channel: {
+            claim_id: htmlElement.dataset.hyperbeamSigningChannelId,
+          },
+        }),
+      });
 
-    const signingChannelId = htmlElement.dataset.hyperbeamSigningChannelId;
-    if (signingChannelId && signingChannelId !== claimId) {
-      const signingChannelUri = htmlElement.dataset.hyperbeamSigningChannelUri || '';
-      const signingChannelTitle =
-        htmlElement.dataset.hyperbeamSigningChannelTitle || signingChannelUri || signingChannelId;
-      const channelKey = `claim:${signingChannelId}`;
-      if (!claims.has(channelKey)) {
-        claims.set(channelKey, {
-          key: channelKey,
-          label: limitLabel(signingChannelTitle),
-          traceTarget: signingChannelId,
-          claimId: signingChannelId,
-          provenance: renderedClaimProvenance(signingChannelUri, onScreen),
-          source: onScreen ? 'visible-page' : 'rendered-claim-preview',
-          valueType: 'channel',
-          order: order - 0.25,
-          summary: sanitizeHyperbeamDebugValue({
-            title: signingChannelTitle,
-            claim_id: signingChannelId,
-            value_type: 'channel',
-            canonical_url: signingChannelUri,
-          }),
-        });
+      const signingChannelId = htmlElement.dataset.hyperbeamSigningChannelId;
+      if (signingChannelId && signingChannelId !== claimId) {
+        const signingChannelUri = htmlElement.dataset.hyperbeamSigningChannelUri || '';
+        const signingChannelTitle =
+          htmlElement.dataset.hyperbeamSigningChannelTitle || signingChannelUri || signingChannelId;
+        const channelKey = `claim:${signingChannelId}`;
+        if (!claims.has(channelKey)) {
+          claims.set(channelKey, {
+            key: channelKey,
+            label: limitLabel(signingChannelTitle),
+            traceTarget: signingChannelId,
+            claimId: signingChannelId,
+            provenance: renderedClaimProvenance(signingChannelUri, onScreen),
+            source: onScreen ? 'visible-page' : 'rendered-claim-preview',
+            valueType: 'channel',
+            order: order - 0.25,
+            summary: sanitizeHyperbeamDebugValue({
+              title: signingChannelTitle,
+              claim_id: signingChannelId,
+              value_type: 'channel',
+              canonical_url: signingChannelUri,
+            }),
+          });
+        }
       }
-    }
-  });
+    });
 
   return [...claims.values()];
 }

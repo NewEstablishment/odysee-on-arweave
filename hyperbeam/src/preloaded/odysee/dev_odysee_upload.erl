@@ -276,16 +276,21 @@ indexed_claim(Payload, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Payload, Payload, Opts),
     case Claim of
         ClaimMap when is_map(ClaimMap) ->
-            case hb_maps:get(<<"claim_id">>, ClaimMap, <<>>, Opts) of
+            PublicClaimMap = sanitize_indexed_claim(ClaimMap, Opts),
+            case upload_id(PublicClaimMap, Opts) of
                 <<>> ->
                     {error,
                         #{
                             <<"status">> => 400,
-                            <<"body">> => <<"Upload index claim requires claim_id.">>
+                            <<"body">> => <<"Upload index claim requires an immutable upload id.">>
                         }
                     };
-                _ ->
-                    {ok, ClaimMap}
+                UploadID ->
+                    {ok,
+                        PublicClaimMap#{
+                            <<"claim_id">> => UploadID,
+                            <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, PublicClaimMap, UploadID, Opts)
+                        }}
             end;
         _ ->
             {error,
@@ -297,24 +302,107 @@ indexed_claim(Payload, Opts) ->
     end.
 
 delete_claim_id(Req, Opts) ->
-    case first_field([<<"x-odysee-upload-claim-id">>, <<"odysee-upload-claim-id">>, <<"claim_id">>], Req, Opts) of
+    case first_field([
+        <<"x-odysee-upload-id">>,
+        <<"odysee-upload-id">>,
+        <<"id">>,
+        <<"immutable_id">>,
+        <<"immutable-id">>,
+        <<"upload_id">>,
+        <<"upload-id">>,
+        <<"x-odysee-upload-claim-id">>,
+        <<"odysee-upload-claim-id">>,
+        <<"claim_id">>
+    ], Req, Opts) of
         not_found ->
             {error,
                 #{
                     <<"status">> => 400,
-                    <<"body">> => <<"Upload delete requires claim_id.">>
+                    <<"body">> => <<"Upload delete requires an immutable upload id.">>
                 }
             };
         <<>> ->
             {error,
                 #{
                     <<"status">> => 400,
-                    <<"body">> => <<"Upload delete requires claim_id.">>
+                    <<"body">> => <<"Upload delete requires an immutable upload id.">>
                 }
             };
         ClaimID ->
             {ok, hb_util:bin(ClaimID)}
     end.
+
+upload_id(Claim, Opts) ->
+    case first_field([
+        <<"id">>,
+        <<"immutable_id">>,
+        <<"immutable-id">>,
+        <<"immutableId">>,
+        <<"upload_id">>,
+        <<"upload-id">>,
+        <<"uploadId">>
+    ], Claim, Opts) of
+        not_found ->
+            Hyperbeam = hb_maps:get(<<"hyperbeam">>, Claim, #{}, Opts),
+            NestedID = case is_map(Hyperbeam) of
+                true ->
+                    case first_field([
+                        <<"upload_id">>,
+                        <<"upload-id">>,
+                        <<"uploadId">>,
+                        <<"immutable_id">>,
+                        <<"immutable-id">>,
+                        <<"id">>
+                    ], Hyperbeam, Opts) of
+                        not_found -> <<>>;
+                        FoundNestedID -> hb_util:bin(FoundNestedID)
+                    end;
+                false ->
+                    <<>>
+            end,
+            case NestedID of
+                <<>> ->
+                    case first_field([<<"claim_id">>], Claim, Opts) of
+                        not_found -> <<>>;
+                        ClaimID -> hb_util:bin(ClaimID)
+                    end;
+                _ -> NestedID
+            end;
+        UploadID ->
+            hb_util:bin(UploadID)
+    end.
+
+sanitize_indexed_claim(Claim, Opts) when is_map(Claim) ->
+    maps:fold(
+        fun(Key, Value, Acc) ->
+            case private_index_key(Key) of
+                true -> Acc;
+                false -> Acc#{ Key => sanitize_indexed_claim(Value, Opts) }
+            end
+        end,
+        #{},
+        Claim
+    );
+sanitize_indexed_claim(Values, Opts) when is_list(Values) ->
+    [sanitize_indexed_claim(Value, Opts) || Value <- Values];
+sanitize_indexed_claim(Value, _Opts) ->
+    Value.
+
+private_index_key(Key) ->
+    Normalized = binary:replace(lower_key(Key), <<"_">>, <<"-">>, [global]),
+    lists:member(
+        Normalized,
+        [
+            <<"authorization">>,
+            <<"cookie">>,
+            <<"set-cookie">>,
+            <<"auth-token">>,
+            <<"auth-token">>,
+            <<"odysee-auth-token">>,
+            <<"x-odysee-auth-token">>,
+            <<"x-lbry-auth-token">>
+        ]
+    ).
 
 read_index(Owner, Opts) ->
     case hb_store:read(hb_opts:get(store, [], Opts), index_path(Owner), Opts) of
@@ -462,8 +550,27 @@ sort_uploads(Uploads, Opts) ->
         fun(Left, Right) ->
             upload_timestamp(Left, Opts) >= upload_timestamp(Right, Opts)
         end,
-        Uploads
+        [normalize_indexed_upload(Upload, Opts) || Upload <- Uploads]
     ).
+
+normalize_indexed_upload(Claim, Opts) when is_map(Claim) ->
+    case upload_id(Claim, Opts) of
+        <<>> -> Claim;
+        UploadID ->
+            Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim, #{}, Opts),
+            Hyperbeam1 =
+                case is_map(Hyperbeam0) of
+                    true -> Hyperbeam0#{ <<"upload_id">> => UploadID };
+                    false -> #{ <<"upload_id">> => UploadID }
+                end,
+            Claim#{
+                <<"claim_id">> => hb_maps:get(<<"claim_id">>, Claim, UploadID, Opts),
+                <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, Claim, UploadID, Opts),
+                <<"hyperbeam">> => Hyperbeam1
+            }
+    end;
+normalize_indexed_upload(Claim, _Opts) ->
+    Claim.
 
 upload_timestamp(Claim, Opts) ->
     case hb_maps:get(<<"timestamp">>, Claim, 0, Opts) of
@@ -744,15 +851,17 @@ upload_index_list_is_public_and_channel_scoped_test() ->
                 <<"/tmp/odysee-upload-index-TEST-", (integer_to_binary(os:system_time(millisecond)))/binary>>
         },
     hb_store:reset(Store),
-    Opts = #{ <<"store">> => Store },
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => hb:wallet() },
     ChannelID = <<"channel-1">>,
-    ClaimID = <<"claim-1">>,
+    ClaimID = <<"upload-1">>,
     Claim =
         #{
-            <<"claim_id">> => ClaimID,
+            <<"id">> => ClaimID,
             <<"value_type">> => <<"stream">>,
             <<"timestamp">> => 10,
-            <<"channel_id">> => ChannelID
+            <<"channel_id">> => ChannelID,
+            <<"auth_token">> => <<"private-token">>,
+            <<"value">> => #{ <<"source">> => #{ <<"x-odysee-auth-token">> => <<"nested-private-token">> } }
         },
     Signed =
         hb_message:commit(
@@ -764,6 +873,14 @@ upload_index_list_is_public_and_channel_scoped_test() ->
         ),
     {ok, IndexRes} = index(#{}, Signed, Opts),
     ?assertEqual(200, hb_maps:get(<<"status">>, IndexRes, undefined, Opts)),
+    IndexedResult = hb_maps:get(<<"result">>, IndexRes, #{}, Opts),
+    IndexedItem = hb_maps:get(<<"item">>, IndexedResult, #{}, Opts),
+    ?assertEqual(ClaimID, hb_maps:get(<<"claim_id">>, IndexedItem, undefined, Opts)),
+    ?assertEqual(ClaimID, hb_maps:get(<<"immutable_id">>, IndexedItem, undefined, Opts)),
+    ?assertEqual(error, hb_maps:find(<<"auth_token">>, IndexedItem, Opts)),
+    IndexedValue = hb_maps:get(<<"value">>, IndexedItem, #{}, Opts),
+    IndexedSource = hb_maps:get(<<"source">>, IndexedValue, #{}, Opts),
+    ?assertEqual(error, hb_maps:find(<<"x-odysee-auth-token">>, IndexedSource, Opts)),
     PublicListReq = #{ <<"method">> => <<"POST">>, <<"body">> => <<"{}">> },
     {ok, PublicListRes} = list(#{}, PublicListReq, Opts),
     PublicResult = hb_maps:get(<<"result">>, PublicListRes, #{}, Opts),
@@ -783,4 +900,37 @@ upload_index_list_is_public_and_channel_scoped_test() ->
         },
     {ok, EmptyListRes} = list(#{}, EmptyListReq, Opts),
     EmptyResult = hb_maps:get(<<"result">>, EmptyListRes, #{}, Opts),
-    ?assertEqual(0, hb_maps:get(<<"total_items">>, EmptyResult, 0, Opts)).
+    ?assertEqual(0, hb_maps:get(<<"total_items">>, EmptyResult, 0, Opts)),
+    DeleteReq =
+        Signed#{
+            <<"body">> => hb_json:encode(#{ <<"id">> => ClaimID }),
+            <<"x-odysee-upload-id">> => ClaimID
+        },
+    {ok, DeleteRes} = delete(#{}, DeleteReq, Opts),
+    ?assertEqual(200, hb_maps:get(<<"status">>, DeleteRes, undefined, Opts)),
+    {ok, DeletedListRes} = list(#{}, PublicListReq, Opts),
+    DeletedResult = hb_maps:get(<<"result">>, DeletedListRes, #{}, Opts),
+    ?assertEqual(0, hb_maps:get(<<"total_items">>, DeletedResult, 0, Opts)).
+
+upload_index_list_normalizes_legacy_nested_upload_id_test() ->
+    Store =
+        #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> =>
+                <<"/tmp/odysee-upload-legacy-index-TEST-", (integer_to_binary(os:system_time(millisecond)))/binary>>
+        },
+    hb_store:reset(Store),
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => hb:wallet() },
+    UploadID = <<"legacy-upload-id">>,
+    LegacyClaim =
+        #{
+            <<"claim_id">> => <<"old-local-claim-id">>,
+            <<"timestamp">> => 10,
+            <<"hyperbeam">> => #{ <<"upload_id">> => UploadID }
+        },
+    ok = write_global_claim(UploadID, LegacyClaim, Opts),
+    {ok, ListRes} = list(#{}, #{ <<"method">> => <<"POST">>, <<"body">> => <<"{}">> }, Opts),
+    Result = hb_maps:get(<<"result">>, ListRes, #{}, Opts),
+    [Item] = hb_maps:get(<<"items">>, Result, [], Opts),
+    ?assertEqual(UploadID, hb_maps:get(<<"immutable_id">>, Item, undefined, Opts)),
+    ?assertEqual(UploadID, hb_maps:get(<<"upload_id">>, hb_maps:get(<<"hyperbeam">>, Item, #{}, Opts), undefined, Opts)).

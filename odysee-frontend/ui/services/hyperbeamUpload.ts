@@ -95,6 +95,7 @@ export async function listHyperbeamPublishes(
     const items = Array.isArray(result?.items) ? result.items : [];
     return items
       .filter((item) => item && item.value_type === 'stream' && item.claim_id && item.permanent_url)
+      .filter((item) => !isSmokeUploadClaim(item))
       .map(normalizeIndexedHyperbeamClaim)
       .filter((item) => item.permanent_url);
   } catch {
@@ -102,7 +103,7 @@ export async function listHyperbeamPublishes(
   }
 }
 
-export async function deleteHyperbeamPublish(claimId: string) {
+export async function deleteHyperbeamPublish(uploadId: string) {
   const response = await fetch(HYPERBEAM_UPLOAD_DELETE_URL, {
     method: 'POST',
     credentials: 'include',
@@ -110,7 +111,7 @@ export async function deleteHyperbeamPublish(claimId: string) {
       accept: 'application/json',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ claim_id: claimId }),
+    body: JSON.stringify({ id: uploadId, immutable_id: uploadId }),
   });
   const json = await responseJson(response);
 
@@ -139,6 +140,7 @@ function normalizePublishResponse(
     streaming_url?: string;
     download_url?: string;
     channel_id?: string;
+    immutable_id?: string;
     hyperbeam_upload?: any;
     hyperbeam?: any;
   } = {
@@ -154,6 +156,7 @@ function normalizePublishResponse(
     short_url: publishedUri,
     type: 'claim',
     value_type: 'stream',
+    immutable_id: uploadId,
     confirmations: 1,
     is_my_output: true,
     channel_id: signingChannel?.claim_id,
@@ -198,6 +201,7 @@ function normalizePublishResponse(
 }
 
 async function indexHyperbeamPublish(claim: Claim) {
+  const uploadClaim = uploadIndexClaim(claim);
   const response = await fetch(HYPERBEAM_UPLOAD_INDEX_URL, {
     method: 'POST',
     credentials: 'include',
@@ -205,13 +209,72 @@ async function indexHyperbeamPublish(claim: Claim) {
       accept: 'application/json',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ claim }),
+    body: JSON.stringify({ claim: uploadClaim }),
   });
   const json = await responseJson(response);
 
   if (!response.ok) {
     throw new Error(errorMessage(json, response.status));
   }
+}
+
+function uploadIndexClaim(claim: any) {
+  const uploadId = claim.immutable_id || claim.hyperbeam?.upload_id || claim.txid || claim.claim_id;
+  const value = claim.value || {};
+  const source = value.source || {};
+  const meta = claim.meta || {};
+  const hyperbeam = claim.hyperbeam || {};
+
+  return {
+    claim_id: uploadId,
+    immutable_id: uploadId,
+    name: claim.name,
+    normalized_name: claim.normalized_name || claim.name,
+    value_type: claim.value_type || 'stream',
+    type: claim.type || 'claim',
+    permanent_url: claim.permanent_url,
+    canonical_url: claim.canonical_url || claim.permanent_url,
+    short_url: claim.short_url || claim.permanent_url,
+    timestamp: claim.timestamp || meta.creation_timestamp || 0,
+    txid: uploadId,
+    nout: claim.nout ?? 0,
+    channel_id: claim.channel_id,
+    is_channel_signature_valid: claim.is_channel_signature_valid,
+    signing_channel: claim.signing_channel
+      ? {
+          claim_id: claim.signing_channel.claim_id,
+          name: claim.signing_channel.name,
+          normalized_name: claim.signing_channel.normalized_name || claim.signing_channel.name,
+          permanent_url: claim.signing_channel.permanent_url,
+          canonical_url: claim.signing_channel.canonical_url,
+          short_url: claim.signing_channel.short_url,
+          value_type: claim.signing_channel.value_type || 'channel',
+          type: claim.signing_channel.type || 'claim',
+          value: {
+            title: claim.signing_channel.value?.title,
+          },
+          meta: normalizeIndexedClaimMeta(claim.signing_channel.meta),
+        }
+      : undefined,
+    value: {
+      title: value.title,
+      description: value.description,
+      thumbnail: value.thumbnail,
+      tags: value.tags || [],
+      languages: value.languages || [],
+      source: {
+        name: source.name,
+        size: source.size,
+        media_type: source.media_type,
+      },
+    },
+    meta: normalizeIndexedClaimMeta(meta),
+    hyperbeam: {
+      upload_device: hyperbeam.upload_device || '~odysee-upload@1.0',
+      upload_id: uploadId,
+      read_path: hyperbeam.read_path,
+    },
+  };
 }
 
 function resultPayload(json: any) {
@@ -222,6 +285,8 @@ function resultPayload(json: any) {
 }
 
 function normalizeIndexedHyperbeamClaim(claim: any) {
+  const uploadId =
+    claim.immutable_id || claim.immutableId || claim.hyperbeam?.upload_id || claim.upload_id || claim.claim_id;
   const permanentUrl = validIndexedUri(claim.permanent_url) ? claim.permanent_url : null;
   const canonicalUrl = validIndexedUri(claim.canonical_url) ? claim.canonical_url : permanentUrl;
   const shortUrl = validIndexedUri(claim.short_url) ? claim.short_url : permanentUrl || canonicalUrl;
@@ -233,16 +298,33 @@ function normalizeIndexedHyperbeamClaim(claim: any) {
     claim_op: claim.claim_op || 'create',
     confirmations: claim.confirmations ?? 1,
     height: claim.height ?? 0,
+    immutable_id: uploadId,
     is_my_output: claim.is_my_output ?? true,
     nout: claim.nout ?? 0,
     permanent_url: permanentUrl,
     short_url: shortUrl,
     canonical_url: canonicalUrl,
     timestamp: claim.timestamp || claim.value?.release_time || claim.meta?.creation_timestamp || 0,
-    txid: claim.txid || claim.claim_id,
+    txid: claim.txid || uploadId,
     type: claim.type || 'claim',
+    value: normalizeIndexedClaimValue(claim.value),
+    hyperbeam: {
+      ...claim.hyperbeam,
+      upload_id: uploadId,
+    },
     meta: normalizeIndexedClaimMeta(claim.meta),
     signing_channel: claim.signing_channel ? normalizeIndexedChannel(claim.signing_channel) : claim.signing_channel,
+  };
+}
+
+function normalizeIndexedClaimValue(value: any = {}) {
+  const tags = Array.isArray(value.tags)
+    ? value.tags.filter((tag) => !Object.values(SCHEDULED_TAGS).includes(tag))
+    : value.tags;
+
+  return {
+    ...value,
+    tags,
   };
 }
 
@@ -272,6 +354,16 @@ function normalizeIndexedClaimMeta(meta: any = {}) {
     support_amount: meta.support_amount ?? '0',
     ...meta,
   };
+}
+
+function isSmokeUploadClaim(claim: any) {
+  const title = claim?.value?.title || claim?.title || '';
+  const name = claim?.name || '';
+  const uploadId = claim?.immutable_id || claim?.claim_id || claim?.hyperbeam?.upload_id || '';
+
+  return [title, name, uploadId].some(
+    (value) => typeof value === 'string' && /^(HB Smoke|debugupload|debugclaim|smoke-|hb-smoke)/i.test(value)
+  );
 }
 
 function parseBody(json: any) {

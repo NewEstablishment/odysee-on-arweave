@@ -264,3 +264,22 @@ same_token_same_secret_test() ->
     {ok, #{ <<"secret">> := Secret1 }} = generate(#{}, Req, #{}),
     {ok, #{ <<"secret">> := Secret2 }} = generate(#{}, Req, #{}),
     ?assertEqual(Secret1, Secret2).
+
+priv_cookie_matches_raw_cookie_secret_test() ->
+    Token = <<"odysee-test-token">>,
+    Req =
+        #{
+            <<"iterations">> => 1,
+            <<"key-length">> => 32
+        },
+    {ok, #{ <<"secret">> := RawSecret }} =
+        generate(#{}, Req#{ <<"cookie">> => <<"auth_token=", Token/binary >> }, #{}),
+    PrivCookieReq =
+        hb_private:set(
+            Req,
+            <<"cookie">>,
+            #{ <<"auth_token">> => Token },
+            #{}
+        ),
+    {ok, #{ <<"secret">> := PrivSecret }} = generate(#{}, PrivCookieReq, #{}),
+    ?assertEqual(RawSecret, PrivSecret).

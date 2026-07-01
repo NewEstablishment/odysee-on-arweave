@@ -1340,6 +1340,9 @@ function mergedRequestDetailData(event: HyperbeamDebugEvent, eventIndex: number,
     contentLength: data.contentLength || peerData.contentLength,
     contentRange: data.contentRange || peerData.contentRange,
     acceptRanges: data.acceptRanges || peerData.acceptRanges,
+    mediaSource: data.mediaSource || peerData.mediaSource,
+    mediaVerification: data.mediaVerification || peerData.mediaVerification,
+    mediaVerificationLimitations: data.mediaVerificationLimitations || peerData.mediaVerificationLimitations,
     mediaMs: data.mediaMs || peerData.mediaMs,
     mediaBlobs: data.mediaBlobs || peerData.mediaBlobs,
     detailMergedFrom: peer ? peer.label : undefined,
@@ -1469,6 +1472,7 @@ function architectureSelectedPath(
   const deviceY = architectureDeviceY(deviceIndex) + 35;
   const path = String(selectedData.devicePath || selectedData.nativePath || selectedData.urlParts?.path || '');
   const sourceLayer = String(selectedData.sourceLayer || '');
+  const nativeSource = String(selectedData.nativeSource || '');
   const isAuth = Boolean(selectedData.authRequired || sourceLayer.includes('auth'));
   const isSsr = path.includes('/$/api/');
   const frontend = isSsr || isAuth ? 'ssr' : 'sdk';
@@ -1479,53 +1483,78 @@ function architectureSelectedPath(
   const responseSuffix =
     frontend === 'ssr' ? `${hyperbeamPoint} 440,415 250,415 200,304` : `${hyperbeamPoint} 440,165 250,165 200,280`;
   const mediaRange = isMediaRangeEvent(selectedData, path, selectedDevice);
-  const backendFlows: Array<{ color: string; label: string; node: string; y: number }> = [];
+  const hasRequest = selectedEvents.some((event) => event.label === 'request' || event.label === 'request failed');
+  const hasResponse = selectedEvents.some(isResponseLikeEvent);
+  const isCache = path.includes('~cache@1.0') || nativeSource === 'cache';
+  const isUpload = path.includes('~odysee-upload@1.0') || path.includes('/hyperbeam-upload/');
+  const isArweave = path.includes('~arweave') || sourceLayer.includes('arweave');
+  const isLegacy =
+    !mediaRange &&
+    (selectedData.deviceLayer === 'compat-device' || sourceLayer === 'original' || sourceLayer.startsWith('fallback'));
+  const selectedFailed = selectedEvents.some(isFailedEvent);
+  const backendFlows: Array<{ color: string; label: string; node: string; x: number; y: number; viaStore?: boolean }> =
+    [];
 
   nodes.add(frontend);
   if (mode !== HYPERBEAM_MODES.original) nodes.add('hyperbeam');
   if (isAuth) nodes.add('auth');
   if (selectedDevice) nodes.add(`device:${selectedDevice}`);
 
-  if (path.includes('~cache@1.0')) {
-    backendFlows.push({ color: '#facc15', label: 'cache', node: 'cache', y: 105 });
+  if (isCache) {
+    backendFlows.push({ color: '#facc15', label: 'cache', node: 'cache', x: 1145, y: 105 });
   }
   if (mediaRange) {
-    backendFlows.push({ color: '#fb7185', label: 'media bytes', node: 'media', y: 497 });
+    backendFlows.push({ color: '#fb7185', label: 'media bytes', node: 'media', x: 1340, y: 497, viaStore: true });
   }
-  if (
-    selectedData.deviceLayer === 'compat-device' ||
-    sourceLayer === 'original' ||
-    sourceLayer.startsWith('fallback')
-  ) {
-    backendFlows.push({ color: '#94a3b8', label: 'legacy', node: 'legacy', y: 153 });
+  if (isLegacy) {
+    backendFlows.push({ color: '#94a3b8', label: 'legacy', node: 'legacy', x: 1340, y: 153, viaStore: true });
   }
-  if (path.includes('~arweave') || sourceLayer.includes('arweave')) {
-    backendFlows.push({ color: '#64748b', label: 'arweave', node: 'arweave', y: 325 });
+  if (isArweave) {
+    backendFlows.push({ color: '#64748b', label: 'arweave', node: 'arweave', x: 1340, y: 325, viaStore: true });
   }
-  if (path.includes('~odysee-upload@1.0') || path.includes('/hyperbeam-upload/')) {
-    backendFlows.push({ color: '#0ea5e9', label: 'upload', node: 'upload', y: 455 });
+  if (isUpload) {
+    backendFlows.push({ color: '#0ea5e9', label: 'upload', node: 'upload', x: 1040, y: 455 });
   }
+  backendFlows.forEach((backend) => nodes.add(backend.node));
+  if (backendFlows.some((backend) => backend.viaStore)) nodes.add('store');
+  if (isUpload) nodes.add('upload');
 
-  if (selected.label === 'request') {
+  if (hasRequest) {
+    const requestColor = selectedFailed && !hasResponse ? '#ff4d7d' : isAuth ? '#22c55e' : '#0ea5e9';
+    const requestPoints = selectedDevice
+      ? isAuth
+        ? `${routePrefix} 585,424 605,424 605,465 710,465 720,${deviceY}`
+        : `${routePrefix} 670,291 720,${deviceY}`
+      : isUpload
+        ? `${routePrefix} 710,465 1040,455`
+        : mediaRange
+          ? `${routePrefix} 1040,255 1340,497`
+          : routePrefix;
     flows.push({
-      color: isAuth ? '#22c55e' : '#0ea5e9',
-      label: isAuth ? 'auth request' : 'request',
-      points: isAuth ? routePrefix : `${routePrefix} 670,291 720,${deviceY}`,
+      color: requestColor,
+      label: selectedFailed && !hasResponse ? 'failed request' : isAuth ? 'auth request' : 'request',
+      points: requestPoints,
     });
   }
 
-  if (isResponseLikeEvent(selected)) {
-    const responsePoints =
-      !isAuth && backendFlows.length
-        ? selectedDevice
-          ? `1340,${backendFlows[0].y} 1040,255 720,${deviceY} 670,291 ${responseSuffix}`
-          : `1340,${backendFlows[0].y} 1040,255 670,291 ${responseSuffix}`
-        : isAuth
-          ? `500,465 440,415 250,415 200,304`
-          : `720,${deviceY} 670,291 ${responseSuffix}`;
+  if (hasResponse) {
+    const primaryBackend = backendFlows[0];
+    const responsePoints = primaryBackend
+      ? primaryBackend.node === 'upload'
+        ? `1040,455 710,465 ${responseSuffix}`
+        : !primaryBackend.viaStore
+          ? `${primaryBackend.x},${primaryBackend.y} ${hyperbeamPoint} ${responseSuffix}`
+          : selectedDevice
+            ? `${primaryBackend.x},${primaryBackend.y} 1040,255 1000,${deviceY} 720,${deviceY} 670,291 ${responseSuffix}`
+            : `${primaryBackend.x},${primaryBackend.y} 1040,255 ${responseSuffix}`
+      : isAuth
+        ? `720,${deviceY} 710,465 605,465 605,424 585,424 500,465 440,415 250,415 200,304`
+        : selectedDevice
+          ? `720,${deviceY} 670,291 ${responseSuffix}`
+          : responseSuffix;
     flows.push({
-      color: '#22c55e',
-      label: 'response',
+      color: selectedFailed ? '#ff4d7d' : '#22c55e',
+      label: selectedFailed ? 'failed response' : 'response',
       points: responsePoints,
     });
   }
@@ -1539,12 +1568,17 @@ function architectureSelectedPath(
   }
 
   backendFlows.forEach((backend) => {
-    nodes.add(backend.node);
-    if (isResponseLikeEvent(selected)) return;
-    const points = backend.node === 'upload' ? `500,465 710,465 1040,455` : `720,${deviceY} 1040,255 1340,${backend.y}`;
+    if (!hasRequest) return;
+    const points =
+      backend.node === 'upload'
+        ? `${hyperbeamPoint} 710,465 1040,455`
+        : !backend.viaStore
+          ? `${hyperbeamPoint} ${backend.x},${backend.y}`
+          : selectedDevice
+            ? `720,${deviceY} 1000,${deviceY} 1040,255 ${backend.x},${backend.y}`
+            : `${hyperbeamPoint} 1040,255 ${backend.x},${backend.y}`;
     flows.push({ color: backend.color, label: backend.label, points });
   });
-  if (backendFlows.length || flows.some((flow) => flow.points.includes('1040,255'))) nodes.add('store');
 
   return { flows, nodes };
 }
@@ -1736,6 +1770,9 @@ function routeSummary(data: any, mode: HyperbeamMode) {
     sourceLayer: data.sourceLayer,
     sourceReason: data.sourceReason,
     sourceAlg: data.sourceAlg,
+    mediaSource: data.mediaSource,
+    mediaVerification: data.mediaVerification,
+    mediaVerificationLimitations: data.mediaVerificationLimitations,
     responseDevice: data.responseDevice,
     requestKey: data.requestKey,
   });
@@ -1974,6 +2011,7 @@ function eventSummary(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
     data.nativeSource,
     data.sourceLayer,
     data.sourceAlg,
+    data.mediaVerification,
     data.elapsedMs !== undefined ? `${data.elapsedMs}ms` : undefined,
     path,
     data.requestKey,

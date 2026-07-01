@@ -88,6 +88,7 @@ committed_keys(Msg, Opts) ->
         <<"device">>,
         <<"content-type">>,
         <<"body">>,
+        <<"tx-hex">>,
         <<"txid">>,
         <<"txid-internal">>,
         <<"nout">>,

@@ -56,7 +56,7 @@ list(StoreOpts, #{ <<"list">> := Key } = Req, NodeOpts) ->
         {ok, Items} when is_list(Items) ->
             {ok, Items};
         {ok, Msg} ->
-            {ok, list_claim_ids(Msg, NodeOpts)};
+            {ok, list_search_ids(Path, Msg, NodeOpts)};
         not_found ->
             list_live(Path, Req, StoreOpts, NodeOpts)
     end.
@@ -137,7 +137,7 @@ read_live(<<"odysee/stream-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
                 #{},
                 #{
                     <<"claim_ids">> => [ClaimID],
-                    <<"claim_type">> => [<<"stream">>],
+                    <<"claim_type">> => <<"stream">>,
                     <<"page_size">> => 1
                 },
                 store_node_opts(StoreOpts, NodeOpts)
@@ -167,7 +167,7 @@ read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
                 #{},
                 #{
                     <<"claim_ids">> => [ChannelID],
-                    <<"claim_type">> => [<<"channel">>],
+                    <<"claim_type">> => <<"channel">>,
                     <<"page_size">> => 1
                 },
                 store_node_opts(StoreOpts, NodeOpts)
@@ -185,30 +185,12 @@ read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     else
         Error -> Error
     end;
+read_live(<<"odysee/outpoint/", Rest/binary>>, StoreOpts, NodeOpts) ->
+    read_claim_output_live(Rest, StoreOpts, NodeOpts);
+read_live(<<"odysee/claim-output/", Rest/binary>>, StoreOpts, NodeOpts) ->
+    read_claim_output_live(Rest, StoreOpts, NodeOpts);
 read_live(<<"odysee/claim-proof/", Rest/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, TxID, NOut} ?= claim_proof_path(Rest),
-        {ok, Transaction} ?=
-            hb_ao:raw(
-                <<"odysee-claim@1.0">>,
-                <<"transaction">>,
-                #{},
-                #{ <<"txid">> => TxID },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        {ok, Proof} ?=
-            hb_ao:raw(
-                <<"odysee-claim-proof@1.0">>,
-                <<"verify">>,
-                Transaction,
-                #{ <<"txid">> => TxID, <<"nout">> => NOut },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        ok ?= require_valid_proof(Proof, NodeOpts),
-        commit_result(Proof, <<"claim-proof">>, NodeOpts)
-    else
-        Error -> Error
-    end;
+    read_claim_output_live(Rest, StoreOpts, NodeOpts);
 read_live(<<"odysee/transaction/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, TxID0} ?= decode_component(Encoded),
@@ -337,9 +319,103 @@ read_live(<<"odysee/blob/", Encoded/binary>>, StoreOpts, NodeOpts) ->
 read_live(_Path, _StoreOpts, _NodeOpts) ->
     {error, not_found}.
 
+read_claim_output_live(Rest, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, TxID, NOut} ?= claim_proof_path(Rest),
+        {ok, Transaction} ?=
+            hb_ao:raw(
+                <<"odysee-claim@1.0">>,
+                <<"transaction">>,
+                #{},
+                #{ <<"txid">> => TxID },
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        {ok, Proof} ?=
+            hb_ao:raw(
+                <<"odysee-claim-proof@1.0">>,
+                <<"verify">>,
+                Transaction,
+                #{ <<"txid">> => TxID, <<"nout">> => NOut },
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        ok ?= require_valid_proof(Proof, NodeOpts),
+        {ok, Msg} ?= claim_output_surface(Proof, TxID, NOut, StoreOpts, NodeOpts),
+        commit_result(
+            Msg#{
+                <<"claim-output-store-path">> =>
+                    <<"odysee/claim-output/", TxID/binary, "/", (integer_to_binary(NOut))/binary>>
+            },
+            <<"claim-output">>,
+            NodeOpts
+        )
+    else
+        Error -> Error
+    end.
+
+claim_output_surface(Proof, TxID, NOut, StoreOpts, NodeOpts) ->
+    case claim_surface_for_proof(Proof, TxID, NOut, StoreOpts, NodeOpts) of
+        {ok, Claim} ->
+            {ok, claim_output_surface_message(Proof, Claim, TxID, NOut, NodeOpts)};
+        _ ->
+            {ok, Proof}
+    end.
+
+claim_surface_for_proof(Proof, TxID, NOut, StoreOpts, NodeOpts) ->
+    maybe
+        ClaimID = hb_maps:get(<<"claim-id">>, Proof, not_found, NodeOpts),
+        true ?= is_binary(ClaimID),
+        {ok, Search} ?=
+            hb_ao:raw(
+                <<"odysee-claim@1.0">>,
+                <<"search">>,
+                #{},
+                #{ <<"claim_ids">> => [ClaimID], <<"page_size">> => 1 },
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        {ok, Claim} ?= claim_from_search(Search, ClaimID, NodeOpts),
+        ok ?= require_outpoint_match(Claim, TxID, NOut, NodeOpts),
+        {ok, Claim}
+    else
+        _ -> {error, claim_surface_not_found}
+    end.
+
+claim_output_surface_message(Proof, Claim, TxID, NOut, Opts) ->
+    ClaimID = first_found([<<"claim-id">>, <<"claim_id">>], Claim, hb_maps:get(<<"claim-id">>, Proof, not_found, Opts), Opts),
+    ClaimName = first_found([<<"claim-name">>, <<"name">>], Claim, hb_maps:get(<<"claim-name">>, Proof, not_found, Opts), Opts),
+    Value = first_found([<<"value">>], Claim, not_found, Opts),
+    Msg0 = Proof#{
+        <<"content-type">> => <<"application/json">>,
+        <<"body">> => hb_json:encode(Claim),
+        <<"tx-hex">> => hb_maps:get(<<"body">>, Proof, not_found, Opts),
+        <<"claim">> => Claim,
+        <<"claim-id">> => ClaimID,
+        <<"claim_id">> => ClaimID,
+        <<"claim-name">> => ClaimName,
+        <<"name">> => ClaimName,
+        <<"txid">> => TxID,
+        <<"nout">> => NOut,
+        <<"outpoint">> => <<TxID/binary, ":", (integer_to_binary(NOut))/binary>>,
+        <<"immutable-id">> => <<TxID/binary, ":", (integer_to_binary(NOut))/binary>>,
+        <<"claim-output-view">> => <<"sdk-claim">>
+    },
+    Msg1 = put_if_found(<<"value">>, Value, Msg0),
+    Msg2 = put_if_found(<<"canonical-url">>, first_found([<<"canonical-url">>, <<"canonical_url">>], Claim, not_found, Opts), Msg1),
+    Msg3 = put_if_found(<<"permanent-url">>, first_found([<<"permanent-url">>, <<"permanent_url">>], Claim, not_found, Opts), Msg2),
+    Msg4 = put_if_found(<<"short-url">>, first_found([<<"short-url">>, <<"short_url">>], Claim, not_found, Opts), Msg3),
+    put_if_found(<<"value-type">>, first_found([<<"value-type">>, <<"value_type">>], Claim, not_found, Opts), Msg4).
+
+require_outpoint_match(Claim, TxID, NOut, Opts) ->
+    ExpectedNOut = integer_to_binary(NOut),
+    case {first_found([<<"txid">>, <<"tx-id">>], Claim, not_found, Opts), nout_binary(first_found([<<"nout">>, <<"n-out">>], Claim, not_found, Opts))} of
+        {TxID, ExpectedNOut} -> ok;
+        _ -> {error, claim_surface_outpoint_mismatch}
+    end.
+
 list_live(<<"odysee/channel-id/", Rest/binary>>, Req, StoreOpts, NodeOpts) ->
-    case binary:split(Rest, <<"/claims">>) of
-        [Encoded, <<>>] ->
+    case binary:split(Rest, <<"/">>) of
+        [Encoded, <<"claim-outputs">>] ->
+            list_channel_claim_outputs(Encoded, Req, StoreOpts, NodeOpts);
+        [Encoded, <<"claims">>] ->
             list_channel_claims(Encoded, Req, StoreOpts, NodeOpts);
         _ ->
             {error, not_found}
@@ -347,11 +423,20 @@ list_live(<<"odysee/channel-id/", Rest/binary>>, Req, StoreOpts, NodeOpts) ->
 list_live(_Path, _Req, _StoreOpts, _NodeOpts) ->
     {error, not_found}.
 
+list_channel_claim_outputs(Encoded, Req, StoreOpts, NodeOpts) ->
+    list_channel_search(Encoded, Req, StoreOpts, NodeOpts, fun list_claim_outputs/2).
+
 list_channel_claims(Encoded, Req, StoreOpts, NodeOpts) ->
+    list_channel_search(Encoded, Req, StoreOpts, NodeOpts, fun list_claim_ids/2).
+
+list_channel_search(Encoded, Req, StoreOpts, NodeOpts, Project) ->
     maybe
         {ok, ChannelID} ?= decode_component(Encoded),
-        Page = hb_maps:get(<<"page">>, Req, 1, NodeOpts),
-        PageSize = hb_maps:get(<<"page-size">>, Req, hb_maps:get(<<"page_size">>, Req, 20, NodeOpts), NodeOpts),
+        Page = int_param(hb_maps:get(<<"page">>, Req, 1, NodeOpts), 1),
+        PageSize = int_param(
+            hb_maps:get(<<"page-size">>, Req, hb_maps:get(<<"page_size">>, Req, 20, NodeOpts), NodeOpts),
+            20
+        ),
         OrderBy = hb_maps:get(<<"order-by">>, Req, hb_maps:get(<<"order_by">>, Req, [<<"release_time">>], NodeOpts), NodeOpts),
         {ok, Search} ?=
             hb_ao:raw(
@@ -360,14 +445,14 @@ list_channel_claims(Encoded, Req, StoreOpts, NodeOpts) ->
                 #{},
                 #{
                     <<"channel_ids">> => [ChannelID],
-                    <<"claim_type">> => [<<"stream">>],
+                    <<"claim_type">> => <<"stream">>,
                     <<"page">> => Page,
                     <<"page_size">> => PageSize,
                     <<"order_by">> => OrderBy
                 },
                 store_node_opts(StoreOpts, NodeOpts)
             ),
-        {ok, list_claim_ids(Search, NodeOpts)}
+        {ok, Project(Search, NodeOpts)}
     else
         Error -> Error
     end.
@@ -385,7 +470,9 @@ commit_result(Msg0, Type, Opts)
         is_map(Msg0), Type =:= <<"stream-descriptor">>;
         is_map(Msg0), Type =:= <<"transaction">> ->
     native_source_message(Type, Msg0, Opts);
-commit_result(Msg0, <<"claim-proof">> = Type, Opts) when is_map(Msg0) ->
+commit_result(Msg0, Type, Opts)
+        when is_map(Msg0), Type =:= <<"claim-proof">>;
+        is_map(Msg0), Type =:= <<"claim-output">> ->
     case native_claim_output_message(Msg0, Opts) of
         {ok, Msg} -> {ok, Msg};
         {error, not_native_claim_output} -> commit_surface_result(Msg0, Type, Opts);
@@ -438,6 +525,8 @@ commitment_device(<<"stream-descriptor">>) ->
     ?LBRY_STREAM_DESCRIPTOR_COMMITMENT_DEVICE;
 commitment_device(<<"claim-proof">>) ->
     ?LBRY_CLAIM_OUTPUT_COMMITMENT_DEVICE;
+commitment_device(<<"claim-output">>) ->
+    ?LBRY_CLAIM_OUTPUT_COMMITMENT_DEVICE;
 commitment_device(<<"transaction">>) ->
     ?LBRY_TRANSACTION_COMMITMENT_DEVICE;
 commitment_device(_Type) ->
@@ -448,6 +537,8 @@ source_message(<<"blob">>, Msg) ->
 source_message(<<"stream-descriptor">>, Msg) ->
     Msg#{ <<"device">> => ?LBRY_STREAM_DESCRIPTOR_COMMITMENT_DEVICE };
 source_message(<<"claim-proof">>, Msg) ->
+    Msg#{ <<"device">> => ?LBRY_CLAIM_OUTPUT_COMMITMENT_DEVICE };
+source_message(<<"claim-output">>, Msg) ->
     Msg#{ <<"device">> => ?LBRY_CLAIM_OUTPUT_COMMITMENT_DEVICE };
 source_message(<<"transaction">>, Msg) ->
     Msg#{ <<"device">> => ?LBRY_TRANSACTION_COMMITMENT_DEVICE };
@@ -501,6 +592,10 @@ infer_type(<<"odysee/channel/", _/binary>>, _Msg, _Opts) ->
     <<"channel">>;
 infer_type(<<"odysee/claim-proof/", _/binary>>, _Msg, _Opts) ->
     <<"claim-proof">>;
+infer_type(<<"odysee/claim-output/", _/binary>>, _Msg, _Opts) ->
+    <<"claim-output">>;
+infer_type(<<"odysee/outpoint/", _/binary>>, _Msg, _Opts) ->
+    <<"claim-output">>;
 infer_type(<<"odysee/transaction/", _/binary>>, _Msg, _Opts) ->
     <<"transaction">>;
 infer_type(<<"odysee/stream-descriptor/", _/binary>>, _Msg, _Opts) ->
@@ -582,6 +677,57 @@ list_claim_ids(Search, Opts) ->
                 ClaimID =/= not_found
             ]
     end.
+
+list_search_ids(Path, Search, Opts) ->
+    case binary:match(Path, <<"/claim-outputs">>) of
+        nomatch -> list_claim_ids(Search, Opts);
+        _ -> list_claim_outputs(Search, Opts)
+    end.
+
+list_claim_outputs(Search, Opts) ->
+    [
+        Outpoint
+    ||
+        Claim <- first_found([<<"claims">>, <<"items">>], Search, [], Opts),
+        Outpoint <- [claim_outpoint(Claim, Opts)],
+        Outpoint =/= not_found
+    ].
+
+claim_outpoint(Claim, Opts) ->
+    TxID = first_found([<<"txid">>, <<"tx-id">>], Claim, not_found, Opts),
+    NOut = first_found([<<"nout">>, <<"n-out">>], Claim, not_found, Opts),
+    case {TxID, nout_binary(NOut)} of
+        {TxID, NOutBin} when is_binary(TxID), is_binary(NOutBin) ->
+            <<TxID/binary, ":", NOutBin/binary>>;
+        _ ->
+            not_found
+    end.
+
+nout_binary(NOut) when is_integer(NOut), NOut >= 0 ->
+    integer_to_binary(NOut);
+nout_binary(NOut) when is_binary(NOut) ->
+    case valid_uint(NOut) of
+        true -> NOut;
+        false -> not_found
+    end;
+nout_binary(_NOut) ->
+    not_found.
+
+int_param(Value, _Default) when is_integer(Value) ->
+    Value;
+int_param(Value, Default) when is_binary(Value) ->
+    try binary_to_integer(Value) of
+        Int -> Int
+    catch
+        _:_ -> Default
+    end;
+int_param(_Value, Default) ->
+    Default.
+
+put_if_found(_Key, not_found, Msg) ->
+    Msg;
+put_if_found(Key, Value, Msg) ->
+    Msg#{ Key => Value }.
 
 blob_message(BlobHash, Body) ->
     (hb_lbry_commitment:blob_message(BlobHash, Body))#{
@@ -876,6 +1022,11 @@ canonical_list_path(Path) ->
         _ -> Path
     end.
 
+classify_channel_claims_list_path(<<ChannelID:40/binary, "/claim-outputs">>) ->
+    case valid_hex_size(ChannelID, 20) of
+        true -> {ok, <<"odysee/channel-id/", ChannelID/binary, "/claim-outputs">>};
+        false -> not_found
+    end;
 classify_channel_claims_list_path(<<ChannelID:40/binary, "/claims">>) ->
     case valid_hex_size(ChannelID, 20) of
         true -> {ok, <<"odysee/channel-id/", ChannelID/binary, "/claims">>};
@@ -886,7 +1037,7 @@ classify_channel_claims_list_path(_Path) ->
 
 classify_native_path(<<TxID:64/binary, ":", NOut/binary>>) ->
     case valid_hex_size(TxID, 32) andalso valid_uint(NOut) of
-        true -> {ok, <<"odysee/claim-proof/", TxID/binary, "/", NOut/binary>>};
+        true -> {ok, <<"odysee/claim-output/", TxID/binary, "/", NOut/binary>>};
         false -> not_found
     end;
 classify_native_path(Path) ->
@@ -1063,6 +1214,30 @@ bare_channel_id_claims_list_returns_claim_ids_test() ->
     {ok, ClaimIDs} = list(Store, #{ <<"list">> => <<ChannelID/binary, "/claims">> }, #{}),
     ?assertEqual([ClaimID1, ClaimID2], ClaimIDs).
 
+bare_channel_id_claim_outputs_list_returns_immutable_outpoints_test() ->
+    ChannelID = <<"fb364ef587872515f545a5b4b3182b58073f230f">>,
+    ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+    TxID1 = <<"6f4fc565d9f7b553c2b87b17f0e1821adc281b6331b926d72df44ee45d44f284">>,
+    TxID2 = <<"8c2c68213df87840edcb0a5a2d2e093f5d2ecc4be82a4f86bfc320778ee8305d">>,
+    Store = #{
+        <<"store-module">> => ?MODULE,
+        <<"fixtures">> => #{
+            <<"odysee/channel-id/", ChannelID/binary, "/claim-outputs">> => #{
+                <<"items">> => [
+                    #{ <<"claim_id">> => ClaimID, <<"txid">> => TxID1, <<"nout">> => 0 },
+                    #{ <<"claim-id">> => ClaimID, <<"txid">> => TxID2, <<"nout">> => <<"2">> },
+                    #{ <<"claim-id">> => ClaimID }
+                ]
+            }
+        }
+    },
+    ?assertEqual(
+        <<"odysee/channel-id/", ChannelID/binary, "/claim-outputs">>,
+        canonical_list_path(<<ChannelID/binary, "/claim-outputs">>)
+    ),
+    {ok, Outpoints} = list(Store, #{ <<"list">> => <<ChannelID/binary, "/claim-outputs">> }, #{}),
+    ?assertEqual([<<TxID1/binary, ":0">>, <<TxID2/binary, ":2">>], Outpoints).
+
 direct_txid_get_returns_native_transaction_test() ->
     Raw = binary:decode_hex(hb_lbry_tx:task0_tx_hex()),
     {ok, TxMsg} = hb_lbry_commitment:transaction_message(Raw),
@@ -1116,11 +1291,11 @@ direct_outpoint_get_returns_native_claim_output_test() ->
     Store = #{
         <<"store-module">> => ?MODULE,
         <<"fixtures">> => #{
-            <<"odysee/claim-proof/", TxID/binary, "/0">> => ClaimOutput
+            <<"odysee/claim-output/", TxID/binary, "/0">> => ClaimOutput
         }
     },
     ?assertEqual(
-        <<"odysee/claim-proof/", TxID/binary, "/0">>,
+        <<"odysee/claim-output/", TxID/binary, "/0">>,
         canonical_read_path(Outpoint)
     ),
     {ok, StoreMsg} = read(Store, #{ <<"read">> => Outpoint }, #{}),
@@ -1137,6 +1312,31 @@ direct_outpoint_get_returns_native_claim_output_test() ->
         true,
         hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
     ).
+
+claim_output_path_aliases_return_native_claim_output_test() ->
+    Raw = binary:decode_hex(hb_lbry_tx:task0_tx_hex()),
+    TxID = hb_lbry_tx:txid(Raw),
+    {ok, ClaimOutput} = hb_lbry_commitment:claim_output_message(Raw, 0),
+    Store = #{
+        <<"store-module">> => ?MODULE,
+        <<"fixtures">> => #{
+            <<"odysee/claim-output/", TxID/binary, "/0">> => ClaimOutput,
+            <<"odysee/claim-proof/", TxID/binary, "/0">> => ClaimOutput,
+            <<"odysee/outpoint/", TxID/binary, "/0">> => ClaimOutput
+        }
+    },
+    {ok, ClaimOutputMsg} =
+        read(Store, #{ <<"read">> => <<"odysee/claim-output/", TxID/binary, "/0">> }, #{}),
+    {ok, ClaimProofMsg} =
+        read(Store, #{ <<"read">> => <<"odysee/claim-proof/", TxID/binary, "/0">> }, #{}),
+    {ok, OutpointMsg} =
+        read(Store, #{ <<"read">> => <<"odysee/outpoint/", TxID/binary, "/0">> }, #{}),
+    ?assertEqual(TxID, maps:get(<<"txid">>, ClaimOutputMsg)),
+    ?assertEqual(0, maps:get(<<"nout">>, ClaimOutputMsg)),
+    ?assertEqual(TxID, maps:get(<<"txid">>, ClaimProofMsg)),
+    ?assertEqual(0, maps:get(<<"nout">>, ClaimProofMsg)),
+    ?assertEqual(TxID, maps:get(<<"txid">>, OutpointMsg)),
+    ?assertEqual(0, maps:get(<<"nout">>, OutpointMsg)).
 
 http_header(Name, Headers) ->
     LowerName = hb_util:bin(string:lowercase(hb_util:bin(Name))),

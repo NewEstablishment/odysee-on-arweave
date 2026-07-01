@@ -10,7 +10,7 @@ import {
   fetchHyperbeamResolveClaimIds,
 } from 'util/hyperbeam';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
-import { PROXY_URL_NO_CF } from 'config';
+import { ODYSEE_HYPERBEAM_NODE_API, PROXY_URL_NO_CF } from 'config';
 
 import 'proxy-polyfill';
 
@@ -352,6 +352,11 @@ export function apiCall(
 }
 
 function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null {
+  if (ODYSEE_HYPERBEAM_NODE_API) {
+    const startupResult = hyperbeamStartupSdkResult(method, params);
+    if (startupResult) return startupResult;
+  }
+
   if (!isHyperbeamEnabled()) return null;
 
   const localResult = hyperbeamLocalSdkResult(method, params);
@@ -378,6 +383,19 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
       );
     default:
       return Promise.reject(new Error(`HyperBEAM mode does not support SDK method ${method}`));
+  }
+}
+
+function hyperbeamStartupSdkResult(method: string, params: any): Promise<any> | null {
+  switch (method) {
+    case 'status':
+    case 'wallet_status':
+    case 'version':
+      return hyperbeamLocalSdkResult(method, params);
+    case 'resolve':
+      return isStartupResolveProbe(params) ? Promise.resolve({}) : null;
+    default:
+      return null;
   }
 }
 
@@ -431,14 +449,25 @@ function shouldResolveClaimIds(params: Record<string, any>) {
 function hyperbeamLocalSdkResult(method: string, params: any): Promise<any> | null {
   switch (method) {
     case 'status':
-      return Promise.resolve({ is_running: true });
+      return Promise.resolve({ is_running: true, wallet: { available_servers: 1 } });
+    case 'wallet_status':
+      return Promise.resolve({ is_locked: false, is_syncing: false });
     case 'version':
       return Promise.resolve({ lbrynet_version: 'hyperbeam' });
+    case 'resolve':
+      if (isStartupResolveProbe(params)) return Promise.resolve({});
+      return null;
     case 'ffmpeg_find':
       return Promise.reject(new Error(`${method} requires authentication`));
     default:
       return null;
   }
+}
+
+function isStartupResolveProbe(params: any): boolean {
+  const urls = params?.urls || params?.uris || params?.uri;
+  if (Array.isArray(urls)) return urls.length === 1 && urls[0] === 'lbry://one';
+  return urls === 'lbry://one';
 }
 
 function daemonCallWithResult(

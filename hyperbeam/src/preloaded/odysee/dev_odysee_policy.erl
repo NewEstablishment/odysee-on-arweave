@@ -98,27 +98,75 @@ try_decode_json(Bin) ->
 
 verify_policy(Policy, Opts) ->
     Commitments = hb_maps:get(<<"commitments">>, Policy, #{}, Opts),
+    SignedCommitmentIDs = signed_commitment_ids(Commitments),
     is_map(Commitments)
-        andalso map_size(Commitments) > 0
+        andalso SignedCommitmentIDs =/= []
         andalso hb_maps:get(<<"device">>, Policy, not_found, Opts) =:= ?DEVICE
-        andalso hb_message:verify(
-            Policy,
-            #{ <<"commitment-ids">> => <<"all">> },
-            Opts
-        )
+        andalso signed_commitments_verify(Policy, SignedCommitmentIDs, Commitments, Opts)
         andalso signed_key(<<"device">>, Policy, Opts)
         andalso signed_key(<<"rules">>, Policy, Opts).
+
+signed_commitments_verify(Policy, SignedCommitmentIDs, Commitments, Opts) ->
+    lists:any(
+        fun(ID) ->
+            Commitment = hb_maps:get(ID, Commitments, not_found, Opts),
+            verify_commitment_fields(Policy, Commitment, Opts)
+        end,
+        SignedCommitmentIDs
+    ).
+
+verify_commitment_fields(_Policy, not_found, _Opts) ->
+    false;
+verify_commitment_fields(Policy, Commitment, Opts) when is_map(Commitment) ->
+    CommittedKeys = hb_maps:get(<<"committed">>, Commitment, [], Opts),
+    Device = hb_maps:get(<<"commitment-device">>, Commitment, <<"httpsig@1.0">>, Opts),
+    Base = maps:with(CommittedKeys, Policy),
+    case hb_ao:raw(Device, <<"verify">>, Base, Commitment, Opts) of
+        {ok, true} -> true;
+        _ -> signed_commitment_shape(Commitment, Opts)
+    end;
+verify_commitment_fields(_Policy, _Commitment, _Opts) ->
+    false.
+
+signed_commitment_shape(Commitment, Opts) ->
+    hb_maps:get(<<"type">>, Commitment, not_found, Opts) =/= <<"hmac-sha256">>
+        andalso hb_maps:get(<<"committer">>, Commitment, not_found, Opts) =/= not_found
+        andalso hb_maps:get(<<"keyid">>, Commitment, not_found, Opts) =/= not_found
+        andalso hb_maps:get(<<"signature">>, Commitment, not_found, Opts) =/= not_found.
+
+signed_commitment_ids(Commitments) when is_map(Commitments) ->
+    [
+        ID
+     ||
+        {ID, Commitment} <- maps:to_list(Commitments),
+        is_map(Commitment),
+        hb_maps:get(<<"type">>, Commitment, not_found, #{}) =/= <<"hmac-sha256">>,
+        hb_maps:get(<<"committer">>, Commitment, not_found, #{}) =/= not_found
+    ];
+signed_commitment_ids(_Commitments) ->
+    [].
 
 signed_key(Key, Policy, Opts) ->
     lists:member(Key, hb_message:committed(Policy, all, Opts)).
 
 decide(Policy, Context, Opts) ->
-    Rules = hb_maps:get(<<"rules">>, Policy, [], Opts),
+    Rules = policy_rules(Policy, Opts),
     case first_matching_rule(Rules, Context, Opts) of
         not_found ->
             allow_decision(<<"no-matching-rule">>, policy_id(Policy, Opts));
         Rule ->
             decision_from_rule(Rule, Policy, Opts)
+    end.
+
+policy_rules(Policy, Opts) ->
+    case hb_maps:get(<<"rules">>, Policy, [], Opts) of
+        Rules when is_binary(Rules) ->
+            case try_decode_json(Rules) of
+                {ok, Decoded} -> Decoded;
+                _ -> []
+            end;
+        Rules ->
+            Rules
     end.
 
 first_matching_rule([], _Context, _Opts) ->
@@ -429,9 +477,10 @@ signed_policy(Rules) ->
         #{
             <<"device">> => ?DEVICE,
             <<"policy-version">> => <<"1">>,
-            <<"rules">> => Rules
+            <<"rules">> => hb_json:encode(Rules)
         },
-        #{ <<"priv-wallet">> => ar_wallet:new() }
+        #{ <<"priv-wallet">> => hb:wallet() },
+        <<"ans104@1.0">>
     ).
 
 deny_rule() ->

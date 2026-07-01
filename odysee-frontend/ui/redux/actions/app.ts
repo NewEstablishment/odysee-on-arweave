@@ -47,7 +47,7 @@ import analytics from 'analytics';
 import { doSignOutCleanup } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
 import { doNotificationSocketConnect } from 'redux/actions/websocket';
-import { getClaimScheduledState, isClaimPrivate, isClaimUnlisted } from 'util/claim';
+import { getClaimOutpoint, getClaimScheduledState, isClaimPrivate, isClaimUnlisted } from 'util/claim';
 import { selectContentPositionForUri } from 'redux/selectors/content';
 import { doTipAccountStatus } from './payments';
 const appVersion = '0.0.0';
@@ -372,12 +372,12 @@ export function doAnalyticsViewForUri(uri: string, preview?: boolean) {
   return (dispatch: Dispatch, getState: GetState) => {
     const state = getState();
     const claim = selectClaimForUri(state, uri);
-    const { txid, nout, claim_id: claimId } = claim;
+    const { claim_id: claimId } = claim;
     const claimIsMine = selectClaimIsMineForUri(state, uri);
     const isUnlistedOrScheduled =
       (getClaimScheduledState(claim) as any) === 'scheduled' || isClaimUnlisted(claim) || isClaimPrivate(claim);
     const isGlobalMod = Boolean(selectUser(state)?.global_mod);
-    const outpoint = `${txid}:${nout}`;
+    const outpoint = getClaimOutpoint(claim);
 
     if (claimIsMine || (isGlobalMod && isUnlistedOrScheduled)) {
       return Promise.resolve();
@@ -395,11 +395,11 @@ export function doSyncLastPosition(uri: string, position: number) {
     const claim = selectClaimForUri(state, uri);
     if (!claim) return;
 
-    const { txid, nout, claim_id: claimId } = claim;
+    const { claim_id: claimId } = claim;
     const claimIsMine = selectClaimIsMineForUri(state, uri);
     if (claimIsMine) return;
 
-    const outpoint = `${txid}:${nout}`;
+    const outpoint = getClaimOutpoint(claim);
     analytics.apiLog.view(uri, outpoint, claimId, position, undefined);
   };
 }

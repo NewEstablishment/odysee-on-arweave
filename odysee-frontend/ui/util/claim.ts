@@ -211,3 +211,16 @@ export const isClaimShort = (claim: Claim | null | undefined): boolean => {
 };
 export const getClaimMeta = (claim: Claim | null | undefined) => claim && claim.meta;
 export const getClaimRepostedAmount = (claim: Claim | null | undefined) => getClaimMeta(claim)?.reposted;
+export function getClaimOutpoint(claim: Claim | null | undefined) {
+  if (!claim) return claim;
+
+  const hyperbeam = (claim as any).hyperbeam;
+  const immutableId =
+    (hyperbeam && (hyperbeam.upload_id || hyperbeam.immutable_id)) ||
+    (claim as any).immutable_id ||
+    (claim as any).immutableId ||
+    (claim as any).outpoint;
+
+  if (immutableId) return immutableId;
+  return claim.txid ? `${claim.txid}:${claim.nout || 0}` : null;
+}
