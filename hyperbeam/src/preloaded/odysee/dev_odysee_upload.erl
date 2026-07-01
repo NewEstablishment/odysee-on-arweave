@@ -26,7 +26,8 @@ index(_Base, Req, Opts) ->
             {ok, Signers} ?= require_signed(Req, Opts),
             {ok, Owner} ?= owner_identity(Req, Signers, Opts),
             {ok, Payload} ?= request_json_body(Req, Opts),
-            {ok, Claim} ?= indexed_claim(Payload, Opts),
+            {ok, Claim0} ?= indexed_claim(Payload, Opts),
+            {ok, Claim} ?= write_immutable_claim(Claim0, Opts),
             {ok, State0} ?= read_index(Owner, Opts),
             ClaimID = hb_maps:get(<<"claim_id">>, Claim, <<>>, Opts),
             Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
@@ -277,7 +278,7 @@ indexed_claim(Payload, Opts) ->
     case Claim of
         ClaimMap when is_map(ClaimMap) ->
             PublicClaimMap = sanitize_indexed_claim(ClaimMap, Opts),
-            case upload_id(PublicClaimMap, Opts) of
+            case media_id(PublicClaimMap, Opts) of
                 <<>> ->
                     {error,
                         #{
@@ -285,12 +286,8 @@ indexed_claim(Payload, Opts) ->
                             <<"body">> => <<"Upload index claim requires an immutable upload id.">>
                         }
                     };
-                UploadID ->
-                    {ok,
-                        PublicClaimMap#{
-                            <<"claim_id">> => UploadID,
-                            <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, PublicClaimMap, UploadID, Opts)
-                        }}
+                _MediaID ->
+                    {ok, PublicClaimMap}
             end;
         _ ->
             {error,
@@ -300,6 +297,47 @@ indexed_claim(Payload, Opts) ->
                 }
             }
     end.
+
+write_immutable_claim(Claim0, Opts) ->
+    Claim1 = normalize_claim_before_immutable_write(Claim0, Opts),
+    maybe
+        {ok, ImmutableID} ?= hb_cache:write(hb_message:commit(Claim1, Opts), Opts),
+        Claim = Claim1#{
+            <<"claim_id">> => ImmutableID,
+            <<"immutable_id">> => ImmutableID,
+            <<"txid">> => ImmutableID
+        },
+        {ok, Claim}
+    end.
+
+normalize_claim_before_immutable_write(Claim, Opts) ->
+    MediaID = media_id(Claim, Opts),
+    Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim, #{}, Opts),
+    Hyperbeam1 =
+        case is_map(Hyperbeam0) of
+            true -> Hyperbeam0#{ <<"upload_id">> => MediaID, <<"media_id">> => MediaID };
+            false -> #{ <<"upload_id">> => MediaID, <<"media_id">> => MediaID }
+        end,
+    Value0 = hb_maps:get(<<"value">>, Claim, #{}, Opts),
+    Source0 =
+        case is_map(Value0) of
+            true -> hb_maps:get(<<"source">>, Value0, #{}, Opts);
+            false -> #{}
+        end,
+    Source1 =
+        case is_map(Source0) of
+            true -> Source0#{ <<"sd_hash">> => hb_maps:get(<<"sd_hash">>, Source0, MediaID, Opts) };
+            false -> #{ <<"sd_hash">> => MediaID }
+        end,
+    Value1 =
+        case is_map(Value0) of
+            true -> Value0#{ <<"source">> => Source1 };
+            false -> #{ <<"source">> => Source1 }
+        end,
+    Claim#{
+        <<"hyperbeam">> => Hyperbeam1,
+        <<"value">> => Value1
+    }.
 
 delete_claim_id(Req, Opts) ->
     case first_field([
@@ -370,6 +408,44 @@ upload_id(Claim, Opts) ->
             end;
         UploadID ->
             hb_util:bin(UploadID)
+    end.
+
+media_id(Claim, Opts) ->
+    Hyperbeam = hb_maps:get(<<"hyperbeam">>, Claim, #{}, Opts),
+    NestedID = case is_map(Hyperbeam) of
+        true ->
+            case first_field([
+                <<"media_id">>,
+                <<"media-id">>,
+                <<"mediaId">>,
+                <<"upload_id">>,
+                <<"upload-id">>,
+                <<"uploadId">>
+            ], Hyperbeam, Opts) of
+                not_found -> <<>>;
+                FoundNestedID -> hb_util:bin(FoundNestedID)
+            end;
+        false ->
+            <<>>
+    end,
+    case NestedID of
+        <<>> ->
+            Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
+            Source = case is_map(Value) of
+                true -> hb_maps:get(<<"source">>, Value, #{}, Opts);
+                false -> #{}
+            end,
+            case is_map(Source) of
+                true ->
+                    case first_field([<<"sd_hash">>, <<"sd-hash">>, <<"sdHash">>], Source, Opts) of
+                        not_found -> upload_id(Claim, Opts);
+                        SourceID -> hb_util:bin(SourceID)
+                    end;
+                false ->
+                    upload_id(Claim, Opts)
+            end;
+        _ ->
+            NestedID
     end.
 
 sanitize_indexed_claim(Claim, Opts) when is_map(Claim) ->

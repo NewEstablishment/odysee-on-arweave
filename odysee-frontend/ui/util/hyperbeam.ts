@@ -98,7 +98,7 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
       if (claimId) {
         try {
           const result = responsePayload(await fetchCacheJson(cacheReadPath(claimId)));
-          const claim = sdkClaimFromHyperbeam(cacheReadClaim(result));
+          const claim = sdkClaimFromHyperbeam(cacheReadClaim(result), claimId);
           if (claim) return [uri, claim];
         } catch (_e) {}
       }
@@ -434,7 +434,141 @@ async function fetchHyperbeamUploadClaimsForIds(claimIds: Array<string>): Promis
   const ids = claimIds.filter(Boolean);
   if (!ids.length) return [];
 
-  return fetchHyperbeamUploadClaims({ claim_ids: ids }, { 'x-odysee-claim-ids': ids.join(',') });
+  const directClaims = await Promise.all(ids.map((id) => fetchHyperbeamImmutableClaim(id)));
+  const resolvedClaims = directClaims.flat();
+  const resolvedIds = new Set(resolvedClaims.map((claim) => claim?.claim_id).filter(Boolean));
+  const unresolvedIds = ids.filter((id) => !resolvedIds.has(id));
+  if (!unresolvedIds.length) return resolvedClaims;
+
+  const indexedClaims = await fetchHyperbeamUploadClaims(
+    { claim_ids: unresolvedIds },
+    { 'x-odysee-claim-ids': unresolvedIds.join(',') }
+  );
+  return [...resolvedClaims, ...indexedClaims];
+}
+
+async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Claim>> {
+  const baseUrl = hyperbeamBaseUrl();
+  if (!baseUrl) return [];
+
+  try {
+    const url = `${baseUrl}/${encodeURIComponent(claimId)}`;
+    const requestHeaders = {
+      accept: 'application/json',
+    };
+    const callId = `immutable-read-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const immutablePath = `/${claimId}`;
+    pushHyperbeamDebug(
+      'request',
+      {
+        ...debugPageContext(),
+        callId,
+        method: 'GET',
+        url,
+        urlParts: urlParts(url),
+        devicePath: immutablePath,
+        deviceLayer: 'store',
+        sourceLayer: 'store',
+        nativeSource: 'store',
+        requestHeaders,
+        requestKey: `claim:${claimId}`,
+      },
+      'info'
+    );
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: hyperbeamFetchCredentials(baseUrl),
+      headers: requestHeaders,
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+    });
+    const json = await response.json().catch(() => null);
+    const claimPayload = responsePayload(json);
+    const expandedClaim = await expandHyperbeamImmutableClaim(baseUrl, claimId, cacheReadClaim(claimPayload));
+    pushHyperbeamDebug(
+      'response',
+      {
+        ...debugPageContext(),
+        callId,
+        method: 'GET',
+        status: response.status,
+        ok: response.ok,
+        url,
+        urlParts: urlParts(url),
+        devicePath: immutablePath,
+        deviceLayer: 'store',
+        sourceLayer: 'store',
+        nativeSource: 'store',
+        requestHeaders,
+        responseHeaders: debugResponseHeaders(response),
+        contentType: response.headers.get('content-type'),
+        contentLength: response.headers.get('content-length'),
+        requestKey: `claim:${claimId}`,
+        claimKeys: uploadListClaimKeys(json) || claimId,
+        body: expandedClaim || json,
+      },
+      response.ok ? 'ok' : 'error'
+    );
+    if (!response.ok || !json) return [];
+
+    const claim = sdkClaimFromHyperbeam(expandedClaim || cacheReadClaim(claimPayload), claimId);
+    return claim?.claim_id ? [claim] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, claim: any) {
+  if (!claim || typeof claim !== 'object') return claim;
+  const needsHyperbeam = !claim.hyperbeam && Boolean(value(claim, 'hyperbeam+link', 'hyperbeam-link'));
+  const needsValue = !claim.value && Boolean(value(claim, 'value+link', 'value-link'));
+  const existingValue = claim.value;
+  const needsSource = Boolean(
+    existingValue &&
+      !existingValue.source &&
+      (value(existingValue, 'source+link', 'source-link') || value(claim, 'value+link', 'value-link'))
+  );
+  const needsThumbnail = Boolean(
+    existingValue &&
+      !existingValue.thumbnail &&
+      (value(existingValue, 'thumbnail+link', 'thumbnail-link') || value(claim, 'value+link', 'value-link'))
+  );
+  if (!needsHyperbeam && !needsValue && !needsSource && !needsThumbnail) return claim;
+
+  const [hyperbeam, claimValue0] = await Promise.all([
+    needsHyperbeam ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'hyperbeam') : Promise.resolve(null),
+    needsValue ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value') : Promise.resolve(null),
+  ]);
+  const claimValue = claimValue0 || existingValue;
+  const source =
+    claimValue && !claimValue.source && value(claimValue, 'source+link', 'source-link')
+      ? await fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value/source')
+      : null;
+  const thumbnail =
+    claimValue && !claimValue.thumbnail && value(claimValue, 'thumbnail+link', 'thumbnail-link')
+      ? await fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value/thumbnail')
+      : null;
+  const expandedValue = claimValue ? { ...claimValue, ...(source ? { source } : {}), ...(thumbnail ? { thumbnail } : {}) } : null;
+
+  return {
+    ...claim,
+    ...(hyperbeam ? { hyperbeam } : {}),
+    ...(expandedValue ? { value: expandedValue } : {}),
+  };
+}
+
+async function fetchHyperbeamImmutableSubmessage(baseUrl: string, claimId: string, path: string) {
+  try {
+    const response = await fetch(`${baseUrl}/${encodeURIComponent(claimId)}/${path}`, {
+      method: 'GET',
+      credentials: hyperbeamFetchCredentials(baseUrl),
+      headers: { accept: 'application/json' },
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    return responsePayload(await response.json().catch(() => null));
+  } catch {
+    return null;
+  }
 }
 
 async function fetchHyperbeamUploadClaims(body: Record<string, any>, headers: Record<string, string> = {}) {
@@ -513,9 +647,8 @@ function uploadListLifecycleKey(requestBody: Record<string, any>) {
 }
 
 function uploadListClaimKeys(responseBody: any) {
-  const claimIds =
-    responseBody?.result?.items?.map((item: any) => item?.claim_id).filter(Boolean) ||
-    responseBody?.items?.map((item: any) => item?.claim_id).filter(Boolean);
+  const result = responsePayload(responseBody);
+  const claimIds = result?.items?.map((item: any) => item?.claim_id).filter(Boolean);
   return Array.isArray(claimIds) ? claimIds.join(',') : undefined;
 }
 
@@ -525,6 +658,19 @@ function debugPageContext() {
     pageUrl: window.location.href,
     pagePath: `${window.location.pathname}${window.location.search}${window.location.hash}`,
   };
+}
+
+function urlParts(url: string) {
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.href : undefined);
+    return {
+      origin: parsed.origin,
+      path: parsed.pathname,
+      query: Object.fromEntries(parsed.searchParams.entries()),
+    };
+  } catch {
+    return { path: url };
+  }
 }
 
 function debugResponseHeaders(response: Response) {
@@ -1076,8 +1222,8 @@ function uploadClaimMatchesUri(claim: any, uri: string): boolean {
 function uriWithClaimId(uri: any, claimId: any): string | null {
   if (!uri || !claimId) return null;
   const text = String(uri);
-  const lastSegment = text.split('/').pop() || text;
-  return lastSegment.includes('#') ? text : `${text}#${claimId}`;
+  const hashIndex = text.lastIndexOf('#');
+  return hashIndex === -1 ? `${text}#${claimId}` : `${text.slice(0, hashIndex)}#${claimId}`;
 }
 
 function uriWithoutStreamClaimId(uri: any): string | null {
@@ -1093,18 +1239,25 @@ function uriWithoutStreamClaimId(uri: any): string | null {
   }
 }
 
-function sdkClaimFromHyperbeam(result: any): any {
+function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   if (!result) return null;
-  const claim = result.claim || result;
-  const claimId = value(claim, 'claim_id', 'claim-id');
+  const claim = responsePayload(result.claim || result);
+  const nativeUpload = Boolean(
+    value(claim, 'hyperbeam') ||
+    value(claim, 'hyperbeam+link', 'hyperbeam-link') ||
+    value(claim, 'hyperbeam_upload', 'hyperbeam-upload')
+  );
+  const claimId = nativeUpload && requestedClaimId ? requestedClaimId : value(claim, 'claim_id', 'claim-id');
   if (!claim || !claimId) return claim;
   const txid = value(claim, 'txid', 'tx-id');
   const nout = value(claim, 'nout', 'n-out');
-  const outpoint = claimOutpoint(txid, nout);
+  const outpoint = nativeUpload ? null : claimOutpoint(txid, nout);
 
   return {
     ...claim,
     claim_id: claimId,
+    immutable_id: nativeUpload ? claimId : value(claim, 'immutable_id', 'immutable-id') || claimId,
+    txid: nativeUpload ? claimId : txid,
     ...(outpoint
       ? {
           outpoint,
@@ -1114,9 +1267,21 @@ function sdkClaimFromHyperbeam(result: any): any {
         }
       : {}),
     name: value(claim, 'name', 'claim-name') || claim.name,
-    canonical_url: value(claim, 'canonical_url', 'canonical-url') || claim.canonical_url,
-    permanent_url: value(claim, 'permanent_url', 'permanent-url') || claim.permanent_url,
-    short_url: value(claim, 'short_url', 'short-url') || claim.short_url,
+    ...(nativeUpload
+      ? {
+          streaming_url: `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(claimId)}`,
+          download_url: `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(claimId)}`,
+        }
+      : {}),
+    canonical_url: nativeUpload
+      ? uriWithClaimId(value(claim, 'canonical_url', 'canonical-url') || claim.canonical_url, claimId)
+      : value(claim, 'canonical_url', 'canonical-url') || claim.canonical_url,
+    permanent_url: nativeUpload
+      ? uriWithClaimId(value(claim, 'permanent_url', 'permanent-url') || claim.permanent_url, claimId)
+      : value(claim, 'permanent_url', 'permanent-url') || claim.permanent_url,
+    short_url: nativeUpload
+      ? uriWithClaimId(value(claim, 'short_url', 'short-url') || claim.short_url, claimId)
+      : value(claim, 'short_url', 'short-url') || claim.short_url,
     value_type: value(claim, 'value_type', 'value-type') || claim.value_type,
   };
 }

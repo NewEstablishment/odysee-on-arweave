@@ -63,8 +63,8 @@ export async function publishThroughHyperbeam(
   }
 
   const publishResponse = normalizePublishResponse(json, publishPayload, file, myChannels);
-  await indexHyperbeamPublish(publishResponse.outputs[0]);
-  return publishResponse;
+  const indexedClaim = await indexHyperbeamPublish(publishResponse.outputs[0]);
+  return { outputs: [indexedClaim || publishResponse.outputs[0]] };
 }
 
 export async function listHyperbeamPublishes(
@@ -226,6 +226,9 @@ async function indexHyperbeamPublish(claim: Claim) {
   if (!response.ok) {
     throw new Error(errorMessage(json, response.status));
   }
+
+  const result = resultPayload(json);
+  return result?.item ? normalizeIndexedHyperbeamClaim(result.item) : null;
 }
 
 function uploadIndexClaim(claim: any) {
@@ -282,6 +285,7 @@ function uploadIndexClaim(claim: any) {
     hyperbeam: {
       upload_device: hyperbeam.upload_device || '~odysee-upload@1.0',
       upload_id: uploadId,
+      media_id: hyperbeam.media_id || hyperbeam.upload_id || uploadId,
       read_path: hyperbeam.read_path,
     },
   };
@@ -295,32 +299,42 @@ function resultPayload(json: any) {
 }
 
 function normalizeIndexedHyperbeamClaim(claim: any) {
-  const uploadId =
-    claim.immutable_id || claim.immutableId || claim.hyperbeam?.upload_id || claim.upload_id || claim.claim_id;
-  const permanentUrl = validIndexedUri(claim.permanent_url) ? claim.permanent_url : null;
-  const canonicalUrl = validIndexedUri(claim.canonical_url) ? claim.canonical_url : permanentUrl;
-  const shortUrl = validIndexedUri(claim.short_url) ? claim.short_url : permanentUrl || canonicalUrl;
+  const claimId = claim.claim_id || claim.immutable_id || claim.immutableId;
+  const mediaId =
+    claim.hyperbeam?.media_id || claim.hyperbeam?.mediaId || claim.hyperbeam?.upload_id || claim.upload_id;
+  const permanentUrl = validIndexedUri(claim.permanent_url) ? uriWithStreamClaimId(claim.permanent_url, claimId) : null;
+  const canonicalUrl = validIndexedUri(claim.canonical_url)
+    ? uriWithStreamClaimId(claim.canonical_url, claimId)
+    : permanentUrl;
+  const shortUrl = validIndexedUri(claim.short_url)
+    ? uriWithStreamClaimId(claim.short_url, claimId)
+    : permanentUrl || canonicalUrl;
+  const mediaUrl = claimId ? `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(claimId)}` : '';
 
   return {
     ...claim,
     address: claim.address || '',
     amount: claim.amount || '0',
+    claim_id: claimId,
     claim_op: claim.claim_op || 'create',
     confirmations: claim.confirmations ?? 1,
     height: claim.height ?? 0,
-    immutable_id: uploadId,
+    immutable_id: claimId,
     is_my_output: claim.is_my_output ?? true,
     nout: claim.nout ?? 0,
     permanent_url: permanentUrl,
     short_url: shortUrl,
     canonical_url: canonicalUrl,
     timestamp: claim.timestamp || claim.value?.release_time || claim.meta?.creation_timestamp || 0,
-    txid: claim.txid || uploadId,
+    txid: claim.txid || claimId,
     type: claim.type || 'claim',
+    streaming_url: claim.streaming_url || mediaUrl,
+    download_url: claim.download_url || mediaUrl,
     value: normalizeIndexedClaimValue(claim.value),
     hyperbeam: {
       ...claim.hyperbeam,
-      upload_id: uploadId,
+      upload_id: mediaId || claim.hyperbeam?.upload_id || claimId,
+      media_id: mediaId || claim.hyperbeam?.media_id || claim.hyperbeam?.upload_id || claimId,
     },
     meta: normalizeIndexedClaimMeta(claim.meta),
     signing_channel: claim.signing_channel ? normalizeIndexedChannel(claim.signing_channel) : claim.signing_channel,
@@ -405,8 +419,9 @@ function publishedUriFromPayload(publishPayload: PublishParams, uploadId: string
 }
 
 function uriWithStreamClaimId(uri: string, uploadId: string) {
-  const lastSegment = uri.split('/').pop() || uri;
-  return lastSegment.includes('#') ? uri : `${uri}#${uploadId}`;
+  if (!uploadId) return uri;
+  const hashIndex = uri.lastIndexOf('#');
+  return hashIndex === -1 ? `${uri}#${uploadId}` : `${uri.slice(0, hashIndex)}#${uploadId}`;
 }
 
 function uploadIdFromResponse(json: any, file: Blob, publishPayload: PublishParams) {
@@ -510,9 +525,8 @@ function uploadDebugLifecycleKey(requestBody: Record<string, any>) {
 }
 
 function uploadDebugClaimKeys(responseBody: any) {
-  const claimIds =
-    responseBody?.result?.items?.map((item: any) => item?.claim_id).filter(Boolean) ||
-    responseBody?.items?.map((item: any) => item?.claim_id).filter(Boolean);
+  const result = resultPayload(responseBody);
+  const claimIds = result?.items?.map((item: any) => item?.claim_id).filter(Boolean);
   return Array.isArray(claimIds) ? claimIds.join(',') : undefined;
 }
 

@@ -175,6 +175,9 @@ export const selectStreamingUrlForUri = (state, uri) => {
   }
 
   const fileInfo = selectFileInfoForUri(state, uri);
-  if (!fileInfo) return fileInfo;
+  if (!fileInfo) {
+    const claim = selectClaimForUri(state, uri);
+    return claim && (claim as any).streaming_url;
+  }
   return fileInfo.streaming_url;
 };

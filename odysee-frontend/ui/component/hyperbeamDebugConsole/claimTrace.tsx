@@ -592,6 +592,17 @@ function discoverClaims(events: Array<HyperbeamDebugEvent>): Array<DiscoveredCla
     }).forEach((alias) => claims.set(alias, claim));
   });
 
+  if (context.currentPathClaim) {
+    claimAliases({
+      claimId: context.currentPathClaim.claimId,
+      txid: context.currentPathClaim.txid,
+      nout: context.currentPathClaim.nout,
+      sdHash: context.currentPathClaim.sdHash,
+      urls: [context.currentPathClaim.traceTarget],
+      traceTarget: context.currentPathClaim.traceTarget,
+    }).forEach((alias) => claims.set(alias, context.currentPathClaim as DiscoveredClaim));
+  }
+
   events.forEach((event) => {
     const data = event.data || {};
     if (!isCurrentPageEvent(data, context)) return;
@@ -830,6 +841,7 @@ type PageClaimContext = {
   currentPath: string;
   currentUrl: string;
   currentChannelPrefix: string;
+  currentPathClaim: DiscoveredClaim | null;
   pageChannelIds: Set<string>;
   myChannelIds: Set<string>;
   renderedClaims: Array<DiscoveredClaim>;
@@ -843,6 +855,7 @@ function pageClaimContext(): PageClaimContext {
       currentPath: '',
       currentUrl: '',
       currentChannelPrefix: '',
+      currentPathClaim: null,
       pageChannelIds: new Set(),
       myChannelIds: new Set(),
       renderedClaims: [],
@@ -857,6 +870,7 @@ function pageClaimContext(): PageClaimContext {
     currentPath,
     currentUrl: normalizeComparable(window.location.href),
     currentChannelPrefix: channelPrefixFromPath(currentPath),
+    currentPathClaim: claimFromCurrentPath(),
     pageChannelIds: new Set(),
     myChannelIds,
     renderedClaims: renderedPageClaims(),
@@ -867,6 +881,35 @@ function pageClaimContext(): PageClaimContext {
 function channelPrefixFromPath(path: string) {
   const firstSegment = path.split('/').filter(Boolean)[0] || '';
   return firstSegment.startsWith('@') && firstSegment.includes(':') ? `/${firstSegment}` : '';
+}
+
+function claimFromCurrentPath(): DiscoveredClaim | null {
+  if (typeof window === 'undefined') return null;
+
+  const segments = window.location.pathname.split('/').filter(Boolean);
+  const lastSegment = segments[segments.length - 1] || '';
+  const match = lastSegment.match(/^(.+):([0-9A-Za-z_-]{20,})$/);
+  if (!match) return null;
+
+  const claimId = match[2];
+  const title = decodeComparable(match[1]);
+  return {
+    key: `claim:${claimId}`,
+    label: limitLabel(title),
+    traceTarget: claimId,
+    claimId,
+    provenance: 'page',
+    source: 'current-url',
+    valueType: 'stream',
+    order: -1,
+    summary: sanitizeHyperbeamDebugValue({
+      title,
+      claim_id: claimId,
+      immutable_id: claimId,
+      value_type: 'stream',
+      canonical_url: window.location.pathname,
+    }),
+  };
 }
 
 function renderedPageClaims(): Array<DiscoveredClaim> {

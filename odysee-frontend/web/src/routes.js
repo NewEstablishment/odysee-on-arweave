@@ -278,7 +278,9 @@ async function postHyperbeamUploadIndex(ctx) {
     `${nodeUrl}${HYPERBEAM_UPLOAD_INDEX_PATH}`,
     { claim },
     {
+      authorization: `Bearer ${authToken}`,
       'x-odysee-auth-token': authToken,
+      'auth-token': authToken,
       'x-odysee-upload-claim': encodedClaim,
     }
   );
@@ -292,7 +294,8 @@ async function postHyperbeamUploadIndex(ctx) {
       error: 'HyperBEAM upload index returned HTML instead of JSON',
       status: response.statusCode,
       route: HYPERBEAM_UPLOAD_INDEX_PATH,
-      details: htmlResponseDetails(response.body),
+      hyperbeam_details: response.headers.details || response.headers['www-authenticate'] || undefined,
+      html: htmlResponseDetails(response.body),
     };
     return;
   }
@@ -387,8 +390,8 @@ async function getHyperbeamLargeUpload(ctx) {
     return;
   }
 
-  const manifestResponse = await getBuffer(hyperbeamReadUrl(nodeUrl, id));
-  const manifest = parseJsonBuffer(manifestResponse.body);
+  const manifestResponse = await getBuffer(hyperbeamReadUrl(nodeUrl, id), { accept: 'application/json' });
+  const manifest = await uploadManifestFromResponse(nodeUrl, id, manifestResponse);
 
   if (!manifest || manifest.type !== HYPERBEAM_UPLOAD_MANIFEST_KIND || !Array.isArray(manifest.chunks)) {
     ctx.status = manifestResponse.statusCode;
@@ -462,6 +465,70 @@ async function getHyperbeamLargeUpload(ctx) {
   } catch (error) {
     ctx.res.destroy(error);
   }
+}
+
+async function uploadManifestFromResponse(nodeUrl, id, response) {
+  const payload = parseJsonBuffer(response.body);
+  const direct = responsePayload(payload);
+  if (direct && direct.type === HYPERBEAM_UPLOAD_MANIFEST_KIND && Array.isArray(direct.chunks)) return direct;
+
+  const linkMediaId = await mediaIdFromHyperbeamLink(nodeUrl, id, direct);
+  const mediaId = linkMediaId || mediaIdFromClaim(direct);
+  if (!mediaId) return direct;
+
+  const mediaResponse = await getBuffer(hyperbeamReadUrl(nodeUrl, mediaId), { accept: 'application/json' });
+  const manifest = responsePayload(parseJsonBuffer(mediaResponse.body));
+  if (manifest && manifest.type === HYPERBEAM_UPLOAD_MANIFEST_KIND && Array.isArray(manifest.chunks)) return manifest;
+  if (mediaId !== id) return uploadManifestFromResponse(nodeUrl, mediaId, mediaResponse);
+  return manifest;
+}
+
+async function mediaIdFromHyperbeamLink(nodeUrl, id, claim) {
+  if (!claim || typeof claim !== 'object') return '';
+
+  const hyperbeam = claim.hyperbeam || claim['hyperbeam'];
+  if (hyperbeam && typeof hyperbeam === 'object') {
+    const mediaId = mediaIdFromClaim({ hyperbeam });
+    if (mediaId) return mediaId;
+  }
+
+  const hyperbeamResponse = await getBuffer(`${hyperbeamReadUrl(nodeUrl, id)}/hyperbeam`, {
+    accept: 'application/json',
+  });
+  if (hyperbeamResponse.statusCode < 200 || hyperbeamResponse.statusCode >= 300) return '';
+  return mediaIdFromHeaders(hyperbeamResponse.headers) || mediaIdFromClaim(responsePayload(parseJsonBuffer(hyperbeamResponse.body)));
+}
+
+function responsePayload(payload) {
+  if (!payload) return payload;
+  const body = typeof payload.body === 'string' ? parseJsonString(payload.body) : null;
+  const value = body || payload;
+
+  if (value && value.result !== undefined) return value.result;
+  if (value && value.data !== undefined) return value.data;
+  return value;
+}
+
+function mediaIdFromHeaders(headers) {
+  if (!headers || typeof headers !== 'object') return '';
+  const readPath = String(headers.read_path || headers['read-path'] || '').replace(/^\/+/, '');
+  return String(headers.media_id || headers['media-id'] || headers.upload_id || headers['upload-id'] || readPath || '').replace(
+    /^\/+/,
+    ''
+  );
+}
+
+function mediaIdFromClaim(claim) {
+  if (!claim || typeof claim !== 'object') return '';
+
+  const hyperbeam = claim.hyperbeam || claim['hyperbeam'];
+  const source = claim.value && claim.value.source ? claim.value.source : {};
+  return String(
+    (hyperbeam && (hyperbeam.media_id || hyperbeam.mediaId || hyperbeam.upload_id || hyperbeam.uploadId)) ||
+      source.sd_hash ||
+      source.sdHash ||
+      ''
+  ).replace(/^\//, '');
 }
 
 function parseByteRange(header, totalSize) {
@@ -538,6 +605,14 @@ function copyHeader(ctx, headers, name) {
 function parseJsonBuffer(body) {
   try {
     return JSON.parse(Buffer.isBuffer(body) ? body.toString('utf8') : String(body));
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonString(value) {
+  try {
+    return JSON.parse(value);
   } catch {
     return null;
   }
@@ -634,7 +709,7 @@ function postBuffer(url, body, extraHeaders = {}) {
   });
 }
 
-function getBuffer(url) {
+function getBuffer(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const client = target.protocol === 'https:' ? https : http;
@@ -646,6 +721,7 @@ function getBuffer(url) {
         path: `${target.pathname}${target.search}`,
         method: 'GET',
         insecureHTTPParser: true,
+        headers: extraHeaders,
       },
       (res) => {
         const chunks = [];

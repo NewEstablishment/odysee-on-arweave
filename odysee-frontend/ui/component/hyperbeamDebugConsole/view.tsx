@@ -860,7 +860,24 @@ function ArchitecturePanel({
           !(isNativeUploadTraceFocus(activeTrace) && isDebugTraceProbe(event.data || {}))
       )
     : [];
-  const displayGraph = selectedGraphEvents.length
+  const latestTraceMediaEventIndex = activeTraceGraphEvents.reduce((latest, event) => {
+    const index = events.indexOf(event);
+    return isMediaRangeGraphEvent(event) && index > latest ? index : latest;
+  }, -1);
+  const selectedShouldYieldToMedia =
+    selectedEvent && activeTrace && latestTraceMediaEventIndex >= 0 && !isMediaRangeGraphEvent(selectedEvent);
+  const latestTraceMediaEvents =
+    selectedShouldYieldToMedia
+      ? lifecycleEventsForSelection(events[latestTraceMediaEventIndex], latestTraceMediaEventIndex, events)
+      : [];
+  const graphFocusEvents = selectedShouldYieldToMedia
+    ? latestTraceMediaEvents
+    : selectedGraphEvents.length
+      ? selectedGraphEvents
+      : activeTraceGraphEvents;
+  const displayGraph = selectedShouldYieldToMedia
+    ? architectureGraph(activeTraceGraphEvents, mode)
+    : selectedGraphEvents.length
     ? architectureGraph(selectedGraphEvents, mode)
     : activeTrace
       ? architectureGraph(activeTraceGraphEvents, mode)
@@ -884,11 +901,15 @@ function ArchitecturePanel({
   const showMediaPath = showClaimPath && displayGraph.rangeEvents > 0;
   const deviceRows = displayGraph.deviceNames.length ? displayGraph.deviceNames : ['No device calls yet'];
   const activeTraceNativeUpload = isNativeUploadTraceFocus(activeTrace);
-  const selectedPath = selectedGraphEvents.length
+  const selectedPath = selectedShouldYieldToMedia
+    ? architectureSelectedPath(graphFocusEvents, deviceRows, latestTraceMediaEventIndex, events, mode)
+    : selectedGraphEvents.length
     ? architectureSelectedPath(selectedGraphEvents, deviceRows, selectedEventIndex, events, mode)
-    : activeTraceGraphEvents.length || activeTraceNativeUpload
-      ? architectureTracePath(displayGraph, deviceRows, activeTrace)
-      : null;
+    : activeTraceGraphEvents.length
+      ? architectureSelectedPath(activeTraceGraphEvents, deviceRows, null, events, mode)
+      : activeTraceNativeUpload
+        ? architectureTracePath(displayGraph, deviceRows, activeTrace)
+        : null;
   const graphHeight = Math.max(600, architectureDeviceY(deviceRows.length - 1) + 106);
   const hasGraphFocus = Boolean(selectedEvent || activeTrace);
   const showStaticBackendEdges = !selectedPath;
@@ -1641,9 +1662,12 @@ function architectureSelectedPath(
   const deviceY = architectureDeviceY(deviceIndex) + 35;
   const path = String(selectedData.devicePath || selectedData.nativePath || selectedData.urlParts?.path || '');
   const sourceLayer = String(selectedData.sourceLayer || '');
+  const deviceLayer = String(selectedData.deviceLayer || '');
   const nativeSource = String(selectedData.nativeSource || '');
   const isUploadRead = isHyperbeamUploadReadPath(path);
   const isUploadMetadata = isHyperbeamUploadMetadataPath(path) || nativeSource === 'upload-index';
+  const isStoreMetadata =
+    isUploadMetadata || nativeSource === 'store' || deviceLayer === 'store' || isDirectImmutableStorePath(path);
   const isAuth = !isUploadRead && Boolean(selectedData.authRequired || sourceLayer.includes('auth'));
   const isSsr = path.includes('/$/api/');
   const frontend = isSsr || isAuth ? 'ssr' : 'sdk';
@@ -1691,7 +1715,7 @@ function architectureSelectedPath(
   if (isArweave) {
     backendFlows.push({ color: '#64748b', label: 'arweave', node: 'arweave', x: 1340, y: 325, viaStore: true });
   }
-  if (isUploadMetadata) {
+  if (isStoreMetadata) {
     backendFlows.push({ color: '#facc15', label: 'store metadata', node: 'store', x: 1040, y: 255 });
   }
   if (isUpload) {
@@ -1709,6 +1733,8 @@ function architectureSelectedPath(
         : `${routePrefix} 670,291 720,${deviceY}`
       : isUpload
         ? `${routePrefix} 710,465 1040,455`
+        : isStoreMetadata
+          ? `${routePrefix} 1040,255`
         : mediaRange
           ? `${routePrefix} 1040,255 1340,497`
           : routePrefix;
@@ -1957,6 +1983,7 @@ function routeSummary(data: any, mode: HyperbeamMode) {
     mediaVerificationLimitations: data.mediaVerificationLimitations,
     responseDevice: data.responseDevice,
     requestKey: data.requestKey,
+    claimKeys: data.claimKeys,
   });
 }
 
@@ -1984,6 +2011,8 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     const device = eventDevices[0] || '';
     const path = String(data.devicePath || data.urlParts?.path || '');
     const sourceLayer = String(data.sourceLayer || '');
+    const deviceLayer = String(data.deviceLayer || '');
+    const nativeSource = String(data.nativeSource || '');
     const authEvent = Boolean(data.authRequired || sourceLayer.includes('auth'));
     const mediaRange = isMediaRangeEvent(data, path, device);
 
@@ -1998,7 +2027,14 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     if (sourceLayer.startsWith('fallback')) counters.fallbackEvents += 1;
     if (sourceLayer === 'original' || isLegacyBackedEvent(data, eventDevices, mediaRange)) counters.legacyEvents += 1;
     if (path.includes('/$/api/') || authEvent) counters.ssrEvents += 1;
-    if (path.includes('~cache@1.0')) counters.cacheEvents += 1;
+    if (
+      path.includes('~cache@1.0') ||
+      deviceLayer === 'store' ||
+      nativeSource === 'store' ||
+      isDirectImmutableStorePath(path)
+    ) {
+      counters.cacheEvents += 1;
+    }
     if (
       path.includes('/arweave') ||
       path.includes('~arweave') ||
@@ -2098,12 +2134,24 @@ function isMediaRangeEvent(data: Record<string, any>, path: string, device: stri
   );
 }
 
+function isMediaRangeGraphEvent(event: HyperbeamDebugEvent) {
+  const data = event.data || {};
+  const path = String(data.devicePath || data.nativePath || data.urlParts?.path || '');
+  const device = devicesFromEventData(data)[0] || String(data.device || data.responseDevice || '');
+  return isMediaRangeEvent(data, path, device);
+}
+
 function isHyperbeamUploadReadPath(path: string) {
   return path.includes('/$/api/hyperbeam-upload/v1/read/');
 }
 
 function isHyperbeamUploadMetadataPath(path: string) {
   return path.includes('/$/api/hyperbeam-upload/v1/list') || path.includes('/$/api/hyperbeam-upload/v1/index');
+}
+
+function isDirectImmutableStorePath(path: string) {
+  const id = String(path || '').replace(/^\/+/, '').split(/[/?#]/)[0];
+  return /^[0-9A-Za-z_-]{43}$/.test(id);
 }
 
 function formatDetail(value: any) {
@@ -2234,6 +2282,7 @@ function eventSummary(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
     data.elapsedMs !== undefined ? `${data.elapsedMs}ms` : undefined,
     path,
     data.requestKey,
+    data.claimKeys ? `claims:${data.claimKeys}` : undefined,
   ]);
   return bits.length ? `- ${bits.join(' ')}` : '';
 }
