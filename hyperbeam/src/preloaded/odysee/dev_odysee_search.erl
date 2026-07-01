@@ -1,6 +1,6 @@
 -module(dev_odysee_search).
 -implements(<<"odysee-search@1.0">>).
--export([info/1, search/3, recsys_fyp/3, recsys_entry/3]).
+-export([info/1, search/3, index/3, index_legacy/3, query/3, health/3, recsys_fyp/3, recsys_entry/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -10,6 +10,11 @@ info(_Opts) ->
     #{
         exports => [
             <<"search">>,
+            <<"index">>,
+            <<"index-legacy">>,
+            <<"index_legacy">>,
+            <<"query">>,
+            <<"health">>,
             <<"recsys_fyp">>,
             <<"recsys-entry">>,
             <<"recsys_entry">>
@@ -19,16 +24,169 @@ info(_Opts) ->
 search(Base, Req, Opts) ->
     safe(fun() ->
         Params = request_params(Base, Req, Opts),
-        QueryParams = maps:merge(direct_query_params(Params), query_params(Params, Opts)),
-        ClaimParams = claim_search_params(QueryParams, Params, Opts),
-        ClaimReq = maps:merge(Params, ClaimParams),
-        case hb_ao:raw(<<"odysee-claim@1.0">>, <<"search">>, Base, ClaimReq, Opts) of
-            {ok, ClaimMsg} ->
-                result_message(lighthouse_result(Params, ClaimMsg, Opts));
-            {error, Reason} ->
-                result_message(empty_search_result(Params, ClaimParams, Reason, Opts))
+        case meili_search_enabled(Params, Opts) of
+            true ->
+                case meili_search_result(Params, Opts) of
+                    {ok, Result} ->
+                        result_message(Result);
+                    {error, Reason} ->
+                        claim_search_result(Base, Params, Reason, Opts);
+                    {failure, Reason} ->
+                        claim_search_result(Base, Params, Reason, Opts)
+                end;
+            false ->
+                claim_search_result(Base, Params, not_found, Opts)
         end
     end).
+
+index(Base, Req, Opts) ->
+    safe(fun() ->
+        Params = request_params(Base, Req, Opts),
+        case legacy_index_requested(Params, Opts) of
+            true ->
+                result_message(legacy_index_result(Base, Params, Opts));
+            false ->
+                Documents = meili_documents(Params, Opts),
+                case Documents of
+                    [] ->
+                        result_message(#{
+                            <<"ok">> => false,
+                            <<"poweredBy">> => <<"hyperbeam-meilisearch">>,
+                            <<"error">> => <<"missing_documents">>
+                        });
+                    _ ->
+                        result_message(meili_index_documents(Documents, Params, Opts))
+                end
+        end
+    end).
+
+index_legacy(Base, Req, Opts) ->
+    safe(fun() ->
+        Params = request_params(Base, Req, Opts),
+        result_message(legacy_index_result(Base, Params, Opts))
+    end).
+
+query(Base, Req, Opts) ->
+    safe(fun() ->
+        Params = request_params(Base, Req, Opts),
+        case meili_search_result(Params, Opts) of
+            {ok, Result} -> result_message(Result);
+            {error, Reason} -> result_message(meili_error_result(Reason));
+            {failure, Reason} -> result_message(meili_error_result(Reason))
+        end
+    end).
+
+health(Base, Req, Opts) ->
+    safe(fun() ->
+        Params = request_params(Base, Req, Opts),
+        result_message(meili_health_result(Params, Opts))
+    end).
+
+claim_search_result(Base, Params, MeiliReason, Opts) ->
+    QueryParams = maps:merge(direct_query_params(Params), query_params(Params, Opts)),
+    ClaimParams = claim_search_params(QueryParams, Params, Opts),
+    ClaimReq = maps:merge(Params, ClaimParams),
+    case hb_ao:raw(<<"odysee-claim@1.0">>, <<"search">>, Base, ClaimReq, Opts) of
+        {ok, ClaimMsg} ->
+            Result0 = lighthouse_result(Params, ClaimMsg, Opts),
+            Result =
+                case MeiliReason of
+                    not_found -> Result0;
+                    _ -> Result0#{ <<"meiliFallbackReason">> => error_text(MeiliReason) }
+                end,
+            result_message(Result);
+        {error, Reason} ->
+            result_message(empty_search_result(Params, ClaimParams, Reason, Opts))
+    end.
+
+legacy_index_result(Base, Params, Opts) ->
+    QueryParams = maps:merge(direct_query_params(Params), query_params(Params, Opts)),
+    ClaimParams = claim_search_params(QueryParams, Params, Opts),
+    Pages = legacy_pages(QueryParams, Opts),
+    Results = [
+        legacy_index_page(Base, Params, ClaimParams, Page, Opts)
+    ||
+        Page <- Pages
+    ],
+    Documents = dedupe_documents(lists:append([Docs || {Docs, _Summary} <- Results])),
+    PageSummaries = [Summary || {_Docs, Summary} <- Results],
+    ClaimItems = lists:sum([
+        hb_maps:get(<<"items">>, Summary, 0, Opts)
+    ||
+        Summary <- PageSummaries
+    ]),
+    IndexResult =
+        case Documents of
+            [] ->
+                #{
+                    <<"ok">> => false,
+                    <<"poweredBy">> => <<"hyperbeam-meilisearch">>,
+                    <<"error">> => <<"missing_documents">>
+                };
+            _ ->
+                meili_index_documents(Documents, Params, Opts)
+        end,
+    IndexResult#{
+        <<"source">> => <<"legacy-odysee">>,
+        <<"pages">> => PageSummaries,
+        <<"claimItems">> => ClaimItems,
+        <<"documents">> => length(Documents)
+    }.
+
+legacy_index_page(Base, Params, ClaimParams, Page, Opts) ->
+    case legacy_supplied_items(Params, Opts) of
+        [] ->
+            ClaimReq = maps:merge(Params, ClaimParams#{ <<"page">> => Page }),
+            case hb_ao:raw(<<"odysee-claim@1.0">>, <<"search">>, Base, ClaimReq, Opts) of
+                {ok, ClaimMsg} ->
+                    legacy_index_items(Page, claim_items(ClaimMsg, Opts), Opts);
+                {error, Reason} ->
+                    {[], #{
+                        <<"ok">> => false,
+                        <<"page">> => Page,
+                        <<"items">> => 0,
+                        <<"documents">> => 0,
+                        <<"error">> => error_text(Reason)
+                    }}
+            end;
+        Items ->
+            legacy_index_items(Page, Items, Opts)
+    end.
+
+legacy_index_items(Page, Items, Opts) ->
+    Docs = meili_documents_from_value(Items, Opts),
+    {Docs, #{
+        <<"ok">> => true,
+        <<"page">> => Page,
+        <<"items">> => length(Items),
+        <<"documents">> => length(Docs)
+    }}.
+
+legacy_supplied_items(Params, Opts) ->
+    search_result_items(
+        first_value(
+            [
+                <<"claim-search-result">>,
+                <<"claim_search_result">>,
+                <<"search-result">>,
+                <<"search_result">>,
+                <<"result">>
+            ],
+            Params,
+            Opts
+        ),
+        Opts
+    ).
+
+legacy_pages(QueryParams, Opts) ->
+    StartPage = positive_int_or_default(first_value([<<"page">>], QueryParams, Opts), 1),
+    Requested = positive_int_or_default(first_value([<<"pages">>, <<"legacy-pages">>, <<"legacy_pages">>], QueryParams, Opts), 1),
+    MaxPages = positive_int_or_default(first_value([<<"max-pages">>, <<"max_pages">>], QueryParams, Opts), 5),
+    Count = erlang:min(Requested, MaxPages),
+    [StartPage + Offset || Offset <- lists:seq(0, Count - 1)].
+
+legacy_index_requested(Params, Opts) ->
+    truthy(first_value([<<"legacy">>, <<"legacy-index">>, <<"legacy_index">>, <<"source">>], Params, Opts)).
 
 recsys_fyp(Base, Req, Opts) ->
     safe(fun() ->
@@ -114,17 +272,46 @@ direct_query_params(Params) ->
             <<"body">>,
             <<"claim-search-result">>,
             <<"claim_search_result">>,
+            <<"claims">>,
             <<"content-type">>,
+            <<"docs">>,
+            <<"documents">>,
             <<"entry">>,
             <<"kind">>,
+            <<"legacy">>,
+            <<"legacy-index">>,
+            <<"legacy_index">>,
+            <<"legacy-pages">>,
+            <<"legacy_pages">>,
+            <<"max-pages">>,
+            <<"max_pages">>,
+            <<"meili">>,
+            <<"meili-api-key">>,
+            <<"meili_api_key">>,
+            <<"meili-index">>,
+            <<"meili_index">>,
+            <<"meili-master-key">>,
+            <<"meili_master_key">>,
+            <<"meili-primary-key">>,
+            <<"meili_primary_key">>,
+            <<"meili-url">>,
+            <<"meili_url">>,
             <<"method">>,
+            <<"pages">>,
             <<"params64">>,
             <<"params-64">>,
             <<"path">>,
+            <<"primaryKey">>,
+            <<"primary-key">>,
+            <<"primary_key">>,
             <<"query">>,
             <<"result">>,
             <<"search-result">>,
             <<"search_result">>,
+            <<"search-engine">>,
+            <<"search_engine">>,
+            <<"source">>,
+            <<"use-meili">>,
             <<"user_suffix">>,
             <<"user-suffix">>
         ],
@@ -207,15 +394,44 @@ direct_claim_params(Params) ->
             <<"auth_token">>,
             <<"authorization">>,
             <<"body">>,
+            <<"claims">>,
             <<"content-type">>,
+            <<"docs">>,
+            <<"documents">>,
             <<"entry">>,
             <<"kind">>,
+            <<"legacy">>,
+            <<"legacy-index">>,
+            <<"legacy_index">>,
+            <<"legacy-pages">>,
+            <<"legacy_pages">>,
+            <<"max-pages">>,
+            <<"max_pages">>,
+            <<"meili">>,
+            <<"meili-api-key">>,
+            <<"meili_api_key">>,
+            <<"meili-index">>,
+            <<"meili_index">>,
+            <<"meili-master-key">>,
+            <<"meili_master_key">>,
+            <<"meili-primary-key">>,
+            <<"meili_primary_key">>,
+            <<"meili-url">>,
+            <<"meili_url">>,
             <<"method">>,
+            <<"pages">>,
             <<"params64">>,
             <<"params-64">>,
             <<"path">>,
+            <<"primaryKey">>,
+            <<"primary-key">>,
+            <<"primary_key">>,
             <<"query">>,
             <<"result">>,
+            <<"search-engine">>,
+            <<"search_engine">>,
+            <<"source">>,
+            <<"use-meili">>,
             <<"user_suffix">>,
             <<"user-suffix">>
         ],
@@ -300,6 +516,343 @@ lighthouse_item(Item, Opts) when is_map(Item) ->
 lighthouse_item(_Item, _Opts) ->
     false.
 
+meili_search_enabled(Params, Opts) ->
+    case first_value([<<"meili">>, <<"use-meili">>, <<"search-engine">>, <<"search_engine">>], Params, Opts) of
+        Value when Value =:= true;
+                Value =:= <<"true">>;
+                Value =:= <<"1">>;
+                Value =:= <<"meili">>;
+                Value =:= <<"meilisearch">> ->
+            true;
+        _ ->
+            hb_maps:get(<<"meili-url">>, Opts, not_found, Opts) =/= not_found
+    end.
+
+meili_search_result(Params, Opts) ->
+    Body = meili_search_body(Params, Opts),
+    case meili_request(<<"POST">>, meili_index_path(Params, Opts, <<"search">>), Body, Params, Opts) of
+        {ok, Resp} ->
+            {ok, meili_lighthouse_result(Params, Resp, Opts)};
+        Error ->
+            Error
+    end.
+
+meili_index_documents(Documents, Params, Opts) ->
+    case meili_request(<<"POST">>, meili_documents_path(Params, Opts), Documents, Params, Opts) of
+        {ok, Resp} ->
+            #{
+                <<"ok">> => true,
+                <<"poweredBy">> => <<"hyperbeam-meilisearch">>,
+                <<"index">> => meili_index_uid(Params, Opts),
+                <<"documents">> => length(Documents),
+                <<"task">> => Resp
+            };
+        {error, Reason} ->
+            meili_error_result(Reason);
+        {failure, Reason} ->
+            meili_error_result(Reason)
+    end.
+
+meili_health_result(Params, Opts) ->
+    case meili_request(<<"GET">>, <<"/health">>, undefined, Params, Opts) of
+        {ok, Resp} ->
+            #{
+                <<"ok">> => true,
+                <<"poweredBy">> => <<"hyperbeam-meilisearch">>,
+                <<"health">> => Resp
+            };
+        {error, Reason} ->
+            meili_error_result(Reason);
+        {failure, Reason} ->
+            meili_error_result(Reason)
+    end.
+
+meili_search_body(Params, Opts) ->
+    QueryParams = maps:merge(direct_query_params(Params), query_params(Params, Opts)),
+    SearchText =
+        case search_text(QueryParams, Opts) of
+            not_found -> <<"">>;
+            Text -> Text
+        end,
+    Limit = positive_int_or_default(
+        first_value([<<"limit">>, <<"page_size">>, <<"page-size">>, <<"size">>], QueryParams, Opts),
+        20
+    ),
+    Offset = non_negative_int_or_default(first_value([<<"offset">>, <<"from">>], QueryParams, Opts), 0),
+    Body0 = #{
+        <<"q">> => SearchText,
+        <<"limit">> => Limit,
+        <<"offset">> => Offset
+    },
+    Body1 = put_optional(<<"filter">>, first_value([<<"filter">>], QueryParams, Opts), Body0),
+    Body2 = put_optional(<<"sort">>, value_list(first_value([<<"sort">>, <<"sort_by">>, <<"order_by">>], QueryParams, Opts)), Body1),
+    put_optional(
+        <<"attributesToRetrieve">>,
+        value_list(first_value([<<"attributesToRetrieve">>, <<"attributes-to-retrieve">>, <<"fields">>], QueryParams, Opts)),
+        Body2
+    ).
+
+meili_lighthouse_result(Params, Resp, Opts) ->
+    Hits = meili_hits(Resp, Opts),
+    Result0 = #{
+        <<"body">> => lists:filtermap(fun(Hit) -> lighthouse_item(Hit, Opts) end, Hits),
+        <<"hits">> => Hits,
+        <<"poweredBy">> => <<"hyperbeam-meilisearch">>,
+        <<"meili">> => maps:without([<<"hits">>], Resp)
+    },
+    Result1 = put_optional(<<"uuid">>, first_value([<<"uuid">>], Params, Opts), Result0),
+    put_optional(<<"kind">>, first_value([<<"kind">>], Params, Opts), Result1).
+
+meili_hits(Resp, Opts) when is_map(Resp) ->
+    case hb_maps:get(<<"hits">>, Resp, [], Opts) of
+        Hits when is_list(Hits) -> Hits;
+        _ -> []
+    end;
+meili_hits(_Resp, _Opts) ->
+    [].
+
+meili_documents(Params, Opts) ->
+    Values = [
+        first_value([<<"documents">>, <<"docs">>], Params, Opts),
+        first_value([<<"claims">>, <<"items">>], Params, Opts),
+        first_value([<<"claim">>, <<"item">>], Params, Opts),
+        search_result_items(first_value([<<"claim-search-result">>, <<"claim_search_result">>, <<"search-result">>, <<"search_result">>, <<"result">>], Params, Opts), Opts)
+    ],
+    Docs = lists:flatmap(fun(Value) -> meili_documents_from_value(Value, Opts) end, Values),
+    dedupe_documents(Docs).
+
+meili_documents_from_value(not_found, _Opts) ->
+    [];
+meili_documents_from_value(Values, Opts) when is_list(Values) ->
+    lists:filtermap(
+        fun(Value) ->
+            case meili_document(Value, Opts) of
+                not_found -> false;
+                Doc -> {true, Doc}
+            end
+        end,
+        Values
+    );
+meili_documents_from_value(Value, Opts) when is_map(Value) ->
+    case meili_document(Value, Opts) of
+        not_found -> [];
+        Doc -> [Doc]
+    end;
+meili_documents_from_value(_Value, _Opts) ->
+    [].
+
+meili_document(Claim, Opts) when is_map(Claim) ->
+    Value = map_value(first_value([<<"value">>], Claim, Opts)),
+    Source = map_value(first_value([<<"source">>], Value, Opts)),
+    Channel = map_value(first_value([<<"signing_channel">>, <<"signing-channel">>], Claim, Opts)),
+    ClaimID = first_value([<<"claim_id">>, <<"claim-id">>, <<"claimId">>, <<"id">>], Claim, Opts),
+    Name = first_value([<<"name">>, <<"claim-name">>, <<"claim_name">>], Claim, Opts),
+    ID = document_id(ClaimID, Claim, Opts),
+    case ID of
+        not_found ->
+            not_found;
+        _ ->
+            optional_doc_fields(#{
+                <<"id">> => ID,
+                <<"claim_id">> => optional_bin(ClaimID),
+                <<"claimId">> => optional_bin(ClaimID),
+                <<"name">> => optional_bin(Name),
+                <<"title">> =>
+                    optional_bin(first_present([
+                        first_value([<<"title">>], Value, Opts),
+                        first_value([<<"title">>], Claim, Opts)
+                    ])),
+                <<"description">> =>
+                    optional_bin(first_present([
+                        first_value([<<"description">>], Value, Opts),
+                        first_value([<<"description">>], Claim, Opts)
+                    ])),
+                <<"value_type">> => optional_bin(first_value([<<"value_type">>, <<"value-type">>], Claim, Opts)),
+                <<"media_type">> =>
+                    optional_bin(first_present([
+                        first_value([<<"media_type">>, <<"media-type">>, <<"content-type">>], Source, Opts),
+                        first_value([<<"media_type">>, <<"media-type">>, <<"content-type">>], Claim, Opts)
+                    ])),
+                <<"tags">> =>
+                    first_present([
+                        first_value([<<"tags">>], Value, Opts),
+                        first_value([<<"tags">>], Claim, Opts)
+                    ]),
+                <<"channel_id">> =>
+                    optional_bin(first_value([<<"claim_id">>, <<"claim-id">>, <<"claimId">>], Channel, Opts)),
+                <<"channel_name">> => optional_bin(first_value([<<"name">>], Channel, Opts)),
+                <<"txid">> => optional_bin(first_value([<<"txid">>], Claim, Opts)),
+                <<"nout">> => first_value([<<"nout">>], Claim, Opts),
+                <<"sd_hash">> => optional_bin(first_value([<<"sd_hash">>, <<"sd-hash">>], Source, Opts)),
+                <<"canonical_url">> =>
+                    optional_bin(first_value([<<"canonical_url">>, <<"canonical-url">>, <<"permanent_url">>], Claim, Opts)),
+                <<"hyperbeam_upload_id">> =>
+                    optional_bin(first_value([<<"hyperbeam_upload_id">>, <<"hyperbeam-upload-id">>], Claim, Opts)),
+                <<"body_path">> =>
+                    optional_bin(first_value([<<"hyperbeam_body_path">>, <<"hyperbeam-body-path">>], Source, Opts))
+            })
+    end;
+meili_document(_Claim, _Opts) ->
+    not_found.
+
+search_result_items(not_found, _Opts) ->
+    [];
+search_result_items(Result, Opts) when is_map(Result) ->
+    case first_value([<<"items">>, <<"claims">>], Result, Opts) of
+        Items when is_list(Items) -> Items;
+        _ -> []
+    end;
+search_result_items(_Result, _Opts) ->
+    [].
+
+document_id(not_found, Claim, Opts) ->
+    case {first_value([<<"txid">>], Claim, Opts), first_value([<<"nout">>], Claim, Opts)} of
+        {TxID, NOut} when is_binary(TxID), is_integer(NOut) ->
+            <<TxID/binary, ":", (integer_to_binary(NOut))/binary>>;
+        {TxID, NOut} when is_binary(TxID), is_binary(NOut) ->
+            <<TxID/binary, ":", NOut/binary>>;
+        _ ->
+            not_found
+    end;
+document_id(ID, _Claim, _Opts) ->
+    optional_bin(ID).
+
+optional_doc_fields(Map) ->
+    maps:filter(
+        fun(_Key, Value) ->
+            Value =/= not_found andalso Value =/= undefined andalso Value =/= <<>> andalso Value =/= []
+        end,
+        Map
+    ).
+
+optional_bin(not_found) ->
+    not_found;
+optional_bin(Value) when is_binary(Value) ->
+    Value;
+optional_bin(Value) when is_integer(Value) ->
+    integer_to_binary(Value);
+optional_bin(Value) ->
+    hb_util:bin(Value).
+
+map_value(Value) when is_map(Value) ->
+    Value;
+map_value(_Value) ->
+    #{}.
+
+dedupe_documents(Docs) ->
+    {_, Deduped} =
+        lists:foldl(
+            fun(Doc, {Seen, Acc}) ->
+                ID = maps:get(<<"id">>, Doc, not_found),
+                case maps:is_key(ID, Seen) of
+                    true -> {Seen, Acc};
+                    false -> {Seen#{ ID => true }, [Doc | Acc]}
+                end
+            end,
+            {#{}, []},
+            Docs
+        ),
+    lists:reverse(Deduped).
+
+meili_request(Method, Path, undefined, Params, Opts) ->
+    meili_http(Method, Path, undefined, Params, Opts);
+meili_request(Method, Path, Body, Params, Opts) ->
+    meili_http(Method, Path, hb_json:encode(Body), Params, Opts).
+
+meili_http(Method, Path, Body, Params, Opts) ->
+    URL = meili_url(Params, Opts),
+    Req0 = #{
+        peer => URL,
+        path => Path,
+        method => Method,
+        headers => meili_headers(Params, Opts),
+        body => <<>>
+    },
+    Req =
+        case Body of
+            undefined -> Req0;
+            _ -> Req0#{ body => Body }
+        end,
+    HTTPOpts = Opts#{ <<"http-client">> => hb_maps:get(<<"http-client">>, Opts, httpc, Opts) },
+    case hb_http_client:request(Req, HTTPOpts) of
+        {ok, Status, _Headers, RespBody} when Status >= 200, Status < 300 ->
+            decode_meili_response(RespBody);
+        {ok, Status, _Headers, RespBody} when Status < 500 ->
+            {error, {meili_http_status, Status, decode_meili_body(RespBody)}};
+        {ok, Status, _Headers, RespBody} ->
+            {failure, {meili_http_status, Status, decode_meili_body(RespBody)}};
+        {error, Reason} ->
+            {failure, Reason}
+    end.
+
+decode_meili_response(RespBody) ->
+    {ok, decode_meili_body(RespBody)}.
+
+decode_meili_body(Body) when is_binary(Body), byte_size(Body) > 0 ->
+    case try_decode_json(Body) of
+        {ok, Decoded} -> Decoded;
+        _ -> Body
+    end;
+decode_meili_body(_Body) ->
+    #{}.
+
+meili_url(Params, Opts) ->
+    case first_value([<<"meili-url">>, <<"meili_url">>], Params, Opts) of
+        URL when is_binary(URL), byte_size(URL) > 0 ->
+            trim_trailing_slash(URL);
+        _ ->
+            trim_trailing_slash(hb_maps:get(<<"meili-url">>, Opts, <<"http://127.0.0.1:7700">>, Opts))
+    end.
+
+meili_index_path(Params, Opts, Suffix) ->
+    <<"/indexes/", (meili_index_uid(Params, Opts))/binary, "/", Suffix/binary>>.
+
+meili_documents_path(Params, Opts) ->
+    <<(meili_index_path(Params, Opts, <<"documents">>))/binary, "?primaryKey=", (meili_primary_key(Params, Opts))/binary>>.
+
+meili_index_uid(Params, Opts) ->
+    case first_value([<<"index">>, <<"index_uid">>, <<"index-uid">>], Params, Opts) of
+        Value when is_binary(Value), byte_size(Value) > 0 -> Value;
+        _ -> hb_maps:get(<<"meili-index">>, Opts, <<"odysee_claims">>, Opts)
+    end.
+
+meili_primary_key(Params, Opts) ->
+    case first_value([<<"primaryKey">>, <<"primary-key">>, <<"primary_key">>], Params, Opts) of
+        Value when is_binary(Value), byte_size(Value) > 0 -> Value;
+        _ -> hb_maps:get(<<"meili-primary-key">>, Opts, <<"id">>, Opts)
+    end.
+
+meili_headers(Params, Opts) ->
+    Headers0 = #{ <<"content-type">> => <<"application/json">> },
+    case meili_api_key(Params, Opts) of
+        not_found -> Headers0;
+        Key -> Headers0#{ <<"authorization">> => <<"Bearer ", Key/binary>> }
+    end.
+
+meili_api_key(Params, Opts) ->
+    case first_value([<<"meili-api-key">>, <<"meili_api_key">>, <<"meili-master-key">>, <<"meili_master_key">>], Params, Opts) of
+        Key when is_binary(Key), byte_size(Key) > 0 -> Key;
+        _ -> hb_maps:get(<<"meili-api-key">>, Opts, not_found, Opts)
+    end.
+
+trim_trailing_slash(URL) when is_binary(URL), byte_size(URL) > 0 ->
+    case binary:last(URL) of
+        $/ -> trim_trailing_slash(binary:part(URL, 0, byte_size(URL) - 1));
+        _ -> URL
+    end;
+trim_trailing_slash(<<>>) ->
+    <<>>.
+
+meili_error_result(Reason) ->
+    #{
+        <<"ok">> => false,
+        <<"poweredBy">> => <<"hyperbeam-meilisearch">>,
+        <<"error">> => error_text(Reason)
+    }.
+
+error_text(Reason) ->
+    hb_util:bin(io_lib:format("~p", [Reason])).
+
 recsys_fyp_result(<<"fetch">>, Params, Opts) ->
     #{
         <<"gid">> => demo_gid(Params, Opts),
@@ -346,6 +899,27 @@ first_value([Key | Rest], Map, Opts) when is_map(Map) ->
 first_value(_Keys, _Map, _Opts) ->
     not_found.
 
+first_present([]) ->
+    not_found;
+first_present([Value | Rest]) ->
+    case Value of
+        not_found -> first_present(Rest);
+        undefined -> first_present(Rest);
+        <<>> -> first_present(Rest);
+        [] -> first_present(Rest);
+        _ -> Value
+    end.
+
+truthy(Value) when Value =:= true;
+                   Value =:= <<"true">>;
+                   Value =:= <<"1">>;
+                   Value =:= <<"yes">>;
+                   Value =:= <<"legacy">>;
+                   Value =:= <<"legacy-odysee">> ->
+    true;
+truthy(_Value) ->
+    false.
+
 value_list(not_found) ->
     [];
 value_list(Values) when is_list(Values) ->
@@ -358,6 +932,12 @@ value_list(Value) ->
 positive_int_or_default(Value, Default) ->
     case int_or_default(Value, Default) of
         Int when Int > 0 -> Int;
+        _ -> Default
+    end.
+
+non_negative_int_or_default(Value, Default) ->
+    case int_or_default(Value, Default) of
+        Int when Int >= 0 -> Int;
         _ -> Default
     end.
 
@@ -452,6 +1032,199 @@ recsys_entry_acknowledges_test() ->
     Result = hb_maps:get(<<"result">>, Msg, #{}),
     ?assertEqual(true, hb_maps:get(<<"ok">>, Result, #{})),
     ?assertEqual(true, hb_maps:get(<<"accepted">>, Result, #{})).
+
+meili_documents_from_claim_search_result_test() ->
+    Claim = #{
+        <<"claim_id">> => <<"claim-1">>,
+        <<"name">> => <<"demo-video">>,
+        <<"txid">> => <<"tx123">>,
+        <<"nout">> => 0,
+        <<"canonical_url">> => <<"lbry://demo-video#claim-1">>,
+        <<"value_type">> => <<"stream">>,
+        <<"value">> => #{
+            <<"title">> => <<"Demo Video">>,
+            <<"description">> => <<"Searchable description">>,
+            <<"tags">> => [<<"hb">>, <<"search">>],
+            <<"source">> => #{
+                <<"media_type">> => <<"video/mp4">>,
+                <<"sd_hash">> => <<"sd123">>
+            }
+        },
+        <<"signing_channel">> => #{
+            <<"claim_id">> => <<"channel-1">>,
+            <<"name">> => <<"@demo">>
+        }
+    },
+    [Doc] = meili_documents(
+        #{
+            <<"claim_search_result">> => #{
+                <<"items">> => [Claim],
+                <<"page">> => 1,
+                <<"page_size">> => 1
+            }
+        },
+        #{}
+    ),
+    ?assertEqual(<<"claim-1">>, hb_maps:get(<<"id">>, Doc, #{})),
+    ?assertEqual(<<"claim-1">>, hb_maps:get(<<"claimId">>, Doc, #{})),
+    ?assertEqual(<<"demo-video">>, hb_maps:get(<<"name">>, Doc, #{})),
+    ?assertEqual(<<"Demo Video">>, hb_maps:get(<<"title">>, Doc, #{})),
+    ?assertEqual(<<"channel-1">>, hb_maps:get(<<"channel_id">>, Doc, #{})),
+    ?assertEqual(<<"sd123">>, hb_maps:get(<<"sd_hash">>, Doc, #{})).
+
+meili_query_uses_search_endpoint_test() ->
+    SearchBody = hb_json:encode(#{
+        <<"hits">> => [
+            #{
+                <<"id">> => <<"claim-1">>,
+                <<"claimId">> => <<"claim-1">>,
+                <<"name">> => <<"demo-video">>,
+                <<"title">> => <<"Demo Video">>
+            }
+        ],
+        <<"offset">> => 0,
+        <<"limit">> => 10,
+        <<"estimatedTotalHits">> => 1,
+        <<"query">> => <<"demo">>
+    }),
+    {ok, Server, Handle} =
+        hb_mock_server:start([
+            {"/indexes/odysee_claims/search", meili_search, {200, SearchBody}}
+        ]),
+    try
+        {ok, Msg} =
+            query(
+                #{},
+                #{
+                    <<"meili-url">> => Server,
+                    <<"q">> => <<"demo">>,
+                    <<"limit">> => 10
+                },
+                #{}
+            ),
+        Result = hb_maps:get(<<"result">>, Msg, #{}),
+        ?assertEqual(<<"hyperbeam-meilisearch">>, hb_maps:get(<<"poweredBy">>, Result, #{})),
+        ?assertEqual([#{ <<"name">> => <<"demo-video">>, <<"claimId">> => <<"claim-1">> }], hb_maps:get(<<"body">>, Result, #{})),
+        [Request] = hb_mock_server:get_requests(meili_search, 1, Handle),
+        ReqBody = hb_json:decode(hb_maps:get(<<"body">>, Request, <<>>, #{})),
+        ?assertEqual(<<"demo">>, hb_maps:get(<<"q">>, ReqBody, #{})),
+        ?assertEqual(10, hb_maps:get(<<"limit">>, ReqBody, #{}))
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+meili_index_posts_documents_test() ->
+    IndexBody = hb_json:encode(#{
+        <<"taskUid">> => 7,
+        <<"indexUid">> => <<"odysee_claims">>,
+        <<"status">> => <<"enqueued">>
+    }),
+    {ok, Server, Handle} =
+        hb_mock_server:start([
+            {"/indexes/odysee_claims/documents", meili_index, {202, IndexBody}}
+        ]),
+    try
+        {ok, Msg} =
+            index(
+                #{},
+                #{
+                    <<"meili-url">> => Server,
+                    <<"documents">> => [
+                        #{
+                            <<"id">> => <<"claim-1">>,
+                            <<"claimId">> => <<"claim-1">>,
+                            <<"name">> => <<"demo-video">>,
+                            <<"title">> => <<"Demo Video">>
+                        }
+                    ]
+                },
+                #{}
+            ),
+        Result = hb_maps:get(<<"result">>, Msg, #{}),
+        ?assertEqual(true, hb_maps:get(<<"ok">>, Result, #{})),
+        ?assertEqual(1, hb_maps:get(<<"documents">>, Result, #{})),
+        ?assertEqual(7, hb_maps:get(<<"taskUid">>, hb_maps:get(<<"task">>, Result, #{}), #{})),
+        [Request] = hb_mock_server:get_requests(meili_index, 1, Handle),
+        ?assertEqual(<<"primaryKey=id">>, hb_maps:get(<<"qs">>, Request, <<>>, #{})),
+        [Doc] = hb_json:decode(hb_maps:get(<<"body">>, Request, <<>>, #{})),
+        ?assertEqual(<<"claim-1">>, hb_maps:get(<<"id">>, Doc, #{})),
+        ?assertEqual(<<"Demo Video">>, hb_maps:get(<<"title">>, Doc, #{}))
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+legacy_index_indexes_claim_search_items_test() ->
+    IndexBody = hb_json:encode(#{
+        <<"taskUid">> => 8,
+        <<"indexUid">> => <<"odysee_claims">>,
+        <<"status">> => <<"enqueued">>
+    }),
+    LegacyClaim = #{
+        <<"claim_id">> => <<"legacy-claim-1">>,
+        <<"name">> => <<"legacy-video">>,
+        <<"value_type">> => <<"stream">>,
+        <<"value">> => #{
+            <<"title">> => <<"Legacy Search Video">>,
+            <<"description">> => <<"Indexed from legacy claim search">>,
+            <<"source">> => #{ <<"media_type">> => <<"video/mp4">> }
+        }
+    },
+    {ok, Server, Handle} =
+        hb_mock_server:start([
+            {"/indexes/odysee_claims/documents", meili_index, {202, IndexBody}}
+        ]),
+    try
+        {ok, Msg} =
+            index_legacy(
+                #{},
+                #{
+                    <<"meili-url">> => Server,
+                    <<"query">> => <<"s=legacy&size=1&claimType=file">>,
+                    <<"claim_search_result">> => #{
+                        <<"items">> => [LegacyClaim],
+                        <<"page">> => 1,
+                        <<"page_size">> => 1,
+                        <<"total_items">> => 1
+                    }
+                },
+                #{}
+            ),
+        Result = hb_maps:get(<<"result">>, Msg, #{}),
+        ?assertEqual(true, hb_maps:get(<<"ok">>, Result, #{})),
+        ?assertEqual(<<"legacy-odysee">>, hb_maps:get(<<"source">>, Result, #{})),
+        ?assertEqual(1, hb_maps:get(<<"claimItems">>, Result, #{})),
+        ?assertEqual(1, hb_maps:get(<<"documents">>, Result, #{})),
+        [Page] = hb_maps:get(<<"pages">>, Result, #{}),
+        ?assertEqual(1, hb_maps:get(<<"items">>, Page, #{})),
+        [Request] = hb_mock_server:get_requests(meili_index, 1, Handle),
+        ?assertEqual(<<"primaryKey=id">>, hb_maps:get(<<"qs">>, Request, <<>>, #{})),
+        [Doc] = hb_json:decode(hb_maps:get(<<"body">>, Request, <<>>, #{})),
+        ?assertEqual(<<"legacy-claim-1">>, hb_maps:get(<<"id">>, Doc, #{})),
+        ?assertEqual(<<"Legacy Search Video">>, hb_maps:get(<<"title">>, Doc, #{}))
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+meili_health_uses_health_endpoint_test() ->
+    HealthBody = hb_json:encode(#{ <<"status">> => <<"available">> }),
+    {ok, Server, Handle} =
+        hb_mock_server:start([
+            {"/health", meili_health, {200, HealthBody}}
+        ]),
+    try
+        {ok, Msg} =
+            health(
+                #{},
+                #{ <<"meili-url">> => Server },
+                #{}
+            ),
+        Result = hb_maps:get(<<"result">>, Msg, #{}),
+        ?assertEqual(true, hb_maps:get(<<"ok">>, Result, #{})),
+        ?assertEqual(<<"available">>, hb_maps:get(<<"status">>, hb_maps:get(<<"health">>, Result, #{}), #{})),
+        [_Request] = hb_mock_server:get_requests(meili_health, 1, Handle)
+    after
+        hb_mock_server:stop(Handle)
+    end.
 
 test_params64(Params) ->
     hb_util:encode(hb_json:encode(Params)).

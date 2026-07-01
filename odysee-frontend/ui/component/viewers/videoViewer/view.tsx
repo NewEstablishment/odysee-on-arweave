@@ -21,7 +21,7 @@ import { ODYSEE_HYPERBEAM_NODE_API } from '../../../../config';
 import { HYPERBEAM_DEVICE, hyperbeamDeviceUrl } from 'util/hyperbeamDevices';
 import { verifySecp256k1Signature } from 'util/hyperbeamSecp256k1';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
-import { isHyperbeamUploadClaim } from 'util/hyperbeamNativeUpload';
+import { hyperbeamClaimMediaUrlFromClaim } from 'util/hyperbeamNativeUpload';
 
 const PLAY_POSITION_SAVE_INTERVAL_MS = 15000;
 const POSITION_SYNC_INTERVAL_MS = 30000;
@@ -1067,10 +1067,10 @@ function VideoViewer(props: Props) {
   const isAudio = Boolean(contentType?.includes('audio'));
   const forcePlayer = Boolean(contentType && FORCE_CONTENT_TYPE_PLAYER.includes(contentType));
   const claimSdHash = hyperbeamClaimSdHash(claim);
-  const isHyperbeamUpload = isHyperbeamUploadClaim(claim);
+  const hyperbeamClaimMediaSource = hyperbeamClaimMediaUrlFromClaim(claim, uri);
   const playerSource =
-    !isHyperbeamUpload && !isLivestreamClaim && !isProtectedContent && !isAudio
-      ? hyperbeamNodeMediaUrl(uri, claimSdHash)
+    !isLivestreamClaim && !isProtectedContent && !isAudio
+      ? hyperbeamClaimMediaSource || hyperbeamNodeMediaUrl(uri, claimSdHash)
       : source;
   const enableInlineHyperbeamNodeDebug = isHyperbeamNodeMediaUrl(playerSource);
 

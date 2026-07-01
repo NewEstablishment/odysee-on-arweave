@@ -441,8 +441,57 @@ append_native_upload_items(Result, [], _Opts) ->
     Result;
 append_native_upload_items(Result, NativeItems, Opts) ->
     Items = search_items(Result, Opts),
-    Result1 = Result#{ <<"items">> => Items ++ NativeItems },
-    increment_total_items(Result1, length(NativeItems), Opts).
+    {MergedItems, AddedCount} = merge_native_upload_items(Items, NativeItems, Opts),
+    Result1 = Result#{ <<"items">> => MergedItems },
+    increment_total_items(Result1, AddedCount, Opts).
+
+merge_native_upload_items(Items, NativeItems, Opts) ->
+    NativeByID = native_items_by_id(NativeItems, Opts),
+    {ReplacedItems, SeenIDs} = replace_native_duplicates(Items, NativeByID, sets:new(), [], Opts),
+    Additions = [
+        Item
+    ||
+        Item <- NativeItems,
+        not sets:is_element(item_claim_id(Item, Opts), SeenIDs)
+    ],
+    {ReplacedItems ++ Additions, length(Additions)}.
+
+native_items_by_id(Items, Opts) ->
+    lists:foldl(
+        fun(Item, Acc) ->
+            case item_claim_id(Item, Opts) of
+                not_found -> Acc;
+                ID -> Acc#{ ID => Item }
+            end
+        end,
+        #{},
+        Items
+    ).
+
+replace_native_duplicates([], _NativeByID, SeenIDs, Acc, _Opts) ->
+    {lists:reverse(Acc), SeenIDs};
+replace_native_duplicates([Item | Rest], NativeByID, SeenIDs, Acc, Opts) ->
+    ID = item_claim_id(Item, Opts),
+    case maps:get(ID, NativeByID, not_found) of
+        not_found ->
+            replace_native_duplicates(Rest, NativeByID, SeenIDs, [Item | Acc], Opts);
+        Native ->
+            replace_native_duplicates(Rest, NativeByID, sets:add_element(ID, SeenIDs), [Native | Acc], Opts)
+    end.
+
+item_claim_id(Item, Opts) when is_map(Item) ->
+    first_value(
+        [
+            <<"claim_id">>,
+            <<"claim-id">>,
+            <<"hyperbeam_upload_id">>,
+            <<"hyperbeam-upload-id">>
+        ],
+        Item,
+        Opts
+    );
+item_claim_id(_Item, _Opts) ->
+    not_found.
 
 increment_total_items(Result, Count, Opts) ->
     case first_value([<<"total_items">>, <<"total-items">>], Result, Opts) of
@@ -1331,6 +1380,38 @@ search_merges_native_channel_uploads_test() ->
     NativeSource = maps:get(<<"source">>, NativeValue),
     ?assertEqual(UploadID, maps:get(<<"hyperbeam_upload_id">>, NativeSource)),
     ?assertEqual(false, maps:is_key(<<"sd_hash">>, NativeSource)).
+
+search_prefers_native_upload_duplicate_test() ->
+    UploadID = <<"native-upload-1">>,
+    Existing = #{
+        <<"claim_id">> => UploadID,
+        <<"value">> => #{ <<"source">> => #{ <<"sd_hash">> => <<"legacy-descriptor">> } }
+    },
+    Native = #{
+        <<"claim_id">> => UploadID,
+        <<"is_hyperbeam_upload">> => true,
+        <<"value">> => #{
+            <<"source">> => #{
+                <<"hyperbeam_upload_id">> => UploadID
+            }
+        }
+    },
+    Result = append_native_upload_items(
+        #{
+            <<"items">> => [target_claim(), Existing],
+            <<"total_items">> => 2
+        },
+        [Native],
+        #{}
+    ),
+    Items = maps:get(<<"items">>, Result),
+    ?assertEqual(2, length(Items)),
+    ?assertEqual(2, maps:get(<<"total_items">>, Result)),
+    [Merged] = [Item || Item <- Items, maps:get(<<"claim_id">>, Item, not_found) =:= UploadID],
+    ?assertEqual(true, maps:get(<<"is_hyperbeam_upload">>, Merged)),
+    Source = maps:get(<<"source">>, maps:get(<<"value">>, Merged)),
+    ?assertEqual(UploadID, maps:get(<<"hyperbeam_upload_id">>, Source)),
+    ?assertEqual(false, maps:is_key(<<"sd_hash">>, Source)).
 
 transaction_accepts_supplied_result_test() ->
     Result = #{

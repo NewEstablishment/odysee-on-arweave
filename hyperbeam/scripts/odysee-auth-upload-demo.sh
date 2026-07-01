@@ -117,7 +117,12 @@ io:format("~nUpload proof check:~n", []),
 io:format("  printf 'hello hyperbeam upload demo' | curl -sS -X POST -H 'accept: application/json' -H 'x-lbry-auth-token: ~s' -H 'content-type: text/plain' --data-binary @- '~s~s/upload?!&filename=demo.txt&content-type=text/plain&channel-id=~s&channel-name=@hyperbeam-demo&claim-name=native-demo&title=Native%20demo&description=Stored%20directly%20in%20HyperBEAM&tags=hyperbeam,native&thumbnail-url=https%3A%2F%2Fexample.test%2Fthumb.jpg' | jq .~n", [CurlToken, Node, <<"~odysee-upload-demo@1.0">>, DemoChannelID]),
 io:format("  curl -sS '~s~s/channel?channel-id=~s&legacy-claim-ids=legacy-a,legacy-b' | jq .~n", [Node, <<"~odysee-upload-demo@1.0">>, DemoChannelID]),
 io:format("  curl -i -sS -X POST -H 'content-type: text/plain' --data-binary '{\"items\":[{\"claim_id\":\"legacy-a\",\"name\":\"legacy-video\",\"value_type\":\"stream\",\"value\":{\"title\":\"Legacy video\",\"source\":{\"media_type\":\"video/mp4\",\"sd_hash\":\"legacy-sd\"}}}],\"page\":1,\"page_size\":20,\"total_items\":1}' '~s~s/search?channel_ids=~s&claim_type=stream' | sed -n '/^total-items:/p;/^claim-ids+link:/p'~n", [Node, <<"~odysee-claim@1.0">>, DemoChannelID]),
-io:format("  curl -sS '~s~s/read?id=<upload-id>'~n~n", [Node, <<"~odysee-upload-demo@1.0">>]).
+io:format("  curl -sS '~s~s/read?id=<upload-id>'~n", [Node, <<"~odysee-upload-demo@1.0">>]),
+io:format("~nOdysee device demo checks:~n", []),
+io:format("  curl -sS '~s~s/demo' | jq .~n", [Node, <<"~odysee@1.0">>]),
+io:format("  curl -sS '~s~s/query?q=native&legacy-user-id=~s' | jq .~n", [Node, <<"~odysee@1.0">>, DemoUserID]),
+io:format("  curl -sS '~s~s/reference?target=<lbry-uri-or-txid:nout>' | jq .~n", [Node, <<"~odysee@1.0">>]),
+io:format("  curl -i -sS '~s~s/media?target=<txid:nout>' | sed -n '1,20p'~n~n", [Node, <<"~odysee@1.0">>]).
 ERL
 )
 

@@ -13,6 +13,9 @@
     resolve/3,
     claim/3,
     source/3,
+    reference/3,
+    query/3,
+    demo/3,
     transaction/3,
     descriptor/3,
     blob/3,
@@ -46,6 +49,9 @@ info(_Opts) ->
             <<"resolve">>,
             <<"claim">>,
             <<"source">>,
+            <<"reference">>,
+            <<"query">>,
+            <<"demo">>,
             <<"transaction">>,
             <<"descriptor">>,
             <<"blob">>,
@@ -69,6 +75,9 @@ index(_Base, _Req, _Opts) ->
             <<"resolve">> => [<<"claim-id">>, <<"name">>, <<"url">>],
             <<"claim">> => [<<"claim-id">>, <<"name">>, <<"url">>],
             <<"source">> => [<<"id">>, <<"native-id">>, <<"kind">>],
+            <<"reference">> => [<<"target">>, <<"claim-id">>, <<"name">>, <<"url">>],
+            <<"query">> => [<<"q">>, <<"id">>, <<"legacy-user-id">>, <<"channel-id">>],
+            <<"demo">> => [<<"target">>, <<"id">>, <<"legacy-user-id">>, <<"channel-id">>],
             <<"transaction">> => [<<"txid">>],
             <<"descriptor">> => [<<"sd-hash">>],
             <<"blob">> => [<<"hash">>],
@@ -578,6 +587,15 @@ sdk_json(Status, JSON) ->
         <<"body">> => Body
     }}.
 
+json_response(Status, JSON) ->
+    Body = hb_json:encode(JSON),
+    {ok, (cors_headers())#{
+        <<"status">> => Status,
+        <<"content-type">> => <<"application/json">>,
+        <<"content-length">> => byte_size(Body),
+        <<"body">> => Body
+    }}.
+
 %% @doc Read a committed public Odysee/LBRY source object by native identifier.
 source(Base, Req, Opts) ->
     case native_source_path(Base, Req, Opts) of
@@ -619,6 +637,333 @@ read_source_key([Key | Rest], Opts) ->
         Result ->
             Result
     end.
+
+reference(Base, Req, Opts) ->
+    with_target(Base, Req, Opts, fun(Target) ->
+        case reference_from_target(Target, Base, Req, Opts) of
+            {ok, Ref} -> Ref;
+            {error, Reason} -> error_map(Reason);
+            {failure, Reason} -> error_map({failure, Reason})
+        end
+    end).
+
+reference_from_target(Target, Base, Req, Opts) ->
+    case immutable_media_claim(Target, Opts) of
+        {ok, Claim} ->
+            reference_from_claim(Target, Claim, <<"immutable-store">>, Opts);
+        _ ->
+            case media_claim(Target, Base, Req, Opts) of
+                {ok, Claim} -> reference_from_claim(Target, Claim, <<"resolved-claim">>, Opts);
+                Error -> Error
+            end
+    end.
+
+reference_from_claim(Target, Claim, Mode, Opts) ->
+    Source =
+        case media_source_from_claim(Claim, Opts) of
+            {ok, MediaSource} -> MediaSource;
+            _ -> #{}
+        end,
+    Ref0 = optional_source_fields(#{
+        <<"status">> => 200,
+        <<"device">> => ?DEVICE,
+        <<"view">> => <<"reference">>,
+        <<"mode">> => Mode,
+        <<"target">> => Target,
+        <<"claim-id">> => optional_first_value([<<"claim-id">>, <<"claim_id">>], Claim, Opts),
+        <<"claim-name">> => optional_first_value([<<"claim-name">>, <<"name">>], Claim, Opts),
+        <<"canonical-url">> =>
+            optional_first_value(
+                [<<"canonical-url">>, <<"canonical_url">>, <<"permanent-url">>, <<"permanent_url">>],
+                Claim,
+                Opts
+            ),
+        <<"txid">> => optional_first_value([<<"txid">>, <<"tx_id">>], Claim, Opts),
+        <<"nout">> => optional_first_value([<<"nout">>, <<"n_out">>], Claim, Opts),
+        <<"sd-hash">> => maps:get(<<"sd-hash">>, Source, undefined),
+        <<"byte-size">> => maps:get(<<"byte-size">>, Source, undefined),
+        <<"byte-size-source">> => maps:get(<<"byte-size-source">>, Source, undefined),
+        <<"content-type">> => maps:get(<<"content-type">>, Source, undefined),
+        <<"filename">> => maps:get(<<"filename">>, Source, undefined),
+        <<"body-path">> => maps:get(<<"body-path">>, Source, undefined),
+        <<"hyperbeam-upload-id">> => maps:get(<<"hyperbeam-upload-id">>, Source, undefined)
+    }),
+    {ok, add_reference_paths(Ref0)}.
+
+add_reference_paths(Ref) ->
+    Ref1 =
+        case reference_outpoint(Ref) of
+            undefined ->
+                Ref;
+            Outpoint ->
+                TxID = maps:get(<<"txid">>, Ref),
+                NOut = path_int(maps:get(<<"nout">>, Ref)),
+                Ref#{
+                    <<"outpoint">> => Outpoint,
+                    <<"source-id">> => Outpoint,
+                    <<"claim-proof-store-path">> =>
+                        <<"odysee/claim-proof/", TxID/binary, "/", NOut/binary>>,
+                    <<"source-demo-path">> =>
+                        <<"/~odysee@1.0/source?id=", Outpoint/binary>>,
+                    <<"media-demo-path">> =>
+                        <<"/~odysee@1.0/media?target=", Outpoint/binary>>
+                }
+        end,
+    case maps:get(<<"sd-hash">>, Ref1, undefined) of
+        undefined ->
+            Ref1;
+        SDHash ->
+            Ref1#{
+                <<"descriptor-demo-path">> =>
+                    <<"/~odysee@1.0/descriptor?sd-hash=", SDHash/binary>>,
+                <<"range-demo-path">> =>
+                    <<"/~odysee@1.0/range?sd-hash=", SDHash/binary, "&start=0&end=1048575">>
+            }
+    end.
+
+reference_outpoint(#{ <<"txid">> := TxID, <<"nout">> := NOut })
+        when is_binary(TxID), byte_size(TxID) =:= 64 ->
+    <<TxID/binary, ":", (path_int(NOut))/binary>>;
+reference_outpoint(_Ref) ->
+    undefined.
+
+query(Base, Req, Opts) ->
+    Query = query_text(Base, Req, Opts),
+    Limit = integer_param(Base, Req, <<"limit">>, 20, Opts),
+    Items0 = query_source_items(Base, Req, Opts) ++ query_native_upload_items(Base, Req, Opts),
+    Matched = query_limit(query_filter_items(Items0, Query, Opts), Limit),
+    json_response(200, #{
+        <<"device">> => ?DEVICE,
+        <<"view">> => <<"query">>,
+        <<"scope">> => <<"local-demo">>,
+        <<"query">> => query_text_value(Query),
+        <<"total-items">> => length(Matched),
+        <<"items">> => Matched
+    }).
+
+query_text(Base, Req, Opts) ->
+    case first_message_value([<<"q">>, <<"query">>, <<"term">>], [Req, Base], Opts) of
+        Value when is_binary(Value), byte_size(Value) > 0 -> hb_util:to_lower(Value);
+        _ -> not_found
+    end.
+
+query_text_value(not_found) ->
+    <<>>;
+query_text_value(Query) ->
+    Query.
+
+query_source_items(Base, Req, Opts) ->
+    case native_source_path(Base, Req, Opts) of
+        {ok, Kind, Keys} ->
+            case read_source_key(Keys, Opts) of
+                {ok, Msg} when is_map(Msg) -> [query_source_item(Kind, hd(Keys), Msg, Opts)];
+                {ok, Body} when is_binary(Body) -> [query_binary_source_item(Kind, hd(Keys), Body)];
+                _ -> []
+            end;
+        _ ->
+            []
+    end.
+
+query_source_item(Kind, ID, Msg, Opts) ->
+    optional_source_fields(#{
+        <<"type">> => Kind,
+        <<"id">> => ID,
+        <<"claim-id">> => optional_first_value([<<"claim-id">>, <<"claim_id">>], Msg, Opts),
+        <<"claim-name">> => optional_first_value([<<"claim-name">>, <<"name">>], Msg, Opts),
+        <<"txid">> => optional_first_value([<<"txid">>, <<"tx_id">>], Msg, Opts),
+        <<"nout">> => optional_first_value([<<"nout">>, <<"n_out">>], Msg, Opts),
+        <<"sd-hash">> => optional_first_value([<<"sd-hash">>, <<"sd_hash">>], Msg, Opts),
+        <<"source-demo-path">> => <<"/~odysee@1.0/source?id=", (normalize_source_id(ID))/binary>>
+    }).
+
+query_binary_source_item(Kind, ID, Body) ->
+    #{
+        <<"type">> => Kind,
+        <<"id">> => ID,
+        <<"byte-size">> => byte_size(Body),
+        <<"source-demo-path">> => <<"/~odysee@1.0/source?id=", (normalize_source_id(ID))/binary>>
+    }.
+
+query_native_upload_items(Base, Req, Opts) ->
+    lists:flatmap(
+        fun({Root, Builder}) ->
+            query_native_upload_items_from_root(Root, Builder, Opts)
+        end,
+        query_native_upload_roots(Base, Req, Opts)
+    ).
+
+query_native_upload_roots(Base, Req, Opts) ->
+    UserRoots =
+        case first_message_value([<<"legacy-user-id">>, <<"legacy_user_id">>, <<"user-id">>], [Req, Base], Opts) of
+            not_found -> [];
+            UserID -> [{sdk_user_upload_root(hb_util:bin(UserID)), fun sdk_upload_claim_item/3}]
+        end,
+    ChannelRoots =
+        case first_message_value([<<"channel-id">>, <<"channel_id">>], [Req, Base], Opts) of
+            not_found -> [];
+            ChannelID -> [{native_channel_upload_root(hb_util:bin(ChannelID)), fun sdk_upload_claim_item/3}]
+        end,
+    UserRoots ++ ChannelRoots ++ [{native_upload_root(), fun sdk_upload_claim_item/3}].
+
+query_native_upload_items_from_root(Root, Builder, Opts) ->
+    IDs = hb_cache:list(Root, Opts),
+    [
+        query_native_upload_item(ID, Root, Builder, Opts)
+     ||
+        ID <- IDs,
+        is_binary(ID)
+    ].
+
+query_native_upload_item(ID0, Root, Builder, Opts) ->
+    ID = native_path_id(ID0),
+    case query_native_upload_record(Root, ID, Opts) of
+        {ok, Upload} ->
+            Claim = Builder(ID, Upload, Opts),
+            query_native_claim_item(Claim, Opts);
+        _ ->
+            #{ <<"type">> => <<"native-upload">>, <<"id">> => ID }
+    end.
+
+query_native_upload_record(Root, ID, Opts) ->
+    case query_read_upload(<<Root/binary, "/", ID/binary>>, Opts) of
+        {ok, Upload} ->
+            {ok, Upload};
+        _ ->
+            query_read_upload(native_upload_path(ID), Opts)
+    end.
+
+query_read_upload(Path, Opts) ->
+    case hb_cache:read(Path, Opts) of
+        {ok, Stored} ->
+            case hb_cache:ensure_all_loaded(Stored, Opts) of
+                Upload when is_map(Upload) -> {ok, Upload};
+                _ -> {error, invalid_upload}
+            end;
+        Error ->
+            Error
+    end.
+
+query_native_claim_item(Claim, Opts) ->
+    Value = maps:get(<<"value">>, Claim, #{}),
+    Source = maps:get(<<"source">>, Value, #{}),
+    UploadID = optional_first_value([<<"hyperbeam_upload_id">>, <<"hyperbeam-upload-id">>], Claim, Opts),
+    optional_source_fields(#{
+        <<"type">> => <<"native-upload">>,
+        <<"id">> => UploadID,
+        <<"claim-id">> => optional_first_value([<<"claim_id">>, <<"claim-id">>], Claim, Opts),
+        <<"claim-name">> => optional_first_value([<<"name">>, <<"claim-name">>], Claim, Opts),
+        <<"title">> => optional_first_value([<<"title">>], Value, Opts),
+        <<"description">> => optional_first_value([<<"description">>], Value, Opts),
+        <<"tags">> => maps:get(<<"tags">>, Value, undefined),
+        <<"content-type">> =>
+            optional_first_value([<<"media_type">>, <<"media-type">>, <<"content-type">>], Source, Opts),
+        <<"byte-size">> => maps:get(<<"size">>, Source, undefined),
+        <<"body-path">> =>
+            optional_first_value([<<"hyperbeam_body_path">>, <<"hyperbeam-body-path">>], Source, Opts),
+        <<"canonical-url">> =>
+            optional_first_value([<<"canonical_url">>, <<"canonical-url">>, <<"permanent_url">>], Claim, Opts),
+        <<"media-demo-path">> => <<"/~odysee@1.0/media?claim-id=", (hb_util:bin(UploadID))/binary>>,
+        <<"read-demo-path">> => <<"/~odysee-upload-demo@1.0/read?id=", (hb_util:bin(UploadID))/binary>>
+    }).
+
+query_filter_items(Items, not_found, _Opts) ->
+    Items;
+query_filter_items(Items, Query, Opts) ->
+    [Item || Item <- Items, query_item_matches(Item, Query, Opts)].
+
+query_item_matches(Item, Query, Opts) ->
+    Text = hb_util:to_lower(iolist_to_binary(query_item_terms(Item, Opts))),
+    binary:match(Text, Query) =/= nomatch.
+
+query_item_terms(Item, Opts) when is_map(Item) ->
+    [
+        <<" ">>,
+        query_term(maps:get(<<"id">>, Item, <<>>)),
+        <<" ">>,
+        query_term(maps:get(<<"claim-id">>, Item, <<>>)),
+        <<" ">>,
+        query_term(maps:get(<<"claim-name">>, Item, <<>>)),
+        <<" ">>,
+        query_term(maps:get(<<"title">>, Item, <<>>)),
+        <<" ">>,
+        query_term(maps:get(<<"description">>, Item, <<>>)),
+        <<" ">>,
+        query_term(maps:get(<<"tags">>, Item, <<>>)),
+        <<" ">>,
+        query_term(maps:get(<<"txid">>, Item, <<>>)),
+        <<" ">>,
+        query_term(maps:get(<<"sd-hash">>, Item, <<>>)),
+        <<" ">>,
+        query_term(hb_maps:get(<<"canonical-url">>, Item, <<>>, Opts))
+    ];
+query_item_terms(_Item, _Opts) ->
+    [].
+
+query_term(Value) when is_binary(Value) ->
+    Value;
+query_term(Value) when is_integer(Value) ->
+    integer_to_binary(Value);
+query_term(Values) when is_list(Values) ->
+    iolist_to_binary([query_term(Value) || Value <- Values]);
+query_term(Value) ->
+    hb_util:bin(Value).
+
+query_limit(Items, Limit) when is_integer(Limit), Limit > 0 ->
+    lists:sublist(Items, Limit);
+query_limit(Items, _Limit) ->
+    Items.
+
+native_upload_root() ->
+    <<"odysee/hyperbeam-upload">>.
+
+native_upload_path(UploadID) ->
+    <<"odysee/hyperbeam-upload/", UploadID/binary>>.
+
+native_channel_upload_root(ChannelID) ->
+    <<"odysee/hyperbeam-channel/", ChannelID/binary, "/uploads">>.
+
+native_path_id(Value) when is_binary(Value) ->
+    case binary:split(Value, <<"/">>, [global]) of
+        [] -> Value;
+        Parts -> lists:last(Parts)
+    end.
+
+demo(Base, Req, Opts) ->
+    Target = first_message_value([<<"target">>, <<"uri">>, <<"url">>, <<"claim-id">>, <<"claim_id">>], [Req, Base], Opts),
+    ID = first_message_value([<<"id">>, <<"native-id">>], [Req, Base], Opts),
+    Demo0 = #{
+        <<"device">> => ?DEVICE,
+        <<"view">> => <<"demo">>,
+        <<"demos">> => #{
+            <<"immutable-playback">> => demo_target_path(<<"media">>, Target),
+            <<"mutable-to-immutable-reference">> => demo_target_path(<<"reference">>, Target),
+            <<"direct-store-id">> => demo_id_path(ID),
+            <<"local-query">> => <<"/~odysee@1.0/query?q=<text>">>,
+            <<"native-upload-query">> =>
+                <<"/~odysee@1.0/query?legacy-user-id=<legacy-user-id>&q=<text>">>
+        }
+    },
+    Demo =
+        case Target of
+            not_found ->
+                Demo0;
+            _ ->
+                case reference_from_target(Target, Base, Req, Opts) of
+                    {ok, Ref} -> Demo0#{ <<"reference">> => Ref };
+                    _ -> Demo0
+                end
+        end,
+    json_response(200, Demo).
+
+demo_target_path(Key, not_found) ->
+    <<"/~odysee@1.0/", Key/binary, "?target=<lbry-uri-or-txid:nout>">>;
+demo_target_path(Key, Target) ->
+    <<"/~odysee@1.0/", Key/binary, "?target=", (hb_util:bin(Target))/binary>>.
+
+demo_id_path(not_found) ->
+    <<"/~odysee@1.0/source?id=<native-id>">>;
+demo_id_path(ID) ->
+    <<"/~odysee@1.0/source?id=", (hb_util:bin(ID))/binary>>.
 
 transaction(Base, Req, Opts) ->
     with_txid(Base, Req, Opts, fun(TxID) ->
@@ -994,6 +1339,11 @@ non_negative_integer(Int) when is_integer(Int), Int >= 0 ->
     {ok, Int};
 non_negative_integer(_Value) ->
     {error, invalid_nout}.
+
+path_int(Int) when is_integer(Int) ->
+    integer_to_binary(Int);
+path_int(Bin) when is_binary(Bin) ->
+    Bin.
 
 normalize_source_id(<<"/", Rest/binary>>) ->
     normalize_source_id(Rest);
@@ -1631,6 +1981,8 @@ contains_claim_id(_Source, _ClaimID, _Opts) ->
 
 range_response(SDHash, Start, End, Opts) when is_binary(SDHash) ->
     range_response(#{ <<"sd-hash">> => SDHash }, Start, End, Opts);
+range_response(Source = #{ <<"body-path">> := _BodyPath }, Start, End, Opts) ->
+    native_body_range_response(Source, Start, End, Opts);
 range_response(Source, Start, End, Opts) ->
     SDHash = maps:get(<<"sd-hash">>, Source),
     map_result(
@@ -1671,6 +2023,70 @@ range_response(Source, Start, End, Opts) ->
         end
     ).
 
+native_body_range_response(Source, Start, End, Opts) ->
+    BodyPath = maps:get(<<"body-path">>, Source),
+    map_result(
+        cached_body(BodyPath, Opts),
+        fun(Body) ->
+            Total = byte_size(Body),
+            case bounded_range(#{ <<"byte-size">> => Total }, Start, End) of
+                {ok, BoundedStart, ActualEnd} ->
+                    Length = ActualEnd - BoundedStart + 1,
+                    Chunk = binary:part(Body, BoundedStart, Length),
+                    ?event(odysee_device,
+                        {native_media_slice,
+                            {body_path, BodyPath},
+                            {start, BoundedStart},
+                            {actual_end, ActualEnd},
+                            {requested_end, End},
+                            {size, byte_size(Chunk)}},
+                        Opts
+                    ),
+                    maps:merge(
+                        #{
+                            <<"status">> => 206,
+                            <<"content-type">> =>
+                                maps:get(
+                                    <<"content-type">>,
+                                    Source,
+                                    <<"application/octet-stream">>
+                                ),
+                            <<"content-length">> => byte_size(Chunk),
+                            <<"accept-ranges">> => <<"bytes">>,
+                            <<"content-range">> => content_range(BoundedStart, ActualEnd, Total),
+                            <<"start">> => BoundedStart,
+                            <<"end">> => ActualEnd,
+                            <<"requested-end">> => End,
+                            <<"body">> => Chunk
+                        },
+                        maps:from_list(response_metadata(Source, Total))
+                    );
+                Error ->
+                    error_map(Error)
+            end
+        end
+    ).
+
+cached_body(BodyPath, Opts) ->
+    case hb_cache:read(BodyPath, Opts) of
+        {ok, Stored} ->
+            cached_body_value(hb_cache:ensure_all_loaded(Stored, Opts), Opts);
+        {error, _} = Error ->
+            Error;
+        _ ->
+            {error, not_found}
+    end.
+
+cached_body_value(Body, _Opts) when is_binary(Body) ->
+    {ok, Body};
+cached_body_value(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:get(<<"body">>, Msg, not_found, Opts) of
+        Body when is_binary(Body) -> {ok, Body};
+        _ -> {error, native_upload_body_not_found}
+    end;
+cached_body_value(_Value, _Opts) ->
+    {error, native_upload_body_not_found}.
+
 response_metadata(Source, Total) ->
     [
         {K, V}
@@ -1682,7 +2098,11 @@ response_metadata(Source, Total) ->
                 maps:get(<<"byte-size-source">>, Source, undefined)
             },
             {<<"claim-id">>, maps:get(<<"claim-id">>, Source, undefined)},
-            {<<"filename">>, maps:get(<<"filename">>, Source, undefined)}
+            {<<"filename">>, maps:get(<<"filename">>, Source, undefined)},
+            {
+                <<"hyperbeam-upload-id">>,
+                maps:get(<<"hyperbeam-upload-id">>, Source, undefined)
+            }
         ],
         V =/= undefined
     ].
@@ -1910,7 +2330,7 @@ with_media_source(Base, Req, Opts, Fun) ->
         _ ->
             with_target(Base, Req, Opts, fun(Target) ->
                 map_result(
-                    hb_lbry_proxy:claim(Target, Opts),
+                    media_claim(Target, Base, Req, Opts),
                     fun(Claim) ->
                         case media_source_from_claim(Claim, Opts) of
                             {ok, Source} -> Fun(Source#{ <<"target">> => Target });
@@ -1920,6 +2340,58 @@ with_media_source(Base, Req, Opts, Fun) ->
                 )
             end)
     end.
+
+media_claim(Target, Base, Req, Opts) ->
+    case immutable_media_claim(Target, Opts) of
+        {ok, _Msg} = Found ->
+            Found;
+        _ ->
+            ResolveReq = media_claim_resolve_req(Req, Target, Opts),
+            case hb_ao:raw(<<"odysee-claim@1.0">>, <<"resolve">>, Base, ResolveReq, Opts) of
+                {ok, Msg} ->
+                    {ok, hb_maps:get(<<"claim">>, Msg, Msg, Opts)};
+                _ ->
+                    hb_lbry_proxy:claim(Target, Opts)
+            end
+    end.
+
+immutable_media_claim(Target, Opts) ->
+    case classify_source_param(Target, <<"outpoint">>) of
+        {ok, <<"claim-output">>, Keys} ->
+            read_source_key(Keys, Opts);
+        {ok, <<"path">>, [<<"odysee/claim-proof/", _/binary>>] = Keys} ->
+            read_source_key(Keys, Opts);
+        _ ->
+            {error, not_found}
+    end.
+
+media_claim_resolve_req(Req, Target, Opts) ->
+    case first_message_value(
+        [
+            <<"uri">>,
+            <<"url">>,
+            <<"claim-id">>,
+            <<"claim_id">>,
+            <<"claim-name">>,
+            <<"name">>
+        ],
+        [Req],
+        Opts
+    ) of
+        not_found ->
+            case media_target_is_uri(Target) of
+                true -> Req#{ <<"uri">> => Target };
+                false -> Req
+            end;
+        _ ->
+            Req
+    end.
+
+media_target_is_uri(<<"lbry://", _/binary>>) -> true;
+media_target_is_uri(<<"hb://", _/binary>>) -> true;
+media_target_is_uri(<<"http://", _/binary>>) -> true;
+media_target_is_uri(<<"https://", _/binary>>) -> true;
+media_target_is_uri(_Target) -> false.
 
 target_keys() ->
     [
@@ -2081,25 +2553,98 @@ content_range(Start, End, Total) ->
 media_source_from_claim(Claim, Opts) ->
     case hb_util:deep_get([<<"value">>, <<"source">>], Claim, #{}) of
         Source when is_map(Source) ->
-            case maps:get(<<"sd_hash">>, Source, undefined) of
-                undefined ->
-                    {error, missing_sd_hash};
-                SDHash ->
-                    ClaimSize = integer_value(maps:get(<<"size">>, Source, undefined)),
-                    {Size, SizeSource} = exact_stream_size(SDHash, ClaimSize, Opts),
-                    {ok,
-                        optional_source_fields(#{
-                            <<"sd-hash">> => SDHash,
-                            <<"claim-id">> => maps:get(<<"claim_id">>, Claim, undefined),
-                            <<"byte-size">> => Size,
-                            <<"byte-size-source">> => SizeSource,
-                            <<"content-type">> =>
-                                maps:get(<<"media_type">>, Source, undefined),
-                            <<"filename">> => maps:get(<<"name">>, Source, undefined)
-                        })}
+            case first_value([<<"hyperbeam_body_path">>, <<"hyperbeam-body-path">>], Source, Opts) of
+                not_found ->
+                    legacy_media_source_from_claim(Claim, Source, Opts);
+                BodyPath ->
+                    native_media_source_from_claim(Claim, Source, BodyPath, Opts)
             end;
         _ ->
+            immutable_media_source_from_claim(Claim, Opts)
+    end.
+
+immutable_media_source_from_claim(Claim, Opts) ->
+    case immutable_media_sd_hash(Claim, Opts) of
+        {ok, SDHash} ->
+            {Size, SizeSource} = exact_stream_size(SDHash, undefined, Opts),
+            {ok,
+                optional_source_fields(#{
+                    <<"sd-hash">> => SDHash,
+                    <<"claim-id">> => optional_first_value([<<"claim-id">>, <<"claim_id">>], Claim, Opts),
+                    <<"byte-size">> => Size,
+                    <<"byte-size-source">> => SizeSource,
+                    <<"filename">> => optional_first_value([<<"claim-name">>, <<"name">>], Claim, Opts),
+                    <<"txid">> => maps:get(<<"txid">>, Claim, undefined),
+                    <<"nout">> => maps:get(<<"nout">>, Claim, undefined)
+                })};
+        _ ->
             {error, missing_source}
+    end.
+
+immutable_media_sd_hash(Claim, Opts) ->
+    case first_value([<<"sd-hash">>, <<"sd_hash">>], Claim, Opts) of
+        not_found ->
+            case hb_maps:get(<<"claim-envelope">>, Claim, not_found, Opts) of
+                #{ <<"message">> := Message } ->
+                    hb_lbry_claim_proto:stream_sd_hash(Message);
+                _ ->
+                    {error, missing_sd_hash}
+            end;
+        SDHash ->
+            {ok, SDHash}
+    end.
+
+legacy_media_source_from_claim(Claim, Source, Opts) ->
+    case maps:get(<<"sd_hash">>, Source, undefined) of
+        undefined ->
+            {error, missing_sd_hash};
+        SDHash ->
+            ClaimSize = integer_value(maps:get(<<"size">>, Source, undefined)),
+            {Size, SizeSource} = exact_stream_size(SDHash, ClaimSize, Opts),
+            {ok,
+                optional_source_fields(#{
+                    <<"sd-hash">> => SDHash,
+                    <<"claim-id">> => maps:get(<<"claim_id">>, Claim, undefined),
+                    <<"byte-size">> => Size,
+                    <<"byte-size-source">> => SizeSource,
+                    <<"content-type">> =>
+                        maps:get(<<"media_type">>, Source, undefined),
+                    <<"filename">> => maps:get(<<"name">>, Source, undefined)
+                })}
+    end.
+
+native_media_source_from_claim(Claim, Source, BodyPath, Opts) ->
+    Size = integer_value(optional_first_value([<<"size">>, <<"byte-size">>], Source, Opts)),
+    {ok,
+        optional_source_fields(#{
+            <<"body-path">> => hb_util:bin(BodyPath),
+            <<"claim-id">> => maps:get(<<"claim_id">>, Claim, undefined),
+            <<"byte-size">> => Size,
+            <<"byte-size-source">> => native_byte_size_source(Size),
+            <<"content-type">> =>
+                optional_first_value(
+                    [<<"media_type">>, <<"media-type">>, <<"content-type">>],
+                    Source,
+                    Opts
+                ),
+            <<"filename">> => maps:get(<<"name">>, Source, undefined),
+            <<"hyperbeam-upload-id">> =>
+                optional_first_value(
+                    [<<"hyperbeam_upload_id">>, <<"hyperbeam-upload-id">>],
+                    Source,
+                    Opts
+                )
+        })}.
+
+native_byte_size_source(undefined) ->
+    undefined;
+native_byte_size_source(_Size) ->
+    <<"native-upload">>.
+
+optional_first_value(Keys, Msg, Opts) ->
+    case first_value(Keys, Msg, Opts) of
+        not_found -> undefined;
+        Value -> Value
     end.
 
 optional_source_fields(Source) ->
@@ -2192,6 +2737,7 @@ status_for(conflicting_native_source_id) -> 400;
 status_for(missing_range) -> 416;
 status_for(invalid_range) -> 416;
 status_for(invalid_integer) -> 400;
+status_for(native_upload_body_not_found) -> 404;
 status_for({unsupported_sdk_method, _}) -> 400;
 status_for(not_found) -> 404;
 status_for({http_status, 403, _}) -> 403;
@@ -2466,6 +3012,132 @@ sdk_claim_list_returns_native_user_uploads_test() ->
     Source = maps:get(<<"source">>, Value),
     ?assertEqual(UploadID, maps:get(<<"hyperbeam_upload_id">>, Source)),
     ?assertEqual(false, maps:is_key(<<"sd_hash">>, Source)).
+
+media_native_upload_body_path_range_test() ->
+    Store = hb_test_utils:test_store(hb_store_volatile, <<"odysee-media-native-body-path">>),
+    ok = hb_store:start(Store),
+    Wallet = ar_wallet:new(),
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => Wallet },
+    Body = <<"0123456789abcdef">>,
+    {ok, BodyPath} = hb_cache:write(Body, Opts),
+    UploadID = <<"native-media-upload">>,
+    Claim = #{
+        <<"claim_id">> => UploadID,
+        <<"name">> => <<"native-media">>,
+        <<"value">> => #{
+            <<"source">> => #{
+                <<"hyperbeam_body_path">> => BodyPath,
+                <<"hyperbeam_upload_id">> => UploadID,
+                <<"media_type">> => <<"video/mp4">>,
+                <<"name">> => <<"native-media.mp4">>,
+                <<"size">> => byte_size(Body)
+            },
+            <<"stream_type">> => <<"video">>
+        },
+        <<"is_hyperbeam_upload">> => true
+    },
+    {ok, Source} = media_source_from_claim(Claim, Opts),
+    ?assertEqual(BodyPath, maps:get(<<"body-path">>, Source)),
+    ?assertEqual(UploadID, maps:get(<<"hyperbeam-upload-id">>, Source)),
+    ?assertEqual(<<"native-upload">>, maps:get(<<"byte-size-source">>, Source)),
+    Res = range_response(Source, 4, 9, Opts),
+    ?assertEqual(206, maps:get(<<"status">>, Res)),
+    ?assertEqual(<<"video/mp4">>, maps:get(<<"content-type">>, Res)),
+    ?assertEqual(<<"bytes 4-9/16">>, maps:get(<<"content-range">>, Res)),
+    ?assertEqual(6, maps:get(<<"content-length">>, Res)),
+    ?assertEqual(<<"456789">>, maps:get(<<"body">>, Res)),
+    ?assertEqual(UploadID, maps:get(<<"hyperbeam-upload-id">>, Res)).
+
+media_source_accepts_immutable_outpoint_test() ->
+    Raw = binary:decode_hex(test_task0_tx_hex()),
+    TxID = hb_lbry_tx:txid(Raw),
+    {ok, ClaimOutput} = hb_lbry_commitment:claim_output_message(Raw, 0),
+    Store = #{
+        <<"store-module">> => hb_store_odysee,
+        <<"fixtures">> => #{
+            <<"odysee/claim-proof/", TxID/binary, "/0">> => ClaimOutput
+        }
+    },
+    Outpoint = <<TxID/binary, ":0">>,
+    {ok, Source} =
+        with_media_source(
+            #{},
+            #{ <<"target">> => Outpoint },
+            #{ <<"store">> => Store },
+            fun(MediaSource) -> MediaSource end
+        ),
+    ?assertEqual(
+        <<"3da16b833f169c21caeb62ca66111227413f30f63c9d2f52f2a787643e086c334ee6949e05875cfe94a816aba02e492e">>,
+        maps:get(<<"sd-hash">>, Source)
+    ),
+    ?assertEqual(TxID, maps:get(<<"txid">>, Source)),
+    ?assertEqual(0, maps:get(<<"nout">>, Source)),
+    ?assertEqual(Outpoint, maps:get(<<"target">>, Source)).
+
+reference_accepts_immutable_outpoint_test() ->
+    Raw = binary:decode_hex(test_task0_tx_hex()),
+    TxID = hb_lbry_tx:txid(Raw),
+    {ok, ClaimOutput} = hb_lbry_commitment:claim_output_message(Raw, 0),
+    Store = #{
+        <<"store-module">> => hb_store_odysee,
+        <<"fixtures">> => #{
+            <<"odysee/claim-proof/", TxID/binary, "/0">> => ClaimOutput
+        }
+    },
+    Outpoint = <<TxID/binary, ":0">>,
+    {ok, Ref} = reference(#{}, #{ <<"target">> => Outpoint }, #{ <<"store">> => Store }),
+    ?assertEqual(200, maps:get(<<"status">>, Ref)),
+    ?assertEqual(<<"immutable-store">>, maps:get(<<"mode">>, Ref)),
+    ?assertEqual(Outpoint, maps:get(<<"outpoint">>, Ref)),
+    ?assertEqual(<<"odysee/claim-proof/", TxID/binary, "/0">>, maps:get(<<"claim-proof-store-path">>, Ref)),
+    ?assertEqual(<<"/~odysee@1.0/media?target=", Outpoint/binary>>, maps:get(<<"media-demo-path">>, Ref)),
+    ?assertEqual(
+        <<"3da16b833f169c21caeb62ca66111227413f30f63c9d2f52f2a787643e086c334ee6949e05875cfe94a816aba02e492e">>,
+        maps:get(<<"sd-hash">>, Ref)
+    ).
+
+query_indexes_native_uploads_test() ->
+    Store = hb_test_utils:test_store(hb_store_volatile, <<"odysee-query-native-upload">>),
+    ok = hb_store:start(Store),
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => ar_wallet:new() },
+    Upload = #{
+        <<"path">> => <<"/~odysee-upload-demo@1.0/upload">>,
+        <<"content-type">> => <<"video/mp4">>,
+        <<"title">> => <<"Demo query native video">>,
+        <<"description">> => <<"Indexed by local query">>,
+        <<"tags">> => <<"demo-query,hyperbeam">>,
+        <<"claim-name">> => <<"demo-query-native-video">>,
+        <<"filename">> => <<"demo-query-native.mp4">>,
+        <<"body">> => <<"native query bytes">>
+    },
+    {ok, UploadID} = hb_cache:write(Upload, Opts),
+    ok = hb_cache:link(UploadID, native_upload_path(UploadID), Opts),
+    {ok, Res} = query(#{}, #{ <<"q">> => <<"demo-query">> }, Opts),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    Body = hb_json:decode(maps:get(<<"body">>, Res)),
+    ?assertEqual(1, maps:get(<<"total-items">>, Body)),
+    [Item] = maps:get(<<"items">>, Body),
+    ?assertEqual(<<"native-upload">>, maps:get(<<"type">>, Item)),
+    ?assertEqual(UploadID, maps:get(<<"claim-id">>, Item)),
+    ?assertEqual(<<"Demo query native video">>, maps:get(<<"title">>, Item)),
+    ?assertEqual(<<"/~odysee@1.0/media?claim-id=", UploadID/binary>>, maps:get(<<"media-demo-path">>, Item)).
+
+demo_lists_working_paths_test() ->
+    {ok, Res} = demo(#{}, #{}, #{}),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    Body = hb_json:decode(maps:get(<<"body">>, Res)),
+    Demos = maps:get(<<"demos">>, Body),
+    ?assertEqual(
+        <<"/~odysee@1.0/media?target=<lbry-uri-or-txid:nout>">>,
+        maps:get(<<"immutable-playback">>, Demos)
+    ),
+    ?assertEqual(<<"/~odysee@1.0/source?id=<native-id>">>, maps:get(<<"direct-store-id">>, Demos)),
+    ?assert(maps:is_key(<<"local-query">>, Demos)).
+
+test_task0_tx_hex() ->
+    <<
+        "01000000012f6e843a8e0aa69fee0a7cc53a4343760dc548a16d13bfeb31f94f571ddae854010000006a47304402202ee7491d13424d2d06ae2407d48d3280223140dfe19e6d14ceedd2609d19e92b0220069a68ed6cd682ee442d8e39ce7f72f5e772b12614a0ab7796c42d817de25ce301210378ff344cc1f8a5451e7b8f348670b20c44ae44704ac05c59fb936ac1a4f26769ffffffff02a086010000000000fde801b531416666616972652d42726967697474652d5f2dc3a7612d64c3a97261696c6c652d656e2d706c65696e2d6469726563742d4d970101aa287054a918ea5a3c58ed4320d92fb8c7545d58e2bd32941d8256b818f5a72bc5ab16bcecff961261e5ea0036a0d7e26aa24738010ef602e0683690d7601cfe3df9268e46dfbb925a70cd16216e046ed17f3da60ac5010aab010a30cb215d05f21823b1208313edeaf8d7af4b2d2d00acc58fac1a1cf40427351b3b79a636b70f5844f6c691330955a53b18123541666661697265204272696769747465205f20c3a7612064c3a97261696c6c6520656e20706c65696e20646972656374202e6d7034188bcb861e2209766964656f2f6d703432303da16b833f169c21caeb62ca66111227413f30f63c9d2f52f2a787643e086c334ee6949e05875cfe94a816aba02e492e1a044e6f6e6528faa2a0d1065a0908800510e802188a08423141666661697265204272696769747465205f20c3a7612064c3a97261696c6c6520656e20706c65696e206469726563742052412a3f68747470733a2f2f7468756d62732e6f647963646e2e636f6d2f62353765383966656131653333636136623761616536386638363735623235622e77656270620208016d7576a914b462dfca8f203323f9c4375e4160e257f61aca7888acd6af8314000000001976a914b462dfca8f203323f9c4375e4160e257f61aca7888ac00000000"
+    >>.
 
 sdk_claim_search_returns_legacy_result_test() ->
     Claim = stream_source_fixture(),
