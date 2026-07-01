@@ -315,14 +315,21 @@ async function postHyperbeamThumbnailUpload(ctx) {
   }
 
   const requestBody = await readJsonBody(ctx);
-  const response = await postJson(`${nodeUrl}${HYPERBEAM_THUMBNAIL_UPLOAD_PATH}`, requestBody, {
+  const params64 = Buffer.from(JSON.stringify(requestBody)).toString('base64url');
+  const response = await postJson(`${nodeUrl}${HYPERBEAM_THUMBNAIL_UPLOAD_PATH}`, { params64 }, {
     host: new URL(nodeUrl).host,
   });
 
   ctx.status = response.statusCode;
   ctx.set('Cache-Control', 'no-store');
   ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
-  ctx.body = response.body;
+  const json = parseJsonBuffer(response.body);
+  if (json && json.id && json.type === 'success') {
+    const url = `${nodeUrl}/~cache@1.0/read?read=${encodeURIComponent(json.id)}`;
+    ctx.body = { ...json, url, message: url };
+  } else {
+    ctx.body = response.body;
+  }
 }
 
 async function postHyperbeamUploadList(ctx) {
