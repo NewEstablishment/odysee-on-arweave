@@ -48,7 +48,30 @@ export function concatClaims(claimList: Array<Claim> = [], concatClaimList: Arra
   return claims;
 }
 export function isHyperbeamUploadClaim(claim: Claim | null | undefined) {
-  return Boolean(claim && ((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id));
+  if (!claim) return false;
+
+  const hyperbeam = (claim as any).hyperbeam;
+  const uploadDevice = String(hyperbeam?.upload_device || hyperbeam?.['upload-device'] || '');
+  const uploadId = hyperbeam?.upload_id || hyperbeam?.uploadId || hyperbeam?.immutable_id || hyperbeam?.immutableId;
+  const immutableId = (claim as any).immutable_id || (claim as any).immutableId || (claim as any).outpoint;
+  const claimId = (claim as any).claim_id || (claim as any)['claim-id'];
+
+  return Boolean(
+    (claim as any).hyperbeam_upload ||
+    uploadId ||
+    uploadDevice.replace(/^~/, '') === 'odysee-upload@1.0' ||
+    (immutableId &&
+      !isLegacyOutpoint(immutableId) &&
+      (!claimId || claimId === immutableId || !isLegacyClaimId(claimId)))
+  );
+}
+
+function isLegacyClaimId(value: any) {
+  return /^[0-9a-f]{40}$/i.test(String(value || ''));
+}
+
+function isLegacyOutpoint(value: any) {
+  return /^[0-9a-f]{64}:\d+$/i.test(String(value || ''));
 }
 export function filterClaims(claims: Array<Claim>, query: string | null | undefined): Array<Claim> {
   if (query) {

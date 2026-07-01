@@ -147,6 +147,7 @@ export default function HyperbeamDebugConsole() {
   const activeSegmentCount = Object.values(displayedSegments).filter(Boolean).length;
   const onActiveTraceChange = React.useCallback((focus: TraceFocus | null) => {
     setActiveTrace(focus);
+    setSelectedEventIndex(null);
   }, []);
 
   const toggleFilter = (filter: FilterKey) => {
@@ -852,33 +853,42 @@ function ArchitecturePanel({
     selectedEvent && selectedEventIndex !== null
       ? lifecycleEventsForSelection(selectedEvent, selectedEventIndex, events)
       : [];
+  const activeTraceGraphEvents = activeTrace
+    ? events.filter(
+        (event) =>
+          eventMatchesTraceGraphFocus(event, activeTrace) &&
+          !(isNativeUploadTraceFocus(activeTrace) && isDebugTraceProbe(event.data || {}))
+      )
+    : [];
   const displayGraph = selectedGraphEvents.length
     ? architectureGraph(selectedGraphEvents, mode)
     : activeTrace
-      ? architectureGraph(
-          graphEvents.filter((event) => eventMatchesTraceGraphFocus(event, activeTrace)),
-          mode
-        )
+      ? architectureGraph(activeTraceGraphEvents, mode)
       : graph;
   const selectedRoute = selectedEvent
     ? routeSummary(mergedRequestDetailData(selectedEvent, selectedEventIndex || 0, events), mode)
     : null;
+  const isAuthTraceFocus = Boolean(!selectedEvent && activeTrace?.kind === 'auth');
   const hasArweaveActivity = displayGraph.arweaveEvents > 0;
   const hasSsr = displayGraph.ssrEvents > 0;
   const hasClaimRead =
-    displayGraph.deviceEvents > 0 ||
-    displayGraph.cacheEvents > 0 ||
-    displayGraph.legacyEvents > 0 ||
-    displayGraph.rangeEvents > 0 ||
-    displayGraph.arweaveEvents > 0;
+    !isAuthTraceFocus &&
+    (displayGraph.deviceEvents > 0 ||
+      displayGraph.cacheEvents > 0 ||
+      displayGraph.legacyEvents > 0 ||
+      displayGraph.rangeEvents > 0 ||
+      displayGraph.arweaveEvents > 0);
   const showClaimPath = hasClaimRead;
   const showAuthPath = displayGraph.authEvents > 0;
   const showLegacyPath = showClaimPath && displayGraph.legacyEvents > 0;
   const showMediaPath = showClaimPath && displayGraph.rangeEvents > 0;
   const deviceRows = displayGraph.deviceNames.length ? displayGraph.deviceNames : ['No device calls yet'];
+  const activeTraceNativeUpload = isNativeUploadTraceFocus(activeTrace);
   const selectedPath = selectedGraphEvents.length
     ? architectureSelectedPath(selectedGraphEvents, deviceRows, selectedEventIndex, events, mode)
-    : null;
+    : activeTraceGraphEvents.length || activeTraceNativeUpload
+      ? architectureTracePath(displayGraph, deviceRows, activeTrace)
+      : null;
   const graphHeight = Math.max(600, architectureDeviceY(deviceRows.length - 1) + 106);
   const hasGraphFocus = Boolean(selectedEvent || activeTrace);
   const showStaticBackendEdges = !selectedPath;
@@ -1152,7 +1162,7 @@ function ArchitecturePanel({
               faded={!showAuthPath && !hasSsr}
               color="#0ea5e9"
             />
-            {(!hasGraphFocus || displayGraph.deviceEvents > 0) && (
+            {(!hasGraphFocus || (displayGraph.deviceEvents > 0 && !isAuthTraceFocus)) && (
               <ArchitectureEdge
                 x1={440}
                 y1={165}
@@ -1163,7 +1173,7 @@ function ArchitecturePanel({
                 faded={displayGraph.deviceEvents === 0}
               />
             )}
-            {!hasGraphFocus &&
+            {!selectedPath &&
               deviceRows.map((device, index) => (
                 <ArchitectureEdge
                   key={`${device}-edge`}
@@ -1172,8 +1182,8 @@ function ArchitecturePanel({
                   x2={720}
                   y2={architectureDeviceY(index) + 35}
                   label={displayGraph.devices[device] ? `${displayGraph.devices[device]}` : 'none'}
-                  active={showClaimPath && Boolean(displayGraph.devices[device])}
-                  faded={!showClaimPath || !displayGraph.devices[device]}
+                  active={Boolean(displayGraph.devices[device])}
+                  faded={!displayGraph.devices[device]}
                 />
               ))}
             {!hasGraphFocus &&
@@ -1197,12 +1207,6 @@ function ArchitecturePanel({
                   active={showAuthPath}
                   faded={!showAuthPath}
                   color="#22c55e"
-                />
-                <ArchitectureFlow
-                  active={showAuthPath}
-                  color="#22c55e"
-                  faded={!showAuthPath}
-                  points="605,424 605,332"
                 />
               </>
             )}
@@ -1471,6 +1475,125 @@ function architectureDeviceStorePath(index: number, count: number) {
   return `1000,${y} ${entryX},${y} ${entryX},146`;
 }
 
+function architectureTracePath(
+  graph: ReturnType<typeof architectureGraph>,
+  deviceRows: Array<string>,
+  activeTrace: TraceFocus | null
+) {
+  const nodes = new Set<string>(['ui']);
+  const flows: Array<{ color: string; label: string; points: string }> = [];
+  const isAuth = activeTrace?.kind === 'auth' || graph.authEvents > 0;
+  const isNativeUpload = isNativeUploadTraceFocus(activeTrace);
+  const hasDevice = deviceRows.length > 0 && deviceRows[0] !== 'No device calls yet';
+  const device = hasDevice ? deviceRows[0] : '';
+  const deviceY = architectureDeviceY(0) + 35;
+
+  if (isAuth) {
+    nodes.add('ssr');
+    nodes.add('auth');
+    if (device) nodes.add(`device:${device}`);
+    flows.push({
+      color: '#22c55e',
+      label: 'auth request',
+      points: device
+        ? `200,304 250,415 440,415 500,465 585,424 605,424 605,465 710,465 720,${deviceY}`
+        : '200,304 250,415 440,415 500,465 585,424 605,424',
+    });
+    flows.push({
+      color: '#22c55e',
+      label: 'auth response',
+      points: device
+        ? `720,${deviceY} 710,465 605,465 605,424 585,424 500,465 440,415 250,415 200,304`
+        : '605,424 585,424 500,465 440,415 250,415 200,304',
+    });
+    return { flows, nodes };
+  }
+
+  if (isNativeUpload) {
+    nodes.add('ssr');
+    nodes.add('store');
+    flows.push({
+      color: '#facc15',
+      label: 'store metadata',
+      points: '200,304 250,415 440,415 1040,255',
+    });
+    flows.push({
+      color: '#22c55e',
+      label: 'response',
+      points: '1040,255 440,415 250,415 200,304',
+    });
+  }
+
+  if (!isNativeUpload || device) nodes.add('sdk');
+  if (graph.hyperbeamEvents > 0) nodes.add('hyperbeam');
+  if (device) nodes.add(`device:${device}`);
+
+  if (!isNativeUpload || device) {
+    flows.push({
+      color: '#0ea5e9',
+      label: 'request',
+      points: device ? `200,280 250,165 440,165 500,291 670,291 720,${deviceY}` : '200,280 250,165 440,165 500,291',
+    });
+  }
+
+  if (graph.legacyEvents > 0 || graph.fallbackEvents > 0) {
+    nodes.add('store');
+    nodes.add('legacy');
+    flows.push({
+      color: '#94a3b8',
+      label: 'legacy store',
+      points: device ? `720,${deviceY} 1000,${deviceY} 1040,255 1340,153` : '500,291 1040,255 1340,153',
+    });
+    flows.push({
+      color: '#22c55e',
+      label: 'response',
+      points: device
+        ? `1340,153 1040,255 1000,${deviceY} 720,${deviceY} 670,291 500,291 440,165 250,165 200,280`
+        : '1340,153 1040,255 500,291 440,165 250,165 200,280',
+    });
+  }
+
+  if (graph.rangeEvents > 0) {
+    nodes.add('ssr');
+    nodes.add('store');
+    nodes.add('media');
+    flows.push({
+      color: '#fb7185',
+      label: 'media bytes',
+      points: '200,304 250,415 440,415 1040,255 1340,497',
+    });
+    flows.push({
+      color: '#22c55e',
+      label: 'response',
+      points: '1340,497 1040,255 440,415 250,415 200,304',
+    });
+  }
+
+  if (graph.legacyEvents === 0 && graph.fallbackEvents === 0 && graph.rangeEvents === 0 && graph.cacheEvents > 0) {
+    nodes.add('cache');
+    flows.push({
+      color: '#facc15',
+      label: 'cache',
+      points: device ? `720,${deviceY} 1000,${deviceY} 1145,105` : '500,291 1145,105',
+    });
+    flows.push({
+      color: '#22c55e',
+      label: 'response',
+      points: device
+        ? `1145,105 1000,${deviceY} 720,${deviceY} 670,291 500,291 440,165 250,165 200,280`
+        : '1145,105 500,291 440,165 250,165 200,280',
+    });
+  } else if (graph.legacyEvents === 0 && graph.fallbackEvents === 0 && graph.rangeEvents === 0 && device) {
+    flows.push({
+      color: '#22c55e',
+      label: 'response',
+      points: `720,${deviceY} 670,291 500,291 440,165 250,165 200,280`,
+    });
+  }
+
+  return { flows, nodes };
+}
+
 function architectureSelectedPath(
   selectedEvents: Array<HyperbeamDebugEvent>,
   deviceRows: Array<string>,
@@ -1480,8 +1603,16 @@ function architectureSelectedPath(
 ) {
   const nodes = new Set<string>(['ui']);
   const flows: Array<{ color: string; label: string; points: string }> = [];
-  const selected = selectedEventIndex !== null ? allEvents[selectedEventIndex] : selectedEvents[0];
-  const selectedData = mergedRequestDetailData(selected, selectedEventIndex || 0, allEvents);
+  const selectedEventPosition =
+    selectedEventIndex !== null ? selectedEventIndex : Math.max(0, selectedEvents.findIndex(isResponseLikeEvent));
+  const selected =
+    selectedEventIndex !== null
+      ? allEvents[selectedEventIndex]
+      : selectedEvents[selectedEventPosition] || selectedEvents[0];
+  const selectedData =
+    selectedEventIndex !== null
+      ? mergedRequestDetailData(selected, selectedEventIndex, allEvents)
+      : selected?.data || {};
   const selectedDevices = devicesFromEventData(selectedData);
   const selectedDevice = selectedDevices[0] || String(selectedData.device || selectedData.responseDevice || '');
   const deviceIndex = Math.max(0, deviceRows.indexOf(selectedDevice));
@@ -1826,15 +1957,20 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     const device = eventDevices[0] || '';
     const path = String(data.devicePath || data.urlParts?.path || '');
     const sourceLayer = String(data.sourceLayer || '');
+    const authEvent = Boolean(data.authRequired || sourceLayer.includes('auth'));
     const mediaRange = isMediaRangeEvent(data, path, device);
 
-    if (mode !== HYPERBEAM_MODES.original && (url.includes('127.0.0.1') || url.includes('localhost') || device)) {
+    if (
+      !mediaRange &&
+      mode !== HYPERBEAM_MODES.original &&
+      (url.includes('127.0.0.1') || url.includes('localhost') || device)
+    ) {
       counters.hyperbeamEvents += 1;
     }
-    if (data.authRequired || sourceLayer.includes('auth')) counters.authEvents += 1;
+    if (authEvent) counters.authEvents += 1;
     if (sourceLayer.startsWith('fallback')) counters.fallbackEvents += 1;
     if (sourceLayer === 'original' || isLegacyBackedEvent(data, eventDevices, mediaRange)) counters.legacyEvents += 1;
-    if (path.includes('/$/api/')) counters.ssrEvents += 1;
+    if (path.includes('/$/api/') || authEvent) counters.ssrEvents += 1;
     if (path.includes('~cache@1.0')) counters.cacheEvents += 1;
     if (
       path.includes('/arweave') ||
@@ -1882,7 +2018,7 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
 function devicesFromEventData(data: Record<string, any>) {
   const devices = new Set<string>();
   [data.device, data.responseDevice].forEach((device) => {
-    const value = String(device || '');
+    const value = normalizeGraphDevice(device);
     if (value && !MODELED_GRAPH_DEVICES.has(value)) devices.add(value);
   });
   [data.devicePath, data.nativePath, data.urlParts?.path].forEach((path) => {
@@ -1896,10 +2032,28 @@ function devicesFromEventData(data: Record<string, any>) {
   return Array.from(devices);
 }
 
+function normalizeGraphDevice(device: any) {
+  const value = String(device || '');
+  if (!value) return '';
+  return value.startsWith('~') ? value : `~${value}`;
+}
+
 function isLegacyBackedEvent(data: Record<string, any>, devices: Array<string>, mediaRange: boolean) {
   if (mediaRange) return false;
-  if (data.deviceLayer === 'compat-device') return true;
-  return devices.some((device) => device.startsWith('~odysee-') && !device.includes('upload'));
+  if (data.authRequired) return false;
+  const legacyDevices = devices.filter(isLegacyStoreBackedDevice);
+  if (legacyDevices.length > 0) return true;
+  return data.deviceLayer === 'compat-device' && String(data.sourceLayer || '') === 'original';
+}
+
+function isLegacyStoreBackedDevice(device: string) {
+  return (
+    device.startsWith('~odysee-') &&
+    !device.includes('upload') &&
+    !device.includes('account') &&
+    !device.includes('file-reaction') &&
+    !device.includes('comment')
+  );
 }
 
 function isMediaRangeEvent(data: Record<string, any>, path: string, device: string) {
@@ -2168,7 +2322,7 @@ function eventMatchesTraceGraphFocus(event: HyperbeamDebugEvent, focus: TraceFoc
   const routeMatches = traceFocusNeedles(focus).some((needle) => routeText.includes(needle));
   if (!routeMatches) return false;
 
-  return !isAggregateClaimRoute(data);
+  return !isAggregateClaimRoute(data) && !isAuxiliaryClaimRoute(data);
 }
 
 function traceGraphRouteText(data: Record<string, any>) {
@@ -2193,9 +2347,33 @@ function isAggregateClaimRoute(data: Record<string, any>) {
   return path.includes('/search') || path.includes('/resolve') || requestKey.startsWith('search:');
 }
 
+function isAuxiliaryClaimRoute(data: Record<string, any>) {
+  const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '').toLowerCase();
+  return (
+    path.includes('/~odysee-comment@1.0/list') ||
+    path.includes('/~odysee-file-reaction@1.0/list') ||
+    path.includes('/~odysee-file@1.0/view-count')
+  );
+}
+
 function isDebugTraceProbe(data: Record<string, any>) {
   const headers = data.requestHeaders || {};
   return String(headers['x-hyperbeam-debug-trace'] || headers['X-Hyperbeam-Debug-Trace'] || '') === 'claim-evidence';
+}
+
+function isNativeUploadTraceFocus(focus: TraceFocus | null) {
+  if (!focus || focus.kind !== 'claim') return false;
+  return [focus.target, focus.claimId, focus.txid]
+    .filter(Boolean)
+    .some((value) => !isLegacyClaimId(value) && !isLegacyOutpoint(value));
+}
+
+function isLegacyClaimId(value: any) {
+  return /^[0-9a-f]{40}$/i.test(String(value || ''));
+}
+
+function isLegacyOutpoint(value: any) {
+  return /^[0-9a-f]{64}:\d+$/i.test(String(value || ''));
 }
 
 function traceFocusNeedles(focus: TraceFocus) {

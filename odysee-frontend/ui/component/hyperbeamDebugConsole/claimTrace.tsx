@@ -25,6 +25,7 @@ export type TraceFocus = {
   kind: 'auth' | 'claim';
   label: string;
   target: string;
+  nativeUpload?: boolean;
   claimId?: string;
   txid?: string;
   nout?: string;
@@ -135,7 +136,9 @@ export default function ClaimTrace({
       );
     };
 
-    if (selectedClaim.txid && !cachedSourceObservation(events, selectedClaim.txid)) {
+    const nativeUpload = isHyperbeamUploadTraceClaim(selectedClaim);
+
+    if (!nativeUpload && selectedClaim.txid && !cachedSourceObservation(events, selectedClaim.txid)) {
       enqueue(
         `tx:${selectedClaim.txid}`,
         hyperbeamDeviceUrl(HYPERBEAM_DEVICE.claim, 'transaction', { txid: selectedClaim.txid })
@@ -143,6 +146,7 @@ export default function ClaimTrace({
     }
 
     if (
+      !nativeUpload &&
       selectedClaim.valueType === 'stream' &&
       selectedClaim.sdHash &&
       !cachedSourceObservation(events, selectedClaim.sdHash)
@@ -386,6 +390,7 @@ function claimTraceFocus(claim: DiscoveredClaim): TraceFocus {
     kind: 'claim',
     label: claim.label,
     target: claim.traceTarget,
+    nativeUpload: isHyperbeamUploadTraceClaim(claim),
     claimId: claim.claimId,
     txid: claim.txid,
     nout: claim.nout,
@@ -1164,6 +1169,41 @@ function claimTypeColor(valueType: string | undefined) {
   return 'rgba(255,255,255,0.5)';
 }
 
+function isHyperbeamUploadTraceClaim(claim: DiscoveredClaim | undefined) {
+  if (!claim) return false;
+
+  const summary = claim.summary || {};
+  const immutableId = stringField(summary, ['immutable_id', 'outpoint']);
+  const uploadDevice = stringField(summary, ['hyperbeam.upload_device', 'hyperbeam.upload-device']);
+  const uploadId = stringField(summary, ['hyperbeam.upload_id', 'hyperbeam.upload-id']);
+  const claimId = claim.claimId || stringField(summary, ['claim_id', 'claim-id']);
+  const traceTarget = claim.traceTarget;
+
+  return Boolean(
+    stringField(summary, ['hyperbeam_upload']) ||
+    uploadId ||
+    isNativeUploadId(claimId) ||
+    isNativeUploadId(traceTarget) ||
+    uploadDevice?.replace(/^~/, '') === 'odysee-upload@1.0' ||
+    (immutableId &&
+      !isLegacyOutpoint(immutableId) &&
+      (!claimId || claimId === immutableId || !isLegacyClaimId(claimId)))
+  );
+}
+
+function isNativeUploadId(value: any) {
+  const id = String(value || '');
+  return Boolean(id && !id.startsWith('lbry://') && !isLegacyClaimId(id) && !isLegacyOutpoint(id));
+}
+
+function isLegacyClaimId(value: any) {
+  return /^[0-9a-f]{40}$/i.test(String(value || ''));
+}
+
+function isLegacyOutpoint(value: any) {
+  return /^[0-9a-f]{64}:\d+$/i.test(String(value || ''));
+}
+
 function initialSteps(
   target: string,
   selectedClaim?: DiscoveredClaim,
@@ -1174,17 +1214,18 @@ function initialSteps(
   const nout = parsed?.nout ?? selectedClaim?.nout;
   const sdHash = selectedClaim?.sdHash;
   const isChannelClaim = selectedClaim?.valueType === 'channel';
+  const nativeUpload = isHyperbeamUploadTraceClaim(selectedClaim);
   const outputLabel = isChannelClaim ? 'channel output' : 'claim output';
   const txSource = txid ? cachedSourceObservation(events, txid) : undefined;
   const descriptorSource = sdHash ? cachedSourceObservation(events, sdHash) : undefined;
-  const descriptorSteps: Array<TraceStep> = isChannelClaim
+  const descriptorSteps: Array<TraceStep> = nativeUpload
     ? [
         {
           key: 'extract-descriptor',
           label: 'Skip stream descriptor ID',
           kind: 'locator',
           status: 'skipped',
-          detail: 'channel claim has no stream descriptor',
+          detail: 'native upload metadata is already represented by the store object',
           response: sanitizeHyperbeamDebugValue({ value_type: selectedClaim?.valueType, sd_hash: sdHash }),
         },
         {
@@ -1192,38 +1233,63 @@ function initialSteps(
           label: 'Skip descriptor/blob source object',
           kind: 'source',
           status: 'skipped',
-          detail: 'channel claim has no descriptor/blob source object',
+          detail: 'native upload bytes are fetched through the media store path',
         },
         {
           key: 'descriptor-commitment',
           label: 'Skip descriptor/blob commitment headers',
           kind: 'source',
           status: 'skipped',
-          detail: 'channel claim has no descriptor/blob commitment path',
+          detail: 'native upload store object owns the media reference',
         },
       ]
-    : [
-        {
-          key: 'extract-descriptor',
-          label: 'Extract stream descriptor ID',
-          kind: 'locator',
-          status: sdHash ? 'ok' : selectedClaim ? 'skipped' : target ? 'pending' : 'skipped',
-          detail: sdHash || 'no sd_hash in loaded claim metadata',
-          response: sanitizeHyperbeamDebugValue({ sd_hash: sdHash }),
-        },
-        {
-          key: 'descriptor-source',
-          label: 'Fetch descriptor/blob source object',
-          kind: 'source',
-          ...sourceObservationStep(descriptorSource, sdHash),
-        },
-        {
-          key: 'descriptor-commitment',
-          label: 'Check descriptor/blob commitment headers',
-          kind: 'source',
-          ...commitmentObservationStep(descriptorSource, sdHash, 'descriptor/blob'),
-        },
-      ];
+    : isChannelClaim
+      ? [
+          {
+            key: 'extract-descriptor',
+            label: 'Skip stream descriptor ID',
+            kind: 'locator',
+            status: 'skipped',
+            detail: 'channel claim has no stream descriptor',
+            response: sanitizeHyperbeamDebugValue({ value_type: selectedClaim?.valueType, sd_hash: sdHash }),
+          },
+          {
+            key: 'descriptor-source',
+            label: 'Skip descriptor/blob source object',
+            kind: 'source',
+            status: 'skipped',
+            detail: 'channel claim has no descriptor/blob source object',
+          },
+          {
+            key: 'descriptor-commitment',
+            label: 'Skip descriptor/blob commitment headers',
+            kind: 'source',
+            status: 'skipped',
+            detail: 'channel claim has no descriptor/blob commitment path',
+          },
+        ]
+      : [
+          {
+            key: 'extract-descriptor',
+            label: 'Extract stream descriptor ID',
+            kind: 'locator',
+            status: sdHash ? 'ok' : selectedClaim ? 'skipped' : target ? 'pending' : 'skipped',
+            detail: sdHash || 'no sd_hash in loaded claim metadata',
+            response: sanitizeHyperbeamDebugValue({ sd_hash: sdHash }),
+          },
+          {
+            key: 'descriptor-source',
+            label: 'Fetch descriptor/blob source object',
+            kind: 'source',
+            ...sourceObservationStep(descriptorSource, sdHash),
+          },
+          {
+            key: 'descriptor-commitment',
+            label: 'Check descriptor/blob commitment headers',
+            kind: 'source',
+            ...commitmentObservationStep(descriptorSource, sdHash, 'descriptor/blob'),
+          },
+        ];
 
   return [
     {
@@ -1259,25 +1325,45 @@ function initialSteps(
       key: 'tx-source',
       label: 'Fetch transaction source object',
       kind: 'source',
-      ...sourceObservationStep(txSource, txid),
+      ...(nativeUpload
+        ? {
+            status: 'skipped' as TraceStatus,
+            detail: 'native upload metadata is read from the store, not legacy transaction lookup',
+          }
+        : sourceObservationStep(txSource, txid)),
     },
     {
       key: 'tx-commitment',
       label: 'Check transaction commitment headers',
       kind: 'source',
-      ...commitmentObservationStep(txSource, txid, 'transaction'),
+      ...(nativeUpload
+        ? {
+            status: 'skipped' as TraceStatus,
+            detail: 'native upload does not need legacy transaction commitment headers',
+          }
+        : commitmentObservationStep(txSource, txid, 'transaction')),
     },
     {
       key: 'claim-source',
       label: `Extract ${outputLabel} from transaction`,
       kind: 'source',
-      ...derivedClaimOutputStep(txSource, txid, nout, outputLabel),
+      ...(nativeUpload
+        ? {
+            status: 'skipped' as TraceStatus,
+            detail: 'native upload store object already contains the claim metadata',
+          }
+        : derivedClaimOutputStep(txSource, txid, nout, outputLabel)),
     },
     {
       key: 'claim-commitment',
       label: `Check ${outputLabel} commitment path`,
       kind: 'source',
-      ...derivedClaimOutputCommitmentStep(txSource, txid, nout, outputLabel),
+      ...(nativeUpload
+        ? {
+            status: 'skipped' as TraceStatus,
+            detail: 'native upload store object is the commitment boundary for this trace',
+          }
+        : derivedClaimOutputCommitmentStep(txSource, txid, nout, outputLabel)),
     },
     ...descriptorSteps,
     {
@@ -1450,10 +1536,12 @@ function derivedClaimOutputCommitmentStep(
   }
 
   return {
-    status: event.data?.sourceAlg ? 'ok' : 'failed',
+    status: event.data?.sourceAlg ? 'ok' : event.data?.ok ? 'warn' : 'failed',
     detail: event.data?.sourceAlg
       ? `${outputLabel} ${nout} covered by transaction commitment`
-      : `missing transaction commitment for ${outputLabel}`,
+      : event.data?.ok
+        ? `transaction response has no commitment metadata for ${outputLabel}`
+        : `missing transaction commitment for ${outputLabel}`,
     url: event.data?.url,
     statusCode: event.data?.status,
     sourceAlg: event.data?.sourceAlg,
@@ -1526,8 +1614,12 @@ function commitmentObservationStep(
 
   const data = event.data || {};
   return {
-    status: data.sourceAlg ? 'ok' : 'failed',
-    detail: data.sourceAlg ? `native ${label} commitment visible` : `missing ${label} commitment header`,
+    status: data.sourceAlg ? 'ok' : data.ok ? 'warn' : 'failed',
+    detail: data.sourceAlg
+      ? `native ${label} commitment visible`
+      : data.ok
+        ? `${label} response has no commitment metadata`
+        : `missing ${label} commitment header`,
     url: data.url,
     statusCode: data.status,
     sourceAlg: data.sourceAlg,

@@ -42,19 +42,13 @@ import { canPublishThroughHyperbeam, publishThroughHyperbeam } from 'services/hy
 import Lbry from 'lbry';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 // import LbryFirst from 'extras/lbry-first/lbry-first';
-import { isClaimNsfw, getChannelIdFromClaim, isStreamPlaceholderClaim } from 'util/claim';
+import { isClaimNsfw, getChannelIdFromClaim, isHyperbeamUploadClaim, isStreamPlaceholderClaim } from 'util/claim';
 import { MEMBERS_ONLY_CONTENT_TAG, SCHEDULED_TAGS, VISIBILITY_TAGS } from 'constants/tags';
 const PUBLISH_PATH_MAP = Object.freeze({
   file: PAGES.UPLOAD,
   post: PAGES.POST,
   livestream: PAGES.LIVESTREAM,
 });
-
-function isHyperbeamUploadClaim(claim) {
-  return (
-    claim?.hyperbeam?.upload_device === '~odysee-upload@1.0' || claim?.hyperbeam?.upload_device === 'odysee-upload@1.0'
-  );
-}
 
 function publishErrorMessage(error: any): string {
   if (typeof error === 'string') return error;
