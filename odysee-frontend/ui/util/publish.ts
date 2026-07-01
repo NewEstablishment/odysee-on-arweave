@@ -226,7 +226,9 @@ export function resolvePublishPayload(
   if (filePath) {
     if (
       type !== 'livestream' ||
-      (type === 'livestream' && liveCreateType === 'edit_placeholder' && liveEditType === 'upload_replay')
+      (type === 'livestream' &&
+        liveEditType === 'upload_replay' &&
+        (liveCreateType === 'choose_replay' || liveCreateType === 'edit_placeholder'))
     ) {
       publishPayload.file_path = filePath as string;
     }

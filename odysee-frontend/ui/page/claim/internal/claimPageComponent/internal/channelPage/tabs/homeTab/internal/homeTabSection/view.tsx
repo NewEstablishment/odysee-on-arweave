@@ -90,7 +90,11 @@ function HomeTabSection(props: Props) {
     requiresSearch && !section.claim_id ? selectClaimSearchByQuery(state)[searchKey] : undefined
   );
   const activeLivestream = useAppSelector((state) => selectActiveLivestreamForChannel(state, channelClaimId));
-  const activeLivestreamUri = activeLivestream?.uri;
+  const activeLivestreamUri =
+    activeLivestream?.claimUri ||
+    activeLivestream?.uri ||
+    activeLivestream?.canonical_url ||
+    activeLivestream?.permanent_url;
   const optionsStringified = JSON.stringify(options);
   const collectionUrls = useAppSelector((state) =>
     section.type === 'playlist' && section.claim_id ? selectUrlsForCollectionId(state, section.claim_id) : undefined
@@ -330,6 +334,8 @@ function HomeTabSection(props: Props) {
           showHideSetting={false}
           liveUris={liveUris}
           isChannelPage
+          includeUnscheduledLivestreams
+          title={__('Live and upcoming')}
         />
       )}
       {editMode && (

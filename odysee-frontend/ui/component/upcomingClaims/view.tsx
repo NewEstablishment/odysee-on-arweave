@@ -1,6 +1,7 @@
 import React from 'react';
 import dayjs from 'util/dayjs';
 import classnames from 'classnames';
+import { shallowEqual } from 'react-redux';
 import ClaimList from 'component/claimList';
 import Icon from 'component/common/icon';
 import ClaimPreviewTile from 'component/claimPreviewTile';
@@ -12,6 +13,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectMutedAndBlockedChannelIds } from 'redux/selectors/blocked';
 import { selectClaimSearchByQuery } from 'redux/selectors/claims';
 import { selectClientSetting } from 'redux/selectors/settings';
+import { selectPendingLivestreamsForChannelId } from 'redux/selectors/livestream';
 import { doClaimSearch as doClaimSearchAction } from 'redux/actions/claims';
 import { doSetClientSetting } from 'redux/actions/settings';
 import { LIVESTREAM_UPCOMING_BUFFER } from 'constants/livestream';
@@ -27,22 +29,32 @@ function buildUpcomingOptions(
   mutedAndBlockedIds: any,
   channelIds: Array<string>,
   isLivestream: boolean,
-  limitPerChannel?: number
+  limitPerChannel?: number,
+  includeUnscheduledLivestreams?: boolean
 ): ClaimSearchOptions {
-  return {
+  const includeAnyLivestream = isLivestream && includeUnscheduledLivestreams;
+  const options = {
     page: 1,
     page_size: 50,
     no_totals: true,
     claim_type: ['stream'],
     remove_duplicates: true,
-    any_tags: isLivestream ? [SCHEDULED_TAGS.LIVE] : [SCHEDULED_TAGS.SHOW],
     channel_ids: channelIds || [],
     not_channel_ids: mutedAndBlockedIds,
     not_tags: CsOptHelper.not_tags(),
     order_by: ['^release_time'],
-    release_time: getUpcomingReleaseTime(),
     ...(isLivestream ? { has_no_source: true } : { has_source: true }),
     ...(isLivestream && limitPerChannel ? { limit_claims_per_channel: limitPerChannel } : {}),
+  };
+
+  if (includeAnyLivestream) {
+    return options;
+  }
+
+  return {
+    ...options,
+    any_tags: isLivestream ? [SCHEDULED_TAGS.LIVE] : [SCHEDULED_TAGS.SHOW],
+    release_time: getUpcomingReleaseTime(),
   };
 }
 
@@ -58,8 +70,10 @@ export type Props = {
   limitClaimsPerChannel?: number;
   loading?: boolean;
   isChannelPage?: boolean;
+  includeUnscheduledLivestreams?: boolean;
   onLoad?: (arg0: number) => void;
   showHideSetting?: boolean;
+  title?: string;
 };
 
 // ****************************************************************************
@@ -73,15 +87,24 @@ const UpcomingClaims = (props: Props) => {
     liveUris = [],
     loading,
     isChannelPage,
+    includeUnscheduledLivestreams,
     limitClaimsPerChannel,
     showHideSetting = true,
+    title,
   } = props;
   const dispatch = useAppDispatch();
   const csByQuery = useAppSelector(selectClaimSearchByQuery) || {};
   const mutedAndBlockedChannelIds = useAppSelector(selectMutedAndBlockedChannelIds);
   const livestreamOptions = React.useMemo(
-    () => buildUpcomingOptions(mutedAndBlockedChannelIds, channelIds, true, limitClaimsPerChannel),
-    [mutedAndBlockedChannelIds, channelIds, limitClaimsPerChannel]
+    () =>
+      buildUpcomingOptions(
+        mutedAndBlockedChannelIds,
+        channelIds,
+        true,
+        limitClaimsPerChannel,
+        includeUnscheduledLivestreams
+      ),
+    [mutedAndBlockedChannelIds, channelIds, limitClaimsPerChannel, includeUnscheduledLivestreams]
   );
   const scheduledOptions = React.useMemo(
     () => buildUpcomingOptions(mutedAndBlockedChannelIds, channelIds, false),
@@ -91,6 +114,22 @@ const UpcomingClaims = (props: Props) => {
   const soKey = scheduledOptions ? createNormalizedClaimSearchKey(scheduledOptions) : '';
   const livestreamUris = csByQuery[loKey];
   const scheduledUris = csByQuery[soKey];
+  const pendingLivestreamUris = useAppSelector((state) => {
+    if (!includeUnscheduledLivestreams || !channelIds?.length) return [];
+    const seen = new Set<string>();
+    const uris: string[] = [];
+    channelIds.forEach((channelId) => {
+      const pending = selectPendingLivestreamsForChannelId(state, channelId) as Array<any>;
+      pending.forEach((claim) => {
+        const claimUri = claim?.claimUri || claim?.uri || claim?.permanent_url || claim?.canonical_url;
+        if (claimUri && !seen.has(claimUri)) {
+          seen.add(claimUri);
+          uris.push(claimUri);
+        }
+      });
+    });
+    return uris;
+  }, shallowEqual);
   const hideUpcoming = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_SCHEDULED_LIVESTREAMS));
   const doClaimSearch = React.useCallback(
     (csOptions: ClaimSearchOptions) => dispatch(doClaimSearchAction(csOptions)),
@@ -108,7 +147,12 @@ const UpcomingClaims = (props: Props) => {
     return 4 * multiply;
   }, [showAllUpcoming, isMobileScreen, isSmallScreen, isLargeScreen]);
   const list = React.useMemo(() => {
-    let uris = (livestreamUris || []).concat(scheduledUris || []);
+    const seen = new Set<string>();
+    let uris = pendingLivestreamUris.concat(livestreamUris || [], scheduledUris || []).filter((uri) => {
+      if (!uri || seen.has(uri)) return false;
+      seen.add(uri);
+      return true;
+    });
 
     if (liveUris) {
       uris = uris.filter((x) => !liveUris.includes(x));
@@ -119,7 +163,7 @@ const UpcomingClaims = (props: Props) => {
       uris: upcomingMax > 0 ? uris.slice(0, upcomingMax) : uris,
       total: uris.length,
     };
-  }, [liveUris, livestreamUris, scheduledUris, upcomingMax]);
+  }, [liveUris, livestreamUris, pendingLivestreamUris, scheduledUris, upcomingMax]);
 
   const hideScheduled = (e) => {
     dispatch(doSetClientSetting(SETTINGS.HIDE_SCHEDULED_LIVESTREAMS, e, true));
@@ -138,7 +182,7 @@ const UpcomingClaims = (props: Props) => {
           <span className="icon__wrapper">
             <Icon icon={ICONS.TIME} />
           </span>
-          <span className="claim-grid__title">{__('Upcoming')}</span>
+          <span className="claim-grid__title">{title || __('Upcoming')}</span>
 
           {showHideSetting && (
             <div className="upcoming-grid__visibility" onClick={() => hideScheduled(!hideUpcoming)}>

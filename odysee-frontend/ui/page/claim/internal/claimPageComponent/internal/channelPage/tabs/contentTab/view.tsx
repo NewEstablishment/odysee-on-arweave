@@ -80,6 +80,11 @@ function ContentTab(props: Props) {
   const tileLayout = useAppSelector((state) => selectClientSetting(state, SETTINGS.TILE_LAYOUT));
   const hideShorts = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_SHORTS));
   const activeLivestreamForChannel = useAppSelector((state) => selectActiveLivestreamForChannel(state, channelClaimId));
+  const activeLivestreamUri =
+    activeLivestreamForChannel?.claimUri ||
+    activeLivestreamForChannel?.uri ||
+    activeLivestreamForChannel?.canonical_url ||
+    activeLivestreamForChannel?.permanent_url;
   const doResolveUris = (uris: Array<string>, doReplay?: boolean) => dispatch(doResolveUrisAction(uris, doReplay));
   const urlParams = new URLSearchParams(search);
   const shortsOnly = shortsOnlyProp || urlParams.get('view') === 'shorts';
@@ -152,11 +157,11 @@ function ContentTab(props: Props) {
           name="contentTab"
           channelIds={scheduledChanIds}
           tileLayout={false}
-          liveUris={
-            activeLivestreamForChannel && activeLivestreamForChannel.uri ? [activeLivestreamForChannel.uri] : []
-          }
+          liveUris={activeLivestreamUri ? [activeLivestreamUri] : []}
           showHideSetting={false}
           isChannelPage
+          includeUnscheduledLivestreams
+          title={__('Live and upcoming')}
         />
       )}
 

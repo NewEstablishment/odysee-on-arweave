@@ -361,6 +361,13 @@ const LivestreamCreatePage = lazyImport(
       /* webpackChunkName: "livestreamCreate" */
     )
 );
+const LivestreamDemoPage = lazyImport(
+  () =>
+    import(
+      'page/livestreamDemo'
+      /* webpackChunkName: "livestreamDemo" */
+    )
+);
 const OdyseeMembershipPage = lazyImport(
   () =>
     import(
@@ -933,6 +940,7 @@ function AppRouter(props: Props) {
           path={`/$/${PAGES.LIVESTREAM_CREATE}`}
           element={<PrivateRoute component={LivestreamCreatePage} isAuthenticated={isAuthenticated} />}
         />
+        <Route path={`/$/${PAGES.LIVESTREAM_DEMO}`} element={<LivestreamDemoPage />} />
         <Route
           path={`/$/${PAGES.LIVESTREAM}`}
           element={<PrivateRoute component={LiveStreamSetupPage} isAuthenticated={isAuthenticated} />}

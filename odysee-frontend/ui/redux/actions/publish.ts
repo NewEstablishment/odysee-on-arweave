@@ -12,7 +12,6 @@ import { lighthouse } from 'redux/actions/search';
 import { selectProtectedContentMembershipsForContentClaimId } from 'redux/selectors/memberships';
 import { doSaveMembershipRestrictionsForContent, doMembershipContentforStreamClaimId } from 'redux/actions/memberships';
 import {
-  makeSelectClaimForUri,
   selectMyActiveClaims,
   selectMyClaims,
   selectMyChannelClaims,
@@ -85,13 +84,12 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
 
     const noFileParam = !filePath || filePath === NO_FILE;
     const state: State = getState();
-    const editingUri = selectPublishFormValue(state, 'editingURI') || '';
-    const remoteUrl = selectPublishFormValue(state, 'remoteFileUrl');
+    const liveCreateType = selectPublishFormValue(state, 'liveCreateType');
     const { memberRestrictionTierIds, name } = state.publish;
     const memberRestrictionStatus = selectMemberRestrictionStatus(state);
-    const claim = makeSelectClaimForUri(editingUri)(state) || {};
-    const hasSourceFile = claim.value && claim.value.source;
-    const redirectToLivestream = noFileParam && !hasSourceFile && !remoteUrl;
+    const isLivestreamPublish =
+      liveCreateType === 'new_placeholder' || liveCreateType === 'edit_placeholder' || liveCreateType === 'choose_replay';
+    const showUploadProgress = !noFileParam && !preview;
 
     const publishSuccess = (successResponse, lbryFirstError) => {
       const state: State = getState();
@@ -146,9 +144,11 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
         })
       );
       dispatch(doCheckPendingClaims(undefined));
-      if (redirectToLivestream) {
+      if (isLivestreamPublish) {
+        const setupParams = new URLSearchParams({ t: 'Setup' });
+        if (pendingClaim.claim_id) setupParams.set('claim_id', pendingClaim.claim_id);
         dispatch(doClearPublish());
-        navigateTo(`/$/${PAGES.LIVESTREAM}`);
+        navigateTo(`/$/${PAGES.LIVESTREAM}?${setupParams.toString()}`);
       }
     };
 
@@ -181,7 +181,7 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
       return;
     }
 
-    if (!redirectToLivestream) {
+    if (!isLivestreamPublish || showUploadProgress) {
       navigateTo(`/$/${PAGES.UPLOADS}`);
     }
 

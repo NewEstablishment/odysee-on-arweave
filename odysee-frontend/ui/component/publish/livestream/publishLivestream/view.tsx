@@ -17,6 +17,9 @@ import './style.scss';
 import FileSelector from 'component/common/file-selector';
 import Button from 'component/button';
 import Icon from 'component/common/icon';
+import { formatBytes } from 'util/format-bytes';
+import { secondsToHms } from 'util/time';
+import { livestreamReplaySourceLabel, type LivestreamReplayEntry } from 'util/livestreamReplayStorage';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectBalance } from 'redux/selectors/wallet';
 import { selectIsStillEditing, selectPublishFormValue } from 'redux/selectors/publish';
@@ -32,6 +35,12 @@ type Props = {
   isCheckingLivestreams: boolean;
   inEditMode: boolean;
   hideTitleUrl?: boolean;
+  localReplayName?: string | null;
+  selectedLocalReplayId?: string | null;
+  localReplays?: LivestreamReplayEntry[];
+  localReplaysLoaded?: boolean;
+  onLocalReplaySelect?: (entry: LivestreamReplayEntry) => void;
+  onLocalReplayFileReplaced?: () => void;
 };
 const INPUT_THROTTLE_MS = 750;
 
@@ -48,7 +57,20 @@ const normalizeUrlForProtocol = (url) => {
 };
 
 function PublishLivestream(props: Props) {
-  const { uri, disabled, livestreamData, isCheckingLivestreams, inEditMode, hideTitleUrl } = props;
+  const {
+    uri,
+    disabled,
+    livestreamData,
+    isCheckingLivestreams,
+    inEditMode,
+    hideTitleUrl,
+    localReplayName,
+    selectedLocalReplayId,
+    localReplays = [],
+    localReplaysLoaded,
+    onLocalReplaySelect,
+    onLocalReplayFileReplaced,
+  } = props;
   const dispatch = useAppDispatch();
   const title = useAppSelector((state) => selectPublishFormValue(state, 'title'));
   const filePath = useAppSelector((state) => selectPublishFormValue(state, 'filePath'));
@@ -75,7 +97,10 @@ function PublishLivestream(props: Props) {
   const totalPages =
     hasLivestreamData && livestreamData.length > PAGE_SIZE ? Math.ceil(livestreamData.length / PAGE_SIZE) : 1;
   const replayTitleLabel = !inEditMode ? __('Select Replay') : __('Use Replay');
+  const uploadReplayLabel = localReplayName ? __('Browser Replay') : __('Upload Replay');
+  const allowReplayUpload = inEditMode || liveCreateType === 'choose_replay';
   const TV_PUBLISH_SIZE_LIMIT_GB_STR = String(WEB_PUBLISH_SIZE_LIMIT_GB);
+  const hasLocalReplays = localReplays.length > 0;
 
   const UPLOAD_SIZE_MESSAGE = __('%SITE_NAME% uploads are limited to %limit% GB.', {
     SITE_NAME,
@@ -91,13 +116,15 @@ function PublishLivestream(props: Props) {
     const livestreamData = JSON.parse(livestreamDataStr);
 
     if (selectedFileIndex !== null && livestreamData && livestreamData.length) {
+      onLocalReplayFileReplaced?.();
       dispatch(
         doUpdatePublishFormAction({
           remoteFileUrl: normalizeUrlForProtocol(livestreamData[selectedFileIndex].data.fileLocation),
+          liveEditType: 'use_replay',
         })
       );
     }
-  }, [selectedFileIndex, dispatch, livestreamDataStr]);
+  }, [selectedFileIndex, dispatch, livestreamDataStr, onLocalReplayFileReplaced]);
 
   function handlePaginateReplays(page) {
     setCurrentPage(page);
@@ -113,6 +140,12 @@ function PublishLivestream(props: Props) {
 
   function handleFileChange(file: WebFile, clearName = true) {
     doUpdateFileFn(file, clearName);
+  }
+
+  function handleUploadReplayFileChange(file: WebFile) {
+    onLocalReplayFileReplaced?.();
+    updatePublishForm({ liveEditType: 'upload_replay', remoteFileUrl: undefined });
+    handleFileChange(file);
   }
 
   function getUploadMessage() {
@@ -403,7 +436,7 @@ function PublishLivestream(props: Props) {
                 </>
               )}
 
-              {inEditMode && (
+              {allowReplayUpload && (
                 <div className="file-upload">
                   <label
                     style={{
@@ -412,16 +445,55 @@ function PublishLivestream(props: Props) {
                   >
                     <FormField
                       name="replay-source"
-                      label={__('Upload Replay')}
+                      label={uploadReplayLabel}
                       type="radio"
                       checked={liveEditType === 'upload_replay'}
-                      onChange={() => updatePublishForm({ liveEditType: 'upload_replay' })}
+                      onChange={() => updatePublishForm({ liveEditType: 'upload_replay', remoteFileUrl: undefined })}
                     />
                   </label>
+                  {localReplayName && (
+                    <p className="help">{__('Using %name% from browser storage.', { name: localReplayName })}</p>
+                  )}
+                  {(hasLocalReplays || localReplaysLoaded === false) && (
+                    <div className="browser-replay-picker">
+                      <div className="browser-replay-picker__header">
+                        <strong>{__('Browser recordings')}</strong>
+                        <span>{__('Saved in this browser')}</span>
+                      </div>
+                      {!localReplaysLoaded && (
+                        <div className="browser-replay-picker__loading">
+                          <Spinner type="small" />
+                        </div>
+                      )}
+                      {localReplaysLoaded &&
+                        localReplays.map((entry) => {
+                          const selected = selectedLocalReplayId === entry.id;
+                          return (
+                            <button
+                              key={entry.id}
+                              type="button"
+                              className={classnames('browser-replay-picker__item', {
+                                'browser-replay-picker__item--selected': selected,
+                              })}
+                              onClick={() => onLocalReplaySelect?.(entry)}
+                            >
+                              <span>
+                                <strong>{entry.title || entry.name}</strong>
+                                <small>
+                                  {livestreamReplaySourceLabel(entry)} - {formatBytes(entry.size, 1)} -{' '}
+                                  {secondsToHms(entry.durationMs / 1000)} - {dayjs(entry.createdAt).from(dayjs())}
+                                </small>
+                              </span>
+                              <Icon icon={selected ? ICONS.SUBMIT : ICONS.PUBLISH} size={16} />
+                            </button>
+                          );
+                        })}
+                    </div>
+                  )}
                   <FileSelector
                     disabled={liveEditType !== 'upload_replay'}
                     currentPath={typeof filePath === 'string' ? filePath : filePath?.name}
-                    onFileChosen={handleFileChange}
+                    onFileChosen={handleUploadReplayFileChange}
                     accept={'video/mp4,video/x-m4v,video/*'}
                     placeholder={__('Select video replay file to upload')}
                   />

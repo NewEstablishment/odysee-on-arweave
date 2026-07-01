@@ -31,9 +31,9 @@ import Button from 'component/button';
 import { useAppSelector } from 'redux/hooks';
 import { selectClientSetting } from 'redux/selectors/settings';
 import * as SETTINGS from 'constants/settings';
-import { getLivestreamTurnServer } from 'constants/livestream';
 import type { MediaWithHls, HlsWithP2P, P2PHlsConfig } from './types';
 import { isEmbedPath } from 'util/embed';
+import { useLivestreamP2PCoordination } from 'util/hyperbeamLivestreamP2P';
 
 const IS_IOS = platform.isIOS();
 const IS_MOBILE = platform.isMobile();
@@ -54,20 +54,6 @@ function parseVttTime(str: string): number | null {
   const h = parts.length > 0 ? parseInt(parts.pop()) : 0;
   const result = h * 3600 + m * 60 + s;
   return isNaN(result) ? null : result;
-}
-
-function getP2PAnnounceTrackers(trackerUrl?: string | null): string[] {
-  if (!trackerUrl) return [];
-  return [trackerUrl];
-}
-
-function getP2PIceServers() {
-  const turnServer = getLivestreamTurnServer();
-  return [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
-    ...(turnServer ? [turnServer] : []),
-  ];
 }
 
 function serializeP2PError(error: any) {
@@ -360,6 +346,26 @@ function VideoJsInner(props: Props) {
 
     return resolvedSource;
   }, [resolvedSource, sourceMode]);
+  const p2pCoordination = useLivestreamP2PCoordination({
+    enabled: Boolean(p2pEnabled && isLivestreamClaim && playbackSource?.src),
+    role: 'viewer',
+    channelId: userClaimId || null,
+    claimId: claimId || activeLivestreamForChannel?.claimId || activeLivestreamForChannel?.claim_id || null,
+    videoUrl: playbackSource?.src || null,
+    trackerUrl: activeLivestreamForChannel?.p2pTrackerUrl || null,
+    swarmId: activeLivestreamForChannel?.p2pSwarmId || null,
+  });
+  const p2pCoordinationKey = React.useMemo(
+    () =>
+      [
+        p2pCoordination.swarmId || '',
+        p2pCoordination.trackerUrls.join('|'),
+        p2pCoordination.iceServers
+          .map((server) => (Array.isArray(server.urls) ? server.urls.join(',') : server.urls || ''))
+          .join('|'),
+      ].join('::'),
+    [p2pCoordination]
+  );
 
   useEffect(() => {
     shouldShowTapToUnmuteRef.current = Boolean(showUnmuteHintWhenMuted);
@@ -677,8 +683,8 @@ function VideoJsInner(props: Props) {
       return;
     }
 
-    const announceTrackers = getP2PAnnounceTrackers(activeLivestreamForChannel?.p2pTrackerUrl || null);
-    const swarmId = activeLivestreamForChannel?.p2pSwarmId || null;
+    const announceTrackers = p2pCoordination.trackerUrls;
+    const swarmId = p2pCoordination.swarmId;
     if (p2pEnabled && isLivestreamClaim) {
       if (P2P_DEBUG)
         console.log('[P2P] Viewer livestream source:', {
@@ -686,8 +692,9 @@ function VideoJsInner(props: Props) {
           isHls,
           preferredVideoUrl: shortenP2PUrl(activeLivestreamForChannel?.videoUrl || null),
           publicVideoUrl: shortenP2PUrl(activeLivestreamForChannel?.videoUrlPublic || null),
-          trackerUrl: activeLivestreamForChannel?.p2pTrackerUrl || null,
+          trackerUrls: announceTrackers,
           swarmId,
+          coordinator: p2pCoordination.source,
         }); // eslint-disable-line no-console
     }
 
@@ -695,7 +702,7 @@ function VideoJsInner(props: Props) {
 
     function createHls(HlsConstructor) {
       if (destroyed) return;
-      const p2pIceServers = getP2PIceServers();
+      const p2pIceServers = p2pCoordination.iceServers;
       // Remember play state so we can restore after HLS reattaches
       const wasPlaying = !media.paused;
       const hls = new HlsConstructor({
@@ -875,7 +882,7 @@ function VideoJsInner(props: Props) {
       clearHls();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [media, playbackSource?.src, resolvedSource?.hlsSrc, sourceMode]);
+  }, [media, playbackSource?.src, resolvedSource?.hlsSrc, sourceMode, p2pEnabled, isLivestreamClaim, p2pCoordinationKey]);
 
   // Auto-play on source load
   useEffect(() => {

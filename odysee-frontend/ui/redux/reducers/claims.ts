@@ -623,7 +623,9 @@ reducers[ACTIONS.UPDATE_PENDING_CLAIMS] = (state: ClaimsState, action: UpdatePen
   const newMyChannelClaimsById = Object.assign({}, state.myChannelClaimsById);
   pendingClaims.forEach((claim: Claim) => {
     let newClaim;
-    const { permanent_url: uri, claim_id: claimId, type, value_type: valueType } = claim;
+    const { claim_id: claimId, type, value_type: valueType } = claim;
+    const uri =
+      (claim as any).permanent_url || (claim as any).canonical_url || (claim as any).claimUri || (claim as any).uri;
     const oldClaim = state.byId[claimId];
 
     if (oldClaim && oldClaim.canonical_url) {

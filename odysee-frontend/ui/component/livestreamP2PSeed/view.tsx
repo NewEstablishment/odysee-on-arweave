@@ -1,20 +1,11 @@
 import React from 'react';
 import Hls from 'hls.js';
-import { getLivestreamTurnServer } from 'constants/livestream';
 import type { HlsWithP2P, P2PHlsConfig } from 'component/viewers/videoViewer/internal/types';
+import { getDefaultLivestreamP2PIceServers } from 'util/hyperbeamLivestreamP2P';
 
 const P2P_DEBUG = process.env.NODE_ENV === 'development';
 const P2P_FORCE_SEGMENT_MODE = true;
 const P2P_SEED_PLAYLIST_TIMEOUT_MS = 30000;
-
-function getP2PIceServers() {
-  const turnServer = getLivestreamTurnServer();
-  return [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
-    ...(turnServer ? [turnServer] : []),
-  ];
-}
 
 function serializeP2PError(error: any) {
   if (!error) return null;
@@ -46,13 +37,17 @@ type Props = {
   active: boolean;
   /** Optional custom tracker URL from livestream metadata */
   trackerUrl?: string | null;
+  trackerUrls?: string[] | null;
   /** Optional custom swarm ID from livestream metadata */
   swarmId?: string | null;
+  iceServers?: RTCIceServer[] | null;
+  coordinationSource?: string | null;
 };
 
-function getP2PAnnounceTrackers(trackerUrl?: string | null): string[] {
-  if (!trackerUrl) return [];
-  return [trackerUrl];
+function getP2PAnnounceTrackers(trackerUrls?: string[] | null, trackerUrl?: string | null): string[] {
+  if (trackerUrls?.length) return trackerUrls;
+  if (trackerUrl) return [trackerUrl];
+  return [];
 }
 
 function shortenP2PUrl(url?: string | null) {
@@ -95,10 +90,22 @@ function summarizeP2PSegment(details: any) {
  *
  * No visible UI - runs entirely in the background.
  */
-export default function LivestreamP2PSeed({ videoUrl, active, trackerUrl, swarmId }: Props) {
+export default function LivestreamP2PSeed({
+  videoUrl,
+  active,
+  trackerUrl,
+  trackerUrls,
+  swarmId,
+  iceServers,
+  coordinationSource,
+}: Props) {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const hlsRef = React.useRef<Hls | null>(null);
   const connectedPeersRef = React.useRef<Set<string>>(new Set());
+  const trackerUrlsKey = (trackerUrls || []).join('|');
+  const iceServersKey = (iceServers || [])
+    .map((server) => (Array.isArray(server.urls) ? server.urls.join(',') : server.urls || ''))
+    .join('|');
 
   React.useEffect(() => {
     if (P2P_DEBUG)
@@ -128,8 +135,8 @@ export default function LivestreamP2PSeed({ videoUrl, active, trackerUrl, swarmI
       }
 
       if (destroyed) return;
-      const p2pIceServers = getP2PIceServers();
-      const announceTrackers = getP2PAnnounceTrackers(trackerUrl);
+      const p2pIceServers = iceServers?.length ? iceServers : getDefaultLivestreamP2PIceServers();
+      const announceTrackers = getP2PAnnounceTrackers(trackerUrls, trackerUrl);
 
       const hls = new HlsConstructor({
         backBufferLength: 30, // Keep more segments in back buffer for P2P sharing
@@ -184,7 +191,11 @@ export default function LivestreamP2PSeed({ videoUrl, active, trackerUrl, swarmI
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         connectedPeersRef.current.clear();
-        console.log('[P2P Seed] Seeding active, tracker:', announceTrackers[0] || 'none'); // eslint-disable-line no-console
+        console.log('[P2P Seed] Seeding active:', {
+          trackers: announceTrackers,
+          swarmId,
+          coordinator: coordinationSource || 'metadata',
+        }); // eslint-disable-line no-console
         video.play().catch(() => {});
 
         if (hls.p2pEngine) {
@@ -292,7 +303,7 @@ export default function LivestreamP2PSeed({ videoUrl, active, trackerUrl, swarmI
         hlsRef.current = null;
       }
     };
-  }, [active, swarmId, trackerUrl, videoUrl]);
+  }, [active, iceServersKey, swarmId, trackerUrl, trackerUrlsKey, videoUrl]);
 
   // Always render the hidden video element so the ref is available when the effect fires
   return (

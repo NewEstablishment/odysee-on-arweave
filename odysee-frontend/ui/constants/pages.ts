@@ -94,6 +94,7 @@ export const YOUTUBE_SYNC = 'youtube';
 export const LIVESTREAM = 'livestream';
 export const LIVESTREAM_CURRENT = 'live';
 export const LIVESTREAM_CREATE = 'livestream/create';
+export const LIVESTREAM_DEMO = 'livestream/demo';
 export const LIST = 'list';
 export const PLAYLIST = 'playlist';
 export const ODYSEE_MEMBERSHIP = 'premium';
@@ -178,6 +179,7 @@ const PAGES = {
   LIVESTREAM,
   LIVESTREAM_CREATE,
   LIVESTREAM_CURRENT,
+  LIVESTREAM_DEMO,
   LIVE_NOW,
   MEMBERSHIPS_LANDING,
   MEMBERSHIPS_SUPPORTER,

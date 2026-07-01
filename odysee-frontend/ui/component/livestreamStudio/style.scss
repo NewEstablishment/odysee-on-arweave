@@ -640,6 +640,107 @@
     }
   }
 
+  &__management {
+    display: grid;
+    gap: 6px;
+    width: 100%;
+    padding: var(--spacing-s);
+    border: 1px solid rgba(var(--color-header-button-base), 0.2);
+    border-radius: var(--border-radius);
+    background: rgba(var(--color-header-button-base), 0.07);
+  }
+
+  &__management-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--spacing-s);
+    min-height: 22px;
+    font-size: var(--font-small);
+
+    span {
+      color: var(--color-text-subtitle);
+      min-width: 0;
+    }
+
+    strong {
+      color: var(--color-text);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+  }
+
+  &__management-error {
+    margin: 0;
+    color: var(--color-text-error);
+    font-size: var(--font-xsmall);
+  }
+
+  &__management-action {
+    width: 100%;
+    margin-top: 2px;
+  }
+
+  &__management-saved-replay {
+    display: grid;
+    gap: var(--spacing-xs);
+    min-width: 0;
+  }
+
+  &__management-saved-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    padding: var(--spacing-xs);
+    border-radius: calc(var(--border-radius) / 2);
+    background: rgba(var(--color-header-button-base), 0.1);
+
+    strong,
+    span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    strong {
+      color: var(--color-text);
+      font-size: var(--font-small);
+    }
+
+    span {
+      color: var(--color-text-subtitle);
+      font-size: var(--font-xsmall);
+    }
+  }
+
+  &__management-saved-video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: calc(var(--border-radius) / 2);
+    background: #000;
+  }
+
+  &__management-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+  }
+
+  &__management-actions > * {
+    flex: 1 1 130px;
+  }
+
+  &__management-saved-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+  }
+
+  &__management-saved-actions > * {
+    flex: 1 1 130px;
+  }
+
   &__saved-box {
     width: 100%;
     margin-top: var(--spacing-m);

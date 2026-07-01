@@ -2,6 +2,7 @@ import React from 'react';
 import Button from 'component/button';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
+import * as ACTIONS from 'constants/action_types';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { useNavigate } from 'react-router-dom';
 import { doToast } from 'redux/actions/notifications';
@@ -19,6 +20,7 @@ import { useLivestreamPublish } from 'contexts/livestreamPublish';
 import * as SETTINGS from 'constants/settings';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { doSetClientSetting } from 'redux/actions/settings';
+import { doPrepareEdit, doUpdateFile, doUpdatePublishForm } from 'redux/actions/publish';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import usePersistedState from 'effects/use-persisted-state';
 import {
@@ -37,13 +39,15 @@ import {
 } from 'redux/actions/websocket';
 import { doCommentList } from 'redux/actions/comments';
 import { doResolveUri } from 'redux/actions/claims';
-import { formatLbryChannelName } from 'util/url';
+import { formatLbryChannelName, formatLbryUrlForWeb } from 'util/url';
 import ClaimPreview from 'component/claimPreview';
 import LivestreamP2PSeed from 'component/livestreamP2PSeed';
+import LivestreamBrowserRelay from 'component/livestreamBrowserRelay';
 import LivestreamConnectingAnimation from 'component/livestreamConnectingAnimation';
 import useLivestreamMetrics from 'effects/use-livestream-metrics';
 import classnames from 'classnames';
 import describeUnknown from 'util/describeUnknown';
+import dayjs from 'util/dayjs';
 import LivestreamSourceSelector from 'component/livestreamSourceSelector/view';
 import type { VideoSource, AudioSource } from 'component/livestreamSourceSelector/view';
 import LivestreamCompositor, { ChatWidgetEditPreview } from 'component/livestreamCompositor/view';
@@ -53,6 +57,16 @@ import SpacemanPng from './spaceman.png';
 import { PLACEHOLDER_MESSAGES, PLACEHOLDER_HYPERCHATS, hyperchatColor } from 'util/livestreamChatPlaceholders';
 import type { CompositorLayer } from 'component/livestreamCompositor/view';
 import { AudioMixer } from 'util/audioMixer';
+import { useLivestreamP2PCoordination } from 'util/hyperbeamLivestreamP2P';
+import {
+  getLivestreamReplayFile,
+  getLivestreamReplayStorageEstimate,
+  livestreamReplaySourceLabel,
+  requestLivestreamReplayStoragePersistence,
+  saveLivestreamReplay,
+  type LivestreamReplayEntry,
+  type LivestreamReplayStorageEstimate,
+} from 'util/livestreamReplayStorage';
 import './style.scss';
 
 type Props = {
@@ -64,6 +78,7 @@ type Props = {
   signature?: string;
   signingTs?: string;
   isFloating?: boolean;
+  onReplaySaved?: (entry: LivestreamReplayEntry) => void;
 };
 
 type Status = 'idle' | 'requesting_permission' | 'preview' | 'connecting' | 'live' | 'stopping' | 'error';
@@ -246,6 +261,45 @@ function formatElapsed(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function formatBytes(bytes: number): string {
+  if (!bytes) return '0 MB';
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatReplayDuration(durationMs: number) {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatReplayStorageSummary(estimate: LivestreamReplayStorageEstimate | null) {
+  if (!estimate) return __('Checking storage');
+  if (!estimate.supported) return __('Unavailable');
+  if (estimate.usage != null && estimate.quota != null) {
+    const freeBytes = Math.max(0, estimate.quota - estimate.usage);
+    return __('%used% used, %free% free', {
+      used: formatBytes(estimate.usage),
+      free: formatBytes(freeBytes),
+    });
+  }
+  if (estimate.quota != null) return __('%free% available', { free: formatBytes(estimate.quota) });
+  return __('Available');
+}
+
+function livestreamClaimUri(claim?: Record<string, any> | null) {
+  return claim?.permanent_url || claim?.canonical_url || null;
+}
+
+function getRecorderMimeType() {
+  if (typeof MediaRecorder === 'undefined') return '';
+  const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+}
+
 function formatFpsLabel(fps: number | null | undefined): string | null {
   if (fps == null || !Number.isFinite(fps) || fps <= 0) return null;
   return `${Math.round(fps)} fps`;
@@ -351,8 +405,16 @@ function getCodecAttemptOrder(
 }
 
 export default function LivestreamStudio(props: Props) {
-  const { streamKey, livestreamUri, livestreamEnabled, hasApprovedLivestreamClaim, presetId, signature, signingTs } =
-    props;
+  const {
+    streamKey,
+    livestreamUri,
+    livestreamEnabled,
+    hasApprovedLivestreamClaim,
+    presetId,
+    signature,
+    signingTs,
+    onReplaySaved,
+  } = props;
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const publishCtx = useLivestreamPublish();
@@ -840,7 +902,12 @@ export default function LivestreamStudio(props: Props) {
     });
   }, [pendingLivestreamClaims, myLivestreamClaims]);
   const nextStreamClaim = allLivestreamClaims[0];
-  const nextStreamUri = nextStreamClaim?.permanent_url;
+  const nextStreamUri = livestreamClaimUri(nextStreamClaim);
+  const nextStreamWebUrl = nextStreamUri ? formatLbryUrlForWeb(nextStreamUri) : null;
+  const activeChannelWebUrl =
+    activeChannelClaim?.permanent_url || activeChannelClaim?.canonical_url
+      ? formatLbryUrlForWeb(activeChannelClaim.permanent_url || activeChannelClaim.canonical_url)
+      : null;
 
   // Server-side stream metrics
   const channelName = activeChannelClaim?.name;
@@ -874,9 +941,7 @@ export default function LivestreamStudio(props: Props) {
     }
   }, [serverMetrics]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // P2P seed: streamer acts as first peer in the P2P swarm (uses shared P2P_DELIVERY setting)
   const activeLivestream = useAppSelector((state) => selectActiveLivestreamForChannel(state, channelId));
-  // Use the public (non-LLHLS) URL for seeding, with ?format=ts to match what viewers load
   const rawHlsVideoUrl = activeLivestream?.videoUrlPublic || activeLivestream?.videoUrl;
   const hlsVideoUrl =
     rawHlsVideoUrl && !rawHlsVideoUrl.includes('format=ts')
@@ -885,15 +950,212 @@ export default function LivestreamStudio(props: Props) {
   const p2pTrackerUrl = activeLivestream?.p2pTrackerUrl || null;
   const p2pSwarmId = activeLivestream?.p2pSwarmId || null;
   const p2pEnabled = useAppSelector((state) => selectClientSetting(state, SETTINGS.P2P_DELIVERY));
+  const browserP2PRequired = status === 'live' && Boolean(mediaStream && !hlsVideoUrl);
+  const p2pSeedingEnabled = Boolean(p2pEnabled || browserP2PRequired);
+  const p2pClaimId = activeLivestream?.claimId || activeLivestream?.claim_id || nextStreamClaim?.claim_id || null;
+  const p2pCoordination = useLivestreamP2PCoordination({
+    enabled: p2pSeedingEnabled && status === 'live' && Boolean(hlsVideoUrl || mediaStream),
+    role: 'seed',
+    channelId,
+    claimId: p2pClaimId,
+    videoUrl: hlsVideoUrl || nextStreamUri || null,
+    trackerUrl: p2pTrackerUrl,
+    swarmId: p2pSwarmId,
+  });
   const prefsReady = useAppSelector(selectPrefsReady);
   const [showP2pConfirm, setShowP2pConfirm] = React.useState(false);
   const [justEnded, setJustEnded] = React.useState(false);
+  const [browserP2PViewers, setBrowserP2PViewers] = React.useState(0);
+  const [localReplay, setLocalReplay] = React.useState<LivestreamReplayEntry | null>(null);
+  const [localReplayPreviewUrl, setLocalReplayPreviewUrl] = React.useState<string | null>(null);
+  const [publishingLocalReplay, setPublishingLocalReplay] = React.useState(false);
+  const [downloadingLocalReplay, setDownloadingLocalReplay] = React.useState(false);
+  const [replayStorageEstimate, setReplayStorageEstimate] =
+    React.useState<LivestreamReplayStorageEstimate | null>(null);
+  const [requestingReplayStoragePersistence, setRequestingReplayStoragePersistence] = React.useState(false);
+  const [replayRecorderState, setReplayRecorderState] = React.useState({
+    status: 'idle' as 'idle' | 'recording' | 'saving' | 'saved' | 'unsupported' | 'error',
+    bytes: 0,
+    startedAt: 0,
+    error: null as string | null,
+  });
+  const replayTitle =
+    nextStreamClaim?.value?.title || nextStreamClaim?.title || nextStreamClaim?.name || activeChannelClaim?.value?.title;
+  const replayStorageSummary = formatReplayStorageSummary(replayStorageEstimate);
+  const canRequestReplayStoragePersistence = Boolean(
+    replayStorageEstimate?.supported && replayStorageEstimate.canPersist && replayStorageEstimate.persisted === false
+  );
+  const mountedRef = React.useRef(false);
+  const replayContextRef = React.useRef({
+    channelId: channelId || null,
+    claimId: p2pClaimId || null,
+    uri: nextStreamUri || null,
+    title: replayTitle || null,
+  });
+  const onReplaySavedRef = React.useRef(onReplaySaved);
+  onReplaySavedRef.current = onReplaySaved;
+  replayContextRef.current = {
+    channelId: channelId || null,
+    claimId: p2pClaimId || null,
+    uri: nextStreamUri || null,
+    title: replayTitle || null,
+  };
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!justEnded) return;
     const timer = setTimeout(() => setJustEnded(false), 15000);
     return () => clearTimeout(timer);
   }, [justEnded]);
+
+  React.useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    setLocalReplayPreviewUrl(null);
+    if (!localReplay) return;
+    getLivestreamReplayFile(localReplay.id)
+      .then((file) => {
+        if (!file) return;
+        const url = URL.createObjectURL(file);
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setLocalReplayPreviewUrl(url);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [localReplay?.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getLivestreamReplayStorageEstimate()
+      .then((estimate) => {
+        if (!cancelled) setReplayStorageEstimate(estimate);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReplayStorageEstimate({
+            supported: false,
+            usage: null,
+            quota: null,
+            persisted: null,
+            canPersist: false,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [localReplay?.id, replayRecorderState.status]);
+
+  React.useEffect(() => {
+    if (status !== 'live' || !mediaStream || mediaStream.getTracks().length === 0) return;
+    if (typeof MediaRecorder === 'undefined') {
+      setReplayRecorderState((prev) => ({ ...prev, status: 'unsupported' }));
+      return;
+    }
+
+    const mimeType = getRecorderMimeType();
+    if (!mimeType) {
+      setReplayRecorderState((prev) => ({ ...prev, status: 'unsupported' }));
+      return;
+    }
+
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(mediaStream, { mimeType });
+    } catch (e: any) {
+      setReplayRecorderState({
+        status: 'error',
+        bytes: 0,
+        startedAt: 0,
+        error: e?.message || __('Could not start the local replay recorder.'),
+      });
+      return;
+    }
+
+    const chunks: Blob[] = [];
+    const startedAt = Date.now();
+    setLocalReplay(null);
+    setReplayRecorderState({ status: 'recording', bytes: 0, startedAt, error: null });
+
+    recorder.addEventListener('dataavailable', (event) => {
+      if (!event.data || event.data.size === 0) return;
+      chunks.push(event.data);
+      const bytes = chunks.reduce((total, chunk) => total + chunk.size, 0);
+      setReplayRecorderState((prev) => ({ ...prev, bytes }));
+    });
+
+    recorder.addEventListener('stop', () => {
+      const endedAt = Date.now();
+      if (!chunks.length) {
+        setReplayRecorderState({ status: 'idle', bytes: 0, startedAt: 0, error: null });
+        return;
+      }
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType });
+      setReplayRecorderState((prev) => ({ ...prev, status: 'saving', bytes: blob.size }));
+      const replayContext = replayContextRef.current;
+      saveLivestreamReplay({
+        blob,
+        sourceType: 'browser',
+        channelId: replayContext.channelId,
+        claimId: replayContext.claimId,
+        uri: replayContext.uri,
+        title: replayContext.title,
+        startedAt,
+        endedAt,
+      })
+        .then((entry) => {
+          if (!mountedRef.current) return;
+          setLocalReplay(entry);
+          onReplaySavedRef.current?.(entry);
+          setReplayRecorderState({ status: 'saved', bytes: entry.size, startedAt, error: null });
+        })
+        .catch((e: any) => {
+          if (!mountedRef.current) return;
+          setReplayRecorderState({
+            status: 'error',
+            bytes: blob.size,
+            startedAt,
+            error: e?.message || __('Could not save replay in browser storage.'),
+          });
+        });
+    });
+
+    try {
+      recorder.start(5000);
+    } catch (e: any) {
+      setReplayRecorderState({
+        status: 'error',
+        bytes: 0,
+        startedAt: 0,
+        error: e?.message || __('Could not start the local replay recorder.'),
+      });
+      return;
+    }
+
+    return () => {
+      if (recorder.state !== 'inactive') {
+        try {
+          recorder.requestData();
+        } catch {}
+        try {
+          recorder.stop();
+        } catch {}
+      }
+    };
+  }, [mediaStream, status]);
 
   // Detect if another stream is already active on this channel (e.g. RTMP, or another browser tab).
   // Suppress for ~15s after the user ends their own stream so the polling has time to catch up.
@@ -1015,6 +1277,57 @@ export default function LivestreamStudio(props: Props) {
   );
   const totalViewers =
     useAppSelector((state) => (activeClaimId ? selectViewersForId(state, activeClaimId) : undefined)) ?? 0;
+  const activeLivestreamUri =
+    activeLivestream?.claimUri || activeLivestream?.uri || activeLivestream?.canonical_url || activeLivestream?.permanent_url;
+  const activeLivestreamHasServerVideo = Boolean(activeLivestream?.videoUrlPublic || activeLivestream?.videoUrl);
+  const p2pTrackerUrlForClaim = p2pCoordination.trackerUrls[0] || p2pTrackerUrl || null;
+  const dispatchBrowserLivestreamState = React.useCallback(
+    (isLive: boolean) => {
+      if (!channelId) return;
+      const claimId = nextStreamClaim?.claim_id || activeClaimId || p2pClaimId || null;
+      const claimUri = nextStreamUri || livestreamClaimUri(nextStreamClaim);
+      dispatch({
+        type: ACTIONS.LIVESTREAM_IS_LIVE_COMPLETE,
+        data: {
+          [channelId]: {
+            type: 'application/x-mpegurl',
+            isLive,
+            viewCount: isLive ? Math.max(totalViewers, browserP2PViewers) : 0,
+            creatorId: channelId,
+            thumbnailUrl: null,
+            activeClaim:
+              isLive && claimUri
+                ? {
+                    claimId,
+                    claimUri,
+                    uri: claimUri,
+                    permanent_url: claimUri,
+                    canonical_url: claimUri,
+                    title: replayTitle,
+                    sourceType: 'browser',
+                    p2pTrackerUrl: p2pTrackerUrlForClaim,
+                    p2pSwarmId: p2pCoordination.swarmId || null,
+                    startedStreaming: dayjs(),
+                  }
+                : null,
+          },
+        },
+      });
+    },
+    [
+      activeClaimId,
+      browserP2PViewers,
+      channelId,
+      dispatch,
+      nextStreamClaim,
+      nextStreamUri,
+      p2pClaimId,
+      p2pCoordination.swarmId,
+      p2pTrackerUrlForClaim,
+      replayTitle,
+      totalViewers,
+    ]
+  );
 
   // Poll livestream status: detects existing streams + gets HLS URL for P2P seeding
   React.useEffect(() => {
@@ -1027,7 +1340,7 @@ export default function LivestreamStudio(props: Props) {
   }, [channelId, dispatch]);
 
   React.useEffect(() => {
-    if (!channelId || status !== 'live' || !p2pEnabled || hlsVideoUrl) return;
+    if (!channelId || status !== 'live' || !p2pSeedingEnabled || hlsVideoUrl) return;
 
     dispatch(doFetchChannelIsLiveForId(channelId));
 
@@ -1036,7 +1349,20 @@ export default function LivestreamStudio(props: Props) {
     }, 3000);
 
     return () => clearInterval(retryInterval);
-  }, [channelId, dispatch, hlsVideoUrl, p2pEnabled, status]);
+  }, [channelId, dispatch, hlsVideoUrl, p2pSeedingEnabled, status]);
+
+  React.useEffect(() => {
+    if (status !== 'live' || !mediaStream || !nextStreamUri) return;
+    if (activeLivestreamUri === nextStreamUri && !activeLivestreamHasServerVideo) return;
+    dispatchBrowserLivestreamState(true);
+  }, [
+    activeLivestreamHasServerVideo,
+    activeLivestreamUri,
+    dispatchBrowserLivestreamState,
+    mediaStream,
+    nextStreamUri,
+    status,
+  ]);
 
   // Debug P2P seed conditions
   React.useEffect(() => {
@@ -1048,11 +1374,12 @@ export default function LivestreamStudio(props: Props) {
           selectedVideoUrl: hlsVideoUrl || null,
           preferredVideoUrl: activeLivestream?.videoUrl || null,
           publicVideoUrl: activeLivestream?.videoUrlPublic || null,
-          trackerUrl: p2pTrackerUrl,
-          swarmId: p2pSwarmId,
+          trackerUrls: p2pCoordination.trackerUrls,
+          swarmId: p2pCoordination.swarmId,
+          coordinator: p2pCoordination.source,
         }); // eslint-disable-line no-console
     }
-  }, [activeLivestream, p2pEnabled, status, hlsVideoUrl, p2pSwarmId, p2pTrackerUrl]);
+  }, [activeLivestream, p2pCoordination, p2pEnabled, status, hlsVideoUrl]);
 
   // Runtime stats
   const [runtimeStats, setRuntimeStats] = React.useState({
@@ -1992,16 +2319,17 @@ export default function LivestreamStudio(props: Props) {
     });
   }, [cameraEnabled, mediaStream]);
 
-  // Warn before closing/refreshing while live
+  // Warn before closing/refreshing while live or while the local replay is still being saved.
   React.useEffect(() => {
-    if (status !== 'live' && status !== 'connecting') return;
+    const replayBusy = replayRecorderState.status === 'recording' || replayRecorderState.status === 'saving';
+    if (status !== 'live' && status !== 'connecting' && !replayBusy) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [status]);
+  }, [replayRecorderState.status, status]);
 
   // Monitor ICE connection state — detect when the stream actually dies
   React.useEffect(() => {
@@ -2179,6 +2507,94 @@ export default function LivestreamStudio(props: Props) {
 
   // ---- Actions ----
 
+  async function handlePublishLocalReplay() {
+    if (!localReplay || publishingLocalReplay) return;
+    setPublishingLocalReplay(true);
+    let file: File | null;
+    try {
+      file = await getLivestreamReplayFile(localReplay.id);
+    } catch {
+      setPublishingLocalReplay(false);
+      dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+      return;
+    }
+    if (!file) {
+      setPublishingLocalReplay(false);
+      dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+      return;
+    }
+    const replayUri = localReplay.uri || nextStreamUri;
+    const replayClaim =
+      allLivestreamClaims.find(
+        (claim: any) => claim.claim_id === localReplay.claimId || livestreamClaimUri(claim) === replayUri
+      ) || nextStreamClaim;
+    try {
+      if (replayClaim && replayUri) {
+        await dispatch(doPrepareEdit(replayClaim, replayUri, ''));
+      }
+      dispatch(
+        doUpdatePublishForm({
+          editingURI: replayUri,
+          liveCreateType: replayUri ? 'edit_placeholder' : 'choose_replay',
+          liveEditType: 'upload_replay',
+          remoteFileUrl: undefined,
+        })
+      );
+      dispatch(doUpdateFile(file as WebFile, false));
+      navigate(`/$/${PAGES.LIVESTREAM_CREATE}?s=Replay&replay=${localReplay.id}`);
+    } catch {
+      setPublishingLocalReplay(false);
+      dispatch(doToast({ isError: true, message: __('Replay could not be prepared for publishing.') }));
+    }
+  }
+
+  async function handleDownloadLocalReplay() {
+    if (!localReplay || downloadingLocalReplay) return;
+    setDownloadingLocalReplay(true);
+    let objectUrl: string | null = null;
+    try {
+      const file = await getLivestreamReplayFile(localReplay.id);
+      if (!file) {
+        dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+        return;
+      }
+      objectUrl = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = file.name || localReplay.name || 'livestream-replay.webm';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      dispatch(doToast({ message: __('Replay download started.') }));
+    } catch {
+      dispatch(doToast({ isError: true, message: __('Replay could not be downloaded from browser storage.') }));
+    } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setDownloadingLocalReplay(false);
+    }
+  }
+
+  async function keepReplayStorage() {
+    setRequestingReplayStoragePersistence(true);
+    try {
+      const persisted = await requestLivestreamReplayStoragePersistence();
+      const estimate = await getLivestreamReplayStorageEstimate();
+      setReplayStorageEstimate(estimate);
+      dispatch(
+        doToast({
+          isError: !persisted,
+          message: persisted
+            ? __('Browser storage will try to keep livestream replays available.')
+            : __('This browser did not allow persistent replay storage.'),
+        })
+      );
+    } catch {
+      dispatch(doToast({ isError: true, message: __('Replay storage settings could not be updated.') }));
+    } finally {
+      setRequestingReplayStoragePersistence(false);
+    }
+  }
+
   async function handleGoLive() {
     if (status === 'idle' || status === 'error') {
       setErrorMessage(null);
@@ -2345,6 +2761,7 @@ export default function LivestreamStudio(props: Props) {
     await publishCtx.actions.stopStream({
       preservePreview: Boolean(cameraAutoStart),
     });
+    dispatchBrowserLivestreamState(false);
     dispatch(doToast({ message: __('Stream ended.') }));
   }
 
@@ -2815,20 +3232,29 @@ export default function LivestreamStudio(props: Props) {
                     </button>
                   ))}
 
-                {(isLive || p2pEnabled) && (
+                {(isLive || p2pSeedingEnabled) && (
                   <button
                     className={classnames('livestream-studio__control-btn livestream-studio__control-btn--p2p', {
-                      'livestream-studio__control-btn--p2p-active': p2pEnabled,
-                      'livestream-studio__control-btn--p2p-pulse': p2pEnabled,
+                      'livestream-studio__control-btn--p2p-active': p2pSeedingEnabled,
+                      'livestream-studio__control-btn--p2p-pulse': p2pSeedingEnabled,
                     })}
                     onClick={() => {
+                      if (browserP2PRequired) {
+                        return;
+                      }
                       if (p2pEnabled) {
                         dispatch(doSetClientSetting(SETTINGS.P2P_DELIVERY, false, prefsReady));
                       } else {
                         setShowP2pConfirm(true);
                       }
                     }}
-                    title={p2pEnabled ? __('P2P seeding active - click to disable') : __('Enable P2P seeding')}
+                    title={
+                      browserP2PRequired
+                        ? __('Browser P2P seeding active')
+                        : p2pEnabled
+                          ? __('P2P seeding active - click to disable')
+                          : __('Enable P2P seeding')
+                    }
                   >
                     <svg
                       width="16"
@@ -2967,6 +3393,108 @@ export default function LivestreamStudio(props: Props) {
             >
               {__('Save composition')}
             </button>
+            <div className="livestream-studio__management">
+              {(nextStreamWebUrl || activeChannelWebUrl) && (
+                <div className="livestream-studio__management-actions">
+                  {nextStreamWebUrl && (
+                    <Button
+                      button="secondary"
+                      className="livestream-studio__management-action"
+                      icon={ICONS.EYE}
+                      label={__('Open stream')}
+                      onClick={() => navigate(nextStreamWebUrl)}
+                    />
+                  )}
+                  {activeChannelWebUrl && (
+                    <Button
+                      button="alt"
+                      className="livestream-studio__management-action"
+                      icon={ICONS.CHANNEL}
+                      label={__('Open channel')}
+                      onClick={() => navigate(activeChannelWebUrl)}
+                    />
+                  )}
+                </div>
+              )}
+              <div className="livestream-studio__management-row">
+                <span>{__('HyperBEAM')}</span>
+                <strong>
+                  {p2pSeedingEnabled
+                    ? p2pCoordination.source === 'hyperbeam'
+                      ? __('Room online')
+                      : __('Waiting for node')
+                    : __('P2P off')}
+                </strong>
+              </div>
+              <div className="livestream-studio__management-row">
+                <span>{__('Browser viewers')}</span>
+                <strong>{browserP2PViewers}</strong>
+              </div>
+              <div className="livestream-studio__management-row">
+                <span>{__('Local replay')}</span>
+                <strong>
+                  {replayRecorderState.status === 'recording' &&
+                    __('Recording %size%', { size: formatBytes(replayRecorderState.bytes) })}
+                  {replayRecorderState.status === 'saving' && __('Saving replay')}
+                  {replayRecorderState.status === 'saved' &&
+                    __('Saved %size%', { size: formatBytes(replayRecorderState.bytes) })}
+                  {replayRecorderState.status === 'unsupported' && __('Unsupported browser')}
+                  {replayRecorderState.status === 'error' && __('Save failed')}
+                  {replayRecorderState.status === 'idle' && __('Ready')}
+                </strong>
+              </div>
+              <div className="livestream-studio__management-row">
+                <span>{__('Replay storage')}</span>
+                <strong>{replayStorageSummary}</strong>
+              </div>
+              {replayRecorderState.error && <p className="livestream-studio__management-error">{replayRecorderState.error}</p>}
+              {canRequestReplayStoragePersistence && (
+                <Button
+                  button="secondary"
+                  className="livestream-studio__management-action"
+                  label={requestingReplayStoragePersistence ? __('Saving...') : __('Keep recordings')}
+                  onClick={keepReplayStorage}
+                  disabled={requestingReplayStoragePersistence}
+                />
+              )}
+              {localReplay && (
+                <div className="livestream-studio__management-saved-replay">
+                  {localReplayPreviewUrl && (
+                    <video
+                      className="livestream-studio__management-saved-video"
+                      src={localReplayPreviewUrl}
+                      controls
+                      preload="metadata"
+                    />
+                  )}
+                  <div className="livestream-studio__management-saved-copy">
+                    <strong>{localReplay.title || localReplay.name}</strong>
+                    <span>
+                      {livestreamReplaySourceLabel(localReplay)} - {formatBytes(localReplay.size)} -{' '}
+                      {formatReplayDuration(localReplay.durationMs)}
+                    </span>
+                  </div>
+                  <div className="livestream-studio__management-saved-actions">
+                    <Button
+                      button="alt"
+                      className="livestream-studio__management-action"
+                      icon={ICONS.DOWNLOAD}
+                      label={downloadingLocalReplay ? __('Downloading...') : __('Download')}
+                      onClick={handleDownloadLocalReplay}
+                      disabled={publishingLocalReplay || downloadingLocalReplay}
+                    />
+                    <Button
+                      button="secondary"
+                      className="livestream-studio__management-action"
+                      icon={ICONS.PUBLISH}
+                      label={publishingLocalReplay ? __('Publishing...') : __('Publish replay')}
+                      onClick={handlePublishLocalReplay}
+                      disabled={!nextStreamUri || publishingLocalReplay || downloadingLocalReplay}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
             {(status === 'idle' ||
               status === 'error' ||
               status === 'preview' ||
@@ -3055,7 +3583,7 @@ export default function LivestreamStudio(props: Props) {
       )}
 
       {/* P2P seeding banner for streamer - hidden once enabled */}
-      {isLive && !p2pEnabled && !showP2pConfirm && (
+      {isLive && !p2pSeedingEnabled && !showP2pConfirm && (
         <div className="livestream-studio__p2p-banner">
           <div className="livestream-studio__p2p-banner-icon">
             <svg
@@ -3104,7 +3632,7 @@ export default function LivestreamStudio(props: Props) {
           <Button
             button="link"
             label={__('Create one now')}
-            onClick={() => navigate(`/$/${PAGES.LIVESTREAM}?t=Publish`)}
+            onClick={() => navigate(`/$/${PAGES.LIVESTREAM_CREATE}`)}
           />
         </div>
       )}
@@ -3112,9 +3640,19 @@ export default function LivestreamStudio(props: Props) {
       {/* Hidden P2P seed player - makes streamer the first peer */}
       <LivestreamP2PSeed
         videoUrl={hlsVideoUrl || ''}
-        active={p2pEnabled && isLive && Boolean(hlsVideoUrl)}
+        active={p2pSeedingEnabled && isLive && Boolean(hlsVideoUrl)}
         trackerUrl={p2pTrackerUrl}
-        swarmId={p2pSwarmId}
+        trackerUrls={p2pCoordination.trackerUrls}
+        swarmId={p2pCoordination.swarmId}
+        iceServers={p2pCoordination.iceServers}
+        coordinationSource={p2pCoordination.source}
+      />
+
+      <LivestreamBrowserRelay
+        active={p2pSeedingEnabled && isLive && Boolean(mediaStream)}
+        mediaStream={mediaStream}
+        coordination={p2pCoordination}
+        onViewerCount={setBrowserP2PViewers}
       />
 
       {/* P2P confirmation dialog */}

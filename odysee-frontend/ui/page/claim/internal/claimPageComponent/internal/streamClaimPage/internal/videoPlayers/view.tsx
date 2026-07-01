@@ -8,6 +8,7 @@ import * as SETTINGS from 'constants/settings';
 import * as TAGS from 'constants/tags';
 import FileTitleSection from 'component/fileTitleSection';
 import VideoClaimInitiator from 'component/videoClaimInitiator';
+import LivestreamBrowserViewer from 'component/livestreamBrowserViewer';
 import ClaimCoverRender from 'component/claimCoverRender';
 import RecommendedContent from 'component/recommendedContent';
 import HyperbeamPlaybackDebug from 'component/hyperbeamPlaybackDebug';
@@ -17,7 +18,7 @@ import { useIsMobile, useIsMobileLandscape, useIsSmallScreen } from 'effects/use
 import { LINKED_COMMENT_QUERY_PARAM, THREAD_COMMENT_QUERY_PARAM } from 'constants/comment';
 import { useLocation } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { getChannelIdFromClaim } from 'util/claim';
+import { getChannelIdFromClaim, isStreamPlaceholderClaim } from 'util/claim';
 import {
   selectClaimIsNsfwForUri,
   selectClaimForUri,
@@ -31,6 +32,7 @@ import {
   selectIsUriCurrentlyPlaying,
   selectIsAutoplayCountdownForUri,
 } from 'redux/selectors/content';
+import { getActiveLivestreamUri, selectActiveLivestreamForChannel } from 'redux/selectors/livestream';
 import { selectCommentsListTitleForUri, selectCommentsDisabledSettingForChannelId } from 'redux/selectors/comments';
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
 import { clearPosition as clearPositionAction } from 'redux/actions/content';
@@ -64,6 +66,7 @@ export default function VideoPlayersPage(props: Props) {
   const commentSettingDisabled = useAppSelector((state) => selectCommentsDisabledSettingForChannelId(state, channelId));
   const playingCollectionId = useAppSelector(selectPlayingCollectionId);
   const fileInfo = useAppSelector((state) => makeSelectFileInfoForUri(uri)(state));
+  const activeLivestreamForChannel = useAppSelector((state) => selectActiveLivestreamForChannel(state, channelId));
   const isMature = useAppSelector((state) => selectClaimIsNsfwForUri(state, uri));
   const isUriPlaying = useAppSelector((state) => selectIsUriCurrentlyPlaying(state, uri));
   const position = useAppSelector((state) => selectContentPositionForUri(state, uri));
@@ -144,6 +147,32 @@ export default function VideoPlayersPage(props: Props) {
 
   const isMobilePortrait = isMobile && !isLandscapeRotated;
   const commentsListProps = { uri, linkedCommentId, threadCommentId };
+  const isLivestreamClaim = isStreamPlaceholderClaim(claim);
+  const activeLivestreamClaimId =
+    activeLivestreamForChannel?.claimId || activeLivestreamForChannel?.claim_id || null;
+  const activeLivestreamUri = getActiveLivestreamUri(activeLivestreamForChannel);
+  const isCurrentClaimLive =
+    activeLivestreamClaimId === claimId ||
+    Boolean(
+      activeLivestreamUri &&
+        [claim?.claimUri, claim?.uri, claim?.canonical_url, claim?.permanent_url].includes(activeLivestreamUri)
+  );
+  const livestreamVideoUrl = activeLivestreamForChannel?.videoUrlPublic || activeLivestreamForChannel?.videoUrl || null;
+  const livestreamP2PTrackerUrl = activeLivestreamForChannel?.p2pTrackerUrl || null;
+  const livestreamP2PSwarmId = activeLivestreamForChannel?.p2pSwarmId || null;
+  const discoverBrowserLivestream = Boolean(isLivestreamClaim && !livestreamVideoUrl);
+  const primaryPlayer = (
+    <LivestreamBrowserViewer
+      active={Boolean(isLivestreamClaim && isCurrentClaimLive)}
+      discoverable={discoverBrowserLivestream}
+      channelId={channelId}
+      claimId={activeLivestreamClaimId || claimId}
+      videoUrl={livestreamVideoUrl}
+      trackerUrl={livestreamP2PTrackerUrl}
+      swarmId={livestreamP2PSwarmId}
+      fallback={<VideoClaimInitiator uri={uri} />}
+    />
+  );
 
   if (isMobilePortrait) {
     const infoContent = (
@@ -179,7 +208,7 @@ export default function VideoPlayersPage(props: Props) {
       <>
         <div className="section card-stack file-page__video">
           <div className={PRIMARY_PLAYER_WRAPPER_CLASS}>
-            <VideoClaimInitiator uri={uri} />
+            {primaryPlayer}
           </div>
 
           <HyperbeamPlaybackDebug uri={uri} claim={claim} accessStatus={accessStatus} />
@@ -201,7 +230,7 @@ export default function VideoPlayersPage(props: Props) {
     <>
       <div className="section card-stack file-page__video">
         <div className={PRIMARY_PLAYER_WRAPPER_CLASS}>
-          <VideoClaimInitiator uri={uri} />
+          {primaryPlayer}
         </div>
 
         <HyperbeamPlaybackDebug uri={uri} claim={claim} accessStatus={accessStatus} />

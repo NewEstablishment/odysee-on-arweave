@@ -78,6 +78,7 @@ export const ROUTES = {
   post: '/$/post',
   livestream: '/$/livestream',
   livestreamCreate: '/$/livestream/create',
+  livestreamDemo: '/$/livestream/demo',
   repost: '/$/repost',
 
   // ── Library / Playlists ─────────────────────────────────────────────────

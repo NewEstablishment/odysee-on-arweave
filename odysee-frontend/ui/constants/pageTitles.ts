@@ -24,6 +24,7 @@ export const PAGE_TITLE = {
   [PAGES.PLAYLISTS]: 'Playlists',
   [PAGES.LIVESTREAM]: 'Go Live on Odysee',
   [PAGES.LIVESTREAM_CURRENT]: 'Live (Experimental)',
+  [PAGES.LIVESTREAM_DEMO]: 'Livestream P2P Demo',
   [PAGES.NOTIFICATIONS]: 'Notifications',
   [PAGES.ODYSEE_MEMBERSHIP]: 'Odysee Premium',
   [PAGES.CREATOR_MEMBERSHIPS]: 'Creator Memberships',

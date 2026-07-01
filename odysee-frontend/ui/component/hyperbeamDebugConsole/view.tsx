@@ -25,7 +25,7 @@ type FilterKey = (typeof FILTERS)[number]['key'];
 type ConsoleTab = 'trace' | 'requests';
 
 export default function HyperbeamDebugConsole() {
-  const [open, setOpen] = React.useState(true);
+  const [open, setOpen] = React.useState(false);
   const [maximized, setMaximized] = React.useState(false);
   const [mode, setMode] = React.useState<HyperbeamMode>(() => getHyperbeamMode());
   const [activeTab, setActiveTab] = React.useState<ConsoleTab>('trace');
@@ -155,6 +155,7 @@ export default function HyperbeamDebugConsole() {
         fontSize: 11,
         lineHeight: 1.35,
         boxShadow: '0 12px 34px rgba(0,0,0,0.46), 0 0 28px rgba(222,0,80,0.2)',
+        pointerEvents: 'none',
       }}
     >
       <div
@@ -166,6 +167,7 @@ export default function HyperbeamDebugConsole() {
           boxSizing: 'border-box',
           padding: '0 8px 0 0',
           background: 'linear-gradient(90deg, rgba(222,0,80,0.42), rgba(222,0,80,0.12))',
+          pointerEvents: 'auto',
         }}
       >
         <button
@@ -242,7 +244,14 @@ export default function HyperbeamDebugConsole() {
         </button>
       </div>
       {open && (
-        <>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+            pointerEvents: 'auto',
+          }}
+        >
           <div style={{ padding: '8px 9px 0' }}>
             <div style={{ overflowWrap: 'anywhere', marginBottom: 8, color: 'rgba(255,255,255,0.72)' }}>
               {modeEndpointLabel(mode)}
@@ -383,7 +392,7 @@ export default function HyperbeamDebugConsole() {
               </div>
             </>
           )}
-        </>
+        </div>
       )}
     </div>
   );

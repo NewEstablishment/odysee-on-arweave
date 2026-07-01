@@ -95,6 +95,7 @@ const YOUTUBE_SYNC = 'youtube';
 const LIVESTREAM = 'livestream';
 const LIVESTREAM_CURRENT = 'live';
 const LIVESTREAM_CREATE = 'livestream/create';
+const LIVESTREAM_DEMO = 'livestream/demo';
 const LIST = 'list';
 const PLAYLIST = 'playlist';
 const ODYSEE_MEMBERSHIP = 'premium';
@@ -179,6 +180,7 @@ const PAGES = {
   LIVESTREAM,
   LIVESTREAM_CREATE,
   LIVESTREAM_CURRENT,
+  LIVESTREAM_DEMO,
   LIVE_NOW,
   MEMBERSHIPS_LANDING,
   MEMBERSHIPS_SUPPORTER,

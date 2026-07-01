@@ -32,7 +32,20 @@ import { toHex } from 'util/hex';
 import { lazyImport } from 'util/lazyImport';
 import { NEW_LIVESTREAM_REPLAY_API } from 'constants/livestream';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { doResetThumbnailStatus, doClearPublish, doUpdatePublishForm, doPublishDesktop } from 'redux/actions/publish';
+import {
+  doResetThumbnailStatus,
+  doClearPublish,
+  doUpdateFile,
+  doUpdatePublishForm,
+  doPublishDesktop,
+} from 'redux/actions/publish';
+import { doToast } from 'redux/actions/notifications';
+import {
+  getLivestreamReplay,
+  getLivestreamReplayFile,
+  listLivestreamReplays,
+  type LivestreamReplayEntry,
+} from 'util/livestreamReplayStorage';
 import { doResolveUri, doCheckPublishNameAvailability } from 'redux/actions/claims';
 import {
   selectPublishFormValues,
@@ -119,6 +132,7 @@ function LivestreamForm(props: Props) {
   const { search } = useLocation();
   const urlParams = new URLSearchParams(search);
   const createTypeShortcut = urlParams.get('s');
+  const localReplayId = urlParams.get('replay');
   const inEditMode = Boolean(editingURI);
   const activeChannelName = activeChannelClaim && activeChannelClaim.name;
   const activeChannelId = activeChannelClaim && activeChannelClaim.claim_id;
@@ -145,14 +159,22 @@ function LivestreamForm(props: Props) {
   const [previewing, setPreviewing] = useState(false);
   const [isCheckingLivestreams, setCheckingLivestreams] = useState(false);
   const [livestreamData, setLivestreamData] = useState<LivestreamReplayItem[]>([]);
+  const [localReplayName, setLocalReplayName] = React.useState<string | null>(null);
+  const [selectedLocalReplayId, setSelectedLocalReplayId] = React.useState<string | null>(null);
+  const [localReplays, setLocalReplays] = React.useState<LivestreamReplayEntry[]>([]);
+  const [localReplaysLoaded, setLocalReplaysLoaded] = React.useState(false);
+  const [checkingLocalReplayForPublish, setCheckingLocalReplayForPublish] = React.useState(false);
   const hasLivestreamData = livestreamData && Boolean(livestreamData.length);
   const TAGS_LIMIT = 5;
 
-  const formDisabled = publishing;
+  const formDisabled = publishing || checkingLocalReplayForPublish;
   const thumbnailUploaded = uploadThumbnailStatus === THUMBNAIL_STATUSES.COMPLETE && thumbnail;
+  const usesLocalReplayUpload = liveEditType === 'upload_replay';
   const requiresReplayUrl =
-    liveCreateType === 'choose_replay' || (liveCreateType === 'edit_placeholder' && liveEditType === 'use_replay');
-  const requiresFile = liveCreateType === 'edit_placeholder' && liveEditType === 'upload_replay';
+    !usesLocalReplayUpload &&
+    (liveCreateType === 'choose_replay' || (liveCreateType === 'edit_placeholder' && liveEditType === 'use_replay'));
+  const requiresFile =
+    usesLocalReplayUpload && (liveCreateType === 'choose_replay' || liveCreateType === 'edit_placeholder');
   const waitingForFile = !remoteFileUrl && !filePath && (requiresReplayUrl || requiresFile);
 
   const formValidLessFile =
@@ -185,7 +207,8 @@ function LivestreamForm(props: Props) {
     uploadThumbnailStatus === THUMBNAIL_STATUSES.IN_PROGRESS ||
     (requiresReplayUrl && !hasSelectedReplay) ||
     (requiresFile && !filePath) ||
-    previewing;
+    previewing ||
+    checkingLocalReplayForPublish;
 
   useEffect(() => {
     if (setClearStatus) setClearStatus(isClear);
@@ -205,6 +228,31 @@ function LivestreamForm(props: Props) {
       return () => clearTimeout(timer);
     }
   }, [modal]);
+
+  useEffect(() => {
+    if (liveEditType !== 'upload_replay') {
+      setLocalReplayName(null);
+      setSelectedLocalReplayId(null);
+    }
+  }, [liveEditType]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLocalReplaysLoaded(false);
+    listLivestreamReplays()
+      .then((entries) => {
+        if (!cancelled) setLocalReplays(entries);
+      })
+      .catch(() => {
+        if (!cancelled) setLocalReplays([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLocalReplaysLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChannelId]);
 
   useEffect(() => {
     if (publishError) {
@@ -260,6 +308,95 @@ function LivestreamForm(props: Props) {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const visibleLocalReplays = React.useMemo(
+    () => localReplays.filter((entry) => !entry.channelId || !activeChannelId || entry.channelId === activeChannelId),
+    [activeChannelId, localReplays]
+  );
+
+  async function applyLocalReplay(entry: LivestreamReplayEntry | null, file?: File | null) {
+    if (!entry?.id && !file) {
+      dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+      return;
+    }
+
+    let replayFile: File | null | undefined = file;
+    try {
+      if (!replayFile && entry?.id) replayFile = await getLivestreamReplayFile(entry.id);
+    } catch {
+      dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+      return;
+    }
+    if (!replayFile) {
+      dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+      return;
+    }
+
+    setSelectedLocalReplayId(entry?.id || null);
+    setLocalReplayName(entry?.title || entry?.name || replayFile.name || null);
+    dispatch(doUpdateFile(replayFile as WebFile, false));
+    updatePublishForm({
+      liveCreateType: editingURI ? 'edit_placeholder' : 'choose_replay',
+      liveEditType: 'upload_replay',
+      remoteFileUrl: undefined,
+    });
+  }
+
+  function clearMissingLocalReplay() {
+    setLocalReplayName(null);
+    setSelectedLocalReplayId(null);
+    dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+  }
+
+  useEffect(() => {
+    if (!selectedLocalReplayId || liveEditType !== 'upload_replay' || filePath) return;
+    let cancelled = false;
+    setCheckingLocalReplayForPublish(true);
+    getLivestreamReplayFile(selectedLocalReplayId)
+      .then((replayFile) => {
+        if (cancelled) return;
+        if (!replayFile) {
+          clearMissingLocalReplay();
+          return;
+        }
+        dispatch(doUpdateFile(replayFile as WebFile, false));
+      })
+      .catch(() => {
+        if (!cancelled) clearMissingLocalReplay();
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingLocalReplayForPublish(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, filePath, liveEditType, selectedLocalReplayId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!localReplayId) {
+      setLocalReplayName(null);
+      setSelectedLocalReplayId(null);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([getLivestreamReplay(localReplayId), getLivestreamReplayFile(localReplayId)])
+      .then(([entry, file]) => {
+        if (cancelled) return;
+        if (!file) {
+          dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+          return;
+        }
+        void applyLocalReplay(entry, file);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          dispatch(doToast({ isError: true, message: __('Replay could not be loaded from browser storage.') }));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, editingURI, localReplayId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (incognito) updatePublishForm({ channel: undefined, channelId: undefined });
     else if (activeChannelName) updatePublishForm({ channel: activeChannelName, channelId: activeChannelId });
@@ -311,17 +448,37 @@ function LivestreamForm(props: Props) {
     }
   }
 
-  function handlePublish() {
+  async function handlePublish() {
+    if (checkingLocalReplayForPublish) return;
+    let publishFile = filePath;
+    if (selectedLocalReplayId && liveEditType === 'upload_replay' && !publishFile) {
+      setCheckingLocalReplayForPublish(true);
+      try {
+        const replayFile = await getLivestreamReplayFile(selectedLocalReplayId);
+        if (!replayFile) {
+          clearMissingLocalReplay();
+          return;
+        }
+        publishFile = replayFile as WebFile;
+        dispatch(doUpdateFile(replayFile as WebFile, false));
+      } catch {
+        clearMissingLocalReplay();
+        return;
+      } finally {
+        setCheckingLocalReplayForPublish(false);
+      }
+    }
     if (enablePublishPreview) {
       setPreviewing(true);
-      publish(filePath, true);
+      publish(publishFile, true);
     } else {
-      publish(filePath, false);
+      publish(publishFile, false);
     }
   }
 
   let submitLabel: any;
   if (isClaimingInitialRewards) submitLabel = __('Claiming credits...');
+  else if (checkingLocalReplayForPublish) submitLabel = __('Loading replay...');
   else if (publishing) submitLabel = isStillEditing || inEditMode ? __('Saving...') : __('Creating...');
   else if (previewing) submitLabel = <Spinner type="small" />;
   else submitLabel = isStillEditing || inEditMode ? __('Save') : __('Create');
@@ -375,7 +532,7 @@ function LivestreamForm(props: Props) {
         onPublish={handlePublish}
         publishLabel={submitLabel}
         publishDisabled={isFormIncomplete || !formValid}
-        publishing={publishing || previewing}
+        publishing={publishing || previewing || checkingLocalReplayForPublish}
         publishFooterLeft={<ChannelSelector hideAnon disabled={publishing} isPublishMenu />}
       >
         {/* Step: Replay (only in replay mode) */}
@@ -403,6 +560,15 @@ function LivestreamForm(props: Props) {
                     livestreamData={livestreamData}
                     isCheckingLivestreams={isCheckingLivestreams}
                     hideTitleUrl
+                    localReplayName={localReplayName}
+                    selectedLocalReplayId={selectedLocalReplayId}
+                    localReplays={visibleLocalReplays}
+                    localReplaysLoaded={localReplaysLoaded}
+                    onLocalReplaySelect={(entry) => void applyLocalReplay(entry)}
+                    onLocalReplayFileReplaced={() => {
+                      setLocalReplayName(null);
+                      setSelectedLocalReplayId(null);
+                    }}
                   />
                 </div>
               }

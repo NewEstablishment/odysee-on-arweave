@@ -18,6 +18,7 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
   line-height: 1.45;
+  pointer-events: none;
 }
 
 .hyperbeam-debug--closed {
@@ -32,6 +33,7 @@
   min-height: 44px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: #0f131a;
+  pointer-events: auto;
 }
 
 .hyperbeam-debug__toggle {
@@ -95,6 +97,7 @@
   min-height: 0;
   overflow: auto;
   padding: 16px;
+  pointer-events: auto;
 }
 
 .hyperbeam-debug__header {

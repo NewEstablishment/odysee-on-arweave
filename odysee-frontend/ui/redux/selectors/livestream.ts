@@ -19,6 +19,13 @@ import { EMPTY_ARRAY, EMPTY_OBJECT } from 'redux/selectors/empty';
 
 const selectState = (state: State) => state.livestream || EMPTY_OBJECT;
 
+export const getActiveLivestreamUri = (activeLivestream?: LivestreamActiveClaim | null) =>
+  activeLivestream?.claimUri ||
+  activeLivestream?.uri ||
+  activeLivestream?.canonical_url ||
+  activeLivestream?.permanent_url ||
+  null;
+
 // -- selectState(state) --
 export const selectLivestreamInfoByCreatorId = (state: State) => selectState(state).livestreamInfoByCreatorId;
 export const selectActiveLivestreamByCreatorId = (state: State) => selectState(state).activeLivestreamByCreatorId;
@@ -74,7 +81,9 @@ export const selectFilteredActiveLivestreamUris = createCachedSelector(
       if (viewCountA > viewCountB) return -1;
       return 0;
     });
-    return sortedLivestreams.map((activeLivestream: LivestreamActiveClaim) => activeLivestream.uri);
+    return sortedLivestreams
+      .map((activeLivestream: LivestreamActiveClaim) => getActiveLivestreamUri(activeLivestream))
+      .filter(Boolean);
   }
 )(
   (state: State, channelIds?: Array<string>, excludedChannelIds?: Array<string>, query?: string) =>
@@ -171,7 +180,7 @@ export const selectIsActiveLivestreamForUri = createCachedSelector(
 
     const activeLivestreamValues = Object.values(activeLivestreams);
     return activeLivestreamValues.some(
-      (activeLivestream?: LivestreamActiveClaim) => activeLivestream && activeLivestream.uri === uri
+      (activeLivestream?: LivestreamActiveClaim) => getActiveLivestreamUri(activeLivestream) === uri
     );
   }
 )((state: State, uri: string) => String(uri));
@@ -194,7 +203,7 @@ export const selectLiveThumbnailForUri = (state: State, uri: string): string | n
   if (!activeLivestreams) return null;
   for (const creatorId in activeLivestreams) {
     const active: any = activeLivestreams[creatorId];
-    if (active && active.uri === uri && active.liveThumbnailUrl) {
+    if (getActiveLivestreamUri(active) === uri && active.liveThumbnailUrl) {
       return active.liveThumbnailUrl;
     }
   }
@@ -218,7 +227,7 @@ export const selectActiveStreamUriForClaimUri = (state: State, uri: string) => {
   if (!channelId) return channelId;
   const activeLivestream = selectActiveLivestreamForChannel(state, channelId);
   if (!activeLivestream) return activeLivestream;
-  return activeLivestream.uri;
+  return getActiveLivestreamUri(activeLivestream);
 };
 export const selectClaimIsActiveChannelLivestreamForUri = (state: State, uri: string) => {
   const activeStreamUri = selectActiveStreamUriForClaimUri(state, uri);
@@ -226,11 +235,11 @@ export const selectClaimIsActiveChannelLivestreamForUri = (state: State, uri: st
   if (activeStreamUri === uri) return true;
   const claim = selectClaimForUri(state, uri);
   if (!claim) return claim;
-  if ([claim.canonical_url, claim.permanent_url].includes(activeStreamUri)) return true;
+  if ([claim.claimUri, claim.uri, claim.canonical_url, claim.permanent_url].includes(activeStreamUri)) return true;
 };
 export const selectLatestLiveUriForChannel = (state: State, channelId: string) => {
   const activeCreatorLivestream = selectActiveLivestreamForChannel(state, channelId);
-  if (activeCreatorLivestream) return activeCreatorLivestream.uri;
+  if (activeCreatorLivestream) return getActiveLivestreamUri(activeCreatorLivestream);
   const futureCreatorLivestreams = selectFutureLivestreamsForCreatorId(state, channelId);
   const pastCreatorLivestreams = selectPastLivestreamsForCreatorId(state, channelId);
   const hasPastLivestreams = pastCreatorLivestreams && pastCreatorLivestreams.length > 0;

@@ -180,6 +180,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   const nsfw = claim ? isClaimNsfw(claim) : false;
   const obscureNsfw = useAppSelector((state) => selectShowMatureContent(state) === false);
   const pending = useAppSelector((state) => (uri ? makeSelectClaimIsPending(uri)(state) : false));
+  const pendingBlocksNavigation = pending && !isLivestream;
   const reflectingProgress = useAppSelector((state) => (uri ? makeSelectReflectingClaimForUri(uri)(state) : undefined));
   const streamingUrl = useAppSelector((state) =>
     repostSrcUri || uri ? selectStreamingUrlForUri(state, repostSrcUri || uri) : undefined
@@ -377,7 +378,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
       return playPlaylistItem();
     }
 
-    if (claim && !pending && !disableNavigation && !disableClickNavigation && !isEmbed) {
+    if (claim && !pendingBlocksNavigation && !disableNavigation && !disableClickNavigation && !isEmbed) {
       const previewTime = (window as any).__previewCurrentTime;
       const previewUnmuted = (window as any).__previewMuted === false;
       const params = new URLSearchParams(navigateSearch.toString());
@@ -491,11 +492,11 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
     <WrapperElement
       ref={ref}
       role="link"
-      onClick={pending || type === 'inline' ? undefined : handleOnClick}
+      onClick={pendingBlocksNavigation || type === 'inline' ? undefined : handleOnClick}
       onMouseEnter={() => setRowHover(true)}
       onMouseLeave={() => setRowHover(false)}
       onAuxClick={(e: any) => {
-        if (e.button === 1 && navigateUrl && !pending && !disableNavigation) {
+        if (e.button === 1 && navigateUrl && !pendingBlocksNavigation && !disableNavigation) {
           e.preventDefault();
           window.open(navigateUrl, '_blank');
         }
@@ -558,7 +559,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
             </UriIndicator>
           ) : (
             <>
-              {!pending ? (
+              {!pendingBlocksNavigation ? (
                 <NavLink aria-hidden tabIndex={-1} {...navLinkProps} target={isEmbed && '_blank'}>
                   <FileThumbnail
                     thumbnail={thumbnailUrl}
@@ -616,7 +617,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
           <div className="claim-preview__text">
             <div className="claim-preview-metadata">
               <div className="claim-preview-info">
-                {pending ? (
+                {pendingBlocksNavigation ? (
                   <ClaimPreviewTitle uri={uri} />
                 ) : (
                   <NavLink

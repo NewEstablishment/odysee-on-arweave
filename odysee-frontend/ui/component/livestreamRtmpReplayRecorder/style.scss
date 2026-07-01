@@ -1,0 +1,68 @@
+.livestream-rtmp-recorder {
+  position: relative;
+  padding: var(--spacing-s) var(--spacing-m);
+  border-radius: 10px;
+  border: 1px solid rgba(var(--color-header-button-base), 0.25);
+  background: rgba(var(--color-header-button-base), 0.06);
+  display: grid;
+  gap: var(--spacing-s);
+}
+
+.livestream-rtmp-recorder__video {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.livestream-rtmp-recorder__content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-s);
+  min-height: 38px;
+}
+
+.livestream-rtmp-recorder__content > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.livestream-rtmp-recorder__label {
+  color: var(--color-text-subtitle);
+  font-size: var(--font-xsmall);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.livestream-rtmp-recorder__content strong {
+  color: var(--color-text);
+  font-size: var(--font-small);
+}
+
+.livestream-rtmp-recorder__saved-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: calc(var(--border-radius) / 2);
+  background: #000;
+}
+
+.livestream-rtmp-recorder__saved-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+}
+
+.livestream-rtmp-recorder__saved-actions > * {
+  flex: 1 1 130px;
+}
+
+@media (max-width: 640px) {
+  .livestream-rtmp-recorder__content {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

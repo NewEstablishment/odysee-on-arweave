@@ -2,6 +2,7 @@ import React from 'react';
 import type { AudioMixer } from 'util/audioMixer';
 import type { VideoSource, AudioSource } from 'component/livestreamSourceSelector/view';
 import type { WebrtcPublishPresetId } from 'constants/webrtcPublish';
+import type { LivestreamReplayEntry } from 'util/livestreamReplayStorage';
 
 export type LivestreamStudioProps = {
   streamKey: string | null;
@@ -11,6 +12,7 @@ export type LivestreamStudioProps = {
   presetId: WebrtcPublishPresetId;
   signature?: string;
   signingTs?: string;
+  onReplaySaved?: (entry: LivestreamReplayEntry) => void;
 };
 
 export type LivestreamPublishStatus =
