@@ -7,11 +7,15 @@ export function localHyperbeamUploadFileInfo(
 
   const value = (claim.value || {}) as any;
   const source = value.source || {};
-  const mediaUrl = (claim as any).streaming_url || (claim as any).download_url || (claim as any).hyperbeam?.read_path;
+  const uploadId = (claim as any).hyperbeam?.upload_id || (claim as any).immutable_id || (claim as any).outpoint;
+  const mediaUrl =
+    (claim as any).streaming_url ||
+    (claim as any).download_url ||
+    uploadReadUrl(uploadId) ||
+    (claim as any).hyperbeam?.read_path;
   if (!mediaUrl) return null;
 
   const size = Number(source.size || (claim as any).hyperbeam_upload?.size || 0);
-  const uploadId = (claim as any).hyperbeam?.upload_id || (claim as any).immutable_id || (claim as any).outpoint;
   const resolvedOutpoint = uploadId || outpoint || (claim.txid ? `${claim.txid}:${claim.nout || 0}` : claim.claim_id);
   const signingChannel = claim.signing_channel;
 
@@ -40,4 +44,8 @@ export function localHyperbeamUploadFileInfo(
       source,
     },
   } as any;
+}
+
+function uploadReadUrl(uploadId: string | null | undefined) {
+  return uploadId ? `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(uploadId)}` : '';
 }

@@ -7,6 +7,7 @@ import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectViewCountForUri } from 'lbryinc';
 import { selectLanguage } from 'redux/selectors/settings';
 import { selectState as selectUserState } from 'redux/selectors/user';
+import { isHyperbeamUploadClaim } from 'util/claim';
 type Props = {
   uri: string;
   isLivestream?: boolean;
@@ -15,9 +16,10 @@ function FileViewCountInline(props: Props) {
   const { uri, isLivestream } = props;
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const viewCount = useAppSelector((state) => selectViewCountForUri(state, uri));
+  const effectiveViewCount = isHyperbeamUploadClaim(claim) ? 0 : viewCount;
   const lang = useAppSelector((state) => selectLanguage(state));
   const user = useAppSelector((state) => selectUserState(state)?.user);
-  const formattedViewCount = toCompactNotation(viewCount, lang);
+  const formattedViewCount = toCompactNotation(effectiveViewCount, lang);
   const userIsMod = user?.groups?.includes('mod') || user?.groups?.includes('admin');
   // Limit the view-count visibility to specific pages for now. We'll eventually
   // show it everywhere, so this band-aid would be the easiest to clean up
@@ -27,7 +29,13 @@ function FileViewCountInline(props: Props) {
     (pathname && pathname.startsWith('/@') && pathname.indexOf('/', 1) === -1) || // Channel Page
     pathname === `/$/${PAGES.UPLOADS}`;
 
-  if (!viewCount || (claim && claim.repost_url) || isLivestream || (!isOnAllowedPage && !userIsMod)) {
+  if (
+    effectiveViewCount === undefined ||
+    effectiveViewCount === null ||
+    (claim && claim.repost_url) ||
+    isLivestream ||
+    (!isOnAllowedPage && !userIsMod)
+  ) {
     // (1) Currently, selectViewCountForUri doesn't differentiate between
     // un-fetched vs zero view-count. But since it's probably not ideal to
     // highlight that a claim has 0 view count, let's just not show anything.
@@ -38,7 +46,7 @@ function FileViewCountInline(props: Props) {
 
   return (
     <span className="view_count">
-      {viewCount !== 1
+      {effectiveViewCount !== 1
         ? __('%view_count% views', {
             view_count: formattedViewCount,
           })

@@ -47,6 +47,9 @@ export function concatClaims(claimList: Array<Claim> = [], concatClaimList: Arra
   });
   return claims;
 }
+export function isHyperbeamUploadClaim(claim: Claim | null | undefined) {
+  return Boolean(claim && ((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id));
+}
 export function filterClaims(claims: Array<Claim>, query: string | null | undefined): Array<Claim> {
   if (query) {
     const queryMatchRegExp = new RegExp(query, 'i');

@@ -25,7 +25,13 @@ import { doFetchTxoPage } from 'redux/actions/wallet';
 import { doMembershipContentForStreamClaimIds, doFetchOdyseeMembershipForChannelIds } from 'redux/actions/memberships';
 import { selectSupportsByOutpoint } from 'redux/selectors/wallet';
 import { creditsToString } from 'util/format-credits';
-import { createNormalizedClaimSearchKey, getChannelIdFromClaim, getClaimTags, isClaimProtected } from 'util/claim';
+import {
+  createNormalizedClaimSearchKey,
+  getChannelIdFromClaim,
+  getClaimTags,
+  isClaimProtected,
+  isHyperbeamUploadClaim,
+} from 'util/claim';
 import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
@@ -707,7 +713,7 @@ export function doFetchClaimListMine(
         const channelClaimIds = new Set([]);
         const costInfos = new Set<Promise<CostInfo>>();
         result.items.forEach((item) => {
-          claimIds.push(item.claim_id);
+          if (!isHyperbeamUploadClaim(item)) claimIds.push(item.claim_id);
 
           if (item.value_type !== 'channel' && item.value_type !== 'collection') {
             const isProtected = isClaimProtected(item);
@@ -961,10 +967,6 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
 
     Lbry[method](abandonParams).then(successCallback, errorCallback);
   };
-}
-
-function isHyperbeamUploadClaim(claim: Claim) {
-  return Boolean(claim && ((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id));
 }
 
 export function doFetchClaimsByChannel(uri: string, page: number = 1) {
@@ -1257,7 +1259,7 @@ export function doClaimSearch(
           stream,
         };
         urls.push(stream.canonical_url);
-        claimIds.push(stream.claim_id);
+        if (!isHyperbeamUploadClaim(stream)) claimIds.push(stream.claim_id);
 
         if (stream.value_type !== 'channel' && stream.value_type !== 'collection') {
           const isProtected = isClaimProtected(stream);

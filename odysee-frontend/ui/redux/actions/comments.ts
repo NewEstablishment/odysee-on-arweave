@@ -31,7 +31,7 @@ import {
 import { makeSelectNotificationForCommentId } from 'redux/selectors/notifications';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { toHex } from 'util/hex';
-import { getChannelFromClaim } from 'util/claim';
+import { getChannelFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
@@ -40,10 +40,6 @@ const stripeEnvironment = getStripeEnvironment();
 const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
 const PROMISE_FULFILLED = 'fulfilled';
 const MENTION_REGEX = /(?:^| |\n)@[^\s=&#$@%?:;/"<>%{}|^~[]*(?::[\w]+)?/gm;
-
-function isLocalHyperbeamUploadClaim(claim: Claim | null | void) {
-  return Boolean(claim && ((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id));
-}
 
 function dispatchEmptyCommentList(
   dispatch: Dispatch,
@@ -94,6 +90,11 @@ export function doCommentList(
         parentId,
       },
     });
+
+    if (isHyperbeamUploadClaim(claim)) {
+      return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
+    }
+
     const activeChannelClaim = selectActiveChannelClaim(state);
     const activeChannelId = activeChannelClaim?.claim_id;
     const isProtected = Boolean(selectProtectedContentTagForUri(state, uri));
@@ -183,7 +184,7 @@ export function doCommentList(
       .catch((error) => {
         const { message } = error;
 
-        if (isLocalHyperbeamUploadClaim(claim)) {
+        if (isHyperbeamUploadClaim(claim)) {
           return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
         }
 

@@ -5,10 +5,41 @@ import { selectMyReactionForUri } from 'redux/selectors/reactions';
 import { makeSelectClaimForUri } from 'redux/selectors/claims';
 import { fetchHyperbeamFileReactionList } from 'util/hyperbeam';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
+const LEGACY_CLAIM_ID_RE = /^[0-9a-f]{40}$/i;
+
+function emptyReactions(claimId: string) {
+  return {
+    my_reactions: {
+      [claimId]: {
+        [REACTION_TYPES.LIKE]: 0,
+        [REACTION_TYPES.DISLIKE]: 0,
+      },
+    },
+    others_reactions: {
+      [claimId]: {
+        [REACTION_TYPES.LIKE]: 0,
+        [REACTION_TYPES.DISLIKE]: 0,
+      },
+    },
+  };
+}
+
 export const doFetchReactions = (claimId: string) => (dispatch: Dispatch) => {
   dispatch({
     type: ACTIONS.REACTIONS_LIST_STARTED,
   });
+
+  if (!LEGACY_CLAIM_ID_RE.test(claimId)) {
+    dispatch({
+      type: ACTIONS.REACTIONS_LIST_COMPLETED,
+      data: {
+        claimId,
+        reactions: emptyReactions(claimId),
+      },
+    });
+    return Promise.resolve();
+  }
+
   const params = {
     claim_ids: claimId,
   };
@@ -45,6 +76,8 @@ export const doReactionLike = (uri: string) => (dispatch: Dispatch, getState: Ge
   const myReaction = selectMyReactionForUri(state, uri);
   const claim = makeSelectClaimForUri(uri)(state);
   const claimId = claim.claim_id;
+  if (!LEGACY_CLAIM_ID_RE.test(claimId)) return Promise.resolve();
+
   const shouldRemove = myReaction === REACTION_TYPES.LIKE;
   return Lbryio.call(
     'reaction',
@@ -82,6 +115,8 @@ export const doReactionDislike = (uri: string) => (dispatch: Dispatch, getState:
   const myReaction = selectMyReactionForUri(state, uri);
   const claim = makeSelectClaimForUri(uri)(state);
   const claimId = claim.claim_id;
+  if (!LEGACY_CLAIM_ID_RE.test(claimId)) return Promise.resolve();
+
   const shouldRemove = myReaction === REACTION_TYPES.DISLIKE;
   return Lbryio.call(
     'reaction',

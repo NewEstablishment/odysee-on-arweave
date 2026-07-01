@@ -4,6 +4,7 @@ import Lbry from 'lbry';
 import { Lbryio } from 'lbryinc';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
+import { isHyperbeamUploadClaim } from 'util/claim';
 import { parseURI } from 'util/lbryURI';
 import { getAuthToken } from 'util/saved-passwords';
 
@@ -306,6 +307,13 @@ export async function fetchHyperbeamFileReactionList(params: { claim_ids: string
 }
 
 export async function fetchHyperbeamViewCount(claimIdCsv: string): Promise<Array<number> | null> {
+  const claimIds = claimIdCsv
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  if (claimIds.some((id) => !/^[0-9a-f]{40}$/i.test(id))) return null;
+
   const response = await fetchDeviceJson(`${FILE_DEVICE}/view-count`, {
     claim_id: claimIdCsv,
   });
@@ -490,7 +498,7 @@ export async function fetchHyperbeamVerifyClaimSignature(
 }
 
 export async function fetchHyperbeamChannel(claim: Claim | null | undefined): Promise<HyperbeamChannel | null> {
-  if (!claim) return null;
+  if (!claim || isHyperbeamUploadClaim(claim)) return null;
 
   const result = await fetchDeviceJson(`${CHANNEL_DEVICE}/channel`, { channel: claim.signing_channel || claim });
   return result ? channelFromHyperbeam(result) : null;
@@ -500,6 +508,8 @@ export async function fetchHyperbeamStreamVerification(
   claim: Claim | null | undefined,
   uri: string
 ): Promise<any | null> {
+  if (!claim || isHyperbeamUploadClaim(claim)) return null;
+
   const result = await fetchDeviceJson(`${STREAM_DEVICE}/verified-stream`, compactParams({ claim, url: uri }));
   return responsePayload(result);
 }
