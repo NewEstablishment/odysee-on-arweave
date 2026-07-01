@@ -41,6 +41,7 @@ const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/~odysee-upload@1.0/finalize?!=true';
 const HYPERBEAM_UPLOAD_INDEX_PATH = '/~odysee-upload@1.0/index?!=true';
 const HYPERBEAM_UPLOAD_LIST_PATH = '/~odysee-upload@1.0/list';
 const HYPERBEAM_UPLOAD_DELETE_PATH = '/~odysee-upload@1.0/delete?!=true';
+const HYPERBEAM_THUMBNAIL_UPLOAD_PATH = '/~odysee-product-events@1.0/thumbnail-upload';
 const HYPERBEAM_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 const HYPERBEAM_UPLOAD_MANIFEST_TYPE = 'application/vnd.odysee.hyperbeam-upload-manifest+json';
 const HYPERBEAM_UPLOAD_MANIFEST_KIND = 'odysee-hyperbeam-chunked-upload';
@@ -301,6 +302,26 @@ async function postHyperbeamUploadIndex(ctx) {
   }
 
   ctx.set('Content-Type', contentType || 'application/json');
+  ctx.body = response.body;
+}
+
+async function postHyperbeamThumbnailUpload(ctx) {
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl) {
+    ctx.status = 404;
+    ctx.body = { error: 'hyperbeam node unavailable' };
+    return;
+  }
+
+  const requestBody = await readJsonBody(ctx);
+  const response = await postJson(`${nodeUrl}${HYPERBEAM_THUMBNAIL_UPLOAD_PATH}`, requestBody, {
+    host: new URL(nodeUrl).host,
+  });
+
+  ctx.status = response.statusCode;
+  ctx.set('Cache-Control', 'no-store');
+  ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
   ctx.body = response.body;
 }
 
@@ -1004,6 +1025,7 @@ router.post(`/$/api/hyperbeam-upload/v1/large`, postHyperbeamLargeUpload);
 router.post(`/$/api/hyperbeam-upload/v1/index`, postHyperbeamUploadIndex);
 router.post(`/$/api/hyperbeam-upload/v1/list`, postHyperbeamUploadList);
 router.post(`/$/api/hyperbeam-upload/v1/delete`, postHyperbeamUploadDelete);
+router.post(`/$/api/hyperbeam-thumbnail/v1/upload`, postHyperbeamThumbnailUpload);
 router.head(`/$/api/hyperbeam-upload/v1/read/:id`, getHyperbeamLargeUpload);
 router.get(`/$/api/hyperbeam-upload/v1/read/:id`, getHyperbeamLargeUpload);
 router.get(`/$/api/content/v1/get`, async (ctx) => getHomepage(ctx, 1));

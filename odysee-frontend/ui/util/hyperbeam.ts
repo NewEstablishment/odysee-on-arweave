@@ -521,6 +521,9 @@ async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, c
   if (!claim || typeof claim !== 'object') return claim;
   const needsHyperbeam = !claim.hyperbeam && Boolean(value(claim, 'hyperbeam+link', 'hyperbeam-link'));
   const needsValue = !claim.value && Boolean(value(claim, 'value+link', 'value-link'));
+  const needsMeta = !claim.meta && Boolean(value(claim, 'meta+link', 'meta-link'));
+  const needsSigningChannel =
+    !claim.signing_channel && Boolean(value(claim, 'signing_channel+link', 'signing-channel+link'));
   const existingValue = claim.value;
   const needsSource = Boolean(
     existingValue &&
@@ -532,13 +535,17 @@ async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, c
       !existingValue.thumbnail &&
       (value(existingValue, 'thumbnail+link', 'thumbnail-link') || value(claim, 'value+link', 'value-link'))
   );
-  if (!needsHyperbeam && !needsValue && !needsSource && !needsThumbnail) return claim;
+  if (!needsHyperbeam && !needsValue && !needsMeta && !needsSigningChannel && !needsSource && !needsThumbnail)
+    return claim;
 
-  const [hyperbeam, claimValue0] = await Promise.all([
+  const [hyperbeam, claimValue0, meta, signingChannel0] = await Promise.all([
     needsHyperbeam ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'hyperbeam') : Promise.resolve(null),
     needsValue ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value') : Promise.resolve(null),
+    needsMeta ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'meta') : Promise.resolve(null),
+    needsSigningChannel ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'signing_channel') : Promise.resolve(null),
   ]);
   const claimValue = claimValue0 || existingValue;
+  const signingChannel = signingChannel0 ? await expandHyperbeamLinkedChannel(baseUrl, claimId, signingChannel0) : null;
   const source =
     claimValue && !claimValue.source && value(claimValue, 'source+link', 'source-link')
       ? await fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value/source')
@@ -552,8 +559,18 @@ async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, c
   return {
     ...claim,
     ...(hyperbeam ? { hyperbeam } : {}),
+    ...(meta ? { meta } : {}),
+    ...(signingChannel ? { signing_channel: signingChannel } : {}),
     ...(expandedValue ? { value: expandedValue } : {}),
   };
+}
+
+async function expandHyperbeamLinkedChannel(baseUrl: string, claimId: string, channel: any) {
+  if (!channel || typeof channel !== 'object') return channel;
+  if (channel.value || !value(channel, 'value+link', 'value-link')) return channel;
+
+  const channelValue = await fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'signing_channel/value');
+  return channelValue ? { ...channel, value: channelValue } : channel;
 }
 
 async function fetchHyperbeamImmutableSubmessage(baseUrl: string, claimId: string, path: string) {
