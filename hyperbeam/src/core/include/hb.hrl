@@ -10,6 +10,7 @@
 -define(IS_ID(X),
     (is_binary(X) andalso (
         byte_size(X) == 42 orelse byte_size(X) == 43 orelse
+        byte_size(X) == 40 orelse
         byte_size(X) == 32 orelse byte_size(X) == 64 orelse
         byte_size(X) == 96 orelse
         (
