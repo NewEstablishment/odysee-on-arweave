@@ -27,6 +27,20 @@ recovery_id_in_valid_range_test() ->
     <<_CompactSig:64/binary, RecId:8>> = Sig,
     ?assert(lists:member(RecId, [0, 1, 2, 3])).
 
+%% @doc A secp256k1 wallet round-trips through the JWK JSON export/import:
+%% `to_json' emits the X/Y public coordinates that `from_json' requires, so the
+%% reimported key has the same address and a signature made by the original
+%% verifies against it. (Previously `to_json' omitted X/Y and `from_json' crashed
+%% with a badarg decoding the missing coordinate.)
+secp256k1_json_round_trips_test() ->
+    Wallet = {PrivKey, _Pub} = ar_wallet:new_ecdsa(),
+    Json = ar_wallet:to_json(PrivKey),
+    Reimported = {_ReimportedPriv, PubKeyTuple} = ar_wallet:from_json(Json),
+    ?assertEqual(ar_wallet:to_address(Wallet), ar_wallet:to_address(Reimported)),
+    Msg = <<"secp256k1 json round-trip">>,
+    Sig = ar_wallet:sign(Wallet, Msg),
+    ?assert(ar_wallet:verify(PubKeyTuple, Msg, Sig)).
+
 signature_has_low_s_test() ->
     Wallet = ar_wallet:new_ecdsa(),
     %% Sign multiple messages and verify all have low-S
