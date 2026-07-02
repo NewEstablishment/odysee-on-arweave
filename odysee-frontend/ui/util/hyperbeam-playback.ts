@@ -1,7 +1,7 @@
 import { HYPERBEAM_BASE_URL, HYPERBEAM_PLAYBACK_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 
 const HYPERBEAM_TIMEOUT_MS = 5000;
-const ODYSEE_DEVICE = '~odysee@1.0';
+const STREAM_DEVICE = '~odysee-stream@1.0';
 
 export function buildHyperbeamPlaybackUrl(uri: string): string {
   const playbackUrl = hyperbeamPlaybackUrl();
@@ -89,7 +89,7 @@ function hyperbeamMediaUrlFromPayload(payload: any): string {
   if (claimId) return `${node}/odysee/media/stream-id/${encodeURIComponent(String(claimId))}`;
 
   const sdHash = payload.sd_hash || payload['sd-hash'];
-  return sdHash ? `${node}/${ODYSEE_DEVICE}/media?sd-hash=${encodeURIComponent(String(sdHash))}` : '';
+  return sdHash ? `${node}/${STREAM_DEVICE}/media?sd-hash=${encodeURIComponent(String(sdHash))}` : '';
 }
 
 function timeoutSignal(ms: number): AbortSignal | undefined {

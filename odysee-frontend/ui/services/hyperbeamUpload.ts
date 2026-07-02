@@ -9,15 +9,18 @@ import {
   VISIBILITY_TAGS,
 } from 'constants/tags';
 import { isHyperbeamFullMode } from 'util/hyperbeamMode';
-import {
-  HYPERBEAM_DEVICE,
-  base64Url,
-  hyperbeamDeviceBase,
-  hyperbeamDevicePostParams64,
-  hyperbeamNodeBase,
-} from 'util/hyperbeamDevices';
+import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
-const LARGE_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;
+const METADATA_KEYS = [
+  'title',
+  'description',
+  'thumbnail_url',
+  'tags',
+  'languages',
+  'license',
+  'license_url',
+  'release_time',
+];
 const UNSUPPORTED_EXACT_TAGS = new Set([
   ...MEMBERS_ONLY_TAGS,
   PURCHASE_TAG,
@@ -63,32 +66,19 @@ export async function publishThroughHyperbeam(
     },
   };
   const storeResponse = await genericStoreWriteResponse(file);
-  if (storeResponse) {
-    const storeJson = await responseJsonWithHeaders(storeResponse);
-    if (storeResponse.ok)
-      return publishIndexedStoreWrite(storeJson, uploadPayload, publishPayload, file, authToken, myChannels);
-    if (!shouldFallbackStoreWrite(storeResponse.status)) throw new Error(errorMessage(storeJson, storeResponse.status));
-  }
+  if (!storeResponse) throw new Error('HyperBEAM node is not configured.');
+  const storeJson = await responseJsonWithHeaders(storeResponse);
+  if (!storeResponse.ok) throw new Error(errorMessage(storeJson, storeResponse.status));
 
-  const cacheResponse = await cacheWriteResponse(file, authToken);
-  if (cacheResponse) {
-    const cacheJson = await responseJsonWithHeaders(cacheResponse);
-    if (cacheResponse.ok)
-      return publishIndexedStoreWrite(cacheJson, uploadPayload, publishPayload, file, authToken, myChannels);
-    if (!shouldFallbackStoreWrite(cacheResponse.status)) throw new Error(errorMessage(cacheJson, cacheResponse.status));
-  }
+  const dataId = storeWriteId(storeJson);
+  if (!dataId) throw new Error('HyperBEAM store write response did not include an ID.');
 
-  if (!authToken) throw new Error('HyperBEAM upload fallback requires an Odysee auth token.');
+  const indexResponse = await indexUploadResponse(dataId, uploadPayload, authToken);
+  if (!indexResponse) throw new Error('HyperBEAM upload device is not configured.');
+  const indexJson = await responseJson(indexResponse);
+  if (!indexResponse.ok) throw new Error(errorMessage(indexJson, indexResponse.status));
 
-  const response =
-    file.size >= LARGE_UPLOAD_THRESHOLD_BYTES
-      ? (await largeUploadResponse(file, { ...uploadPayload, chunked_manifest: true }, authToken)) ||
-        (await directUploadResponse(file, uploadPayload, authToken))
-      : await directUploadResponse(file, uploadPayload, authToken);
-  const json = await responseJson(response);
-  if (!response.ok) throw new Error(errorMessage(json, response.status));
-
-  return normalizePublishResponse(json, publishPayload, file, myChannels);
+  return normalizePublishResponse(indexJson, publishPayload, file, myChannels);
 }
 
 async function genericStoreWriteResponse(file: Blob) {
@@ -106,115 +96,24 @@ async function genericStoreWriteResponse(file: Blob) {
   });
 }
 
-async function cacheWriteResponse(file: Blob, authToken?: string) {
-  const base = hyperbeamDeviceBase(HYPERBEAM_DEVICE.cache);
-  if (!base) return null;
-
-  return fetch(`${base}/write?!=true`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      accept: 'application/json',
-      'content-type': file.type || 'application/octet-stream',
-      ...odyseeAuthHeaders(authToken),
-    },
-    body: file,
-  });
-}
-
-async function directUploadResponse(file: Blob, uploadPayload: Record<string, any>, authToken: string) {
-  const request = hyperbeamDevicePostParams64(
-    HYPERBEAM_DEVICE.upload,
-    'submit&!',
-    {
-      ...uploadPayload,
-      content_base64: await blobToBase64(file),
-    },
-    {
-      Authorization: `Bearer ${authToken}`,
-      [X_LBRY_AUTH_TOKEN]: authToken,
-    }
-  );
-  if (!request) throw new Error('HyperBEAM upload device is not configured.');
-
-  return request;
-}
-
-async function publishIndexedStoreWrite(
-  json: any,
-  uploadPayload: Record<string, any>,
-  publishPayload: PublishParams,
-  file: Blob,
-  authToken: string,
-  myChannels?: Array<ChannelClaim> | null
-): Promise<PublishResponse> {
-  const localResponse = normalizeStoreWriteResponse(json, publishPayload, file, myChannels);
-  const indexedResponse = await indexUploadResponse(json, uploadPayload, localResponse, authToken);
-  if (!indexedResponse) return localResponse;
-
-  const indexedJson = await responseJson(indexedResponse);
-  if (indexedResponse.ok) return normalizePublishResponse(indexedJson, publishPayload, file, myChannels);
-  if (!shouldFallbackStoreWrite(indexedResponse.status))
-    throw new Error(errorMessage(indexedJson, indexedResponse.status));
-
-  return localResponse;
-}
-
-async function indexUploadResponse(
-  json: any,
-  uploadPayload: Record<string, any>,
-  localResponse: PublishResponse,
-  authToken?: string
-) {
-  const claim: any = Array.isArray(localResponse?.outputs) ? localResponse.outputs[0] : null;
-  const dataId = storeWriteId(storeWritePayload(json)) || claim?.hyperbeam?.['data-id'];
-  if (!dataId || !claim) return null;
-
+async function indexUploadResponse(dataId: string, uploadPayload: Record<string, any>, authToken?: string) {
   return hyperbeamDevicePostParams64(
-    HYPERBEAM_DEVICE.index,
-    'upload&!',
+    HYPERBEAM_DEVICE.upload,
+    'index&!',
     {
       ...uploadPayload,
       data_id: dataId,
-      claim,
     },
     odyseeAuthHeaders(authToken)
   );
 }
 
-function shouldFallbackStoreWrite(status: number) {
-  return status === 403 || status === 404 || status === 405;
-}
-
-async function largeUploadResponse(file: Blob, uploadPayload: Record<string, any>, authToken: string) {
-  const response = await fetch('/$/api/hyperbeam-upload/v1/large', {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      accept: 'application/json',
-      'content-type': uploadPayload.content_type || 'application/octet-stream',
-      'x-odysee-filename': uploadPayload.filename || 'upload',
-      'x-odysee-upload-params64': base64Url(JSON.stringify(uploadPayload || {})),
-      Authorization: `Bearer ${authToken}`,
-      [X_LBRY_AUTH_TOKEN]: authToken,
-    },
-    body: file,
-  });
-  const contentType = response.headers.get('content-type') || '';
-
-  if (response.status === 404 || contentType.includes('text/html')) return null;
-  return response;
-}
-
 function publishMetadata(publishPayload: PublishParams) {
-  const {
-    file_path: _filePath,
-    uploadUrl: _uploadUrl,
-    guid: _guid,
-    remote_url: _remoteUrl,
-    ...metadata
-  } = publishPayload as any;
-  return metadata;
+  const payload = publishPayload as any;
+  return METADATA_KEYS.reduce<Record<string, any>>((metadata, key) => {
+    if (hasValue(payload[key])) metadata[key] = payload[key];
+    return metadata;
+  }, {});
 }
 
 function normalizePublishResponse(
@@ -231,7 +130,8 @@ function normalizePublishResponse(
   const mediaUrl = mediaUrlFromResponse(response);
   const source = outputs[0].value?.source || {};
   const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
-  const publishedUri = publishedUriFromClaim(outputs[0], publishPayload, signingChannel);
+  const recordId = uploadRecordId(response, outputs[0]);
+  const publishedUri = publishedUriFromClaim(outputs[0], publishPayload, signingChannel, recordId);
   const sourceName = source.name || fileName(file, publishPayload);
   const sourceSize = source.size || String(file.size);
   const claim: any = {
@@ -249,6 +149,10 @@ function normalizePublishResponse(
     signing_channel: signingChannel ? channelSummary(signingChannel) : outputs[0].signing_channel,
     streaming_url: mediaUrl,
     download_url: mediaUrl,
+    hyperbeam: {
+      ...outputs[0].hyperbeam,
+      ...(recordId ? { 'record-id': recordId, record_id: recordId } : {}),
+    },
     value: {
       ...outputs[0].value,
       source: {
@@ -261,83 +165,6 @@ function normalizePublishResponse(
   };
 
   return { ...result, outputs: [claim] };
-}
-
-function normalizeStoreWriteResponse(
-  json: any,
-  publishPayload: PublishParams,
-  file: Blob,
-  myChannels?: Array<ChannelClaim> | null
-): PublishResponse {
-  const payload = storeWritePayload(json);
-  const dataId = storeWriteId(payload);
-  if (!dataId) throw new Error('HyperBEAM store write response did not include an ID.');
-
-  const metadata = publishMetadata(publishPayload);
-  const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
-  const name = publishPayload.name || fileName(file, publishPayload);
-  const mediaUrl = genericReadUrl(dataId);
-  const publishedUri = signingChannel
-    ? publishedUriFromClaim({ name }, publishPayload, signingChannel)
-    : `lbry://${name}#${dataId}`;
-  const timestamp = Math.floor(Date.now() / 1000);
-  const mediaType = file.type || publishPayload.content_type || 'application/octet-stream';
-  const sourceName = fileName(file, publishPayload);
-  const claim: any = {
-    address: '',
-    amount: '0',
-    claim_id: dataId,
-    claim_op: 'create',
-    name,
-    normalized_name: name.toLowerCase(),
-    permanent_url: publishedUri,
-    canonical_url: publishedUri,
-    short_url: publishedUri,
-    type: 'claim',
-    value_type: 'stream',
-    confirmations: 1,
-    is_my_output: true,
-    is_channel_signature_valid: Boolean(signingChannel),
-    signing_channel: signingChannel ? channelSummary(signingChannel) : undefined,
-    height: 0,
-    txid: dataId,
-    nout: 0,
-    timestamp,
-    meta: {
-      activation_height: 0,
-      creation_height: 0,
-      creation_timestamp: timestamp,
-      effective_amount: '0',
-      expiration_height: 0,
-      is_controlling: true,
-      reposted: 0,
-      support_amount: '0',
-    },
-    streaming_url: mediaUrl,
-    download_url: mediaUrl,
-    hyperbeam: {
-      'data-id': dataId,
-      path: genericReadPath(dataId),
-    },
-    value: {
-      title: metadata.title || name,
-      description: metadata.description || '',
-      thumbnail: thumbnailValue(metadata.thumbnail_url || metadata.thumbnail),
-      tags: Array.isArray(metadata.tags) ? metadata.tags : [],
-      languages: Array.isArray(metadata.languages) ? metadata.languages : [],
-      release_time: metadata.release_time || timestamp,
-      source: {
-        media_type: mediaType,
-        name: sourceName,
-        size: String(file.size),
-        source: dataId,
-        sd_hash: dataId,
-        url: mediaUrl,
-      },
-    },
-  };
-
-  return { outputs: [claim] };
 }
 
 function uploadResponse(json: any) {
@@ -368,11 +195,23 @@ function channelSummary(channel: ChannelClaim) {
   };
 }
 
-function publishedUriFromClaim(claim: any, publishPayload: PublishParams, signingChannel?: ChannelClaim) {
-  if (!signingChannel) return claim.permanent_url || claim.canonical_url || claim.short_url || '';
+function publishedUriFromClaim(
+  claim: any,
+  publishPayload: PublishParams,
+  signingChannel?: ChannelClaim,
+  recordId?: string
+) {
+  const name = claim.name || publishPayload.name;
+  const claimId = claim.claim_id || claim['claim-id'] || recordId;
 
-  const channelBaseUrl = signingChannel.short_url || signingChannel.canonical_url || signingChannel.permanent_url;
-  return channelBaseUrl ? `${channelBaseUrl}/${claim.name || publishPayload.name}` : '';
+  if (signingChannel) {
+    const channelBaseUrl = signingChannel.short_url || signingChannel.canonical_url || signingChannel.permanent_url;
+    if (channelBaseUrl && name) return `${channelBaseUrl}/${name}`;
+  }
+  if (name && claimId) return `lbry://${name}#${claimId}`;
+  if (recordId) return `lbry://${recordId}`;
+
+  return claim.permanent_url || claim.canonical_url || claim.short_url || (name ? `lbry://${name}` : '');
 }
 
 function mediaUrlFromResponse(json: any) {
@@ -384,44 +223,33 @@ function mediaUrlFromResponse(json: any) {
     json?.record?.['record-id'] ||
     json?.record?.record_id ||
     json?.claim?.hyperbeam?.['record-id'];
-  const path = json?.['media-path'] || json?.media_path || (recordId ? `/~odysee-upload@1.0/media?id=${recordId}` : '');
+  const responsePath = json?.['read-path'] || json?.read_path || json?.url || json?.['media-path'] || json?.media_path;
+  const path =
+    recordId && String(responsePath || '').includes('/~odysee-upload@1.0/')
+      ? `/${recordId}`
+      : responsePath || (recordId ? `/${recordId}` : '');
   if (!path) return '';
   if (/^https?:\/\//.test(path)) return path;
   return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-function genericReadPath(id: string) {
-  return `/${id
-    .split('/')
-    .filter(Boolean)
-    .map((part) => encodeURIComponent(part))
-    .join('/')}`;
-}
-
-function genericReadUrl(id: string) {
-  const base = hyperbeamNodeBase();
-  return `${base}${genericReadPath(id)}`;
-}
-
-function storeWritePayload(json: any) {
-  const body = responseBodyObject(json);
-  return body ? { ...json, ...body } : json;
+function uploadRecordId(json: any, claim: any) {
+  return (
+    json?.['record-id'] ||
+    json?.record_id ||
+    json?.id ||
+    json?.record?.['record-id'] ||
+    json?.record?.record_id ||
+    claim?.hyperbeam?.['record-id'] ||
+    claim?.hyperbeam?.record_id ||
+    claim?.claim_id ||
+    claim?.['claim-id']
+  );
 }
 
 function storeWriteId(json: any) {
   const path = json?.path || json?.id || json?.['read-path'] || json?.read_path || json?.url || json?.body;
   return typeof path === 'string' ? path.replace(/^\//, '') : '';
-}
-
-function responseBodyObject(json: any) {
-  if (json?.body && typeof json.body === 'object') return json.body;
-  if (typeof json?.body !== 'string') return null;
-
-  try {
-    return JSON.parse(json.body);
-  } catch {
-    return null;
-  }
 }
 
 async function responseJsonWithHeaders(response: Response) {
@@ -432,6 +260,15 @@ async function responseJsonWithHeaders(response: Response) {
     return acc;
   }, {});
   return { ...json, ...headers };
+}
+
+function odyseeAuthHeaders(authToken?: string): Record<string, string> {
+  return authToken
+    ? {
+        Authorization: `Bearer ${authToken}`,
+        [X_LBRY_AUTH_TOKEN]: authToken,
+      }
+    : {};
 }
 
 function responseJson(response: Response) {
@@ -446,15 +283,6 @@ function responseJson(response: Response) {
 
 function errorMessage(json: any, status: number) {
   return json?.body || json?.details || json?.error || `HyperBEAM upload failed with ${status}`;
-}
-
-function odyseeAuthHeaders(authToken?: string): Record<string, string> {
-  return authToken
-    ? {
-        Authorization: `Bearer ${authToken}`,
-        [X_LBRY_AUTH_TOKEN]: authToken,
-      }
-    : {};
 }
 
 function hasValue(value: any) {
@@ -481,23 +309,6 @@ function fileName(file: Blob, publishPayload: PublishParams) {
   return typeof File !== 'undefined' && file instanceof File && file.name ? file.name : publishPayload.name || 'upload';
 }
 
-function thumbnailValue(value: any) {
-  if (!value) return undefined;
-  return typeof value === 'string' ? { url: value } : value;
-}
-
 function isBlob(value: any): value is Blob {
   return typeof Blob !== 'undefined' && value instanceof Blob;
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      resolve(result.includes(',') ? result.slice(result.indexOf(',') + 1) : result);
-    });
-    reader.addEventListener('error', () => reject(reader.error || new Error('Failed to read upload')));
-    reader.readAsDataURL(blob);
-  });
 }

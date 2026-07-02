@@ -8,7 +8,7 @@ export const regexInvalidURI =
 export const regexAddress = /^(b|r)(?=[^0OIl]{32,33})[0-9A-Za-z]{32,33}$/;
 const regexPartProtocol = '^((?:lbry://)?)';
 const regexPartStreamOrChannelName = '([^:$#/]*)';
-const regexPartModifierSeparator = '([:$#]?)([0-9a-f]*)';
+const regexPartModifierSeparator = '([:$#]?)([0-9A-Za-z_-]*)';
 const queryStringBreaker = '^([\\S]+)([?][\\S]*)';
 const separateQuerystring = new RegExp(queryStringBreaker);
 const MOD_SEQUENCE_SEPARATOR = '*';
@@ -207,7 +207,7 @@ function parseURIModifier(modSeperator: string | null | undefined, modValue: str
     }
   }
 
-  if (claimId && (claimId.length > claimIdMaxLength || !claimId.match(/^[0-9a-f]+$/))) {
+  if (claimId && !isClaimIdModifierValid(claimId)) {
     const hashIndex = claimId.indexOf('#');
 
     if (hashIndex >= 0) {
@@ -240,6 +240,14 @@ function parseURIModifier(modSeperator: string | null | undefined, modValue: str
   }
 
   return [claimId, claimSequence, bidPosition, pathHash];
+}
+
+function isClaimIdModifierValid(claimId: string) {
+  return (claimId.length <= claimIdMaxLength && /^[0-9a-f]+$/.test(claimId)) || isHyperbeamDataId(claimId);
+}
+
+function isHyperbeamDataId(claimId: string) {
+  return claimId.length > claimIdMaxLength && claimId.length <= 128 && /^[0-9A-Za-z_-]+$/.test(claimId);
 }
 
 const errorHistory = [];

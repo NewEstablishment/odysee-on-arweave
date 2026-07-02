@@ -1,13 +1,13 @@
 import { HYPERBEAM_BASE_URL, LBRY_API_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { callHyperbeamComment } from 'services/hyperbeamUserState';
 import { allowHyperbeamCompatibilityReads, isHyperbeamDeviceEnabled, isHyperbeamEnabled } from 'util/hyperbeamMode';
+import { parseURI } from 'util/lbryURI';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const CLAIM_DEVICE = '~odysee-claim@1.0';
 const COMMENT_DEVICE = '~odysee-comment@1.0';
 const ODYSEE_DEVICE = '~odysee@1.0';
-const INDEX_DEVICE = '~odysee-index@1.0';
 const UPLOAD_DEVICE = '~odysee-upload@1.0';
 const REACTION_DEVICE = '~odysee-reaction@1.0';
 const FILE_DEVICE = '~odysee-file@1.0';
@@ -52,14 +52,62 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
 async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
   return Promise.all(
     urls.map(async (uri): Promise<[string, any]> => {
+      const immutableClaim = await fetchHyperbeamImmutableResolve(uri);
+      if (immutableClaim) return [uri, immutableClaim];
+
       const storeClaim = await fetchCachedStoreJsonOrNull(storePath('odysee/claim', uri)).then(responsePayload);
       if (storeClaim) return [uri, sdkClaimFromHyperbeam(storeClaim)];
 
-      const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { uri });
+      const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { uri }).catch(() => null);
       const result = responsePayload(response);
-      return [uri, sdkClaimFromHyperbeam(result?.[uri] || result)];
+      const claim = sdkClaimFromHyperbeam(result?.[uri] || result);
+      if (claim) return [uri, claim];
+
+      return [uri, await fetchHyperbeamUploadResolve(uri)];
     })
   );
+}
+
+async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> {
+  const immutableId = immutableRouteIdFromUri(uri);
+  if (!immutableId) return null;
+
+  const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
+  const decodedClaim = decodeClaimMetadata(storePayload(result));
+  const signingChannel = decodedClaim?.signedChannelId
+    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
+        .then(responsePayload)
+        .catch(() => null)
+    : null;
+  const parsed = parseURI(uri);
+  const name = parsed.streamName || parsed.claimName;
+  const claim = immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name);
+  if (!claim) return null;
+
+  return !name || claim.name === name ? claim : null;
+}
+
+async function fetchHyperbeamUploadResolve(uri: string): Promise<any | null> {
+  let parsed;
+  try {
+    parsed = parseURI(uri);
+  } catch {
+    return null;
+  }
+
+  const claimId = parsed.channelName ? parsed.streamClaimId : parsed.streamClaimId || parsed.claimId;
+  const name = parsed.streamName || (parsed.channelName ? undefined : parsed.claimName);
+  if (!claimId && !name) return null;
+
+  const result = await fetchHyperbeamUploadList(
+    compactParams({
+      claim_ids: claimId ? [claimId] : undefined,
+      name,
+      page_size: 1,
+    })
+  ).catch(() => null);
+
+  return Array.isArray(result?.items) ? result.items[0] || null : null;
 }
 
 async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[string, any]>> {
@@ -103,6 +151,12 @@ export async function fetchHyperbeamGet(params: any): Promise<any | null> {
   const uri = params?.uri || params?.url;
   if (!uri) return null;
 
+  const immutablePayload = playbackPayloadFromUploadClaim(await fetchHyperbeamImmutableResolve(uri));
+  if (immutablePayload) return immutablePayload;
+
+  const uploadPayload = playbackPayloadFromUploadClaim(await fetchHyperbeamUploadResolve(uri));
+  if (uploadPayload) return uploadPayload;
+
   const storeStream = await fetchStoreJsonOrNull(storePath('odysee/stream', uri)).then(responsePayload);
   const storePayload = playbackPayloadFromHyperbeam(storeStream);
   if (storePayload) return storePayload;
@@ -127,6 +181,17 @@ type HyperbeamChannel = {
     thumbnail?: { url?: string };
   };
   [key: string]: any;
+};
+
+type ProtoField = {
+  number: number;
+  wireType: number;
+  value: number | Uint8Array;
+};
+
+type DecodedClaimMetadata = {
+  signedChannelId?: string;
+  value?: Record<string, any>;
 };
 
 export async function fetchHyperbeamCommentList(params: CommentListParams): Promise<CommentListResponse | null> {
@@ -297,7 +362,7 @@ export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Pro
 
   const localParams = localUploadSearchParams(params);
   const [response, localUploads] = await Promise.all([
-    fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params),
+    fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params).catch(() => null),
     localParams ? fetchHyperbeamUploadList(localParams).catch(() => null) : Promise.resolve(null),
   ]);
   const result = sdkSearchFromHyperbeam(responsePayload(response));
@@ -307,9 +372,7 @@ export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Pro
 }
 
 export async function fetchHyperbeamUploadList(params: ClaimSearchOptions = {}): Promise<ClaimSearchResponse | null> {
-  const response =
-    (await fetchDeviceJson(`${INDEX_DEVICE}/list`, params).catch(() => null)) ||
-    (await fetchDeviceJson(`${UPLOAD_DEVICE}/list`, params));
+  const response = await fetchDeviceJson(`${UPLOAD_DEVICE}/list`, params);
   const result = sdkSearchFromHyperbeam(responsePayload(response));
   const sourceItems = result && result.items;
   if (!Array.isArray(sourceItems)) return null;
@@ -340,7 +403,13 @@ async function fetchHyperbeamImmutableList(
     await Promise.all(
       uniqueIds.map(async (id) => {
         const result = await fetchCachedImmutableJsonOrNull(id).then(responsePayload);
-        return immutableClaimFromHyperbeam(result, id);
+        const decodedClaim = decodeClaimMetadata(storePayload(result));
+        const signingChannel = decodedClaim?.signedChannelId
+          ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
+              .then(responsePayload)
+              .catch(() => null)
+          : null;
+        return immutableClaimFromHyperbeam(result, id, signingChannel, decodedClaim);
       })
     )
   ).filter(Boolean);
@@ -374,10 +443,28 @@ function fetchCachedImmutableJsonOrNull(id: string): Promise<any | null> {
 }
 
 async function fetchImmutableJsonOrNull(id: string): Promise<any | null> {
-  const source = await fetchStoreJsonOrNull(`${ODYSEE_DEVICE}/source?id=${encodeURIComponent(id)}&view=json`);
-  if (source) return source;
+  if (isOutpointId(id) || isStandaloneImmutableId(id)) {
+    const source = await fetchStoreJsonOrNull(encodeDataPath(id), false);
+    if (source) return source;
+  }
 
-  return fetchStoreJsonOrNull(encodeDataPath(id));
+  return fetchStoreJsonOrNull(`${ODYSEE_DEVICE}/source?id=${encodeURIComponent(id)}&view=json`);
+}
+
+function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> {
+  const key = `immutable-channel:${id}`;
+  const now = Date.now();
+  const cached = deviceReadCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+
+  const promise = fetchStoreJsonOrNull(
+    `${ODYSEE_DEVICE}/source?id=${encodeURIComponent(id)}&kind=channel&view=json`
+  ).catch((error) => {
+    deviceReadCache.delete(key);
+    throw error;
+  });
+  deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
+  return promise;
 }
 
 export async function fetchHyperbeamVerifyClaimSignature(
@@ -451,15 +538,20 @@ function uploadClaimFromHyperbeam(item: any): any {
   const source = claimValue.source || {};
   const dataId = value(hyperbeam, 'data-id', 'data_id') || value(source, 'sd_hash', 'sd-hash', 'source');
   const recordId = value(hyperbeam, 'record-id', 'record_id') || claim.claim_id;
+  const routeId = recordId || dataId || claim.claim_id;
+  const routeUrl = routeId ? `lbry://${routeId}` : claimUrl(claim.name, routeId);
   const explicitMediaUrl = absoluteHyperbeamUrl(claim.streaming_url || claim.download_url || source.url);
   const mediaUrl =
-    explicitMediaUrl ||
-    (dataId ? `${hyperbeamBaseUrl()}/${encodeDataPath(String(dataId))}` : '') ||
-    (recordId ? `${hyperbeamBaseUrl()}/${UPLOAD_DEVICE}/media?id=${encodeURIComponent(recordId)}` : '');
+    normalizedUploadMediaUrl(explicitMediaUrl, recordId) ||
+    (recordId ? `${hyperbeamBaseUrl()}/${encodeDataPath(String(recordId))}` : '') ||
+    (dataId ? `${hyperbeamBaseUrl()}/${encodeDataPath(String(dataId))}` : '');
   const releaseTime = value(claimValue, 'release_time', 'release-time') || claim.timestamp;
 
   return {
     ...claim,
+    canonical_url: routeUrl,
+    permanent_url: routeUrl,
+    short_url: routeUrl,
     confirmations: Number(claim.confirmations) > 0 ? claim.confirmations : 1,
     is_my_output: claim.is_my_output !== undefined ? claim.is_my_output : true,
     streaming_url: claim.streaming_url || mediaUrl,
@@ -475,35 +567,88 @@ function uploadClaimFromHyperbeam(item: any): any {
   };
 }
 
-function immutableClaimFromHyperbeam(result: any, immutableId: string): any | null {
+function playbackPayloadFromUploadClaim(claim: any): any | null {
+  if (!claim) return null;
+
+  const source = claim.value?.source || {};
+  const hyperbeam = claim.hyperbeam || {};
+  const dataId = value(hyperbeam, 'data-id', 'data_id') || value(source, 'sd_hash', 'sd-hash', 'source');
+  const recordId = value(hyperbeam, 'record-id', 'record_id') || value(claim, 'claim_id', 'claim-id');
+  const explicitMediaUrl = absoluteHyperbeamUrl(claim.streaming_url || claim.download_url || source.url);
+  const mediaUrl =
+    normalizedUploadMediaUrl(explicitMediaUrl, recordId) ||
+    (recordId ? `${hyperbeamBaseUrl()}/${encodeDataPath(String(recordId))}` : '') ||
+    (dataId ? `${hyperbeamBaseUrl()}/${encodeDataPath(String(dataId))}` : '');
+  if (!mediaUrl) return null;
+
+  return {
+    streaming_url: mediaUrl,
+    download_url: mediaUrl,
+    media_type: value(source, 'media_type', 'media-type') || 'application/octet-stream',
+    source_size: value(source, 'size', 'byte-size', 'byte_size'),
+    claim_id: value(claim, 'claim_id', 'claim-id'),
+    claim_name: claim.name,
+    file_name: source.name,
+    sd_hash: dataId,
+  };
+}
+
+function immutableClaimFromHyperbeam(
+  result: any,
+  immutableId: string,
+  channelResult?: any,
+  decodedClaim?: DecodedClaimMetadata | null,
+  fallbackName?: string
+): any | null {
   const payload = storePayload(result);
   if (!payload) return null;
 
+  const immutableOutpoint = outpointParts(immutableId);
+  const claimMetadata = decodedClaim || decodeClaimMetadata(payload);
+  const decodedValue = isObject(claimMetadata?.value) ? claimMetadata.value : {};
+  const decodedSource = isObject(value(decodedValue, 'source')) ? value(decodedValue, 'source') : {};
+  const channelPayload = storePayload(channelResult);
+  const channelClaim = sdkClaimFromHyperbeam(channelPayload) || channelPayload;
   const claim = sdkClaimFromHyperbeam(payload) || payload;
   const existingValue = isObject(value(claim, 'value')) ? value(claim, 'value') : {};
   const payloadSource = isObject(value(payload, 'source')) ? value(payload, 'source') : {};
   const valueSource = isObject(value(existingValue, 'source')) ? value(existingValue, 'source') : {};
-  const sourceClaimId = value(payload, 'claim_id', 'claim-id') || value(claim, 'claim_id', 'claim-id');
-  const txid = value(payload, 'txid');
-  const nout = value(payload, 'nout');
+  const sourceClaimId =
+    value(payload, 'claim_id', 'claim-id') ||
+    value(claim, 'claim_id', 'claim-id') ||
+    claimIdFromSignatureInput(value(payload, 'signature-input'));
+  const txid = value(payload, 'txid') || immutableOutpoint?.txid;
+  const nout = value(payload, 'nout') || immutableOutpoint?.nout;
   const device = value(payload, 'device');
   const outpoint =
     typeof txid === 'string' && (typeof nout === 'number' || typeof nout === 'string') ? `${txid}:${nout}` : null;
   const storeId = immutableId || outpoint || value(payload, 'id') || sourceClaimId;
   if (!storeId) return null;
+  const frontendClaimId = sourceClaimId || String(storeId);
+  const routeClaimId = webSafeImmutableId(storeId);
 
-  const rawName = value(payload, 'claim-name', 'claim_name', 'name') || value(claim, 'name');
+  const decodedTitle = value(decodedValue, 'title');
+  const rawName =
+    fallbackName ||
+    value(payload, 'claim-name', 'claim_name', 'name') ||
+    value(claim, 'name') ||
+    slugFromText(decodedTitle);
   const name = safeClaimName(rawName || `store-${String(storeId).slice(0, 8)}`);
-  const title = value(existingValue, 'title') || value(payload, 'title') || rawName || name;
-  const description = value(existingValue, 'description') || value(payload, 'description') || '';
+  const title = value(existingValue, 'title') || value(payload, 'title') || decodedTitle || rawName || name;
+  const description =
+    value(existingValue, 'description') || value(payload, 'description') || value(decodedValue, 'description') || '';
   const sdHash =
     value(payload, 'sd_hash', 'sd-hash') ||
     value(payloadSource, 'sd_hash', 'sd-hash') ||
-    value(valueSource, 'sd_hash', 'sd-hash');
+    value(valueSource, 'sd_hash', 'sd-hash') ||
+    value(decodedSource, 'sd_hash', 'sd-hash');
+  const payloadContentType = value(payload, 'content-type');
   const mediaType =
-    value(payload, 'media_type', 'media-type', 'content-type') ||
+    value(payload, 'media_type', 'media-type') ||
     value(payloadSource, 'media_type', 'media-type') ||
     value(valueSource, 'media_type', 'media-type') ||
+    value(decodedSource, 'media_type', 'media-type') ||
+    (isMediaContentType(payloadContentType) ? payloadContentType : undefined) ||
     (device === 'lbry-stream@1.0' && sdHash ? 'video/mp4' : undefined);
   const explicitMediaUrl = absoluteHyperbeamUrl(
     value(payload, 'streaming_url', 'streaming-url', 'download_url', 'download-url') ||
@@ -511,9 +656,16 @@ function immutableClaimFromHyperbeam(result: any, immutableId: string): any | nu
       value(valueSource, 'url')
   );
   const directMediaUrl =
-    !String(storeId).includes(':') && isMediaContentType(mediaType) ? `${hyperbeamBaseUrl()}/${encodeDataPath(storeId)}` : '';
+    !String(storeId).includes(':') && isMediaContentType(mediaType)
+      ? `${hyperbeamBaseUrl()}/${encodeDataPath(storeId)}`
+      : '';
+  const claimMediaUrl =
+    name && isClaimId(sourceClaimId)
+      ? `${hyperbeamBaseUrl()}/${STREAM_DEVICE}/media?claim-name=${encodeURIComponent(name)}&claim-id=${encodeURIComponent(String(sourceClaimId))}`
+      : '';
   const mediaUrl =
     explicitMediaUrl ||
+    claimMediaUrl ||
     hyperbeamMediaUrlFromPayload({
       ...payload,
       sd_hash: sdHash,
@@ -525,11 +677,11 @@ function immutableClaimFromHyperbeam(result: any, immutableId: string): any | nu
   const canonicalUrl =
     value(claim, 'canonical_url', 'canonical-url') ||
     value(payload, 'canonical_url', 'canonical-url') ||
-    claimUrl(name, sourceClaimId);
+    claimUrl(name, routeClaimId);
   const permanentUrl =
     value(claim, 'permanent_url', 'permanent-url') ||
     value(payload, 'permanent_url', 'permanent-url') ||
-    claimUrl(name, sourceClaimId);
+    claimUrl(name, routeClaimId);
   const valueType =
     value(claim, 'value_type', 'value-type') ||
     value(payload, 'value_type', 'value-type') ||
@@ -537,12 +689,19 @@ function immutableClaimFromHyperbeam(result: any, immutableId: string): any | nu
   const sourceName =
     value(payloadSource, 'name') ||
     value(valueSource, 'name') ||
+    value(decodedSource, 'name') ||
     value(payload, 'filename') ||
     (mediaType === 'video/mp4' ? `${name}.mp4` : undefined);
+  const signingChannel =
+    channelClaim && value(channelClaim, 'claim_id', 'claim-id') === claimMetadata?.signedChannelId
+      ? channelClaim
+      : undefined;
 
   return compactParams({
     ...claim,
-    claim_id: String(storeId),
+    claim_id: frontendClaimId,
+    txid,
+    nout,
     name,
     canonical_url: canonicalUrl,
     permanent_url: permanentUrl,
@@ -551,21 +710,42 @@ function immutableClaimFromHyperbeam(result: any, immutableId: string): any | nu
     timestamp: value(claim, 'timestamp') || value(payload, 'timestamp', 'release_time', 'release-time'),
     confirmations: toNumber(value(claim, 'confirmations'), 1),
     is_my_output: value(claim, 'is_my_output', 'is-my-output'),
+    is_channel_signature_valid: signingChannel
+      ? true
+      : value(claim, 'is_channel_signature_valid', 'is-channel-signature-valid'),
+    signing_channel: signingChannel || value(claim, 'signing_channel', 'signing-channel'),
     streaming_url: mediaUrl || value(claim, 'streaming_url', 'streaming-url'),
     download_url: mediaUrl || value(claim, 'download_url', 'download-url'),
     value: compactParams({
       ...existingValue,
       title,
       description,
-      thumbnail: thumbnailObject(value(existingValue, 'thumbnail') || value(payload, 'thumbnail'), mediaUrl, mediaType),
-      stream_type: value(existingValue, 'stream_type', 'stream-type') || streamTypeFromMediaType(mediaType),
+      thumbnail: thumbnailObject(
+        value(existingValue, 'thumbnail') || value(payload, 'thumbnail') || value(decodedValue, 'thumbnail'),
+        mediaUrl,
+        mediaType
+      ),
+      stream_type:
+        value(existingValue, 'stream_type', 'stream-type') ||
+        value(decodedValue, 'stream_type', 'stream-type') ||
+        streamTypeFromMediaType(mediaType),
+      tags: value(existingValue, 'tags') || value(decodedValue, 'tags'),
+      license: value(existingValue, 'license') || value(decodedValue, 'license'),
+      release_time:
+        value(existingValue, 'release_time', 'release-time') || value(decodedValue, 'release_time', 'release-time'),
+      video: value(existingValue, 'video') || value(decodedValue, 'video'),
       source: compactParams({
         ...payloadSource,
         ...valueSource,
         sd_hash: sdHash,
         media_type: mediaType,
         name: sourceName,
-        size: value(payloadSource, 'size') || value(valueSource, 'size') || value(payload, 'byte-size', 'source-size'),
+        size:
+          value(payloadSource, 'size') ||
+          value(valueSource, 'size') ||
+          value(decodedSource, 'size') ||
+          value(payload, 'byte-size', 'source-size'),
+        hash: value(payloadSource, 'hash') || value(valueSource, 'hash') || value(decodedSource, 'hash'),
         url: mediaUrl || value(payloadSource, 'url') || value(valueSource, 'url'),
       }),
     }),
@@ -691,18 +871,18 @@ function fetchCachedDeviceJson(path: string, body: Record<string, any>): Promise
   return promise;
 }
 
-async function fetchStoreJsonOrNull(path: string): Promise<any | null> {
+async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) return null;
   if (!allowHyperbeamCompatibilityReads() && isCompatibilityStorePath(path)) return null;
 
   try {
     const response = await fetch(buildDeviceUrl(baseUrl, path), {
-      headers: { accept: 'application/json' },
+      headers: preferJson ? { accept: 'application/json' } : undefined,
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
     if (!response.ok) return null;
-    return parseDeviceJson(await response.text());
+    return parseStoreResponse(response);
   } catch {
     return null;
   }
@@ -772,6 +952,11 @@ function absoluteHyperbeamUrl(url: any): string {
   return baseUrl && url.startsWith('/') ? `${baseUrl}${url}` : url;
 }
 
+function normalizedUploadMediaUrl(url: string, recordId: any): string {
+  if (!url || !recordId || !url.includes('/~odysee-upload@1.0/')) return url || '';
+  return `${hyperbeamBaseUrl()}/${encodeDataPath(String(recordId))}`;
+}
+
 function compactParams(params: Record<string, any>): Record<string, any> {
   return Object.fromEntries(
     Object.entries(params).filter(([key, value]) => key !== 'no_auth' && value !== undefined && value !== null)
@@ -810,6 +995,72 @@ function parseDeviceJson(text: string): any {
   }
 }
 
+async function parseStoreResponse(response: Response): Promise<any> {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) return parseDeviceJson(await response.text());
+
+  const body = new Uint8Array(await response.arrayBuffer());
+  const headers = responseHeadersObject(response);
+  if (contentType.includes('multipart/form-data')) {
+    return {
+      ...headers,
+      ...parseMultipartBytes(body, contentType),
+    };
+  }
+
+  return {
+    ...headers,
+    body: new TextDecoder().decode(body),
+  };
+}
+
+function responseHeadersObject(response: Response): Record<string, any> {
+  const headers: Record<string, any> = {};
+  response.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+  return headers;
+}
+
+function parseMultipartBytes(body: Uint8Array, contentType: string): Record<string, any> {
+  const boundary = contentType.match(/boundary="?([^";]+)"?/i)?.[1];
+  if (!boundary) return { body: new TextDecoder().decode(body) };
+
+  const text = bytesToBinaryString(body);
+  const parts: Record<string, any> = {};
+  for (const segment of text.split(`--${boundary}`)) {
+    const separator = segment.indexOf('\r\n\r\n');
+    if (separator === -1) continue;
+
+    const rawHeaders = segment.slice(0, separator);
+    const name = rawHeaders.match(/name="([^"]+)"/i)?.[1];
+    if (!name) continue;
+
+    let value = segment.slice(separator + 4);
+    value = value.replace(/\r\n$/, '');
+    parts[name] = latin1ToHex(value);
+  }
+
+  return parts;
+}
+
+function bytesToBinaryString(bytes: Uint8Array): string {
+  let result = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    result += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return result;
+}
+
+function latin1ToHex(value: string): string {
+  let hex = '';
+  for (let index = 0; index < value.length; index += 1) {
+    hex += (value.charCodeAt(index) & 0xff).toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
 function storePayload(result: any): any {
   const payload = responsePayload(result);
   if (!payload) return null;
@@ -826,6 +1077,161 @@ function storePayload(result: any): any {
   return payload;
 }
 
+function decodeClaimMetadata(payload: any): DecodedClaimMetadata | null {
+  const claimHex = value(payload, 'claim', 'claim-value-hex', 'claim_value_hex');
+  const bytes = hexToBytes(claimHex);
+  if (!bytes) return null;
+
+  try {
+    const envelope = claimEnvelope(bytes);
+    const claimFields = protoFields(envelope.message);
+    const stream = protoBytes(claimFields, 1);
+    const streamFields = stream ? protoFields(stream) : [];
+    const source = protoBytes(streamFields, 1);
+    const sourceFields = source ? protoFields(source) : [];
+    const thumbnail = protoBytes(claimFields, 10);
+    const thumbnailFields = thumbnail ? protoFields(thumbnail) : [];
+    const video = protoBytes(streamFields, 11);
+    const videoFields = video ? protoFields(video) : [];
+    const thumbnailUrl = protoString(thumbnailFields, 5) || protoString(thumbnailFields, 1);
+    const mediaType = protoString(sourceFields, 4);
+
+    return {
+      signedChannelId: envelope.signedChannelId,
+      value: compactParams({
+        title: protoString(claimFields, 8),
+        description: protoString(claimFields, 9),
+        thumbnail: thumbnailUrl ? { url: thumbnailUrl } : undefined,
+        tags: protoStrings(claimFields, 11),
+        license: protoString(streamFields, 3),
+        release_time: protoNumber(streamFields, 5),
+        stream_type: streamTypeFromMediaType(mediaType),
+        source: compactParams({
+          hash: protoBytesHex(sourceFields, 1),
+          name: protoString(sourceFields, 2),
+          size: protoNumber(sourceFields, 3),
+          media_type: mediaType,
+          url: protoString(sourceFields, 5),
+          sd_hash: protoBytesHex(sourceFields, 6),
+        }),
+        video: compactParams({
+          width: protoNumber(videoFields, 1),
+          height: protoNumber(videoFields, 2),
+          duration: protoNumber(videoFields, 3),
+        }),
+      }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function claimEnvelope(bytes: Uint8Array): { message: Uint8Array; signedChannelId?: string } {
+  if (bytes[0] === 0 && bytes.length > 1) {
+    return { message: bytes.slice(1) };
+  }
+
+  if (bytes[0] === 1 && bytes.length > 85) {
+    return {
+      signedChannelId: bytesToHex(Array.from(bytes.slice(1, 21)).reverse()),
+      message: bytes.slice(85),
+    };
+  }
+
+  return { message: bytes };
+}
+
+function protoFields(bytes: Uint8Array): Array<ProtoField> {
+  const fields: Array<ProtoField> = [];
+  let offset = 0;
+  while (offset < bytes.length) {
+    const key = readProtoVarint(bytes, offset);
+    offset = key.offset;
+    const number = Math.floor(key.value / 8);
+    const wireType = key.value % 8;
+    let fieldValue: number | Uint8Array;
+
+    if (wireType === 0) {
+      const next = readProtoVarint(bytes, offset);
+      fieldValue = next.value;
+      offset = next.offset;
+    } else if (wireType === 1) {
+      fieldValue = bytes.slice(offset, offset + 8);
+      offset += 8;
+    } else if (wireType === 2) {
+      const length = readProtoVarint(bytes, offset);
+      offset = length.offset;
+      fieldValue = bytes.slice(offset, offset + length.value);
+      offset += length.value;
+    } else if (wireType === 5) {
+      fieldValue = bytes.slice(offset, offset + 4);
+      offset += 4;
+    } else {
+      throw new Error('unsupported protobuf field');
+    }
+
+    fields.push({ number, wireType, value: fieldValue });
+  }
+  return fields;
+}
+
+function readProtoVarint(bytes: Uint8Array, start: number): { value: number; offset: number } {
+  let value = 0;
+  let shift = 0;
+  for (let offset = start; offset < bytes.length && offset < start + 10; offset += 1) {
+    const byte = bytes[offset];
+    value += (byte & 0x7f) * 2 ** shift;
+    if ((byte & 0x80) === 0) return { value, offset: offset + 1 };
+    shift += 7;
+  }
+  throw new Error('invalid protobuf varint');
+}
+
+function protoBytes(fields: Array<ProtoField>, number: number): Uint8Array | undefined {
+  const field = fields.find(
+    (item) => item.number === number && item.wireType === 2 && item.value instanceof Uint8Array
+  );
+  return field?.value instanceof Uint8Array ? field.value : undefined;
+}
+
+function protoBytesHex(fields: Array<ProtoField>, number: number): string | undefined {
+  const bytes = protoBytes(fields, number);
+  return bytes ? bytesToHex(bytes) : undefined;
+}
+
+function protoString(fields: Array<ProtoField>, number: number): string | undefined {
+  const bytes = protoBytes(fields, number);
+  return bytes ? new TextDecoder().decode(bytes) : undefined;
+}
+
+function protoStrings(fields: Array<ProtoField>, number: number): Array<string> | undefined {
+  const values = fields
+    .filter((item) => item.number === number && item.wireType === 2 && item.value instanceof Uint8Array)
+    .map((item) => new TextDecoder().decode(item.value as Uint8Array))
+    .filter(Boolean);
+  return values.length ? values : undefined;
+}
+
+function protoNumber(fields: Array<ProtoField>, number: number): number | undefined {
+  const field = fields.find((item) => item.number === number && item.wireType === 0 && typeof item.value === 'number');
+  return typeof field?.value === 'number' ? field.value : undefined;
+}
+
+function hexToBytes(value: any): Uint8Array | null {
+  if (typeof value !== 'string' || value.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(value)) return null;
+  const bytes = new Uint8Array(value.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(value: Uint8Array | Array<number>): string {
+  return Array.from(value)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 function safeClaimName(name: any): string {
   const cleaned = String(name || '')
     .replace(/^lbry:\/\//, '')
@@ -836,9 +1242,64 @@ function safeClaimName(name: any): string {
   return cleaned || 'store-object';
 }
 
+function slugFromText(text: any): string | undefined {
+  if (typeof text !== 'string' || !text.trim()) return undefined;
+  return safeClaimName(text).toLowerCase();
+}
+
 function claimUrl(name: string, claimId: any): string {
-  const suffix = typeof claimId === 'string' && /^[0-9a-f]{1,40}$/i.test(claimId) ? `#${claimId}` : '';
+  const suffix = typeof claimId === 'string' && isRouteClaimModifier(claimId) ? `#${claimId}` : '';
   return `lbry://${name}${suffix}`;
+}
+
+function isOutpointId(id: any): boolean {
+  return /^[0-9a-f]{64}:[0-9]+$/i.test(String(id || ''));
+}
+
+function isStandaloneImmutableId(id: any): boolean {
+  return /^[0-9A-Za-z_-]{41,128}$/.test(String(id || ''));
+}
+
+function isClaimId(id: any): boolean {
+  return /^[0-9a-f]{40}$/i.test(String(id || ''));
+}
+
+function claimIdFromSignatureInput(input: any): string | undefined {
+  const match = String(input || '').match(/claim-id="([0-9a-f]{40})"/i);
+  return match?.[1];
+}
+
+function outpointParts(id: any): { txid: string; nout: number } | null {
+  const match = String(id || '').match(/^([0-9a-f]{64}):([0-9]+)$/i);
+  return match ? { txid: match[1], nout: Number(match[2]) } : null;
+}
+
+function webSafeImmutableId(id: any): string {
+  const value = String(id || '');
+  const outpoint = value.match(/^([0-9a-f]{64}):([0-9]+)$/i);
+  return outpoint ? `out_${outpoint[1]}_${outpoint[2]}` : value;
+}
+
+function immutableRouteIdFromUri(uri: string): string | null {
+  let parsed;
+  try {
+    parsed = parseURI(uri);
+  } catch {
+    return null;
+  }
+
+  const modifier = parsed.channelName ? parsed.streamClaimId : parsed.streamClaimId || parsed.claimId;
+  if (typeof modifier !== 'string') {
+    const name = parsed.streamName || (parsed.channelName ? undefined : parsed.claimName);
+    return isStandaloneImmutableId(name) ? String(name) : null;
+  }
+
+  const outpoint = modifier.match(/^out_([0-9a-f]{64})_([0-9]+)$/i);
+  return outpoint ? `${outpoint[1]}:${outpoint[2]}` : null;
+}
+
+function isRouteClaimModifier(claimId: string) {
+  return /^[0-9a-f]{1,40}$/i.test(claimId) || /^[0-9A-Za-z_-]{41,128}$/.test(claimId);
 }
 
 function isMediaContentType(contentType: any): boolean {
@@ -853,7 +1314,8 @@ function streamTypeFromMediaType(mediaType: any): string | undefined {
 }
 
 function thumbnailObject(thumbnail: any, mediaUrl: string, mediaType: any): any {
-  const value = thumbnail || (mediaUrl && typeof mediaType === 'string' && mediaType.startsWith('image/') ? mediaUrl : null);
+  const value =
+    thumbnail || (mediaUrl && typeof mediaType === 'string' && mediaType.startsWith('image/') ? mediaUrl : null);
   if (typeof value === 'string') return { url: value };
   return isObject(value) ? value : undefined;
 }
@@ -926,6 +1388,7 @@ function claimIdFromChannelUri(uri: string): string | null {
 function sdkClaimFromHyperbeam(result: any): any {
   if (!result) return null;
   const claim = result.claim || result;
+  if (!isObject(claim)) return isObject(result) ? result : null;
   const claimId = value(claim, 'claim_id', 'claim-id');
   if (!claim || !claimId) return claim;
 
@@ -987,7 +1450,7 @@ function hyperbeamMediaUrlFromPayload(payload: any): string {
   if (!baseUrl || !payload) return '';
 
   const sdHash = value(payload, 'sd_hash', 'sd-hash');
-  if (sdHash) return `${baseUrl}/${ODYSEE_DEVICE}/media?sd-hash=${encodeURIComponent(String(sdHash))}`;
+  if (sdHash) return `${baseUrl}/${STREAM_DEVICE}/media?sd-hash=${encodeURIComponent(String(sdHash))}`;
   if (!allowHyperbeamCompatibilityReads()) return '';
 
   const streamStorePath = value(payload, 'stream-store-path', 'stream_store_path');

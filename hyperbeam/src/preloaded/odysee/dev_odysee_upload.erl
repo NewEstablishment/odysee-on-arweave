@@ -1,6 +1,6 @@
 -module(dev_odysee_upload).
 -implements(<<"odysee-upload@1.0">>).
--export([info/1, submit/3, upload/3, write/3, chunk/3, finalize/3, record/3, media/3, list/3]).
+-export([info/1, submit/3, upload/3, write/3, chunk/3, finalize/3, index/3, record/3, media/3, list/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -16,6 +16,7 @@ info(_Opts) ->
             <<"write">>,
             <<"chunk">>,
             <<"finalize">>,
+            <<"index">>,
             <<"record">>,
             <<"media">>,
             <<"list">>
@@ -34,6 +35,28 @@ chunk(Base, Req, Opts) ->
 finalize(Base, Req, Opts) ->
     raw_write(Base, Req, Opts).
 
+index(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Payload0} ?= request_payload(Base, Req, Opts),
+                    Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
+                    {ok, DataID} ?= required_first([<<"data-id">>, <<"data_id">>, <<"id">>], Payload, Opts),
+                    Record0 = upload_index_record(Owner, DataID, Payload, Opts),
+                    {ok, RecordID} ?= hb_cache:write(Record0, Opts),
+                    Record = enrich_record(RecordID, Record0, Opts),
+                    ok ?= write_indexes(Record, Opts),
+                    {ok, index_response(Record, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
 submit(Base, Req, Opts) ->
     case method(Req, Opts) of
         <<"options">> ->
@@ -42,11 +65,14 @@ submit(Base, Req, Opts) ->
             safe(fun() ->
                 maybe
                     {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
-                    {ok, Payload} ?= request_payload(Base, Req, Opts),
+                    {ok, Payload0} ?= request_payload(Base, Req, Opts),
+                    Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
                     {ok, Bytes} ?= payload_bytes(Payload, Req, Opts),
                     ok ?= enforce_size(Bytes, Base, Req, Opts),
                     {ok, DataID} ?= hb_cache:write(Bytes, Opts),
-                    Record0 = upload_record(Owner, DataID, Bytes, Payload, Opts),
+                    RecordBase = upload_record(Owner, DataID, Bytes, Payload, Opts),
+                    {ok, MediaBytes} ?= media_bytes(RecordBase, Bytes, Opts),
+                    Record0 = RecordBase#{ <<"body">> => MediaBytes },
                     {ok, RecordID} ?= hb_cache:write(Record0, Opts),
                     Record = enrich_record(RecordID, Record0, Opts),
                     ok ?= write_indexes(Record, Opts),
@@ -121,9 +147,7 @@ media(Base, Req, Opts) ->
             safe(fun() ->
                 maybe
                     {ok, Record} ?= read_record(Base, Req, Opts),
-                    {ok, DataID} ?= field(<<"data-id">>, Record, Opts),
-                    {ok, Bytes} ?= hb_cache:read(DataID, Opts),
-                    {ok, MediaBytes} ?= media_bytes(Record, Bytes, Opts),
+                    {ok, MediaBytes} ?= record_media_bytes(Record, Opts),
                     {ok, media_response(Record, MediaBytes, Req, Opts)}
                 else
                     Error -> Error
@@ -248,12 +272,7 @@ upload_record(Owner, DataID, Bytes, Payload, Opts) ->
     Metadata = metadata(Payload, Opts),
     Name = first_field([<<"name">>, <<"claim-name">>, <<"claim_name">>], Payload, Opts),
     Title = first_field([<<"title">>], Metadata, Opts),
-    MediaType =
-        first_field(
-            [<<"content-type">>, <<"content_type">>, <<"media-type">>, <<"media_type">>],
-            Payload,
-            Opts
-        ),
+    MediaType = media_type(Payload, Opts),
     Filename = first_field([<<"filename">>, <<"file-name">>, <<"file_name">>], Payload, Opts),
     ReleaseTime = first_field([<<"release-time">>, <<"release_time">>], Metadata, Opts),
     RecordFilename = value_or(Filename, value_or(Name, <<"upload">>)),
@@ -275,7 +294,10 @@ upload_record(Owner, DataID, Bytes, Payload, Opts) ->
         <<"data-id">> => DataID,
         <<"data-kind">> => DataKind,
         <<"byte-size">> => Size,
+        <<"content-length">> => Size,
         <<"content-type">> => value_or(MediaType, <<"application/octet-stream">>),
+        <<"accept-ranges">> => <<"bytes">>,
+        <<"cache-control">> => [<<"store">>, <<"cache">>],
         <<"filename">> => RecordFilename,
         <<"created-at">> => integer_to_binary(erlang:system_time(second)),
         <<"metadata">> => Metadata,
@@ -294,6 +316,46 @@ upload_record(Owner, DataID, Bytes, Payload, Opts) ->
             )
     }.
 
+upload_index_record(Owner, DataID, Payload, Opts) ->
+    Metadata = metadata(Payload, Opts),
+    Name = value_or(first_field([<<"name">>, <<"claim-name">>, <<"claim_name">>], Payload, Opts), <<"upload">>),
+    MediaType =
+        value_or(
+            media_type(Payload, Opts),
+            <<"application/octet-stream">>
+        ),
+    Filename = value_or(first_field([<<"filename">>, <<"file-name">>, <<"file_name">>], Payload, Opts), Name),
+    Size = integer_value(first_field([<<"size">>, <<"byte-size">>, <<"byte_size">>], Payload, Opts), 0),
+    Claim =
+        normalize_index_claim(
+            value_or(first_field([<<"claim">>], Payload, Opts), #{}),
+            Owner,
+            DataID,
+            Name,
+            MediaType,
+            Filename,
+            Size,
+            Metadata,
+            Opts
+        ),
+    #{
+        <<"device">> => ?DEVICE,
+        <<"type">> => <<"odysee-upload-index">>,
+        <<"version">> => <<"1">>,
+        <<"owner">> => Owner,
+        <<"data-id">> => DataID,
+        <<"data-kind">> => <<"bytes">>,
+        <<"byte-size">> => Size,
+        <<"content-length">> => Size,
+        <<"content-type">> => MediaType,
+        <<"accept-ranges">> => <<"bytes">>,
+        <<"cache-control">> => [<<"store">>, <<"cache">>],
+        <<"filename">> => Filename,
+        <<"created-at">> => integer_to_binary(erlang:system_time(second)),
+        <<"metadata">> => Metadata,
+        <<"claim">> => Claim
+    }.
+
 metadata(Payload, Opts) ->
     Source = case first_field([<<"metadata">>, <<"publish">>, <<"publish-payload">>, <<"publish_payload">>], Payload, Opts) of
         Msg when is_map(Msg) ->
@@ -302,6 +364,9 @@ metadata(Payload, Opts) ->
             Payload
     end,
     without_control_keys(Source).
+
+media_type(Msg, Opts) ->
+    first_field([<<"content_type">>, <<"media_type">>, <<"content-type">>, <<"media-type">>], Msg, Opts).
 
 without_control_keys(Msg) ->
     Control = control_keys(),
@@ -323,7 +388,7 @@ claim_summary(Name0, Title0, Metadata, DataID, Owner, ReleaseTime, MediaType0, F
     Thumbnail = first_field([<<"thumbnail-url">>, <<"thumbnail_url">>, <<"thumbnail">>], Metadata, Opts),
     MediaType =
         value_or(
-            first_field([<<"content-type">>, <<"content_type">>, <<"media-type">>, <<"media_type">>], Metadata, Opts),
+            media_type(Metadata, Opts),
             value_or(MediaType0, <<"application/octet-stream">>)
         ),
     Claim0 = #{
@@ -368,22 +433,123 @@ claim_summary(Name0, Title0, Metadata, DataID, Owner, ReleaseTime, MediaType0, F
     },
     put_optional({<<"signing_channel">>, SigningChannel}, Claim0).
 
+normalize_index_claim(Claim0, Owner, DataID, Name, MediaType, Filename, Size, Metadata, Opts) when is_map(Claim0) ->
+    Timestamp = release_time_or_now(first_field([<<"release_time">>, <<"release-time">>], Metadata, Opts)),
+    Value0 = value_or(first_field([<<"value">>], Claim0, Opts), #{}),
+    Source0 = value_or(first_field([<<"source">>], Value0, Opts), #{}),
+    Hyperbeam0 = value_or(first_field([<<"hyperbeam">>], Claim0, Opts), #{}),
+    ClaimName = value_or(first_field([<<"name">>], Claim0, Opts), Name),
+    ClaimURI =
+        value_or(
+            first_field([<<"permanent_url">>, <<"canonical_url">>, <<"short_url">>], Claim0, Opts),
+            claim_uri(ClaimName, Metadata, Opts)
+        ),
+    SigningChannel =
+        value_or(
+            first_field([<<"signing_channel">>, <<"signing-channel">>], Claim0, Opts),
+            signing_channel(Metadata, Opts)
+        ),
+    Claim1 = Claim0#{
+        <<"claim_id">> => DataID,
+        <<"claim-id">> => DataID,
+        <<"name">> => ClaimName,
+        <<"normalized_name">> => hb_util:to_lower(ClaimName),
+        <<"permanent_url">> => ClaimURI,
+        <<"canonical_url">> => ClaimURI,
+        <<"short_url">> => ClaimURI,
+        <<"type">> => <<"claim">>,
+        <<"value_type">> => <<"stream">>,
+        <<"confirmations">> => 1,
+        <<"is_my_output">> => true,
+        <<"is_channel_signature_valid">> => SigningChannel =/= not_found,
+        <<"txid">> => DataID,
+        <<"nout">> => 0,
+        <<"timestamp">> => Timestamp,
+        <<"streaming_url">> => generic_read_path(DataID),
+        <<"download_url">> => generic_read_path(DataID),
+        <<"hyperbeam">> => Hyperbeam0#{
+            <<"owner">> => Owner,
+            <<"data-id">> => DataID,
+            <<"device">> => ?DEVICE,
+            <<"path">> => generic_read_path(DataID)
+        },
+        <<"value">> => Value0#{
+            <<"title">> =>
+                value_or(first_field([<<"title">>], Value0, Opts), value_or(first_field([<<"title">>], Metadata, Opts), ClaimName)),
+            <<"description">> =>
+                value_or(
+                    first_field([<<"description">>], Value0, Opts),
+                    value_or(first_field([<<"description">>], Metadata, Opts), <<>>)
+                ),
+            <<"thumbnail">> =>
+                thumbnail_value(
+                    value_or(
+                        first_field([<<"thumbnail">>], Value0, Opts),
+                        first_field([<<"thumbnail_url">>, <<"thumbnail">>], Metadata, Opts)
+                    )
+                ),
+            <<"tags">> =>
+                list_value(value_or(first_field([<<"tags">>], Value0, Opts), first_field([<<"tags">>], Metadata, Opts))),
+            <<"languages">> =>
+                list_value(
+                    value_or(first_field([<<"languages">>], Value0, Opts), first_field([<<"languages">>], Metadata, Opts))
+                ),
+            <<"release_time">> => Timestamp,
+            <<"source">> => Source0#{
+                <<"media_type">> => MediaType,
+                <<"media-type">> => MediaType,
+                <<"name">> => Filename,
+                <<"size">> => integer_to_binary(Size),
+                <<"source">> => DataID,
+                <<"sd_hash">> => DataID,
+                <<"url">> => generic_read_path(DataID)
+            }
+        }
+    },
+    put_optional({<<"signing_channel">>, SigningChannel}, Claim1);
+normalize_index_claim(_Claim, Owner, DataID, Name, MediaType, Filename, Size, Metadata, Opts) ->
+    normalize_index_claim(#{}, Owner, DataID, Name, MediaType, Filename, Size, Metadata, Opts).
+
 response(Record, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Record, Opts),
+    Msg = (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"id">> => RecordID,
+        <<"record-id">> => RecordID,
+        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, Opts),
+        <<"media-path">> => generic_read_path(RecordID),
+        <<"read-path">> => generic_read_path(RecordID),
+        <<"url">> => generic_read_path(RecordID),
+        <<"record">> => public_record(Record, Opts),
+        <<"claim">> => Claim,
+        <<"outputs">> => [Claim],
+        <<"result">> => #{ <<"outputs">> => [Claim] }
+    },
+    Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+index_response(Record, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
+    DataID = hb_maps:get(<<"data-id">>, Record, Opts),
     Msg = (cors_headers())#{
         <<"device">> => ?DEVICE,
         <<"status">> => 200,
         <<"content-type">> => <<"application/json">>,
         <<"id">> => hb_maps:get(<<"record-id">>, Record, Opts),
         <<"record-id">> => hb_maps:get(<<"record-id">>, Record, Opts),
-        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, Opts),
-        <<"media-path">> => media_path(hb_maps:get(<<"record-id">>, Record, Opts)),
-        <<"record">> => Record,
+        <<"data-id">> => DataID,
+        <<"media-path">> => generic_read_path(DataID),
+        <<"record">> => public_record(Record, Opts),
         <<"claim">> => Claim,
         <<"outputs">> => [Claim],
         <<"result">> => #{ <<"outputs">> => [Claim] }
     },
     Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+public_record(Record, Opts) ->
+    hb_maps:without([<<"body">>], Record, Opts).
 
 raw_write_response(ID, Owner) ->
     ReadPath = <<"/", ID/binary>>,
@@ -406,14 +572,56 @@ raw_write_response(ID, Owner) ->
     }.
 
 enrich_record(RecordID, Record0, Opts) ->
+    case hb_maps:get(<<"type">>, Record0, not_found, Opts) of
+        <<"odysee-upload-index">> ->
+            enrich_index_record(RecordID, Record0, Opts);
+        _ ->
+            enrich_upload_record(RecordID, Record0, Opts)
+    end.
+
+enrich_upload_record(RecordID, Record0, Opts) ->
     Claim0 = hb_maps:get(<<"claim">>, Record0, #{}, Opts),
     Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim0, #{}, Opts),
+    Value0 = hb_maps:get(<<"value">>, Claim0, #{}, Opts),
+    Source0 = hb_maps:get(<<"source">>, Value0, #{}, Opts),
+    ReadPath = generic_read_path(RecordID),
     Claim = Claim0#{
         <<"claim_id">> => RecordID,
         <<"claim-id">> => RecordID,
         <<"txid">> => RecordID,
+        <<"permanent_url">> => <<"lbry://", RecordID/binary>>,
+        <<"canonical_url">> => <<"lbry://", RecordID/binary>>,
+        <<"short_url">> => <<"lbry://", RecordID/binary>>,
+        <<"streaming_url">> => ReadPath,
+        <<"download_url">> => ReadPath,
         <<"hyperbeam">> => Hyperbeam0#{
-            <<"record-id">> => RecordID
+            <<"record-id">> => RecordID,
+            <<"path">> => ReadPath
+        },
+        <<"value">> => Value0#{
+            <<"source">> => Source0#{
+                <<"url">> => ReadPath
+            }
+        }
+    },
+    Record0#{
+        <<"id">> => RecordID,
+        <<"record-id">> => RecordID,
+        <<"claim">> => Claim
+    }.
+
+enrich_index_record(RecordID, Record0, Opts) ->
+    Claim0 = hb_maps:get(<<"claim">>, Record0, #{}, Opts),
+    Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim0, #{}, Opts),
+    DataID = hb_maps:get(<<"data-id">>, Record0, RecordID, Opts),
+    Claim = Claim0#{
+        <<"streaming_url">> => generic_read_path(DataID),
+        <<"download_url">> => generic_read_path(DataID),
+        <<"hyperbeam">> => Hyperbeam0#{
+            <<"record-id">> => RecordID,
+            <<"data-id">> => DataID,
+            <<"device">> => ?DEVICE,
+            <<"path">> => generic_read_path(DataID)
         }
     },
     Record0#{
@@ -441,12 +649,19 @@ upload_indexes(Record, Opts) ->
     RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
     DataID = hb_maps:get(<<"data-id">>, Record, not_found, Opts),
     Name = first_field([<<"name">>, <<"claim-name">>, <<"claim_name">>], Claim, Opts),
+    Metadata = hb_maps:get(<<"metadata">>, Record, #{}, Opts),
+    NamedURI =
+        case Name of
+            NameBin when is_binary(NameBin), NameBin =/= <<>> -> claim_uri(NameBin, Metadata, Opts);
+            _ -> not_found
+        end,
     Values =
         [
             {<<"record-id">>, RecordID},
             {<<"claim-id">>, RecordID},
             {<<"claim-id">>, DataID},
-            {<<"name">>, Name}
+            {<<"name">>, Name},
+            {<<"uri">>, NamedURI}
         ]
             ++ [{<<"uri">>, URI} || URI <- claim_uris(Claim, Opts)],
     lists:usort(
@@ -728,6 +943,18 @@ read_record(Base, Req, Opts) ->
         end
     end.
 
+record_media_bytes(Record, Opts) ->
+    case hb_maps:get(<<"body">>, Record, not_found, Opts) of
+        Body when is_binary(Body) ->
+            {ok, Body};
+        _ ->
+            maybe
+                {ok, DataID} ?= field(<<"data-id">>, Record, Opts),
+                {ok, Bytes} ?= hb_cache:read(DataID, Opts),
+                media_bytes(Record, Bytes, Opts)
+            end
+    end.
+
 requested_id(Base, Req, Opts) ->
     case first_found(
         [
@@ -931,6 +1158,13 @@ field(Key, Msg, Opts) ->
 first_field(Keys, Msg, Opts) ->
     first_found([{Msg, Key} || Key <- Keys], Opts).
 
+required_first(Keys, Map, Opts) ->
+    case first_field(Keys, Map, Opts) of
+        not_found -> {error, {missing_required_param, hd(Keys)}};
+        <<>> -> {error, {missing_required_param, hd(Keys)}};
+        Value -> {ok, Value}
+    end.
+
 first_found([], _Opts) ->
     not_found;
 first_found([{Msg, Key} | Rest], Opts) when is_map(Msg) ->
@@ -1057,6 +1291,8 @@ value_or(undefined, Default) ->
     Default;
 value_or(<<>>, Default) ->
     Default;
+value_or(null, Default) ->
+    Default;
 value_or(Value, _Default) ->
     Value.
 
@@ -1074,8 +1310,8 @@ lower_key(Key) when is_binary(Key) ->
 lower_key(Key) ->
     hb_util:to_lower(hb_ao:normalize_key(Key)).
 
-media_path(ID) ->
-    <<"/~odysee-upload@1.0/media?id=", ID/binary>>.
+generic_read_path(ID) ->
+    <<"/", ID/binary>>.
 
 map_or_empty(Map) when is_map(Map) ->
     Map;
@@ -1162,7 +1398,10 @@ upload_stores_signed_body_and_reads_media_test() ->
     ),
     ?assertEqual(RecordID, hb_maps:get(<<"claim_id">>, hd(hb_maps:get(<<"outputs">>, Res, Opts)), Opts)),
     ?assertEqual(RecordID, hb_maps:get(<<"record-id">>, Body, Opts)),
+    ?assertEqual(generic_read_path(RecordID), hb_maps:get(<<"read-path">>, Body, Opts)),
+    ?assertEqual(generic_read_path(RecordID), hb_maps:get(<<"media-path">>, Body, Opts)),
     ?assertEqual(RecordID, hb_maps:get(<<"claim_id">>, hd(hb_maps:get(<<"outputs">>, Body, Opts)), Opts)),
+    ?assertEqual(not_found, hb_maps:get(<<"body">>, hb_maps:get(<<"record">>, Body, Opts), not_found, Opts)),
     Source =
         hb_maps:get(
             <<"source">>,
@@ -1175,6 +1414,7 @@ upload_stores_signed_body_and_reads_media_test() ->
     ?assertEqual(RecordID, hb_maps:get(<<"record-id">>, Record, Opts)),
     ?assertEqual(RecordID, hb_maps:get(<<"claim_id">>, hb_maps:get(<<"claim">>, Record, Opts), Opts)),
     ?assertEqual(DataID, hb_maps:get(<<"data-id">>, Record, Opts)),
+    ?assertEqual(<<"hello">>, hb_maps:get(<<"body">>, Record, Opts)),
     {ok, Media} = media(#{}, #{ <<"id">> => RecordID }, Opts),
     ?assertEqual(<<"hello">>, hb_maps:get(<<"body">>, Media, Opts)),
     ?assertEqual(<<"text/plain">>, hb_maps:get(<<"content-type">>, Media, Opts)).
@@ -1230,6 +1470,36 @@ upload_response_includes_metadata_and_signature_context_test() ->
     ?assertEqual(<<"13">>, hb_maps:get(<<"size">>, Source, Opts)),
     ?assertEqual(true, hb_maps:get(<<"is_channel_signature_valid">>, Claim, Opts)),
     ?assertEqual(Channel, SigningChannel).
+
+upload_index_prefers_payload_media_type_over_transport_content_type_test() ->
+    Opts = test_opts(),
+    DataID = <<"data-id-1">>,
+    Payload = #{
+        <<"data_id">> => DataID,
+        <<"name">> => <<"mov-demo">>,
+        <<"filename">> => <<"demo.mov">>,
+        <<"content_type">> => <<"video/quicktime">>,
+        <<"size">> => 1234,
+        <<"metadata">> => #{
+            <<"title">> => <<"MOV Demo">>
+        }
+    },
+    Req =
+        signed(
+            #{
+                <<"params64">> => hb_util:encode(hb_json:encode(Payload)),
+                <<"content-type">> => <<"application/json">>
+            },
+            Opts
+        ),
+    {ok, Res} = index(#{}, Req, Opts),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Res, Opts)),
+    Record = hb_maps:get(<<"record">>, Body, Opts),
+    [Claim] = hb_maps:get(<<"outputs">>, Body, Opts),
+    Source = hb_maps:get(<<"source">>, hb_maps:get(<<"value">>, Claim, Opts), Opts),
+    ?assertEqual(<<"video/quicktime">>, hb_maps:get(<<"content-type">>, Record, Opts)),
+    ?assertEqual(<<"video/quicktime">>, hb_maps:get(<<"media_type">>, Source, Opts)),
+    ?assertEqual(<<"/", DataID/binary>>, hb_maps:get(<<"media-path">>, Body, Opts)).
 
 upload_accepts_params64_base64_content_test() ->
     Opts = test_opts(),
@@ -1307,23 +1577,20 @@ upload_resolves_native_claim_and_stream_media_test() ->
     {ok, Res} = submit(#{}, Req, Opts),
     RecordID = hb_maps:get(<<"record-id">>, Res, Opts),
     URI = <<"lbry://@native#channel-1/native-demo">>,
-    {ok, ClaimMsg} = dev_odysee_claim:resolve(#{}, #{ <<"uri">> => URI }, Opts),
-    ?assertEqual(RecordID, hb_maps:get(<<"claim-id">>, ClaimMsg, Opts)),
-    Claim = hb_maps:get(<<"claim">>, ClaimMsg, Opts),
-    ?assertEqual(true, hb_maps:get(<<"is_channel_signature_valid">>, Claim, Opts)),
-    {ok, Playback} =
-        dev_odysee_stream:playback(
-            #{},
-            #{ <<"uri">> => URI, <<"media-base-url">> => <<"http://127.0.0.1:8734">> },
-            Opts
-        ),
-    PlaybackBody = hb_json:decode(hb_maps:get(<<"body">>, Playback, Opts)),
-    ?assertEqual(
-        <<"http://127.0.0.1:8734/~odysee-upload@1.0/media?id=", RecordID/binary>>,
-        hb_maps:get(<<"streaming_url">>, PlaybackBody, Opts)
+    Store = hb_opts:get(store, no_viable_store, Opts),
+    {ok, IndexedRecordID} = hb_store:read(
+        Store,
+        index_path(<<"uri">>, URI),
+        maps:without([<<"store">>, store], Opts)
     ),
-    {ok, StreamMedia} = dev_odysee_stream:media(#{}, #{ <<"uri">> => URI }, Opts),
-    ?assertEqual(<<"native media">>, hb_maps:get(<<"body">>, StreamMedia, Opts)).
+    ?assertEqual(RecordID, IndexedRecordID),
+    {ok, Record0} = hb_cache:read(RecordID, Opts),
+    Record = enrich_record(RecordID, hb_cache:ensure_all_loaded(Record0, Opts), Opts),
+    Claim = hb_maps:get(<<"claim">>, Record, Opts),
+    ?assertEqual(RecordID, hb_maps:get(<<"claim-id">>, Claim, Opts)),
+    ?assertEqual(true, hb_maps:get(<<"is_channel_signature_valid">>, Claim, Opts)),
+    {ok, Media} = media(#{}, #{ <<"id">> => RecordID }, Opts),
+    ?assertEqual(<<"native media">>, hb_maps:get(<<"body">>, Media, Opts)).
 
 upload_list_indexes_all_channel_and_name_test() ->
     Opts = test_opts(),

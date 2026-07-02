@@ -2120,16 +2120,19 @@ store_live_claim_proof_read_fetches_and_commits_test() ->
         },
         Path = <<"odysee/claim-proof/", TxID/binary, "/0">>,
         {ok, Msg} = hb_store:read(Store, Path, #{}),
+        ?assertEqual(<<"lbry-claim@1.0">>, hb_maps:get(<<"device">>, Msg, #{})),
         ?assertEqual(ClaimID, hb_maps:get(<<"claim-id">>, Msg, #{})),
-        ?assertEqual(true, hb_maps:get(<<"valid">>, Msg, #{})),
-        ?assert(has_commitment_device(Msg, ?LBRY_CLAIM_OUTPUT_COMMITMENT_DEVICE)),
+        ?assertEqual(TxID, hb_maps:get(<<"txid">>, Msg, #{})),
+        ?assertEqual(0, hb_maps:get(<<"nout">>, Msg, #{})),
+        ?assert(has_commitment_device(Msg, ?LBRY_CLAIM_COMMITMENT_DEVICE)),
         ?assert(hb_message:verify(Msg, source_verify_req(Msg), #{})),
         LbryStore = Store#{ <<"store-module">> => hb_store_lbry_claim_output },
         {ok, LbryMsg} = hb_store:read(LbryStore, <<TxID/binary, ":0">>, #{}),
         ?assertEqual(ClaimID, hb_maps:get(<<"claim-id">>, LbryMsg, #{})),
         ?assert(has_commitment_device(LbryMsg, ?LBRY_CLAIM_COMMITMENT_DEVICE)),
         ?assert(hb_message:verify(LbryMsg, source_verify_req(LbryMsg), #{})),
-        [_Request1, _Request2] = hb_mock_server:get_requests(transaction_show, 2, ServerHandle)
+        [_Request1, _Request2, _Request3, _Request4] =
+            hb_mock_server:get_requests(transaction_show, 4, ServerHandle)
     after
         hb_mock_server:stop(ServerHandle)
     end.

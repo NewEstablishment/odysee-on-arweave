@@ -20,12 +20,7 @@ const CANONICAL_NATIVE_DEVICES = new Set([
   '~odysee-subscription@1.0',
 ]);
 const CANONICAL_NATIVE_SOURCE_DEVICES = new Set(['~odysee@1.0']);
-const CANONICAL_WRITE_DEVICES = new Set([
-  '~cache@1.0',
-  '~odysee-index@1.0',
-  '~odysee-upload@1.0',
-  '~odysee-user-state@1.0',
-]);
+const CANONICAL_WRITE_DEVICES = new Set(['~cache@1.0', '~odysee-upload@1.0', '~odysee-user-state@1.0']);
 
 export function getHyperbeamMode(): HyperbeamMode {
   if (!ODYSEE_HYPERBEAM_NODE_API) return HYPERBEAM_MODES.original;

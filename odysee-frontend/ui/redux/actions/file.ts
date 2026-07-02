@@ -22,6 +22,7 @@ import { getStripeEnvironment } from 'util/stripe';
 import { getChannelIdFromClaim, isClaimUnlisted } from 'util/claim';
 import { toHex } from 'util/hex';
 import { fetchHyperbeamPlaybackUrl } from 'util/hyperbeam-playback';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 const stripeEnvironment = getStripeEnvironment();
 
 async function getOwnedClaimAccessKey(
@@ -182,9 +183,20 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
       accessKey = (await getOwnedClaimAccessKey(dispatch, state, uri)) || null;
     }
 
-    const claim = selectClaimForUri(getState(), uri) as any;
-    const claimStreamingUrl = claim?.streaming_url || claim?.download_url || claim?.value?.source?.url;
-    const immutableId = claim?.hyperbeam?.immutable_id || claim?.hyperbeam?.['immutable-id'];
+    const claim = selectClaimForUri(getState(), uri);
+    const rawClaimStreamingUrl = claim?.streaming_url || claim?.download_url || claim?.value?.source?.url;
+    const nodeBase = hyperbeamNodeBase();
+    const claimStreamingUrl =
+      typeof rawClaimStreamingUrl === 'string' && rawClaimStreamingUrl.startsWith('/') && nodeBase
+        ? `${nodeBase}${rawClaimStreamingUrl}`
+        : rawClaimStreamingUrl;
+    const immutableId =
+      claim?.hyperbeam?.immutable_id ||
+      claim?.hyperbeam?.['immutable-id'] ||
+      claim?.hyperbeam?.record_id ||
+      claim?.hyperbeam?.['record-id'] ||
+      claim?.hyperbeam?.data_id ||
+      claim?.hyperbeam?.['data-id'];
     if (!accessKey && claimStreamingUrl && immutableId) {
       const streamInfo = {
         ...claim,

@@ -13,6 +13,7 @@ const { lbryProxy: Lbry } = require('../lbry');
 const { buildURI } = require('./lbryURI');
 
 const HYPERBEAM_TIMEOUT_MS = 5000;
+const HYPERBEAM_DEVICE_STREAM = '~odysee-stream@1.0';
 const EXTRA_PATH_SEGMENT_CHARS = /['()]/g;
 const FALLBACK_SOURCE_FILENAME = 'stream';
 const SOURCE_HASH_FILENAME_LENGTH = 6;
@@ -148,7 +149,7 @@ function hyperbeamMediaUrlFromPayload(payload) {
   if (claimId) return `${node}/odysee/media/stream-id/${encodeURIComponent(String(claimId))}`;
 
   const sdHash = payload.sd_hash || payload['sd-hash'];
-  return sdHash ? `${node}/odysee/media/sd-hash/${encodeURIComponent(String(sdHash))}` : '';
+  return sdHash ? `${node}/${HYPERBEAM_DEVICE_STREAM}/media?sd-hash=${encodeURIComponent(String(sdHash))}` : '';
 }
 
 function timeoutSignal(ms) {

@@ -995,7 +995,7 @@ native_upload_media_url(Claim, Base, Req, Opts) ->
             not_found;
         RecordID ->
             Origin = trim_trailing_slash(media_base_url(Base, Req, Opts)),
-            {ok, <<Origin/binary, "/~odysee-upload@1.0/media?id=", (url_encode(RecordID))/binary>>, RecordID}
+            {ok, <<Origin/binary, "/", (url_encode(RecordID))/binary>>, RecordID}
     end.
 
 native_upload_record_id(Msg, Opts) ->
