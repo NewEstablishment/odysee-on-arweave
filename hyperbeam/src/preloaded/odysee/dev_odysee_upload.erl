@@ -6,12 +6,15 @@
 %%% not written to the public store.
 -module(dev_odysee_upload).
 -implements(<<"odysee-upload@1.0">>).
--export([chunk/3, delete/3, finalize/3, index/3, info/1, list/3, write/3]).
+-export([chunk/3, delete/3, finalize/3, index/3, info/1, list/3, update/3, write/3]).
+-ifdef(TEST).
+-export([search_document/2]).
+-endif.
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 info(_Opts) ->
-    #{ exports => [<<"chunk">>, <<"delete">>, <<"finalize">>, <<"index">>, <<"list">>, <<"write">>] }.
+    #{ exports => [<<"chunk">>, <<"delete">>, <<"finalize">>, <<"index">>, <<"list">>, <<"update">>, <<"write">>] }.
 
 chunk(Base, Req, Opts) ->
     write(Base, Req, Opts).
@@ -35,6 +38,7 @@ index(_Base, Req, Opts) ->
             State1 = State0#{ <<"uploads">> => Uploads1 },
             ok ?= write_index(Owner, State1, Opts),
             ok ?= write_global_claim(ClaimID, Claim, Opts),
+            ok ?= index_search_claim(Claim, Opts),
             {ok, json_response(#{ <<"item">> => Claim, <<"signers">> => Signers })}
         else
             Error -> Error
@@ -70,7 +74,38 @@ delete(_Base, Req, Opts) ->
             State1 = State0#{ <<"uploads">> => Uploads1 },
             ok ?= write_index(Owner, State1, Opts),
             ok ?= delete_global_claim(ClaimID, Opts),
+            ok ?= delete_search_claim(ClaimID, Opts),
             {ok, json_response(#{ <<"claim_id">> => ClaimID, <<"deleted">> => true, <<"signers">> => Signers })}
+        else
+            Error -> Error
+        end
+    end).
+
+update(_Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            ok ?= require_post(Req, Opts),
+            {ok, Signers} ?= require_signed(Req, Opts),
+            {ok, Owner} ?= owner_identity(Req, Signers, Opts),
+            {ok, Payload} ?= request_json_body(Req, Opts),
+            {ok, Patch0} ?= indexed_claim_update(Payload, Opts),
+            ClaimID = hb_maps:get(<<"claim_id">>, Patch0, upload_id(Patch0, Opts), Opts),
+            {ok, Existing} ?= read_claim_index(ClaimID, Opts),
+            OldChannelID = channel_id_from_claim(Existing, Opts),
+            Patch = sanitize_indexed_claim(Patch0, Opts),
+            Claim = merge_indexed_claim(Existing, Patch, Opts),
+            {ok, State0} ?= read_index(Owner, Opts),
+            Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
+            Uploads1 = Uploads0#{ ClaimID => Claim },
+            State1 = State0#{ <<"uploads">> => Uploads1 },
+            ok ?= write_index(Owner, State1, Opts),
+            ok ?= case OldChannelID =:= channel_id_from_claim(Claim, Opts) of
+                true -> ok;
+                false -> delete_channel_claim(OldChannelID, ClaimID, Opts)
+            end,
+            ok ?= write_global_claim(ClaimID, Claim, Opts),
+            ok ?= index_search_claim(Claim, Opts),
+            {ok, json_response(#{ <<"item">> => Claim, <<"signers">> => Signers })}
         else
             Error -> Error
         end
@@ -297,6 +332,93 @@ indexed_claim(Payload, Opts) ->
                 }
             }
     end.
+
+indexed_claim_update(Payload, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, Payload, Payload, Opts),
+    case Claim of
+        ClaimMap when is_map(ClaimMap) ->
+            case hb_util:bin(hb_maps:get(<<"claim_id">>, ClaimMap, upload_id(ClaimMap, Opts), Opts)) of
+                <<>> ->
+                    {error,
+                        #{
+                            <<"status">> => 400,
+                            <<"body">> => <<"Upload update requires an immutable upload id.">>
+                        }
+                    };
+                _ClaimID ->
+                    {ok, ClaimMap}
+            end;
+        _ ->
+            {error,
+                #{
+                    <<"status">> => 400,
+                    <<"body">> => <<"Upload update request requires a claim object.">>
+                }
+            }
+    end.
+
+merge_indexed_claim(Existing, Patch, Opts) ->
+    ClaimID = hb_maps:get(<<"claim_id">>, Existing, upload_id(Existing, Opts), Opts),
+    Value = merge_claim_value(
+        hb_maps:get(<<"value">>, Existing, #{}, Opts),
+        hb_maps:get(<<"value">>, Patch, #{}, Opts),
+        Opts
+    ),
+    Hyperbeam0 = merge_hyperbeam_value(
+        hb_maps:get(<<"hyperbeam">>, Existing, #{}, Opts),
+        hb_maps:get(<<"hyperbeam">>, Patch, #{}, Opts),
+        Opts
+    ),
+    Hyperbeam = Hyperbeam0#{ <<"upload_id">> => ClaimID },
+    Meta = merge_map_value(hb_maps:get(<<"meta">>, Existing, #{}, Opts), hb_maps:get(<<"meta">>, Patch, #{}, Opts)),
+    Merged0 = merge_map_value(Existing, Patch),
+    Merged0#{
+        <<"claim_id">> => ClaimID,
+        <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, Existing, ClaimID, Opts),
+        <<"txid">> => hb_maps:get(<<"txid">>, Existing, ClaimID, Opts),
+        <<"nout">> => hb_maps:get(<<"nout">>, Existing, 0, Opts),
+        <<"value">> => Value,
+        <<"hyperbeam">> => Hyperbeam,
+        <<"meta">> => Meta
+    }.
+
+merge_claim_value(ExistingValue, PatchValue, Opts) ->
+    Existing = case is_map(ExistingValue) of true -> ExistingValue; false -> #{} end,
+    Patch = case is_map(PatchValue) of true -> PatchValue; false -> #{} end,
+    Source = merge_source_value(
+        hb_maps:get(<<"source">>, Existing, #{}, Opts),
+        hb_maps:get(<<"source">>, Patch, #{}, Opts),
+        Opts
+    ),
+    Merged = merge_map_value(Existing, Patch),
+    Merged#{ <<"source">> => Source }.
+
+merge_source_value(ExistingSource, PatchSource, Opts) ->
+    Existing = case is_map(ExistingSource) of true -> ExistingSource; false -> #{} end,
+    Patch = case is_map(PatchSource) of true -> PatchSource; false -> #{} end,
+    SourceID = hb_maps:get(<<"sd_hash">>, Existing, hb_maps:get(<<"sd_hash">>, Patch, <<>>, Opts), Opts),
+    Merged = merge_map_value(Existing, Patch),
+    Merged#{ <<"sd_hash">> => SourceID }.
+
+merge_hyperbeam_value(ExistingHyperbeam, PatchHyperbeam, Opts) ->
+    Existing = case is_map(ExistingHyperbeam) of true -> ExistingHyperbeam; false -> #{} end,
+    Patch = case is_map(PatchHyperbeam) of true -> PatchHyperbeam; false -> #{} end,
+    MediaID = hb_maps:get(<<"media_id">>, Existing, hb_maps:get(<<"media_id">>, Patch, <<>>, Opts), Opts),
+    UploadID = hb_maps:get(<<"upload_id">>, Existing, hb_maps:get(<<"upload_id">>, Patch, MediaID, Opts), Opts),
+    Merged = merge_map_value(Existing, Patch),
+    Merged#{
+        <<"media_id">> => MediaID,
+        <<"upload_id">> => UploadID
+    }.
+
+merge_map_value(Existing, Patch) when is_map(Existing), is_map(Patch) ->
+    maps:merge(Existing, Patch);
+merge_map_value(Existing, _Patch) when is_map(Existing) ->
+    Existing;
+merge_map_value(_Existing, Patch) when is_map(Patch) ->
+    Patch;
+merge_map_value(_Existing, _Patch) ->
+    #{}.
 
 write_immutable_claim(Claim0, Opts) ->
     Claim1 = normalize_claim_before_immutable_write(Claim0, Opts),
@@ -563,6 +685,183 @@ delete_channel_claim(ChannelID, ClaimID, Opts) ->
         State1 = State0#{ <<"uploads">> => Uploads1 },
         hb_store:write(hb_opts:get(store, [], Opts), #{ channel_index_path(ChannelID) => hb_json:encode(State1) }, Opts)
     end.
+
+index_search_claim(Claim, Opts) ->
+    try
+        case dev_odysee_search:index(#{}, #{ <<"document">> => search_document(Claim, Opts) }, Opts) of
+            {ok, _} -> ok;
+            _ -> ok
+        end
+    catch
+        _:_ -> ok
+    end.
+
+delete_search_claim(ClaimID, Opts) ->
+    try
+        case dev_odysee_search:delete(#{}, #{ <<"id">> => ClaimID }, Opts) of
+            {ok, _} -> ok;
+            _ -> ok
+        end
+    catch
+        _:_ -> ok
+    end.
+
+search_document(Claim, Opts) ->
+    ClaimID = hb_maps:get(<<"claim_id">>, Claim, upload_id(Claim, Opts), Opts),
+    Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
+    Source = map_value(Value, <<"source">>, #{}, Opts),
+    SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
+    Timestamp = upload_timestamp(Claim, Opts),
+    ContentType = map_value(Source, <<"media_type">>, <<>>, Opts),
+    Name = hb_maps:get(<<"name">>, Claim, <<>>, Opts),
+    ClaimType = hb_maps:get(<<"value_type">>, Claim, <<"stream">>, Opts),
+    ThumbnailURL = thumbnail_url(Value, Opts),
+    HasThumbnail = truthy_int(ThumbnailURL =/= <<>>),
+    HasChannel = truthy_int(channel_id_from_claim(Claim, Opts) =/= <<>>),
+    IsChannel = truthy_int(ClaimType =:= <<"channel">>),
+    EffectiveAmount = number_value(hb_maps:get(<<"effective_amount">>, Claim, 0, Opts), 0),
+    CertificateAmount = number_value(map_value(SigningChannel, <<"effective_amount">>, 1, Opts), 1),
+    RecencyRank = recency_rank(Timestamp),
+    Rank = search_rank(#{
+        is_controlling => 0,
+        has_thumbnail => HasThumbnail,
+        effective_amount => EffectiveAmount,
+        certificate_amount => CertificateAmount,
+        view_count => 0,
+        sub_count => 0,
+        claim_count => 0,
+        is_channel => IsChannel,
+        duration => number_value(map_value(Source, <<"duration">>, 0, Opts), 0),
+        recency_rank => RecencyRank
+    }),
+    #{
+        <<"doc_id">> => ClaimID,
+        <<"claim_id">> => ClaimID,
+        <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, Claim, ClaimID, Opts),
+        <<"txid">> => hb_maps:get(<<"txid">>, Claim, ClaimID, Opts),
+        <<"name">> => Name,
+        <<"searchable_name">> => searchable_name(Name),
+        <<"stripped_name">> => stripped_name(Name),
+        <<"title">> => map_value(Value, <<"title">>, <<>>, Opts),
+        <<"description">> => map_value(Value, <<"description">>, <<>>, Opts),
+        <<"channel_name">> => map_value(SigningChannel, <<"name">>, <<>>, Opts),
+        <<"channel_claim_id">> => channel_id_from_claim(Claim, Opts),
+        <<"bid_state">> => <<"Active">>,
+        <<"claim_type">> => ClaimType,
+        <<"content_type">> => ContentType,
+        <<"media_type">> => media_type(ContentType),
+        <<"tags">> => map_value(Value, <<"tags">>, [], Opts),
+        <<"language">> => first_list_value(map_value(Value, <<"languages">>, [], Opts), <<"">>),
+        <<"nsfw">> => false,
+        <<"thumbnail_url">> => ThumbnailURL,
+        <<"release_time">> => Timestamp,
+        <<"created_at">> => Timestamp,
+        <<"transaction_time">> => Timestamp,
+        <<"duration">> => map_value(Source, <<"duration">>, 0, Opts),
+        <<"fee">> => map_value(Value, <<"fee">>, 0, Opts),
+        <<"view_count">> => 0,
+        <<"view_cnt">> => 0,
+        <<"sub_cnt">> => 0,
+        <<"claim_count">> => 0,
+        <<"claim_cnt">> => 0,
+        <<"channel_claim_count">> => 0,
+        <<"effective_amount">> => EffectiveAmount,
+        <<"certificate_amount">> => CertificateAmount,
+        <<"is_channel">> => IsChannel,
+        <<"has_thumbnail">> => HasThumbnail,
+        <<"has_channel">> => HasChannel,
+        <<"is_controlling">> => 0,
+        <<"recency_rank">> => RecencyRank,
+        <<"search_rank">> => Rank,
+        <<"source_system">> => <<"hyperbeam-native">>
+    }.
+
+truthy_int(true) -> 1;
+truthy_int(false) -> 0.
+
+number_value(Value, _Default) when is_integer(Value) -> Value;
+number_value(Value, _Default) when is_float(Value) -> Value;
+number_value(Value, Default) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ ->
+        try binary_to_float(Value)
+        catch _:_ -> Default
+        end
+    end;
+number_value(_Value, Default) -> Default.
+
+search_rank(Values) ->
+    IsControlling = maps:get(is_controlling, Values, 0),
+    HasThumbnail = maps:get(has_thumbnail, Values, 0),
+    EffectiveAmount = maps:get(effective_amount, Values, 0),
+    CertificateAmount = maps:get(certificate_amount, Values, 1),
+    ViewCount = maps:get(view_count, Values, 0),
+    SubCount = maps:get(sub_count, Values, 0),
+    ClaimCount = maps:get(claim_count, Values, 0),
+    IsChannel = maps:get(is_channel, Values, 0),
+    Duration = maps:get(duration, Values, 0),
+    RecencyRank = maps:get(recency_rank, Values, 0),
+    SupportRank =
+        math:log(max(1, min(EffectiveAmount, 100000000)) * 21 + 1) * 2 +
+        math:log(max(1, min(CertificateAmount, 100000000)) * 21 + 1) * 2,
+    Rank =
+        RecencyRank * 20 +
+        IsControlling * 25 +
+        HasThumbnail * 20 +
+        SupportRank +
+        math:log(max(1, ViewCount) + 1) * 2 +
+        math:log(max(1, SubCount) + 1) * 3 +
+        channel_claim_count_boost(IsChannel, ClaimCount),
+    case Duration > 0 andalso Duration < 120 of
+        true -> Rank * 0.5;
+        false -> Rank
+    end.
+
+channel_claim_count_boost(1, ClaimCount) when ClaimCount > 10 -> 10;
+channel_claim_count_boost(_IsChannel, _ClaimCount) -> 0.
+
+recency_rank(Timestamp) ->
+    Now = erlang:system_time(second),
+    AgeDays = max(0, (Now - number_value(Timestamp, 0)) div 86400),
+    if
+        AgeDays =< 7 -> 60;
+        AgeDays =< 30 -> 45;
+        AgeDays =< 90 -> 30;
+        AgeDays =< 365 -> 18;
+        AgeDays =< 3650 -> max(0, 12 - ((AgeDays - 365) / 365));
+        true -> 0
+    end.
+
+map_value(Map, Key, Default, Opts) when is_map(Map) ->
+    hb_maps:get(Key, Map, Default, Opts);
+map_value(_Map, _Key, Default, _Opts) ->
+    Default.
+
+thumbnail_url(Value, Opts) ->
+    Thumbnail = map_value(Value, <<"thumbnail">>, #{}, Opts),
+    map_value(Thumbnail, <<"url">>, <<>>, Opts).
+
+media_type(ContentType) ->
+    case binary:split(hb_util:to_lower(hb_util:bin(ContentType)), <<"/">>) of
+        [<<"video">>, _] -> <<"video">>;
+        [<<"audio">>, _] -> <<"audio">>;
+        [<<"image">>, _] -> <<"image">>;
+        _ -> <<>>
+    end.
+
+first_list_value([Value | _], _Default) ->
+    Value;
+first_list_value(_Value, Default) ->
+    Default.
+
+searchable_name(Name) ->
+    binary:replace(hb_util:bin(Name), <<".">>, <<"-">>, [global]).
+
+stripped_name(Name0) ->
+    Name1 = binary:replace(hb_util:bin(Name0), <<"-">>, <<>>, [global]),
+    Name2 = binary:replace(Name1, <<"_">>, <<>>, [global]),
+    Name3 = binary:replace(Name2, <<"The">>, <<>>, [global]),
+    binary:replace(Name3, <<"the">>, <<>>, [global]).
 
 read_channel_index(ChannelID, Opts) ->
     case hb_store:read(hb_opts:get(store, [], Opts), channel_index_path(ChannelID), Opts) of
@@ -847,6 +1146,46 @@ upload_auth_ignored_keys() ->
     ].
 
 %%% Tests
+
+search_document_normalizes_upload_claim_test() ->
+    ClaimID = <<"native-claim-id">>,
+    Claim =
+        #{
+            <<"claim_id">> => ClaimID,
+            <<"immutable_id">> => ClaimID,
+            <<"txid">> => ClaimID,
+            <<"name">> => <<"The-video_file">>,
+            <<"value_type">> => <<"stream">>,
+            <<"timestamp">> => <<"123">>,
+            <<"channel_id">> => <<"channel-id">>,
+            <<"signing_channel">> => #{ <<"name">> => <<"@rave">>, <<"claim_id">> => <<"signing-channel-id">> },
+            <<"value">> =>
+                #{
+                    <<"title">> => <<"Native upload">>,
+                    <<"description">> => <<"Indexed from HyperBEAM">>,
+                    <<"tags">> => [<<"hb">>, <<"search">>],
+                    <<"languages">> => [<<"en">>],
+                    <<"thumbnail">> => #{ <<"url">> => <<"https://example.test/thumb.jpg">> },
+                    <<"source">> => #{ <<"media_type">> => <<"video/mp4">>, <<"duration">> => 60 }
+                }
+        },
+    Doc = search_document(Claim, #{}),
+    ?assertEqual(ClaimID, hb_maps:get(<<"doc_id">>, Doc, undefined, #{})),
+    ?assertEqual(ClaimID, hb_maps:get(<<"claim_id">>, Doc, undefined, #{})),
+    ?assertEqual(ClaimID, hb_maps:get(<<"immutable_id">>, Doc, undefined, #{})),
+    ?assertEqual(<<"The-video_file">>, hb_maps:get(<<"searchable_name">>, Doc, undefined, #{})),
+    ?assertEqual(<<"videofile">>, hb_maps:get(<<"stripped_name">>, Doc, undefined, #{})),
+    ?assertEqual(<<"Native upload">>, hb_maps:get(<<"title">>, Doc, undefined, #{})),
+    ?assertEqual(<<"@rave">>, hb_maps:get(<<"channel_name">>, Doc, undefined, #{})),
+    ?assertEqual(<<"channel-id">>, hb_maps:get(<<"channel_claim_id">>, Doc, undefined, #{})),
+    ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"content_type">>, Doc, undefined, #{})),
+    ?assertEqual(<<"video">>, hb_maps:get(<<"media_type">>, Doc, undefined, #{})),
+    ?assertEqual([<<"hb">>, <<"search">>], hb_maps:get(<<"tags">>, Doc, undefined, #{})),
+    ?assertEqual(<<"en">>, hb_maps:get(<<"language">>, Doc, undefined, #{})),
+    ?assertEqual(<<"https://example.test/thumb.jpg">>, hb_maps:get(<<"thumbnail_url">>, Doc, undefined, #{})),
+    ?assertEqual(123, hb_maps:get(<<"release_time">>, Doc, undefined, #{})),
+    ?assertEqual(60, hb_maps:get(<<"duration">>, Doc, undefined, #{})),
+    ?assertEqual(<<"hyperbeam-native">>, hb_maps:get(<<"source_system">>, Doc, undefined, #{})).
 
 write_requires_auth_signature_test() ->
     ?assertMatch(

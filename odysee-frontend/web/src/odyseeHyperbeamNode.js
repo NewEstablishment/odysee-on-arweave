@@ -5,16 +5,17 @@ const HYPERBEAM_MODE_STORAGE_KEY = 'odysee-hyperbeam-mode';
 const HYPERBEAM_DEVICE_CLAIM = '~odysee-claim@1.0';
 const HYPERBEAM_DEVICE_STREAM = '~odysee-stream@1.0';
 const HYPERBEAM_DEVICE_ACCOUNT = '~odysee-account@1.0';
+const HYPERBEAM_DEVICE_SEARCH = '~odysee-search@1.0';
 const HYPERBEAM_DEVICES = new Set([
   HYPERBEAM_DEVICE_ACCOUNT,
   HYPERBEAM_DEVICE_CLAIM,
+  HYPERBEAM_DEVICE_SEARCH,
   HYPERBEAM_DEVICE_STREAM,
   '~odysee-channel@1.0',
   '~odysee-comment@1.0',
   '~odysee-file@1.0',
   '~odysee-file-reaction@1.0',
   '~odysee-reaction@1.0',
-  '~odysee-subscription@1.0',
 ]);
 
 function hyperbeamNodeBase() {
@@ -108,11 +109,7 @@ async function hyperbeamNodeClaimIdChannelEntries(urls, extraHeaders) {
     if (claimId) uriByClaimId.set(claimId.toLowerCase(), uri);
   });
 
-  const result = await hyperbeamNodeFetchJson(
-    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'search', { claim_ids: Array.from(uriByClaimId.keys()) }),
-    extraHeaders
-  );
-  const search = sdkSearchFromHyperbeam(result);
+  const search = await hyperbeamNodeSearch({ claim_ids: Array.from(uriByClaimId.keys()) }, extraHeaders);
   const items = Array.isArray(search && search.items) ? search.items : [];
 
   return items
@@ -131,11 +128,24 @@ async function hyperbeamNodeClaimSearch(params, extraHeaders) {
   const storeResult = await hyperbeamNodeChannelClaimSearch(params || {}, extraHeaders);
   if (storeResult) return storeResult;
 
-  const result = await hyperbeamNodeFetchJson(
-    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'search', params || {}),
-    extraHeaders
-  );
-  return sdkSearchFromHyperbeam(result);
+  const searchResult = await hyperbeamNodeSearch(params || {}, extraHeaders);
+  if (searchResult) return searchResult;
+
+  return null;
+}
+
+async function hyperbeamNodeSearch(params, extraHeaders) {
+  try {
+    const result = await hyperbeamNodeFetchJson(
+      hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_SEARCH, 'query', params || {}),
+      extraHeaders
+    );
+    const search = sdkSearchFromHyperbeam(result);
+    return Array.isArray(search && search.items) ? search : null;
+  } catch (e) {
+    void e;
+    return null;
+  }
 }
 
 async function hyperbeamNodeChannelClaimSearch(params, extraHeaders) {

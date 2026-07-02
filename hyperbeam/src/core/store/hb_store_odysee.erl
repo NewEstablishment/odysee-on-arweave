@@ -294,7 +294,7 @@ read_live(<<"odysee/subscription-count/", Encoded/binary>>, StoreOpts, NodeOpts)
         {ok, ClaimID} ?= decode_component(Encoded),
         {ok, Counts} ?=
             hb_ao:raw(
-                <<"odysee-subscription@1.0">>,
+                <<"odysee-account@1.0">>,
                 <<"sub-count">>,
                 #{},
                 #{ <<"claim-id">> => ClaimID },
@@ -631,7 +631,7 @@ infer_type(_Path, Msg, Opts) when is_map(Msg) ->
         <<"odysee-reaction@1.0">> -> <<"comment-reaction">>;
         <<"odysee-file@1.0">> -> <<"file-view-count">>;
         <<"odysee-file-reaction@1.0">> -> <<"file-reaction">>;
-        <<"odysee-subscription@1.0">> -> <<"subscription-count">>;
+        <<"odysee-account@1.0">> -> <<"subscription-count">>;
         <<"odysee-blob@1.0">> -> <<"blob">>;
         <<"lbry-blob@1.0">> -> <<"blob">>;
         <<"odysee-claim-proof@1.0">> -> <<"claim-proof">>;

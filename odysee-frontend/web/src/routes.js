@@ -41,6 +41,7 @@ const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/~odysee-upload@1.0/finalize?!=true';
 const HYPERBEAM_UPLOAD_INDEX_PATH = '/~odysee-upload@1.0/index?!=true';
 const HYPERBEAM_UPLOAD_LIST_PATH = '/~odysee-upload@1.0/list';
 const HYPERBEAM_UPLOAD_DELETE_PATH = '/~odysee-upload@1.0/delete?!=true';
+const HYPERBEAM_UPLOAD_UPDATE_PATH = '/~odysee-upload@1.0/update?!=true';
 const HYPERBEAM_THUMBNAIL_UPLOAD_PATH = '/~odysee-product-events@1.0/thumbnail-upload';
 const HYPERBEAM_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 const HYPERBEAM_UPLOAD_MANIFEST_TYPE = 'application/vnd.odysee.hyperbeam-upload-manifest+json';
@@ -76,7 +77,7 @@ const HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
   '/~odysee-comment@1.0/moderation-am-i',
   '/~odysee-file@1.0/view-count',
   '/~odysee-file-reaction@1.0/list',
-  '/~odysee-subscription@1.0/sub-count',
+  '/~odysee-account@1.0/sub-count',
 ]);
 
 function getCookieValue(cookieHeader, name) {
@@ -316,9 +317,13 @@ async function postHyperbeamThumbnailUpload(ctx) {
 
   const requestBody = await readJsonBody(ctx);
   const params64 = Buffer.from(JSON.stringify(requestBody)).toString('base64url');
-  const response = await postJson(`${nodeUrl}${HYPERBEAM_THUMBNAIL_UPLOAD_PATH}`, { params64 }, {
-    host: new URL(nodeUrl).host,
-  });
+  const response = await postJson(
+    `${nodeUrl}${HYPERBEAM_THUMBNAIL_UPLOAD_PATH}`,
+    { params64 },
+    {
+      host: new URL(nodeUrl).host,
+    }
+  );
 
   ctx.status = response.statusCode;
   ctx.set('Cache-Control', 'no-store');
@@ -398,6 +403,58 @@ async function postHyperbeamUploadDelete(ctx) {
     { id: uploadId, immutable_id: uploadId },
     {
       'x-odysee-auth-token': authToken,
+      'x-odysee-upload-id': uploadId,
+    }
+  );
+
+  ctx.status = response.statusCode;
+  ctx.set('Cache-Control', 'no-store');
+  ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
+  ctx.body = response.body;
+}
+
+async function postHyperbeamUploadUpdate(ctx) {
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl) {
+    ctx.status = 404;
+    ctx.body = { error: 'hyperbeam node unavailable' };
+    return;
+  }
+
+  const authToken = getRequestAuthToken(ctx);
+  if (!authToken) {
+    ctx.status = 401;
+    ctx.set('Cache-Control', 'no-store');
+    ctx.body = { error: 'auth_token cookie required' };
+    return;
+  }
+
+  const requestBody = await readJsonBody(ctx);
+  const claim = requestBody.claim || requestBody;
+  const uploadId = String(
+    claim.claim_id ||
+      claim.immutable_id ||
+      claim.immutableId ||
+      claim.upload_id ||
+      claim.uploadId ||
+      claim?.hyperbeam?.upload_id ||
+      ''
+  ).trim();
+  if (!uploadId) {
+    ctx.status = 400;
+    ctx.set('Cache-Control', 'no-store');
+    ctx.body = { error: 'upload id required' };
+    return;
+  }
+
+  const response = await postJson(
+    `${nodeUrl}${HYPERBEAM_UPLOAD_UPDATE_PATH}`,
+    { claim },
+    {
+      authorization: `Bearer ${authToken}`,
+      'x-odysee-auth-token': authToken,
+      'auth-token': authToken,
       'x-odysee-upload-id': uploadId,
     }
   );
@@ -524,7 +581,10 @@ async function mediaIdFromHyperbeamLink(nodeUrl, id, claim) {
     accept: 'application/json',
   });
   if (hyperbeamResponse.statusCode < 200 || hyperbeamResponse.statusCode >= 300) return '';
-  return mediaIdFromHeaders(hyperbeamResponse.headers) || mediaIdFromClaim(responsePayload(parseJsonBuffer(hyperbeamResponse.body)));
+  return (
+    mediaIdFromHeaders(hyperbeamResponse.headers) ||
+    mediaIdFromClaim(responsePayload(parseJsonBuffer(hyperbeamResponse.body)))
+  );
 }
 
 function responsePayload(payload) {
@@ -540,10 +600,9 @@ function responsePayload(payload) {
 function mediaIdFromHeaders(headers) {
   if (!headers || typeof headers !== 'object') return '';
   const readPath = String(headers.read_path || headers['read-path'] || '').replace(/^\/+/, '');
-  return String(headers.media_id || headers['media-id'] || headers.upload_id || headers['upload-id'] || readPath || '').replace(
-    /^\/+/,
-    ''
-  );
+  return String(
+    headers.media_id || headers['media-id'] || headers.upload_id || headers['upload-id'] || readPath || ''
+  ).replace(/^\/+/, '');
 }
 
 function mediaIdFromClaim(claim) {
@@ -1032,6 +1091,7 @@ router.post(`/$/api/hyperbeam-upload/v1/large`, postHyperbeamLargeUpload);
 router.post(`/$/api/hyperbeam-upload/v1/index`, postHyperbeamUploadIndex);
 router.post(`/$/api/hyperbeam-upload/v1/list`, postHyperbeamUploadList);
 router.post(`/$/api/hyperbeam-upload/v1/delete`, postHyperbeamUploadDelete);
+router.post(`/$/api/hyperbeam-upload/v1/update`, postHyperbeamUploadUpdate);
 router.post(`/$/api/hyperbeam-thumbnail/v1/upload`, postHyperbeamThumbnailUpload);
 router.head(`/$/api/hyperbeam-upload/v1/read/:id`, getHyperbeamLargeUpload);
 router.get(`/$/api/hyperbeam-upload/v1/read/:id`, getHyperbeamLargeUpload);

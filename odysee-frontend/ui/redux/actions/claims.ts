@@ -121,9 +121,24 @@ async function mergeHyperbeamPublishesIntoClaimList(
 
   return {
     ...result,
-    items: [...indexedClaims, ...(result.items || [])],
+    items: sortClaimsByNewest([...indexedClaims, ...(result.items || [])]),
     total_items: Number(result.total_items || 0) + indexedClaims.length,
   };
+}
+
+function sortClaimsByNewest(claims: Array<Claim>) {
+  return [...claims].sort((a, b) => claimNewestTimestamp(b) - claimNewestTimestamp(a));
+}
+
+function claimNewestTimestamp(claim: Claim) {
+  const anyClaim = claim as any;
+  return Number(
+    anyClaim?.value?.release_time ||
+      anyClaim?.meta?.creation_timestamp ||
+      anyClaim?.timestamp ||
+      anyClaim?.height ||
+      0
+  );
 }
 
 function emptyClaimListResult(page: number, pageSize: number): StreamListResponse {
@@ -987,7 +1002,7 @@ export function doFetchClaimsByChannel(uri: string, page: number = 1) {
       include_purchase_receipt: true,
     }).then(async (result: ClaimSearchResponse) => {
       result = await mergeHyperbeamPublishesIntoChannelResult(result, uri, page || 1);
-      const { items: claims, total_items: claimsInChannel, page: returnedPage } = result;
+      const { items: claims, total_items: claimsInChannel, page: returnedPage, total_pages: totalPages } = result;
       dispatch({
         type: ACTIONS.FETCH_CHANNEL_CLAIMS_COMPLETED,
         data: {
@@ -995,6 +1010,7 @@ export function doFetchClaimsByChannel(uri: string, page: number = 1) {
           claimsInChannel,
           claims: claims || [],
           page: returnedPage || undefined,
+          totalPages,
         },
       });
     });

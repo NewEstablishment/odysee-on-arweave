@@ -37,12 +37,23 @@ import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { sanitizeName, buildURI } from 'util/lbryURI';
 import { getVideoBitrate, resolvePublishPayload } from 'util/publish';
 import { parsePurchaseTag, parseRentalTag, TO_SECONDS } from 'util/stripe';
-import { canPublishThroughHyperbeam, publishThroughHyperbeam } from 'services/hyperbeamUpload';
+import {
+  canPublishThroughHyperbeam,
+  listHyperbeamPublishes,
+  publishThroughHyperbeam,
+  updateHyperbeamPublish,
+} from 'services/hyperbeamUpload';
 import uploadThumbnail from 'services/thumbnailUpload';
 import Lbry from 'lbry';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 // import LbryFirst from 'extras/lbry-first/lbry-first';
-import { isClaimNsfw, getChannelIdFromClaim, isHyperbeamUploadClaim, isStreamPlaceholderClaim } from 'util/claim';
+import {
+  isClaimNsfw,
+  getChannelIdFromClaim,
+  getClaimTags,
+  isHyperbeamUploadClaim,
+  isStreamPlaceholderClaim,
+} from 'util/claim';
 import { MEMBERS_ONLY_CONTENT_TAG, SCHEDULED_TAGS, VISIBILITY_TAGS } from 'constants/tags';
 const PUBLISH_PATH_MAP = Object.freeze({
   file: PAGES.UPLOAD,
@@ -1015,6 +1026,38 @@ async function hydrateClaimsInStore(dispatch: Dispatch, claims: Array<StreamClai
   }
 }
 
+async function mergeHyperbeamUploadsForPublishSearch(
+  legacyClaims: Array<StreamClaim>,
+  term: string,
+  filter: string,
+  channelIds: Array<string | null | undefined>
+) {
+  const nativeClaims = await listHyperbeamPublishes({ channelIds }).catch(() => []);
+  const filteredNativeClaims = filterHyperbeamUploadsForPublishSearch(nativeClaims, term, filter);
+  const claimsById: Record<string, StreamClaim> = {};
+
+  [...legacyClaims, ...filteredNativeClaims].forEach((claim) => {
+    if (claim?.claim_id && !claimsById[claim.claim_id]) claimsById[claim.claim_id] = claim;
+  });
+
+  return sortClaimsByNewest(Object.values(claimsById));
+}
+
+function filterHyperbeamUploadsForPublishSearch(claims: Array<StreamClaim>, term: string, filter: string) {
+  let filteredClaims = claims;
+
+  if (filter === 'unlisted') {
+    filteredClaims = filteredClaims.filter((claim) => (getClaimTags(claim) || []).includes(VISIBILITY_TAGS.UNLISTED));
+  } else if (filter === 'scheduled') {
+    const scheduledTags = new Set<string>(Object.values(SCHEDULED_TAGS));
+    filteredClaims = filteredClaims.filter((claim) =>
+      (getClaimTags(claim) || []).some((tag) => scheduledTags.has(tag))
+    );
+  }
+
+  return term.length > 0 ? clientTitleFilter(filteredClaims, term) : filteredClaims;
+}
+
 /**
  * Searches the current user's uploads.
  *
@@ -1049,8 +1092,9 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
 
       const result = await Lbry.claim_search(csParams);
       const claims = await hydrateClaimsInStore(dispatch, sortClaimsByNewest(extractStreamClaims(result)));
+      const mergedClaims = await mergeHyperbeamUploadsForPublishSearch(claims, term, filter, myChannelIds);
       return {
-        claims: term.length > 0 ? clientTitleFilter(claims, term) : claims,
+        claims: mergedClaims,
       };
     }
 
@@ -1071,8 +1115,9 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
 
       const result = await Lbry.claim_search(csParams);
       const claims = await hydrateClaimsInStore(dispatch, sortClaimsByNewest(extractStreamClaims(result)));
+      const mergedClaims = await mergeHyperbeamUploadsForPublishSearch(claims, term, filter, myChannelIds);
       return {
-        claims: term.length > 0 ? clientTitleFilter(claims, term) : claims,
+        claims: mergedClaims,
       };
     }
 
@@ -1085,8 +1130,9 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
         claim_type: ['stream'],
       });
       const claims = await hydrateClaimsInStore(dispatch, sortClaimsByNewest(extractStreamClaims(result)));
+      const mergedClaims = await mergeHyperbeamUploadsForPublishSearch(claims, term, filter, myChannelIds);
       return {
-        claims,
+        claims: mergedClaims,
       };
     }
 
@@ -1100,8 +1146,9 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
       });
       const claims = clientTitleFilter(sortClaimsByNewest(extractStreamClaims(result)), term);
       const hydratedClaims = await hydrateClaimsInStore(dispatch, claims);
+      const mergedClaims = await mergeHyperbeamUploadsForPublishSearch(hydratedClaims, term, filter, myChannelIds);
       return {
-        claims: hydratedClaims,
+        claims: mergedClaims,
       };
     }
 
@@ -1133,7 +1180,7 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
     }
 
     return {
-      claims: sortClaimsByNewest(resolvedClaims),
+      claims: await mergeHyperbeamUploadsForPublishSearch(resolvedClaims, term, filter, myChannelIds),
     };
   };
 };
@@ -1376,8 +1423,20 @@ export const doPublish =
     }
 
     const publishFile = publishData.filePath;
+    if (myClaimForUri && isHyperbeamUploadClaim(myClaimForUri)) {
+      return updateHyperbeamPublish(
+        myClaimForUri,
+        withPublishMediaDuration(publishPayload, publishData),
+        myChannels
+      ).then(success, fail);
+    }
+
     if (canPublishThroughHyperbeam(publishFile, publishPayload, publishData.type)) {
-      return publishThroughHyperbeam(publishFile, publishPayload, myChannels).then(success, fail);
+      return publishThroughHyperbeam(
+        publishFile,
+        withPublishMediaDuration(publishPayload, publishData),
+        myChannels
+      ).then(success, fail);
     }
 
     return Lbry.publish(publishPayload).then((response: PublishResponse) => {
@@ -1428,6 +1487,21 @@ export const doCreateClaimForEarlyUpload =
       { onSuccess: () => {}, onFailure: () => {} }
     );
   };
+
+function withPublishMediaDuration(publishPayload: PublishParams, publishData: any): PublishParams {
+  const duration = Number(publishData.fileDur || 0);
+  if (!duration) return publishPayload;
+
+  if (publishData.fileVid) {
+    return { ...publishPayload, video: { ...(publishPayload as any).video, duration } };
+  }
+
+  if (publishData.fileMime && publishData.fileMime.startsWith('audio/')) {
+    return { ...publishPayload, audio: { ...(publishPayload as any).audio, duration } };
+  }
+
+  return publishPayload;
+}
 export const doPublishWithEarlyUpload =
   (tusUrlPromise: Promise<{ tusUrl: string }>, guid: string) => async (dispatch: Dispatch, getState: GetState) => {
     const state = getState();

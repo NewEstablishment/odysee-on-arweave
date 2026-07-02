@@ -1,14 +1,12 @@
-%%% @doc Odysee internal API subscription compatibility device.
+%%% @doc Odysee account subscription-count implementation.
 %%%
-%%% This device exposes read-only `/subscription/sub_count' responses as
-%%% AO-Core messages. Follow/unfollow mutations remain outside this adapter.
+%%% Exposed through `odysee-account@1.0'.
 -module(dev_odysee_subscription).
--implements(<<"odysee-subscription@1.0">>).
 -export([info/1, 'sub-count'/3, sub_count/3, normalize/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--define(DEVICE, <<"odysee-subscription@1.0">>).
+-define(DEVICE, <<"odysee-account@1.0">>).
 -define(DEFAULT_API_URL, <<"https://api.odysee.com">>).
 
 %% @doc Return the public device API.

@@ -15,6 +15,7 @@ const HYPERBEAM_UPLOAD_URL = '/$/api/hyperbeam-upload/v1/large';
 const HYPERBEAM_UPLOAD_INDEX_URL = '/$/api/hyperbeam-upload/v1/index';
 const HYPERBEAM_UPLOAD_LIST_URL = '/$/api/hyperbeam-upload/v1/list';
 const HYPERBEAM_UPLOAD_DELETE_URL = '/$/api/hyperbeam-upload/v1/delete';
+const HYPERBEAM_UPLOAD_UPDATE_URL = '/$/api/hyperbeam-upload/v1/update';
 
 const UNSUPPORTED_EXACT_TAGS = new Set([
   ...MEMBERS_ONLY_TAGS,
@@ -132,6 +133,31 @@ export async function deleteHyperbeamPublish(uploadId: string) {
   return resultPayload(json);
 }
 
+export async function updateHyperbeamPublish(
+  existingClaim: StreamClaim,
+  publishPayload: PublishParams,
+  myChannels?: Array<ChannelClaim> | null
+): Promise<PublishResponse> {
+  const claim = uploadIndexClaim(updatedHyperbeamClaim(existingClaim, publishPayload, myChannels));
+  const response = await fetch(HYPERBEAM_UPLOAD_UPDATE_URL, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ claim }),
+  });
+  const json = await responseJson(response);
+
+  if (!response.ok) {
+    throw new Error(errorMessage(json, response.status));
+  }
+
+  const result = resultPayload(json);
+  return { outputs: [result?.item ? normalizeIndexedHyperbeamClaim(result.item) : claim] };
+}
+
 function normalizePublishResponse(
   json: any,
   publishPayload: PublishParams,
@@ -185,6 +211,8 @@ function normalizePublishResponse(
         size: sourceSize,
         media_type: file.type || publishPayload.content_type || 'application/octet-stream',
       },
+      ...(publishPayload.video ? { video: publishPayload.video } : {}),
+      ...(publishPayload.audio ? { audio: publishPayload.audio } : {}),
     },
     txid: uploadId,
     nout: 0,
@@ -280,6 +308,8 @@ function uploadIndexClaim(claim: any) {
         size: source.size,
         media_type: source.media_type,
       },
+      ...(value.video ? { video: value.video } : {}),
+      ...(value.audio ? { audio: value.audio } : {}),
     },
     meta: normalizeIndexedClaimMeta(meta),
     hyperbeam: {
@@ -287,6 +317,46 @@ function uploadIndexClaim(claim: any) {
       upload_id: uploadId,
       media_id: hyperbeam.media_id || hyperbeam.upload_id || uploadId,
       read_path: hyperbeam.read_path,
+    },
+  };
+}
+
+function updatedHyperbeamClaim(
+  existingClaim: StreamClaim,
+  publishPayload: PublishParams,
+  myChannels?: Array<ChannelClaim> | null
+) {
+  const current: any = normalizeIndexedHyperbeamClaim(existingClaim);
+  const claimId = current.claim_id || current.immutable_id || current.hyperbeam?.upload_id;
+  const signingChannel = signingChannelFromPayload(publishPayload, myChannels) || current.signing_channel;
+  const name = publishPayload.name || current.name;
+  const permanentUrl = publishedUriFromPayload({ ...publishPayload, name }, claimId, signingChannel);
+  const value = current.value || {};
+  const source = value.source || {};
+
+  return {
+    ...current,
+    claim_id: claimId,
+    immutable_id: claimId,
+    txid: current.txid || claimId,
+    name,
+    normalized_name: name,
+    permanent_url: permanentUrl,
+    canonical_url: permanentUrl,
+    short_url: permanentUrl,
+    channel_id: publishPayload.channel_id || current.channel_id,
+    signing_channel: signingChannel,
+    timestamp: publishPayload.release_time || current.timestamp || current.meta?.creation_timestamp || 0,
+    value: {
+      ...value,
+      title: publishPayload.title || name,
+      description: publishPayload.description ?? value.description ?? '',
+      thumbnail: publishPayload.thumbnail_url ? { url: publishPayload.thumbnail_url } : value.thumbnail,
+      tags: publishPayload.tags || value.tags || [],
+      languages: publishPayload.languages || value.languages || [],
+      source,
+      ...(publishPayload.video ? { video: publishPayload.video } : value.video ? { video: value.video } : {}),
+      ...(publishPayload.audio ? { audio: publishPayload.audio } : value.audio ? { audio: value.audio } : {}),
     },
   };
 }
@@ -300,8 +370,10 @@ function resultPayload(json: any) {
 
 function normalizeIndexedHyperbeamClaim(claim: any) {
   const claimId = claim.claim_id || claim.immutable_id || claim.immutableId;
+  const uploadId =
+    claim.hyperbeam?.upload_id || claim.hyperbeam?.uploadId || claim.upload_id || claim.uploadId || claimId;
   const mediaId =
-    claim.hyperbeam?.media_id || claim.hyperbeam?.mediaId || claim.hyperbeam?.upload_id || claim.upload_id;
+    claim.hyperbeam?.media_id || claim.hyperbeam?.mediaId || claim.value?.source?.sd_hash || claim.sd_hash || uploadId;
   const permanentUrl = validIndexedUri(claim.permanent_url) ? uriWithStreamClaimId(claim.permanent_url, claimId) : null;
   const canonicalUrl = validIndexedUri(claim.canonical_url)
     ? uriWithStreamClaimId(claim.canonical_url, claimId)
@@ -333,8 +405,8 @@ function normalizeIndexedHyperbeamClaim(claim: any) {
     value: normalizeIndexedClaimValue(claim.value),
     hyperbeam: {
       ...claim.hyperbeam,
-      upload_id: mediaId || claim.hyperbeam?.upload_id || claimId,
-      media_id: mediaId || claim.hyperbeam?.media_id || claim.hyperbeam?.upload_id || claimId,
+      upload_id: uploadId,
+      media_id: mediaId,
     },
     meta: normalizeIndexedClaimMeta(claim.meta),
     signing_channel: claim.signing_channel ? normalizeIndexedChannel(claim.signing_channel) : claim.signing_channel,

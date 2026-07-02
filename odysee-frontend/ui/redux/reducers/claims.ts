@@ -7,7 +7,7 @@
 // - Sean
 import * as ACTIONS from 'constants/action_types';
 import mergeClaim from 'util/merge-claim';
-import { getChannelIdFromClaim } from 'util/claim';
+import { getChannelIdFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import { claimToStoredCollection } from 'util/collections';
 const reducers = {};
 const defaultState: ClaimsState = {
@@ -153,9 +153,77 @@ function updateIfValueChanged(original, delta, key, newValue) {
  * @param newClaim
  */
 function updateIfClaimChanged(original, delta, key, newClaim) {
-  if (!original[key] || claimHasNewData(original[key], newClaim)) {
-    delta[key] = newClaim;
+  const claim = preserveExistingChannelMeta(original[key], newClaim);
+
+  if (!original[key] || claimHasNewData(original[key], claim)) {
+    delta[key] = claim;
   }
+}
+
+function preserveExistingChannelMeta(originalClaim, newClaim) {
+  if (!originalClaim || !newClaim || newClaim.value_type !== 'channel') return newClaim;
+
+  const originalClaimsInChannel = Number(originalClaim.meta?.claims_in_channel || 0);
+  const newClaimsInChannel = Number(newClaim.meta?.claims_in_channel || 0);
+  if (!originalClaimsInChannel || newClaimsInChannel >= originalClaimsInChannel) return newClaim;
+
+  return {
+    ...newClaim,
+    meta: {
+      ...newClaim.meta,
+      ...originalClaim.meta,
+      claims_in_channel: originalClaimsInChannel,
+    },
+  };
+}
+
+function claimChannelUrls(claim: any): Array<string> {
+  const channel = claim?.signing_channel;
+  return [channel?.canonical_url, channel?.permanent_url].filter(Boolean);
+}
+
+function claimChannelId(claim: any): string | null {
+  return claim?.signing_channel?.claim_id || claim?.channel_id || null;
+}
+
+function removeClaimFromChannelPages(paginatedClaimsByChannel: any, claimId: string, channelUrls: Array<string>) {
+  const result = Object.assign({}, paginatedClaimsByChannel);
+
+  channelUrls.forEach((uri) => {
+    const channelPages = result[uri];
+    if (!channelPages) return;
+
+    const nextPages = Object.assign({}, channelPages);
+    if (nextPages.all) {
+      nextPages.all = new Set(Array.from(nextPages.all).filter((id) => id !== claimId));
+    }
+
+    Object.keys(nextPages).forEach((key) => {
+      if (Array.isArray(nextPages[key])) {
+        nextPages[key] = nextPages[key].filter((id) => id !== claimId);
+      }
+    });
+
+    if (typeof nextPages.itemCount === 'number') {
+      nextPages.itemCount = Math.max(0, nextPages.itemCount - 1);
+    }
+
+    result[uri] = nextPages;
+  });
+
+  return result;
+}
+
+function decrementChannelCounts(channelClaimCounts: any, channelUrls: Array<string>) {
+  const result = Object.assign({}, channelClaimCounts);
+
+  channelUrls.forEach((uri) => {
+    if (typeof result[uri] === 'number') {
+      result[uri] = Math.max(0, result[uri] - 1);
+    }
+  });
+
+  return result;
 }
 
 function selectClaimIsMine(state: ClaimsState, claim: Claim) {
@@ -418,7 +486,7 @@ reducers[ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED] = (state: ClaimsState, action:
 
     if (
       (claim.type && claim.type.match(/claim|update/)) ||
-      ((claim as any).hyperbeam_upload && claimId && permanentUri)
+      (isHyperbeamUploadClaim(claim) && claimId && permanentUri)
     ) {
       urlsForCurrentPage.push(permanentUri);
       const includesMeta = Object.keys(claim.meta || {}).length > 0;
@@ -584,6 +652,7 @@ reducers[ACTIONS.FETCH_CHANNEL_CLAIMS_COMPLETED] = (state: ClaimsState, action: 
   const byIdDelta = {};
   const fetchingChannelClaims = Object.assign({}, state.fetchingChannelClaims);
   const claimsByUriDelta = {};
+  const channelClaimId = state.claimsByUri[uri] || claims?.[0]?.signing_channel?.claim_id;
 
   if (claims !== undefined) {
     claims.forEach((claim) => {
@@ -592,6 +661,23 @@ reducers[ACTIONS.FETCH_CHANNEL_CLAIMS_COMPLETED] = (state: ClaimsState, action: 
       updateIfClaimChanged(state.byId, byIdDelta, claim.claim_id, claim);
       updateIfValueChanged(state.claimsByUri, claimsByUriDelta, claim.canonical_url, claim.claim_id);
     });
+  }
+
+  if (channelClaimId && claimsInChannel !== undefined) {
+    const channelClaim = byIdDelta[channelClaimId] || state.byId[channelClaimId];
+
+    if (channelClaim?.value_type === 'channel') {
+      byIdDelta[channelClaimId] = {
+        ...channelClaim,
+        meta: {
+          ...channelClaim.meta,
+          claims_in_channel: claimsInChannel,
+        },
+      };
+      channelClaimCounts[uri] = claimsInChannel;
+      if (channelClaim.canonical_url) channelClaimCounts[channelClaim.canonical_url] = claimsInChannel;
+      if (channelClaim.permanent_url) channelClaimCounts[channelClaim.permanent_url] = claimsInChannel;
+    }
   }
 
   byChannel.all = allClaimIds;
@@ -780,6 +866,9 @@ reducers[ACTIONS.ABANDON_CLAIM_SUCCEEDED] = (state: ClaimsState, action: any): C
   }: {
     claimId: string;
   } = action.data;
+  const abandonedClaim = state.byId[claimId];
+  const channelUrls = claimChannelUrls(abandonedClaim);
+  const channelId = claimChannelId(abandonedClaim);
   const byId = Object.assign({}, state.byId);
   const newMyClaims = state.myClaims ? state.myClaims.slice() : [];
   let myClaimsPageResults = null;
@@ -820,6 +909,22 @@ reducers[ACTIONS.ABANDON_CLAIM_SUCCEEDED] = (state: ClaimsState, action: any): C
   }
 
   delete byId[claimId];
+  const paginatedClaimsByChannel = removeClaimFromChannelPages(state.paginatedClaimsByChannel, claimId, channelUrls);
+  const channelClaimCounts = decrementChannelCounts(state.channelClaimCounts, channelUrls);
+
+  if (channelId && byId[channelId]?.value_type === 'channel') {
+    const channelClaim = byId[channelId];
+    const currentCount = Number(channelClaim.meta?.claims_in_channel || 0);
+
+    byId[channelId] = {
+      ...channelClaim,
+      meta: {
+        ...channelClaim.meta,
+        claims_in_channel: Math.max(0, currentCount - 1),
+      },
+    };
+  }
+
   return Object.assign({}, state, {
     myClaims,
     myChannelClaimsById: newMyChannelClaimsById,
@@ -827,6 +932,8 @@ reducers[ACTIONS.ABANDON_CLAIM_SUCCEEDED] = (state: ClaimsState, action: any): C
     myCollectionClaimIds: newMyCollectionClaimIds && Array.from(newMyCollectionClaimIds),
     byId,
     claimsByUri,
+    paginatedClaimsByChannel,
+    channelClaimCounts,
     abandoningById,
     myClaimsPageResults: myClaimsPageResults || state.myClaimsPageResults,
   });

@@ -11,9 +11,10 @@ export const HYPERBEAM_DEVICE = {
   fileReaction: '~odysee-file-reaction@1.0',
   productEvents: '~odysee-product-events@1.0',
   reaction: '~odysee-reaction@1.0',
+  search: '~odysee-search@1.0',
   stream: '~odysee-stream@1.0',
   streamDescriptor: '~odysee-stream-descriptor@1.0',
-  subscription: '~odysee-subscription@1.0',
+  subscription: '~odysee-account@1.0',
   upload: '~odysee-upload@1.0',
 };
 

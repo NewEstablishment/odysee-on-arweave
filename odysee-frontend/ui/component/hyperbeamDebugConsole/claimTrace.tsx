@@ -20,9 +20,10 @@ type TraceStep = {
 };
 
 const AUTH_TRACE_TARGET = 'auth:~odysee-account@1.0/preference-get:enable-sync';
+const SEARCH_TRACE_TARGET = 'search:~odysee-search@1.0/query';
 
 export type TraceFocus = {
-  kind: 'auth' | 'claim';
+  kind: 'auth' | 'claim' | 'search';
   label: string;
   target: string;
   nativeUpload?: boolean;
@@ -69,6 +70,8 @@ export default function ClaimTrace({
     detail: string;
     response?: any;
   }>({ status: 'pending', detail: 'loading authenticated account preference' });
+  const searchProfile = React.useMemo(() => searchTraceProfile(events), [events, renderedClaimVersion]);
+  const hasSearchTrace = searchProfile.status !== 'pending';
   const materializedEvidence = React.useRef<Set<string>>(new Set());
   const priorityClaims = pageClaims.filter((claim) => claim.provenance === 'page' || claim.provenance === 'visible');
   const displayedClaims = orderDisplayedClaims(priorityClaims.length !== 0 ? priorityClaims : observedClaims);
@@ -118,9 +121,13 @@ export default function ClaimTrace({
       setSteps(authTraceSteps(profile, events));
       return;
     }
+    if (target === SEARCH_TRACE_TARGET) {
+      setSteps(searchTraceSteps(searchProfile, events));
+      return;
+    }
     if (!target || !selectedClaim) return;
     setSteps(initialSteps(target, selectedClaim, events));
-  }, [events, profile, selectedClaim, target]);
+  }, [events, profile, searchProfile, selectedClaim, target]);
 
   React.useEffect(() => {
     if (!selectedClaim) return;
@@ -218,6 +225,17 @@ export default function ClaimTrace({
     setSteps(authTraceSteps(profile, events));
     onActiveTraceChange?.(authTraceFocus(profile.status));
   }, [events, onActiveTraceChange, profile, target]);
+  const selectSearch = React.useCallback(() => {
+    if (target === SEARCH_TRACE_TARGET) {
+      setTarget('');
+      setSteps(initialSteps(''));
+      onActiveTraceChange?.(null);
+      return;
+    }
+    setTarget(SEARCH_TRACE_TARGET);
+    setSteps(searchTraceSteps(searchProfile, events));
+    onActiveTraceChange?.(searchTraceFocus(searchProfile.status));
+  }, [events, onActiveTraceChange, searchProfile, target]);
 
   return (
     <div
@@ -257,6 +275,9 @@ export default function ClaimTrace({
             profile={profile}
             profileSelected={target === AUTH_TRACE_TARGET}
             onSelectProfile={selectProfile}
+            search={hasSearchTrace ? searchProfile : undefined}
+            searchSelected={target === SEARCH_TRACE_TARGET}
+            onSelectSearch={selectSearch}
           />
         </div>
       )}
@@ -408,6 +429,16 @@ function authTraceFocus(status: TraceStatus): TraceFocus {
   };
 }
 
+function searchTraceFocus(status: TraceStatus): TraceFocus {
+  return {
+    kind: 'search',
+    label: `search ~odysee-search@1.0/query · ${status}`,
+    target: SEARCH_TRACE_TARGET,
+    devicePath: '/~odysee-search@1.0/query',
+    requestKey: 'search:',
+  };
+}
+
 function ProfileTraceRow({
   onSelect,
   profile,
@@ -475,33 +506,111 @@ function ProfileTraceRow({
   );
 }
 
+function SearchTraceRow({
+  onSelect,
+  search,
+  selected,
+}: {
+  onSelect: () => void;
+  search?: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  };
+  selected: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title="HyperBEAM search request"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '76px 54px minmax(0, 1fr) minmax(92px, 148px)',
+        gap: 6,
+        alignItems: 'center',
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        border: `1px solid ${selected ? 'rgba(14,165,233,0.74)' : 'rgba(255,255,255,0.1)'}`,
+        borderRadius: 4,
+        padding: '3px 5px',
+        background: selected ? 'rgba(14,165,233,0.18)' : 'rgba(255,255,255,0.04)',
+        color: '#f9fafb',
+        cursor: 'pointer',
+        font: 'inherit',
+        textAlign: 'left',
+      }}
+    >
+      <span style={{ color: '#0ea5e9', overflow: 'hidden', textOverflow: 'ellipsis' }}>search</span>
+      <span
+        style={{
+          color: '#94a3b8',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        query
+      </span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        local search / Meilisearch
+        {search.detail ? ` · ${search.detail}` : ''}
+      </span>
+      <span
+        style={{
+          color: statusColor(search.status),
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {search.status}
+      </span>
+    </button>
+  );
+}
+
 function ClaimGroup({
   claims,
   label,
   onSelect,
   onSelectProfile,
+  onSelectSearch,
   profile,
   profileSelected,
+  search,
+  searchSelected,
   target,
 }: {
   claims: Array<DiscoveredClaim>;
   label: string;
   onSelect: (claim: DiscoveredClaim) => void;
   onSelectProfile: () => void;
+  onSelectSearch: () => void;
   profile: {
     status: TraceStatus;
     detail: string;
     response?: any;
   };
   profileSelected: boolean;
+  search: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  };
+  searchSelected: boolean;
   target: string;
 }) {
   return (
     <>
       <div style={{ color: 'rgba(255,255,255,0.46)', padding: '2px 2px 0' }}>
-        {label} {claims.length + 1}
+        {label} {claims.length + 1 + (search ? 1 : 0)}
       </div>
       <ProfileTraceRow profile={profile} selected={profileSelected} onSelect={onSelectProfile} />
+      {search && <SearchTraceRow search={search} selected={searchSelected} onSelect={onSelectSearch} />}
       {claims.map((claim) => (
         <button
           key={claim.key}
@@ -600,7 +709,7 @@ function discoverClaims(events: Array<HyperbeamDebugEvent>): Array<DiscoveredCla
       sdHash: context.currentPathClaim.sdHash,
       urls: [context.currentPathClaim.traceTarget],
       traceTarget: context.currentPathClaim.traceTarget,
-    }).forEach((alias) => claims.set(alias, context.currentPathClaim as DiscoveredClaim));
+    }).forEach((alias) => claims.set(alias, context.currentPathClaim));
   }
 
   events.forEach((event) => {
@@ -1503,6 +1612,134 @@ function accountPreferenceAuthEvents(events: Array<HyperbeamDebugEvent>) {
       String(data.requestKey || '').includes('enable-sync')
     );
   });
+}
+
+function searchTraceProfile(events: Array<HyperbeamDebugEvent>): {
+  status: TraceStatus;
+  detail: string;
+  response?: any;
+} {
+  const searchEvents = searchDeviceEvents(events);
+  if (searchEvents.length === 0) return { status: 'pending', detail: 'waiting for search request' };
+  const responseEvent = [...searchEvents].reverse().find((event) => event.label === 'response');
+  const requestEvent = searchEvents.find((event) => event.label === 'request');
+
+  if (responseEvent) {
+    const data = responseEvent.data || {};
+    const ok = data.ok !== false && (!data.status || (data.status >= 200 && data.status < 300));
+    return {
+      status: ok ? 'ok' : 'failed',
+      detail: `${data.status || 'unknown status'} · ${searchResultCount(data)} results`,
+      response: sanitizeHyperbeamDebugValue(data.response || data.body || data),
+    };
+  }
+
+  if (requestEvent) {
+    return {
+      status: 'running',
+      detail: String(requestEvent.data?.requestKey || 'search request pending'),
+      response: sanitizeHyperbeamDebugValue(requestEvent.data),
+    };
+  }
+
+  return { status: 'pending', detail: 'waiting for search request' };
+}
+
+function searchTraceSteps(
+  profile: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  },
+  events: Array<HyperbeamDebugEvent>
+): Array<TraceStep> {
+  const searchEvents = searchDeviceEvents(events);
+  const requestEvent = searchEvents.find((event) => event.label === 'request');
+  const responseEvent = [...searchEvents].reverse().find((event) => event.label === 'response');
+  const responseData = responseEvent?.data || {};
+
+  return [
+    {
+      key: 'search-target',
+      label: 'Select HyperBEAM search request',
+      kind: 'input',
+      status: 'ok',
+      detail: '~odysee-search@1.0/query',
+      response: sanitizeHyperbeamDebugValue({
+        target: SEARCH_TRACE_TARGET,
+        devicePath: '/~odysee-search@1.0/query',
+      }),
+    },
+    {
+      key: 'search-request',
+      label: 'Send query to local search device',
+      kind: 'facade',
+      status: requestEvent ? 'ok' : 'pending',
+      detail: requestEvent?.data?.requestKey || 'waiting for request event',
+      url: requestEvent?.data?.url,
+      response: sanitizeHyperbeamDebugValue(requestEvent?.data),
+    },
+    {
+      key: 'search-response',
+      label: 'Read search device response',
+      kind: 'source',
+      status: responseEvent
+        ? responseData.ok !== false
+          ? 'ok'
+          : 'failed'
+        : profile.status === 'failed'
+          ? 'failed'
+          : 'pending',
+      detail: responseEvent
+        ? `${responseData.status || 'unknown status'} · ${searchResultCount(responseData)} results`
+        : profile.detail,
+      url: responseData.url,
+      statusCode: responseData.status,
+      sourceAlg: responseData.sourceAlg,
+      response: sanitizeHyperbeamDebugValue(responseData.response || responseData.body || profile.response),
+    },
+  ];
+}
+
+function searchDeviceEvents(events: Array<HyperbeamDebugEvent>) {
+  return events.filter((event) => isSearchDeviceEventData(event.data || {}));
+}
+
+function isSearchDeviceEventData(data: Record<string, any>) {
+  const device = normalizeDeviceName(data.device);
+  const responseDevice = normalizeDeviceName(data.responseDevice);
+  const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '');
+  return (
+    device === '~odysee-search@1.0' ||
+    responseDevice === '~odysee-search@1.0' ||
+    path.includes('/~odysee-search@1.0/query')
+  );
+}
+
+function normalizeDeviceName(device: any) {
+  const value = String(device || '');
+  if (!value) return '';
+  return value.startsWith('~') ? value : `~${value}`;
+}
+
+function searchResultCount(data: any) {
+  const body = parseMaybeJson(data?.body);
+  const response = parseMaybeJson(data?.response);
+  const result = response?.result || body?.result || data?.result || response || body;
+  const total = result?.total_items ?? result?.['total-items'] ?? result?.estimatedTotalHits ?? result?.totalHits;
+  if (total !== undefined && total !== null) return total;
+  if (Array.isArray(result?.items)) return result.items.length;
+  if (Array.isArray(result?.hits)) return result.hits.length;
+  return 0;
+}
+
+function parseMaybeJson(value: any) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 
 function cachedSourceObservation(events: Array<HyperbeamDebugEvent>, id: string | undefined) {

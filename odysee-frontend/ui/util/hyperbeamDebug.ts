@@ -26,8 +26,8 @@ const AUTH_REQUIRED_DEVICE_PATHS = new Set([
   '/~odysee-file@1.0/view-count',
   '/~odysee-file@1.0/view_count',
   '/~odysee-file-reaction@1.0/list',
-  '/~odysee-subscription@1.0/sub-count',
-  '/~odysee-subscription@1.0/sub_count',
+  '/~odysee-account@1.0/sub-count',
+  '/~odysee-account@1.0/sub_count',
 ]);
 let installed = false;
 let resourceDebugInstalled = false;

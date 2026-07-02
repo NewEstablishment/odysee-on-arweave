@@ -7,7 +7,6 @@ import { selectClientSetting, selectLanguage, selectShowMatureContent } from 're
 import { selectClaimForUri, selectClaimIdForUri, selectClaimIsNsfwForUri } from 'redux/selectors/claims';
 import { doClaimSearch, doResolveClaimIds, doResolveUris } from 'redux/actions/claims';
 import { buildURI, isURIValid } from 'util/lbryURI';
-import { batchActions } from 'util/batch-actions';
 import {
   makeSelectSearchUrisForQuery,
   selectPersonalRecommendations,
@@ -23,6 +22,8 @@ import { SEARCH_OPTIONS } from 'constants/search';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
+import { fetchHyperbeamSearch } from 'util/hyperbeam';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 const isDev = process.env.NODE_ENV !== 'production';
 // ****************************************************************************
 // FYP
@@ -162,6 +163,79 @@ const processLighthouseResults = (results: Array<any>) => {
   return uris;
 };
 
+const processHyperbeamSearchResults = (results: Array<any>) => {
+  const uris = [];
+  const claimIds = [];
+  results.forEach((item) => {
+    if (!item) return;
+    const claimId = item.claim_id || item['claim-id'];
+    if (claimId) claimIds.push(claimId);
+
+    const name = item.name || item.claim_name || item['claim-name'];
+    const canonicalUrl = item.canonical_url || item['canonical-url'] || item.permanent_url || item['permanent-url'];
+    if (!name || !claimId) {
+      if (canonicalUrl) uris.push(canonicalUrl);
+      return;
+    }
+
+    const claimType = item.claim_type || item['claim-type'] || item.type;
+    const channelName = item.channel_name || item['channel-name'];
+    const channelClaimId = item.channel_claim_id || item['channel-claim-id'];
+    const urlObj: LbryUrlObj = {};
+    if (String(name).startsWith('@') || claimType === 'channel') {
+      urlObj.channelName = name;
+      urlObj.channelClaimId = claimId;
+    } else {
+      if (channelName) urlObj.channelName = channelName;
+      if (channelClaimId) urlObj.channelClaimId = channelClaimId;
+      urlObj.streamName = name;
+      urlObj.streamClaimId = claimId;
+    }
+
+    const url = buildURI(urlObj, true);
+    if (isURIValid(url)) {
+      uris.push(url);
+    } else if (canonicalUrl) {
+      uris.push(canonicalUrl);
+    }
+  });
+  return { uris, claimIds };
+};
+
+const orderedHyperbeamSearchUris = (results: Array<any>, resolveInfo: any, fallbackUris: Array<string>) => {
+  if (!resolveInfo) return fallbackUris;
+
+  const urisByClaimId = {};
+  Object.values(resolveInfo).forEach((resolved: any) => {
+    const claim = resolved && (resolved.stream || resolved.channel || resolved.collection || resolved);
+    if (!claim || !claim.claim_id) return;
+
+    const uri = claim.canonical_url || claim.permanent_url || claim.short_url;
+    if (uri) urisByClaimId[claim.claim_id] = uri;
+  });
+
+  const orderedUris = [];
+  results.forEach((item, index) => {
+    if (!item) return;
+    const claimId = item.claim_id || item['claim-id'];
+    const uri = claimId && urisByClaimId[claimId];
+    const fallbackUri = fallbackUris[index];
+    const resultUri = uri || fallbackUri;
+    if (resultUri && !orderedUris.includes(resultUri)) orderedUris.push(resultUri);
+  });
+
+  return orderedUris.length ? orderedUris : fallbackUris;
+};
+
+const hyperbeamSearchParams = (query: string, searchOptions: SearchOptions) => ({
+  ...searchOptions,
+  s: query,
+  size: searchOptions.size,
+  from: searchOptions.from,
+});
+
+const uniqueUris = (uris: Array<string>) => Array.from(new Set(uris.filter(Boolean)));
+
 export const doSearch =
   (rawQuery: string, searchOptions: SearchOptions) => (dispatch: Dispatch, getState: GetState) => {
     const query = rawQuery.replace(/^lbry:\/\//i, '').replace(/\//, ' ');
@@ -177,6 +251,7 @@ export const doSearch =
     const queryWithOptions = getSearchQueryString(query, searchOptions);
     const size = searchOptions.size;
     const from = searchOptions.from;
+    const hyperbeamSearchEnabled = isHyperbeamEnabled() && !searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
     // If we have already searched for something, we don't need to do anything
     const urisForQuery = makeSelectSearchUrisForQuery(queryWithOptions)(state);
 
@@ -191,50 +266,101 @@ export const doSearch =
     });
     const isSearchingRecommendations = searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
     const cmd = isSearchingRecommendations && !isDev ? lighthouse.searchRecommendations : lighthouse.search;
-    cmd(queryWithOptions)
-      .then((data: SearchResults) => {
-        const { body: result, poweredBy, uuid } = data;
-        const uris = processLighthouseResults(result);
 
-        if (isSearchingRecommendations) {
-          // Temporarily resolve using `claim_search` until the SDK bug is fixed.
-          const claimIds = result.map((x) => x.claimId);
-          dispatch(doResolveClaimIds(claimIds)).finally(() => {
-            dispatch({
-              type: ACTIONS.SEARCH_SUCCESS,
-              data: {
-                query: queryWithOptions,
-                from: from,
-                size: size,
-                uris,
-                poweredBy,
-                uuid,
-              },
-            });
-          });
-          return;
-        }
-
-        const actions = [];
-        actions.push(doResolveUris(uris));
-        actions.push({
-          type: ACTIONS.SEARCH_SUCCESS,
-          data: {
-            query: queryWithOptions,
-            from: from,
-            size: size,
-            uris,
-            poweredBy,
-            uuid,
-          },
-        });
-        dispatch(batchActions(...actions));
-      })
-      .catch(() => {
-        dispatch({
-          type: ACTIONS.SEARCH_FAIL,
-        });
+    const finishSearch = (uris: Array<string>, poweredBy?: string, uuid?: string) => {
+      dispatch(doResolveUris(uris));
+      dispatch({
+        type: ACTIONS.SEARCH_SUCCESS,
+        data: {
+          query: queryWithOptions,
+          from: from,
+          size: size,
+          uris,
+          poweredBy,
+          uuid,
+        },
       });
+    };
+
+    const fetchLighthouseResults = () =>
+      cmd(queryWithOptions).then((data: SearchResults) => {
+        const { body: result, poweredBy, uuid } = data;
+        return { result, poweredBy, uuid, uris: processLighthouseResults(result) };
+      });
+
+    const runLighthouseSearch = () =>
+      fetchLighthouseResults()
+        .then(({ result, poweredBy, uuid, uris }) => {
+          if (isSearchingRecommendations) {
+            // Temporarily resolve using `claim_search` until the SDK bug is fixed.
+            const claimIds = result.map((x) => x.claimId);
+            dispatch(doResolveClaimIds(claimIds)).finally(() => {
+              dispatch({
+                type: ACTIONS.SEARCH_SUCCESS,
+                data: {
+                  query: queryWithOptions,
+                  from: from,
+                  size: size,
+                  uris,
+                  poweredBy,
+                  uuid,
+                },
+              });
+            });
+            return;
+          }
+
+          finishSearch(uniqueUris(uris), poweredBy, uuid);
+        })
+        .catch(() => {
+          dispatch({
+            type: ACTIONS.SEARCH_FAIL,
+          });
+        });
+
+    if (hyperbeamSearchEnabled) {
+      fetchHyperbeamSearch(hyperbeamSearchParams(query, searchOptions))
+        .then((data) => {
+          if (!data || !Array.isArray(data.items)) throw new Error('HyperBEAM search returned no items array');
+          const { uris, claimIds } = processHyperbeamSearchResults(data.items);
+          const legacyResultsPromise = fetchLighthouseResults().catch(() => null);
+          if (!claimIds.length) {
+            legacyResultsPromise.then((legacyResults) => {
+              finishSearch(uniqueUris([...uris, ...(legacyResults?.uris || [])]), 'HyperBEAM', legacyResults?.uuid);
+            });
+            return;
+          }
+
+          dispatch(doResolveClaimIds(claimIds, false))
+            .then((resolveInfo) => {
+              const resolvedUris = orderedHyperbeamSearchUris(data.items, resolveInfo, uris);
+              legacyResultsPromise.then((legacyResults) => {
+                const mergedUris = uniqueUris([...resolvedUris, ...(legacyResults?.uris || [])]);
+                dispatch(doResolveUris(mergedUris));
+                dispatch({
+                  type: ACTIONS.SEARCH_SUCCESS,
+                  data: {
+                    query: queryWithOptions,
+                    from: from,
+                    size: size,
+                    uris: mergedUris,
+                    poweredBy: 'HyperBEAM',
+                    uuid: legacyResults?.uuid,
+                  },
+                });
+              });
+            })
+            .catch(() => {
+              legacyResultsPromise.then((legacyResults) => {
+                finishSearch(uniqueUris([...uris, ...(legacyResults?.uris || [])]), 'HyperBEAM', legacyResults?.uuid);
+              });
+            });
+        })
+        .catch(runLighthouseSearch);
+      return;
+    }
+
+    runLighthouseSearch();
   };
 export const doUpdateSearchOptions =
   (newOptions: SearchOptions, additionalOptions: SearchOptions) => (dispatch: Dispatch, getState: GetState) => {

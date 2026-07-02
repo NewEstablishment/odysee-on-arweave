@@ -18,9 +18,10 @@ const COMMENT_DEVICE = '~odysee-comment@1.0';
 const REACTION_DEVICE = '~odysee-reaction@1.0';
 const FILE_DEVICE = '~odysee-file@1.0';
 const FILE_REACTION_DEVICE = '~odysee-file-reaction@1.0';
-const SUBSCRIPTION_DEVICE = '~odysee-subscription@1.0';
+const SUBSCRIPTION_DEVICE = ACCOUNT_DEVICE;
 const CHANNEL_DEVICE = '~odysee-channel@1.0';
 const STREAM_DEVICE = '~odysee-stream@1.0';
+const SEARCH_DEVICE = '~odysee-search@1.0';
 const PRIVATE_PARAM_KEYS = new Set([
   'accesstoken',
   'authorization',
@@ -337,83 +338,82 @@ export async function fetchHyperbeamSubCount(claimIdCsv: string): Promise<Array<
 }
 
 export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
-  const storeResult = await fetchHyperbeamChannelClaimSearch(params);
-  if (storeResult) return storeResult;
-
-  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params);
-  const result = sdkSearchFromHyperbeam(responsePayload(response));
-  const items = result && result.items;
-
-  return Array.isArray(items) ? result : null;
+  const searchResult = await fetchHyperbeamClaimDeviceSearch(params);
+  return mergeHyperbeamChannelUploadsIntoSearchResult(searchResult, params);
 }
 
-async function fetchHyperbeamChannelClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
-  const channelIds = stringList((params as any).channel_ids || (params as any).channelIds);
-  if (!channelIds.length) return null;
-  if (hasHyperbeamChannelSearchConstraints(params)) return null;
-
+async function fetchHyperbeamClaimDeviceSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   try {
-    const page = toNumber((params as any).page, 1);
-    const pageSize = toNumber((params as any).page_size || (params as any)['page-size'], 20);
-    const uploadClaims = await fetchHyperbeamUploadClaimsForChannels(channelIds);
-    let storeIds = (
-      await Promise.all(
-        channelIds.map(async (channelId) => {
-          const result = responsePayload(
-            await fetchCacheJson(cacheListPath(`${channelId}/claim-outputs`, { page, page_size: pageSize }))
-          );
-          return Array.isArray(result?.items) ? result.items : [];
-        })
-      )
-    ).flat();
-    if (!storeIds.length) {
-      storeIds = (
-        await Promise.all(
-          channelIds.map(async (channelId) => {
-            const result = responsePayload(
-              await fetchCacheJson(cacheListPath(`${channelId}/claims`, { page, page_size: pageSize }))
-            );
-            return Array.isArray(result?.items) ? result.items : [];
-          })
-        )
-      ).flat();
-    }
+    const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params);
+    const result = sdkSearchFromHyperbeam(responsePayload(response));
+    const items = result && result.items;
 
-    if (!storeIds.length && !uploadClaims.length) {
-      return {
-        items: [],
-        page,
-        page_size: pageSize,
-        total_items: 0,
-        total_pages: 0,
-      } as any;
-    }
-
-    const storeItems = (
-      await Promise.all(
-        storeIds.slice(0, pageSize).map(async (storeId) => {
-          const result = responsePayload(await fetchCacheJson(cacheReadPath(storeId)));
-          return sdkClaimFromHyperbeam(cacheReadClaim(result));
-        })
-      )
-    ).filter(Boolean);
-    const existingIds = new Set(storeItems.map((claim) => claim.claim_id));
-    const items = [...uploadClaims.filter((claim) => !existingIds.has(claim.claim_id)), ...storeItems].slice(
-      0,
-      pageSize
-    );
-    const totalItems = storeIds.length + uploadClaims.filter((claim) => !existingIds.has(claim.claim_id)).length;
-
-    return {
-      items,
-      page,
-      page_size: pageSize,
-      total_items: totalItems,
-      total_pages: Math.max(1, Math.ceil(totalItems / pageSize)),
-    } as any;
+    return Array.isArray(items) ? result : null;
   } catch (_e) {
     return null;
   }
+}
+
+export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
+  try {
+    const response = await fetchDeviceJson(`${SEARCH_DEVICE}/query`, params);
+    const result = sdkSearchFromHyperbeam(responsePayload(response));
+    const items = result && result.items;
+
+    return Array.isArray(items) ? result : null;
+  } catch (error) {
+    void error;
+    return null;
+  }
+}
+
+async function mergeHyperbeamChannelUploadsIntoSearchResult(
+  searchResult: ClaimSearchResponse | null,
+  params: ClaimSearchOptions
+): Promise<ClaimSearchResponse | null> {
+  const channelIds = stringList((params as any).channel_ids || (params as any).channelIds);
+  if (!channelIds.length || hasHyperbeamChannelSearchConstraints(params)) return searchResult;
+
+  try {
+    const page = toNumber((params as any).page, 1);
+    if (page !== 1) return searchResult;
+
+    const uploadClaims = await fetchHyperbeamUploadClaimsForChannels(channelIds);
+    if (!uploadClaims.length) return searchResult;
+
+    const searchItems = Array.isArray(searchResult?.items) ? searchResult.items : [];
+    const existingIds = new Set(searchItems.map((claim) => claim?.claim_id).filter(Boolean));
+    const mergedUploads = uploadClaims.filter((claim) => !existingIds.has(claim.claim_id));
+    if (!mergedUploads.length) return searchResult;
+    const pageSize = toNumber((params as any).page_size || (params as any)['page-size'], searchResult?.page_size || 20);
+    const items = [...mergedUploads, ...searchItems].sort(compareClaimsNewestFirst).slice(0, pageSize);
+
+    return {
+      ...searchResult,
+      items,
+      page: searchResult?.page || page,
+      page_size: pageSize,
+      total_items: Number(searchResult?.total_items || 0) + mergedUploads.length,
+      total_pages: Math.max(1, Number(searchResult?.total_pages || 0)),
+    } as any;
+  } catch (_e) {
+    return searchResult;
+  }
+}
+
+function compareClaimsNewestFirst(a: Claim, b: Claim): number {
+  return claimSortTime(b) - claimSortTime(a);
+}
+
+function claimSortTime(claim: any): number {
+  const claimValue = value(claim, 'value') || {};
+  const meta = value(claim, 'meta') || {};
+
+  return Math.max(
+    toNumber(value(claim, 'timestamp'), 0),
+    toNumber(value(claimValue, 'release_time', 'release-time'), 0),
+    toNumber(value(meta, 'creation_timestamp', 'creation-timestamp'), 0)
+  );
 }
 
 function hasHyperbeamChannelSearchConstraints(params: ClaimSearchOptions): boolean {
@@ -527,13 +527,13 @@ async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, c
   const existingValue = claim.value;
   const needsSource = Boolean(
     existingValue &&
-      !existingValue.source &&
-      (value(existingValue, 'source+link', 'source-link') || value(claim, 'value+link', 'value-link'))
+    !existingValue.source &&
+    (value(existingValue, 'source+link', 'source-link') || value(claim, 'value+link', 'value-link'))
   );
   const needsThumbnail = Boolean(
     existingValue &&
-      !existingValue.thumbnail &&
-      (value(existingValue, 'thumbnail+link', 'thumbnail-link') || value(claim, 'value+link', 'value-link'))
+    !existingValue.thumbnail &&
+    (value(existingValue, 'thumbnail+link', 'thumbnail-link') || value(claim, 'value+link', 'value-link'))
   );
   if (!needsHyperbeam && !needsValue && !needsMeta && !needsSigningChannel && !needsSource && !needsThumbnail)
     return claim;
@@ -542,7 +542,9 @@ async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, c
     needsHyperbeam ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'hyperbeam') : Promise.resolve(null),
     needsValue ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value') : Promise.resolve(null),
     needsMeta ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'meta') : Promise.resolve(null),
-    needsSigningChannel ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'signing_channel') : Promise.resolve(null),
+    needsSigningChannel
+      ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'signing_channel')
+      : Promise.resolve(null),
   ]);
   const claimValue = claimValue0 || existingValue;
   const signingChannel = signingChannel0 ? await expandHyperbeamLinkedChannel(baseUrl, claimId, signingChannel0) : null;
@@ -554,7 +556,9 @@ async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, c
     claimValue && !claimValue.thumbnail && value(claimValue, 'thumbnail+link', 'thumbnail-link')
       ? await fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value/thumbnail')
       : null;
-  const expandedValue = claimValue ? { ...claimValue, ...(source ? { source } : {}), ...(thumbnail ? { thumbnail } : {}) } : null;
+  const expandedValue = claimValue
+    ? { ...claimValue, ...(source ? { source } : {}), ...(thumbnail ? { thumbnail } : {}) }
+    : null;
 
   return {
     ...claim,
@@ -1269,12 +1273,26 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   const txid = value(claim, 'txid', 'tx-id');
   const nout = value(claim, 'nout', 'n-out');
   const outpoint = nativeUpload ? null : claimOutpoint(txid, nout);
+  const hyperbeam = value(claim, 'hyperbeam') || {};
+  const mediaId = value(hyperbeam, 'media_id', 'media-id', 'mediaId') || value(claim, 'claim_id', 'claim-id');
+  const valueType = value(claim, 'value_type', 'value-type') || claim.value_type;
+  const meta = normalizeHyperbeamClaimMeta(value(claim, 'meta'));
 
   return {
     ...claim,
     claim_id: claimId,
     immutable_id: nativeUpload ? claimId : value(claim, 'immutable_id', 'immutable-id') || claimId,
     txid: nativeUpload ? claimId : txid,
+    ...(nativeUpload
+      ? {
+          hyperbeam: {
+            ...hyperbeam,
+            upload_id: claimId,
+            media_id: mediaId,
+            read_path: value(hyperbeam, 'read_path', 'read-path') || (mediaId ? `/${mediaId}` : undefined),
+          },
+        }
+      : {}),
     ...(outpoint
       ? {
           outpoint,
@@ -1299,7 +1317,35 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
     short_url: nativeUpload
       ? uriWithClaimId(value(claim, 'short_url', 'short-url') || claim.short_url, claimId)
       : value(claim, 'short_url', 'short-url') || claim.short_url,
-    value_type: value(claim, 'value_type', 'value-type') || claim.value_type,
+    value_type: valueType,
+    meta,
+    signing_channel: claim.signing_channel
+      ? normalizeHyperbeamChannelClaim(claim.signing_channel)
+      : claim.signing_channel,
+  };
+}
+
+function normalizeHyperbeamChannelClaim(channel: any): any {
+  return {
+    ...channel,
+    type: channel.type || 'claim',
+    value_type: value(channel, 'value_type', 'value-type') || 'channel',
+    meta: normalizeHyperbeamClaimMeta(value(channel, 'meta')),
+  };
+}
+
+function normalizeHyperbeamClaimMeta(meta: any = {}): any {
+  return {
+    activation_height: meta.activation_height ?? meta['activation-height'] ?? 0,
+    claims_in_channel: meta.claims_in_channel ?? meta['claims-in-channel'] ?? 0,
+    creation_height: meta.creation_height ?? meta['creation-height'] ?? 0,
+    creation_timestamp: meta.creation_timestamp ?? meta['creation-timestamp'] ?? 0,
+    effective_amount: meta.effective_amount ?? meta['effective-amount'] ?? '0',
+    expiration_height: meta.expiration_height ?? meta['expiration-height'] ?? 0,
+    is_controlling: meta.is_controlling ?? meta['is-controlling'] ?? true,
+    reposted: meta.reposted ?? 0,
+    support_amount: meta.support_amount ?? meta['support-amount'] ?? '0',
+    ...meta,
   };
 }
 

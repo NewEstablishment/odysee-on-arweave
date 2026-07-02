@@ -14,6 +14,9 @@ import ClaimTrace, { type TraceFocus } from './claimTrace';
 const MAX_EVENTS = 1200;
 const MAX_RELEVANT_EVENTS = 24;
 const MAX_EVENTS_PER_FRAME = 80;
+const ODYSEE_COLOR = '#e91e63';
+const MEDIA_COLOR = '#14b8a6';
+const SEARCH_COLOR = '#f97316';
 const FILTERS = [
   { key: 'all', label: 'all', color: 'rgba(255,255,255,0.84)' },
   { key: 'get', label: 'get', color: 'rgba(255,255,255,0.76)' },
@@ -29,16 +32,42 @@ type FilterKey = (typeof FILTERS)[number]['key'];
 const CATEGORY_FILTER_KEYS = FILTERS.map((filter) => filter.key).filter(
   (key) => key !== 'all' && key !== 'other'
 ) as Array<FilterKey>;
-const MODELED_GRAPH_DEVICES = new Set(['~cache@1.0', '~odysee-upload@1.0', '~arweave@1.0']);
+const MODELED_GRAPH_DEVICES = new Set(['~cache@1.0']);
+const GRAPH_DEVICE_ROWS = [
+  '~odysee-comment@1.0',
+  '~odysee-claim@1.0',
+  '~odysee-account@1.0',
+  '~odysee-search@1.0',
+  '~odysee-stream@1.0',
+  '~odysee-upload@1.0',
+] as const;
+const GRAPH_STORE_ROWS = ['cache@1.0', 'hb_store_odysee', 'hb_store_lbry_blob'] as const;
+const GRAPH_LEGACY_ROWS = ['Odysee API', 'Chainquery', 'Blobcache'] as const;
+const ARCH_NODE_MIN_W = 150;
+const ARCH_NODE_MAX_W = 220;
+const ARCH_SMALL_NODE_H = 52;
+const ARCH_MEDIUM_NODE_H = 64;
+const ARCH_LARGE_NODE_H = 74;
+type ArchitectureRect = { x: number; y: number; w: number; h: number };
+type ArchitectureRects = Record<string, ArchitectureRect>;
+type ArchitecturePoint = { x: number; y: number };
+type ArchitecturePairCounts = Record<string, Record<string, number>>;
+type ArchitectureColumnWidths = {
+  left: number;
+  middle: number;
+  device: number;
+  store: number;
+  backend: number;
+};
 const ARCHITECTURE_ARROW_MARKERS = [
   { id: 'hb-arrow-blue', color: '#38bdf8' },
   { id: 'hb-arrow-hyperbeam', color: '#0ea5e9' },
   { id: 'hb-arrow-auth', color: '#22c55e' },
   { id: 'hb-arrow-cache', color: '#facc15' },
-  { id: 'hb-arrow-legacy', color: '#94a3b8' },
+  { id: 'hb-arrow-legacy', color: ODYSEE_COLOR },
+  { id: 'hb-arrow-search', color: SEARCH_COLOR },
   { id: 'hb-arrow-muted', color: '#64748b' },
-  { id: 'hb-arrow-media', color: '#fb7185' },
-  { id: 'hb-arrow-arweave', color: '#c084fc' },
+  { id: 'hb-arrow-media', color: MEDIA_COLOR },
   { id: 'hb-arrow-ui', color: '#e879f9' },
 ] as const;
 type SegmentKey = 'graph' | 'trace' | 'requests';
@@ -866,10 +895,9 @@ function ArchitecturePanel({
   }, -1);
   const selectedShouldYieldToMedia =
     selectedEvent && activeTrace && latestTraceMediaEventIndex >= 0 && !isMediaRangeGraphEvent(selectedEvent);
-  const latestTraceMediaEvents =
-    selectedShouldYieldToMedia
-      ? lifecycleEventsForSelection(events[latestTraceMediaEventIndex], latestTraceMediaEventIndex, events)
-      : [];
+  const latestTraceMediaEvents = selectedShouldYieldToMedia
+    ? lifecycleEventsForSelection(events[latestTraceMediaEventIndex], latestTraceMediaEventIndex, events)
+    : [];
   const graphFocusEvents = selectedShouldYieldToMedia
     ? latestTraceMediaEvents
     : selectedGraphEvents.length
@@ -878,43 +906,78 @@ function ArchitecturePanel({
   const displayGraph = selectedShouldYieldToMedia
     ? architectureGraph(activeTraceGraphEvents, mode)
     : selectedGraphEvents.length
-    ? architectureGraph(selectedGraphEvents, mode)
-    : activeTrace
-      ? architectureGraph(activeTraceGraphEvents, mode)
-      : graph;
+      ? architectureGraph(selectedGraphEvents, mode)
+      : activeTrace
+        ? architectureGraph(activeTraceGraphEvents, mode)
+        : graph;
   const selectedRoute = selectedEvent
     ? routeSummary(mergedRequestDetailData(selectedEvent, selectedEventIndex || 0, events), mode)
     : null;
   const isAuthTraceFocus = Boolean(!selectedEvent && activeTrace?.kind === 'auth');
-  const hasArweaveActivity = displayGraph.arweaveEvents > 0;
   const hasSsr = displayGraph.ssrEvents > 0;
   const hasClaimRead =
     !isAuthTraceFocus &&
     (displayGraph.deviceEvents > 0 ||
       displayGraph.cacheEvents > 0 ||
       displayGraph.legacyEvents > 0 ||
-      displayGraph.rangeEvents > 0 ||
-      displayGraph.arweaveEvents > 0);
+      displayGraph.rangeEvents > 0);
   const showClaimPath = hasClaimRead;
   const showAuthPath = displayGraph.authEvents > 0;
+  const showSearchPath = displayGraph.searchEvents > 0;
   const showLegacyPath = showClaimPath && displayGraph.legacyEvents > 0;
   const showMediaPath = showClaimPath && displayGraph.rangeEvents > 0;
-  const deviceRows = displayGraph.deviceNames.length ? displayGraph.deviceNames : ['No device calls yet'];
+  const deviceRows = GRAPH_DEVICE_ROWS.concat(
+    displayGraph.deviceNames.filter((device) => !GRAPH_DEVICE_ROWS.includes(device as any))
+  );
+  const visibleStoreRows = GRAPH_STORE_ROWS.map(
+    (store) => [store, Number(displayGraph.storeBackends[store] || 0)] as [string, number]
+  ).concat(Object.entries(displayGraph.storeBackends).filter(([store]) => !GRAPH_STORE_ROWS.includes(store as any)));
+  const legacyRows = GRAPH_LEGACY_ROWS.map(
+    (backend) => [backend, Number(displayGraph.legacyBackends[backend] || 0)] as [string, number]
+  ).concat(
+    Object.entries(displayGraph.legacyBackends).filter(([backend]) => !GRAPH_LEGACY_ROWS.includes(backend as any))
+  );
+  const visibleLegacyRows = legacyRows;
+  const columnWidths = architectureColumnWidths(deviceRows, visibleStoreRows, visibleLegacyRows);
+  const layout = architectureLayout(maximized, columnWidths);
+  const architectureRects = architectureNodeRects(
+    layout,
+    columnWidths,
+    deviceRows,
+    visibleStoreRows,
+    visibleLegacyRows
+  );
   const activeTraceNativeUpload = isNativeUploadTraceFocus(activeTrace);
   const selectedPath = selectedShouldYieldToMedia
-    ? architectureSelectedPath(graphFocusEvents, deviceRows, latestTraceMediaEventIndex, events, mode)
+    ? architectureSelectedPath(
+        graphFocusEvents,
+        deviceRows,
+        latestTraceMediaEventIndex,
+        events,
+        mode,
+        architectureRects
+      )
     : selectedGraphEvents.length
-    ? architectureSelectedPath(selectedGraphEvents, deviceRows, selectedEventIndex, events, mode)
-    : activeTraceGraphEvents.length
-      ? architectureSelectedPath(activeTraceGraphEvents, deviceRows, null, events, mode)
-      : activeTraceNativeUpload
-        ? architectureTracePath(displayGraph, deviceRows, activeTrace)
-        : null;
-  const graphHeight = Math.max(600, architectureDeviceY(deviceRows.length - 1) + 106);
+      ? architectureSelectedPath(selectedGraphEvents, deviceRows, selectedEventIndex, events, mode, architectureRects)
+      : activeTraceGraphEvents.length
+        ? architectureSelectedPath(activeTraceGraphEvents, deviceRows, null, events, mode, architectureRects)
+        : activeTraceNativeUpload
+          ? architectureTracePath(displayGraph, deviceRows, activeTrace, architectureRects)
+          : null;
+  const graphHeight = maximized ? 560 : 540;
   const hasGraphFocus = Boolean(selectedEvent || activeTrace);
   const showStaticBackendEdges = !selectedPath;
   const nodeActive = (node: string, fallback: boolean) => (selectedPath ? selectedPath.nodes.has(node) : fallback);
   const nodeFaded = (node: string, fallback: boolean) => (selectedPath ? !selectedPath.nodes.has(node) : fallback);
+  const deviceActive = (device: string, count: number) =>
+    selectedPath ? selectedPath.nodes.has(`device:${device}`) : count > 0;
+  const deviceFaded = (device: string, count: number) =>
+    selectedPath ? !selectedPath.nodes.has(`device:${device}`) : count === 0;
+  const rowActive = (node: string, count: number) => (selectedPath ? selectedPath.nodes.has(node) : count > 0);
+  const rowFaded = (node: string, count: number) => (selectedPath ? !selectedPath.nodes.has(node) : count === 0);
+  const activeStorePairs = graphPairEntries(displayGraph.deviceStoreBackends);
+  const activeDeviceLegacyPairs = graphPairEntries(displayGraph.deviceLegacyBackends);
+  const activeLegacyPairs = graphPairEntries(displayGraph.storeLegacyBackends);
 
   return (
     <div
@@ -939,23 +1002,11 @@ function ArchitecturePanel({
           boxSizing: 'border-box',
         }}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(92px, 1fr))', gap: 6 }}>
-          <Metric label="Mode" value={modeLabel(mode)} />
-          <Metric label="HyperBEAM" value={displayGraph.hyperbeamEvents} color="#0ea5e9" />
-          <Metric label="Auth" value={displayGraph.authEvents} color="#22c55e" />
-          <Metric label="Cache/store" value={displayGraph.cacheEvents} color="#facc15" />
-          <Metric
-            label="Legacy Odysee"
-            value={displayGraph.legacyEvents + displayGraph.fallbackEvents}
-            color="#94a3b8"
-          />
-          <Metric label="Media store" value={displayGraph.rangeEvents} color="#fb7185" />
-          <Metric label="Arweave store" value={displayGraph.arweaveEvents} color="#64748b" />
-        </div>
         <div
           style={{
             display: 'flex',
             flexWrap: 'wrap',
+            alignItems: 'center',
             gap: 10,
             color: 'rgba(255,255,255,0.68)',
             overflowWrap: 'anywhere',
@@ -964,42 +1015,46 @@ function ArchitecturePanel({
           <span>
             devices observed: <span style={{ color: '#0ea5e9' }}>{displayGraph.deviceNames.length}</span>
           </span>
+          <span style={{ flex: '0 0 18px' }} />
           {selectedEvent && (
             <span style={{ color: '#0ea5e9' }}>
               highlighting {selectedEvent.label} {selectedRoute?.devicePath || selectedRoute?.nativePath || ''}
             </span>
           )}
           {!selectedEvent && activeTrace && <span style={{ color: '#0ea5e9' }}>highlighting {activeTrace.label}</span>}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              color: 'rgba(255,255,255,0.68)',
+              userSelect: 'none',
+              minWidth: 240,
+              flex: '1 1 280px',
+              marginLeft: 44,
+            }}
+          >
+            <span style={{ flex: '0 0 auto' }}>zoom {Math.round(zoom * 100)}%</span>
+            <input
+              type="range"
+              min="100"
+              max="200"
+              step="5"
+              value={Math.round(zoom * 100)}
+              onChange={(event) => setZoom(Number(event.currentTarget.value) / 100)}
+              style={{ flex: '1 1 80px', minWidth: 0 }}
+            />
+          </label>
         </div>
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            color: 'rgba(255,255,255,0.68)',
-            userSelect: 'none',
-          }}
-        >
-          <span style={{ flex: '0 0 auto' }}>zoom {Math.round(zoom * 100)}%</span>
-          <input
-            type="range"
-            min="100"
-            max="200"
-            step="5"
-            value={Math.round(zoom * 100)}
-            onChange={(event) => setZoom(Number(event.currentTarget.value) / 100)}
-            style={{ flex: '1 1 80px', minWidth: 0 }}
-          />
-        </label>
         <div
           style={{
             position: 'relative',
             width: `${zoom * 100}%`,
-            aspectRatio: `1540 / ${graphHeight}`,
+            aspectRatio: `${layout.viewWidth} / ${graphHeight}`,
           }}
         >
           <svg
-            viewBox={`0 0 1540 ${graphHeight}`}
+            viewBox={`0 0 ${layout.viewWidth} ${graphHeight}`}
             style={{
               position: 'absolute',
               left: 0,
@@ -1029,20 +1084,14 @@ function ArchitecturePanel({
               ))}
             </defs>
             <ArchitectureNode
-              x={30}
-              y={250}
-              w={170}
-              h={82}
+              {...architectureRects.ui}
               title="Browser UI"
               detail="Odysee React app"
               color="#e879f9"
               active={nodeActive('ui', hasGraphFocus)}
             />
             <ArchitectureNode
-              x={250}
-              y={124}
-              w={190}
-              h={82}
+              {...architectureRects.sdk}
               title="SDK facade"
               detail="lbry.ts / hyperbeam.ts"
               color="#38bdf8"
@@ -1050,10 +1099,7 @@ function ArchitecturePanel({
               faded={nodeFaded('sdk', !showClaimPath)}
             />
             <ArchitectureNode
-              x={250}
-              y={374}
-              w={190}
-              h={82}
+              {...architectureRects.ssr}
               title="SSR proxy"
               detail="/$/api routes"
               color="#38bdf8"
@@ -1061,10 +1107,7 @@ function ArchitecturePanel({
               faded={nodeFaded('ssr', !showAuthPath && !hasSsr)}
             />
             <ArchitectureNode
-              x={500}
-              y={250}
-              w={170}
-              h={82}
+              {...architectureRects.hyperbeam}
               title="HyperBEAM"
               detail="router / runtime"
               color="#0ea5e9"
@@ -1074,220 +1117,185 @@ function ArchitecturePanel({
             {deviceRows.map((device, index) => (
               <ArchitectureNode
                 key={device}
-                x={720}
-                y={architectureDeviceY(index)}
-                w={280}
-                h={70}
+                {...architectureRects[`device:${device}`]}
                 title={device}
                 detail={displayGraph.devices[device] ? `${displayGraph.devices[device]} calls` : 'not observed yet'}
                 color="#0ea5e9"
-                active={nodeActive(`device:${device}`, Boolean(displayGraph.devices[device]))}
-                faded={nodeFaded(`device:${device}`, !displayGraph.devices[device])}
+                active={deviceActive(device, Number(displayGraph.devices[device] || 0))}
+                faded={deviceFaded(device, Number(displayGraph.devices[device] || 0))}
               />
             ))}
             <ArchitectureNode
-              x={500}
-              y={424}
-              w={210}
-              h={82}
+              {...architectureRects.auth}
               title="Auth hook"
               detail="cookie/token -> signer"
               color="#22c55e"
               active={nodeActive('auth', showAuthPath)}
               faded={nodeFaded('auth', !showAuthPath)}
             />
+            {visibleStoreRows.map(([store, count], index) => (
+              <ArchitectureNode
+                key={`store-${store}`}
+                {...architectureRects[`store:${store}`]}
+                title={store}
+                detail={`${count} calls`}
+                color="#facc15"
+                active={rowActive(`store:${store}`, count) || (showSearchPath && store === 'hb_store_odysee')}
+                faded={rowFaded(`store:${store}`, count) && !(showSearchPath && store === 'hb_store_odysee')}
+              />
+            ))}
             <ArchitectureNode
-              x={1040}
-              y={64}
-              w={210}
-              h={82}
-              title="cache@1.0"
-              detail="generic read/list/write"
-              color="#facc15"
-              active={nodeActive('cache', showClaimPath && displayGraph.cacheEvents > 0)}
-              faded={nodeFaded('cache', !showClaimPath)}
+              {...architectureRects.meilisearch}
+              title="Meilisearch"
+              detail="local claim index"
+              color={SEARCH_COLOR}
+              active={nodeActive('meilisearch', showSearchPath)}
+              faded={nodeFaded('meilisearch', !showSearchPath)}
             />
+            {visibleLegacyRows.map(([backend, count], index) => (
+              <ArchitectureNode
+                key={`legacy-${backend}`}
+                {...architectureRects[`legacy:${backend}`]}
+                title={backend}
+                detail={`${count} calls`}
+                color={ODYSEE_COLOR}
+                active={rowActive(`legacy:${backend}`, count) || (showSearchPath && backend === 'Chainquery')}
+                faded={rowFaded(`legacy:${backend}`, count) && !(showSearchPath && backend === 'Chainquery')}
+              />
+            ))}
             <ArchitectureNode
-              x={1040}
-              y={214}
-              w={210}
-              h={82}
-              title="Store stack"
-              detail="local, Odysee, Arweave, gateways"
-              color="#facc15"
-              active={nodeActive('store', showClaimPath && hasClaimRead)}
-              faded={nodeFaded('store', !showClaimPath)}
-            />
-            <ArchitectureNode
-              x={1040}
-              y={414}
-              w={210}
-              h={82}
-              title="Upload device"
-              detail="chunks, manifest, writes"
-              color="#0ea5e9"
-              active={nodeActive('upload', displayGraph.uploadEvents > 0)}
-              faded={nodeFaded('upload', hasGraphFocus && displayGraph.uploadEvents === 0)}
-            />
-            <ArchitectureNode
-              x={1340}
-              y={112}
-              w={160}
-              h={82}
-              title="Legacy Odysee"
-              detail="API / chain / blobs"
-              color="#94a3b8"
-              active={nodeActive('legacy', showLegacyPath)}
-              faded={nodeFaded('legacy', !showClaimPath)}
-            />
-            <ArchitectureNode
-              x={1340}
-              y={284}
-              w={160}
-              h={82}
-              title="Arweave store"
-              detail={hasArweaveActivity ? 'observed lookup' : 'not wired yet'}
-              color="#64748b"
-              active={nodeActive('arweave', showClaimPath && displayGraph.arweaveEvents > 0)}
-              faded={nodeFaded('arweave', !showClaimPath || !hasArweaveActivity)}
-            />
-            <ArchitectureNode
-              x={1340}
-              y={456}
-              w={160}
-              h={82}
+              {...architectureRects.media}
               title="Media store"
               detail="chunks/range bytes"
-              color="#fb7185"
+              color={MEDIA_COLOR}
               active={nodeActive('media', showMediaPath)}
               faded={nodeFaded('media', !showClaimPath)}
             />
             {(!hasGraphFocus || displayGraph.sdkEvents > 0) && (
-              <ArchitectureEdge
-                x1={200}
-                y1={280}
-                x2={250}
-                y2={165}
-                label={`${displayGraph.sdkEvents} sdk`}
+              <ArchitectureNodeEdge
+                rects={architectureRects}
+                from="ui"
+                to="sdk"
                 active={displayGraph.sdkEvents > 0}
                 faded={displayGraph.sdkEvents === 0}
               />
             )}
-            <ArchitectureEdge
-              x1={200}
-              y1={304}
-              x2={250}
-              y2={415}
-              label={`${displayGraph.ssrEvents} proxy`}
+            <ArchitectureNodeEdge
+              rects={architectureRects}
+              from="ui"
+              to="ssr"
               active={showAuthPath || hasSsr}
               faded={!showAuthPath && !hasSsr}
               color="#0ea5e9"
             />
             {(!hasGraphFocus || (displayGraph.deviceEvents > 0 && !isAuthTraceFocus)) && (
-              <ArchitectureEdge
-                x1={440}
-                y1={165}
-                x2={500}
-                y2={280}
-                label={`${displayGraph.deviceEvents} routed`}
+              <ArchitectureNodeEdge
+                rects={architectureRects}
+                from="sdk"
+                to="hyperbeam"
                 active={displayGraph.deviceEvents > 0}
                 faded={displayGraph.deviceEvents === 0}
               />
             )}
             {!selectedPath &&
               deviceRows.map((device, index) => (
-                <ArchitectureEdge
+                <ArchitectureNodeEdge
                   key={`${device}-edge`}
-                  x1={670}
-                  y1={291}
-                  x2={720}
-                  y2={architectureDeviceY(index) + 35}
-                  label={displayGraph.devices[device] ? `${displayGraph.devices[device]}` : 'none'}
+                  rects={architectureRects}
+                  from="hyperbeam"
+                  to={`device:${device}`}
                   active={Boolean(displayGraph.devices[device])}
                   faded={!displayGraph.devices[device]}
                 />
               ))}
-            {!hasGraphFocus &&
-              deviceRows.map((device, index) => (
-                <ArchitectureFlow
-                  key={`${device}-store-flow`}
-                  active={showClaimPath && Boolean(displayGraph.devices[device])}
+            {!selectedPath &&
+              activeStorePairs.map(([device, store]) => (
+                <ArchitectureNodeEdge
+                  key={`store-input-${device}-${store}`}
+                  rects={architectureRects}
+                  from={`device:${device}`}
+                  to={`store:${store}`}
+                  active
                   color="#facc15"
-                  faded={!showClaimPath || !displayGraph.devices[device]}
-                  points={architectureDeviceStorePath(index, deviceRows.length)}
                 />
               ))}
+            {!selectedPath &&
+              activeDeviceLegacyPairs.map(([device, backend]) => (
+                <ArchitectureNodeEdge
+                  key={`legacy-input-${device}-${backend}`}
+                  rects={architectureRects}
+                  from={`device:${device}`}
+                  to={`legacy:${backend}`}
+                  active
+                  color={ODYSEE_COLOR}
+                />
+              ))}
+            {showStaticBackendEdges && showSearchPath && (
+              <>
+                <ArchitectureNodeEdge
+                  rects={architectureRects}
+                  from="device:~odysee-search@1.0"
+                  to="meilisearch"
+                  active={showSearchPath}
+                  color={SEARCH_COLOR}
+                />
+                <ArchitectureNodeEdge
+                  rects={architectureRects}
+                  from="meilisearch"
+                  to="store:hb_store_odysee"
+                  active={showSearchPath}
+                  color="#facc15"
+                />
+                <ArchitectureNodeEdge
+                  rects={architectureRects}
+                  from="meilisearch"
+                  to="legacy:Chainquery"
+                  active={showSearchPath}
+                  color={ODYSEE_COLOR}
+                />
+              </>
+            )}
             {(!hasGraphFocus || showAuthPath) && (
               <>
-                <ArchitectureEdge
-                  x1={440}
-                  y1={415}
-                  x2={500}
-                  y2={465}
-                  label={`${displayGraph.authEvents} auth`}
+                <ArchitectureNodeEdge
+                  rects={architectureRects}
+                  from="ssr"
+                  to="auth"
                   active={showAuthPath}
                   faded={!showAuthPath}
                   color="#22c55e"
                 />
               </>
             )}
-            {showStaticBackendEdges && (!hasGraphFocus || displayGraph.cacheEvents > 0) && (
-              <ArchitectureEdge
-                x1={1145}
-                y1={146}
-                x2={1145}
-                y2={214}
-                label="cache miss"
-                active={showClaimPath && displayGraph.cacheEvents > 0}
-                faded={!showClaimPath || displayGraph.cacheEvents === 0}
+            {showStaticBackendEdges && activeStorePairs.some(([, store]) => store === 'cache@1.0') && (
+              <ArchitectureNodeEdge
+                rects={architectureRects}
+                from="store:cache@1.0"
+                to="store:hb_store_odysee"
+                active={showClaimPath}
+                faded={!showClaimPath}
                 color="#facc15"
               />
             )}
-            {showStaticBackendEdges && (!hasGraphFocus || showLegacyPath) && (
-              <ArchitectureEdge
-                x1={1250}
-                y1={255}
-                x2={1340}
-                y2={153}
-                label={`${displayGraph.legacyEvents} legacy store`}
-                active={showLegacyPath}
-                faded={!showClaimPath}
-                color="#94a3b8"
-              />
-            )}
-            {showStaticBackendEdges && (!hasGraphFocus || hasArweaveActivity) && (
-              <ArchitectureEdge
-                x1={1250}
-                y1={255}
-                x2={1340}
-                y2={325}
-                label="arweave store"
-                active={showClaimPath && displayGraph.arweaveEvents > 0}
-                faded={!showClaimPath || !hasArweaveActivity}
-                color="#64748b"
-              />
-            )}
+            {showStaticBackendEdges &&
+              activeLegacyPairs.map(([store, backend]) => (
+                <ArchitectureNodeEdge
+                  key={`legacy-store-${store}-${backend}`}
+                  rects={architectureRects}
+                  from={`store:${store}`}
+                  to={`legacy:${backend}`}
+                  active
+                  color={ODYSEE_COLOR}
+                />
+              ))}
             {showStaticBackendEdges && (!hasGraphFocus || showMediaPath) && (
-              <ArchitectureEdge
-                x1={1250}
-                y1={255}
-                x2={1340}
-                y2={497}
-                label="media bytes"
+              <ArchitectureNodeEdge
+                rects={architectureRects}
+                from="store:hb_store_lbry_blob"
+                to="media"
                 active={showMediaPath}
                 faded={!showClaimPath}
-                color="#fb7185"
-              />
-            )}
-            {showStaticBackendEdges && displayGraph.uploadEvents > 0 && (
-              <ArchitectureEdge
-                x1={710}
-                y1={465}
-                x2={1040}
-                y2={455}
-                label={`${displayGraph.uploadEvents} upload`}
-                active
-                color="#0ea5e9"
+                color={MEDIA_COLOR}
               />
             )}
             {selectedPath?.flows.map((flow, index) => (
@@ -1295,24 +1303,7 @@ function ArchitecturePanel({
             ))}
           </svg>
         </div>
-        <DetailSection title="Recent Route Samples" value={displayGraph.samples} empty="no routes observed yet" />
       </div>
-    </div>
-  );
-}
-
-function Metric({ label, value, color }: { label: string; value: any; color?: string }) {
-  return (
-    <div
-      style={{
-        border: '1px solid rgba(255,255,255,0.12)',
-        borderRadius: 4,
-        padding: 6,
-        background: 'rgba(0,0,0,0.14)',
-      }}
-    >
-      <div style={{ color: 'rgba(255,255,255,0.48)', fontSize: 10 }}>{label}</div>
-      <div style={{ color: color || 'rgba(255,255,255,0.88)', overflowWrap: 'anywhere' }}>{String(value ?? '-')}</div>
     </div>
   );
 }
@@ -1484,6 +1475,10 @@ function ArchitectureNode({
   detail?: string;
   color: string;
 }) {
+  const compact = h < 62;
+  const titleY = y + (compact ? 21 : 25);
+  const detailStartY = y + (compact ? 38 : 46);
+
   return (
     <g opacity={faded ? 0.3 : 1}>
       <rect
@@ -1494,14 +1489,20 @@ function ArchitectureNode({
         rx={6}
         fill={active ? activeFill(color) : 'rgba(0,0,0,0.28)'}
         stroke={color}
-        strokeWidth={active ? 4 : 2}
+        strokeWidth={active ? 2 : 1}
       />
-      <text x={x + 12} y={y + 30} fill="#f9fafb" fontSize="15" fontWeight="700">
-        {limitString(title, Math.max(12, Math.floor((w - 24) / 8)))}
+      <text x={x + 8} y={titleY} fill="#f9fafb" fontSize="14" fontWeight="700">
+        {limitString(title, Math.max(8, Math.floor((w - 16) / 8.1)))}
       </text>
       {(details || [detail || '']).map((line, index) => (
-        <text key={`${line}-${index}`} x={x + 12} y={y + 55 + index * 15} fill="rgba(255,255,255,0.68)" fontSize="11">
-          {limitString(line, Math.max(12, Math.floor((w - 24) / 6)))}
+        <text
+          key={`${line}-${index}`}
+          x={x + 8}
+          y={detailStartY + index * 15}
+          fill="rgba(255,255,255,0.68)"
+          fontSize="11"
+        >
+          {limitString(line, Math.max(12, Math.floor((w - 16) / 6)))}
         </text>
       ))}
     </g>
@@ -1509,19 +1510,145 @@ function ArchitectureNode({
 }
 
 function architectureDeviceY(index: number) {
-  return 28 + index * 92;
+  return 24 + index * 66;
 }
 
-function architectureDeviceStorePath(index: number, count: number) {
-  const y = architectureDeviceY(index) + 35;
-  const entryX = Math.round(1054 + ((index + 1) * 172) / (count + 1));
-  return `1000,${y} ${entryX},${y} ${entryX},146`;
+function storeRowY(index: number) {
+  return 176 + index * 64;
+}
+
+function legacyRowY(index: number) {
+  return 154 + index * 62;
+}
+
+function architectureTextWidth(text: string) {
+  return Math.ceil(text.length * 8.8 + 26);
+}
+
+function architectureColumnWidth(labels: Array<string>, min = ARCH_NODE_MIN_W, max = ARCH_NODE_MAX_W) {
+  return Math.max(min, Math.min(max, ...labels.map(architectureTextWidth)));
+}
+
+function architectureColumnWidths(
+  deviceRows: Array<string>,
+  storeRows: Array<[string, number]>,
+  legacyRows: Array<[string, number]>
+): ArchitectureColumnWidths {
+  return {
+    left: architectureColumnWidth(['Browser UI', 'SDK facade', 'SSR proxy'], 112, 180),
+    middle: architectureColumnWidth(['HyperBEAM', 'Auth hook'], 118, 170),
+    device: architectureColumnWidth(deviceRows, 190, 280),
+    store: architectureColumnWidth(['Meilisearch', ...storeRows.map(([store]) => store)], 132, 230),
+    backend: architectureColumnWidth(['Media store', ...legacyRows.map(([backend]) => backend)], 132, 220),
+  };
+}
+
+function architectureNodeRects(
+  layout: ReturnType<typeof architectureLayout>,
+  widths: ArchitectureColumnWidths,
+  deviceRows: Array<string>,
+  storeRows: Array<[string, number]>,
+  legacyRows: Array<[string, number]>
+): ArchitectureRects {
+  const rects: ArchitectureRects = {
+    ui: { x: layout.uiX, y: 220, w: widths.left, h: ARCH_LARGE_NODE_H },
+    sdk: { x: layout.sdkX, y: 106, w: widths.left, h: ARCH_LARGE_NODE_H },
+    ssr: { x: layout.ssrX, y: 330, w: widths.left, h: ARCH_LARGE_NODE_H },
+    hyperbeam: { x: layout.hyperbeamX, y: 220, w: widths.middle, h: ARCH_LARGE_NODE_H },
+    auth: { x: layout.authX, y: 376, w: widths.middle, h: ARCH_LARGE_NODE_H },
+    meilisearch: { x: layout.storeX, y: layout.searchY, w: widths.store, h: 64 },
+    media: { x: layout.mediaX, y: layout.mediaStoreY, w: widths.backend, h: ARCH_LARGE_NODE_H },
+  };
+
+  deviceRows.forEach((device, index) => {
+    rects[`device:${device}`] = {
+      x: layout.deviceX,
+      y: architectureDeviceY(index),
+      w: widths.device,
+      h: ARCH_MEDIUM_NODE_H,
+    };
+  });
+  storeRows.forEach(([store], index) => {
+    rects[`store:${store}`] = { x: layout.storeX, y: storeRowY(index), w: widths.store, h: ARCH_SMALL_NODE_H };
+  });
+  legacyRows.forEach(([backend], index) => {
+    rects[`legacy:${backend}`] = { x: layout.legacyX, y: legacyRowY(index), w: widths.backend, h: ARCH_SMALL_NODE_H };
+  });
+
+  return rects;
+}
+
+function architectureRectCenter(rect: ArchitectureRect): ArchitecturePoint {
+  return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+}
+
+function architectureNodeAnchor(from: ArchitectureRect, to: ArchitectureRect): ArchitecturePoint {
+  const fromCenter = architectureRectCenter(from);
+  const toCenter = architectureRectCenter(to);
+  const dx = toCenter.x - fromCenter.x;
+  if (Math.abs(dx) > 1) return { x: dx >= 0 ? from.x + from.w : from.x, y: fromCenter.y };
+  return { x: fromCenter.x, y: toCenter.y >= fromCenter.y ? from.y + from.h : from.y };
+}
+
+function architectureNodeEdgePoints(
+  rects: ArchitectureRects,
+  fromKey: string,
+  toKey: string,
+  via: Array<ArchitecturePoint> = []
+) {
+  const from = rects[fromKey];
+  const to = rects[toKey];
+  if (!from || !to) return '';
+
+  const startTarget = via[0] ? { ...via[0], w: 0, h: 0 } : to;
+  const endSource = via[via.length - 1] ? { ...via[via.length - 1], w: 0, h: 0 } : from;
+  const start = architectureNodeAnchor(from, startTarget);
+  const end = architectureNodeAnchor(to, endSource);
+  return [start, ...via, end].map((point) => `${Math.round(point.x)},${Math.round(point.y)}`).join(' ');
+}
+
+function architectureConnect(
+  rects: ArchitectureRects,
+  fromKey: string,
+  toKey: string,
+  via: Array<ArchitecturePoint> = []
+) {
+  return architectureNodeEdgePoints(rects, fromKey, toKey, via);
+}
+
+function architectureLayout(maximized: boolean, widths: ArchitectureColumnWidths) {
+  const gap = maximized ? 88 : 56;
+  const uiX = 30;
+  const sdkX = uiX + widths.left + gap;
+  const hyperbeamX = sdkX + widths.left + gap;
+  const deviceX = hyperbeamX + widths.middle + gap;
+  const storeX = deviceX + widths.device + gap;
+  const legacyX = storeX + widths.store + gap;
+  const mediaX = legacyX;
+  const viewWidth = mediaX + widths.backend + 40;
+
+  return {
+    viewWidth,
+    uiX,
+    sdkX,
+    ssrX: sdkX,
+    hyperbeamX,
+    deviceX,
+    authX: hyperbeamX,
+    storeX,
+    legacyX,
+    mediaX,
+    searchY: 390,
+    uploadY: 460,
+    mediaStoreY: 70,
+  };
 }
 
 function architectureTracePath(
   graph: ReturnType<typeof architectureGraph>,
   deviceRows: Array<string>,
-  activeTrace: TraceFocus | null
+  activeTrace: TraceFocus | null,
+  rects: ArchitectureRects
 ) {
   const nodes = new Set<string>(['ui']);
   const flows: Array<{ color: string; label: string; points: string }> = [];
@@ -1529,42 +1656,26 @@ function architectureTracePath(
   const isNativeUpload = isNativeUploadTraceFocus(activeTrace);
   const hasDevice = deviceRows.length > 0 && deviceRows[0] !== 'No device calls yet';
   const device = hasDevice ? deviceRows[0] : '';
-  const deviceY = architectureDeviceY(0) + 35;
+  const addFlow = (from: string, to: string, color: string, label: string) => {
+    const points = architectureConnect(rects, from, to);
+    if (points) flows.push({ color, label, points });
+  };
 
   if (isAuth) {
     nodes.add('ssr');
     nodes.add('auth');
     if (device) nodes.add(`device:${device}`);
-    flows.push({
-      color: '#22c55e',
-      label: 'auth request',
-      points: device
-        ? `200,304 250,415 440,415 500,465 585,424 605,424 605,465 710,465 720,${deviceY}`
-        : '200,304 250,415 440,415 500,465 585,424 605,424',
-    });
-    flows.push({
-      color: '#22c55e',
-      label: 'auth response',
-      points: device
-        ? `720,${deviceY} 710,465 605,465 605,424 585,424 500,465 440,415 250,415 200,304`
-        : '605,424 585,424 500,465 440,415 250,415 200,304',
-    });
+    addFlow('ui', 'ssr', '#22c55e', 'auth request');
+    addFlow('ssr', 'auth', '#22c55e', 'auth request');
+    if (device) addFlow('auth', `device:${device}`, '#22c55e', 'auth request');
     return { flows, nodes };
   }
 
   if (isNativeUpload) {
     nodes.add('ssr');
-    nodes.add('store');
-    flows.push({
-      color: '#facc15',
-      label: 'store metadata',
-      points: '200,304 250,415 440,415 1040,255',
-    });
-    flows.push({
-      color: '#22c55e',
-      label: 'response',
-      points: '1040,255 440,415 250,415 200,304',
-    });
+    nodes.add('store:hb_store_odysee');
+    addFlow('ui', 'ssr', '#0ea5e9', 'request');
+    addFlow('ssr', 'store:hb_store_odysee', '#facc15', 'store metadata');
   }
 
   if (!isNativeUpload || device) nodes.add('sdk');
@@ -1572,66 +1683,30 @@ function architectureTracePath(
   if (device) nodes.add(`device:${device}`);
 
   if (!isNativeUpload || device) {
-    flows.push({
-      color: '#0ea5e9',
-      label: 'request',
-      points: device ? `200,280 250,165 440,165 500,291 670,291 720,${deviceY}` : '200,280 250,165 440,165 500,291',
-    });
+    addFlow('ui', 'sdk', '#0ea5e9', 'request');
+    addFlow('sdk', 'hyperbeam', '#0ea5e9', 'request');
+    if (device) addFlow('hyperbeam', `device:${device}`, '#0ea5e9', 'request');
   }
 
   if (graph.legacyEvents > 0 || graph.fallbackEvents > 0) {
-    nodes.add('store');
-    nodes.add('legacy');
-    flows.push({
-      color: '#94a3b8',
-      label: 'legacy store',
-      points: device ? `720,${deviceY} 1000,${deviceY} 1040,255 1340,153` : '500,291 1040,255 1340,153',
-    });
-    flows.push({
-      color: '#22c55e',
-      label: 'response',
-      points: device
-        ? `1340,153 1040,255 1000,${deviceY} 720,${deviceY} 670,291 500,291 440,165 250,165 200,280`
-        : '1340,153 1040,255 500,291 440,165 250,165 200,280',
-    });
+    nodes.add('store:hb_store_odysee');
+    nodes.add('legacy:Odysee API');
+    addFlow(device ? `device:${device}` : 'hyperbeam', 'store:hb_store_odysee', '#facc15', 'store');
+    addFlow('store:hb_store_odysee', 'legacy:Odysee API', ODYSEE_COLOR, 'legacy store');
   }
 
   if (graph.rangeEvents > 0) {
     nodes.add('ssr');
-    nodes.add('store');
+    nodes.add('store:hb_store_lbry_blob');
     nodes.add('media');
-    flows.push({
-      color: '#fb7185',
-      label: 'media bytes',
-      points: '200,304 250,415 440,415 1040,255 1340,497',
-    });
-    flows.push({
-      color: '#22c55e',
-      label: 'response',
-      points: '1340,497 1040,255 440,415 250,415 200,304',
-    });
+    addFlow('ui', 'ssr', '#0ea5e9', 'request');
+    addFlow('ssr', 'store:hb_store_lbry_blob', MEDIA_COLOR, 'media bytes');
+    addFlow('store:hb_store_lbry_blob', 'media', MEDIA_COLOR, 'media bytes');
   }
 
   if (graph.legacyEvents === 0 && graph.fallbackEvents === 0 && graph.rangeEvents === 0 && graph.cacheEvents > 0) {
-    nodes.add('cache');
-    flows.push({
-      color: '#facc15',
-      label: 'cache',
-      points: device ? `720,${deviceY} 1000,${deviceY} 1145,105` : '500,291 1145,105',
-    });
-    flows.push({
-      color: '#22c55e',
-      label: 'response',
-      points: device
-        ? `1145,105 1000,${deviceY} 720,${deviceY} 670,291 500,291 440,165 250,165 200,280`
-        : '1145,105 500,291 440,165 250,165 200,280',
-    });
-  } else if (graph.legacyEvents === 0 && graph.fallbackEvents === 0 && graph.rangeEvents === 0 && device) {
-    flows.push({
-      color: '#22c55e',
-      label: 'response',
-      points: `720,${deviceY} 670,291 500,291 440,165 250,165 200,280`,
-    });
+    nodes.add('store:cache@1.0');
+    addFlow(device ? `device:${device}` : 'hyperbeam', 'store:cache@1.0', '#facc15', 'cache');
   }
 
   return { flows, nodes };
@@ -1642,7 +1717,8 @@ function architectureSelectedPath(
   deviceRows: Array<string>,
   selectedEventIndex: number | null,
   allEvents: Array<HyperbeamDebugEvent>,
-  mode: HyperbeamMode
+  mode: HyperbeamMode,
+  rects: ArchitectureRects
 ) {
   const nodes = new Set<string>(['ui']);
   const flows: Array<{ color: string; label: string; points: string }> = [];
@@ -1656,10 +1732,10 @@ function architectureSelectedPath(
     selectedEventIndex !== null
       ? mergedRequestDetailData(selected, selectedEventIndex, allEvents)
       : selected?.data || {};
+  const selectedEventData = selectedEvents.map((event) => event.data || {});
   const selectedDevices = devicesFromEventData(selectedData);
   const selectedDevice = selectedDevices[0] || String(selectedData.device || selectedData.responseDevice || '');
-  const deviceIndex = Math.max(0, deviceRows.indexOf(selectedDevice));
-  const deviceY = architectureDeviceY(deviceIndex) + 35;
+  const selectedDeviceNode = selectedDevice ? `device:${selectedDevice}` : '';
   const path = String(selectedData.devicePath || selectedData.nativePath || selectedData.urlParts?.path || '');
   const sourceLayer = String(selectedData.sourceLayer || '');
   const deviceLayer = String(selectedData.deviceLayer || '');
@@ -1671,122 +1747,140 @@ function architectureSelectedPath(
   const isAuth = !isUploadRead && Boolean(selectedData.authRequired || sourceLayer.includes('auth'));
   const isSsr = path.includes('/$/api/');
   const frontend = isSsr || isAuth ? 'ssr' : 'sdk';
-  const frontendPoint = isUploadRead
-    ? '250,415 440,415'
-    : frontend === 'ssr'
-      ? '250,415 440,415 500,465'
-      : '250,165 440,165 500,291';
-  const uiPoint = frontend === 'ssr' ? '200,304' : '200,280';
-  const hyperbeamPoint = isUploadRead ? '440,415' : frontend === 'ssr' ? '500,465' : '500,291';
-  const routePrefix = `${uiPoint} ${frontendPoint}`;
-  const responseSuffix = isUploadRead
-    ? '440,415 250,415 200,304'
-    : frontend === 'ssr'
-      ? `${hyperbeamPoint} 440,415 250,415 200,304`
-      : `${hyperbeamPoint} 440,165 250,165 200,280`;
   const mediaRange = isMediaRangeEvent(selectedData, path, selectedDevice);
+  const isSearch = selectedDevice === '~odysee-search@1.0' || path.includes('/~odysee-search@1.0/query');
   const hasRequest = selectedEvents.some((event) => event.label === 'request' || event.label === 'request failed');
   const hasResponse = selectedEvents.some(isResponseLikeEvent);
+  const hasLifecycle = hasRequest || hasResponse;
   const isCache = path.includes('~cache@1.0') || nativeSource === 'cache';
-  const isUpload =
-    path.includes('~odysee-upload@1.0') || (path.includes('/hyperbeam-upload/') && !isUploadRead && !isUploadMetadata);
-  const isArweave = path.includes('~arweave') || sourceLayer.includes('arweave');
   const isLegacy =
+    !isSearch &&
     !mediaRange &&
     (selectedData.deviceLayer === 'compat-device' || sourceLayer === 'original' || sourceLayer.startsWith('fallback'));
   const selectedFailed = selectedEvents.some(isFailedEvent);
-  const backendFlows: Array<{ color: string; label: string; node: string; x: number; y: number; viaStore?: boolean }> =
-    [];
+  const legacyBackend = legacyBackendName(selectedData, selectedDevices, mediaRange) || (isLegacy ? 'Odysee API' : '');
+  const backendFlows: Array<{ color: string; label: string; node: string; viaStore?: boolean }> = [];
+  const sourceNode =
+    selectedDeviceNode ||
+    (isAuth ? 'auth' : mode !== HYPERBEAM_MODES.original && !isUploadRead ? 'hyperbeam' : frontend);
+  const addFlow = (from: string, to: string, color: string, label: string, via?: Array<ArchitecturePoint>) => {
+    const points = architectureConnect(rects, from, to, via);
+    if (points) flows.push({ color, label, points });
+  };
 
   nodes.add(frontend);
-  if (mode !== HYPERBEAM_MODES.original && !isUploadRead && !isUploadMetadata) nodes.add('hyperbeam');
+  if (mode !== HYPERBEAM_MODES.original && !isUploadRead) nodes.add('hyperbeam');
   if (isAuth) nodes.add('auth');
-  if (selectedDevice) nodes.add(`device:${selectedDevice}`);
+  if (selectedDeviceNode) nodes.add(selectedDeviceNode);
+
+  const addBackendFlow = (flow: { color: string; label: string; node: string; viaStore?: boolean }) => {
+    if (!backendFlows.some((existing) => existing.node === flow.node && existing.label === flow.label)) {
+      backendFlows.push(flow);
+    }
+  };
+
+  selectedEventData.forEach((data) => {
+    const eventDevices = devicesFromEventData(data);
+    const eventDevice = eventDevices[0] || String(data.device || data.responseDevice || '');
+    const eventPath = String(data.devicePath || data.nativePath || data.urlParts?.path || '');
+    const eventMediaRange = isMediaRangeEvent(data, eventPath, eventDevice);
+    const eventStoreBackend = storeBackendName(data, eventPath, eventDevice, eventMediaRange);
+    const eventLegacyBackend = legacyBackendName(data, eventDevices, eventMediaRange);
+    const eventSearch = eventDevice === '~odysee-search@1.0' || eventPath.includes('/~odysee-search@1.0/query');
+
+    if (eventMediaRange) {
+      addBackendFlow({ color: MEDIA_COLOR, label: 'media bytes', node: 'media', viaStore: true });
+    }
+    if (eventStoreBackend) {
+      addBackendFlow({ color: '#facc15', label: eventStoreBackend, node: `store:${eventStoreBackend}` });
+    }
+    if (eventLegacyBackend && !eventSearch) {
+      addBackendFlow({ color: ODYSEE_COLOR, label: eventLegacyBackend, node: `legacy:${eventLegacyBackend}` });
+    }
+  });
 
   if (isCache) {
-    backendFlows.push({ color: '#facc15', label: 'cache', node: 'cache', x: 1145, y: 105 });
+    addBackendFlow({ color: '#facc15', label: 'cache', node: 'store:cache@1.0' });
+  }
+  if (isSearch) {
+    addBackendFlow({
+      color: SEARCH_COLOR,
+      label: 'search index',
+      node: 'meilisearch',
+    });
   }
   if (mediaRange) {
-    backendFlows.push({ color: '#fb7185', label: 'media bytes', node: 'media', x: 1340, y: 497, viaStore: true });
+    addBackendFlow({
+      color: MEDIA_COLOR,
+      label: 'media bytes',
+      node: 'media',
+      viaStore: true,
+    });
   }
-  if (isLegacy) {
-    backendFlows.push({ color: '#94a3b8', label: 'legacy', node: 'legacy', x: 1340, y: 153, viaStore: true });
-  }
-  if (isArweave) {
-    backendFlows.push({ color: '#64748b', label: 'arweave', node: 'arweave', x: 1340, y: 325, viaStore: true });
+  if (isLegacy && legacyBackend) {
+    addBackendFlow({
+      color: ODYSEE_COLOR,
+      label: legacyBackend,
+      node: `legacy:${legacyBackend}`,
+      viaStore: true,
+    });
   }
   if (isStoreMetadata) {
-    backendFlows.push({ color: '#facc15', label: 'store metadata', node: 'store', x: 1040, y: 255 });
-  }
-  if (isUpload) {
-    backendFlows.push({ color: '#0ea5e9', label: 'upload', node: 'upload', x: 1040, y: 455 });
+    addBackendFlow({ color: '#facc15', label: 'store metadata', node: 'store:hb_store_odysee' });
   }
   backendFlows.forEach((backend) => nodes.add(backend.node));
-  if (backendFlows.some((backend) => backend.viaStore)) nodes.add('store');
-  if (isUpload) nodes.add('upload');
+  if (isSearch) {
+    nodes.add('store:hb_store_odysee');
+    nodes.add('legacy:Chainquery');
+  }
+  if (backendFlows.some((backend) => backend.viaStore)) nodes.add('store:hb_store_odysee');
 
   if (hasRequest) {
     const requestColor = selectedFailed && !hasResponse ? '#ff4d7d' : isAuth ? '#22c55e' : '#0ea5e9';
-    const requestPoints = selectedDevice
-      ? isAuth
-        ? `${routePrefix} 585,424 605,424 605,465 710,465 720,${deviceY}`
-        : `${routePrefix} 670,291 720,${deviceY}`
-      : isUpload
-        ? `${routePrefix} 710,465 1040,455`
-        : isStoreMetadata
-          ? `${routePrefix} 1040,255`
-        : mediaRange
-          ? `${routePrefix} 1040,255 1340,497`
-          : routePrefix;
-    flows.push({
-      color: requestColor,
-      label: selectedFailed && !hasResponse ? 'failed request' : isAuth ? 'auth request' : 'request',
-      points: requestPoints,
-    });
-  }
-
-  if (hasResponse) {
-    const primaryBackend = backendFlows[0];
-    const responsePoints = primaryBackend
-      ? primaryBackend.node === 'upload'
-        ? `1040,455 710,465 ${responseSuffix}`
-        : !primaryBackend.viaStore
-          ? `${primaryBackend.x},${primaryBackend.y} ${hyperbeamPoint} ${responseSuffix}`
-          : selectedDevice
-            ? `${primaryBackend.x},${primaryBackend.y} 1040,255 1000,${deviceY} 720,${deviceY} 670,291 ${responseSuffix}`
-            : `${primaryBackend.x},${primaryBackend.y} 1040,255 ${responseSuffix}`
-      : isAuth
-        ? `720,${deviceY} 710,465 605,465 605,424 585,424 500,465 440,415 250,415 200,304`
-        : selectedDevice
-          ? `720,${deviceY} 670,291 ${responseSuffix}`
-          : responseSuffix;
-    flows.push({
-      color: selectedFailed ? '#ff4d7d' : '#22c55e',
-      label: selectedFailed ? 'failed response' : 'response',
-      points: responsePoints,
-    });
-  }
-
-  if (selectedDevice && !isAuth) {
-    flows.push({
-      color: '#0ea5e9',
-      label: selectedDevice.replace(/^~/, ''),
-      points: `670,291 720,${deviceY}`,
-    });
+    const requestLabel = selectedFailed && !hasResponse ? 'failed request' : isAuth ? 'auth request' : 'request';
+    addFlow('ui', frontend, requestColor, requestLabel);
+    if (isAuth) {
+      addFlow(frontend, 'auth', requestColor, requestLabel);
+      if (selectedDeviceNode) addFlow('auth', selectedDeviceNode, requestColor, requestLabel);
+    } else if (mode !== HYPERBEAM_MODES.original && !isUploadRead) {
+      addFlow(frontend, 'hyperbeam', requestColor, requestLabel);
+      if (selectedDeviceNode) addFlow('hyperbeam', selectedDeviceNode, requestColor, requestLabel);
+    }
   }
 
   backendFlows.forEach((backend) => {
-    if (!hasRequest) return;
-    const points =
-      backend.node === 'upload'
-        ? `${hyperbeamPoint} 710,465 1040,455`
-        : !backend.viaStore
-          ? `${hyperbeamPoint} ${backend.x},${backend.y}`
-          : selectedDevice
-            ? `720,${deviceY} 1000,${deviceY} 1040,255 ${backend.x},${backend.y}`
-            : `${hyperbeamPoint} 1040,255 ${backend.x},${backend.y}`;
-    flows.push({ color: backend.color, label: backend.label, points });
+    if (!hasLifecycle) return;
+    if (backend.viaStore) {
+      addFlow(sourceNode, 'store:hb_store_odysee', backend.color, backend.label);
+      addFlow('store:hb_store_odysee', backend.node, backend.color, backend.label);
+    } else {
+      addFlow(sourceNode, backend.node, backend.color, backend.label);
+    }
   });
+  if (hasLifecycle && isSearch) {
+    addFlow('meilisearch', 'legacy:Chainquery', ODYSEE_COLOR, 'chainquery');
+    addFlow('meilisearch', 'store:hb_store_odysee', '#facc15', 'hyperbeam index');
+  }
+
+  if (hasResponse) {
+    const responseColor = selectedFailed ? '#ff4d7d' : '#22c55e';
+    const responseLabel = selectedFailed ? 'failed response' : 'response';
+    const responseStart = backendFlows[0]?.node || sourceNode;
+    if (backendFlows[0]?.viaStore) {
+      addFlow(responseStart, 'store:hb_store_odysee', responseColor, responseLabel);
+      addFlow('store:hb_store_odysee', sourceNode, responseColor, responseLabel);
+    } else if (responseStart !== sourceNode) {
+      addFlow(responseStart, sourceNode, responseColor, responseLabel);
+    }
+    if (selectedDeviceNode && !isAuth && mode !== HYPERBEAM_MODES.original && !isUploadRead) {
+      addFlow(selectedDeviceNode, 'hyperbeam', responseColor, responseLabel);
+    }
+    if (isAuth && selectedDeviceNode) addFlow(selectedDeviceNode, 'auth', responseColor, responseLabel);
+    if (isAuth) addFlow('auth', 'ssr', responseColor, responseLabel);
+    else if (mode !== HYPERBEAM_MODES.original && !isUploadRead)
+      addFlow('hyperbeam', frontend, responseColor, responseLabel);
+    addFlow(frontend, 'ui', responseColor, responseLabel);
+  }
 
   return { flows, nodes };
 }
@@ -1815,13 +1909,7 @@ function ArchitectureFlow({
   );
 }
 
-function ArchitectureSelectedFlow({ color, label, points }: { color: string; label: string; points: string }) {
-  const parsed = points
-    .split(/\s+/)
-    .map((point) => point.split(',').map(Number))
-    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-  const middle = parsed[Math.max(0, Math.floor(parsed.length / 2) - 1)] || [0, 0];
-
+function ArchitectureSelectedFlow({ color, points }: { color: string; label: string; points: string }) {
   return (
     <g>
       <polyline
@@ -1829,62 +1917,34 @@ function ArchitectureSelectedFlow({ color, label, points }: { color: string; lab
         fill="none"
         opacity={0.96}
         stroke={color}
-        strokeWidth={5}
+        strokeWidth={3}
         markerEnd={architectureArrowMarker(color)}
       />
-      <rect x={middle[0] - 56} y={middle[1] - 26} width="112" height="18" rx="4" fill={activeLabelFill(color)} />
-      <text x={middle[0]} y={middle[1] - 13} fill="#f9fafb" fontSize="10" textAnchor="middle">
-        {limitString(label, 18)}
-      </text>
     </g>
   );
 }
 
-function ArchitectureEdge({
+function ArchitectureNodeEdge({
   active,
   color = '#38bdf8',
   faded,
-  x1,
-  y1,
-  x2,
-  y2,
-  label,
+  from,
+  rects,
+  to,
+  via,
 }: {
   active?: boolean;
   color?: string;
   faded?: boolean;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  label: string;
+  from: string;
+  rects: ArchitectureRects;
+  to: string;
+  via?: Array<ArchitecturePoint>;
 }) {
-  const lx = (x1 + x2) / 2;
-  const ly = (y1 + y2) / 2 - 7;
-  return (
-    <g opacity={faded ? 0.25 : 1}>
-      <line
-        x1={x1}
-        y1={y1}
-        x2={x2}
-        y2={y2}
-        stroke={color}
-        strokeWidth={active ? 4 : 2}
-        markerEnd={architectureArrowMarker(color)}
-      />
-      <rect
-        x={lx - 42}
-        y={ly - 13}
-        width="84"
-        height="18"
-        rx="4"
-        fill={active ? activeLabelFill(color) : 'rgba(12,10,12,0.88)'}
-      />
-      <text x={lx} y={ly} fill={active ? '#f9fafb' : 'rgba(255,255,255,0.78)'} fontSize="10" textAnchor="middle">
-        {label}
-      </text>
-    </g>
-  );
+  const points = architectureNodeEdgePoints(rects, from, to, via);
+  if (!points) return null;
+
+  return <ArchitectureFlow active={active} color={color} faded={faded} points={points} />;
 }
 
 function architectureArrowMarker(color?: string) {
@@ -1897,14 +1957,14 @@ function architectureArrowMarker(color?: string) {
       return 'url(#hb-arrow-auth)';
     case '#facc15':
       return 'url(#hb-arrow-cache)';
-    case '#94a3b8':
+    case ODYSEE_COLOR:
       return 'url(#hb-arrow-legacy)';
+    case SEARCH_COLOR:
+      return 'url(#hb-arrow-search)';
     case '#64748b':
       return 'url(#hb-arrow-muted)';
-    case '#fb7185':
+    case MEDIA_COLOR:
       return 'url(#hb-arrow-media)';
-    case '#c084fc':
-      return 'url(#hb-arrow-arweave)';
     case '#e879f9':
       return 'url(#hb-arrow-ui)';
     default:
@@ -1918,13 +1978,13 @@ function activeFill(color: string) {
       return 'rgba(34,197,94,0.16)';
     case '#facc15':
       return 'rgba(250,204,21,0.14)';
-    case '#94a3b8':
+    case ODYSEE_COLOR:
     case '#64748b':
       return 'rgba(148,163,184,0.14)';
-    case '#fb7185':
-      return 'rgba(251,113,133,0.14)';
-    case '#c084fc':
-      return 'rgba(192,132,252,0.14)';
+    case SEARCH_COLOR:
+      return 'rgba(249,115,22,0.15)';
+    case MEDIA_COLOR:
+      return 'rgba(20,184,166,0.14)';
     default:
       return 'rgba(14,165,233,0.16)';
   }
@@ -1936,13 +1996,13 @@ function activeLabelFill(color: string) {
       return 'rgba(34,197,94,0.84)';
     case '#facc15':
       return 'rgba(202,138,4,0.9)';
-    case '#94a3b8':
+    case ODYSEE_COLOR:
     case '#64748b':
       return 'rgba(71,85,105,0.94)';
-    case '#fb7185':
+    case SEARCH_COLOR:
+      return 'rgba(234,88,12,0.9)';
+    case MEDIA_COLOR:
       return 'rgba(190,18,60,0.9)';
-    case '#c084fc':
-      return 'rgba(126,34,206,0.9)';
     default:
       return 'rgba(14,165,233,0.88)';
   }
@@ -1954,7 +2014,7 @@ function traceFilterBackground(color: string) {
       return 'rgba(34,197,94,0.18)';
     case '#ffb020':
       return 'rgba(255,176,32,0.16)';
-    case '#94a3b8':
+    case ODYSEE_COLOR:
       return 'rgba(148,163,184,0.16)';
     case '#ff4d7d':
       return 'rgba(255,77,125,0.16)';
@@ -1989,6 +2049,11 @@ function routeSummary(data: any, mode: HyperbeamMode) {
 
 function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMode) {
   const devices: Record<string, number> = {};
+  const storeBackends: Record<string, number> = {};
+  const legacyBackends: Record<string, number> = {};
+  const deviceStoreBackends: ArchitecturePairCounts = {};
+  const deviceLegacyBackends: ArchitecturePairCounts = {};
+  const storeLegacyBackends: ArchitecturePairCounts = {};
   const samples: Array<Record<string, any>> = [];
   const counters = {
     hyperbeamEvents: 0,
@@ -1999,9 +2064,9 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     ssrEvents: 0,
     deviceEvents: 0,
     cacheEvents: 0,
+    searchEvents: 0,
     uploadEvents: 0,
     rangeEvents: 0,
-    arweaveEvents: 0,
   };
 
   events.forEach((event) => {
@@ -2015,6 +2080,8 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     const nativeSource = String(data.nativeSource || '');
     const authEvent = Boolean(data.authRequired || sourceLayer.includes('auth'));
     const mediaRange = isMediaRangeEvent(data, path, device);
+    const storeBackend = storeBackendName(data, path, device, mediaRange);
+    const legacyBackend = legacyBackendName(data, eventDevices, mediaRange);
 
     if (
       !mediaRange &&
@@ -2035,21 +2102,21 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     ) {
       counters.cacheEvents += 1;
     }
-    if (
-      path.includes('/arweave') ||
-      path.includes('~arweave') ||
-      device.includes('arweave') ||
-      sourceLayer.includes('arweave')
-    ) {
-      counters.arweaveEvents += 1;
+    if (device === '~odysee-search@1.0' || path.includes('/~odysee-search@1.0/query')) {
+      counters.searchEvents += 1;
     }
     if (
       path.includes('~odysee-upload@1.0') ||
-      (path.includes('/hyperbeam-upload/') && !isHyperbeamUploadReadPath(path) && !isHyperbeamUploadMetadataPath(path))
+      (path.includes('/hyperbeam-upload/') && !isHyperbeamUploadReadPath(path))
     ) {
       counters.uploadEvents += 1;
     }
     if (mediaRange) counters.rangeEvents += 1;
+    if (storeBackend) storeBackends[storeBackend] = Number(storeBackends[storeBackend] || 0) + 1;
+    if (legacyBackend) legacyBackends[legacyBackend] = Number(legacyBackends[legacyBackend] || 0) + 1;
+    if (device && storeBackend) incrementGraphPair(deviceStoreBackends, device, storeBackend);
+    if (device && legacyBackend && !storeBackend) incrementGraphPair(deviceLegacyBackends, device, legacyBackend);
+    if (storeBackend && legacyBackend) incrementGraphPair(storeLegacyBackends, storeBackend, legacyBackend);
     if (eventDevices.length) {
       counters.deviceEvents += eventDevices.length;
       eventDevices.forEach((observedDevice) => {
@@ -2069,13 +2136,65 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     }
   });
   counters.sdkEvents = Math.max(0, counters.hyperbeamEvents - counters.ssrEvents);
+  if (counters.searchEvents > 0) {
+    legacyBackends.Chainquery = Math.max(Number(legacyBackends.Chainquery || 0), counters.searchEvents);
+    storeBackends.hb_store_odysee = Math.max(Number(storeBackends.hb_store_odysee || 0), counters.searchEvents);
+  }
 
   return {
     ...counters,
     devices,
+    storeBackends,
+    legacyBackends,
+    deviceStoreBackends,
+    deviceLegacyBackends,
+    storeLegacyBackends,
     deviceNames: Object.keys(devices).sort((a, b) => Number(devices[b] || 0) - Number(devices[a] || 0)),
     samples,
   };
+}
+
+function incrementGraphPair(pairs: ArchitecturePairCounts, from: string, to: string) {
+  pairs[from] = pairs[from] || {};
+  pairs[from][to] = Number(pairs[from][to] || 0) + 1;
+}
+
+function graphPairEntries(pairs: ArchitecturePairCounts) {
+  return Object.entries(pairs).flatMap(([from, targets]) =>
+    Object.entries(targets)
+      .filter(([, count]) => count > 0)
+      .map(([to]) => [from, to] as [string, string])
+  );
+}
+
+function storeBackendName(data: Record<string, any>, path: string, device: string, mediaRange: boolean) {
+  const sourceLayer = String(data.sourceLayer || '');
+  const deviceLayer = String(data.deviceLayer || '');
+  const nativeSource = String(data.nativeSource || '');
+
+  if (mediaRange) return 'hb_store_lbry_blob';
+  if (path.includes('~cache@1.0') || nativeSource === 'cache') return 'cache@1.0';
+  if (path.includes('~arweave') || device.includes('arweave') || sourceLayer.includes('arweave')) return '';
+  if (nativeSource === 'upload-index' || path.includes('/hyperbeam-upload/v1/list')) return '';
+  if (nativeSource === 'store' || deviceLayer === 'store' || isDirectImmutableStorePath(path)) return 'hb_store_odysee';
+  if (sourceLayer === 'original' || sourceLayer.startsWith('fallback')) return '';
+  return '';
+}
+
+function legacyBackendName(data: Record<string, any>, devices: Array<string>, mediaRange: boolean) {
+  if (mediaRange) return '';
+  const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '').toLowerCase();
+  const deviceText = devices.join(' ').toLowerCase();
+  const sourceLayer = String(data.sourceLayer || '');
+
+  if (path.includes('~odysee-search@1.0') || deviceText.includes('odysee-search')) return '';
+  if (path.includes('~odysee-account@1.0') || deviceText.includes('odysee-account')) return 'Odysee API';
+  if (path.includes('~odysee-file') || path.includes('~odysee-blob') || deviceText.includes('file')) return 'Blobcache';
+  if (path.includes('~lbry') || path.includes('claim-output') || deviceText.includes('lbry')) return 'Chainquery';
+  if (sourceLayer === 'original' || sourceLayer.startsWith('fallback') || devices.some(isLegacyStoreBackedDevice)) {
+    return 'Odysee API';
+  }
+  return '';
 }
 
 function devicesFromEventData(data: Record<string, any>) {
@@ -2103,7 +2222,7 @@ function normalizeGraphDevice(device: any) {
 
 function isLegacyBackedEvent(data: Record<string, any>, devices: Array<string>, mediaRange: boolean) {
   if (mediaRange) return false;
-  if (data.authRequired) return false;
+  if (isSearchDeviceEventData(data)) return false;
   const legacyDevices = devices.filter(isLegacyStoreBackedDevice);
   if (legacyDevices.length > 0) return true;
   return data.deviceLayer === 'compat-device' && String(data.sourceLayer || '') === 'original';
@@ -2113,9 +2232,7 @@ function isLegacyStoreBackedDevice(device: string) {
   return (
     device.startsWith('~odysee-') &&
     !device.includes('upload') &&
-    !device.includes('account') &&
-    !device.includes('file-reaction') &&
-    !device.includes('comment')
+    !device.includes('search')
   );
 }
 
@@ -2150,7 +2267,9 @@ function isHyperbeamUploadMetadataPath(path: string) {
 }
 
 function isDirectImmutableStorePath(path: string) {
-  const id = String(path || '').replace(/^\/+/, '').split(/[/?#]/)[0];
+  const id = String(path || '')
+    .replace(/^\/+/, '')
+    .split(/[/?#]/)[0];
   return /^[0-9A-Za-z_-]{43}$/.test(id);
 }
 
@@ -2389,6 +2508,10 @@ function eventMatchesTraceFocus(event: HyperbeamDebugEvent, focus: TraceFocus) {
     return matchesDevice || matchesRequest;
   }
 
+  if (focus.kind === 'search') {
+    return isSearchDeviceEventData(data);
+  }
+
   const haystack = eventClaimFocusText(event);
   return traceFocusNeedles(focus).some((needle) => haystack.includes(needle));
 }
@@ -2396,7 +2519,7 @@ function eventMatchesTraceFocus(event: HyperbeamDebugEvent, focus: TraceFocus) {
 function eventMatchesTraceGraphFocus(event: HyperbeamDebugEvent, focus: TraceFocus) {
   const data = event.data || {};
 
-  if (focus.kind === 'auth') return eventMatchesTraceFocus(event, focus);
+  if (focus.kind === 'auth' || focus.kind === 'search') return eventMatchesTraceFocus(event, focus);
 
   const routeText = traceGraphRouteText(data);
   const routeMatches = traceFocusNeedles(focus).some((needle) => routeText.includes(needle));
@@ -2418,6 +2541,17 @@ function traceGraphRouteText(data: Record<string, any>) {
     .filter(Boolean)
     .join('\n')
     .toLowerCase();
+}
+
+function isSearchDeviceEventData(data: Record<string, any>) {
+  const device = normalizeGraphDevice(data.device);
+  const responseDevice = normalizeGraphDevice(data.responseDevice);
+  const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '');
+  return (
+    device === '~odysee-search@1.0' ||
+    responseDevice === '~odysee-search@1.0' ||
+    path.includes('/~odysee-search@1.0/query')
+  );
 }
 
 function isAggregateClaimRoute(data: Record<string, any>) {
