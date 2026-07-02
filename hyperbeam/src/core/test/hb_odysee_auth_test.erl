@@ -433,22 +433,15 @@ import_wallet(WalletJson, Token, ServerID) ->
         server_opts(ServerID)
     ).
 
-%% @doc Migration of an existing user's wallet. A wallet the node did NOT mint --
-%% standing in for a user's existing wallet exported from the LBRY SDK/wallet
-%% servers -- is imported into `~secret@1.0' keyed to the account; thereafter the
-%% account's sessions sign with the IMPORTED wallet rather than a freshly-minted
-%% one, preserving the user's existing identity. In production the account is
-%% resolved via `user/me' and the key is the user's own LBRY key.
-%%
-%% Key type: LBRY wallets are ECDSA secp256k1. `ar_wallet:to_json/1' does not yet
-%% serialise the secp256k1 public coordinates (its secp256k1 clause carries a
-%% `TODO' and omits `x'/`y', which `from_json/2' then requires), so a secp256k1
-%% key cannot round-trip through the JSON import path today -- an upstream gap the
-%% team must close to import real LBRY keys. The import-and-bind MECHANISM is
-%% demonstrated here with a node-native key that does round-trip.
+%% @doc Migration of an existing user's wallet. An ECDSA secp256k1 key -- the
+%% LBRY wallet key type, standing in for a user's existing wallet exported from
+%% the SDK/wallet servers -- is imported into `~secret@1.0' keyed to the account;
+%% thereafter the account's sessions sign with the IMPORTED wallet rather than a
+%% freshly-minted one, preserving the user's existing identity. In production the
+%% account is resolved via `user/me' and the key is the user's own LBRY key.
 migration_imports_existing_wallet_test() ->
     ServerID = start_account_node(<<"migration">>),
-    Existing = {PrivKey, _} = ar_wallet:new(),
+    Existing = {PrivKey, _} = ar_wallet:new_ecdsa(),
     ExistingAddress = hb_util:human_id(ar_wallet:to_address(Existing)),
     ?assertMatch(
         {ok, _},
