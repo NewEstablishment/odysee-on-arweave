@@ -20,6 +20,26 @@
 %%% This mirrors the `~http-auth@1.0' device's PBKDF2 derivation, but sources its
 %%% entropy from the Odysee cookie rather than HTTP Basic credentials.
 %%%
+%%% Odysee mints many session tokens per account (one per installation/login,
+%%% each an expiring JWT), all resolving to a single account. The node-hosted
+%%% wallet is the per-ACCOUNT identity that owns a user's mutable state (channel,
+%%% preferences), so the secret is derived from the account a session belongs to,
+%%% not from the session token itself. The bare `auth_token' value is extracted
+%%% from whichever source carried it (the cookie jar's `auth_token' entry, or the
+%%% `authorization' header with any `Bearer ' scheme stripped) and mapped to its
+%%% account via the node's `odysee-session-accounts' option (a `token =>
+%%% account-id' map), which stands in for the `user/me' lookup in a self-hosted
+%%% deployment.
+%%%
+%%% When the map is configured, a token absent from it is REJECTED (401): an
+%%% unknown session is not a valid credential. When NO map is configured every
+%%% session resolves to itself (the prior per-session behaviour), so an
+%%% unconfigured node is unchanged and existing keyspaces are unaffected. Two
+%%% sessions of the same account derive the same secret and share one wallet;
+%%% distinct accounts stay isolated. The PBKDF2 input is domain-separated
+%%% (`odysee-account:' vs `odysee-token:' prefixes) so an account identifier and
+%%% a raw token can never collide in the derived keyspace.
+%%%
 %%% The `generate' key reads the token and derives a key from it using PBKDF2.
 %%% The parameters for the PBKDF2 algorithm are configurable via the request
 %%% message:
@@ -106,8 +126,25 @@ generate(_Msg, #{ <<"secret">> := Secret }, _Opts) ->
 generate(_Msg, Req, Opts) ->
     case token(Req, Opts) of
         {ok, Token} ->
-            ?event(key_gen, {generating_key, {priv_token, Token}}),
-            derive_key(Token, Req, Opts);
+            case resolve_account(Token, Opts) of
+                {ok, {account, Account}} ->
+                    ?event(key_gen,
+                        {generating_key,
+                            {priv_token, Token}, {priv_account, Account}}),
+                    derive_key(account, Account, Req, Opts);
+                {ok, {token, SelfToken}} ->
+                    ?event(key_gen,
+                        {generating_key, {priv_token, SelfToken}, {account, self}}),
+                    derive_key(token, SelfToken, Req, Opts);
+                {error, unknown} ->
+                    ?event(key_gen, {unknown_token, {priv_token, Token}}),
+                    {error,
+                        #{
+                            <<"status">> => 401,
+                            <<"details">> => <<"Unknown Odysee session token.">>
+                        }
+                    }
+            end;
         {error, no_token} ->
             {error,
                 #{
@@ -119,56 +156,78 @@ generate(_Msg, Req, Opts) ->
             }
     end.
 
-%% @doc Read the Odysee token from the request. Sources are tried in order: the
-%% raw `cookie' header, the raw `authorization' header, then the parsed cookie
-%% map stored under `priv/cookie' by the HTTP layer. The raw `cookie' header and
-%% the parsed `priv/cookie' map are both canonicalised through `canonical_token/2'
-%% to the SAME deterministic token string, so a given Odysee session yields the
-%% same derived secret whether it arrived in-process (raw header) or over real
-%% HTTP (parsed into `priv/cookie' before the hook ran). The `authorization'
-%% header is used verbatim, as it is never reshaped by the cookie codec.
+%% @doc Read the bare Odysee `auth_token' from the request. Sources are tried in
+%% order: the raw `cookie' header, the raw `authorization' header, then the
+%% parsed cookie map stored under `priv/cookie' by the HTTP layer. The raw
+%% `cookie' header and the parsed `priv/cookie' map both yield the same bare
+%% token (the jar's `auth_token' value), so a given Odysee session derives the
+%% same secret whether it arrived in-process (raw header) or over real HTTP
+%% (parsed into `priv/cookie' before the hook ran), and whether it arrived as a
+%% cookie or as an `authorization' header. The `authorization' header has any
+%% `Bearer ' scheme stripped; it is never reshaped by the cookie codec.
 token(Req, Opts) ->
     case hb_maps:get(<<"cookie">>, Req, undefined, Opts) of
         Cookie when is_binary(Cookie), Cookie =/= <<>> ->
-            canonical_token(Cookie, Opts);
+            {ok, cookie_token(Cookie, Opts)};
         _ ->
             case hb_maps:get(<<"authorization">>, Req, undefined, Opts) of
                 Auth when is_binary(Auth), Auth =/= <<>> ->
-                    {ok, Auth};
+                    {ok, strip_bearer(Auth)};
                 _ ->
                     priv_cookie_token(Req, Opts)
             end
     end.
 
-%% @doc Read the parsed cookie map that the HTTP layer stores under
-%% `priv/cookie'. This is the form the token takes over real HTTP: `hb_http'
+%% @doc Read the bare token from the parsed cookie map the HTTP layer stores
+%% under `priv/cookie'. This is the form the token takes over real HTTP: `hb_http'
 %% runs the inbound `cookie' header through the `~cookie@1.0' codec before the
 %% request hook executes, leaving a parsed map (e.g.
-%% `#{ <<"auth_token">> => <<...>> }') rather than the raw header. We canonicalise
-%% that map to the same token string the raw-cookie path produces.
+%% `#{ <<"auth_token">> => <<...>> }') rather than the raw header.
 priv_cookie_token(Req, Opts) ->
     case hb_private:get(<<"cookie">>, Req, #{}, Opts) of
         ParsedCookie when is_map(ParsedCookie), map_size(ParsedCookie) > 0 ->
-            {ok, canonical_cookie(ParsedCookie, Opts)};
+            {ok, bare_token(ParsedCookie, Opts)};
         _ ->
             {error, no_token}
     end.
 
-%% @doc Canonicalise a raw `cookie' header binary to a deterministic token. We
-%% parse the `key=value; key2=value2' header into the same map form the HTTP layer
-%% stores under `priv/cookie' (the `~cookie@1.0' codec's `from_cookie' parse:
-%% split on `;', then on the first `=', trimming and URL-decoding values), then
-%% serialise it canonically. This makes the raw-header path and the parsed
-%% `priv/cookie' path converge on an identical token for the same Odysee session.
-%% The parse is done inline with core utilities rather than via the `~cookie@1.0'
-%% device, as device-to-device source calls are not available from within the
-%% build-signed preloaded device context.
-canonical_token(Cookie, Opts) ->
+%% @doc Extract the bare token from a raw `cookie' header binary. We parse the
+%% `key=value; key2=value2' header into the same map form the HTTP layer stores
+%% under `priv/cookie' (the `~cookie@1.0' codec's `from_cookie' parse: split on
+%% `;', then on the first `=', trimming and URL-decoding values), then take the
+%% bare token from it. This makes the raw-header path and the parsed `priv/cookie'
+%% path converge for the same Odysee session. The parse is done inline with core
+%% utilities rather than via the `~cookie@1.0' device, as device-to-device source
+%% calls are not available from within the build-signed preloaded device context.
+cookie_token(Cookie, Opts) ->
     case parse_cookie_header(Cookie) of
         ParsedCookie when map_size(ParsedCookie) > 0 ->
-            {ok, canonical_cookie(ParsedCookie, Opts)};
+            bare_token(ParsedCookie, Opts);
         _ ->
-            {ok, Cookie}
+            Cookie
+    end.
+
+%% @doc Take the bare session token from a parsed cookie map: the `auth_token'
+%% value if present, else the canonical serialisation of the whole jar (a
+%% deterministic fallback for a jar that carries no `auth_token').
+bare_token(ParsedCookie, Opts) ->
+    case hb_maps:find(<<"auth_token">>, ParsedCookie, Opts) of
+        {ok, Value} -> cookie_value(Value);
+        error -> canonical_cookie(ParsedCookie, Opts)
+    end.
+
+%% @doc Strip a leading `Bearer ' scheme (case-insensitive) from an
+%% `authorization' header, leaving the bare token; a header with no recognised
+%% scheme is used verbatim.
+strip_bearer(Auth) ->
+    case Auth of
+        <<Scheme:7/binary, Rest/binary>> ->
+            case string:lowercase(Scheme) of
+                <<"bearer ">> -> Rest;
+                _ -> Auth
+            end;
+        _ ->
+            Auth
     end.
 
 %% @doc Parse a raw `cookie' header binary into a key-value map, mirroring the
@@ -221,9 +280,35 @@ cookie_value(Value) when is_map(Value) ->
 cookie_value(Value) ->
     hb_util:bin(Value).
 
-%% @doc Derive a key from the Odysee token using the PBKDF2 algorithm and user
-%% specified parameters, mirroring `~http-auth@1.0'.
-derive_key(Token, Req, Opts) ->
+%% @doc Resolve a session token to the account identity that owns it. The node's
+%% `odysee-session-accounts' option holds a `token => account-id' map that stands
+%% in for the Odysee `user/me' lookup. When the map is configured, a mapped token
+%% resolves to its account and an UNKNOWN token is rejected (`{error, unknown}');
+%% when NO map is configured, every token resolves to itself
+%% (`{ok, {token, Token}}'), preserving the prior per-session behaviour.
+resolve_account(Token, Opts) ->
+    Accounts = hb_opts:get(<<"odysee-session-accounts">>, #{}, Opts),
+    case hb_maps:find(Token, Accounts, Opts) of
+        {ok, Account} ->
+            {ok, {account, hb_util:bin(Account)}};
+        error ->
+            case hb_maps:size(Accounts, Opts) of
+                0 -> {ok, {token, Token}};
+                _ -> {error, unknown}
+            end
+    end.
+
+%% @doc The PBKDF2 password prefix that separates the account-identifier space
+%% from the raw-token space, so the two can never collide in the derived keyspace.
+domain_tag(account) -> <<"odysee-account:">>;
+domain_tag(token) -> <<"odysee-token:">>.
+
+%% @doc Derive a key from the resolved identity using the PBKDF2 algorithm and
+%% user specified parameters, mirroring `~http-auth@1.0'. The PBKDF2 password is
+%% domain-separated by `Domain' (`account' or `token') so an account identifier
+%% and a raw session token can never collide in the derived keyspace.
+derive_key(Domain, Identity, Req, Opts) ->
+    Token = <<(domain_tag(Domain))/binary, Identity/binary>>,
     Alg = hb_util:atom(hb_maps:get(<<"alg">>, Req, <<"sha256">>, Opts)),
     Salt =
         hb_maps:get(

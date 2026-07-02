@@ -19,6 +19,9 @@
 %%% `~meta@1.0/is-operator'. On an unclaimed node (no operator/wallet configured)
 %%% the gate is permissive. `current'/`resolve' are unauthenticated reads.
 %%%
+%%% Parameter extraction and the `{ok, #{status => ...}}' response shapes are
+%%% shared with `~owned-reference@1.0' via `lib_odysee_reference'.
+%%%
 %%% Node configuration note: because a reference is mutable at a constant path, a
 %%% live HTTP node MUST disable result caching for these reads -- set
 %%% `http-extra-opts => #{ <<"force-message">> => true, <<"cache-control">> =>
@@ -26,6 +29,7 @@
 %%% target. The in-process `hb_ao:resolve' path used by the tests is unaffected.
 -module(dev_odysee_reference).
 -implements(<<"odysee-reference@1.0">>).
+-device_libraries([lib_odysee_reference]).
 -export([info/1, point/3, current/3, resolve/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -61,13 +65,13 @@ info(_Opts) ->
 point(Base, Req, Opts) ->
     case is_operator(Base, Req, Opts) of
         false ->
-            unauthorized();
+            lib_odysee_reference:unauthorized();
         true ->
             case reference_key(Base, Req, Opts) of
                 {ok, NormKey} ->
                     point_target(NormKey, Base, Req, Opts);
                 {error, Reason} ->
-                    error_response(Reason)
+                    lib_odysee_reference:error_response(Reason)
             end
     end.
 
@@ -86,7 +90,7 @@ point_target(NormKey, Base, Req, Opts) ->
                 <<"target">> => Target
             }};
         {error, Reason} ->
-            error_response(Reason)
+            lib_odysee_reference:error_response(Reason)
     end.
 
 %% @doc Return the CURRENT target for a reference key by following the link
@@ -103,12 +107,12 @@ current(Base, Req, Opts) ->
                     ),
                     {ok, Value};
                 not_found ->
-                    error_response(not_found);
+                    lib_odysee_reference:error_response(not_found);
                 {error, Reason} ->
-                    error_response(Reason)
+                    lib_odysee_reference:error_response(Reason)
             end;
         {error, Reason} ->
-            error_response(Reason)
+            lib_odysee_reference:error_response(Reason)
     end.
 
 %% @doc Alias for `current'.
@@ -117,7 +121,7 @@ resolve(Base, Req, Opts) ->
 
 %% @doc The reference key, normalized. Accepts `key', `claim-id', or `reference'.
 reference_key(Base, Req, Opts) ->
-    case param(Base, Req, [<<"key">>, <<"claim-id">>, <<"claim_id">>, <<"reference">>], Opts) of
+    case lib_odysee_reference:param(Base, Req, [<<"key">>, <<"claim-id">>, <<"claim_id">>, <<"reference">>], Opts) of
         {ok, Key} -> {ok, hb_ao:normalize_key(Key)};
         Error -> Error
     end.
@@ -126,7 +130,7 @@ reference_key(Base, Req, Opts) ->
 %% directly. As a convenience, an inline `value' message is written to the cache
 %% first and the resulting id is used as the target.
 target(Base, Req, Opts) ->
-    case param(Base, Req, [<<"target">>, <<"id">>], Opts) of
+    case lib_odysee_reference:param(Base, Req, [<<"target">>, <<"id">>], Opts) of
         {ok, Target} ->
             {ok, Target};
         {error, _} ->
@@ -157,7 +161,7 @@ write_value(Value, Opts) ->
 %% in-process as the subject) -- so the signed one of the two is handed to
 %% `~meta@1.0/is-operator' for the signer check.
 is_operator(Base, Req, Opts) ->
-    Subject = signed_subject(Base, Req, Opts),
+    Subject = lib_odysee_reference:signed_subject(Base, Req, Opts),
     case hb_ao:resolve(
         #{ <<"device">> => <<"meta@1.0">> },
         #{ <<"path">> => <<"is-operator">>, <<"body">> => Subject },
@@ -167,55 +171,5 @@ is_operator(Base, Req, Opts) ->
         _ -> false
     end.
 
-%% @doc Prefer whichever of the request or base carries a commitment, so the
-%% operator-signature check sees the signer regardless of invocation shape. On an
-%% unclaimed node neither is signed and the request is used (the gate is
-%% permissive anyway).
-signed_subject(Base, Req, Opts) ->
-    case hb_message:signers(Req, Opts) of
-        [] ->
-            case hb_message:signers(Base, Opts) of
-                [] -> Req;
-                _ -> Base
-            end;
-        _ ->
-            Req
-    end.
-
 link_path(NormKey) ->
     << ?REF_CACHE/binary, "/", NormKey/binary >>.
-
-param(Base, Req, Keys, Opts) ->
-    case hb_maps:get_first(param_paths(Base, Req, Keys), not_found, Opts) of
-        Value when is_binary(Value), byte_size(Value) > 0 -> {ok, Value};
-        _ -> {error, {missing_required, hd(Keys)}}
-    end.
-
-param_paths(Base, Req, Keys) ->
-    lists:flatmap(
-        fun(Key) ->
-            [{Req, Key}, {Base, Key}]
-        end,
-        Keys
-    ).
-
-%% @doc All error outcomes are returned as `{ok, #{status => ...}}', not
-%% `{error, _}': see the note on `set/3' -- the reserved `set' verb's
-%% `hb_util:ok' wrapper throws on a bare `{error, _}'. The HTTP layer maps a
-%% non-2xx `status' to the response code regardless.
-unauthorized() ->
-    {ok, #{ <<"status">> => 403, <<"message">> => <<"Unauthorized.">> }}.
-
-error_response(not_found) ->
-    {ok, #{ <<"status">> => 404, <<"message">> => <<"Reference not found.">> }};
-error_response({missing_required, Key}) ->
-    {ok, #{
-        <<"status">> => 400,
-        <<"message">> => <<"Missing required field.">>,
-        <<"field">> => Key
-    }};
-error_response(Reason) ->
-    {ok, #{
-        <<"status">> => 500,
-        <<"message">> => hb_util:bin(io_lib:format("~p", [Reason]))
-    }}.
