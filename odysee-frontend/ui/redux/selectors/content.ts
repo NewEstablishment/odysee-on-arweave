@@ -15,6 +15,7 @@ import {
 import { makeSelectMediaTypeForUri } from 'redux/selectors/file_info';
 import { selectBalance } from 'redux/selectors/wallet';
 import { selectPendingUnlockedRestrictionsForUri } from 'redux/selectors/memberships';
+import { getClaimOutpoint } from 'util/claim';
 import * as RENDER_MODES from 'constants/file_render_modes';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import { FORCE_CONTENT_TYPE_PLAYER, FORCE_CONTENT_TYPE_COMIC } from 'constants/claim';
@@ -129,7 +130,7 @@ export const selectContentPositionForUri = (state: State, uri: string) => {
   const claim = selectClaimForUri(state, uri);
 
   if (claim) {
-    const outpoint = `${claim.txid}:${claim.nout}`;
+    const outpoint = getClaimOutpoint(claim);
     const id = claim.claim_id;
     const positions = selectState(state).positions;
     if (positions[id]) {

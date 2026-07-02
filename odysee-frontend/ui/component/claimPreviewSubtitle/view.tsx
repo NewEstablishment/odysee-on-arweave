@@ -35,7 +35,7 @@ function ClaimPreviewSubtitle(props: Props) {
   const lang = useAppSelector((state) => selectLanguage(state));
   const fetchSubCount = React.useCallback((id: string) => dispatch(doFetchSubCount(id)), [dispatch]);
   const isEmbed = React.useContext(EmbedContext);
-  const claimsInChannel = (claim && claim.meta.claims_in_channel) || 0;
+  const claimsInChannel = claim?.meta?.claims_in_channel || 0;
   const claimId = (claim && claim.claim_id) || '0';
   const formattedSubCount = subCount ? toCompactNotation(subCount, lang, 10000) : null;
   React.useEffect(() => {

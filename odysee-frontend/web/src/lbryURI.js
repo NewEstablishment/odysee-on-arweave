@@ -5,13 +5,14 @@ const __ = (msg) => msg;
 const isProduction = process.env.NODE_ENV === 'production';
 const channelNameMinLength = 1;
 const claimIdMaxLength = 40;
+const hyperbeamClaimIdLength = 43;
 // see https://spec.lbry.com/#urls
 const regexInvalidURI =
   /[ =&#:$@%?;/\\"<>%{}|^~[\]`\u{0000}-\u{0008}\u{000b}-\u{000c}\u{000e}-\u{001F}\u{D800}-\u{DFFF}\u{FFFE}-\u{FFFF}]/u; // eslint-disable-line no-control-regex
 // const regexAddress = /^(b|r)(?=[^0OIl]{32,33})[0-9A-Za-z]{32,33}$/;
 const regexPartProtocol = '^((?:lbry://)?)';
 const regexPartStreamOrChannelName = '([^:$#/]*)';
-const regexPartModifierSeparator = '([:$#]?)([0-9a-f]*)';
+const regexPartModifierSeparator = '([:$#]?)([0-9A-Za-z_-]*)';
 const queryStringBreaker = '^([\\S]+)([?][\\S]*)';
 const separateQuerystring = new RegExp(queryStringBreaker);
 const MOD_SEQUENCE_SEPARATOR = '*';
@@ -210,7 +211,7 @@ function parseURIModifier(modSeperator, modValue) {
     }
   }
 
-  if (claimId && (claimId.length > claimIdMaxLength || !claimId.match(/^[0-9a-f]+$/))) {
+  if (claimId && !isClaimIdModifierValid(claimId)) {
     const hashIndex = claimId.indexOf('#');
 
     if (hashIndex >= 0) {
@@ -242,6 +243,13 @@ function parseURIModifier(modSeperator, modValue) {
   }
 
   return [claimId, claimSequence, bidPosition, pathHash];
+}
+
+function isClaimIdModifierValid(claimId) {
+  return (
+    (claimId.length <= claimIdMaxLength && /^[0-9a-f]+$/.test(claimId)) ||
+    (claimId.length === hyperbeamClaimIdLength && /^[0-9A-Za-z_-]+$/.test(claimId))
+  );
 }
 
 /**

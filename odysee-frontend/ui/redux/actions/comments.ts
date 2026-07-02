@@ -31,7 +31,7 @@ import {
 import { makeSelectNotificationForCommentId } from 'redux/selectors/notifications';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { toHex } from 'util/hex';
-import { getChannelFromClaim } from 'util/claim';
+import { getChannelFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
@@ -40,6 +40,29 @@ const stripeEnvironment = getStripeEnvironment();
 const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
 const PROMISE_FULFILLED = 'fulfilled';
 const MENTION_REGEX = /(?:^| |\n)@[^\s=&#$@%?:;/"<>%{}|^~[]*(?::[\w]+)?/gm;
+
+function dispatchEmptyCommentList(
+  dispatch: Dispatch,
+  claimId: string,
+  uri: string,
+  parentId: string | null | undefined,
+  page: number
+) {
+  return dispatch({
+    type: ACTIONS.COMMENT_LIST_COMPLETED,
+    data: {
+      comments: [],
+      parentId,
+      totalItems: 0,
+      totalFilteredItems: 0,
+      totalPages: 0,
+      claimId,
+      uri,
+      page,
+    },
+  });
+}
+
 export function doCommentList(
   uri: string,
   parentId: string | null | undefined,
@@ -67,6 +90,11 @@ export function doCommentList(
         parentId,
       },
     });
+
+    if (isHyperbeamUploadClaim(claim)) {
+      return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
+    }
+
     const activeChannelClaim = selectActiveChannelClaim(state);
     const activeChannelId = activeChannelClaim?.claim_id;
     const isProtected = Boolean(selectProtectedContentTagForUri(state, uri));
@@ -155,6 +183,10 @@ export function doCommentList(
       })
       .catch((error) => {
         const { message } = error;
+
+        if (isHyperbeamUploadClaim(claim)) {
+          return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
+        }
 
         switch (message) {
           case 'comments are disabled by the creator':
@@ -376,6 +408,16 @@ export function doFetchMyCommentedChannels(claimId: string | null | undefined) {
     if (!contentClaimId || !myChannelClaims) {
       return;
     }
+    if (myChannelClaims.length === 0) {
+      dispatch({
+        type: ACTIONS.COMMENT_FETCH_MY_COMMENTED_CHANNELS_COMPLETE,
+        data: {
+          contentClaimId,
+          commentedChannelIds: [],
+        },
+      });
+      return;
+    }
 
     return Promise.all(myChannelClaims.map((x) => ChannelSign.sign(x.claim_id, x.name, true))).then((signatures) => {
       const params = [];
@@ -398,8 +440,8 @@ export function doFetchMyCommentedChannels(claimId: string | null | undefined) {
         .then((response) => {
           for (let i = 0; i < response.length; ++i) {
             if (response[i].status !== 'fulfilled') {
-              // Meaningless if it couldn't confirm history for all own channels.
-              return;
+              // Do not block comment submission forever if a history probe fails.
+              continue;
             }
 
             if ((response[i] as PromiseFulfilledResult<any>).value.total_items > 0) {
@@ -1636,6 +1678,27 @@ export function doCommentModUnBlockAsModerator(commenterUri: string, creatorUri:
 }
 const yieldThread = () => new Promise((resolve) => setTimeout(resolve));
 const normalizeUri = (uri: string) => uri && uri.replace(/:/g, '#');
+let modBlockedListInFlight: Promise<any> | null = null;
+let modDelegatesForMyChannelsInFlight: Promise<any> | null = null;
+let modAmIListInFlight: Promise<any> | null = null;
+
+async function allSettledSequential(items, fn) {
+  const results = [];
+
+  for (let i = 0; i < items.length; ++i) {
+    try {
+      results.push({ status: PROMISE_FULFILLED, value: await fn(items[i]) });
+    } catch (reason) {
+      results.push({ status: 'rejected', reason });
+    }
+
+    if (i < items.length - 1) {
+      await yieldThread();
+    }
+  }
+
+  return results;
+}
 
 export function doFetchModBlockedList() {
   return async (dispatch: Dispatch, getState: GetState) => {
@@ -1651,24 +1714,28 @@ export function doFetchModBlockedList() {
       return;
     }
 
+    if (modBlockedListInFlight) {
+      return modBlockedListInFlight;
+    }
+
     dispatch({
       type: ACTIONS.COMMENT_MODERATION_BLOCK_LIST_STARTED,
     });
     let channelSignatures = [];
-    return Promise.all(myChannels.map((channel) => channelSignName(channel.claim_id, channel.name, true)))
+    modBlockedListInFlight = Promise.all(
+      myChannels.map((channel) => channelSignName(channel.claim_id, channel.name, true))
+    )
       .then((response) => {
         channelSignatures = response;
-        return Promise.allSettled(
-          channelSignatures
-            .filter((x) => x !== undefined && x !== null)
-            .map((signatureData) =>
-              Comments.moderation_block_list({
-                mod_channel_id: signatureData.claim_id,
-                mod_channel_name: signatureData.name,
-                signature: signatureData.signature,
-                signing_ts: signatureData.signing_ts,
-              } as unknown as BlockedListArgs)
-            )
+        return allSettledSequential(
+          channelSignatures.filter((x) => x !== undefined && x !== null).map((signatureData) => signatureData),
+          (signatureData) =>
+            Comments.moderation_block_list({
+              mod_channel_id: signatureData.claim_id,
+              mod_channel_name: signatureData.name,
+              signature: signatureData.signature,
+              signing_ts: signatureData.signing_ts,
+            } as unknown as BlockedListArgs)
         )
           .then(async (res) => {
             let personalBlockList = [];
@@ -1814,7 +1881,11 @@ export function doFetchModBlockedList() {
         dispatch({
           type: ACTIONS.COMMENT_MODERATION_BLOCK_LIST_FAILED,
         });
+      })
+      .finally(() => {
+        modBlockedListInFlight = null;
       });
+    return modBlockedListInFlight;
   };
 }
 export const doUpdateBlockListForPublishedChannel = (channelClaim: ChannelClaim) => {
@@ -2018,27 +2089,31 @@ export function doCommentModListDelegatesForMyChannels() {
       return;
     }
 
+    if (modDelegatesForMyChannelsInFlight) {
+      return modDelegatesForMyChannelsInFlight;
+    }
+
     dispatch({
       type: ACTIONS.COMMENT_MODERATION_DELEGATES_FOR_MY_CHANNELS_STARTED,
     });
     let channelSignatures = [];
-    return Promise.all(myChannels.map((channel) => channelSignName(channel.claim_id, channel.name, true)))
+    modDelegatesForMyChannelsInFlight = Promise.all(
+      myChannels.map((channel) => channelSignName(channel.claim_id, channel.name, true))
+    )
       .then((response) => {
         channelSignatures = response;
-        return Promise.allSettled(
-          channelSignatures
-            .filter((x) => x !== undefined && x !== null)
-            .map((signatureData) =>
-              Comments.moderation_list_delegates({
-                channel_name: signatureData.name,
-                channel_id: signatureData.claim_id,
-                signature: signatureData.signature,
-                signing_ts: signatureData.signing_ts,
-              }).then((value) => ({
-                signatureData,
-                value,
-              }))
-            )
+        return allSettledSequential(
+          channelSignatures.filter((x) => x !== undefined && x !== null).map((signatureData) => signatureData),
+          (signatureData) =>
+            Comments.moderation_list_delegates({
+              channel_name: signatureData.name,
+              channel_id: signatureData.claim_id,
+              signature: signatureData.signature,
+              signing_ts: signatureData.signing_ts,
+            }).then((value) => ({
+              signatureData,
+              value,
+            }))
         )
           .then((results) => {
             const delegatesById = {};
@@ -2064,7 +2139,11 @@ export function doCommentModListDelegatesForMyChannels() {
         dispatch({
           type: ACTIONS.COMMENT_MODERATION_DELEGATES_FOR_MY_CHANNELS_FAILED,
         });
+      })
+      .finally(() => {
+        modDelegatesForMyChannelsInFlight = null;
       });
+    return modDelegatesForMyChannelsInFlight;
   };
 }
 export function doFetchCommentModAmIList(channelClaim?: ChannelClaim) {
@@ -2079,24 +2158,26 @@ export function doFetchCommentModAmIList(channelClaim?: ChannelClaim) {
       return;
     }
 
+    if (modAmIListInFlight) {
+      return modAmIListInFlight;
+    }
+
     dispatch({
       type: ACTIONS.COMMENT_MODERATION_AM_I_LIST_STARTED,
     });
     let channelSignatures = [];
-    return Promise.all(myChannels.map((channel) => channelSignName(channel.claim_id, channel.name, true)))
+    modAmIListInFlight = Promise.all(myChannels.map((channel) => channelSignName(channel.claim_id, channel.name, true)))
       .then((response) => {
         channelSignatures = response;
-        return Promise.allSettled(
-          channelSignatures
-            .filter((x) => x !== undefined && x !== null)
-            .map((signatureData) =>
-              Comments.moderation_am_i({
-                channel_name: signatureData.name,
-                channel_id: signatureData.claim_id,
-                signature: signatureData.signature,
-                signing_ts: signatureData.signing_ts,
-              })
-            )
+        return allSettledSequential(
+          channelSignatures.filter((x) => x !== undefined && x !== null).map((signatureData) => signatureData),
+          (signatureData) =>
+            Comments.moderation_am_i({
+              channel_name: signatureData.name,
+              channel_id: signatureData.claim_id,
+              signature: signatureData.signature,
+              signing_ts: signatureData.signing_ts,
+            })
         )
           .then((results) => {
             const delegatorsById = {};
@@ -2125,7 +2206,11 @@ export function doFetchCommentModAmIList(channelClaim?: ChannelClaim) {
         dispatch({
           type: ACTIONS.COMMENT_MODERATION_AM_I_LIST_FAILED,
         });
+      })
+      .finally(() => {
+        modAmIListInFlight = null;
       });
+    return modAmIListInFlight;
   };
 }
 export const doFetchCreatorSettings = (channelId: string) => {

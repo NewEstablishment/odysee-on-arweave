@@ -20,6 +20,9 @@ import { doFetchSubCount, selectSubCountForUri } from 'lbryinc';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { getClaimTitle } from 'util/claim';
 
+const RETRY_COUNT_MAX = 6;
+const RETRY_INTERVAL_MS = 5000;
+
 type Props = {
   uri: string;
   nsfw?: boolean;
@@ -47,9 +50,29 @@ export default function FileTitleSection(props: Props) {
   const title = getClaimTitle(claim);
   const subCount = useAppSelector((state) => channelUri && selectSubCountForUri(state, channelUri));
   const isMobile = useIsMobile();
+  const retryCountRef = React.useRef(0);
+
   React.useEffect(() => {
     if (channelClaimId) dispatch(doFetchSubCount(channelClaimId));
   }, [channelClaimId, dispatch]);
+
+  React.useEffect(() => {
+    retryCountRef.current = 0;
+  }, [channelClaimId]);
+
+  React.useEffect(() => {
+    if (!channelClaimId || Number.isInteger(subCount) || retryCountRef.current >= RETRY_COUNT_MAX) {
+      return;
+    }
+
+    const retryTimer = window.setTimeout(() => {
+      retryCountRef.current += 1;
+      dispatch(doFetchSubCount(channelClaimId));
+    }, RETRY_INTERVAL_MS);
+
+    return () => window.clearTimeout(retryTimer);
+  }, [channelClaimId, dispatch, subCount]);
+
   return (
     <Card
       isPageTitle

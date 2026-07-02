@@ -574,6 +574,84 @@ http_auth_test() ->
         signers_from_commitments_response(Resp3, ServerWallet)
     ).
 
+odysee_auth_token_test() ->
+    % Start a node with the `~odysee-auth@1.0' device as the secret-provider.
+    % The hook is triggered by the posted `!' commit key; the Odysee auth token
+    % is used only by the provider to derive the signing secret.
+    Node =
+        hb_http_server:start_node(
+            #{
+                <<"priv-wallet">> => ServerWallet = ar_wallet:new(),
+                <<"on">> => #{
+                    <<"request">> => #{
+                        <<"device">> => <<"auth-hook@1.0">>,
+                        <<"path">> => <<"request">>,
+                        <<"when">> => #{
+                            <<"keys">> => [<<"!">>]
+                        },
+                        <<"secret-provider">> =>
+                            #{
+                                <<"device">> => <<"odysee-auth@1.0">>,
+                                <<"access-control">> =>
+                                    #{ <<"device">> => <<"odysee-auth@1.0">> }
+                            }
+                    }
+                }
+            }
+        ),
+    Resp1 =
+        hb_http:get(
+            Node,
+            #{
+                <<"path">> => <<"commitments">>,
+                <<"body">> => <<"Test data">>,
+                <<"!">> => true
+            },
+            #{}
+        ),
+    ?assertMatch(
+        {error, #{ <<"status">> := 401, <<"www-authenticate">> := _ }},
+        Resp1
+    ),
+    Cookie = <<"auth_token=odysee-test-token">>,
+    Resp2 =
+        hb_http:get(
+            Node,
+            #{
+                <<"path">> => <<"commitments">>,
+                <<"body">> => <<"Test data">>,
+                <<"cookie">> => Cookie,
+                <<"!">> => true,
+                <<"iterations">> => 1,
+                <<"key-length">> => 32
+            },
+            #{}
+        ),
+    ?assertMatch(
+        {ok, #{ <<"status">> := 200 }},
+        Resp2
+    ),
+    Signers = signers_from_commitments_response(hb_util:ok(Resp2), ServerWallet),
+    ?assertEqual(1, length(Signers)),
+    [Signer] = Signers,
+    Resp3 =
+        hb_http:get(
+            Node,
+            #{
+                <<"path">> => <<"commitments">>,
+                <<"body">> => <<"Test data2">>,
+                <<"cookie">> => Cookie,
+                <<"!">> => true,
+                <<"iterations">> => 1,
+                <<"key-length">> => 32
+            },
+            #{}
+        ),
+    ?assertEqual(
+        [Signer],
+        signers_from_commitments_response(hb_util:ok(Resp3), ServerWallet)
+    ).
+
 chained_preprocess_test() ->
     % Start a node with the `~http-auth@1.0' device as the secret-provider, with
     % a router chained afterwards in the request hook.

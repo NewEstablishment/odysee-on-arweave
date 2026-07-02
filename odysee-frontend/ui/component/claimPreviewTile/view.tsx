@@ -28,7 +28,7 @@ import CollectionPreviewOverlay from 'component/collectionPreviewOverlay';
 import { FYP_ID } from 'constants/urlParams';
 import * as PAGES from 'constants/pages';
 import { EmbedContext } from 'contexts/embed';
-import { isClaimNsfw, isClaimShort, isStreamPlaceholderClaim } from 'util/claim';
+import { isClaimNsfw, isClaimShort, isHyperbeamUploadClaim, isStreamPlaceholderClaim } from 'util/claim';
 import formatMediaDuration from 'util/formatMediaDuration';
 import type { HomepageTitles } from 'util/buildHomepage';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -103,6 +103,7 @@ function ClaimPreviewTile(props: Props) {
     isLivestream && uri ? selectIsActiveLivestreamForUri(state, uri) : false
   );
   const viewCount = useAppSelector((state) => selectViewCountForUri(state, uri));
+  const effectiveViewCount = isHyperbeamUploadClaim(claim) ? 0 : viewCount;
   const disableShortsView = useAppSelector((state) => selectClientSetting(state, SETTINGS.DISABLE_SHORTS_VIEW));
   const firstCollectionItemUrl = useAppSelector((state) =>
     claim && isCollection ? selectFirstItemUrlForCollection(state, claim.claim_id) : undefined
@@ -152,7 +153,13 @@ function ClaimPreviewTile(props: Props) {
   const channelUri = !isChannel ? signingChannel && signingChannel.permanent_url : claim && claim.permanent_url;
   const channelTitle = signingChannel && ((signingChannel.value && signingChannel.value.title) || signingChannel.name);
   const isChannelPage = React.useContext(ChannelPageContext);
-  const shouldShowViewCount = !(!viewCount || (claim && claim.repost_url) || isLivestream || !isChannelPage);
+  const shouldShowViewCount = !(
+    effectiveViewCount === undefined ||
+    effectiveViewCount === null ||
+    (claim && claim.repost_url) ||
+    isLivestream ||
+    !isChannelPage
+  );
   const ariaLabelData = isChannel
     ? title
     : formatClaimPreviewTitle(title, channelTitle, date ? date.getTime() : null, mediaDuration);
@@ -203,6 +210,25 @@ function ClaimPreviewTile(props: Props) {
     return null;
   }
 
+  const hyperbeamTraceAttrs =
+    claim && claim.claim_id
+      ? {
+          'data-hyperbeam-claim-id': claim.claim_id,
+          'data-hyperbeam-immutable-id': claim.immutable_id || claim.outpoint,
+          'data-hyperbeam-store-path': claim.immutable_store_path,
+          'data-hyperbeam-claim-txid': claim.txid,
+          'data-hyperbeam-claim-nout': claim.nout,
+          'data-hyperbeam-claim-sd-hash': claim.value?.source?.sd_hash,
+          'data-hyperbeam-claim-uri': canonicalUrl || claim.permanent_url || uri,
+          'data-hyperbeam-claim-title': title || claim.name,
+          'data-hyperbeam-claim-type': claim.value_type,
+          'data-hyperbeam-signing-channel-id': claim.signing_channel?.claim_id,
+          'data-hyperbeam-signing-channel-uri':
+            claim.signing_channel?.canonical_url || claim.signing_channel?.permanent_url,
+          'data-hyperbeam-signing-channel-title': channelTitle || claim.signing_channel?.name,
+        }
+      : {};
+
   if (placeholder || claim === undefined) {
     return (
       <li
@@ -236,6 +262,7 @@ function ClaimPreviewTile(props: Props) {
 
   return (
     <li
+      {...hyperbeamTraceAttrs}
       onClick={handleClick}
       onMouseEnter={() => setTileHover(true)}
       onMouseLeave={() => setTileHover(false)}

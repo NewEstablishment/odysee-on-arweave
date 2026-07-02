@@ -32,14 +32,14 @@ function ModalError(props: Props) {
     // https://github.com/lbryio/lbry-sdk/issues/1118
     // The sdk logs failed downloads, they happen so often that it's mostly noise in the desktop logs
     // The thumbnail error shouldn't be routed here, but it's troublesome to create a different path.
-    let errorMessage = typeof error === 'string' ? error : error.message;
+    let errorMessage = cleanErrorText(typeof error === 'string' ? error : error.message);
     const skipLog =
       (errorMessage && errorMessage.startsWith('Failed to download')) ||
       /^Thumbnail size over (.*)MB, please edit and reupload.$/.test(errorMessage);
 
     if (typeof error !== 'string' && error.cause) {
       try {
-        errorMessage += ' => ' + (JSON.stringify(error.cause, null, '\t') || '');
+        errorMessage += ' => ' + cleanErrorText(JSON.stringify(error.cause, null, '\t') || '');
       } catch (e) {
         console.error(e); // eslint-disable-line no-console
       }
@@ -79,7 +79,8 @@ function ModalError(props: Props) {
     const label = errorKeyLabels[key];
 
     if (label !== 'skip') {
-      const val = typeof errorObj[key] === 'string' ? errorObj[key] : JSON.stringify(errorObj[key]);
+      const rawVal = typeof errorObj[key] === 'string' ? errorObj[key] : JSON.stringify(errorObj[key]);
+      const val = cleanErrorText(rawVal);
       errorInfoList.push(
         <li key={key}>
           <strong>{label}</strong>: {val}
@@ -98,6 +99,12 @@ function ModalError(props: Props) {
       <ul className="error-modal__error-list ul--no-style">{errorInfoList}</ul>
     </Modal>
   );
+}
+
+function cleanErrorText(value) {
+  if (typeof value !== 'string') return value;
+  if (/<!doctype html|<html[\s>]/i.test(value)) return 'Received an HTML response instead of JSON';
+  return value;
 }
 
 export default ModalError;

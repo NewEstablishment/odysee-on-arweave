@@ -1,6 +1,8 @@
 import React from 'react';
 import { sanitizeHyperbeamDebugValue, sanitizeHyperbeamDebugUrl, type HyperbeamDebugEvent } from 'util/hyperbeamDebug';
+import { fetchHyperbeamAccountSdk } from 'util/hyperbeam';
 import { HYPERBEAM_DEVICE, hyperbeamDeviceUrl } from 'util/hyperbeamDevices';
+import { getAuthToken } from 'util/saved-passwords';
 
 type TraceStatus = 'pending' | 'running' | 'ok' | 'warn' | 'failed' | 'skipped';
 type TraceKind = 'input' | 'locator' | 'source' | 'facade' | 'transport';
@@ -17,6 +19,22 @@ type TraceStep = {
   response?: any;
 };
 
+const AUTH_TRACE_TARGET = 'auth:~odysee-account@1.0/preference-get:enable-sync';
+const SEARCH_TRACE_TARGET = 'search:~odysee-search@1.0/query';
+
+export type TraceFocus = {
+  kind: 'auth' | 'claim' | 'search';
+  label: string;
+  target: string;
+  nativeUpload?: boolean;
+  claimId?: string;
+  txid?: string;
+  nout?: string;
+  sdHash?: string;
+  devicePath?: string;
+  requestKey?: string;
+};
+
 type DiscoveredClaim = {
   key: string;
   label: string;
@@ -25,7 +43,7 @@ type DiscoveredClaim = {
   txid?: string;
   nout?: string;
   sdHash?: string;
-  provenance: 'page' | 'visible' | 'observed';
+  provenance: 'page' | 'visible' | 'loaded' | 'observed';
   source: string;
   valueType?: string;
   isOwnChannel?: boolean;
@@ -33,7 +51,13 @@ type DiscoveredClaim = {
   summary?: any;
 };
 
-export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEvent> }) {
+export default function ClaimTrace({
+  events,
+  onActiveTraceChange,
+}: {
+  events: Array<HyperbeamDebugEvent>;
+  onActiveTraceChange?: (focus: TraceFocus | null) => void;
+}) {
   const [renderedClaimVersion, setRenderedClaimVersion] = React.useState(0);
   const discoveredClaims = React.useMemo(() => discoverClaims(events), [events, renderedClaimVersion]);
   const pageClaims = discoveredClaims.filter((claim) => claim.provenance !== 'observed');
@@ -41,9 +65,22 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
   const [target, setTarget] = React.useState('');
   const [steps, setSteps] = React.useState<Array<TraceStep>>(() => initialSteps(''));
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
+  const [profile, setProfile] = React.useState<{
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  }>({ status: 'pending', detail: 'loading authenticated account preference' });
+  const searchProfile = React.useMemo(() => searchTraceProfile(events), [events, renderedClaimVersion]);
+  const hasSearchTrace = searchProfile.status !== 'pending';
   const materializedEvidence = React.useRef<Set<string>>(new Set());
-  const displayedClaims = pageClaims.length === 0 ? observedClaims : pageClaims;
-  const displayedClaimLabel = pageClaims.length === 0 ? 'current page responses' : 'page / visible';
+  const priorityClaims = pageClaims.filter((claim) => claim.provenance === 'page' || claim.provenance === 'visible');
+  const displayedClaims = orderDisplayedClaims(priorityClaims.length !== 0 ? priorityClaims : observedClaims);
+  const displayedClaimLabel =
+    priorityClaims.length !== 0
+      ? 'visible page claims'
+      : observedClaims.length !== 0
+        ? 'current page responses'
+        : 'visible page claims';
   const selectedClaim = React.useMemo(
     () => discoveredClaims.find((claim) => claim.traceTarget === target),
     [discoveredClaims, target]
@@ -61,7 +98,14 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-hyperbeam-claim-id'],
+      attributeFilter: [
+        'data-hyperbeam-claim-id',
+        'data-hyperbeam-immutable-id',
+        'data-hyperbeam-store-path',
+        'data-hyperbeam-claim-txid',
+        'data-hyperbeam-claim-nout',
+        'data-hyperbeam-claim-sd-hash',
+      ],
     });
     const timer = window.setTimeout(bump, 1000);
     bump();
@@ -73,17 +117,17 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
   }, []);
 
   React.useEffect(() => {
-    if (target || discoveredClaims.length === 0) return;
-    const firstClaim = pageClaims[0] || observedClaims[0];
-    if (!firstClaim) return;
-    setTarget(firstClaim.traceTarget);
-    setSteps(initialSteps(firstClaim.traceTarget, firstClaim, events));
-  }, [discoveredClaims.length, events, observedClaims, pageClaims, target]);
-
-  React.useEffect(() => {
+    if (target === AUTH_TRACE_TARGET) {
+      setSteps(authTraceSteps(profile, events));
+      return;
+    }
+    if (target === SEARCH_TRACE_TARGET) {
+      setSteps(searchTraceSteps(searchProfile, events));
+      return;
+    }
     if (!target || !selectedClaim) return;
     setSteps(initialSteps(target, selectedClaim, events));
-  }, [events, selectedClaim, target]);
+  }, [events, profile, searchProfile, selectedClaim, target]);
 
   React.useEffect(() => {
     if (!selectedClaim) return;
@@ -92,10 +136,16 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
     const enqueue = (key: string, url: string) => {
       if (!url || materializedEvidence.current.has(key)) return;
       materializedEvidence.current.add(key);
-      requests.push(fetch(url, { headers: { accept: 'application/json' } }).catch(() => null));
+      requests.push(
+        fetch(url, { headers: { accept: 'application/json', 'x-hyperbeam-debug-trace': 'claim-evidence' } }).catch(
+          () => null
+        )
+      );
     };
 
-    if (selectedClaim.txid && !cachedSourceObservation(events, selectedClaim.txid)) {
+    const nativeUpload = isHyperbeamUploadTraceClaim(selectedClaim);
+
+    if (!nativeUpload && selectedClaim.txid && !cachedSourceObservation(events, selectedClaim.txid)) {
       enqueue(
         `tx:${selectedClaim.txid}`,
         hyperbeamDeviceUrl(HYPERBEAM_DEVICE.claim, 'transaction', { txid: selectedClaim.txid })
@@ -103,6 +153,7 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
     }
 
     if (
+      !nativeUpload &&
       selectedClaim.valueType === 'stream' &&
       selectedClaim.sdHash &&
       !cachedSourceObservation(events, selectedClaim.sdHash)
@@ -116,13 +167,75 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
     if (requests.length !== 0) Promise.allSettled(requests);
   }, [events, selectedClaim]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    setProfile({ status: 'running', detail: 'requesting authenticated account preference' });
+
+    if (!getAuthToken()) {
+      setProfile({ status: 'skipped', detail: 'no auth token available' });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    fetchHyperbeamAccountSdk('preference_get', { key: 'enable-sync' })
+      .then((response) => {
+        if (cancelled) return;
+        setProfile({
+          status: response !== null ? 'ok' : 'warn',
+          detail: response !== null ? 'authenticated account preference loaded' : 'no account preference returned',
+          response: profileSummary(response),
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setProfile({
+          status: 'failed',
+          detail: String(error?.message || error),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selectClaim = React.useCallback(
     (claim: DiscoveredClaim) => {
+      if (target === claim.traceTarget) {
+        setTarget('');
+        setSteps(initialSteps(''));
+        onActiveTraceChange?.(null);
+        return;
+      }
       setTarget(claim.traceTarget);
       setSteps(initialSteps(claim.traceTarget, claim, events));
+      onActiveTraceChange?.(claimTraceFocus(claim));
     },
-    [events]
+    [events, onActiveTraceChange, target]
   );
+  const selectProfile = React.useCallback(() => {
+    if (target === AUTH_TRACE_TARGET) {
+      setTarget('');
+      setSteps(initialSteps(''));
+      onActiveTraceChange?.(null);
+      return;
+    }
+    setTarget(AUTH_TRACE_TARGET);
+    setSteps(authTraceSteps(profile, events));
+    onActiveTraceChange?.(authTraceFocus(profile.status));
+  }, [events, onActiveTraceChange, profile, target]);
+  const selectSearch = React.useCallback(() => {
+    if (target === SEARCH_TRACE_TARGET) {
+      setTarget('');
+      setSteps(initialSteps(''));
+      onActiveTraceChange?.(null);
+      return;
+    }
+    setTarget(SEARCH_TRACE_TARGET);
+    setSteps(searchTraceSteps(searchProfile, events));
+    onActiveTraceChange?.(searchTraceFocus(searchProfile.status));
+  }, [events, onActiveTraceChange, searchProfile, target]);
 
   return (
     <div
@@ -134,12 +247,11 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
         minWidth: 0,
         width: '100%',
         boxSizing: 'border-box',
-        borderTop: '1px solid rgba(255,255,255,0.12)',
         padding: '8px 9px 9px',
         background: 'rgba(255,255,255,0.025)',
       }}
     >
-      {displayedClaims.length !== 0 && (
+      {(displayedClaims.length !== 0 || profile) && (
         <div
           style={{
             display: 'grid',
@@ -155,7 +267,18 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
             background: 'rgba(0,0,0,0.1)',
           }}
         >
-          <ClaimGroup label={displayedClaimLabel} claims={displayedClaims} target={target} onSelect={selectClaim} />
+          <ClaimGroup
+            label={displayedClaimLabel}
+            claims={displayedClaims}
+            target={target}
+            onSelect={selectClaim}
+            profile={profile}
+            profileSelected={target === AUTH_TRACE_TARGET}
+            onSelectProfile={selectProfile}
+            search={hasSearchTrace ? searchProfile : undefined}
+            searchSelected={target === SEARCH_TRACE_TARGET}
+            onSelectSearch={selectSearch}
+          />
         </div>
       )}
       <div
@@ -283,24 +406,211 @@ export default function ClaimTrace({ events }: { events: Array<HyperbeamDebugEve
   );
 }
 
+function claimTraceFocus(claim: DiscoveredClaim): TraceFocus {
+  return {
+    kind: 'claim',
+    label: claim.label,
+    target: claim.traceTarget,
+    nativeUpload: isHyperbeamUploadTraceClaim(claim),
+    claimId: claim.claimId,
+    txid: claim.txid,
+    nout: claim.nout,
+    sdHash: claim.sdHash,
+  };
+}
+
+function authTraceFocus(status: TraceStatus): TraceFocus {
+  return {
+    kind: 'auth',
+    label: `auth preference_get enable-sync · ${status}`,
+    target: AUTH_TRACE_TARGET,
+    devicePath: '/~odysee-account@1.0/preference-get',
+    requestKey: 'enable-sync',
+  };
+}
+
+function searchTraceFocus(status: TraceStatus): TraceFocus {
+  return {
+    kind: 'search',
+    label: `search ~odysee-search@1.0/query · ${status}`,
+    target: SEARCH_TRACE_TARGET,
+    devicePath: '/~odysee-search@1.0/query',
+    requestKey: 'search:',
+  };
+}
+
+function ProfileTraceRow({
+  onSelect,
+  profile,
+  selected,
+}: {
+  onSelect: () => void;
+  profile: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  };
+  selected: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title="authenticated account preference request"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '76px 54px minmax(0, 1fr) minmax(92px, 148px)',
+        gap: 6,
+        alignItems: 'center',
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        border: `1px solid ${selected ? 'rgba(14,165,233,0.74)' : 'rgba(255,255,255,0.1)'}`,
+        borderRadius: 4,
+        padding: '3px 5px',
+        background: selected ? 'rgba(14,165,233,0.18)' : 'rgba(255,255,255,0.04)',
+        color: '#f9fafb',
+        cursor: 'pointer',
+        font: 'inherit',
+        textAlign: 'left',
+      }}
+    >
+      <span style={{ color: '#22c55e', overflow: 'hidden', textOverflow: 'ellipsis' }}>auth</span>
+      <span
+        style={{
+          color: '#94a3b8',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        user
+      </span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        user profile / account preference
+        {profile.detail ? ` · ${profile.detail}` : ''}
+      </span>
+      <span
+        style={{
+          color: statusColor(profile.status),
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {profile.status}
+      </span>
+    </button>
+  );
+}
+
+function SearchTraceRow({
+  onSelect,
+  search,
+  selected,
+}: {
+  onSelect: () => void;
+  search?: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  };
+  selected: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title="HyperBEAM search request"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '76px 54px minmax(0, 1fr) minmax(92px, 148px)',
+        gap: 6,
+        alignItems: 'center',
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        border: `1px solid ${selected ? 'rgba(14,165,233,0.74)' : 'rgba(255,255,255,0.1)'}`,
+        borderRadius: 4,
+        padding: '3px 5px',
+        background: selected ? 'rgba(14,165,233,0.18)' : 'rgba(255,255,255,0.04)',
+        color: '#f9fafb',
+        cursor: 'pointer',
+        font: 'inherit',
+        textAlign: 'left',
+      }}
+    >
+      <span style={{ color: '#0ea5e9', overflow: 'hidden', textOverflow: 'ellipsis' }}>search</span>
+      <span
+        style={{
+          color: '#94a3b8',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        query
+      </span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        local search / Meilisearch
+        {search.detail ? ` · ${search.detail}` : ''}
+      </span>
+      <span
+        style={{
+          color: statusColor(search.status),
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {search.status}
+      </span>
+    </button>
+  );
+}
+
 function ClaimGroup({
   claims,
   label,
   onSelect,
+  onSelectProfile,
+  onSelectSearch,
+  profile,
+  profileSelected,
+  search,
+  searchSelected,
   target,
 }: {
   claims: Array<DiscoveredClaim>;
   label: string;
   onSelect: (claim: DiscoveredClaim) => void;
+  onSelectProfile: () => void;
+  onSelectSearch: () => void;
+  profile: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  };
+  profileSelected: boolean;
+  search: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  };
+  searchSelected: boolean;
   target: string;
 }) {
-  if (claims.length === 0) return null;
-
   return (
     <>
       <div style={{ color: 'rgba(255,255,255,0.46)', padding: '2px 2px 0' }}>
-        {label} {claims.length}
+        {label} {claims.length + 1 + (search ? 1 : 0)}
       </div>
+      <ProfileTraceRow profile={profile} selected={profileSelected} onSelect={onSelectProfile} />
+      {search && <SearchTraceRow search={search} selected={searchSelected} onSelect={onSelectSearch} />}
       {claims.map((claim) => (
         <button
           key={claim.key}
@@ -390,6 +700,17 @@ function discoverClaims(events: Array<HyperbeamDebugEvent>): Array<DiscoveredCla
       traceTarget: claim.traceTarget,
     }).forEach((alias) => claims.set(alias, claim));
   });
+
+  if (context.currentPathClaim) {
+    claimAliases({
+      claimId: context.currentPathClaim.claimId,
+      txid: context.currentPathClaim.txid,
+      nout: context.currentPathClaim.nout,
+      sdHash: context.currentPathClaim.sdHash,
+      urls: [context.currentPathClaim.traceTarget],
+      traceTarget: context.currentPathClaim.traceTarget,
+    }).forEach((alias) => claims.set(alias, context.currentPathClaim));
+  }
 
   events.forEach((event) => {
     const data = event.data || {};
@@ -590,7 +911,9 @@ function shouldReplaceClaim(existing: DiscoveredClaim, next: DiscoveredClaim) {
   const existingRank = provenanceRank(existing.provenance);
   const nextRank = provenanceRank(next.provenance);
   if (nextRank !== existingRank) return nextRank < existingRank;
-  if (existing.source === 'visible-page' && next.source !== 'visible-page') return true;
+  const existingSourceRank = sourceRank(existing);
+  const nextSourceRank = sourceRank(next);
+  if (nextSourceRank !== existingSourceRank) return nextSourceRank < existingSourceRank;
   return next.label.length > existing.label.length && existing.label === existing.traceTarget;
 }
 
@@ -627,6 +950,7 @@ type PageClaimContext = {
   currentPath: string;
   currentUrl: string;
   currentChannelPrefix: string;
+  currentPathClaim: DiscoveredClaim | null;
   pageChannelIds: Set<string>;
   myChannelIds: Set<string>;
   renderedClaims: Array<DiscoveredClaim>;
@@ -640,6 +964,7 @@ function pageClaimContext(): PageClaimContext {
       currentPath: '',
       currentUrl: '',
       currentChannelPrefix: '',
+      currentPathClaim: null,
       pageChannelIds: new Set(),
       myChannelIds: new Set(),
       renderedClaims: [],
@@ -654,6 +979,7 @@ function pageClaimContext(): PageClaimContext {
     currentPath,
     currentUrl: normalizeComparable(window.location.href),
     currentChannelPrefix: channelPrefixFromPath(currentPath),
+    currentPathClaim: claimFromCurrentPath(),
     pageChannelIds: new Set(),
     myChannelIds,
     renderedClaims: renderedPageClaims(),
@@ -666,63 +992,128 @@ function channelPrefixFromPath(path: string) {
   return firstSegment.startsWith('@') && firstSegment.includes(':') ? `/${firstSegment}` : '';
 }
 
+function claimFromCurrentPath(): DiscoveredClaim | null {
+  if (typeof window === 'undefined') return null;
+
+  const segments = window.location.pathname.split('/').filter(Boolean);
+  const lastSegment = segments[segments.length - 1] || '';
+  const match = lastSegment.match(/^(.+):([0-9A-Za-z_-]{20,})$/);
+  if (!match) return null;
+
+  const claimId = match[2];
+  const title = decodeComparable(match[1]);
+  return {
+    key: `claim:${claimId}`,
+    label: limitLabel(title),
+    traceTarget: claimId,
+    claimId,
+    provenance: 'page',
+    source: 'current-url',
+    valueType: 'stream',
+    order: -1,
+    summary: sanitizeHyperbeamDebugValue({
+      title,
+      claim_id: claimId,
+      immutable_id: claimId,
+      value_type: 'stream',
+      canonical_url: window.location.pathname,
+    }),
+  };
+}
+
 function renderedPageClaims(): Array<DiscoveredClaim> {
   if (typeof document === 'undefined') return [];
 
   const claims = new Map<string, DiscoveredClaim>();
-  document.querySelectorAll('[data-hyperbeam-claim-id]').forEach((element, order) => {
-    const htmlElement = element as HTMLElement;
-    if (!isVisibleElement(htmlElement)) return;
+  document
+    .querySelectorAll('[data-hyperbeam-claim-id], [data-hyperbeam-immutable-id], [data-hyperbeam-store-path]')
+    .forEach((element, order) => {
+      const htmlElement = element as HTMLElement;
+      if (!isVisibleElement(htmlElement)) return;
+      const onScreen = isElementInViewport(htmlElement);
 
-    const claimId = htmlElement.dataset.hyperbeamClaimId;
-    const txid = htmlElement.dataset.hyperbeamClaimTxid;
-    const nout = htmlElement.dataset.hyperbeamClaimNout;
-    const sdHash = htmlElement.dataset.hyperbeamClaimSdHash;
-    const uri = htmlElement.dataset.hyperbeamClaimUri || '';
-    const title = htmlElement.dataset.hyperbeamClaimTitle || uri || claimId || '';
-    const valueType = htmlElement.dataset.hyperbeamClaimType;
-    if (!claimId || !isResolvedPageClaim(valueType)) return;
+      const claimId = htmlElement.dataset.hyperbeamClaimId;
+      const immutableId = htmlElement.dataset.hyperbeamImmutableId;
+      const storePath = htmlElement.dataset.hyperbeamStorePath;
+      const txid = htmlElement.dataset.hyperbeamClaimTxid;
+      const nout = htmlElement.dataset.hyperbeamClaimNout;
+      const sdHash = htmlElement.dataset.hyperbeamClaimSdHash;
+      const uri = htmlElement.dataset.hyperbeamClaimUri || '';
+      const title = htmlElement.dataset.hyperbeamClaimTitle || uri || claimId || immutableId || storePath || '';
+      const valueType = htmlElement.dataset.hyperbeamClaimType;
+      const stableId = claimId || immutableId || storePath;
+      if (!stableId || !isResolvedPageClaim(valueType)) return;
 
-    const traceTarget = txid && nout !== undefined && nout !== '' ? `${txid}:${nout}` : claimId || uri;
-    const key = `claim:${claimId}`;
-    if (claims.has(key)) return;
+      const traceTarget =
+        txid && nout !== undefined && nout !== '' ? `${txid}:${nout}` : immutableId || claimId || storePath || uri;
+      const key = `claim:${stableId}`;
+      if (claims.has(key)) return;
 
-    claims.set(key, {
-      key,
-      label: limitLabel(title),
-      traceTarget,
-      claimId,
-      txid,
-      nout,
-      sdHash,
-      provenance: renderedClaimProvenance(uri),
-      source: 'rendered-claim-preview',
-      valueType,
-      order,
-      summary: sanitizeHyperbeamDebugValue({
-        title,
-        claim_id: claimId,
-        value_type: valueType,
+      claims.set(key, {
+        key,
+        label: limitLabel(title),
+        traceTarget,
+        claimId,
         txid,
         nout,
-        sd_hash: sdHash,
-        canonical_url: uri,
-        signing_channel: {
-          claim_id: htmlElement.dataset.hyperbeamSigningChannelId,
-        },
-      }),
+        sdHash,
+        provenance: renderedClaimProvenance(uri, onScreen),
+        source: onScreen ? 'visible-page' : 'rendered-claim-preview',
+        valueType,
+        order,
+        summary: sanitizeHyperbeamDebugValue({
+          title,
+          claim_id: claimId,
+          immutable_id: immutableId,
+          store_path: storePath,
+          value_type: valueType,
+          txid,
+          nout,
+          sd_hash: sdHash,
+          canonical_url: uri,
+          signing_channel: {
+            claim_id: htmlElement.dataset.hyperbeamSigningChannelId,
+          },
+        }),
+      });
+
+      const signingChannelId = htmlElement.dataset.hyperbeamSigningChannelId;
+      if (signingChannelId && signingChannelId !== claimId) {
+        const signingChannelUri = htmlElement.dataset.hyperbeamSigningChannelUri || '';
+        const signingChannelTitle =
+          htmlElement.dataset.hyperbeamSigningChannelTitle || signingChannelUri || signingChannelId;
+        const channelKey = `claim:${signingChannelId}`;
+        if (!claims.has(channelKey)) {
+          claims.set(channelKey, {
+            key: channelKey,
+            label: limitLabel(signingChannelTitle),
+            traceTarget: signingChannelId,
+            claimId: signingChannelId,
+            provenance: renderedClaimProvenance(signingChannelUri, onScreen),
+            source: onScreen ? 'visible-page' : 'rendered-claim-preview',
+            valueType: 'channel',
+            order: order - 0.25,
+            summary: sanitizeHyperbeamDebugValue({
+              title: signingChannelTitle,
+              claim_id: signingChannelId,
+              value_type: 'channel',
+              canonical_url: signingChannelUri,
+            }),
+          });
+        }
+      }
     });
-  });
 
   return [...claims.values()];
 }
 
-function renderedClaimProvenance(uri: string): DiscoveredClaim['provenance'] {
+function renderedClaimProvenance(uri: string, onScreen: boolean): DiscoveredClaim['provenance'] {
   if (typeof window === 'undefined') return 'visible';
   const normalizedUri = normalizeComparable(uri);
   const currentUrl = normalizeComparable(window.location.href);
   const currentPath = normalizeComparable(window.location.pathname + window.location.hash);
-  return normalizedUri && (normalizedUri === currentUrl || normalizedUri === currentPath) ? 'page' : 'visible';
+  if (normalizedUri && (normalizedUri === currentUrl || normalizedUri === currentPath)) return 'page';
+  return onScreen ? 'visible' : 'loaded';
 }
 
 function reduxPageClaims(myChannelIds: Set<string>): Array<DiscoveredClaim> {
@@ -793,12 +1184,17 @@ function reduxClaimProvenance(urls: Array<string>): DiscoveredClaim['provenance'
   const normalizedUrls = urls.map(normalizeComparable).filter(Boolean);
   return normalizedUrls.some((url) => url.length > 1 && (url === currentUrl || url === currentPath))
     ? 'page'
-    : 'visible';
+    : 'loaded';
 }
 
 function isVisibleElement(element: HTMLElement) {
   const style = window.getComputedStyle(element);
   return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+}
+
+function isElementInViewport(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
 }
 
 function isCurrentPageEvent(data: any, context: PageClaimContext) {
@@ -861,11 +1257,20 @@ function normalizePagePath(value: string) {
 
 function compareClaims(a: DiscoveredClaim, b: DiscoveredClaim) {
   return (
-    ownChannelRank(a) - ownChannelRank(b) ||
     provenanceRank(a.provenance) - provenanceRank(b.provenance) ||
+    sourceRank(a) - sourceRank(b) ||
     (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) ||
+    claimKindRank(a) - claimKindRank(b) ||
+    ownChannelRank(a) - ownChannelRank(b) ||
     a.label.localeCompare(b.label)
   );
+}
+
+function orderDisplayedClaims(claims: Array<DiscoveredClaim>) {
+  const channels = claims.filter((claim) => claim.valueType === 'channel');
+  const nonChannels = claims.filter((claim) => claim.valueType !== 'channel');
+  if (nonChannels.length === 0) return channels.slice(0, 80);
+  return [...channels.slice(0, 1), ...nonChannels].slice(0, 80);
 }
 
 function ownChannelRank(claim: DiscoveredClaim) {
@@ -875,6 +1280,20 @@ function ownChannelRank(claim: DiscoveredClaim) {
 function provenanceRank(provenance: DiscoveredClaim['provenance']) {
   if (provenance === 'page') return 0;
   if (provenance === 'visible') return 1;
+  if (provenance === 'loaded') return 2;
+  return 3;
+}
+
+function sourceRank(claim: DiscoveredClaim) {
+  if (claim.source === 'visible-page') return 0;
+  if (claim.source === 'rendered-claim-preview') return 1;
+  if (claim.source === 'redux-claims') return 2;
+  return 3;
+}
+
+function claimKindRank(claim: DiscoveredClaim) {
+  if (claim.valueType === 'channel') return 0;
+  if (claim.valueType === 'stream') return 1;
   return 2;
 }
 
@@ -902,6 +1321,41 @@ function claimTypeColor(valueType: string | undefined) {
   return 'rgba(255,255,255,0.5)';
 }
 
+function isHyperbeamUploadTraceClaim(claim: DiscoveredClaim | undefined) {
+  if (!claim) return false;
+
+  const summary = claim.summary || {};
+  const immutableId = stringField(summary, ['immutable_id', 'outpoint']);
+  const uploadDevice = stringField(summary, ['hyperbeam.upload_device', 'hyperbeam.upload-device']);
+  const uploadId = stringField(summary, ['hyperbeam.upload_id', 'hyperbeam.upload-id']);
+  const claimId = claim.claimId || stringField(summary, ['claim_id', 'claim-id']);
+  const traceTarget = claim.traceTarget;
+
+  return Boolean(
+    stringField(summary, ['hyperbeam_upload']) ||
+    uploadId ||
+    isNativeUploadId(claimId) ||
+    isNativeUploadId(traceTarget) ||
+    uploadDevice?.replace(/^~/, '') === 'odysee-upload@1.0' ||
+    (immutableId &&
+      !isLegacyOutpoint(immutableId) &&
+      (!claimId || claimId === immutableId || !isLegacyClaimId(claimId)))
+  );
+}
+
+function isNativeUploadId(value: any) {
+  const id = String(value || '');
+  return Boolean(id && !id.startsWith('lbry://') && !isLegacyClaimId(id) && !isLegacyOutpoint(id));
+}
+
+function isLegacyClaimId(value: any) {
+  return /^[0-9a-f]{40}$/i.test(String(value || ''));
+}
+
+function isLegacyOutpoint(value: any) {
+  return /^[0-9a-f]{64}:\d+$/i.test(String(value || ''));
+}
+
 function initialSteps(
   target: string,
   selectedClaim?: DiscoveredClaim,
@@ -912,17 +1366,18 @@ function initialSteps(
   const nout = parsed?.nout ?? selectedClaim?.nout;
   const sdHash = selectedClaim?.sdHash;
   const isChannelClaim = selectedClaim?.valueType === 'channel';
+  const nativeUpload = isHyperbeamUploadTraceClaim(selectedClaim);
   const outputLabel = isChannelClaim ? 'channel output' : 'claim output';
   const txSource = txid ? cachedSourceObservation(events, txid) : undefined;
   const descriptorSource = sdHash ? cachedSourceObservation(events, sdHash) : undefined;
-  const descriptorSteps: Array<TraceStep> = isChannelClaim
+  const descriptorSteps: Array<TraceStep> = nativeUpload
     ? [
         {
           key: 'extract-descriptor',
           label: 'Skip stream descriptor ID',
           kind: 'locator',
           status: 'skipped',
-          detail: 'channel claim has no stream descriptor',
+          detail: 'native upload metadata is already represented by the store object',
           response: sanitizeHyperbeamDebugValue({ value_type: selectedClaim?.valueType, sd_hash: sdHash }),
         },
         {
@@ -930,38 +1385,63 @@ function initialSteps(
           label: 'Skip descriptor/blob source object',
           kind: 'source',
           status: 'skipped',
-          detail: 'channel claim has no descriptor/blob source object',
+          detail: 'native upload bytes are fetched through the media store path',
         },
         {
           key: 'descriptor-commitment',
           label: 'Skip descriptor/blob commitment headers',
           kind: 'source',
           status: 'skipped',
-          detail: 'channel claim has no descriptor/blob commitment path',
+          detail: 'native upload store object owns the media reference',
         },
       ]
-    : [
-        {
-          key: 'extract-descriptor',
-          label: 'Extract stream descriptor ID',
-          kind: 'locator',
-          status: sdHash ? 'ok' : selectedClaim ? 'skipped' : target ? 'pending' : 'skipped',
-          detail: sdHash || 'no sd_hash in loaded claim metadata',
-          response: sanitizeHyperbeamDebugValue({ sd_hash: sdHash }),
-        },
-        {
-          key: 'descriptor-source',
-          label: 'Fetch descriptor/blob source object',
-          kind: 'source',
-          ...sourceObservationStep(descriptorSource, sdHash),
-        },
-        {
-          key: 'descriptor-commitment',
-          label: 'Check descriptor/blob commitment headers',
-          kind: 'source',
-          ...commitmentObservationStep(descriptorSource, sdHash, 'descriptor/blob'),
-        },
-      ];
+    : isChannelClaim
+      ? [
+          {
+            key: 'extract-descriptor',
+            label: 'Skip stream descriptor ID',
+            kind: 'locator',
+            status: 'skipped',
+            detail: 'channel claim has no stream descriptor',
+            response: sanitizeHyperbeamDebugValue({ value_type: selectedClaim?.valueType, sd_hash: sdHash }),
+          },
+          {
+            key: 'descriptor-source',
+            label: 'Skip descriptor/blob source object',
+            kind: 'source',
+            status: 'skipped',
+            detail: 'channel claim has no descriptor/blob source object',
+          },
+          {
+            key: 'descriptor-commitment',
+            label: 'Skip descriptor/blob commitment headers',
+            kind: 'source',
+            status: 'skipped',
+            detail: 'channel claim has no descriptor/blob commitment path',
+          },
+        ]
+      : [
+          {
+            key: 'extract-descriptor',
+            label: 'Extract stream descriptor ID',
+            kind: 'locator',
+            status: sdHash ? 'ok' : selectedClaim ? 'skipped' : target ? 'pending' : 'skipped',
+            detail: sdHash || 'no sd_hash in loaded claim metadata',
+            response: sanitizeHyperbeamDebugValue({ sd_hash: sdHash }),
+          },
+          {
+            key: 'descriptor-source',
+            label: 'Fetch descriptor/blob source object',
+            kind: 'source',
+            ...sourceObservationStep(descriptorSource, sdHash),
+          },
+          {
+            key: 'descriptor-commitment',
+            label: 'Check descriptor/blob commitment headers',
+            kind: 'source',
+            ...commitmentObservationStep(descriptorSource, sdHash, 'descriptor/blob'),
+          },
+        ];
 
   return [
     {
@@ -997,25 +1477,45 @@ function initialSteps(
       key: 'tx-source',
       label: 'Fetch transaction source object',
       kind: 'source',
-      ...sourceObservationStep(txSource, txid),
+      ...(nativeUpload
+        ? {
+            status: 'skipped' as TraceStatus,
+            detail: 'native upload metadata is read from the store, not legacy transaction lookup',
+          }
+        : sourceObservationStep(txSource, txid)),
     },
     {
       key: 'tx-commitment',
       label: 'Check transaction commitment headers',
       kind: 'source',
-      ...commitmentObservationStep(txSource, txid, 'transaction'),
+      ...(nativeUpload
+        ? {
+            status: 'skipped' as TraceStatus,
+            detail: 'native upload does not need legacy transaction commitment headers',
+          }
+        : commitmentObservationStep(txSource, txid, 'transaction')),
     },
     {
       key: 'claim-source',
       label: `Extract ${outputLabel} from transaction`,
       kind: 'source',
-      ...derivedClaimOutputStep(txSource, txid, nout, outputLabel),
+      ...(nativeUpload
+        ? {
+            status: 'skipped' as TraceStatus,
+            detail: 'native upload store object already contains the claim metadata',
+          }
+        : derivedClaimOutputStep(txSource, txid, nout, outputLabel)),
     },
     {
       key: 'claim-commitment',
       label: `Check ${outputLabel} commitment path`,
       kind: 'source',
-      ...derivedClaimOutputCommitmentStep(txSource, txid, nout, outputLabel),
+      ...(nativeUpload
+        ? {
+            status: 'skipped' as TraceStatus,
+            detail: 'native upload store object is the commitment boundary for this trace',
+          }
+        : derivedClaimOutputCommitmentStep(txSource, txid, nout, outputLabel)),
     },
     ...descriptorSteps,
     {
@@ -1026,6 +1526,220 @@ function initialSteps(
       detail: target ? 'manual trace action only' : undefined,
     },
   ];
+}
+
+function authTraceSteps(
+  profile: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  },
+  events: Array<HyperbeamDebugEvent>
+): Array<TraceStep> {
+  const authEvents = accountPreferenceAuthEvents(events);
+  const requestEvent = authEvents.find((event) => event.label === 'request');
+  const responseEvent = [...authEvents].reverse().find((event) => event.label === 'response');
+  const authSourceEvent = [...events]
+    .reverse()
+    .find((event) => event.label === 'auth source' && event.data?.devicePath === '/~odysee-account@1.0/preference-get');
+  const authRequestEvent = [...events]
+    .reverse()
+    .find(
+      (event) => event.label === 'auth request' && event.data?.devicePath === '/~odysee-account@1.0/preference-get'
+    );
+  const responseData = responseEvent?.data || {};
+
+  return [
+    {
+      key: 'auth-target',
+      label: 'Select authenticated account request',
+      kind: 'input',
+      status: 'ok',
+      detail: 'preference_get key enable-sync',
+      response: sanitizeHyperbeamDebugValue({
+        target: AUTH_TRACE_TARGET,
+        devicePath: '/~odysee-account@1.0/preference-get',
+        authRequired: true,
+      }),
+    },
+    {
+      key: 'auth-source',
+      label: 'Resolve auth token source',
+      kind: 'transport',
+      status: authSourceEvent?.data?.authPresent ? 'ok' : authSourceEvent ? 'warn' : 'pending',
+      detail: authSourceEvent?.data?.authSource || 'waiting for auth source event',
+      response: sanitizeHyperbeamDebugValue(authSourceEvent?.data),
+    },
+    {
+      key: 'auth-request-body',
+      label: 'Build server-side auth request body',
+      kind: 'transport',
+      status: authRequestEvent?.data?.authPresent ? 'ok' : authRequestEvent ? 'warn' : 'pending',
+      detail: authRequestEvent?.data?.authTransport || 'waiting for auth request event',
+      response: sanitizeHyperbeamDebugValue(authRequestEvent?.data),
+    },
+    {
+      key: 'auth-proxy-request',
+      label: 'Send request through same-origin auth bridge',
+      kind: 'transport',
+      status: requestEvent ? 'ok' : 'pending',
+      detail: requestEvent?.data?.requestKey || 'waiting for request event',
+      url: requestEvent?.data?.url,
+      response: sanitizeHyperbeamDebugValue(requestEvent?.data),
+    },
+    {
+      key: 'auth-device-response',
+      label: 'Read account device response',
+      kind: 'facade',
+      status: responseEvent ? (responseData.ok ? 'ok' : 'failed') : profile.status === 'failed' ? 'failed' : 'pending',
+      detail: responseEvent
+        ? `${responseData.status || 'unknown status'} · ${responseData.contentType || 'unknown content-type'}`
+        : profile.detail,
+      url: responseData.url,
+      statusCode: responseData.status,
+      sourceAlg: responseData.sourceAlg,
+      response: sanitizeHyperbeamDebugValue(responseData.response || responseData.body || profile.response),
+    },
+  ];
+}
+
+function accountPreferenceAuthEvents(events: Array<HyperbeamDebugEvent>) {
+  return events.filter((event) => {
+    const data = event.data || {};
+    return (
+      data.authRequired === true &&
+      data.devicePath === '/~odysee-account@1.0/preference-get' &&
+      String(data.requestKey || '').includes('enable-sync')
+    );
+  });
+}
+
+function searchTraceProfile(events: Array<HyperbeamDebugEvent>): {
+  status: TraceStatus;
+  detail: string;
+  response?: any;
+} {
+  const searchEvents = searchDeviceEvents(events);
+  if (searchEvents.length === 0) return { status: 'pending', detail: 'waiting for search request' };
+  const responseEvent = [...searchEvents].reverse().find((event) => event.label === 'response');
+  const requestEvent = searchEvents.find((event) => event.label === 'request');
+
+  if (responseEvent) {
+    const data = responseEvent.data || {};
+    const ok = data.ok !== false && (!data.status || (data.status >= 200 && data.status < 300));
+    return {
+      status: ok ? 'ok' : 'failed',
+      detail: `${data.status || 'unknown status'} · ${searchResultCount(data)} results`,
+      response: sanitizeHyperbeamDebugValue(data.response || data.body || data),
+    };
+  }
+
+  if (requestEvent) {
+    return {
+      status: 'running',
+      detail: String(requestEvent.data?.requestKey || 'search request pending'),
+      response: sanitizeHyperbeamDebugValue(requestEvent.data),
+    };
+  }
+
+  return { status: 'pending', detail: 'waiting for search request' };
+}
+
+function searchTraceSteps(
+  profile: {
+    status: TraceStatus;
+    detail: string;
+    response?: any;
+  },
+  events: Array<HyperbeamDebugEvent>
+): Array<TraceStep> {
+  const searchEvents = searchDeviceEvents(events);
+  const requestEvent = searchEvents.find((event) => event.label === 'request');
+  const responseEvent = [...searchEvents].reverse().find((event) => event.label === 'response');
+  const responseData = responseEvent?.data || {};
+
+  return [
+    {
+      key: 'search-target',
+      label: 'Select HyperBEAM search request',
+      kind: 'input',
+      status: 'ok',
+      detail: '~odysee-search@1.0/query',
+      response: sanitizeHyperbeamDebugValue({
+        target: SEARCH_TRACE_TARGET,
+        devicePath: '/~odysee-search@1.0/query',
+      }),
+    },
+    {
+      key: 'search-request',
+      label: 'Send query to local search device',
+      kind: 'facade',
+      status: requestEvent ? 'ok' : 'pending',
+      detail: requestEvent?.data?.requestKey || 'waiting for request event',
+      url: requestEvent?.data?.url,
+      response: sanitizeHyperbeamDebugValue(requestEvent?.data),
+    },
+    {
+      key: 'search-response',
+      label: 'Read search device response',
+      kind: 'source',
+      status: responseEvent
+        ? responseData.ok !== false
+          ? 'ok'
+          : 'failed'
+        : profile.status === 'failed'
+          ? 'failed'
+          : 'pending',
+      detail: responseEvent
+        ? `${responseData.status || 'unknown status'} · ${searchResultCount(responseData)} results`
+        : profile.detail,
+      url: responseData.url,
+      statusCode: responseData.status,
+      sourceAlg: responseData.sourceAlg,
+      response: sanitizeHyperbeamDebugValue(responseData.response || responseData.body || profile.response),
+    },
+  ];
+}
+
+function searchDeviceEvents(events: Array<HyperbeamDebugEvent>) {
+  return events.filter((event) => isSearchDeviceEventData(event.data || {}));
+}
+
+function isSearchDeviceEventData(data: Record<string, any>) {
+  const device = normalizeDeviceName(data.device);
+  const responseDevice = normalizeDeviceName(data.responseDevice);
+  const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '');
+  return (
+    device === '~odysee-search@1.0' ||
+    responseDevice === '~odysee-search@1.0' ||
+    path.includes('/~odysee-search@1.0/query')
+  );
+}
+
+function normalizeDeviceName(device: any) {
+  const value = String(device || '');
+  if (!value) return '';
+  return value.startsWith('~') ? value : `~${value}`;
+}
+
+function searchResultCount(data: any) {
+  const body = parseMaybeJson(data?.body);
+  const response = parseMaybeJson(data?.response);
+  const result = response?.result || body?.result || data?.result || response || body;
+  const total = result?.total_items ?? result?.['total-items'] ?? result?.estimatedTotalHits ?? result?.totalHits;
+  if (total !== undefined && total !== null) return total;
+  if (Array.isArray(result?.items)) return result.items.length;
+  if (Array.isArray(result?.hits)) return result.hits.length;
+  return 0;
+}
+
+function parseMaybeJson(value: any) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 
 function cachedSourceObservation(events: Array<HyperbeamDebugEvent>, id: string | undefined) {
@@ -1102,10 +1816,12 @@ function derivedClaimOutputCommitmentStep(
   }
 
   return {
-    status: event.data?.sourceAlg ? 'ok' : 'failed',
+    status: event.data?.sourceAlg ? 'ok' : event.data?.ok ? 'warn' : 'failed',
     detail: event.data?.sourceAlg
       ? `${outputLabel} ${nout} covered by transaction commitment`
-      : `missing transaction commitment for ${outputLabel}`,
+      : event.data?.ok
+        ? `transaction response has no commitment metadata for ${outputLabel}`
+        : `missing transaction commitment for ${outputLabel}`,
     url: event.data?.url,
     statusCode: event.data?.status,
     sourceAlg: event.data?.sourceAlg,
@@ -1178,8 +1894,12 @@ function commitmentObservationStep(
 
   const data = event.data || {};
   return {
-    status: data.sourceAlg ? 'ok' : 'failed',
-    detail: data.sourceAlg ? `native ${label} commitment visible` : `missing ${label} commitment header`,
+    status: data.sourceAlg ? 'ok' : data.ok ? 'warn' : 'failed',
+    detail: data.sourceAlg
+      ? `native ${label} commitment visible`
+      : data.ok
+        ? `${label} response has no commitment metadata`
+        : `missing ${label} commitment header`,
     url: data.url,
     statusCode: data.status,
     sourceAlg: data.sourceAlg,
@@ -1250,6 +1970,22 @@ function claimSummary(value: any) {
   });
 }
 
+function profileSummary(value: any) {
+  const result = value?.result || value?.body?.result || value;
+  return sanitizeHyperbeamDebugValue({
+    hasProfile: result !== undefined && result !== null,
+    preferenceKey: 'enable-sync',
+    keys: result && typeof result === 'object' ? Object.keys(result).slice(0, 24) : undefined,
+    preferenceValue: result && typeof result === 'object' ? result['enable-sync'] : result,
+    channelClaimId: stringField(result, ['channel_claim_id', 'channel.claim_id', 'default_channel.claim_id']),
+    channelName: stringField(result, ['channel_name', 'channel.name', 'default_channel.name']),
+    email: stringField(result, ['email', 'user.email']),
+    language: stringField(result, ['language', 'settings.language']),
+    mature: result?.show_mature || result?.settings?.show_mature,
+    raw: result,
+  });
+}
+
 function statusColor(status: TraceStatus) {
   switch (status) {
     case 'ok':
@@ -1284,9 +2020,11 @@ function kindColor(kind: TraceKind) {
 function provenanceColor(provenance: DiscoveredClaim['provenance']) {
   switch (provenance) {
     case 'page':
-      return '#22c55e';
+      return '#38bdf8';
     case 'visible':
       return '#0ea5e9';
+    case 'loaded':
+      return '#94a3b8';
     default:
       return 'rgba(255,255,255,0.18)';
   }

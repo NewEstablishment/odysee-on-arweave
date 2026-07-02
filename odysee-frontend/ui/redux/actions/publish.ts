@@ -33,21 +33,44 @@ import { navigateTo } from 'redux/router';
 import analytics from 'analytics';
 import { doOpenModal, doSetActiveChannel, doSetIncognito } from 'redux/actions/app';
 import { CC_LICENSES, COPYRIGHT, OTHER, NONE, PUBLIC_DOMAIN } from 'constants/licenses';
-import { IMG_CDN_PUBLISH_URL } from 'constants/cdn_urls';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { sanitizeName, buildURI } from 'util/lbryURI';
 import { getVideoBitrate, resolvePublishPayload } from 'util/publish';
 import { parsePurchaseTag, parseRentalTag, TO_SECONDS } from 'util/stripe';
+import {
+  canPublishThroughHyperbeam,
+  listHyperbeamPublishes,
+  publishThroughHyperbeam,
+  updateHyperbeamPublish,
+} from 'services/hyperbeamUpload';
+import uploadThumbnail from 'services/thumbnailUpload';
 import Lbry from 'lbry';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 // import LbryFirst from 'extras/lbry-first/lbry-first';
-import { isClaimNsfw, getChannelIdFromClaim, isStreamPlaceholderClaim } from 'util/claim';
+import {
+  isClaimNsfw,
+  getChannelIdFromClaim,
+  getClaimTags,
+  isHyperbeamUploadClaim,
+  isStreamPlaceholderClaim,
+} from 'util/claim';
 import { MEMBERS_ONLY_CONTENT_TAG, SCHEDULED_TAGS, VISIBILITY_TAGS } from 'constants/tags';
 const PUBLISH_PATH_MAP = Object.freeze({
   file: PAGES.UPLOAD,
   post: PAGES.POST,
   livestream: PAGES.LIVESTREAM,
 });
+
+function publishErrorMessage(error: any): string {
+  if (typeof error === 'string') return error;
+  if (typeof error?.message === 'string') return error.message;
+  if (error) {
+    try {
+      return JSON.stringify(error);
+    } catch {}
+  }
+  return __('Publish failed.');
+}
 
 function resolveClaimTypeForAnalytics(claim) {
   if (!claim) {
@@ -110,7 +133,11 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
         }
       };
 
-      analytics.apiLog.publish(pendingClaim, apiLogSuccessCb);
+      const hyperbeamUpload = isHyperbeamUploadClaim(pendingClaim);
+
+      if (!hyperbeamUpload) {
+        analytics.apiLog.publish(pendingClaim, apiLogSuccessCb);
+      }
       const { permanent_url: url } = pendingClaim;
       const actions: Array<any> = [];
       actions.push({
@@ -126,16 +153,26 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
       const isMatch = (claim: any) => claim.claim_id === pendingClaim.claim_id;
 
       const isEdit = myClaims.some(isMatch);
-      actions.push({
-        type: ACTIONS.UPDATE_PENDING_CLAIMS,
-        data: {
-          claims: [pendingClaim],
-          options: {
-            overrideTags: true,
-            overrideSigningChannel: true,
-          },
-        },
-      } as UpdatePendingClaimsAction);
+      actions.push(
+        hyperbeamUpload
+          ? {
+              type: ACTIONS.UPDATE_CONFIRMED_CLAIMS,
+              data: {
+                claims: [pendingClaim],
+                pending: state.claims.pendingById || {},
+              },
+            }
+          : ({
+              type: ACTIONS.UPDATE_PENDING_CLAIMS,
+              data: {
+                claims: [pendingClaim],
+                options: {
+                  overrideTags: true,
+                  overrideSigningChannel: true,
+                },
+              },
+            } as UpdatePendingClaimsAction)
+      );
       dispatch(batchActions(...actions));
       dispatch(
         doOpenModal(MODALS.PUBLISH, {
@@ -157,7 +194,7 @@ export const doPublishDesktop = (filePath: undefined, preview?: boolean) => {
       actions.push({
         type: ACTIONS.PUBLISH_FAIL,
       });
-      let message = typeof error === 'string' ? error : error.message;
+      let message = publishErrorMessage(error);
 
       if (message.endsWith(ERRORS.SDK_FETCH_TIMEOUT)) {
         message = ERRORS.PUBLISH_TIMEOUT_BUT_LIKELY_SUCCESSFUL;
@@ -637,18 +674,7 @@ export const doUploadThumbnail =
     });
 
     const doUpload = (data) => {
-      return fetch(IMG_CDN_PUBLISH_URL, {
-        method: 'POST',
-        body: data,
-      })
-        .then((res) => res.text())
-        .then((text) => {
-          try {
-            return text.length ? JSON.parse(text) : {};
-          } catch {
-            throw new Error(text);
-          }
-        })
+      return uploadThumbnail(data)
         .then((json) => {
           if (json.type !== 'success') {
             return uploadError(
@@ -1000,6 +1026,38 @@ async function hydrateClaimsInStore(dispatch: Dispatch, claims: Array<StreamClai
   }
 }
 
+async function mergeHyperbeamUploadsForPublishSearch(
+  legacyClaims: Array<StreamClaim>,
+  term: string,
+  filter: string,
+  channelIds: Array<string | null | undefined>
+) {
+  const nativeClaims = await listHyperbeamPublishes({ channelIds }).catch(() => []);
+  const filteredNativeClaims = filterHyperbeamUploadsForPublishSearch(nativeClaims, term, filter);
+  const claimsById: Record<string, StreamClaim> = {};
+
+  [...legacyClaims, ...filteredNativeClaims].forEach((claim) => {
+    if (claim?.claim_id && !claimsById[claim.claim_id]) claimsById[claim.claim_id] = claim;
+  });
+
+  return sortClaimsByNewest(Object.values(claimsById));
+}
+
+function filterHyperbeamUploadsForPublishSearch(claims: Array<StreamClaim>, term: string, filter: string) {
+  let filteredClaims = claims;
+
+  if (filter === 'unlisted') {
+    filteredClaims = filteredClaims.filter((claim) => (getClaimTags(claim) || []).includes(VISIBILITY_TAGS.UNLISTED));
+  } else if (filter === 'scheduled') {
+    const scheduledTags = new Set<string>(Object.values(SCHEDULED_TAGS));
+    filteredClaims = filteredClaims.filter((claim) =>
+      (getClaimTags(claim) || []).some((tag) => scheduledTags.has(tag))
+    );
+  }
+
+  return term.length > 0 ? clientTitleFilter(filteredClaims, term) : filteredClaims;
+}
+
 /**
  * Searches the current user's uploads.
  *
@@ -1034,8 +1092,9 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
 
       const result = await Lbry.claim_search(csParams);
       const claims = await hydrateClaimsInStore(dispatch, sortClaimsByNewest(extractStreamClaims(result)));
+      const mergedClaims = await mergeHyperbeamUploadsForPublishSearch(claims, term, filter, myChannelIds);
       return {
-        claims: term.length > 0 ? clientTitleFilter(claims, term) : claims,
+        claims: mergedClaims,
       };
     }
 
@@ -1056,8 +1115,9 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
 
       const result = await Lbry.claim_search(csParams);
       const claims = await hydrateClaimsInStore(dispatch, sortClaimsByNewest(extractStreamClaims(result)));
+      const mergedClaims = await mergeHyperbeamUploadsForPublishSearch(claims, term, filter, myChannelIds);
       return {
-        claims: term.length > 0 ? clientTitleFilter(claims, term) : claims,
+        claims: mergedClaims,
       };
     }
 
@@ -1070,8 +1130,9 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
         claim_type: ['stream'],
       });
       const claims = await hydrateClaimsInStore(dispatch, sortClaimsByNewest(extractStreamClaims(result)));
+      const mergedClaims = await mergeHyperbeamUploadsForPublishSearch(claims, term, filter, myChannelIds);
       return {
-        claims,
+        claims: mergedClaims,
       };
     }
 
@@ -1085,8 +1146,9 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
       });
       const claims = clientTitleFilter(sortClaimsByNewest(extractStreamClaims(result)), term);
       const hydratedClaims = await hydrateClaimsInStore(dispatch, claims);
+      const mergedClaims = await mergeHyperbeamUploadsForPublishSearch(hydratedClaims, term, filter, myChannelIds);
       return {
-        claims: hydratedClaims,
+        claims: mergedClaims,
       };
     }
 
@@ -1118,7 +1180,7 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
     }
 
     return {
-      claims: sortClaimsByNewest(resolvedClaims),
+      claims: await mergeHyperbeamUploadsForPublishSearch(resolvedClaims, term, filter, myChannelIds),
     };
   };
 };
@@ -1360,6 +1422,23 @@ export const doPublish =
       }
     }
 
+    const publishFile = publishData.filePath;
+    if (myClaimForUri && isHyperbeamUploadClaim(myClaimForUri)) {
+      return updateHyperbeamPublish(
+        myClaimForUri,
+        withPublishMediaDuration(publishPayload, publishData),
+        myChannels
+      ).then(success, fail);
+    }
+
+    if (canPublishThroughHyperbeam(publishFile, publishPayload, publishData.type)) {
+      return publishThroughHyperbeam(
+        publishFile,
+        withPublishMediaDuration(publishPayload, publishData),
+        myChannels
+      ).then(success, fail);
+    }
+
     return Lbry.publish(publishPayload).then((response: PublishResponse) => {
       // TODO: Restore LbryFirst
       // if (!useLBRYUploader) {
@@ -1408,6 +1487,21 @@ export const doCreateClaimForEarlyUpload =
       { onSuccess: () => {}, onFailure: () => {} }
     );
   };
+
+function withPublishMediaDuration(publishPayload: PublishParams, publishData: any): PublishParams {
+  const duration = Number(publishData.fileDur || 0);
+  if (!duration) return publishPayload;
+
+  if (publishData.fileVid) {
+    return { ...publishPayload, video: { ...(publishPayload as any).video, duration } };
+  }
+
+  if (publishData.fileMime && publishData.fileMime.startsWith('audio/')) {
+    return { ...publishPayload, audio: { ...(publishPayload as any).audio, duration } };
+  }
+
+  return publishPayload;
+}
 export const doPublishWithEarlyUpload =
   (tusUrlPromise: Promise<{ tusUrl: string }>, guid: string) => async (dispatch: Dispatch, getState: GetState) => {
     const state = getState();
@@ -1582,7 +1676,7 @@ export const doPublishWithEarlyUpload =
         type: ACTIONS.PUBLISH_PIPELINE_UPDATE,
         data: { id: guid, updates: { stage: 'error', error: error?.message } },
       });
-      dispatch(doError({ message: typeof error === 'string' ? error : error.message, cause: error.cause }));
+      dispatch(doError({ message: publishErrorMessage(error), cause: error?.cause }));
     }
   };
 

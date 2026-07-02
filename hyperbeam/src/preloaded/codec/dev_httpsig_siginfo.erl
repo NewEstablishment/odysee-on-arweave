@@ -61,7 +61,7 @@ commitment_to_sf_siginfo(Msg, CommID, Commitment, Opts) ->
     % absent on the wire (permitted by RFC 9421 §1.4.2.3).
     KeyID = maps:get(<<"keyid">>, Commitment, undefined),
     % Extract the signature from the commitment.
-    Signature = hb_util:decode(maps:get(<<"signature">>, Commitment)),
+    Signature = decode_signature(maps:get(<<"signature">>, Commitment)),
     % Extract the keys present in the commitment.
     CommittedKeys = to_siginfo_keys(Msg, Commitment, Opts),
     ?event({normalized_for_enc, CommittedKeys, {commitment, Commitment}}),
@@ -139,6 +139,13 @@ derived_commitment_id(Sig) when byte_size(Sig) == 32 ->
     hb_util:human_id(Sig);
 derived_commitment_id(Sig) ->
     hb_util:human_id(crypto:hash(sha256, Sig)).
+
+decode_signature(Signature) ->
+    try base64:decode(Signature, #{mode => urlsafe, padding => false}) of
+        Bytes -> Bytes
+    catch
+        _:_ -> hb_util:decode(Signature)
+    end.
 
 get_additional_params(Commitment) ->
     AdditionalParams =

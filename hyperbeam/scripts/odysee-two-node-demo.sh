@@ -91,9 +91,7 @@ io:format("  curl -sS -H 'accept: application/json' '~s<descriptor-sd-hash>' | j
 io:format("  curl -sS -H 'accept: application/json' '~s<blob-sha384>' | jq .~n", [NodeA]),
 io:format("  curl -sS -H 'accept: application/json' '~s<txid>' | jq .~n", [NodeA]),
 io:format("  curl -sS -H 'accept: application/json' '~s<txid>:<nout>' | jq .~n", [NodeA]),
-io:format("~nOdysee surface read examples:~n", []),
-io:format("  curl -sS -H 'accept: application/json' '~s~s?id=odysee/comment/<comment-id>' | jq .~n", [NodeA, <<"~odysee@1.0/source">>]),
-io:format("  curl -sS -H 'accept: application/json' '~s~s?id=<comment-id>&kind=comment' | jq .~n~n", [NodeA, <<"~odysee@1.0/source">>]).
+io:format("~nOdysee surface reads now go through typed stores/native IDs; the old facade is removed.~n~n", []).
 ERL
 )
 

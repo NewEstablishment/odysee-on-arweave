@@ -25,12 +25,36 @@ import { doFetchTxoPage } from 'redux/actions/wallet';
 import { doMembershipContentForStreamClaimIds, doFetchOdyseeMembershipForChannelIds } from 'redux/actions/memberships';
 import { selectSupportsByOutpoint } from 'redux/selectors/wallet';
 import { creditsToString } from 'util/format-credits';
-import { createNormalizedClaimSearchKey, getChannelIdFromClaim, isClaimProtected } from 'util/claim';
+import {
+  createNormalizedClaimSearchKey,
+  getChannelIdFromClaim,
+  getClaimTags,
+  isClaimProtected,
+  isHyperbeamUploadClaim,
+} from 'util/claim';
 import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
+import { fetchHyperbeamResolveClaimIds } from 'util/hyperbeam';
+import { deleteHyperbeamPublish, listHyperbeamPublishes } from 'services/hyperbeamUpload';
 let onChannelConfirmCallback;
 let checkPendingInterval;
+
+const HYPERBEAM_CLAIM_ID_BATCH_DELAY_MS = 25;
+const HYPERBEAM_CLAIM_ID_BATCH_SIZE = 50;
+const hyperbeamClaimIdBatches: Map<string, HyperbeamClaimIdBatch> = new Map();
+
+type HyperbeamClaimIdBatch = {
+  ids: Set<string>;
+  options: any;
+  timeout: any;
+  waiters: Array<{
+    cachedClaims: ResolveResponse | {};
+    resolve: (value: any) => void;
+    reject: (error: any) => void;
+  }>;
+};
 
 type CostInfo = {
   claimId: string;
@@ -72,6 +96,216 @@ async function getCostInfoForFee(claimId: string, fee: Fee | undefined): Promise
   }));
    return Promise.resolve(exchangeRate);
   */
+}
+
+async function mergeHyperbeamPublishesIntoClaimList(
+  result: StreamListResponse,
+  page: number,
+  channelIds: Array<string | null | undefined> = []
+): Promise<StreamListResponse> {
+  if (page !== 1) return result;
+
+  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
+  if (!hyperbeamClaims.length) return result;
+
+  const wantedChannelIds = new Set(channelIds.filter(Boolean));
+  const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
+  const indexedClaims = hyperbeamClaims.filter((claim) => {
+    if (existingIds.has(claim.claim_id)) return false;
+    if (wantedChannelIds.size === 0) return true;
+    const channelId = getHyperbeamUploadChannelId(claim);
+    return Boolean(channelId && wantedChannelIds.has(channelId));
+  });
+
+  if (!indexedClaims.length) return result;
+
+  return {
+    ...result,
+    items: sortClaimsByNewest([...indexedClaims, ...(result.items || [])]),
+    total_items: Number(result.total_items || 0) + indexedClaims.length,
+  };
+}
+
+function sortClaimsByNewest(claims: Array<Claim>) {
+  return [...claims].sort((a, b) => claimNewestTimestamp(b) - claimNewestTimestamp(a));
+}
+
+function claimNewestTimestamp(claim: Claim) {
+  const anyClaim = claim as any;
+  return Number(
+    anyClaim?.value?.release_time ||
+      anyClaim?.meta?.creation_timestamp ||
+      anyClaim?.timestamp ||
+      anyClaim?.height ||
+      0
+  );
+}
+
+function emptyClaimListResult(page: number, pageSize: number): StreamListResponse {
+  return {
+    items: [],
+    page,
+    page_size: pageSize,
+    total_items: 0,
+    total_pages: 0,
+  };
+}
+
+async function mergeHyperbeamPublishesIntoChannelResult(
+  result: ClaimSearchResponse,
+  channelUri: string,
+  page: number
+): Promise<ClaimSearchResponse> {
+  if (page !== 1) return result;
+
+  const channelIds = getHyperbeamChannelIdsFromClaims(result.items || []);
+  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
+  if (!hyperbeamClaims.length) return result;
+
+  const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
+  const indexedClaims = hyperbeamClaims.filter(
+    (claim) =>
+      !existingIds.has(claim.claim_id) &&
+      (channelIds.length
+        ? channelIds.includes(getHyperbeamUploadChannelId(claim))
+        : hyperbeamClaimMatchesChannel(claim, channelUri))
+  );
+
+  if (!indexedClaims.length) return result;
+
+  return {
+    ...result,
+    items: [...indexedClaims, ...(result.items || [])],
+    total_items: Number(result.total_items || 0) + indexedClaims.length,
+  };
+}
+
+function getHyperbeamChannelIdsFromClaims(claims: Array<Claim>) {
+  return Array.from(
+    new Set(
+      claims.map((claim) => getChannelIdFromClaim(claim)).filter((channelId): channelId is string => Boolean(channelId))
+    )
+  );
+}
+
+async function mergeHyperbeamPublishesIntoSearchResult(
+  result: ClaimSearchResponse,
+  options: ClaimSearchOptions
+): Promise<ClaimSearchResponse> {
+  if (options.page && options.page !== 1) return result;
+
+  const channelIds = Array.isArray(options.channel_ids)
+    ? options.channel_ids
+    : options.channel_id
+      ? Array.isArray(options.channel_id)
+        ? options.channel_id
+        : [options.channel_id]
+      : [];
+
+  if (!channelIds.length) return result;
+
+  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
+  if (!hyperbeamClaims.length) return result;
+
+  const wantedChannelIds = new Set(channelIds.filter(Boolean));
+  const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
+  const indexedClaims = hyperbeamClaims.filter((claim) => {
+    if (existingIds.has(claim.claim_id)) return false;
+    if (!hyperbeamClaimMatchesSearchOptions(claim, options)) return false;
+    const channelId = getHyperbeamUploadChannelId(claim);
+    return Boolean(channelId && wantedChannelIds.has(channelId));
+  });
+
+  if (!indexedClaims.length) return result;
+
+  return {
+    ...result,
+    items: [...indexedClaims, ...(result.items || [])],
+    total_items: Number(result.total_items || 0) + indexedClaims.length,
+  };
+}
+
+function hyperbeamClaimMatchesChannel(claim: StreamClaim, channelUri: string) {
+  const directChannelId = getHyperbeamUploadChannelId(claim);
+  if (directChannelId && channelUri.includes(directChannelId)) return true;
+
+  const claimUrls = [claim.permanent_url, claim.canonical_url, claim.short_url].filter(Boolean);
+  if (claimUrls.some((url) => hyperbeamClaimUrlMatchesChannel(String(url), channelUri))) return true;
+
+  const channel = claim.signing_channel;
+  if (!channel || !channelUri) return false;
+
+  const channelId = channel.claim_id;
+  if (channelId && channelUri.includes(channelId)) return true;
+
+  const candidates = [channel.permanent_url, channel.canonical_url, channel.short_url, channel.name].filter(Boolean);
+  return candidates.some((candidate) => {
+    try {
+      return normalizeURI(String(candidate)) === normalizeURI(channelUri);
+    } catch {
+      return String(candidate) === channelUri;
+    }
+  });
+}
+
+function hyperbeamClaimMatchesSearchOptions(claim: StreamClaim, options: ClaimSearchOptions) {
+  if (!hyperbeamClaimMatchesSearchTags(claim, options)) return false;
+  if (!hyperbeamClaimMatchesReleaseTime(claim, options)) return false;
+  return true;
+}
+
+function hyperbeamClaimMatchesSearchTags(claim: StreamClaim, options: ClaimSearchOptions) {
+  const anyTags = normalizeSearchArray((options as any).any_tags || (options as any).anyTags);
+  if (!anyTags.length) return true;
+
+  const claimTags = new Set((getClaimTags(claim) || []).map(String));
+  return anyTags.some((tag) => claimTags.has(tag));
+}
+
+function hyperbeamClaimMatchesReleaseTime(claim: StreamClaim, options: ClaimSearchOptions) {
+  const filter = (options as any).release_time || (options as any).releaseTime;
+  if (!filter) return true;
+
+  const releaseTime = Number(
+    (claim.value as any)?.release_time || claim.timestamp || claim.meta?.creation_timestamp || 0
+  );
+  if (!Number.isFinite(releaseTime) || releaseTime <= 0) return false;
+
+  if (typeof filter === 'string') {
+    const text = filter.trim();
+    const target = Number(text.replace(/^[<>]=?/, ''));
+    if (!Number.isFinite(target)) return true;
+    if (text.startsWith('>=')) return releaseTime >= target;
+    if (text.startsWith('>')) return releaseTime > target;
+    if (text.startsWith('<=')) return releaseTime <= target;
+    if (text.startsWith('<')) return releaseTime < target;
+    return releaseTime === target;
+  }
+
+  if (typeof filter === 'number') return releaseTime === filter;
+  return true;
+}
+
+function normalizeSearchArray(value: any): Array<string> {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (value) return [String(value)];
+  return [];
+}
+
+function hyperbeamClaimUrlMatchesChannel(claimUrl: string, channelUri: string) {
+  if (!claimUrl || !channelUri) return false;
+
+  try {
+    const normalizedClaimUrl = normalizeURI(claimUrl);
+    const normalizedChannelUri = normalizeURI(channelUri);
+    return normalizedClaimUrl === normalizedChannelUri || normalizedClaimUrl.startsWith(`${normalizedChannelUri}/`);
+  } catch {
+    return claimUrl === channelUri || claimUrl.startsWith(`${channelUri}/`);
+  }
+}
+
+function getHyperbeamUploadChannelId(claim: StreamClaim) {
+  return (claim as any).channel_id || (claim as any).channel_claim_id || getChannelIdFromClaim(claim);
 }
 
 export function doResolveUris(
@@ -287,6 +521,10 @@ export function doResolveClaimIds(claimIds: Array<string>, returnCachedClaims: b
       return Promise.resolve(cachedClaims);
     }
 
+    if (isHyperbeamEnabled()) {
+      return scheduleHyperbeamClaimIdResolve(dispatch, idsToResolve, cachedClaims, options);
+    }
+
     return dispatch(
       doClaimSearch(
         {
@@ -302,6 +540,122 @@ export function doResolveClaimIds(claimIds: Array<string>, returnCachedClaims: b
       )
     ).then((response: ClaimSearchResponse) => ({ ...response, ...cachedClaims }));
   };
+}
+
+function scheduleHyperbeamClaimIdResolve(
+  dispatch: Dispatch,
+  claimIds: Array<string>,
+  cachedClaims: ResolveResponse | {},
+  options?: {}
+) {
+  const batchOptions = options || {};
+  const batchKey = stableJson(batchOptions);
+  let batch = hyperbeamClaimIdBatches.get(batchKey);
+
+  if (!batch) {
+    batch = {
+      ids: new Set(),
+      options: batchOptions,
+      timeout: undefined,
+      waiters: [],
+    };
+    hyperbeamClaimIdBatches.set(batchKey, batch);
+    batch.timeout = setTimeout(() => flushHyperbeamClaimIdBatch(dispatch, batchKey), HYPERBEAM_CLAIM_ID_BATCH_DELAY_MS);
+  }
+
+  claimIds.forEach((claimId) => batch.ids.add(claimId));
+
+  return new Promise((resolve, reject) => {
+    batch.waiters.push({ cachedClaims, resolve, reject });
+  });
+}
+
+function flushHyperbeamClaimIdBatch(dispatch: Dispatch, batchKey: string) {
+  const batch = hyperbeamClaimIdBatches.get(batchKey);
+  if (!batch) return;
+
+  hyperbeamClaimIdBatches.delete(batchKey);
+  const claimIds = Array.from(batch.ids);
+  const chunks = chunk(claimIds, HYPERBEAM_CLAIM_ID_BATCH_SIZE);
+
+  Promise.all(chunks.map((ids) => fetchHyperbeamClaimIdChunk(dispatch, ids, batch.options)))
+    .then((responses) => Object.assign({}, ...responses.filter(Boolean)))
+    .then((response) => {
+      batch.waiters.forEach(({ cachedClaims, resolve }) => resolve({ ...response, ...cachedClaims }));
+    })
+    .catch((error) => {
+      batch.waiters.forEach(({ reject }) => reject(error));
+    });
+}
+
+async function fetchHyperbeamClaimIdChunk(dispatch: Dispatch, claimIds: Array<string>, options: any) {
+  const searchOptions = {
+    ...options,
+    claim_ids: claimIds,
+    page: 1,
+    page_size: claimIds.length,
+    no_totals: true,
+  };
+  const query = createNormalizedClaimSearchKey(searchOptions);
+
+  dispatch({
+    type: ACTIONS.CLAIM_SEARCH_STARTED,
+    data: { query },
+  });
+
+  try {
+    const data = await fetchHyperbeamResolveClaimIds(searchOptions);
+    if (!data) throw new Error('HyperBEAM claim-id resolve returned no data');
+
+    const resolveInfo = {};
+    const urls = [];
+    data.items.forEach((claim: Claim) => {
+      const claimUrl = claim.canonical_url || claim.permanent_url || claim.short_url || claim.claim_id;
+      resolveInfo[claimUrl] = { stream: claim };
+      urls.push(claimUrl);
+    });
+
+    dispatch({
+      type: ACTIONS.CLAIM_SEARCH_COMPLETED,
+      data: {
+        query,
+        resolveInfo,
+        urls,
+        append: false,
+        page: searchOptions.page,
+        pageSize: searchOptions.page_size,
+        totalItems: data.total_items,
+        totalPages: data.total_pages,
+      },
+    });
+
+    return resolveInfo;
+  } catch (error) {
+    dispatch({
+      type: ACTIONS.CLAIM_SEARCH_FAILED,
+      data: { query },
+      error,
+    });
+    throw error;
+  }
+}
+
+function chunk<T>(items: Array<T>, size: number): Array<Array<T>> {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function stableJson(value: any): string {
+  if (!value || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+    .join(',')}}`;
 }
 export const doResolveClaimId = (claimId: ClaimId, returnCachedClaims: boolean = true, options: {} = {}) =>
   doResolveClaimIds([claimId], returnCachedClaims, options);
@@ -339,7 +693,9 @@ export function doFetchClaimListMine(
       channel_id: channelIds,
       resolve,
     })
+      .catch(() => emptyClaimListResult(page, pageSize))
       .then(async (result: StreamListResponse) => {
+        result = await mergeHyperbeamPublishesIntoClaimList(result, page, channelIds);
         // Log stuck claims
         const claims = result.items;
         const pendingClaimsById = selectPendingClaimsById(state);
@@ -372,7 +728,7 @@ export function doFetchClaimListMine(
         const channelClaimIds = new Set([]);
         const costInfos = new Set<Promise<CostInfo>>();
         result.items.forEach((item) => {
-          claimIds.push(item.claim_id);
+          if (!isHyperbeamUploadClaim(item)) claimIds.push(item.claim_id);
 
           if (item.value_type !== 'channel' && item.value_type !== 'collection') {
             const isProtected = isClaimProtected(item);
@@ -502,6 +858,47 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
   const { txid, nout } = claim;
   const outpoint = `${txid}:${nout}`;
   return (dispatch: Dispatch, getState: GetState) => {
+    if (isHyperbeamUploadClaim(claim)) {
+      const uploadId =
+        (claim as any).hyperbeam?.upload_id || (claim as any).immutable_id || (claim as any).outpoint || claim.claim_id;
+      const data = {
+        claimId: claim.claim_id,
+      };
+      dispatch({
+        type: ACTIONS.ABANDON_CLAIM_STARTED,
+        data,
+      });
+
+      deleteHyperbeamPublish(uploadId).then(
+        () => {
+          dispatch({
+            type: ACTIONS.ABANDON_CLAIM_SUCCEEDED,
+            data,
+          });
+          if (cb) cb(ABANDON_STATES.DONE);
+          dispatch(
+            doToast({
+              message: __('Successfully removed your upload.'),
+            })
+          );
+        },
+        () => {
+          dispatch({
+            type: ACTIONS.ABANDON_CLAIM_SUCCEEDED,
+            data,
+          });
+          dispatch(
+            doToast({
+              message: 'Error removing your HyperBEAM upload',
+              isError: true,
+            })
+          );
+          if (cb) cb(ABANDON_STATES.ERROR);
+        }
+      );
+      return;
+    }
+
     const state = getState();
     const myClaims: Array<Claim> = selectMyClaimsRaw(state);
     const mySupports: Record<string, Support> = selectSupportsByOutpoint(state);
@@ -586,6 +983,7 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
     Lbry[method](abandonParams).then(successCallback, errorCallback);
   };
 }
+
 export function doFetchClaimsByChannel(uri: string, page: number = 1) {
   return (dispatch: Dispatch) => {
     dispatch({
@@ -602,8 +1000,9 @@ export function doFetchClaimsByChannel(uri: string, page: number = 1) {
       order_by: ['release_time'],
       include_is_my_output: true,
       include_purchase_receipt: true,
-    }).then((result: ClaimSearchResponse) => {
-      const { items: claims, total_items: claimsInChannel, page: returnedPage } = result;
+    }).then(async (result: ClaimSearchResponse) => {
+      result = await mergeHyperbeamPublishesIntoChannelResult(result, uri, page || 1);
+      const { items: claims, total_items: claimsInChannel, page: returnedPage, total_pages: totalPages } = result;
       dispatch({
         type: ACTIONS.FETCH_CHANNEL_CLAIMS_COMPLETED,
         data: {
@@ -611,6 +1010,7 @@ export function doFetchClaimsByChannel(uri: string, page: number = 1) {
           claimsInChannel,
           claims: claims || [],
           page: returnedPage || undefined,
+          totalPages,
         },
       });
     });
@@ -861,6 +1261,7 @@ export function doClaimSearch(
     });
 
     const success = async (data: ClaimSearchResponse) => {
+      data = await mergeHyperbeamPublishesIntoSearchResult(data, options);
       const resolveInfo = {};
       const urls = [];
       const claimIds: Array<ClaimId> = [];
@@ -874,7 +1275,7 @@ export function doClaimSearch(
           stream,
         };
         urls.push(stream.canonical_url);
-        claimIds.push(stream.claim_id);
+        if (!isHyperbeamUploadClaim(stream)) claimIds.push(stream.claim_id);
 
         if (stream.value_type !== 'channel' && stream.value_type !== 'collection') {
           const isProtected = isClaimProtected(stream);

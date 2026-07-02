@@ -47,6 +47,32 @@ export function concatClaims(claimList: Array<Claim> = [], concatClaimList: Arra
   });
   return claims;
 }
+export function isHyperbeamUploadClaim(claim: Claim | null | undefined) {
+  if (!claim) return false;
+
+  const hyperbeam = (claim as any).hyperbeam;
+  const uploadDevice = String(hyperbeam?.upload_device || hyperbeam?.['upload-device'] || '');
+  const uploadId = hyperbeam?.upload_id || hyperbeam?.uploadId || hyperbeam?.immutable_id || hyperbeam?.immutableId;
+  const immutableId = (claim as any).immutable_id || (claim as any).immutableId || (claim as any).outpoint;
+  const claimId = (claim as any).claim_id || (claim as any)['claim-id'];
+
+  return Boolean(
+    (claim as any).hyperbeam_upload ||
+    uploadId ||
+    uploadDevice.replace(/^~/, '') === 'odysee-upload@1.0' ||
+    (immutableId &&
+      !isLegacyOutpoint(immutableId) &&
+      (!claimId || claimId === immutableId || !isLegacyClaimId(claimId)))
+  );
+}
+
+function isLegacyClaimId(value: any) {
+  return /^[0-9a-f]{40}$/i.test(String(value || ''));
+}
+
+function isLegacyOutpoint(value: any) {
+  return /^[0-9a-f]{64}:\d+$/i.test(String(value || ''));
+}
 export function filterClaims(claims: Array<Claim>, query: string | null | undefined): Array<Claim> {
   if (query) {
     const queryMatchRegExp = new RegExp(query, 'i');
@@ -211,3 +237,16 @@ export const isClaimShort = (claim: Claim | null | undefined): boolean => {
 };
 export const getClaimMeta = (claim: Claim | null | undefined) => claim && claim.meta;
 export const getClaimRepostedAmount = (claim: Claim | null | undefined) => getClaimMeta(claim)?.reposted;
+export function getClaimOutpoint(claim: Claim | null | undefined) {
+  if (!claim) return claim;
+
+  const hyperbeam = (claim as any).hyperbeam;
+  const immutableId =
+    (hyperbeam && (hyperbeam.upload_id || hyperbeam.immutable_id)) ||
+    (claim as any).immutable_id ||
+    (claim as any).immutableId ||
+    (claim as any).outpoint;
+
+  if (immutableId) return immutableId;
+  return claim.txid ? `${claim.txid}:${claim.nout || 0}` : null;
+}

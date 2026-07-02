@@ -505,9 +505,13 @@ function App() {
     }
 
     if (hasMyChannels) {
-      dispatch(doFetchModBlockedList());
-      dispatch(doFetchCommentModAmIList());
-      dispatch(doCommentModListDelegatesForMyChannels());
+      const backgroundSyncTimer = setTimeout(async () => {
+        await dispatch(doFetchModBlockedList());
+        await dispatch(doFetchCommentModAmIList());
+        await dispatch(doCommentModListDelegatesForMyChannels());
+      }, 2500);
+
+      return () => clearTimeout(backgroundSyncTimer);
     } // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, hasMyChannels, hasNoChannels]);
   useEffect(() => {

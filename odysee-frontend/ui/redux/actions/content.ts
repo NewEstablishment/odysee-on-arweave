@@ -5,7 +5,7 @@ import * as PAGES from 'constants/pages';
 import { COL_TYPES } from 'constants/collections';
 import { navigateTo } from 'redux/router';
 import { doOpenModal, doAnalyticsViewForUri } from 'redux/actions/app';
-import { getChannelIdFromClaim, isClaimUnlisted, isClaimShort } from 'util/claim';
+import { getChannelIdFromClaim, getClaimOutpoint, isClaimUnlisted, isClaimShort } from 'util/claim';
 import { toHex } from 'util/hex';
 import { formatLbryUrlForWeb, generateListSearchUrlParams } from 'util/url';
 import {
@@ -625,8 +625,8 @@ export function savePosition(uri: string, position: number) {
   return (dispatch: Dispatch, getState: () => any) => {
     const state = getState();
     const claim = makeSelectClaimForUri(uri)(state);
-    const { claim_id: claimId, txid, nout } = claim;
-    const outpoint = `${txid}:${nout}`;
+    const { claim_id: claimId } = claim;
+    const outpoint = getClaimOutpoint(claim);
     dispatch({
       type: ACTIONS.SET_CONTENT_POSITION,
       data: {
@@ -641,8 +641,8 @@ export function clearPosition(uri: string) {
   return (dispatch: Dispatch, getState: () => any) => {
     const state = getState();
     const claim = makeSelectClaimForUri(uri)(state);
-    const { claim_id: claimId, txid, nout } = claim;
-    const outpoint = `${txid}:${nout}`;
+    const { claim_id: claimId } = claim;
+    const outpoint = getClaimOutpoint(claim);
     dispatch({
       type: ACTIONS.CLEAR_CONTENT_POSITION,
       data: {

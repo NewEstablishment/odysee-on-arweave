@@ -49,7 +49,8 @@
     "test:e2e:report": "playwright show-report playwright-report",
     "test:e2e:codegen": "playwright codegen http://localhost:1337",
     "test:e2e:smoke": "playwright test --project=chromium tests/specs/smoke",
-    "test:e2e:auth": "playwright test --project=chromium:auth tests/specs/authenticated"
+    "test:e2e:auth": "playwright test --project=chromium:auth tests/specs/authenticated",
+    "test:hyperbeam-upload-smoke": "node tests/scripts/hyperbeam-upload-smoke.mjs"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.2",

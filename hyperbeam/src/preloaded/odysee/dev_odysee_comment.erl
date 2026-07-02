@@ -5,7 +5,32 @@
 %%% for later verification against LBRY channel public keys.
 -module(dev_odysee_comment).
 -implements(<<"odysee-comment@1.0">>).
--export([info/1, list/3, by_id/3, normalize/3, verify_signature/3, verify_claim_signature/3]).
+-export([
+    info/1,
+    list/3,
+    by_id/3,
+    create/3,
+    edit/3,
+    pin/3,
+    abandon/3,
+    reaction_react/3,
+    setting_get/3,
+    setting_list/3,
+    setting_update/3,
+    setting_block_word/3,
+    setting_unblock_word/3,
+    setting_list_blocked_words/3,
+    moderation_block/3,
+    moderation_unblock/3,
+    moderation_block_list/3,
+    moderation_add_delegate/3,
+    moderation_remove_delegate/3,
+    moderation_list_delegates/3,
+    moderation_am_i/3,
+    normalize/3,
+    verify_signature/3,
+    verify_claim_signature/3
+]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -18,6 +43,24 @@ info(_Opts) ->
         exports => [
             <<"list">>,
             <<"by-id">>,
+            <<"create">>,
+            <<"edit">>,
+            <<"pin">>,
+            <<"abandon">>,
+            <<"reaction-react">>,
+            <<"setting-get">>,
+            <<"setting-list">>,
+            <<"setting-update">>,
+            <<"setting-block-word">>,
+            <<"setting-unblock-word">>,
+            <<"setting-list-blocked-words">>,
+            <<"moderation-block">>,
+            <<"moderation-unblock">>,
+            <<"moderation-block-list">>,
+            <<"moderation-add-delegate">>,
+            <<"moderation-remove-delegate">>,
+            <<"moderation-list-delegates">>,
+            <<"moderation-am-i">>,
             <<"normalize">>,
             <<"verify-signature">>,
             <<"verify-claim-signature">>
@@ -43,6 +86,56 @@ by_id(Base, Req, Opts) ->
             normalize_by_id(Result, Raw, Opts)
         else
             Error -> Error
+        end
+    end).
+
+%% @doc Proxy Commentron write and settings operations through HyperBEAM.
+create(Base, Req, Opts) -> commentron(<<"comment.Create">>, Base, Req, Opts).
+edit(Base, Req, Opts) -> commentron(<<"comment.Edit">>, Base, Req, Opts).
+pin(Base, Req, Opts) -> commentron(<<"comment.Pin">>, Base, Req, Opts).
+abandon(Base, Req, Opts) -> commentron(<<"comment.Abandon">>, Base, Req, Opts).
+reaction_react(Base, Req, Opts) -> commentron(<<"reaction.React">>, Base, Req, Opts).
+setting_get(Base, Req, Opts) -> commentron(<<"setting.Get">>, Base, Req, Opts).
+setting_list(Base, Req, Opts) -> commentron(<<"setting.List">>, Base, Req, Opts).
+setting_update(Base, Req, Opts) -> commentron(<<"setting.Update">>, Base, Req, Opts).
+setting_block_word(Base, Req, Opts) -> commentron(<<"setting.BlockWord">>, Base, Req, Opts).
+setting_unblock_word(Base, Req, Opts) -> commentron(<<"setting.UnBlockWord">>, Base, Req, Opts).
+setting_list_blocked_words(Base, Req, Opts) -> commentron(<<"setting.ListBlockedWords">>, Base, Req, Opts).
+moderation_block(Base, Req, Opts) -> commentron(<<"moderation.Block">>, Base, Req, Opts).
+moderation_unblock(Base, Req, Opts) -> commentron(<<"moderation.UnBlock">>, Base, Req, Opts).
+moderation_block_list(Base, Req, Opts) -> commentron(<<"moderation.BlockedList">>, Base, Req, Opts).
+moderation_add_delegate(Base, Req, Opts) -> commentron(<<"moderation.AddDelegate">>, Base, Req, Opts).
+moderation_remove_delegate(Base, Req, Opts) -> commentron(<<"moderation.RemoveDelegate">>, Base, Req, Opts).
+moderation_list_delegates(Base, Req, Opts) -> commentron(<<"moderation.ListDelegates">>, Base, Req, Opts).
+moderation_am_i(Base, Req, Opts) -> commentron(<<"moderation.AmI">>, Base, Req, Opts).
+
+commentron(Method, Base, Req, Opts) ->
+    safe(fun() ->
+        case proxy_params(Base, Req, Opts) of
+            {ok, Params} ->
+                case api_request(Method, Params, Base, Req, Opts) of
+                    {ok, Result, Raw} ->
+                        {ok, #{
+                            <<"device">> => ?DEVICE,
+                            <<"content-type">> => <<"application/json">>,
+                            <<"method">> => Method,
+                            <<"body">> => Raw,
+                            <<"result">> => Result
+                        }};
+                    {error, {comment_api_error, Error, Raw}} ->
+                        {ok, #{
+                            <<"device">> => ?DEVICE,
+                            <<"status">> => 400,
+                            <<"content-type">> => <<"application/json">>,
+                            <<"method">> => Method,
+                            <<"body">> => Raw,
+                            <<"error">> => Error
+                        }};
+                    Error ->
+                        Error
+                end;
+            Error ->
+                Error
         end
     end).
 
@@ -492,6 +585,73 @@ list_params(Base, Req, Opts) ->
             end
     end.
 
+proxy_params(Base, Req, Opts) ->
+    BodyParams =
+        case first_found([{Req, <<"body">>}, {Base, <<"body">>}], Opts) of
+            Raw when is_binary(Raw) ->
+                case try_decode_json(Raw) of
+                    {ok, #{ <<"params">> := Params }} when is_map(Params) -> Params;
+                    {ok, Params} when is_map(Params) -> Params;
+                    _ -> #{}
+                end;
+            Params when is_map(Params) -> Params;
+            _ -> #{}
+        end,
+    {ok, strip_proxy_params(maps:merge(clean_proxy_map(Base), maps:merge(clean_proxy_map(Req), BodyParams)))}.
+
+clean_proxy_map(Msg) when is_map(Msg) ->
+    maps:filter(
+        fun(Key, _Value) ->
+            not lists:member(Key, proxy_control_keys())
+        end,
+        Msg
+    );
+clean_proxy_map(_Msg) ->
+    #{}.
+
+strip_proxy_params(Params) ->
+    maps:without(proxy_control_keys(), Params).
+
+proxy_control_keys() ->
+    [
+        <<"accept">>,
+        <<"accept-bundle">>,
+        <<"accept-encoding">>,
+        <<"accept-language">>,
+        <<"authorization">>,
+        <<"body">>,
+        <<"commitments">>,
+        <<"connection">>,
+        <<"content-length">>,
+        <<"content-type">>,
+        <<"cookie">>,
+        <<"device">>,
+        <<"host">>,
+        <<"method">>,
+        <<"origin">>,
+        <<"path">>,
+        <<"priv">>,
+        <<"referer">>,
+        <<"sec-ch-ua">>,
+        <<"sec-ch-ua-mobile">>,
+        <<"sec-ch-ua-platform">>,
+        <<"sec-fetch-dest">>,
+        <<"sec-fetch-mode">>,
+        <<"sec-fetch-site">>,
+        <<"sec-gpc">>,
+        <<"signature-input">>,
+        <<"user-agent">>,
+        <<"x-odysee-auth-token">>,
+        <<"x-lbry-auth-token">>,
+        <<"odysee-auth-token">>,
+        <<"auth_token">>,
+        <<"auth-token">>,
+        <<"access_token">>,
+        <<"access-token">>,
+        <<"refresh_token">>,
+        <<"refresh-token">>
+    ].
+
 params_from(Mappings, Base, Req, Opts) ->
     lists:foldl(
         fun({OutKey, Keys}, Params) ->
@@ -692,10 +852,11 @@ signature_response(IsValid) ->
     }.
 
 api_request(Method, Params, Base, Req, Opts) ->
+    LegacyParams = legacy_api_params(Params, Base, Req, Opts),
     Payload = hb_json:encode(#{
         <<"jsonrpc">> => <<"2.0">>,
         <<"method">> => Method,
-        <<"params">> => Params,
+        <<"params">> => LegacyParams,
         <<"id">> => 1
     }),
     Msg = #{
@@ -704,7 +865,8 @@ api_request(Method, Params, Base, Req, Opts) ->
         <<"content-type">> => <<"application/json">>,
         <<"body">> => Payload
     },
-    case hb_http:request(Msg, Opts) of
+    AuthedMsg = maps:merge(Msg, legacy_api_headers(Base, Req, Opts)),
+    case hb_http:request(AuthedMsg, Opts) of
         {ok, #{ <<"body">> := Body }} when is_binary(Body) -> decode_api_body(Body, Opts);
         {ok, Body} when is_binary(Body) -> decode_api_body(Body, Opts);
         {ok, Other} -> {error, {comment_response_without_body, Other}};
@@ -716,7 +878,7 @@ decode_api_body(Body, Opts) ->
         {ok, Decoded} ?= try_decode_json(Body),
         case hb_maps:get(<<"error">>, Decoded, not_found, Opts) of
             not_found -> {ok, hb_maps:get(<<"result">>, Decoded, Decoded, Opts), Body};
-            Error -> {error, {comment_api_error, Error}}
+            Error -> {error, {comment_api_error, Error, Body}}
         end
     end.
 
@@ -783,6 +945,69 @@ has_any([Key | Rest], Map, Opts) ->
 
 put_optional({_Key, not_found}, Msg) -> Msg;
 put_optional({Key, Value}, Msg) -> Msg#{ Key => Value }.
+
+legacy_api_headers(Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+                {error, not_found} -> #{}
+            end
+    end.
+
+legacy_api_params(Params, Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            Params#{ <<"auth_token">> => Token };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> Params#{ <<"auth_token">> => Token };
+                {error, not_found} -> Params
+            end
+    end.
+
+find_auth_token(Msg, Opts) ->
+    case first_found(
+        [{Msg, Key} || Key <- [<<"x-odysee-auth-token">>, <<"x-lbry-auth-token">>, <<"odysee-auth-token">>, <<"auth_token">>]],
+        Opts
+    ) of
+        not_found -> find_auth_cookie(Msg, Opts);
+        Token -> {ok, token_value(Token)}
+    end.
+
+find_auth_cookie(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:find(<<"cookie">>, Msg, Opts) of
+        {ok, Cookie} -> token_from_cookie(hb_util:bin(Cookie));
+        error -> {error, not_found}
+    end;
+find_auth_cookie(_Msg, _Opts) ->
+    {error, not_found}.
+
+token_from_cookie(Cookie) ->
+    token_from_cookie_parts(binary:split(Cookie, <<";">>, [global])).
+
+token_from_cookie_parts([]) ->
+    {error, not_found};
+token_from_cookie_parts([Part | Rest]) ->
+    case binary:split(Part, <<"=">>) of
+        [Name, Value] ->
+            case trim_bin(Name) of
+                <<"auth_token">> -> {ok, trim_bin(Value)};
+                _ -> token_from_cookie_parts(Rest)
+            end;
+        _ ->
+            token_from_cookie_parts(Rest)
+    end.
+
+token_value(#{ <<"value">> := Value }) ->
+    hb_util:bin(Value);
+token_value(Value) ->
+    hb_util:bin(Value).
+
+trim_bin(Bin) ->
+    list_to_binary(string:trim(binary_to_list(Bin))).
 
 try_decode_json(Raw) ->
     try {ok, hb_json:decode(Raw)}
@@ -859,6 +1084,62 @@ normalize_verifies_comment_with_public_key_test() ->
 
 list_requires_claim_or_author_for_fetch_test() ->
     ?assertEqual({error, claim_id_not_found}, list(#{}, #{}, #{})).
+
+list_params_do_not_expose_auth_token_test() ->
+    {ok, Params} = list_params(
+        #{},
+        #{
+            <<"claim-id">> => <<"claim-1">>,
+            <<"x-odysee-auth-token">> => <<"token-1">>,
+            <<"auth_token">> => <<"token-2">>,
+            <<"cookie">> => <<"auth_token=token-3">>
+        },
+        #{}
+    ),
+    ?assertEqual(#{ <<"claim_id">> => <<"claim-1">> }, Params).
+
+legacy_api_headers_forwards_odysee_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"cookie">> => <<"auth_token=token-1">> },
+        legacy_api_headers(#{}, #{ <<"x-odysee-auth-token">> => <<"token-1">> }, #{})
+    ).
+
+legacy_api_headers_extracts_auth_cookie_test() ->
+    ?assertEqual(
+        #{ <<"cookie">> => <<"auth_token=token-2">> },
+        legacy_api_headers(#{}, #{ <<"cookie">> => <<"other=1; auth_token=token-2; x=3">> }, #{})
+    ).
+
+legacy_api_params_forwards_odysee_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"claim_id">> => <<"claim-1">>, <<"auth_token">> => <<"token-1">> },
+        legacy_api_params(
+            #{ <<"claim_id">> => <<"claim-1">> },
+            #{},
+            #{ <<"x-odysee-auth-token">> => <<"token-1">> },
+            #{}
+        )
+    ).
+
+proxy_params_strips_transport_metadata_test() ->
+    {ok, Params} = proxy_params(
+        #{},
+        #{
+            <<"auth_token">> => <<"secret">>,
+            <<"accept-bundle">> => <<"bundle">>,
+            <<"connection">> => <<"keep-alive">>,
+            <<"channel_id">> => <<"channel-1">>,
+            <<"claim_id">> => <<"claim-1">>,
+            <<"comment">> => <<"hello">>
+        },
+        #{}
+    ),
+    ?assertEqual(false, maps:is_key(<<"auth_token">>, Params)),
+    ?assertEqual(false, maps:is_key(<<"accept-bundle">>, Params)),
+    ?assertEqual(false, maps:is_key(<<"connection">>, Params)),
+    ?assertEqual(<<"channel-1">>, maps:get(<<"channel_id">>, Params)),
+    ?assertEqual(<<"claim-1">>, maps:get(<<"claim_id">>, Params)),
+    ?assertEqual(<<"hello">>, maps:get(<<"comment">>, Params)).
 
 commentron_vector() ->
     #{

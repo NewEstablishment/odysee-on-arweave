@@ -21,7 +21,11 @@ const defaultState: StatsState = {
 export const statsReducer = handleActions(
   {
     [ACTIONS.FETCH_VIEW_COUNT_STARTED]: (state) => ({ ...state, fetchingViewCount: true }),
-    [ACTIONS.FETCH_VIEW_COUNT_FAILED]: (state, action) => ({ ...state, viewCountError: action.data }),
+    [ACTIONS.FETCH_VIEW_COUNT_FAILED]: (state, action) => ({
+      ...state,
+      fetchingViewCount: false,
+      viewCountError: action.data,
+    }),
     [ACTIONS.FETCH_VIEW_COUNT_COMPLETED]: (state, action) => {
       const { claimIdCsv, viewCounts } = action.data;
       const viewCountById = Object.assign({}, state.viewCountById);
@@ -36,7 +40,11 @@ export const statsReducer = handleActions(
       return { ...state, fetchingViewCount: false, viewCountById };
     },
     [ACTIONS.FETCH_SUB_COUNT_STARTED]: (state) => ({ ...state, fetchingSubCount: true }),
-    [ACTIONS.FETCH_SUB_COUNT_FAILED]: (state, action) => ({ ...state, subCountError: action.data }),
+    [ACTIONS.FETCH_SUB_COUNT_FAILED]: (state, action) => ({
+      ...state,
+      fetchingSubCount: false,
+      subCountError: action.data,
+    }),
     [ACTIONS.FETCH_SUB_COUNT_COMPLETED]: (state, action) => {
       const { claimIds, subCounts, fetchDate } = action.data;
       const subCountById = Object.assign({}, state.subCountById);

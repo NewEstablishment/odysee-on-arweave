@@ -151,7 +151,7 @@ api_params(Params0, Opts) ->
     Params2 = put_alias(<<"channel_id">>, <<"channel-id">>, Params1, Opts),
     Params3 = put_alias(<<"channel_name">>, <<"channel-name">>, Params2, Opts),
     Params4 = put_alias(<<"signing_ts">>, <<"signing-ts">>, Params3, Opts),
-    maps:without(control_keys() ++ request_metadata_keys(), Params4).
+    maps:without(control_keys() ++ request_metadata_keys() ++ private_credential_keys(), Params4).
 
 control_keys() ->
     [
@@ -174,11 +174,13 @@ control_keys() ->
 request_metadata_keys() ->
     [
         <<"accept">>,
+        <<"accept-encoding">>,
         <<"accept-bundle">>,
         <<"accept-language">>,
         <<"authorization">>,
         <<"connection">>,
         <<"content-length">>,
+        <<"commitments">>,
         <<"cookie">>,
         <<"host">>,
         <<"origin">>,
@@ -190,7 +192,18 @@ request_metadata_keys() ->
         <<"sec-fetch-dest">>,
         <<"sec-fetch-mode">>,
         <<"sec-fetch-site">>,
+        <<"sec-gpc">>,
         <<"user-agent">>
+    ].
+
+private_credential_keys() ->
+    [
+        <<"auth_token">>,
+        <<"auth-token">>,
+        <<"lbry-auth-token">>,
+        <<"odysee-auth-token">>,
+        <<"x-lbry-auth-token">>,
+        <<"x-odysee-auth-token">>
     ].
 
 put_alias(Target, Source, Params, Opts) ->
@@ -205,10 +218,11 @@ put_alias(Target, Source, Params, Opts) ->
     end.
 
 api_request(Method, Params, Base, Req, Opts) ->
+    LegacyParams = legacy_api_params(Params, Base, Req, Opts),
     Payload = hb_json:encode(#{
         <<"jsonrpc">> => <<"2.0">>,
         <<"method">> => Method,
-        <<"params">> => Params,
+        <<"params">> => LegacyParams,
         <<"id">> => 1
     }),
     Msg = #{
@@ -217,7 +231,8 @@ api_request(Method, Params, Base, Req, Opts) ->
         <<"content-type">> => <<"application/json">>,
         <<"body">> => Payload
     },
-    case hb_http:request(Msg, Opts) of
+    AuthedMsg = maps:merge(Msg, legacy_api_headers(Base, Req, Opts)),
+    case hb_http:request(AuthedMsg, Opts) of
         {ok, #{ <<"body">> := Body }} when is_binary(Body) -> decode_api_body(Body, Opts);
         {ok, Body} when is_binary(Body) -> decode_api_body(Body, Opts);
         {ok, Other} -> {error, {reaction_response_without_body, Other}};
@@ -262,6 +277,69 @@ reaction_comment_ids(MyReactions, OthersReactions) ->
 
 map_or_empty(Map) when is_map(Map) -> Map;
 map_or_empty(_Value) -> #{}.
+
+legacy_api_headers(Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+                {error, not_found} -> #{}
+            end
+    end.
+
+legacy_api_params(Params, Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            Params#{ <<"auth_token">> => Token };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> Params#{ <<"auth_token">> => Token };
+                {error, not_found} -> Params
+            end
+    end.
+
+find_auth_token(Msg, Opts) ->
+    case first_found(
+        [{Msg, Key} || Key <- [<<"x-odysee-auth-token">>, <<"x-lbry-auth-token">>, <<"odysee-auth-token">>, <<"auth_token">>]],
+        Opts
+    ) of
+        not_found -> find_auth_cookie(Msg, Opts);
+        Token -> {ok, token_value(Token)}
+    end.
+
+find_auth_cookie(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:find(<<"cookie">>, Msg, Opts) of
+        {ok, Cookie} -> token_from_cookie(hb_util:bin(Cookie));
+        error -> {error, not_found}
+    end;
+find_auth_cookie(_Msg, _Opts) ->
+    {error, not_found}.
+
+token_from_cookie(Cookie) ->
+    token_from_cookie_parts(binary:split(Cookie, <<";">>, [global])).
+
+token_from_cookie_parts([]) ->
+    {error, not_found};
+token_from_cookie_parts([Part | Rest]) ->
+    case binary:split(Part, <<"=">>) of
+        [Name, Value] ->
+            case trim_bin(Name) of
+                <<"auth_token">> -> {ok, trim_bin(Value)};
+                _ -> token_from_cookie_parts(Rest)
+            end;
+        _ ->
+            token_from_cookie_parts(Rest)
+    end.
+
+token_value(#{ <<"value">> := Value }) ->
+    hb_util:bin(Value);
+token_value(Value) ->
+    hb_util:bin(Value).
+
+trim_bin(Bin) ->
+    list_to_binary(string:trim(binary_to_list(Bin))).
 
 first_value([], _Map, _Opts) ->
     not_found;
@@ -325,7 +403,14 @@ list_accepts_raw_json_test() ->
 list_params_normalizes_aliases_and_strips_control_fields_test() ->
     {ok, Params} = list_params(
         #{ <<"comment-url">> => <<"http://comments">>, <<"comment-ids">> => <<"c1,c2">> },
-        #{ <<"body">> => <<"{}">>, <<"channel-id">> => <<"channel-1">>, <<"signature">> => <<"sig">> },
+        #{
+            <<"body">> => <<"{}">>,
+            <<"channel-id">> => <<"channel-1">>,
+            <<"signature">> => <<"sig">>,
+            <<"accept-encoding">> => <<"gzip">>,
+            <<"sec-gpc">> => <<"1">>,
+            <<"x-odysee-auth-token">> => <<"tok">>
+        },
         #{}
     ),
     ?assertEqual(#{
@@ -336,6 +421,29 @@ list_params_normalizes_aliases_and_strips_control_fields_test() ->
 
 list_requires_comment_ids_for_fetch_test() ->
     ?assertEqual({error, comment_ids_not_found}, list(#{}, #{}, #{})).
+
+legacy_api_headers_forwards_odysee_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"cookie">> => <<"auth_token=token-1">> },
+        legacy_api_headers(#{}, #{ <<"x-odysee-auth-token">> => <<"token-1">> }, #{})
+    ).
+
+legacy_api_headers_extracts_auth_cookie_test() ->
+    ?assertEqual(
+        #{ <<"cookie">> => <<"auth_token=token-2">> },
+        legacy_api_headers(#{}, #{ <<"cookie">> => <<"other=1; auth_token=token-2; x=3">> }, #{})
+    ).
+
+legacy_api_params_forwards_odysee_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"comment_ids">> => <<"c1">>, <<"auth_token">> => <<"token-1">> },
+        legacy_api_params(
+            #{ <<"comment_ids">> => <<"c1">> },
+            #{},
+            #{ <<"x-odysee-auth-token">> => <<"token-1">> },
+            #{}
+        )
+    ).
 
 reaction_result() ->
     #{

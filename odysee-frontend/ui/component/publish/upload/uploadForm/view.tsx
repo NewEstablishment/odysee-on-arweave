@@ -34,12 +34,14 @@ import PublishControlTags from 'component/publish/shared/publishControlTags/view
 import PublishSummary from 'component/publish/shared/publishSummary/view';
 import PublishTagsPicker from 'component/publish/shared/publishTagsPicker/view';
 import * as ACTIONS from 'constants/action_types';
-import { doAddPipelineItem, doUpdatePipelineItem } from 'redux/actions/publishPipeline';
+import { doAddPipelineItem, doRemovePipelineItem, doUpdatePipelineItem } from 'redux/actions/publishPipeline';
 import type { PipelineStage } from 'redux/actions/publishPipeline';
 import { runConversion, runOptimization } from 'util/upload-conversion-pipeline';
 import { enqueue, promote, release, dequeue } from 'util/pipeline-queue';
 import { v4 as uuid } from 'uuid';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { canPublishThroughHyperbeam } from 'services/hyperbeamUpload';
+import { resolvePublishPayload } from 'util/publish';
 import {
   doResetThumbnailStatus,
   doClearPublish,
@@ -59,7 +61,7 @@ import {
   selectActivePipelineItems,
 } from 'redux/selectors/publish';
 import type { PipelineItem } from 'redux/actions/publishPipeline';
-import { selectIsStreamPlaceholderForUri } from 'redux/selectors/claims';
+import { selectIsStreamPlaceholderForUri, selectMyChannelClaims } from 'redux/selectors/claims';
 import * as RENDER_MODES from 'constants/file_render_modes';
 import * as SETTINGS from 'constants/settings';
 import { doClaimInitialRewards } from 'redux/actions/rewards';
@@ -108,6 +110,7 @@ function UploadForm(props: Props) {
   const modal = useAppSelector(selectModal);
   const enablePublishPreview = useAppSelector((state) => selectClientSetting(state, SETTINGS.ENABLE_PUBLISH_PREVIEW));
   const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
+  const myChannels = useAppSelector(selectMyChannelClaims) as Array<ChannelClaim> | null | undefined;
   const incognito = useAppSelector(selectIncognito);
   const isClaimingInitialRewards = useAppSelector(selectIsClaimingInitialRewards);
   const hasClaimedInitialRewards = useAppSelector(selectHasClaimedInitialRewards);
@@ -143,6 +146,20 @@ function UploadForm(props: Props) {
   const checkAvailability = React.useCallback((n: string) => dispatch(doCheckPublishNameAvailability(n)), [dispatch]);
   const claimInitialRewards = React.useCallback(() => dispatch(doClaimInitialRewards()), [dispatch]);
   const fetchCreatorSettings = React.useCallback((cid: string) => dispatch(doFetchCreatorSettings(cid)), [dispatch]);
+  const canUseHyperbeamPublish = React.useCallback(
+    (file: unknown) => {
+      if (!(file instanceof File)) return false;
+      const publishPayload = resolvePublishPayload(
+        publishFormValues,
+        myClaimForUri,
+        myChannels,
+        memberRestrictionStatus,
+        false
+      );
+      return canPublishThroughHyperbeam(file, publishPayload, publishFormValues.type);
+    },
+    [memberRestrictionStatus, myChannels, myClaimForUri, publishFormValues]
+  );
 
   const pipelineItems = useAppSelector(selectActivePipelineItems) as PipelineItem[];
   const inEditMode = Boolean(editingURI);
@@ -346,9 +363,11 @@ function UploadForm(props: Props) {
       const pipelineId = activePipelineItem?.id || pipelineItemIdRef.current;
       const pipelineStage = activePipelineItem?.stage;
       dispatch(doUpdatePipelineItem(pipelineId, { publishStarted: true }));
+      const hyperbeamPublish = canUseHyperbeamPublish(outputFile);
 
       if (
         mode === PUBLISH_MODES.FILE &&
+        !hyperbeamPublish &&
         pipelineStage &&
         ['queued', 'converting', 'optimizing', 'paused', 'pausing'].includes(pipelineStage)
       ) {
@@ -379,7 +398,15 @@ function UploadForm(props: Props) {
         const uploadHandle = (window as any).__earlyUploadHandles?.[pipelineId];
         const uploadPromise = earlyUploadPromiseRef.current || uploadHandle?.promise;
 
-        if (uploadPromise && mode === PUBLISH_MODES.FILE) {
+        if (hyperbeamPublish) {
+          uploadHandle?.abort?.();
+          earlyUploadAbortRef.current?.();
+          earlyUploadPromiseRef.current = null;
+          earlyUploadAbortRef.current = null;
+          delete (window as any).__earlyUploadHandles?.[pipelineId];
+          dispatch(doRemovePipelineItem(pipelineId));
+          publish(outputFile, false);
+        } else if (uploadPromise && mode === PUBLISH_MODES.FILE) {
           dispatch(doPublishWithEarlyUpload(uploadPromise, pipelineId));
         } else {
           dispatch(doUpdatePipelineItem(pipelineId, { stage: 'processing', progress: 0 }));
@@ -687,7 +714,7 @@ function UploadForm(props: Props) {
         if (!started) {
           dispatch(doUpdatePipelineItem(itemId, { stage: 'queued' }));
         }
-      } else if (!pipelineAlreadyHandled && !earlyUploadPromiseRef.current) {
+      } else if (!pipelineAlreadyHandled && !earlyUploadPromiseRef.current && !canUseHyperbeamPublish(filePath)) {
         const itemId = pipelineItemIdRef.current;
         const file = filePath;
 

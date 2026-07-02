@@ -23,6 +23,7 @@ import {
   getChannelTitleFromClaim,
   getChannelNameFromClaim,
   getChannelPermanentUrlFromClaim,
+  getClaimOutpoint,
 } from 'util/claim';
 import * as CLAIM from 'constants/claim';
 import * as TAG from 'constants/tags';
@@ -37,8 +38,20 @@ export function selectClaimsStates(state: State) {
 
 const selectState = (state: State) => state.claims || EMPTY_OBJECT;
 
+function isSyntheticPendingClaim(id: string, claim?: any) {
+  return (
+    id.startsWith('pending-') ||
+    String(claim?.claim_id || '').startsWith('pending-') ||
+    String(claim?.txid || '').startsWith('pending-')
+  );
+}
+
 export const selectById = (state: State) => selectState(state).byId || EMPTY_OBJECT;
-export const selectPendingClaimsById = (state: State) => selectState(state).pendingById || EMPTY_OBJECT;
+export const selectPendingClaimsById = createSelector(selectState, (state) => {
+  const pendingById = state.pendingById || EMPTY_OBJECT;
+  const entries = Object.entries(pendingById).filter(([id, claim]) => !isSyntheticPendingClaim(id, claim));
+  return entries.length === Object.keys(pendingById).length ? pendingById : Object.fromEntries(entries);
+});
 export const selectClaimsById = createSelector(selectById, selectPendingClaimsById, (byId, pendingById) => {
   const hasPending = pendingById && Object.keys(pendingById).length > 0;
   return hasPending ? Object.assign({}, byId, pendingById) : byId;
@@ -118,7 +131,10 @@ export const selectAllClaimsByChannel = createSelector(
   selectState,
   (state) => state.paginatedClaimsByChannel || EMPTY_OBJECT
 );
-export const selectPendingIds = createSelector(selectState, (state) => Object.keys(state.pendingById) || []);
+export const selectPendingIds = createSelector(
+  selectPendingClaimsById,
+  (pendingById) => Object.keys(pendingById) || []
+);
 export const selectPendingClaims = createSelector(selectPendingClaimsById, (pendingById) => Object.values(pendingById));
 export const selectClaimIsPendingForId = (state: State, claimId: string) => {
   return Boolean(selectPendingClaimsById(state)[claimId]);
@@ -181,9 +197,7 @@ export const selectClaimForUri = createCachedSelector(
 )((state, uri, returnRepost = true) => `${String(uri)}:${returnRepost ? '1' : '0'}`);
 export const selectClaimOutpointForUri = (state: State, uri: string) => {
   const claim = selectClaimForUri(state, uri);
-  if (!claim) return claim;
-  const outpoint = `${claim.txid}:${claim.nout}`;
-  return outpoint;
+  return getClaimOutpoint(claim);
 };
 export const selectChannelClaimIdForUri = (state: State, uri: string) =>
   getChannelIdFromClaim(selectClaimForUri(state, uri));
@@ -602,7 +616,7 @@ export const selectMyClaimsPage = createSelector(selectState, (state) => {
   const pendingUris: string[] = [];
   for (const [id, claim] of Object.entries(pendingById)) {
     const c = claim as any;
-    if (id.startsWith('__preview_')) continue;
+    if (id.startsWith('__preview_') || isSyntheticPendingClaim(id, c)) continue;
     const resolved = state.byId[id];
     if (c.confirmations > 0 || (resolved && resolved.confirmations > 0)) continue;
     if (c.permanent_url && !seenUrls.has(c.permanent_url) && !seenNames.has(c.name)) {
@@ -682,11 +696,14 @@ export const selectMyClaimUrisWithoutChannels = createSelector(selectMyClaimsWit
 });
 export const selectAllMyClaimsByOutpoint = createSelector(
   selectMyClaimsRaw,
-  (claims) => new Set(claims && claims.length ? claims.map((claim) => `${claim.txid}:${claim.nout}`) : null)
+  (claims) => new Set(claims && claims.length ? claims.map(getClaimOutpoint).filter(Boolean) : null)
 );
 export const selectMyClaimsOutpoints = createSelector(selectMyClaims, (myClaims) => {
   const outpoints = [];
-  myClaims.forEach((claim) => outpoints.push(`${claim.txid}:${claim.nout}`));
+  myClaims.forEach((claim) => {
+    const outpoint = getClaimOutpoint(claim);
+    if (outpoint) outpoints.push(outpoint);
+  });
   return outpoints;
 });
 export const selectFetchingMyChannels = (state: State) => selectState(state).fetchingMyChannels;

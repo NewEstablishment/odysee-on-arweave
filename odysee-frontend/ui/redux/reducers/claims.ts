@@ -7,7 +7,7 @@
 // - Sean
 import * as ACTIONS from 'constants/action_types';
 import mergeClaim from 'util/merge-claim';
-import { getChannelIdFromClaim } from 'util/claim';
+import { getChannelIdFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import { claimToStoredCollection } from 'util/collections';
 const reducers = {};
 const defaultState: ClaimsState = {
@@ -153,9 +153,77 @@ function updateIfValueChanged(original, delta, key, newValue) {
  * @param newClaim
  */
 function updateIfClaimChanged(original, delta, key, newClaim) {
-  if (!original[key] || claimHasNewData(original[key], newClaim)) {
-    delta[key] = newClaim;
+  const claim = preserveExistingChannelMeta(original[key], newClaim);
+
+  if (!original[key] || claimHasNewData(original[key], claim)) {
+    delta[key] = claim;
   }
+}
+
+function preserveExistingChannelMeta(originalClaim, newClaim) {
+  if (!originalClaim || !newClaim || newClaim.value_type !== 'channel') return newClaim;
+
+  const originalClaimsInChannel = Number(originalClaim.meta?.claims_in_channel || 0);
+  const newClaimsInChannel = Number(newClaim.meta?.claims_in_channel || 0);
+  if (!originalClaimsInChannel || newClaimsInChannel >= originalClaimsInChannel) return newClaim;
+
+  return {
+    ...newClaim,
+    meta: {
+      ...newClaim.meta,
+      ...originalClaim.meta,
+      claims_in_channel: originalClaimsInChannel,
+    },
+  };
+}
+
+function claimChannelUrls(claim: any): Array<string> {
+  const channel = claim?.signing_channel;
+  return [channel?.canonical_url, channel?.permanent_url].filter(Boolean);
+}
+
+function claimChannelId(claim: any): string | null {
+  return claim?.signing_channel?.claim_id || claim?.channel_id || null;
+}
+
+function removeClaimFromChannelPages(paginatedClaimsByChannel: any, claimId: string, channelUrls: Array<string>) {
+  const result = Object.assign({}, paginatedClaimsByChannel);
+
+  channelUrls.forEach((uri) => {
+    const channelPages = result[uri];
+    if (!channelPages) return;
+
+    const nextPages = Object.assign({}, channelPages);
+    if (nextPages.all) {
+      nextPages.all = new Set(Array.from(nextPages.all).filter((id) => id !== claimId));
+    }
+
+    Object.keys(nextPages).forEach((key) => {
+      if (Array.isArray(nextPages[key])) {
+        nextPages[key] = nextPages[key].filter((id) => id !== claimId);
+      }
+    });
+
+    if (typeof nextPages.itemCount === 'number') {
+      nextPages.itemCount = Math.max(0, nextPages.itemCount - 1);
+    }
+
+    result[uri] = nextPages;
+  });
+
+  return result;
+}
+
+function decrementChannelCounts(channelClaimCounts: any, channelUrls: Array<string>) {
+  const result = Object.assign({}, channelClaimCounts);
+
+  channelUrls.forEach((uri) => {
+    if (typeof result[uri] === 'number') {
+      result[uri] = Math.max(0, result[uri] - 1);
+    }
+  });
+
+  return result;
 }
 
 function selectClaimIsMine(state: ClaimsState, claim: Claim) {
@@ -178,6 +246,14 @@ function selectClaimIsMine(state: ClaimsState, claim: Claim) {
   }
 
   return false;
+}
+
+function isSyntheticPendingClaimId(id: string, claim?: any) {
+  return (
+    id.startsWith('pending-') ||
+    String(claim?.claim_id || '').startsWith('pending-') ||
+    String(claim?.txid || '').startsWith('pending-')
+  );
 }
 
 // ****************************************************************************
@@ -408,7 +484,10 @@ reducers[ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED] = (state: ClaimsState, action:
       value_type: valueType,
     } = claim;
 
-    if (claim.type && claim.type.match(/claim|update/)) {
+    if (
+      (claim.type && claim.type.match(/claim|update/)) ||
+      (isHyperbeamUploadClaim(claim) && claimId && permanentUri)
+    ) {
       urlsForCurrentPage.push(permanentUri);
       const includesMeta = Object.keys(claim.meta || {}).length > 0;
 
@@ -573,6 +652,7 @@ reducers[ACTIONS.FETCH_CHANNEL_CLAIMS_COMPLETED] = (state: ClaimsState, action: 
   const byIdDelta = {};
   const fetchingChannelClaims = Object.assign({}, state.fetchingChannelClaims);
   const claimsByUriDelta = {};
+  const channelClaimId = state.claimsByUri[uri] || claims?.[0]?.signing_channel?.claim_id;
 
   if (claims !== undefined) {
     claims.forEach((claim) => {
@@ -581,6 +661,23 @@ reducers[ACTIONS.FETCH_CHANNEL_CLAIMS_COMPLETED] = (state: ClaimsState, action: 
       updateIfClaimChanged(state.byId, byIdDelta, claim.claim_id, claim);
       updateIfValueChanged(state.claimsByUri, claimsByUriDelta, claim.canonical_url, claim.claim_id);
     });
+  }
+
+  if (channelClaimId && claimsInChannel !== undefined) {
+    const channelClaim = byIdDelta[channelClaimId] || state.byId[channelClaimId];
+
+    if (channelClaim?.value_type === 'channel') {
+      byIdDelta[channelClaimId] = {
+        ...channelClaim,
+        meta: {
+          ...channelClaim.meta,
+          claims_in_channel: claimsInChannel,
+        },
+      };
+      channelClaimCounts[uri] = claimsInChannel;
+      if (channelClaim.canonical_url) channelClaimCounts[channelClaim.canonical_url] = claimsInChannel;
+      if (channelClaim.permanent_url) channelClaimCounts[channelClaim.permanent_url] = claimsInChannel;
+    }
   }
 
   byChannel.all = allClaimIds;
@@ -675,8 +772,26 @@ reducers[ACTIONS.REMOVE_PENDING_CLAIM_BY_ID] = (state: ClaimsState, action: any)
   const { claimId } = action.data;
   if (!state.pendingById[claimId]) return state;
   const pendingById = { ...state.pendingById };
+  const pendingClaim = pendingById[claimId];
   delete pendingById[claimId];
-  return { ...state, pendingById };
+  if (!isSyntheticPendingClaimId(claimId, pendingClaim)) return { ...state, pendingById };
+
+  const byId = { ...state.byId };
+  const claimsByUri = { ...state.claimsByUri };
+  delete byId[claimId];
+  Object.keys(claimsByUri).forEach((uri) => {
+    if (claimsByUri[uri] === claimId) {
+      delete claimsByUri[uri];
+    }
+  });
+
+  return {
+    ...state,
+    byId,
+    pendingById,
+    claimsByUri,
+    myClaims: state.myClaims?.filter((id: string) => id !== claimId),
+  };
 };
 
 reducers[ACTIONS.UPDATE_CONFIRMED_CLAIMS] = (state: ClaimsState, action: any): ClaimsState => {
@@ -715,7 +830,7 @@ reducers[ACTIONS.UPDATE_CONFIRMED_CLAIMS] = (state: ClaimsState, action: any): C
   const removedPendingUrls: string[] = [];
   for (const [id, claim] of Object.entries(cleanedPending)) {
     if (
-      id.startsWith('pending-') &&
+      isSyntheticPendingClaimId(id, claim) &&
       (confirmedUrls.has((claim as any).permanent_url) || confirmedNames.has((claim as any).name))
     ) {
       removedPendingUrls.push((claim as any).permanent_url);
@@ -751,6 +866,9 @@ reducers[ACTIONS.ABANDON_CLAIM_SUCCEEDED] = (state: ClaimsState, action: any): C
   }: {
     claimId: string;
   } = action.data;
+  const abandonedClaim = state.byId[claimId];
+  const channelUrls = claimChannelUrls(abandonedClaim);
+  const channelId = claimChannelId(abandonedClaim);
   const byId = Object.assign({}, state.byId);
   const newMyClaims = state.myClaims ? state.myClaims.slice() : [];
   let myClaimsPageResults = null;
@@ -791,6 +909,22 @@ reducers[ACTIONS.ABANDON_CLAIM_SUCCEEDED] = (state: ClaimsState, action: any): C
   }
 
   delete byId[claimId];
+  const paginatedClaimsByChannel = removeClaimFromChannelPages(state.paginatedClaimsByChannel, claimId, channelUrls);
+  const channelClaimCounts = decrementChannelCounts(state.channelClaimCounts, channelUrls);
+
+  if (channelId && byId[channelId]?.value_type === 'channel') {
+    const channelClaim = byId[channelId];
+    const currentCount = Number(channelClaim.meta?.claims_in_channel || 0);
+
+    byId[channelId] = {
+      ...channelClaim,
+      meta: {
+        ...channelClaim.meta,
+        claims_in_channel: Math.max(0, currentCount - 1),
+      },
+    };
+  }
+
   return Object.assign({}, state, {
     myClaims,
     myChannelClaimsById: newMyChannelClaimsById,
@@ -798,6 +932,8 @@ reducers[ACTIONS.ABANDON_CLAIM_SUCCEEDED] = (state: ClaimsState, action: any): C
     myCollectionClaimIds: newMyCollectionClaimIds && Array.from(newMyCollectionClaimIds),
     byId,
     claimsByUri,
+    paginatedClaimsByChannel,
+    channelClaimCounts,
     abandoningById,
     myClaimsPageResults: myClaimsPageResults || state.myClaimsPageResults,
   });
@@ -1088,20 +1224,30 @@ reducers[ACTIONS.REHYDRATE] = (state: ClaimsState, action: any) => {
   const pendingById = incoming.pendingById ? { ...incoming.pendingById } : {};
 
   Object.keys(byId).forEach((id) => {
-    if (id.startsWith('__preview_')) {
+    if (id.startsWith('__preview_') || isSyntheticPendingClaimId(id, byId[id] || pendingById[id])) {
       delete byId[id];
       delete pendingById[id];
     }
   });
+  Object.keys(pendingById).forEach((id) => {
+    if (isSyntheticPendingClaimId(id, pendingById[id])) {
+      delete pendingById[id];
+      delete byId[id];
+    }
+  });
   Object.keys(claimsByUri).forEach((uri) => {
+    const claimId = claimsByUri[uri];
     if (
-      claimsByUri[uri]?.startsWith?.('__preview_') ||
-      (typeof claimsByUri[uri] === 'string' && claimsByUri[uri].startsWith('__preview_'))
+      claimId?.startsWith?.('__preview_') ||
+      (typeof claimId === 'string' &&
+        (claimId.startsWith('__preview_') || isSyntheticPendingClaimId(claimId, byId[claimId] || pendingById[claimId])))
     ) {
       delete claimsByUri[uri];
     }
   });
-  const filteredMyClaims = myClaims?.filter((id: string) => !id.startsWith('__preview_'));
+  const filteredMyClaims = myClaims?.filter(
+    (id: string) => !id.startsWith('__preview_') && !isSyntheticPendingClaimId(id, byId[id] || pendingById[id])
+  );
 
   return {
     ...defaultState,

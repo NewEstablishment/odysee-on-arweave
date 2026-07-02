@@ -18,19 +18,50 @@ info(_Opts) ->
 %% @doc Resolve and normalize an Odysee/LBRY claim.
 resolve(Base, Req, Opts) ->
     safe(fun() ->
-        maybe
-            {ok, Claim, Raw} ?= find_or_fetch_claim(Base, Req, Opts),
-            ok_message(normalize_claim(Claim, Raw, Opts))
-        else
-            Error -> Error
+        case claim_ids(Base, Req, Opts) of
+            {ok, ClaimIDs} ->
+                maybe
+                    {ok, Result, Raw} ?= find_or_fetch_claim_id_search(ClaimIDs, Base, Req, Opts),
+                    ok_message((normalize_search_result(Result, Raw, Opts))#{
+                        <<"view">> => <<"claim-id-resolve">>
+                    })
+                else
+                    Error -> Error
+                end;
+            not_found ->
+                resolve_by_uri_or_claim(Base, Req, Opts);
+            Error ->
+                Error
         end
     end).
+
+resolve_by_uri_or_claim(Base, Req, Opts) ->
+    case claim_uris(Base, Req, Opts) of
+            {ok, URIs} ->
+                maybe
+                    {ok, Raw} ?= resolve_proxy_many(URIs, Base, Req, Opts),
+                    {ok, Result} ?= claims_from_proxy(URIs, Raw, Opts),
+                    ok_message(normalize_claim_result_map(Result, Raw, Opts))
+                else
+                    Error -> Error
+                end;
+            not_found ->
+                maybe
+                    {ok, Claim, Raw} ?= find_or_fetch_claim(Base, Req, Opts),
+                    ok_message(normalize_claim(Claim, Raw, Opts))
+                else
+                    Error -> Error
+                end;
+            Error ->
+                Error
+    end.
 
 %% @doc Search claims using the SDK proxy `claim_search' method.
 search(Base, Req, Opts) ->
     safe(fun() ->
+        Params = search_params(Base, Req, Opts),
         maybe
-            {ok, Result, Raw} ?= find_or_fetch_search(Base, Req, Opts),
+            {ok, Result, Raw} ?= find_or_fetch_search_params(Params, Base, Req, Opts),
             ok_message(normalize_search_result(Result, Raw, Opts))
         else
             Error -> Error
@@ -72,12 +103,26 @@ find_or_fetch_claim(Base, Req, Opts) ->
     end.
 
 find_or_fetch_search(Base, Req, Opts) ->
+    find_or_fetch_search_params(search_params(Base, Req, Opts), Base, Req, Opts).
+
+find_or_fetch_search_params(Params, Base, Req, Opts) ->
     case search_candidate(Base, Req, Opts) of
         {ok, _Result, _Raw} = Search ->
             Search;
         not_found ->
             maybe
-                {ok, Raw} ?= search_proxy(search_params(Base, Req), Base, Req, Opts),
+                {ok, Raw} ?= search_proxy(Params, Base, Req, Opts),
+                search_from_proxy(Raw, Opts)
+            end
+    end.
+
+find_or_fetch_claim_id_search(ClaimIDs, Base, Req, Opts) ->
+    case search_candidate(Base, Req, Opts) of
+        {ok, _Result, _Raw} = Search ->
+            Search;
+        not_found ->
+            maybe
+                {ok, Raw} ?= search_proxy(claim_id_search_params(ClaimIDs, Base, Req, Opts), Base, Req, Opts),
                 search_from_proxy(Raw, Opts)
             end
     end.
@@ -340,6 +385,9 @@ colon_to_hash(Part) ->
 resolve_proxy(URI, Base, Req, Opts) ->
     sdk_proxy(<<"resolve">>, #{ <<"urls">> => [URI] }, Base, Req, Opts).
 
+resolve_proxy_many(URIs, Base, Req, Opts) ->
+    sdk_proxy(<<"resolve">>, #{ <<"urls">> => URIs }, Base, Req, Opts).
+
 search_proxy(Params, Base, Req, Opts) ->
     sdk_proxy(<<"claim_search">>, Params, Base, Req, Opts).
 
@@ -363,35 +411,58 @@ sdk_proxy(Method, Params, Base, Req, Opts) ->
         Error -> Error
     end.
 
-search_params(Base, Req) ->
-    maps:without(search_reserved_keys(), maps:merge(map_or_empty(Base), map_or_empty(Req))).
+search_params(Base, Req, Opts) ->
+    hb_cache:ensure_all_loaded(
+        maps:with(search_allowed_keys(), maps:merge(map_or_empty(Base), map_or_empty(Req))),
+        Opts
+    ).
+
+claim_id_search_params(ClaimIDs, Base, Req, Opts) ->
+    Params0 = search_params(Base, Req, Opts),
+    Page = first_value([<<"page">>], Params0, Opts),
+    PageSize = first_value([<<"page_size">>, <<"page-size">>], Params0, Opts),
+    NoTotals = first_value([<<"no_totals">>, <<"no-totals">>], Params0, Opts),
+    Params1 = Params0#{
+        <<"claim_ids">> => ClaimIDs,
+        <<"page">> => value_or(Page, 1),
+        <<"page_size">> => value_or(PageSize, length(ClaimIDs)),
+        <<"no_totals">> => value_or(NoTotals, true)
+    },
+    maps:without([<<"claim-id">>, <<"claim_id">>, <<"claim-ids">>], Params1).
 
 map_or_empty(Map) when is_map(Map) -> Map;
 map_or_empty(_Value) -> #{}.
 
-search_reserved_keys() ->
+search_allowed_keys() ->
     [
-        <<"access-token">>,
-        <<"access_token">>,
-        <<"auth-token">>,
-        <<"auth_token">>,
-        <<"authorization">>,
-        <<"body">>,
-        <<"claim-search-result">>,
-        <<"claim_search_result">>,
-        <<"content-type">>,
-        <<"device">>,
-        <<"include_is_my_output">>,
-        <<"include_purchase_receipt">>,
-        <<"method">>,
-        <<"path">>,
-        <<"proxy-url">>,
-        <<"proxy_url">>,
-        <<"raw-result">>,
-        <<"raw_result">>,
-        <<"result">>,
-        <<"search-result">>,
-        <<"search_result">>
+        <<"all_tags">>,
+        <<"any_languages">>,
+        <<"any_tags">>,
+        <<"channel_ids">>,
+        <<"claim_ids">>,
+        <<"claim_type">>,
+        <<"content_aspect_ratio">>,
+        <<"duration">>,
+        <<"exclude_shorts">>,
+        <<"exclude_shorts_aspect_ratio_lte">>,
+        <<"exclude_shorts_duration_lte">>,
+        <<"fee_amount">>,
+        <<"has_channel_signature">>,
+        <<"has_no_source">>,
+        <<"has_source">>,
+        <<"limit_claims_per_channel">>,
+        <<"name">>,
+        <<"no_totals">>,
+        <<"not_channel_ids">>,
+        <<"not_tags">>,
+        <<"order_by">>,
+        <<"page">>,
+        <<"page_size">>,
+        <<"release_time">>,
+        <<"remove_duplicates">>,
+        <<"reposted_claim_id">>,
+        <<"stream_types">>,
+        <<"valid_channel_signature">>
     ].
 
 proxy_url(Base, Req, Opts) ->
@@ -414,6 +485,12 @@ claim_from_proxy(URI, Raw, Opts) ->
     maybe
         {ok, Decoded} ?= try_decode_json(Raw),
         claim_from_proxy_map(URI, Decoded, Raw, Opts)
+    end.
+
+claims_from_proxy(URIs, Raw, Opts) ->
+    maybe
+        {ok, Decoded} ?= try_decode_json(Raw),
+        claims_from_proxy_map(URIs, Decoded, Raw, Opts)
     end.
 
 search_from_proxy(Raw, Opts) ->
@@ -450,6 +527,32 @@ transaction_from_proxy_map(Msg, Raw, Opts) when is_map(Msg) ->
         Error -> {error, {proxy_error, Error}}
     end;
 transaction_from_proxy_map(_Msg, _Raw, _Opts) ->
+    {error, invalid_proxy_response}.
+
+claims_from_proxy_map(URIs, Msg, _Raw, Opts) when is_map(Msg) ->
+    case hb_maps:get(<<"error">>, Msg, not_found, Opts) of
+        not_found ->
+            Result = hb_maps:get(<<"result">>, Msg, Msg, Opts),
+            case is_map(Result) of
+                true ->
+                    Claims =
+                        lists:filtermap(
+                            fun(URI) ->
+                                case hb_maps:get(URI, Result, not_found, Opts) of
+                                    not_found -> false;
+                                    Claim -> {true, {URI, Claim}}
+                                end
+                            end,
+                            URIs
+                        ),
+                    {ok, maps:from_list(Claims)};
+                false ->
+                    {error, invalid_proxy_response}
+            end;
+        Error ->
+            {error, {proxy_error, Error}}
+    end;
+claims_from_proxy_map(_URIs, _Msg, _Raw, _Opts) ->
     {error, invalid_proxy_response}.
 
 search_from_result(Msg, Raw, Opts) ->
@@ -552,6 +655,26 @@ normalize_search_result(Result, Raw, Opts) ->
         {<<"total-pages">>, first_value([<<"total_pages">>, <<"total-pages">>], Result, Opts)}
     ],
     lists:foldl(fun put_if_found_pair/2, Msg0, Optional).
+
+normalize_claim_result_map(Result, Raw, Opts) ->
+    Normalized =
+        maps:from_list(
+            lists:filtermap(
+                fun({URI, Claim}) ->
+                    case normalize_claim(Claim, Raw, Opts) of
+                        Msg when is_map(Msg) -> {true, {URI, Msg}};
+                        _ -> false
+                    end
+                end,
+                maps:to_list(Result)
+            )
+        ),
+    #{
+        <<"device">> => ?DEVICE,
+        <<"content-type">> => <<"application/json">>,
+        <<"body">> => Raw,
+        <<"result">> => Normalized
+    }.
 
 normalize_transaction_result(Result, Raw, Opts) ->
     maybe
@@ -661,6 +784,51 @@ required_txid(Base, Req, Opts) ->
         _ -> {error, txid_not_found}
     end.
 
+claim_uris(Base, Req, Opts) ->
+    case first_value([<<"urls">>, <<"uris">>], Req, Opts) of
+        URIs when is_list(URIs) ->
+            normalize_uris(URIs);
+        _ ->
+            case first_value([<<"urls">>, <<"uris">>], Base, Opts) of
+                URIs when is_list(URIs) -> normalize_uris(URIs);
+                _ -> not_found
+            end
+    end.
+
+claim_ids(Base, Req, Opts) ->
+    case first_value([<<"claim_ids">>, <<"claim-ids">>], Req, Opts) of
+        ClaimIDs when is_list(ClaimIDs) ->
+            normalize_claim_ids(ClaimIDs);
+        _ ->
+            case first_value([<<"claim_ids">>, <<"claim-ids">>], Base, Opts) of
+                ClaimIDs when is_list(ClaimIDs) -> normalize_claim_ids(ClaimIDs);
+                _ -> not_found
+            end
+    end.
+
+normalize_claim_ids(ClaimIDs) ->
+    Normalized = [ClaimID || ClaimID <- ClaimIDs, is_binary(ClaimID), ClaimID =/= <<>>],
+    case Normalized of
+        [] -> {error, claim_ids_not_found};
+        _ -> {ok, Normalized}
+    end.
+
+normalize_uris(URIs) ->
+    Normalized =
+        lists:filtermap(
+            fun(URI) ->
+                case normalize_uri(URI) of
+                    {ok, NormalizedURI} -> {true, NormalizedURI};
+                    _ -> false
+                end
+            end,
+            URIs
+        ),
+    case Normalized of
+        [] -> {error, uri_not_found};
+        _ -> {ok, Normalized}
+    end.
+
 required_first(Keys, Map, Opts) ->
     case first_value(Keys, Map, Opts) of
         not_found -> {error, {missing, hd(Keys)}};
@@ -690,6 +858,9 @@ put_if_found(Key, Value, Msg) -> Msg#{ Key => Value }.
 
 put_if_found_pair({_Key, not_found}, Msg) -> Msg;
 put_if_found_pair({Key, Value}, Msg) -> Msg#{ Key => Value }.
+
+value_or(not_found, Fallback) -> Fallback;
+value_or(Value, _Fallback) -> Value.
 
 try_decode_json(Raw) ->
     try {ok, hb_json:decode(Raw)}
@@ -721,6 +892,57 @@ resolve_proxy_result_test() ->
         hb_maps:get(<<"claim-name">>, Msg, #{})
     ),
     ?assertEqual(<<"stream">>, hb_maps:get(<<"value-type">>, Msg, #{})).
+
+resolve_proxy_batch_result_test() ->
+    URI1 = <<"lbry://@veritasium#f/why-is-it-so-easy-to-disrupt-gps#3">>,
+    URI2 = <<"lbry://@lbry#3fda836a92faaceedfe398225fb9b2ee2ed1f01a">>,
+    Claim1 = target_claim(),
+    Claim2 = (target_claim())#{ <<"claim_id">> => <<"3fda836a92faaceedfe398225fb9b2ee2ed1f01a">> },
+    Raw = hb_json:encode(#{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"result">> => #{ URI1 => Claim1, URI2 => Claim2 },
+        <<"id">> => 1
+    }),
+    {ok, Msg} = resolve(#{}, #{ <<"urls">> => [URI1, URI2], <<"body">> => Raw }, #{}),
+    Result = hb_maps:get(<<"result">>, Msg, #{}),
+    ?assertEqual(2, maps:size(Result)),
+    ?assertEqual(
+        <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+        hb_maps:get(<<"claim-id">>, hb_maps:get(URI1, Result, #{}), #{})
+    ),
+    ?assertEqual(
+        <<"3fda836a92faaceedfe398225fb9b2ee2ed1f01a">>,
+        hb_maps:get(<<"claim-id">>, hb_maps:get(URI2, Result, #{}), #{})
+    ).
+
+resolve_claim_ids_search_result_test() ->
+    Claim = target_claim(),
+    Result = #{
+        <<"items">> => [Claim],
+        <<"page">> => 1,
+        <<"page_size">> => 1,
+        <<"total_items">> => 1,
+        <<"total_pages">> => 1
+    },
+    Raw = hb_json:encode(#{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"result">> => Result,
+        <<"id">> => 1
+    }),
+    {ok, Msg} = resolve(
+        #{},
+        #{
+            <<"claim_ids">> => [<<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>],
+            <<"body">> => Raw
+        },
+        #{}
+    ),
+    ?assertEqual(<<"claim-id-resolve">>, hb_maps:get(<<"view">>, Msg, #{})),
+    ?assertEqual(
+        [<<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>],
+        hb_maps:get(<<"claim-ids">>, Msg, #{})
+    ),
+    ?assertEqual([Claim], hb_maps:get(<<"items">>, Msg, #{})).
 
 search_proxy_result_test() ->
     Claim = target_claim(),
@@ -765,15 +987,53 @@ transaction_accepts_supplied_result_test() ->
 
 search_params_removes_control_fields_test() ->
     Params = search_params(
-        #{ <<"proxy-url">> => <<"http://proxy">>, <<"page">> => 1 },
+        #{
+            <<"proxy-url">> => <<"http://proxy">>,
+            <<"page">> => 1,
+            <<"index">> => 3,
+            <<"accept-encoding">> => <<"gzip">>
+        },
         #{
             <<"body">> => <<"{}">>,
+            <<"origin">> => <<"http://localhost:9090">>,
+            <<"sec-gpc">> => <<"1">>,
             <<"auth_token">> => <<"token">>,
             <<"include_is_my_output">> => true,
             <<"claim_type">> => [<<"stream">>]
-        }
+        },
+        #{}
     ),
     ?assertEqual(#{ <<"page">> => 1, <<"claim_type">> => [<<"stream">>] }, Params).
+
+search_params_loads_linked_values_test() ->
+    Opts = #{},
+    {ok, ChannelIDs} = hb_cache:write([<<"channel-id">>], Opts),
+    {ok, ClaimTypes} = hb_cache:write([<<"stream">>, <<"repost">>], Opts),
+    {ok, OrderBy} = hb_cache:write([<<"release_time">>], Opts),
+    Params = search_params(
+        #{},
+        #{
+            <<"channel_ids">> =>
+                {link, ChannelIDs, #{ <<"type">> => <<"link">>, <<"lazy">> => false }},
+            <<"claim_type">> =>
+                {link, ClaimTypes, #{ <<"type">> => <<"link">>, <<"lazy">> => false }},
+            <<"order_by">> =>
+                {link, OrderBy, #{ <<"type">> => <<"link">>, <<"lazy">> => false }},
+            <<"page">> => 1,
+            <<"page_size">> => 20
+        },
+        Opts
+    ),
+    ?assertEqual(
+        #{
+            <<"channel_ids">> => [<<"channel-id">>],
+            <<"claim_type">> => [<<"stream">>, <<"repost">>],
+            <<"order_by">> => [<<"release_time">>],
+            <<"page">> => 1,
+            <<"page_size">> => 20
+        },
+        Params
+    ).
 
 odysee_url_to_lbry_uri_test() ->
     ?assertEqual(

@@ -112,7 +112,7 @@ function ChannelPage(props: Props) {
   const isGlobalMod = Boolean(useAppSelector(selectUser)?.global_mod);
   const hideShorts = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_SHORTS));
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
-  const { meta } = claim;
+  const meta = claim?.meta || {};
   const { claims_in_channel } = meta;
   const showClaims = Boolean(claims_in_channel) && !preferEmbed && !banState.filtered && !banState.blacklisted;
   const channelIsBlackListed = banState.blacklisted;

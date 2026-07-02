@@ -12,6 +12,7 @@ type Props = {
 function ImageViewer(props: Props) {
   const { source, title, onClick } = props;
   const [loadingError, setLoadingError] = React.useState(false);
+
   return (
     <React.Fragment>
       {loadingError && (

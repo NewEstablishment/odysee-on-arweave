@@ -1,7 +1,9 @@
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { isHyperbeamDeviceEnabled, isHyperbeamFullMode } from 'util/hyperbeamMode';
+import { getAuthToken } from 'util/saved-passwords';
 
 export const HYPERBEAM_DEVICE = {
+  account: '~odysee-account@1.0',
   claim: '~odysee-claim@1.0',
   channel: '~odysee-channel@1.0',
   comment: '~odysee-comment@1.0',
@@ -9,9 +11,11 @@ export const HYPERBEAM_DEVICE = {
   fileReaction: '~odysee-file-reaction@1.0',
   productEvents: '~odysee-product-events@1.0',
   reaction: '~odysee-reaction@1.0',
+  search: '~odysee-search@1.0',
   stream: '~odysee-stream@1.0',
   streamDescriptor: '~odysee-stream-descriptor@1.0',
-  subscription: '~odysee-subscription@1.0',
+  subscription: '~odysee-account@1.0',
+  upload: '~odysee-upload@1.0',
 };
 
 export function hyperbeamNodeBase() {
@@ -54,13 +58,20 @@ export function hyperbeamDevicePostJson(
 
   return fetch(`${base}/${key}`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
+      ...authTokenHeader(),
       ...headers,
     },
     body: JSON.stringify(body),
   });
+}
+
+function authTokenHeader(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { 'x-odysee-auth-token': token } : {};
 }
 
 export function hyperbeamDevicePostParams64(
@@ -94,10 +105,31 @@ const HYPERBEAM_ROUTED_METHODS = new Set([
   'blob_list',
   'comment_list',
   'comment_by_id',
+  'comment_abandon',
+  'comment_create',
+  'comment_edit',
+  'comment_pin',
   'comment_get_channel_from_comment_id',
+  'moderation_add_delegate',
+  'moderation_am_i',
+  'moderation_block',
+  'moderation_block_list',
+  'moderation_list_delegates',
+  'moderation_remove_delegate',
+  'moderation_unblock',
+  'preference_get',
+  'preference_set',
   'reaction_list',
+  'reaction_react',
+  'setting_block_word',
   'setting_get',
   'setting_list',
+  'setting_list_blocked_words',
+  'setting_unblock_word',
+  'setting_update',
+  'settings_get',
+  'settings_set',
+  'settings_clear',
   'commentron',
 ]);
 
@@ -106,6 +138,16 @@ export function isHyperbeamMethodEnabled(method: string) {
 }
 
 export function hyperbeamMethodDevice(method: string) {
-  void method;
+  if (['preference_get', 'preference_set', 'settings_get', 'settings_set', 'settings_clear'].includes(method)) {
+    return HYPERBEAM_DEVICE.account;
+  }
+  if (
+    method.startsWith('comment_') ||
+    method.startsWith('reaction_') ||
+    method.startsWith('setting_') ||
+    method.startsWith('moderation_')
+  ) {
+    return HYPERBEAM_DEVICE.comment;
+  }
   return HYPERBEAM_DEVICE.claim;
 }

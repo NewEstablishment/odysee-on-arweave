@@ -4,15 +4,18 @@ const HYPERBEAM_NODE_TIMEOUT_MS = 15000;
 const HYPERBEAM_MODE_STORAGE_KEY = 'odysee-hyperbeam-mode';
 const HYPERBEAM_DEVICE_CLAIM = '~odysee-claim@1.0';
 const HYPERBEAM_DEVICE_STREAM = '~odysee-stream@1.0';
+const HYPERBEAM_DEVICE_ACCOUNT = '~odysee-account@1.0';
+const HYPERBEAM_DEVICE_SEARCH = '~odysee-search@1.0';
 const HYPERBEAM_DEVICES = new Set([
+  HYPERBEAM_DEVICE_ACCOUNT,
   HYPERBEAM_DEVICE_CLAIM,
+  HYPERBEAM_DEVICE_SEARCH,
   HYPERBEAM_DEVICE_STREAM,
   '~odysee-channel@1.0',
   '~odysee-comment@1.0',
   '~odysee-file@1.0',
   '~odysee-file-reaction@1.0',
   '~odysee-reaction@1.0',
-  '~odysee-subscription@1.0',
 ]);
 
 function hyperbeamNodeBase() {
@@ -79,6 +82,17 @@ async function hyperbeamNodeResolve(params, extraHeaders) {
 async function hyperbeamNodeResolveEntries(urls, extraHeaders) {
   return Promise.all(
     urls.map(async (uri) => {
+      const claimId = claimIdFromUri(uri);
+      if (claimId) {
+        try {
+          const result = await hyperbeamNodeFetchJson(hyperbeamCacheReadPath(claimId), extraHeaders);
+          const claim = sdkClaimFromHyperbeam(cacheReadClaim(result));
+          if (claim) return [uri, claim];
+        } catch (e) {
+          void e;
+        }
+      }
+
       const result = await hyperbeamNodeFetchJson(
         hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'resolve', { uri }),
         extraHeaders
@@ -95,11 +109,7 @@ async function hyperbeamNodeClaimIdChannelEntries(urls, extraHeaders) {
     if (claimId) uriByClaimId.set(claimId.toLowerCase(), uri);
   });
 
-  const result = await hyperbeamNodeFetchJson(
-    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'search', { claim_ids: Array.from(uriByClaimId.keys()) }),
-    extraHeaders
-  );
-  const search = sdkSearchFromHyperbeam(result);
+  const search = await hyperbeamNodeSearch({ claim_ids: Array.from(uriByClaimId.keys()) }, extraHeaders);
   const items = Array.isArray(search && search.items) ? search.items : [];
 
   return items
@@ -115,22 +125,103 @@ async function hyperbeamNodeClaimIdChannelEntries(urls, extraHeaders) {
 async function hyperbeamNodeClaimSearch(params, extraHeaders) {
   if (!hyperbeamNodeConfigured()) return null;
 
-  const result = await hyperbeamNodeFetchJson(
-    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'search', params || {}),
-    extraHeaders
-  );
-  return sdkSearchFromHyperbeam(result);
+  const storeResult = await hyperbeamNodeChannelClaimSearch(params || {}, extraHeaders);
+  if (storeResult) return storeResult;
+
+  const searchResult = await hyperbeamNodeSearch(params || {}, extraHeaders);
+  if (searchResult) return searchResult;
+
+  return null;
+}
+
+async function hyperbeamNodeSearch(params, extraHeaders) {
+  try {
+    const result = await hyperbeamNodeFetchJson(
+      hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_SEARCH, 'query', params || {}),
+      extraHeaders
+    );
+    const search = sdkSearchFromHyperbeam(result);
+    return Array.isArray(search && search.items) ? search : null;
+  } catch (e) {
+    void e;
+    return null;
+  }
+}
+
+async function hyperbeamNodeChannelClaimSearch(params, extraHeaders) {
+  const channelIds = stringList(params.channel_ids || params.channelIds);
+  if (!channelIds.length) return null;
+
+  try {
+    const page = Number(params.page || 1);
+    const pageSize = Number(params.page_size || params['page-size'] || 20);
+    let storeIds = (
+      await Promise.all(
+        channelIds.map(async (channelId) => {
+          const result = await hyperbeamNodeFetchJson(
+            hyperbeamCacheListPath(`${channelId}/claim-outputs`, { page, page_size: pageSize }),
+            extraHeaders
+          );
+          return Array.isArray(result?.items) ? result.items : [];
+        })
+      )
+    ).flat();
+    if (!storeIds.length) {
+      storeIds = (
+        await Promise.all(
+          channelIds.map(async (channelId) => {
+            const result = await hyperbeamNodeFetchJson(
+              hyperbeamCacheListPath(`${channelId}/claims`, { page, page_size: pageSize }),
+              extraHeaders
+            );
+            return Array.isArray(result?.items) ? result.items : [];
+          })
+        )
+      ).flat();
+    }
+    if (!storeIds.length) return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
+
+    const items = (
+      await Promise.all(
+        storeIds.slice(0, pageSize).map(async (storeId) => {
+          const result = await hyperbeamNodeFetchJson(hyperbeamCacheReadPath(storeId), extraHeaders);
+          return sdkClaimFromHyperbeam(cacheReadClaim(result));
+        })
+      )
+    ).filter(Boolean);
+
+    return {
+      items,
+      page,
+      page_size: pageSize,
+      total_items: storeIds.length,
+      total_pages: Math.max(1, Math.ceil(storeIds.length / pageSize)),
+    };
+  } catch (e) {
+    void e;
+    return null;
+  }
 }
 
 async function hyperbeamNodeGet(params, extraHeaders) {
   const uri = params && (params.uri || params.url);
-  if (!uri) return null;
+  const id = params && (params.id || params.outpoint || params.immutable_id || params.immutableId);
+  if (!uri && !id) return null;
 
   const result = await hyperbeamNodeFetchJson(
-    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_STREAM, 'playback', { uri }),
+    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_STREAM, 'playback', id ? { id } : { uri }),
     extraHeaders
   );
   return playbackPayloadFromHyperbeam(result);
+}
+
+async function hyperbeamNodeAccount(method, params, extraHeaders) {
+  const key = method.replace(/_/g, '-');
+  const result = await hyperbeamNodeFetchJson(
+    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_ACCOUNT, key, params || {}),
+    extraHeaders
+  );
+  return result && Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result;
 }
 
 async function hyperbeamNodeSdkCall(method, params, extraHeaders) {
@@ -147,6 +238,12 @@ async function hyperbeamNodeSdkCall(method, params, extraHeaders) {
       return hyperbeamNodeClaimSearch(params || {}, extraHeaders);
     case 'get':
       return hyperbeamNodeGet(params || {}, extraHeaders);
+    case 'preference_get':
+    case 'preference_set':
+    case 'settings_get':
+    case 'settings_set':
+    case 'settings_clear':
+      return hyperbeamNodeAccount(method, params || {}, extraHeaders);
     default:
       return Promise.reject(new Error(`HyperBEAM mode does not support SDK method ${method}`));
   }
@@ -163,11 +260,6 @@ const LEGACY_ONLY_SDK_METHODS = new Set([
   'collection_list',
   'file_list',
   'purchase_list',
-  'preference_get',
-  'preference_set',
-  'settings_get',
-  'settings_set',
-  'settings_clear',
   'stream_list',
   'sync_get',
   'sync_set',
@@ -212,6 +304,28 @@ async function hyperbeamNodeFetchJson(request, extraHeaders) {
   }
 }
 
+function hyperbeamCacheReadPath(id) {
+  const base = hyperbeamNodeBase();
+  return `${base}/${hyperbeamDirectPath(id)}`;
+}
+
+function hyperbeamCacheListPath(path, params = {}) {
+  const base = hyperbeamNodeBase();
+  const urlParams = new URLSearchParams({ list: String(path).replace(/^\//, '') });
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') urlParams.set(key, String(value));
+  });
+  return `${base}/~cache@1.0/list?${urlParams.toString()}`;
+}
+
+function hyperbeamDirectPath(id) {
+  return String(id)
+    .replace(/^\/+/, '')
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+}
+
 function unwrapJsonRpcResult(json) {
   if (json?.error) {
     throw new Error(json.error.message || json.error);
@@ -249,6 +363,11 @@ function claimIdFromChannelUri(uri) {
   return match ? match[1] : null;
 }
 
+function claimIdFromUri(uri) {
+  const match = String(uri).match(/#([0-9a-f]{40})(?:$|[/?#])/i);
+  return match ? match[1] : null;
+}
+
 function isHyperbeamDeviceEnabled(device) {
   const mode = hyperbeamMode();
   if (mode === 'original') return false;
@@ -258,9 +377,14 @@ function isHyperbeamDeviceEnabled(device) {
 function hyperbeamLocalSdkResult(method, params) {
   switch (method) {
     case 'status':
-      return Promise.resolve({ is_running: true });
+      return Promise.resolve({ is_running: true, wallet: { available_servers: 1 } });
+    case 'wallet_status':
+      return Promise.resolve({ is_locked: false, is_syncing: false });
     case 'version':
       return Promise.resolve({ lbrynet_version: 'hyperbeam' });
+    case 'resolve':
+      if (isStartupResolveProbe(params)) return Promise.resolve({});
+      return null;
     case 'ffmpeg_find':
       return Promise.reject(new Error(`${method} requires authentication`));
     default:
@@ -268,21 +392,52 @@ function hyperbeamLocalSdkResult(method, params) {
   }
 }
 
+function isStartupResolveProbe(params) {
+  const urls = params && (params.urls || params.uris || params.uri);
+  if (Array.isArray(urls)) return urls.length === 1 && urls[0] === 'lbry://one';
+  return urls === 'lbry://one';
+}
+
 function sdkClaimFromHyperbeam(result) {
   if (!result) return null;
   const claim = result.claim || result;
   const claimId = claim.claim_id || claim['claim-id'];
   if (!claim || !claimId) return claim;
+  const txid = claim.txid || claim['tx-id'];
+  const nout = claim.nout ?? claim['n-out'];
+  const outpoint = claimOutpoint(txid, nout);
 
   return {
     ...claim,
     claim_id: claimId,
+    ...(outpoint
+      ? {
+          outpoint,
+          immutable_id: outpoint,
+          immutable_store_path:
+            claim['claim-output-store-path'] ||
+            claim['claim-proof-store-path'] ||
+            `odysee/claim-output/${txid}/${nout}`,
+        }
+      : {}),
     name: claim.name || claim['claim-name'],
     canonical_url: claim.canonical_url || claim['canonical-url'],
     permanent_url: claim.permanent_url || claim['permanent-url'],
     short_url: claim.short_url || claim['short-url'],
     value_type: claim.value_type || claim['value-type'],
   };
+}
+
+function claimOutpoint(txid, nout) {
+  if (!txid && txid !== 0) return null;
+  if (nout === undefined || nout === null || nout === '') return null;
+  return `${txid}:${nout}`;
+}
+
+function cacheReadClaim(result) {
+  if (Array.isArray(result?.items) && result.items.length) return result.items[0];
+  if (Array.isArray(result?.claims) && result.claims.length) return result.claims[0];
+  return result;
 }
 
 function sdkSearchFromHyperbeam(result) {
@@ -295,6 +450,11 @@ function sdkSearchFromHyperbeam(result) {
     total_items: sdkResult.total_items || sdkResult['total-items'] || result.total_items || result['total-items'],
     total_pages: sdkResult.total_pages || sdkResult['total-pages'] || result.total_pages || result['total-pages'],
   };
+}
+
+function stringList(value) {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  return value ? [String(value)] : [];
 }
 
 function playbackPayloadFromHyperbeam(result) {

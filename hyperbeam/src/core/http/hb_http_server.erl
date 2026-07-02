@@ -401,11 +401,17 @@ init(Req, ServerID) ->
     case cowboy_req:method(Req) of
         <<"OPTIONS">> -> cors_reply(Req, ServerID);
         _ ->
-            {ok, Body} = read_body(Req),
+            {ok, Body} = maybe_read_body(Req),
             handle_request(Req, Body, ServerID)
     end.
 
 %% @doc Helper to grab the full body of a HTTP request, even if it's chunked.
+maybe_read_body(Req) ->
+    case cowboy_req:has_body(Req) of
+        true -> read_body(Req);
+        false -> {ok, <<>>}
+    end.
+
 read_body(Req) -> read_body(Req, <<>>).
 read_body(Req0, Acc) ->
     case cowboy_req:read_body(Req0) of
@@ -720,3 +726,6 @@ restart_server_test() ->
         {ok, <<"server-2">>},
         hb_http:get(N2, <<"/~meta@1.0/info/test-key">>, #{ <<"protocol">> => http2 })
     ).
+
+maybe_read_body_without_body_test() ->
+    ?assertEqual({ok, <<>>}, maybe_read_body(#{has_body => false})).

@@ -2,9 +2,15 @@ import analytics from 'analytics';
 import { FETCH_TIMEOUT, SDK_FETCH_TIMEOUT } from 'constants/errors';
 import { NO_AUTH, X_LBRY_AUTH_TOKEN } from 'constants/token';
 import fetchWithTimeout from 'util/fetch';
-import { fetchHyperbeamClaimSearch, fetchHyperbeamGet, fetchHyperbeamResolve } from 'util/hyperbeam';
+import {
+  fetchHyperbeamAccountSdk,
+  fetchHyperbeamClaimSearch,
+  fetchHyperbeamGet,
+  fetchHyperbeamResolve,
+  fetchHyperbeamResolveClaimIds,
+} from 'util/hyperbeam';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
-import { PROXY_URL_NO_CF } from 'config';
+import { ODYSEE_HYPERBEAM_NODE_API, PROXY_URL_NO_CF } from 'config';
 
 import 'proxy-polyfill';
 
@@ -346,6 +352,11 @@ export function apiCall(
 }
 
 function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null {
+  if (ODYSEE_HYPERBEAM_NODE_API) {
+    const startupResult = hyperbeamStartupSdkResult(method, params);
+    if (startupResult) return startupResult;
+  }
+
   if (!isHyperbeamEnabled()) return null;
 
   const localResult = hyperbeamLocalSdkResult(method, params);
@@ -355,14 +366,36 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
   switch (method) {
     case 'resolve':
       return fetchHyperbeamResolve(stripHyperbeamNodeOnlyParams(params || {})).then(requireHyperbeamResult(method));
-    case 'claim_search':
-      return fetchHyperbeamClaimSearch(stripHyperbeamNodeOnlyParams(claimSearchParamHook(params || {}))).then(
-        requireHyperbeamResult(method)
-      );
+    case 'claim_search': {
+      const searchParams = stripHyperbeamNodeOnlyParams(claimSearchParamHook(params || {}));
+      const search = shouldResolveClaimIds(searchParams) ? fetchHyperbeamResolveClaimIds : fetchHyperbeamClaimSearch;
+      return search(searchParams).then(requireHyperbeamResult(method));
+    }
     case 'get':
       return fetchHyperbeamGet(stripHyperbeamNodeOnlyParams(params || {})).then(requireHyperbeamResult(method));
+    case 'preference_get':
+    case 'preference_set':
+    case 'settings_get':
+    case 'settings_set':
+    case 'settings_clear':
+      return fetchHyperbeamAccountSdk(method, stripHyperbeamNodeOnlyParams(params || {})).then(
+        requireHyperbeamResult(method)
+      );
     default:
       return Promise.reject(new Error(`HyperBEAM mode does not support SDK method ${method}`));
+  }
+}
+
+function hyperbeamStartupSdkResult(method: string, params: any): Promise<any> | null {
+  switch (method) {
+    case 'status':
+    case 'wallet_status':
+    case 'version':
+      return hyperbeamLocalSdkResult(method, params);
+    case 'resolve':
+      return isStartupResolveProbe(params) ? Promise.resolve({}) : null;
+    default:
+      return null;
   }
 }
 
@@ -377,11 +410,6 @@ const LEGACY_ONLY_SDK_METHODS = new Set([
   'collection_list',
   'file_list',
   'purchase_list',
-  'preference_get',
-  'preference_set',
-  'settings_get',
-  'settings_set',
-  'settings_clear',
   'stream_list',
   'sync_get',
   'sync_set',
@@ -411,17 +439,35 @@ function stripHyperbeamNodeOnlyParams(params: Record<string, any>) {
   return clean;
 }
 
+function shouldResolveClaimIds(params: Record<string, any>) {
+  const claimIds = params.claim_ids;
+  if (!Array.isArray(claimIds) || claimIds.length === 0) return false;
+
+  return Object.keys(params).every((key) => ['claim_ids', 'page', 'page_size', 'no_totals'].includes(key));
+}
+
 function hyperbeamLocalSdkResult(method: string, params: any): Promise<any> | null {
   switch (method) {
     case 'status':
-      return Promise.resolve({ is_running: true });
+      return Promise.resolve({ is_running: true, wallet: { available_servers: 1 } });
+    case 'wallet_status':
+      return Promise.resolve({ is_locked: false, is_syncing: false });
     case 'version':
       return Promise.resolve({ lbrynet_version: 'hyperbeam' });
+    case 'resolve':
+      if (isStartupResolveProbe(params)) return Promise.resolve({});
+      return null;
     case 'ffmpeg_find':
       return Promise.reject(new Error(`${method} requires authentication`));
     default:
       return null;
   }
+}
+
+function isStartupResolveProbe(params: any): boolean {
+  const urls = params?.urls || params?.uris || params?.uri;
+  if (Array.isArray(urls)) return urls.length === 1 && urls[0] === 'lbry://one';
+  return urls === 'lbry://one';
 }
 
 function daemonCallWithResult(

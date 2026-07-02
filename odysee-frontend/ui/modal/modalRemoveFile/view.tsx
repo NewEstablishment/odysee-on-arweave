@@ -22,6 +22,8 @@ function ModalRemoveFile(props: Props) {
   const title = useAppSelector((state) => selectTitleForUri(state, uri));
   const claim = useAppSelector((state) => makeSelectClaimForUri(uri)(state));
   const isAbandoning = useAppSelector((state) => makeSelectIsAbandoningClaimForUri(uri)(state));
+  const isHyperbeamUpload = Boolean(claim && (claim.hyperbeam_upload || claim.hyperbeam?.upload_id));
+  const [isRemovingHyperbeamUpload, setIsRemovingHyperbeamUpload] = React.useState(false);
   const closeModal = () => dispatch(doHideModal());
 
   React.useEffect(() => {
@@ -48,9 +50,14 @@ function ModalRemoveFile(props: Props) {
             <div className="section__actions">
               <Button
                 button="primary"
-                label={isAbandoning ? __('Removing...') : __('Remove')}
-                disabled={isAbandoning}
-                onClick={() => dispatch(doDeleteFileAndMaybeGoBack(uri, false, true, doGoBack as any, claim))}
+                label={
+                  isRemovingHyperbeamUpload || (!isHyperbeamUpload && isAbandoning) ? __('Removing...') : __('Remove')
+                }
+                disabled={isRemovingHyperbeamUpload || (!isHyperbeamUpload && isAbandoning)}
+                onClick={() => {
+                  if (isHyperbeamUpload) setIsRemovingHyperbeamUpload(true);
+                  dispatch(doDeleteFileAndMaybeGoBack(uri, false, true, doGoBack as any, claim));
+                }}
               />
               <Button button="link" label={__('Cancel')} onClick={closeModal} />
             </div>

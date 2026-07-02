@@ -5,6 +5,10 @@
 
 /tmp/
 
+aidocs-local/
+
+/_build/
+
 hyperbeam/_build/
 hyperbeam/deps/
 hyperbeam/log/

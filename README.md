@@ -6,13 +6,14 @@ Odysee on Arweave / HyperBEAM monorepo.
 
 | Path | Source | Role |
 | --- | --- | --- |
-| `hyperbeam/` | `permaweb/HyperBEAM`, branch `edge`, commit `3e610d0`, plus ported Bhavya bridge baseline | Main HyperBEAM source of truth for this monorepo. Keep upstream edge alignment deliberate. |
-| `odysee-frontend/` | `OdyseeTeam/odysee-frontend`, branch `hyperbeam-implementation-rave`, commit `a70d7eb` | Odysee web client with HyperBEAM integration work. |
+| `hyperbeam/` | `NewEstablishment/odysee-on-arweave`, current live branch `rave/auth-upload`, commit `6211ae3` | Main HyperBEAM source of truth for this monorepo. Keep upstream edge alignment deliberate. |
+| `odysee-frontend/` | `NewEstablishment/odysee-on-arweave`, current live branch `rave/auth-upload`, commit `6211ae3` | Odysee web client with HyperBEAM integration work. |
 | `references/hyperbeam-bhavya/` | `permaweb/HyperBEAM`, branch `bhavyagor/odysee-bridge-devices`, commit `0cab8d2` | Reference snapshot for Bhavya's bridge/device approach. Do not develop here long term. |
 | `references/hyperbeam-rave/` | `NewEstablishment/HyperBEAM`, branch `odysee-on-hb-rave`, commit `43e0f61` | Reference snapshot for Rave's bridge/device approach. Do not develop here long term. |
 | `aidocs/` | Shared local docs | Plans, setup notes, comparisons, and decisions for the monorepo. |
+| `aidocs-local/` | Ignored local docs | Personal Codex/session notes that should not be committed. |
 
-Bhavya's bridge/device approach is the selected baseline and has been ported into `hyperbeam/`. Rave's branch remains a reference for the smaller facade/playback shape. See [aidocs/hyperbeam-approach-comparison.md](aidocs/hyperbeam-approach-comparison.md) and [aidocs/bhavya-port-validation.md](aidocs/bhavya-port-validation.md).
+Bhavya's bridge/device approach was the selected baseline and has been ported into `hyperbeam/`. The freshest shared work now lives on branches of `NewEstablishment/odysee-on-arweave`, with `rave/auth-upload` currently the newest checked branch by commit date. See [aidocs/source-branches.md](aidocs/source-branches.md), [aidocs/hyperbeam-approach-comparison.md](aidocs/hyperbeam-approach-comparison.md), and [aidocs/bhavya-port-validation.md](aidocs/bhavya-port-validation.md).
 
 ## Local Setup
 

@@ -84,9 +84,17 @@ export function isHyperbeamPlaybackUrl(src: string | null | undefined): boolean 
   try {
     const baseUrl = typeof window !== 'undefined' ? window.location.href : undefined;
     const url = new URL(src, baseUrl);
-    return url.pathname.includes('/~lbry-stream@1.0/media') || url.pathname.includes('/~odysee-stream@1.0/media');
+    return (
+      url.pathname.includes('/~lbry-stream@1.0/media') ||
+      url.pathname.includes('/~odysee-stream@1.0/media') ||
+      url.pathname.startsWith('/$/api/hyperbeam-upload/v1/read/')
+    );
   } catch {
-    return src.includes('~lbry-stream@1.0/media') || src.includes('~odysee-stream@1.0/media');
+    return (
+      src.includes('~lbry-stream@1.0/media') ||
+      src.includes('~odysee-stream@1.0/media') ||
+      src.includes('/$/api/hyperbeam-upload/v1/read/')
+    );
   }
 }
 

@@ -13,6 +13,7 @@ import * as STRIPE from 'constants/stripe';
 import * as MODALS from 'constants/modal_types';
 import { doOpenModal } from 'redux/actions/app';
 import { getStripeEnvironment } from 'util/stripe';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 const stripeEnvironment = getStripeEnvironment();
 export const doTipAccountCheckForUri = (uri: string) => async (dispatch: Dispatch, getState: GetState) => {
   const state = getState();
@@ -20,6 +21,16 @@ export const doTipAccountCheckForUri = (uri: string) => async (dispatch: Dispatc
   const channelName = selectChannelNameForUri(state, uri);
   const isFetching = channelClaimId && selectAccountCheckIsFetchingForId(state, channelClaimId);
   if (isFetching) return;
+  if (isHyperbeamEnabled()) {
+    dispatch({
+      type: ACTIONS.SET_CAN_RECEIVE_FIAT_TIPS,
+      data: {
+        accountCheckResponse: undefined,
+        claimId: channelClaimId,
+      },
+    });
+    return;
+  }
   dispatch({
     type: ACTIONS.CHECK_CAN_RECEIVE_FIAT_TIPS_STARTED,
     data: channelClaimId,

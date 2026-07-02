@@ -114,6 +114,8 @@ result_from_decoded(_Decoded, _Raw, _Opts) ->
 result_from_map(Msg, Raw, Opts) when is_map(Msg) ->
     case hb_maps:get(<<"error">>, Msg, not_found, Opts) of
         not_found -> result_from_success_map(Msg, Raw, Opts);
+        null -> result_from_success_map(Msg, Raw, Opts);
+        undefined -> result_from_success_map(Msg, Raw, Opts);
         Error -> {error, {reaction_api_error, Error}}
     end;
 result_from_map(_Msg, _Raw, _Opts) ->
@@ -153,15 +155,10 @@ is_reaction_result(_Result, _Opts) ->
     false.
 
 list_params(Base, Req, Opts) ->
-    case private_credential_present(Base, Req, Opts) of
-        true ->
-            {error, private_credentials_not_allowed};
-        false ->
-            Params = api_params(maps:merge(map_or_empty(Base), map_or_empty(Req)), Opts),
-            case hb_maps:get(<<"claim_ids">>, Params, not_found, Opts) of
-                not_found -> {error, claim_ids_not_found};
-                _ClaimIDs -> {ok, Params}
-            end
+    Params = api_params(request_params(Base, Req, Opts), Opts),
+    case hb_maps:get(<<"claim_ids">>, Params, not_found, Opts) of
+        not_found -> {error, claim_ids_not_found};
+        _ClaimIDs -> {ok, Params}
     end.
 
 api_params(Params0, Opts) ->
@@ -193,8 +190,10 @@ request_metadata_keys() ->
     [
         <<"accept">>,
         <<"accept-bundle">>,
+        <<"accept-encoding">>,
         <<"accept-language">>,
         <<"authorization">>,
+        <<"commitments">>,
         <<"connection">>,
         <<"content-length">>,
         <<"cookie">>,
@@ -208,6 +207,7 @@ request_metadata_keys() ->
         <<"sec-fetch-dest">>,
         <<"sec-fetch-mode">>,
         <<"sec-fetch-site">>,
+        <<"sec-gpc">>,
         <<"user-agent">>
     ].
 
@@ -215,16 +215,15 @@ private_credential_keys() ->
     [
         <<"auth_token">>,
         <<"auth-token">>,
+        <<"odysee-auth-token">>,
+        <<"x-odysee-auth-token">>,
+        <<"x-lbry-auth-token">>,
         <<"authorization">>,
         <<"access_token">>,
         <<"access-token">>,
         <<"refresh_token">>,
         <<"refresh-token">>
     ].
-
-private_credential_present(Base, Req, Opts) ->
-    first_found([{Req, Key} || Key <- private_credential_keys()] ++ [{Base, Key} || Key <- private_credential_keys()], Opts)
-        =/= not_found.
 
 put_alias(Target, Source, Params, Opts) ->
     case hb_maps:get(Target, Params, not_found, Opts) of
@@ -238,14 +237,15 @@ put_alias(Target, Source, Params, Opts) ->
     end.
 
 api_request(Params, Base, Req, Opts) ->
-    Body = form_body(Params),
+    Body = form_body(legacy_api_params(Params, Base, Req, Opts)),
     Msg = #{
         <<"method">> => <<"POST">>,
         <<"path">> => reaction_url(Base, Req, Opts),
         <<"content-type">> => <<"application/x-www-form-urlencoded">>,
         <<"body">> => Body
     },
-    case hb_http:request(Msg, Opts) of
+    AuthedMsg = maps:merge(Msg, legacy_api_headers(Base, Req, Opts)),
+    case hb_http:request(AuthedMsg, Opts) of
         {ok, #{ <<"body">> := RespBody }} when is_binary(RespBody) -> decode_api_body(RespBody, Opts);
         {ok, RespBody} when is_binary(RespBody) -> decode_api_body(RespBody, Opts);
         {ok, Other} -> {error, {reaction_response_without_body, Other}};
@@ -327,6 +327,89 @@ reaction_claim_ids(MyReactions, OthersReactions) ->
 map_or_empty(Map) when is_map(Map) -> Map;
 map_or_empty(_Value) -> #{}.
 
+legacy_api_headers(Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
+                {error, not_found} -> #{}
+            end
+    end.
+
+legacy_api_params(Params, Base, Req, Opts) ->
+    case find_auth_token(Req, Opts) of
+        {ok, Token} ->
+            Params#{ <<"auth_token">> => Token };
+        {error, not_found} ->
+            case find_auth_token(Base, Opts) of
+                {ok, Token} -> Params#{ <<"auth_token">> => Token };
+                {error, not_found} -> Params
+            end
+    end.
+
+find_auth_token(Msg, Opts) ->
+    case first_found(
+        [{Msg, Key} || Key <- [<<"x-odysee-auth-token">>, <<"x-lbry-auth-token">>, <<"odysee-auth-token">>, <<"auth_token">>]],
+        Opts
+    ) of
+        not_found -> find_auth_cookie(Msg, Opts);
+        Token -> {ok, token_value(Token)}
+    end.
+
+find_auth_cookie(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:find(<<"cookie">>, Msg, Opts) of
+        {ok, Cookie} -> token_from_cookie(hb_util:bin(Cookie));
+        error -> {error, not_found}
+    end;
+find_auth_cookie(_Msg, _Opts) ->
+    {error, not_found}.
+
+token_from_cookie(Cookie) ->
+    token_from_cookie_parts(binary:split(Cookie, <<";">>, [global])).
+
+token_from_cookie_parts([]) ->
+    {error, not_found};
+token_from_cookie_parts([Part | Rest]) ->
+    case binary:split(Part, <<"=">>) of
+        [Name, Value] ->
+            case trim_bin(Name) of
+                <<"auth_token">> -> {ok, trim_bin(Value)};
+                _ -> token_from_cookie_parts(Rest)
+            end;
+        _ ->
+            token_from_cookie_parts(Rest)
+    end.
+
+token_value(#{ <<"value">> := Value }) ->
+    hb_util:bin(Value);
+token_value(Value) ->
+    hb_util:bin(Value).
+
+trim_bin(Bin) ->
+    list_to_binary(string:trim(binary_to_list(Bin))).
+
+request_params(Base, Req, Opts) ->
+    BaseParams = maps:merge(map_or_empty(Base), body_params(Base, Opts)),
+    ReqParams = maps:merge(body_params(Req, Opts), map_or_empty(Req)),
+    maps:merge(BaseParams, ReqParams).
+
+body_params(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:get(<<"body">>, Msg, not_found, Opts) of
+        Body when is_map(Body) ->
+            Body;
+        Body when is_binary(Body) ->
+            case try_decode_json(Body) of
+                {ok, Decoded} when is_map(Decoded) -> Decoded;
+                _ -> #{}
+            end;
+        _ ->
+            #{}
+    end;
+body_params(_Msg, _Opts) ->
+    #{}.
+
 first_value([], _Map, _Opts) ->
     not_found;
 first_value([Key | Rest], Map, Opts) when is_map(Map) ->
@@ -385,6 +468,24 @@ list_accepts_internal_api_json_test() ->
     ?assertEqual(Raw, hb_maps:get(<<"body">>, Msg, #{})),
     ?assertEqual([<<"claim-1">>, <<"claim-2">>], hb_maps:get(<<"claim-ids">>, Msg, #{})).
 
+list_accepts_api_success_with_null_error_test() ->
+    Raw = hb_json:encode(#{
+        <<"success">> => true,
+        <<"error">> => null,
+        <<"data">> => #{
+            <<"others_reactions">> => #{
+                <<"claim-1">> => #{ <<"like">> => 4, <<"dislike">> => 0 }
+            }
+        }
+    }),
+    {ok, Msg} = list(#{}, #{ <<"body">> => Raw }, #{}),
+    ?assertEqual(#{}, hb_maps:get(<<"my_reactions">>, Msg, #{})),
+    ?assertEqual([<<"claim-1">>], hb_maps:get(<<"claim-ids">>, Msg, #{})),
+    ?assertEqual(
+        #{ <<"like">> => 4, <<"dislike">> => 0 },
+        hb_maps:get(<<"claim-1">>, hb_maps:get(<<"others_reactions">>, Msg, #{}), #{})
+    ).
+
 list_params_normalizes_aliases_and_strips_control_fields_test() ->
     {ok, Params} = list_params(
         #{ <<"odysee-api-url">> => <<"http://api">>, <<"claim-ids">> => <<"claim-1">> },
@@ -393,10 +494,49 @@ list_params_normalizes_aliases_and_strips_control_fields_test() ->
     ),
     ?assertEqual(#{ <<"claim_ids">> => <<"claim-1">> }, Params).
 
-list_params_rejects_private_credentials_test() ->
+list_params_strips_private_credentials_test() ->
+    {ok, Params} = list_params(
+        #{ <<"claim-ids">> => <<"claim-1">> },
+        #{
+            <<"auth_token">> => <<"tok">>,
+            <<"x-odysee-auth-token">> => <<"tok">>,
+            <<"accept-encoding">> => <<"gzip">>,
+            <<"commitments">> => #{ <<"sig">> => <<"value">> },
+            <<"sec-gpc">> => <<"1">>
+        },
+        #{}
+    ),
+    ?assertEqual(#{ <<"claim_ids">> => <<"claim-1">> }, Params).
+
+legacy_api_headers_forwards_odysee_auth_token_test() ->
     ?assertEqual(
-        {error, private_credentials_not_allowed},
-        list_params(#{ <<"claim-ids">> => <<"claim-1">> }, #{ <<"auth_token">> => <<"tok">> }, #{})
+        #{ <<"cookie">> => <<"auth_token=token-1">> },
+        legacy_api_headers(#{}, #{ <<"x-odysee-auth-token">> => <<"token-1">> }, #{})
+    ).
+
+legacy_api_headers_extracts_auth_cookie_test() ->
+    ?assertEqual(
+        #{ <<"cookie">> => <<"auth_token=token-2">> },
+        legacy_api_headers(#{}, #{ <<"cookie">> => <<"other=1; auth_token=token-2; x=3">> }, #{})
+    ).
+
+list_params_reads_json_body_test() ->
+    {ok, Params} = list_params(
+        #{},
+        #{ <<"body">> => <<"{\"claim_ids\":\"claim-1\",\"x-odysee-auth-token\":\"tok\"}">> },
+        #{}
+    ),
+    ?assertEqual(#{ <<"claim_ids">> => <<"claim-1">> }, Params).
+
+legacy_api_params_forwards_odysee_auth_token_test() ->
+    ?assertEqual(
+        #{ <<"claim_ids">> => <<"claim-1">>, <<"auth_token">> => <<"token-1">> },
+        legacy_api_params(
+            #{ <<"claim_ids">> => <<"claim-1">> },
+            #{},
+            #{ <<"x-odysee-auth-token">> => <<"token-1">> },
+            #{}
+        )
     ).
 
 form_body_encodes_params_test() ->
