@@ -977,11 +977,28 @@ const RECENT_PAGE_SIZE = 100;
 const SEARCH_PAGE_SIZE_PER_CHANNEL = 24;
 
 function sortClaimsByNewest(claims: Array<StreamClaim>): Array<StreamClaim> {
-  return [...claims].sort((a, b) => {
-    const aTime = Number(a?.value?.release_time || a?.meta?.creation_timestamp || 0);
-    const bTime = Number(b?.value?.release_time || b?.meta?.creation_timestamp || 0);
-    return bTime - aTime;
-  });
+  return claims
+    .map((claim, index) => ({ claim, index, timestamp: claimNewestTimestamp(claim) }))
+    .sort((a, b) => b.timestamp - a.timestamp || a.index - b.index)
+    .map(({ claim }) => claim);
+}
+
+function claimNewestTimestamp(claim: StreamClaim): number {
+  return firstPositiveNumber([
+    claim?.meta?.creation_timestamp,
+    (claim as any)?.timestamp,
+    claim?.value?.release_time,
+    (claim as any)?.height,
+  ]);
+}
+
+function firstPositiveNumber(values: Array<any>) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+
+  return 0;
 }
 
 function extractStreamClaims(result: any): Array<StreamClaim> {

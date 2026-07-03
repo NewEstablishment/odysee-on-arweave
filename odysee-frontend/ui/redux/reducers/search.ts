@@ -57,7 +57,7 @@ export default handleActions(
       const urisForQuery = state.resultsByQuery[normalizedQuery] && state.resultsByQuery[normalizedQuery]['uris'];
       let newUris = uris;
 
-      if (from !== 0 && urisForQuery) {
+      if (Number(from || 0) > 0 && urisForQuery) {
         newUris = Array.from(new Set(urisForQuery.concat(uris)));
       }
 

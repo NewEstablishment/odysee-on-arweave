@@ -121,24 +121,35 @@ async function mergeHyperbeamPublishesIntoClaimList(
 
   return {
     ...result,
-    items: sortClaimsByNewest([...indexedClaims, ...(result.items || [])]),
+    items: sortClaimsByNewest([...(result.items || []), ...indexedClaims]),
     total_items: Number(result.total_items || 0) + indexedClaims.length,
   };
 }
 
 function sortClaimsByNewest(claims: Array<Claim>) {
-  return [...claims].sort((a, b) => claimNewestTimestamp(b) - claimNewestTimestamp(a));
+  return claims
+    .map((claim, index) => ({ claim, index, timestamp: claimNewestTimestamp(claim) }))
+    .sort((a, b) => b.timestamp - a.timestamp || a.index - b.index)
+    .map(({ claim }) => claim);
 }
 
 function claimNewestTimestamp(claim: Claim) {
   const anyClaim = claim as any;
-  return Number(
-    anyClaim?.value?.release_time ||
-      anyClaim?.meta?.creation_timestamp ||
-      anyClaim?.timestamp ||
-      anyClaim?.height ||
-      0
-  );
+  return firstPositiveNumber([
+    anyClaim?.meta?.creation_timestamp,
+    anyClaim?.timestamp,
+    anyClaim?.value?.release_time,
+    anyClaim?.height,
+  ]);
+}
+
+function firstPositiveNumber(values: Array<any>) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+
+  return 0;
 }
 
 function emptyClaimListResult(page: number, pageSize: number): StreamListResponse {

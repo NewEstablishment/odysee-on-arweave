@@ -25,7 +25,8 @@ const waitForTasks = !Boolean(args['no-wait']);
 const waitTimeoutMs = intArg(args['wait-timeout-ms'], Number(process.env.MEILI_WAIT_TIMEOUT_MS || 60000));
 const modifiedSince = intArg(args['modified-since'], 0);
 const searchTerm = stringArg(args['search-term'], '');
-const order = stringArg(args.order, searchTerm ? 'recent' : 'id');
+const exactTerm = stringArg(args['exact-term'], '');
+const order = stringArg(args.order, searchTerm || exactTerm ? 'recent' : 'id');
 const mysqlBin = args.mysql || process.env.MYSQL_BIN || 'mysql';
 const meiliUrl = String(args['meili-url'] || DEFAULTS.meiliUrl).replace(/\/+$/, '');
 const index = String(args.index || DEFAULTS.index);
@@ -44,7 +45,7 @@ let maxModifiedAt = Number(checkpoint.modified_at || 0);
 
 while (imported < limit) {
   const take = Math.min(batchSize, limit - imported);
-  const rows = await readChainquery(mysqlBin, cursor, take, modifiedSince, searchTerm, order);
+  const rows = await readChainquery(mysqlBin, cursor, take, modifiedSince, searchTerm, exactTerm, order);
   if (!rows.length) break;
 
   cursor = Math.max(...rows.map((doc) => Number(doc.id || 0)));
@@ -111,8 +112,8 @@ async function writeCheckpoint(file, state) {
   await rename(tmp, file);
 }
 
-async function readChainquery(mysqlBin, afterId, count, modifiedSince, searchTerm, orderMode) {
-  const query = chainquerySql(afterId, count, modifiedSince, searchTerm, orderMode);
+async function readChainquery(mysqlBin, afterId, count, modifiedSince, searchTerm, exactTerm, orderMode) {
+  const query = chainquerySql(afterId, count, modifiedSince, searchTerm, exactTerm, orderMode);
   const output = await run(mysqlBin, [
     '--skip-ssl',
     '--batch',
@@ -134,7 +135,7 @@ async function readChainquery(mysqlBin, afterId, count, modifiedSince, searchTer
     .map((line) => JSON.parse(line));
 }
 
-function chainquerySql(afterId, count, modifiedSince, searchTerm, orderMode) {
+function chainquerySql(afterId, count, modifiedSince, searchTerm, exactTerm, orderMode) {
   const id = Number(afterId) || 0;
   const lim = Math.max(1, Math.min(Number(count) || 1000, 50000));
   const orderBy = orderMode === 'recent'
@@ -143,6 +144,7 @@ function chainquerySql(afterId, count, modifiedSince, searchTerm, orderMode) {
   const modifiedFilter =
     Number(modifiedSince) > 0 ? `\n  AND c.modified_at >= FROM_UNIXTIME(${Number(modifiedSince)})` : '';
   const searchFilter = searchTerm ? `\n  AND (${searchPredicate(searchTerm)})` : '';
+  const exactFilter = exactTerm ? `\n  AND (${exactPredicate(exactTerm)})` : '';
   return `
 SELECT JSON_OBJECT(
   'id', c.id,
@@ -150,9 +152,11 @@ SELECT JSON_OBJECT(
   'doc_id', CONCAT(COALESCE(c.transaction_hash_update, c.transaction_hash_id), ':', COALESCE(c.vout_update, c.vout)),
   'immutable_id', CONCAT(COALESCE(c.transaction_hash_update, c.transaction_hash_id), ':', COALESCE(c.vout_update, c.vout)),
   'legacy_outpoint', CONCAT(COALESCE(c.transaction_hash_update, c.transaction_hash_id), ':', COALESCE(c.vout_update, c.vout)),
+  'source_system', 'legacy-chainquery',
   'claim_id', c.claim_id,
   'name', c.name,
-  'searchable_name', REPLACE(c.name, '.', '-'),
+  'source_name', c.source_name,
+  'searchable_name', TRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.name, '.', ' '), '_', ' '), '-', ' '), '(', ' '), ')', ' '), '[', ' ')),
   'stripped_name', REPLACE(REPLACE(REPLACE(REPLACE(c.name, '-', ''), '_', ''), 'The', ''), 'the', ''),
   'channel_name', p.name,
   'channel_claim_id', p.claim_id,
@@ -184,10 +188,19 @@ LEFT JOIN claim_tag ct ON ct.claim_id = c.claim_id
 LEFT JOIN tag t ON ct.tag_id = t.id
 WHERE c.id > ${id}
   AND c.claim_id IS NOT NULL
-  AND COALESCE(c.transaction_hash_update, c.transaction_hash_id) IS NOT NULL${modifiedFilter}${searchFilter}
+  AND COALESCE(c.transaction_hash_update, c.transaction_hash_id) IS NOT NULL${modifiedFilter}${searchFilter}${exactFilter}
 GROUP BY c.id
 ORDER BY ${orderBy}
 LIMIT ${lim}`;
+}
+
+function exactPredicate(value) {
+  const noExt = String(value).replace(/\.[^.]+$/, '');
+  const candidates = [...new Set([String(value), noExt].filter(Boolean))];
+  return candidates.flatMap((candidate) => {
+    const quoted = sqlString(candidate);
+    return [`c.name = ${quoted}`, `c.title = ${quoted}`, `c.source_name = ${quoted}`];
+  }).join(' OR ');
 }
 
 function searchPredicate(value) {
@@ -317,7 +330,7 @@ function mediaType(contentType) {
 
 async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
   const settings = {
-    searchableAttributes: ['title', 'name', 'channel_name', 'searchable_name', 'stripped_name', 'tags', 'description'],
+    searchableAttributes: ['title', 'name', 'source_name', 'channel_name', 'searchable_name', 'stripped_name', 'tags', 'description'],
     filterableAttributes: [
       'doc_id',
       'claim_id',
@@ -345,6 +358,7 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
       'has_channel',
       'is_controlling',
       'recency_rank',
+      'source_system',
     ],
     sortableAttributes: [
       'is_channel',

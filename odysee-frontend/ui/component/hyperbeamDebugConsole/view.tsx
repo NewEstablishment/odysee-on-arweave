@@ -739,6 +739,32 @@ function RequestDetail({
   );
 }
 
+function Metric({ label, value, color }: { label: string; value: any; color?: string }) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        padding: '5px 6px',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 4,
+        background: 'rgba(0,0,0,0.14)',
+      }}
+    >
+      <div style={{ color: 'rgba(255,255,255,0.44)', fontSize: 10, marginBottom: 2 }}>{label}</div>
+      <div
+        style={{
+          color: color || 'rgba(255,255,255,0.82)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {formatDetail(value)}
+      </div>
+    </div>
+  );
+}
+
 function readStoredBoolean(key: string, fallback: boolean) {
   if (typeof window === 'undefined') return fallback;
   const value = window.localStorage.getItem(key);
@@ -923,12 +949,13 @@ function ArchitecturePanel({
       displayGraph.rangeEvents > 0);
   const showClaimPath = hasClaimRead;
   const showAuthPath = displayGraph.authEvents > 0;
-  const showSearchPath = displayGraph.searchEvents > 0;
+  const showMeiliPath = displayGraph.meilisearchEvents > 0;
   const showLegacyPath = showClaimPath && displayGraph.legacyEvents > 0;
   const showMediaPath = showClaimPath && displayGraph.rangeEvents > 0;
-  const deviceRows = GRAPH_DEVICE_ROWS.concat(
-    displayGraph.deviceNames.filter((device) => !GRAPH_DEVICE_ROWS.includes(device as any))
-  );
+  const deviceRows: Array<string> = [
+    ...GRAPH_DEVICE_ROWS,
+    ...displayGraph.deviceNames.filter((device) => !GRAPH_DEVICE_ROWS.includes(device as any)),
+  ];
   const visibleStoreRows = GRAPH_STORE_ROWS.map(
     (store) => [store, Number(displayGraph.storeBackends[store] || 0)] as [string, number]
   ).concat(Object.entries(displayGraph.storeBackends).filter(([store]) => !GRAPH_STORE_ROWS.includes(store as any)));
@@ -1140,8 +1167,8 @@ function ArchitecturePanel({
                 title={store}
                 detail={`${count} calls`}
                 color="#facc15"
-                active={rowActive(`store:${store}`, count) || (showSearchPath && store === 'hb_store_odysee')}
-                faded={rowFaded(`store:${store}`, count) && !(showSearchPath && store === 'hb_store_odysee')}
+                active={rowActive(`store:${store}`, count) || (showMeiliPath && store === 'hb_store_odysee')}
+                faded={rowFaded(`store:${store}`, count) && !(showMeiliPath && store === 'hb_store_odysee')}
               />
             ))}
             <ArchitectureNode
@@ -1149,8 +1176,8 @@ function ArchitecturePanel({
               title="Meilisearch"
               detail="local claim index"
               color={SEARCH_COLOR}
-              active={nodeActive('meilisearch', showSearchPath)}
-              faded={nodeFaded('meilisearch', !showSearchPath)}
+              active={nodeActive('meilisearch', showMeiliPath)}
+              faded={nodeFaded('meilisearch', !showMeiliPath)}
             />
             {visibleLegacyRows.map(([backend, count], index) => (
               <ArchitectureNode
@@ -1159,8 +1186,8 @@ function ArchitecturePanel({
                 title={backend}
                 detail={`${count} calls`}
                 color={ODYSEE_COLOR}
-                active={rowActive(`legacy:${backend}`, count) || (showSearchPath && backend === 'Chainquery')}
-                faded={rowFaded(`legacy:${backend}`, count) && !(showSearchPath && backend === 'Chainquery')}
+                active={rowActive(`legacy:${backend}`, count) || (showMeiliPath && backend === 'Chainquery')}
+                faded={rowFaded(`legacy:${backend}`, count) && !(showMeiliPath && backend === 'Chainquery')}
               />
             ))}
             <ArchitectureNode
@@ -1230,27 +1257,27 @@ function ArchitecturePanel({
                   color={ODYSEE_COLOR}
                 />
               ))}
-            {showStaticBackendEdges && showSearchPath && (
+            {showStaticBackendEdges && showMeiliPath && (
               <>
                 <ArchitectureNodeEdge
                   rects={architectureRects}
                   from="device:~odysee-search@1.0"
                   to="meilisearch"
-                  active={showSearchPath}
+                  active={showMeiliPath}
                   color={SEARCH_COLOR}
                 />
                 <ArchitectureNodeEdge
                   rects={architectureRects}
                   from="meilisearch"
                   to="store:hb_store_odysee"
-                  active={showSearchPath}
+                  active={showMeiliPath}
                   color="#facc15"
                 />
                 <ArchitectureNodeEdge
                   rects={architectureRects}
                   from="meilisearch"
                   to="legacy:Chainquery"
-                  active={showSearchPath}
+                  active={showMeiliPath}
                   color={ODYSEE_COLOR}
                 />
               </>
@@ -1749,6 +1776,7 @@ function architectureSelectedPath(
   const frontend = isSsr || isAuth ? 'ssr' : 'sdk';
   const mediaRange = isMediaRangeEvent(selectedData, path, selectedDevice);
   const isSearch = selectedDevice === '~odysee-search@1.0' || path.includes('/~odysee-search@1.0/query');
+  const searchUsesMeili = isSearch && searchUsesMeilisearch(selectedData);
   const hasRequest = selectedEvents.some((event) => event.label === 'request' || event.label === 'request failed');
   const hasResponse = selectedEvents.some(isResponseLikeEvent);
   const hasLifecycle = hasRequest || hasResponse;
@@ -1797,12 +1825,19 @@ function architectureSelectedPath(
     if (eventLegacyBackend && !eventSearch) {
       addBackendFlow({ color: ODYSEE_COLOR, label: eventLegacyBackend, node: `legacy:${eventLegacyBackend}` });
     }
+    if (eventSearch && searchUsesMeilisearch(data)) {
+      addBackendFlow({
+        color: SEARCH_COLOR,
+        label: 'search index',
+        node: 'meilisearch',
+      });
+    }
   });
 
   if (isCache) {
     addBackendFlow({ color: '#facc15', label: 'cache', node: 'store:cache@1.0' });
   }
-  if (isSearch) {
+  if (searchUsesMeili) {
     addBackendFlow({
       color: SEARCH_COLOR,
       label: 'search index',
@@ -1829,7 +1864,7 @@ function architectureSelectedPath(
     addBackendFlow({ color: '#facc15', label: 'store metadata', node: 'store:hb_store_odysee' });
   }
   backendFlows.forEach((backend) => nodes.add(backend.node));
-  if (isSearch) {
+  if (searchUsesMeili) {
     nodes.add('store:hb_store_odysee');
     nodes.add('legacy:Chainquery');
   }
@@ -1857,7 +1892,7 @@ function architectureSelectedPath(
       addFlow(sourceNode, backend.node, backend.color, backend.label);
     }
   });
-  if (hasLifecycle && isSearch) {
+  if (hasLifecycle && searchUsesMeili) {
     addFlow('meilisearch', 'legacy:Chainquery', ODYSEE_COLOR, 'chainquery');
     addFlow('meilisearch', 'store:hb_store_odysee', '#facc15', 'hyperbeam index');
   }
@@ -2065,6 +2100,7 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     deviceEvents: 0,
     cacheEvents: 0,
     searchEvents: 0,
+    meilisearchEvents: 0,
     uploadEvents: 0,
     rangeEvents: 0,
   };
@@ -2104,6 +2140,7 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     }
     if (device === '~odysee-search@1.0' || path.includes('/~odysee-search@1.0/query')) {
       counters.searchEvents += 1;
+      if (searchUsesMeilisearch(data)) counters.meilisearchEvents += 1;
     }
     if (
       path.includes('~odysee-upload@1.0') ||
@@ -2136,9 +2173,9 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     }
   });
   counters.sdkEvents = Math.max(0, counters.hyperbeamEvents - counters.ssrEvents);
-  if (counters.searchEvents > 0) {
-    legacyBackends.Chainquery = Math.max(Number(legacyBackends.Chainquery || 0), counters.searchEvents);
-    storeBackends.hb_store_odysee = Math.max(Number(storeBackends.hb_store_odysee || 0), counters.searchEvents);
+  if (counters.meilisearchEvents > 0) {
+    legacyBackends.Chainquery = Math.max(Number(legacyBackends.Chainquery || 0), counters.meilisearchEvents);
+    storeBackends.hb_store_odysee = Math.max(Number(storeBackends.hb_store_odysee || 0), counters.meilisearchEvents);
   }
 
   return {
@@ -2229,11 +2266,7 @@ function isLegacyBackedEvent(data: Record<string, any>, devices: Array<string>, 
 }
 
 function isLegacyStoreBackedDevice(device: string) {
-  return (
-    device.startsWith('~odysee-') &&
-    !device.includes('upload') &&
-    !device.includes('search')
-  );
+  return device.startsWith('~odysee-') && !device.includes('upload') && !device.includes('search');
 }
 
 function isMediaRangeEvent(data: Record<string, any>, path: string, device: string) {
@@ -2552,6 +2585,29 @@ function isSearchDeviceEventData(data: Record<string, any>) {
     responseDevice === '~odysee-search@1.0' ||
     path.includes('/~odysee-search@1.0/query')
   );
+}
+
+function searchUsesMeilisearch(data: Record<string, any>) {
+  if (!isSearchDeviceEventData(data)) return false;
+
+  return searchBackend(data) === 'meilisearch';
+}
+
+function searchBackend(data: Record<string, any>) {
+  const body = parseMaybeJson(data.body) || parseMaybeJson(data.bodyCapture) || {};
+  const result = parseMaybeJson(body.result) || body.result || {};
+  return String(
+    data.backend || body.backend || result.backend || data.searchBackend || data.sourceBackend || ''
+  ).toLowerCase();
+}
+
+function parseMaybeJson(value: any) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return value;
+  }
 }
 
 function isAggregateClaimRoute(data: Record<string, any>) {

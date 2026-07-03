@@ -4,10 +4,10 @@ import { NO_AUTH, X_LBRY_AUTH_TOKEN } from 'constants/token';
 import fetchWithTimeout from 'util/fetch';
 import {
   fetchHyperbeamAccountSdk,
-  fetchHyperbeamClaimSearch,
   fetchHyperbeamGet,
   fetchHyperbeamResolve,
   fetchHyperbeamResolveClaimIds,
+  fetchHyperbeamSearch,
 } from 'util/hyperbeam';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { ODYSEE_HYPERBEAM_NODE_API, PROXY_URL_NO_CF } from 'config';
@@ -368,7 +368,7 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
       return fetchHyperbeamResolve(stripHyperbeamNodeOnlyParams(params || {})).then(requireHyperbeamResult(method));
     case 'claim_search': {
       const searchParams = stripHyperbeamNodeOnlyParams(claimSearchParamHook(params || {}));
-      const search = shouldResolveClaimIds(searchParams) ? fetchHyperbeamResolveClaimIds : fetchHyperbeamClaimSearch;
+      const search = shouldResolveClaimIds(searchParams) ? fetchHyperbeamResolveClaimIds : fetchHyperbeamSearch;
       return search(searchParams).then(requireHyperbeamResult(method));
     }
     case 'get':
@@ -407,6 +407,7 @@ const LEGACY_ONLY_SDK_METHODS = new Set([
   'blob_list',
   'channel_sign',
   'channel_list',
+  'claim_list',
   'collection_list',
   'file_list',
   'purchase_list',

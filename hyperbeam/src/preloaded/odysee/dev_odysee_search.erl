@@ -19,7 +19,7 @@ query(Base, Req, Opts) ->
         maybe
             {ok, Raw} ?= meili_post(index_path(Params, Opts, <<"/search">>), Search, Base, Req, Opts),
             {ok, Decoded} ?= try_decode_json(Raw),
-            Result = normalize_search_response(Decoded, Params, Opts),
+            Result = maybe_merge_legacy_claim_search(normalize_search_response(Decoded, Params, Opts), Params, Opts),
             ok_json(Result#{ <<"request">> => Search })
         else
             Error -> device_error(Error)
@@ -136,7 +136,8 @@ meili_search_body(Params, Opts) ->
 
 normalize_search_response(Msg, Params, Opts) when is_map(Msg) ->
     Hits0 = hb_maps:get(<<"hits">>, Msg, [], Opts),
-    Hits = filter_stale_native_hits(Hits0, Opts),
+    Hits1 = filter_filename_query_hits(Hits0, Params, Opts),
+    Hits = filter_stale_native_hits(Hits1, Opts),
     Limit = hb_maps:get(<<"limit">>, Msg, page_size(Params, Opts), Opts),
     Offset = hb_maps:get(<<"offset">>, Msg, offset(Params, Opts), Opts),
     Total = first_value([<<"estimatedTotalHits">>, <<"totalHits">>], Msg, Opts),
@@ -153,6 +154,149 @@ normalize_search_response(Msg, Params, Opts) when is_map(Msg) ->
     };
 normalize_search_response(Other, _Params, _Opts) ->
     #{ <<"device">> => ?DEVICE, <<"backend">> => <<"meilisearch">>, <<"raw">> => Other }.
+
+maybe_merge_legacy_claim_search(Result, Params, Opts) ->
+    case first_value([<<"channel_ids">>, <<"channel-ids">>, <<"channel_id">>, <<"channel-id">>], Params, Opts) of
+        not_found ->
+            Result;
+        _ ->
+            case hb_ao:raw(<<"odysee-claim@1.0">>, <<"search">>, #{}, legacy_claim_search_params(Params, Opts), Opts) of
+                {ok, Legacy0} ->
+                    Legacy = search_result_payload(Legacy0, Opts),
+                    merge_legacy_search_result(Result, Legacy, Params, Opts);
+                _ ->
+                    Result
+            end
+    end.
+
+legacy_claim_search_params(Params, Opts) ->
+    maps:without(
+        [<<"backend-url">>, <<"backend_url">>, <<"meili-url">>, <<"meili_url">>, <<"api-key">>, <<"api_key">>, <<"meili-key">>, <<"meili_key">>, <<"search-index">>, <<"search_index">>, <<"meili-index">>, <<"meili_index">>],
+        Params#{
+            <<"page_size">> => page_size(Params, Opts),
+            <<"page">> => page(Params, Opts)
+        }
+    ).
+
+search_result_payload(Msg, Opts) when is_map(Msg) ->
+    case hb_maps:get(<<"result">>, Msg, not_found, Opts) of
+        Result when is_map(Result) -> Result;
+        _ -> Msg
+    end;
+search_result_payload(Msg, _Opts) ->
+    Msg.
+
+merge_legacy_search_result(Result, Legacy, Params, Opts) when is_map(Legacy) ->
+    NativeItems = list_or_empty(hb_maps:get(<<"items">>, Result, [], Opts)),
+    LegacyItems = list_or_empty(hb_maps:get(<<"items">>, Legacy, [], Opts)),
+    Items = sort_search_items(unique_search_items(LegacyItems ++ NativeItems, Opts), Params, Opts),
+    Result#{
+        <<"items">> => Items,
+        <<"claim-ids">> => claim_ids_from_hits(Items, Opts),
+        <<"total-items">> => max(value_or(hb_maps:get(<<"total-items">>, Result, not_found, Opts), 0), length(Items)),
+        <<"legacy-items">> => length(LegacyItems)
+    };
+merge_legacy_search_result(Result, _Legacy, _Params, _Opts) ->
+    Result.
+
+list_or_empty(Value) when is_list(Value) -> Value;
+list_or_empty(_Value) -> [].
+
+unique_search_items(Items, Opts) ->
+    {Unique, _Seen} =
+        lists:foldl(
+            fun(Item, {Acc, Seen}) ->
+                Key = search_item_key(Item, Opts),
+                case sets:is_element(Key, Seen) of
+                    true -> {Acc, Seen};
+                    false -> {[Item | Acc], sets:add_element(Key, Seen)}
+                end
+            end,
+            {[], sets:new([{version, 2}])},
+            Items
+        ),
+    lists:reverse(Unique).
+
+search_item_key(Item, Opts) when is_map(Item) ->
+    first_value([<<"claim_id">>, <<"claim-id">>, <<"immutable_id">>, <<"immutable-id">>, <<"doc_id">>, <<"doc-id">>], Item, <<"">>, Opts);
+search_item_key(Item, _Opts) ->
+    hb_util:bin(Item).
+
+sort_search_items(Items, Params, Opts) ->
+    case normalize_sorts(list_value(value_or(first_value([<<"sort">>, <<"sort_by">>, <<"sort-by">>, <<"order_by">>, <<"order-by">>, <<"order">>], Params, Opts), [<<"release_time">>]))) of
+        [Sort | _] -> sort_search_items_by(Sort, Items, Opts);
+        [] -> Items
+    end.
+
+sort_search_items_by(<<"release_time:asc">>, Items, Opts) ->
+    lists:sort(fun(A, B) -> item_time(A, Opts) =< item_time(B, Opts) end, Items);
+sort_search_items_by(<<"release_time:desc">>, Items, Opts) ->
+    lists:sort(fun(A, B) -> item_time(A, Opts) >= item_time(B, Opts) end, Items);
+sort_search_items_by(_Sort, Items, _Opts) ->
+    Items.
+
+item_time(Item, Opts) when is_map(Item) ->
+    parse_int(first_value([<<"release_time">>, <<"release-time">>, <<"timestamp">>, <<"transaction_time">>, <<"transaction-time">>, <<"created_at">>, <<"created-at">>], Item, Opts), 0);
+item_time(_Item, _Opts) ->
+    0.
+
+filter_filename_query_hits(Hits, Params, Opts) when is_list(Hits) ->
+    Terms = filename_query_terms(query_text(Params, Opts)),
+    case Terms of
+        [] -> Hits;
+        _ -> [Hit || Hit <- Hits, filename_hit_matches(Hit, Terms, Opts)]
+    end;
+filter_filename_query_hits(Hits, _Params, _Opts) ->
+    Hits.
+
+filename_query_terms(Query0) ->
+    Query = hb_util:bin(Query0),
+    case binary:match(Query, [<<".">>, <<"_">>]) of
+        nomatch -> [];
+        _ ->
+            Terms = [
+                Term
+             || Term <- binary:split(normalized_search_text(Query), <<" ">>, [global]),
+                byte_size(Term) >= 2,
+                not lists:member(Term, [<<"mp4">>, <<"mkv">>, <<"mov">>, <<"webm">>, <<"avi">>])
+            ],
+            case length(Terms) >= 2 of
+                true -> Terms;
+                false -> []
+            end
+    end.
+
+filename_hit_matches(Hit, Terms, Opts) ->
+    Text = normalized_search_text(
+        join_with(
+            [
+                hit_text(<<"title">>, Hit, Opts),
+                hit_text(<<"name">>, Hit, Opts),
+                hit_text(<<"source_name">>, Hit, Opts),
+                hit_text(<<"searchable_name">>, Hit, Opts),
+                hit_text(<<"stripped_name">>, Hit, Opts),
+                hit_text(<<"description">>, Hit, Opts)
+            ],
+            <<" ">>
+        )
+    ),
+    lists:all(fun(Term) -> binary:match(Text, Term) =/= nomatch end, Terms).
+
+hit_text(Key, Hit, Opts) ->
+    case hb_maps:get(Key, Hit, <<>>, Opts) of
+        Value when is_binary(Value) -> Value;
+        Value when is_integer(Value) -> integer_to_binary(Value);
+        Value when is_float(Value) -> hb_util:bin(io_lib:format("~p", [Value]));
+        _ -> <<>>
+    end.
+
+normalized_search_text(Value0) ->
+    Value = hb_util:to_lower(hb_util:bin(Value0)),
+    lists:foldl(
+        fun(Sep, Acc) -> binary:replace(Acc, Sep, <<" ">>, [global]) end,
+        Value,
+        [<<".">>, <<"_">>, <<"-">>, <<"(">>, <<")">>, <<"[">>, <<"]">>, <<"/">>, <<"\\">>]
+    ).
 
 filter_stale_native_hits(Hits, Opts) when is_list(Hits) ->
     case native_upload_ids(Opts) of
@@ -258,7 +402,7 @@ index_path(Params, Opts, Suffix) ->
     <<"/indexes/", (index_name(Params, Opts))/binary, Suffix/binary>>.
 
 index_name(Params, Opts) ->
-    hb_util:bin(value_or(first_value([<<"index">>, <<"index-id">>, <<"index_id">>], Params, Opts), ?DEFAULT_INDEX)).
+    hb_util:bin(value_or(first_value([<<"search-index">>, <<"search_index">>, <<"meili-index">>, <<"meili_index">>], Params, Opts), ?DEFAULT_INDEX)).
 
 query_text(Params, Opts) ->
     hb_util:bin(value_or(first_value([<<"q">>, <<"query">>, <<"s">>, <<"text">>], Params, Opts), <<"">>)).
@@ -792,7 +936,8 @@ filterable_attributes() ->
         <<"has_thumbnail">>,
         <<"has_channel">>,
         <<"is_controlling">>,
-        <<"recency_rank">>
+        <<"recency_rank">>,
+        <<"source_system">>
     ].
 
 sortable_attributes() ->
@@ -820,6 +965,7 @@ searchable_attributes() ->
     [
         <<"title">>,
         <<"name">>,
+        <<"source_name">>,
         <<"channel_name">>,
         <<"searchable_name">>,
         <<"stripped_name">>,
@@ -865,6 +1011,10 @@ normalize_search_response_test() ->
     Result = normalize_search_response(Msg, #{}, #{}),
     ?assertEqual([<<"abc">>], maps:get(<<"claim-ids">>, Result)),
     ?assertEqual(1, maps:get(<<"total-items">>, Result)).
+
+index_name_ignores_ui_index_param_test() ->
+    ?assertEqual(?DEFAULT_INDEX, index_name(#{ <<"index">> => 0 }, #{})),
+    ?assertEqual(<<"alternate">>, index_name(#{ <<"search-index">> => <<"alternate">> }, #{})).
 
 search_id_test() ->
     ?assertEqual(<<"abc-XYZ_123_0">>, search_id(<<"abc-XYZ_123:0">>)).

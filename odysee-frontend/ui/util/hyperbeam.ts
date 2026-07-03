@@ -337,114 +337,91 @@ export async function fetchHyperbeamSubCount(claimIdCsv: string): Promise<Array<
   return Array.isArray(counts) ? counts : null;
 }
 
-export async function fetchHyperbeamClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
-  const searchResult = await fetchHyperbeamClaimDeviceSearch(params);
-  return mergeHyperbeamChannelUploadsIntoSearchResult(searchResult, params);
-}
-
-async function fetchHyperbeamClaimDeviceSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
-  try {
-    const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, params);
-    const result = sdkSearchFromHyperbeam(responsePayload(response));
-    const items = result && result.items;
-
-    return Array.isArray(items) ? result : null;
-  } catch (_e) {
-    return null;
-  }
-}
-
 export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   try {
     const response = await fetchDeviceJson(`${SEARCH_DEVICE}/query`, params);
     const result = sdkSearchFromHyperbeam(responsePayload(response));
     const items = result && result.items;
 
-    return Array.isArray(items) ? result : null;
+    if (!Array.isArray(items)) return null;
+
+    const resolvedItems = await hydrateNativeSearchItems(items);
+    return {
+      ...result,
+      items: resolvedItems,
+    };
   } catch (error) {
     void error;
     return null;
   }
 }
 
-async function mergeHyperbeamChannelUploadsIntoSearchResult(
-  searchResult: ClaimSearchResponse | null,
-  params: ClaimSearchOptions
-): Promise<ClaimSearchResponse | null> {
-  const channelIds = stringList((params as any).channel_ids || (params as any).channelIds);
-  if (!channelIds.length || hasHyperbeamChannelSearchConstraints(params)) return searchResult;
+async function hydrateNativeSearchItems(items: Array<any>): Promise<Array<any>> {
+  const nativeIds = items.filter(isNativeSearchHit).map(searchHitId).filter(Boolean).map(String);
+  if (!nativeIds.length) return items;
 
-  try {
-    const page = toNumber((params as any).page, 1);
-    if (page !== 1) return searchResult;
+  const nativeClaims = await fetchHyperbeamUploadClaimsForIds([...new Set(nativeIds)]);
+  if (!nativeClaims.length) return items;
 
-    const uploadClaims = await fetchHyperbeamUploadClaimsForChannels(channelIds);
-    if (!uploadClaims.length) return searchResult;
+  const nativeById: Record<string, any> = {};
+  nativeClaims.forEach((claim) => {
+    if (claim?.claim_id) nativeById[claim.claim_id] = claim;
+  });
 
-    const searchItems = Array.isArray(searchResult?.items) ? searchResult.items : [];
-    const existingIds = new Set(searchItems.map((claim) => claim?.claim_id).filter(Boolean));
-    const mergedUploads = uploadClaims.filter((claim) => !existingIds.has(claim.claim_id));
-    if (!mergedUploads.length) return searchResult;
-    const pageSize = toNumber((params as any).page_size || (params as any)['page-size'], searchResult?.page_size || 20);
-    const items = [...mergedUploads, ...searchItems].sort(compareClaimsNewestFirst).slice(0, pageSize);
-
-    return {
-      ...searchResult,
-      items,
-      page: searchResult?.page || page,
-      page_size: pageSize,
-      total_items: Number(searchResult?.total_items || 0) + mergedUploads.length,
-      total_pages: Math.max(1, Number(searchResult?.total_pages || 0)),
-    } as any;
-  } catch (_e) {
-    return searchResult;
-  }
+  return items.map((item) => {
+    const id = String(searchHitId(item) || '');
+    return nativeById[id] || item;
+  });
 }
 
-function compareClaimsNewestFirst(a: Claim, b: Claim): number {
-  return claimSortTime(b) - claimSortTime(a);
-}
-
-function claimSortTime(claim: any): number {
-  const claimValue = value(claim, 'value') || {};
-  const meta = value(claim, 'meta') || {};
-
-  return Math.max(
-    toNumber(value(claim, 'timestamp'), 0),
-    toNumber(value(claimValue, 'release_time', 'release-time'), 0),
-    toNumber(value(meta, 'creation_timestamp', 'creation-timestamp'), 0)
+function searchHitId(item: any) {
+  return value(
+    item,
+    'claim_id',
+    'claim-id',
+    'immutable_id',
+    'immutable-id',
+    'doc_id',
+    'doc-id',
+    'search_id',
+    'search-id'
   );
 }
 
-function hasHyperbeamChannelSearchConstraints(params: ClaimSearchOptions): boolean {
+function isNativeSearchHit(item: any): boolean {
   return Boolean(
-    (params as any).any_tags ||
-    (params as any).all_tags ||
-    (params as any).not_tags ||
-    (params as any).release_time ||
-    (params as any).releaseTime
+    item &&
+    (value(item, 'source_system', 'source-system') === 'hyperbeam-native' ||
+      value(item, 'hyperbeam') ||
+      value(item, 'hyperbeam_upload', 'hyperbeam-upload'))
   );
 }
 
-async function fetchHyperbeamUploadClaimsForChannels(channelIds: Array<string>): Promise<Array<Claim>> {
-  return fetchHyperbeamUploadClaims({ channel_ids: channelIds }, { 'x-odysee-channel-ids': channelIds.join(',') });
+export async function fetchHyperbeamClaimsByIds(ids: Array<string>): Promise<Array<Claim>> {
+  const requestedIds = ids.filter(Boolean);
+  const uploadClaims = await fetchHyperbeamUploadClaims(
+    { claim_ids: requestedIds },
+    { 'x-odysee-claim-ids': requestedIds.join(',') }
+  );
+  const resolvedIds = new Set(uploadClaims.map((claim) => claim?.claim_id).filter(Boolean));
+  const unresolvedIds = requestedIds.filter((id) => !resolvedIds.has(id));
+  if (!unresolvedIds.length) return uploadClaims;
+
+  const directClaims = (await Promise.all(unresolvedIds.map((id) => fetchHyperbeamImmutableClaim(id)))).flat();
+  return [...uploadClaims, ...directClaims];
 }
 
 async function fetchHyperbeamUploadClaimsForIds(claimIds: Array<string>): Promise<Array<Claim>> {
   const ids = claimIds.filter(Boolean);
   if (!ids.length) return [];
 
-  const directClaims = await Promise.all(ids.map((id) => fetchHyperbeamImmutableClaim(id)));
-  const resolvedClaims = directClaims.flat();
-  const resolvedIds = new Set(resolvedClaims.map((claim) => claim?.claim_id).filter(Boolean));
+  const indexedClaims = await fetchHyperbeamUploadClaims({ claim_ids: ids }, { 'x-odysee-claim-ids': ids.join(',') });
+  const resolvedIds = new Set(indexedClaims.map((claim) => claim?.claim_id).filter(Boolean));
   const unresolvedIds = ids.filter((id) => !resolvedIds.has(id));
-  if (!unresolvedIds.length) return resolvedClaims;
+  if (!unresolvedIds.length) return indexedClaims;
 
-  const indexedClaims = await fetchHyperbeamUploadClaims(
-    { claim_ids: unresolvedIds },
-    { 'x-odysee-claim-ids': unresolvedIds.join(',') }
-  );
-  return [...resolvedClaims, ...indexedClaims];
+  const directClaims = await Promise.all(unresolvedIds.map((id) => fetchHyperbeamImmutableClaim(id)));
+  return [...indexedClaims, ...directClaims.flat()];
 }
 
 async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Claim>> {

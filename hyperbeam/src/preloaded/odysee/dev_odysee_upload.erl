@@ -70,11 +70,12 @@ delete(_Base, Req, Opts) ->
             {ok, ClaimID} ?= delete_claim_id(Req, Opts),
             {ok, State0} ?= read_index(Owner, Opts),
             Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
+            Existing = hb_maps:get(ClaimID, Uploads0, undefined, Opts),
             Uploads1 = maps:remove(ClaimID, Uploads0),
             State1 = State0#{ <<"uploads">> => Uploads1 },
             ok ?= write_index(Owner, State1, Opts),
             ok ?= delete_global_claim(ClaimID, Opts),
-            ok ?= delete_search_claim(ClaimID, Opts),
+            ok ?= delete_search_claim(ClaimID, Existing, Opts),
             {ok, json_response(#{ <<"claim_id">> => ClaimID, <<"deleted">> => true, <<"signers">> => Signers })}
         else
             Error -> Error
@@ -104,6 +105,7 @@ update(_Base, Req, Opts) ->
                 false -> delete_channel_claim(OldChannelID, ClaimID, Opts)
             end,
             ok ?= write_global_claim(ClaimID, Claim, Opts),
+            ok ?= delete_search_claim(ClaimID, Existing, Opts),
             ok ?= index_search_claim(Claim, Opts),
             {ok, json_response(#{ <<"item">> => Claim, <<"signers">> => Signers })}
         else
@@ -696,15 +698,31 @@ index_search_claim(Claim, Opts) ->
         _:_ -> ok
     end.
 
-delete_search_claim(ClaimID, Opts) ->
+delete_search_claim(ClaimID, Existing, Opts) ->
     try
-        case dev_odysee_search:delete(#{}, #{ <<"id">> => ClaimID }, Opts) of
+        case dev_odysee_search:delete(#{}, #{ <<"ids">> => search_document_ids(ClaimID, Existing, Opts) }, Opts) of
             {ok, _} -> ok;
             _ -> ok
         end
     catch
         _:_ -> ok
     end.
+
+search_document_ids(ClaimID, Existing, Opts) ->
+    IDs =
+        [ClaimID] ++
+            case Existing of
+                Claim when is_map(Claim) ->
+                    [
+                        hb_maps:get(<<"doc_id">>, Claim, not_found, Opts),
+                        hb_maps:get(<<"doc-id">>, Claim, not_found, Opts),
+                        hb_maps:get(<<"immutable_id">>, Claim, not_found, Opts),
+                        hb_maps:get(<<"immutable-id">>, Claim, not_found, Opts)
+                    ];
+                _ ->
+                    []
+            end,
+    lists:usort([hb_util:bin(ID) || ID <- IDs, is_binary(ID), ID =/= <<>>, ID =/= not_found]).
 
 search_document(Claim, Opts) ->
     ClaimID = hb_maps:get(<<"claim_id">>, Claim, upload_id(Claim, Opts), Opts),
@@ -740,6 +758,10 @@ search_document(Claim, Opts) ->
         <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, Claim, ClaimID, Opts),
         <<"txid">> => hb_maps:get(<<"txid">>, Claim, ClaimID, Opts),
         <<"name">> => Name,
+        <<"canonical_url">> => hb_maps:get(<<"canonical_url">>, Claim, <<>>, Opts),
+        <<"permanent_url">> => hb_maps:get(<<"permanent_url">>, Claim, <<>>, Opts),
+        <<"short_url">> => hb_maps:get(<<"short_url">>, Claim, <<>>, Opts),
+        <<"source_name">> => map_value(Source, <<"name">>, <<>>, Opts),
         <<"searchable_name">> => searchable_name(Name),
         <<"stripped_name">> => stripped_name(Name),
         <<"title">> => map_value(Value, <<"title">>, <<>>, Opts),
@@ -752,7 +774,7 @@ search_document(Claim, Opts) ->
         <<"media_type">> => media_type(ContentType),
         <<"tags">> => map_value(Value, <<"tags">>, [], Opts),
         <<"language">> => first_list_value(map_value(Value, <<"languages">>, [], Opts), <<"">>),
-        <<"nsfw">> => false,
+        <<"nsfw">> => 0,
         <<"thumbnail_url">> => ThumbnailURL,
         <<"release_time">> => Timestamp,
         <<"created_at">> => Timestamp,
@@ -855,13 +877,20 @@ first_list_value(_Value, Default) ->
     Default.
 
 searchable_name(Name) ->
-    binary:replace(hb_util:bin(Name), <<".">>, <<"-">>, [global]).
+    normalize_search_text(Name).
 
 stripped_name(Name0) ->
     Name1 = binary:replace(hb_util:bin(Name0), <<"-">>, <<>>, [global]),
     Name2 = binary:replace(Name1, <<"_">>, <<>>, [global]),
     Name3 = binary:replace(Name2, <<"The">>, <<>>, [global]),
     binary:replace(Name3, <<"the">>, <<>>, [global]).
+
+normalize_search_text(Name0) ->
+    lists:foldl(
+        fun(Sep, Name) -> binary:replace(Name, Sep, <<" ">>, [global]) end,
+        hb_util:bin(Name0),
+        [<<".">>, <<"_">>, <<"-">>, <<"(">>, <<")">>, <<"[">>, <<"]">>]
+    ).
 
 read_channel_index(ChannelID, Opts) ->
     case hb_store:read(hb_opts:get(store, [], Opts), channel_index_path(ChannelID), Opts) of
@@ -1166,7 +1195,7 @@ search_document_normalizes_upload_claim_test() ->
                     <<"tags">> => [<<"hb">>, <<"search">>],
                     <<"languages">> => [<<"en">>],
                     <<"thumbnail">> => #{ <<"url">> => <<"https://example.test/thumb.jpg">> },
-                    <<"source">> => #{ <<"media_type">> => <<"video/mp4">>, <<"duration">> => 60 }
+                    <<"source">> => #{ <<"name">> => <<"The-video_file.mp4">>, <<"media_type">> => <<"video/mp4">>, <<"duration">> => 60 }
                 }
         },
     Doc = search_document(Claim, #{}),
@@ -1174,6 +1203,7 @@ search_document_normalizes_upload_claim_test() ->
     ?assertEqual(ClaimID, hb_maps:get(<<"claim_id">>, Doc, undefined, #{})),
     ?assertEqual(ClaimID, hb_maps:get(<<"immutable_id">>, Doc, undefined, #{})),
     ?assertEqual(<<"The-video_file">>, hb_maps:get(<<"searchable_name">>, Doc, undefined, #{})),
+    ?assertEqual(<<"The-video_file.mp4">>, hb_maps:get(<<"source_name">>, Doc, undefined, #{})),
     ?assertEqual(<<"videofile">>, hb_maps:get(<<"stripped_name">>, Doc, undefined, #{})),
     ?assertEqual(<<"Native upload">>, hb_maps:get(<<"title">>, Doc, undefined, #{})),
     ?assertEqual(<<"@rave">>, hb_maps:get(<<"channel_name">>, Doc, undefined, #{})),
