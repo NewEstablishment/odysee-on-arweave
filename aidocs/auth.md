@@ -4,7 +4,8 @@ How Odysee sessions map onto HyperBEAM's native auth stack (`~auth-hook@1.0`,
 `~secret@1.0`), what the current deliverable proves, and how to reproduce it.
 Landed on `victor/latest` as: `c5f92e3` (auth deliverable), `bc6226a`
 (standalone `ar_wallet` secp256k1 JWK-export fix), `a039f66` (migration act uses
-secp256k1), `64f39b5` (demo launcher + tracked UI).
+secp256k1), `64f39b5` (demo launcher + tracked UI), `261ea94` (real `user/me`
+resolution via `odysee-account-api`), `f433199` (live-account demo hero).
 
 ## Identity model
 
@@ -41,11 +42,16 @@ cookie remains a per-device access gate; the wallet owns account state.
      `authorization` header with any `Bearer` scheme stripped, or the same
      field from the reshaped `priv/cookie`. Cookie-form and header-form of one
      session converge on ONE token.
-  2. *Account resolution* — `hb_maps:find` in the node's
+  2. *Account resolution* — first `hb_maps:find` in the node's
      `odysee-session-accounts` map (the offline stand-in for Odysee's
-     `user/me`). Mapped → the account; unknown token on a configured node →
-     **401**; no map at all → the token self-resolves (unconfigured nodes are
-     unchanged).
+     `user/me`); on a map miss, if the node's `odysee-account-api` option names
+     an internal-apis base URL (production: `https://api.odysee.com`), a REAL
+     `user/me` call — form-encoded `auth_token` in, `{success, error, data}`
+     envelope out, the account being `data.id` (shapes measured against
+     production, mirrored in the `hb_mock_server` test). API-rejected token →
+     **401**; unreachable API → **502** (an outage is never mistaken for a bad
+     credential, never a silent self-resolve). With neither source configured
+     the token self-resolves (unconfigured nodes are unchanged).
   3. *Domain-tagged derivation* — PBKDF2 over `odysee-account:<A>` or
      `odysee-token:<T>`. The domain separation means presenting a known
      account-id verbatim as a token can NOT derive that account's wallet
@@ -99,9 +105,18 @@ HB_PORT=0 rebar3 device test -m dev_auth_hook   # shared-device regression
 
 ```bash
 cd hyperbeam
-./scripts/odysee-auth-demo.sh
+./scripts/odysee-auth-demo.sh                                    # demo sessions only
+ODYSEE_ACCOUNT_API=https://api.odysee.com ./scripts/odysee-auth-demo.sh  # + real accounts
 # open the printed URL: http://localhost:18736/~hyperbuddy@1.0/odysee-demo.html
 ```
+
+With `ODYSEE_ACCOUNT_API` set, the page's "Bring your Odysee account" hero is
+live: paste a real odysee.com `auth_token` (DevTools → Application → Cookies)
+and the pipeline lights up stage by stage — token present, account vouched by
+the real API, hosted wallet revealed, stable signature — with prove-it actions
+that re-send the token as a browser cookie (same wallet) and tamper one
+character (rejected at the API stage, the node never mints). Verified
+end-to-end against production with a real account token.
 
 The script boots one node with the session→account map, the `on/request` auth
 hook, and `hyperbuddy-serve` for the demo UI
@@ -123,7 +138,8 @@ operator address (from `/~meta@1.0/info`) to surface the client signer.
   tokens and hosts extractable wallets. For wallet-ignorant (custodial) users
   this is on the critical path, not deferrable.
 - **Channel layer** — attribution, multi-channel switching, anonymous uploads.
-- **Real `user/me` / SDK-export wiring** — the `odysee-session-accounts` map
-  and the import act stand in for them.
+- **SDK-export wiring for migration** — the import act stands in for it. (The
+  `user/me` half is DONE: `odysee-account-api` resolves real tokens against
+  production.)
 - **`~process@1.0` versioned-latest preference storage** — the demo uses the
   lighter owner-gated store; versioned history remains a production option.
