@@ -57,6 +57,7 @@ const HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
   '/~odysee-account@1.0/user-signin',
   '/~odysee-account@1.0/user-me',
   '/~odysee-account@1.0/user-email-resend-token',
+  '/~odysee-account@1.0/account-status',
   '/~odysee-comment@1.0/create',
   '/~odysee-comment@1.0/edit',
   '/~odysee-comment@1.0/pin',
