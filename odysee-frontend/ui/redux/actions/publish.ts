@@ -39,7 +39,12 @@ import { sanitizeName, buildURI } from 'util/lbryURI';
 import { getVideoBitrate, resolvePublishPayload } from 'util/publish';
 import { parsePurchaseTag, parseRentalTag, TO_SECONDS } from 'util/stripe';
 import { fetchHyperbeamUploadList } from 'util/hyperbeam';
-import { canPublishThroughHyperbeam, publishThroughHyperbeam } from 'services/hyperbeamUpload';
+import {
+  canPublishThroughHyperbeam,
+  canUpdateThroughHyperbeam,
+  publishThroughHyperbeam,
+  updateThroughHyperbeam,
+} from 'services/hyperbeamUpload';
 import Lbry from 'lbry';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken as getSavedAuthToken } from 'util/saved-passwords';
@@ -1441,10 +1446,12 @@ export const doPublish =
     const publishThroughHyperbeamEnabled =
       !needsLegacyUploadPreparation(publishData) &&
       canPublishThroughHyperbeam(publishFile, publishPayload, publishData.type);
+    const editThroughHyperbeamEnabled =
+      !publishThroughHyperbeamEnabled && canUpdateThroughHyperbeam(myClaimForUri, publishPayload);
 
     // hit backend to save restricted memberships
     // hit the backend immediately to save the data, we will overwrite it if publish succeeds
-    if (channelClaimId && !previewFn && !publishThroughHyperbeamEnabled) {
+    if (channelClaimId && !previewFn && !publishThroughHyperbeamEnabled && !editThroughHyperbeamEnabled) {
       dispatch(
         doSaveMembershipRestrictionsForContent(
           channelClaimId,
@@ -1472,6 +1479,10 @@ export const doPublish =
 
     if (publishThroughHyperbeamEnabled) {
       return publishThroughHyperbeam(publishFile, publishPayload, getAuthToken(), myChannels).then(success, fail);
+    }
+
+    if (editThroughHyperbeamEnabled) {
+      return updateThroughHyperbeam(myClaimForUri, publishPayload, getAuthToken(), myChannels).then(success, fail);
     }
 
     return Lbry.publish(publishPayload).then((response: PublishResponse) => {

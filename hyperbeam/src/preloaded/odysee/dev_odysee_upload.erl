@@ -1,6 +1,6 @@
 -module(dev_odysee_upload).
 -implements(<<"odysee-upload@1.0">>).
--export([info/1, submit/3, upload/3, write/3, chunk/3, finalize/3, index/3, record/3, media/3, list/3]).
+-export([info/1, submit/3, upload/3, write/3, chunk/3, finalize/3, index/3, update/3, delete/3, record/3, media/3, list/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -17,6 +17,8 @@ info(_Opts) ->
             <<"chunk">>,
             <<"finalize">>,
             <<"index">>,
+            <<"update">>,
+            <<"delete">>,
             <<"record">>,
             <<"media">>,
             <<"list">>
@@ -51,6 +53,54 @@ index(Base, Req, Opts) ->
                     Record = enrich_record(RecordID, Record0, Opts),
                     ok ?= write_indexes(Record, Opts),
                     {ok, index_response(Record, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
+update(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Payload0} ?= request_payload(Base, Req, Opts),
+                    Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
+                    {ok, OldRecord} ?= resolve_record(Base, Payload, Opts),
+                    ok ?= require_record_owner(Owner, OldRecord, Opts),
+                    OldRecordID = hb_maps:get(<<"record-id">>, OldRecord, not_found, Opts),
+                    Metadata = update_metadata(OldRecord, Payload, Opts),
+                    Record0 = rebuild_index_record(OldRecord, Metadata, Opts),
+                    {ok, RecordID} ?= hb_cache:write(Record0, Opts),
+                    Record = enrich_record(RecordID, Record0, Opts),
+                    ok ?= remove_from_list_indexes(OldRecord, OldRecordID, Opts),
+                    ok ?= write_indexes(Record, Opts),
+                    {ok, index_response(Record, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
+delete(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Payload0} ?= request_payload(Base, Req, Opts),
+                    Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
+                    {ok, Record} ?= resolve_record(Base, Payload, Opts),
+                    ok ?= require_record_owner(Owner, Record, Opts),
+                    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+                    ok ?= remove_from_list_indexes(Record, RecordID, Opts),
+                    ok ?= tombstone_indexes(Record, Opts),
+                    {ok, delete_response(RecordID, Record, Opts)}
                 else
                     Error -> Error
                 end
@@ -172,13 +222,82 @@ authenticated_owner(_Base, Req, Opts) ->
             }};
         Signers ->
             case request_signature_valid(Req, Opts) of
-                true -> {ok, hd(Signers)};
+                true ->
+                    % Ownership is anchored to the Odysee auth token when present,
+                    % so it is deterministic across requests and node restarts,
+                    % independent of the auth hook's per-session signing wallet.
+                    % Falls back to the request signer for token-less requests.
+                    case token_owner(Req, Opts) of
+                        {ok, Owner} -> {ok, Owner};
+                        not_found -> {ok, hd(Signers)}
+                    end;
                 _ -> {error, #{
                     <<"status">> => 401,
                     <<"body">> => <<"Invalid request signature.">>
                 }}
             end
     end.
+
+token_owner(Req, Opts) ->
+    case auth_token(Req, Opts) of
+        {ok, Token} -> {ok, token_secret(Token)};
+        not_found -> not_found
+    end.
+
+auth_token(Req, Opts) ->
+    case authorization_token(Req, Opts) of
+        {ok, _Token} = Found -> Found;
+        not_found ->
+            case first_field(auth_token_keys(), Req, Opts) of
+                not_found -> cookie_auth_token(Req, Opts);
+                Token -> {ok, hb_util:bin(Token)}
+            end
+    end.
+
+authorization_token(Req, Opts) ->
+    case first_field([<<"authorization">>], Req, Opts) of
+        not_found -> not_found;
+        Auth ->
+            case binary:split(string:trim(hb_util:bin(Auth)), <<" ">>) of
+                [Scheme, Value0] ->
+                    Value = string:trim(Value0, leading),
+                    case hb_util:to_lower(Scheme) of
+                        <<"bearer">> when Value =/= <<>> -> {ok, Value};
+                        <<"token">> when Value =/= <<>> -> {ok, Value};
+                        _ -> not_found
+                    end;
+                _ -> not_found
+            end
+    end.
+
+cookie_auth_token(Req, Opts) ->
+    try dev_cookie:extract(Req, #{}, Opts) of
+        {ok, Cookies} ->
+            case first_field(auth_token_keys(), Cookies, Opts) of
+                not_found -> not_found;
+                Token -> {ok, hb_util:bin(Token)}
+            end;
+        _ -> not_found
+    catch _:_ ->
+        not_found
+    end.
+
+auth_token_keys() ->
+    [
+        <<"auth-token">>,
+        <<"auth_token">>,
+        <<"authtoken">>,
+        <<"lbry-auth-token">>,
+        <<"lbry_auth_token">>,
+        <<"x-lbry-auth-token">>,
+        <<"x_lbry_auth_token">>,
+        <<"odysee-auth-token">>,
+        <<"odysee_auth_token">>
+    ].
+
+token_secret(Token0) ->
+    Token = hb_util:bin(Token0),
+    hb_util:encode(hb_crypto:sha256(<<"odysee-auth:", Token/binary>>)).
 
 request_signers(Req, Opts) ->
     lists:usort(signers(Req, Opts)).
@@ -449,6 +568,22 @@ normalize_index_claim(Claim0, Owner, DataID, Name, MediaType, Filename, Size, Me
             first_field([<<"signing_channel">>, <<"signing-channel">>], Claim0, Opts),
             signing_channel(Metadata, Opts)
         ),
+    Value1 =
+        put_optional(
+            {<<"audio">>,
+                value_or(
+                    first_field([<<"audio">>], Value0, Opts),
+                    first_field([<<"audio">>], Metadata, Opts)
+                )},
+            put_optional(
+                {<<"video">>,
+                    value_or(
+                        first_field([<<"video">>], Value0, Opts),
+                        first_field([<<"video">>], Metadata, Opts)
+                    )},
+                Value0
+            )
+        ),
     Claim1 = Claim0#{
         <<"claim_id">> => DataID,
         <<"claim-id">> => DataID,
@@ -473,7 +608,7 @@ normalize_index_claim(Claim0, Owner, DataID, Name, MediaType, Filename, Size, Me
             <<"device">> => ?DEVICE,
             <<"path">> => generic_read_path(DataID)
         },
-        <<"value">> => Value0#{
+        <<"value">> => Value1#{
             <<"title">> =>
                 value_or(first_field([<<"title">>], Value0, Opts), value_or(first_field([<<"title">>], Metadata, Opts), ClaimName)),
             <<"description">> =>
@@ -942,6 +1077,143 @@ read_record(Base, Req, Opts) ->
             _ -> {error, invalid_upload_record}
         end
     end.
+
+resolve_record(Base, Req, Opts) ->
+    case read_record(Base, Req, Opts) of
+        {ok, Record} ->
+            {ok, Record};
+        _ ->
+            maybe
+                {ok, ID} ?= requested_id(Base, Req, Opts),
+                {ok, RecordID} ?= indexed_record_id(ID, Opts),
+                {ok, Msg} ?= hb_cache:read(RecordID, Opts),
+                Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
+                case Loaded of
+                    #{ <<"data-id">> := _ } -> {ok, enrich_record(RecordID, Loaded, Opts)};
+                    _ -> {error, invalid_upload_record}
+                end
+            end
+    end.
+
+indexed_record_id(ID, Opts) ->
+    Store = hb_opts:get(store, no_viable_store, Opts),
+    case Store of
+        no_viable_store ->
+            {error, upload_record_not_found};
+        _ ->
+            first_index_value(
+                Store,
+                [index_path(<<"record-id">>, ID), index_path(<<"claim-id">>, ID)],
+                Opts
+            )
+    end.
+
+first_index_value(_Store, [], _Opts) ->
+    {error, upload_record_not_found};
+first_index_value(Store, [Path | Rest], Opts) ->
+    case hb_store:read(Store, Path, maps:without([<<"store">>, store], Opts)) of
+        {ok, RecordID} when is_binary(RecordID), RecordID =/= <<>> -> {ok, RecordID};
+        RecordID when is_binary(RecordID), RecordID =/= <<>> -> {ok, RecordID};
+        _ -> first_index_value(Store, Rest, Opts)
+    end.
+
+require_record_owner(Owner, Record, Opts) ->
+    case hb_maps:get(<<"owner">>, Record, not_found, Opts) of
+        Owner ->
+            ok;
+        _ ->
+            {error, #{
+                <<"status">> => 403,
+                <<"body">> => <<"Record is owned by another identity.">>
+            }}
+    end.
+
+update_metadata(OldRecord, Payload, Opts) ->
+    OldMetadata = strip_commitments(map_or_empty(hb_maps:get(<<"metadata">>, OldRecord, #{}, Opts))),
+    NewMetadata =
+        case first_field([<<"metadata">>, <<"publish">>, <<"publish-payload">>, <<"publish_payload">>], Payload, Opts) of
+            Msg when is_map(Msg) -> without_control_keys(hb_cache:ensure_all_loaded(Msg, Opts));
+            _ -> #{}
+        end,
+    maps:merge(OldMetadata, NewMetadata).
+
+strip_commitments(Map) when is_map(Map) ->
+    maps:map(
+        fun(_Key, Value) -> strip_commitments(Value) end,
+        maps:without([<<"commitments">>, <<"priv">>], Map)
+    );
+strip_commitments(List) when is_list(List) ->
+    [strip_commitments(Value) || Value <- List];
+strip_commitments(Value) ->
+    Value.
+
+rebuild_index_record(OldRecord, Metadata, Opts) ->
+    Claim0 = strip_commitments(map_or_empty(hb_maps:get(<<"claim">>, OldRecord, #{}, Opts))),
+    BaseClaim = maps:without([<<"value">>], Claim0),
+    Owner = hb_maps:get(<<"owner">>, OldRecord, not_found, Opts),
+    DataID = hb_maps:get(<<"data-id">>, OldRecord, not_found, Opts),
+    Name = value_or(first_field([<<"name">>], Claim0, Opts), <<"upload">>),
+    MediaType =
+        value_or(
+            hb_maps:get(<<"content-type">>, OldRecord, not_found, Opts),
+            <<"application/octet-stream">>
+        ),
+    Filename = value_or(hb_maps:get(<<"filename">>, OldRecord, not_found, Opts), Name),
+    Size = integer_value(hb_maps:get(<<"byte-size">>, OldRecord, 0, Opts), 0),
+    Claim = normalize_index_claim(BaseClaim, Owner, DataID, Name, MediaType, Filename, Size, Metadata, Opts),
+    maps:without(
+        [<<"id">>, <<"record-id">>, <<"commitments">>, <<"priv">>],
+        OldRecord#{
+            <<"metadata">> => Metadata,
+            <<"claim">> => Claim,
+            <<"updated-at">> => integer_to_binary(erlang:system_time(second))
+        }
+    ).
+
+remove_from_list_indexes(_Record, not_found, _Opts) ->
+    ok;
+remove_from_list_indexes(Record, RecordID, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] ->
+            ok;
+        _ ->
+            lists:foldl(
+                fun(Path, ok) ->
+                    Existing = read_list_index(Store, Path, Opts),
+                    Updated = [ID || ID <- Existing, ID =/= RecordID],
+                    hb_store:write(Store, #{ Path => hb_json:encode(Updated) }, Opts);
+                   (_Path, Error) ->
+                    Error
+                end,
+                ok,
+                upload_list_indexes(Record, Opts)
+            )
+    end.
+
+tombstone_indexes(Record, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] ->
+            ok;
+        _ ->
+            case upload_indexes(Record, Opts) of
+                [] -> ok;
+                Paths -> hb_store:write(Store, maps:from_list([{Path, <<>>} || Path <- Paths]), Opts)
+            end
+    end.
+
+delete_response(RecordID, Record, Opts) ->
+    Msg = (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"id">> => RecordID,
+        <<"record-id">> => RecordID,
+        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, not_found, Opts),
+        <<"deleted">> => true
+    },
+    Msg#{ <<"body">> => hb_json:encode(Msg) }.
 
 record_media_bytes(Record, Opts) ->
     case hb_maps:get(<<"body">>, Record, not_found, Opts) of
@@ -1501,6 +1773,100 @@ upload_index_prefers_payload_media_type_over_transport_content_type_test() ->
     ?assertEqual(<<"video/quicktime">>, hb_maps:get(<<"media_type">>, Source, Opts)),
     ?assertEqual(<<"/", DataID/binary>>, hb_maps:get(<<"media-path">>, Body, Opts)).
 
+upload_owner_is_stable_across_signing_wallets_with_same_token_test() ->
+    Opts = test_opts(),
+    Token = <<"stable-user-token">>,
+    DataID = <<"data-token-owned-1">>,
+    IndexPayload = #{
+        <<"data_id">> => DataID,
+        <<"name">> => <<"token-owned">>,
+        <<"content_type">> => <<"video/mp4">>,
+        <<"size">> => 10,
+        <<"metadata">> => #{ <<"title">> => <<"Before">> }
+    },
+    %% First session: wallet A signs, but the Bearer token carries the identity.
+    ReqA = (signed(params64_req(IndexPayload), Opts))#{ <<"authorization">> => <<"Bearer ", Token/binary>> },
+    {ok, IndexRes} = index(#{}, ReqA, Opts),
+    IndexBody = hb_json:decode(hb_maps:get(<<"body">>, IndexRes, Opts)),
+    RecordID = hb_maps:get(<<"record-id">>, IndexBody, Opts),
+    ?assertEqual(token_secret(Token), hb_maps:get(<<"owner">>, hb_maps:get(<<"record">>, IndexBody, Opts), Opts)),
+    %% Second session: a DIFFERENT signing wallet, same token -> edit succeeds.
+    UpdatePayload = #{ <<"record_id">> => RecordID, <<"metadata">> => #{ <<"title">> => <<"After">> } },
+    ReqB = (signed(params64_req(UpdatePayload), Opts))#{ <<"authorization">> => <<"Bearer ", Token/binary>> },
+    {ok, UpdateRes} = update(#{}, ReqB, Opts),
+    UpdateBody = hb_json:decode(hb_maps:get(<<"body">>, UpdateRes, Opts)),
+    [UpdatedClaim] = hb_maps:get(<<"outputs">>, UpdateBody, Opts),
+    ?assertEqual(<<"After">>, hb_maps:get(<<"title">>, hb_maps:get(<<"value">>, UpdatedClaim, Opts), Opts)),
+    %% A different token must NOT be able to edit.
+    ReqC = (signed(params64_req(UpdatePayload), Opts))#{ <<"authorization">> => <<"Bearer other-token">> },
+    ?assertMatch({error, #{ <<"status">> := 403 }}, update(#{}, ReqC, Opts)).
+
+upload_update_and_delete_roundtrip_test() ->
+    Opts = test_opts(),
+    Wallet = ar_wallet:new(),
+    DataID = <<"data-update-1">>,
+    IndexPayload = #{
+        <<"data_id">> => DataID,
+        <<"name">> => <<"update-demo">>,
+        <<"filename">> => <<"update-demo.mp4">>,
+        <<"content_type">> => <<"video/mp4">>,
+        <<"size">> => 10,
+        <<"metadata">> => #{
+            <<"title">> => <<"Before">>,
+            <<"video">> => #{ <<"duration">> => 42 }
+        }
+    },
+    {ok, IndexRes} = index(#{}, signed_with(params64_req(IndexPayload), Wallet, Opts), Opts),
+    IndexBody = hb_json:decode(hb_maps:get(<<"body">>, IndexRes, Opts)),
+    RecordID = hb_maps:get(<<"record-id">>, IndexBody, Opts),
+    [IndexClaim] = hb_maps:get(<<"outputs">>, IndexBody, Opts),
+    IndexValue = hb_maps:get(<<"value">>, IndexClaim, Opts),
+    ?assertEqual(<<"Before">>, hb_maps:get(<<"title">>, IndexValue, Opts)),
+    ?assertEqual(42, hb_maps:get(<<"duration">>, hb_maps:get(<<"video">>, IndexValue, Opts), Opts)),
+    UpdatePayload = #{
+        <<"record_id">> => RecordID,
+        <<"metadata">> => #{ <<"title">> => <<"After">> }
+    },
+    ?assertMatch(
+        {error, #{ <<"status">> := 403 }},
+        update(#{}, signed(params64_req(UpdatePayload), Opts), Opts)
+    ),
+    {ok, UpdateRes} = update(#{}, signed_with(params64_req(UpdatePayload), Wallet, Opts), Opts),
+    UpdateBody = hb_json:decode(hb_maps:get(<<"body">>, UpdateRes, Opts)),
+    NewRecordID = hb_maps:get(<<"record-id">>, UpdateBody, Opts),
+    [UpdatedClaim] = hb_maps:get(<<"outputs">>, UpdateBody, Opts),
+    UpdatedValue = hb_maps:get(<<"value">>, UpdatedClaim, Opts),
+    ?assertEqual(<<"After">>, hb_maps:get(<<"title">>, UpdatedValue, Opts)),
+    ?assertNotEqual(RecordID, NewRecordID),
+    UpdatedVideo = hb_maps:get(<<"video">>, UpdatedValue, Opts),
+    ?assertEqual(42, hb_maps:get(<<"duration">>, UpdatedVideo, Opts)),
+    ?assertEqual(not_found, hb_maps:get(<<"commitments">>, UpdatedVideo, not_found, Opts)),
+    ?assertEqual(DataID, hb_maps:get(<<"claim_id">>, UpdatedClaim, Opts)),
+    {ok, ListRes} = list(#{}, #{ <<"name">> => <<"update-demo">> }, Opts),
+    ListBody = hb_json:decode(hb_maps:get(<<"body">>, ListRes, Opts)),
+    ListItems = hb_maps:get(<<"items">>, hb_maps:get(<<"result">>, ListBody, Opts), Opts),
+    ?assertEqual(1, length(ListItems)),
+    ?assertEqual(
+        <<"After">>,
+        hb_maps:get(<<"title">>, hb_maps:get(<<"value">>, hd(ListItems), Opts), Opts)
+    ),
+    DeletePayload = #{ <<"record_id">> => NewRecordID },
+    ?assertMatch(
+        {error, #{ <<"status">> := 403 }},
+        delete(#{}, signed(params64_req(DeletePayload), Opts), Opts)
+    ),
+    {ok, DeleteRes} = delete(#{}, signed_with(params64_req(DeletePayload), Wallet, Opts), Opts),
+    DeleteBody = hb_json:decode(hb_maps:get(<<"body">>, DeleteRes, Opts)),
+    ?assertEqual(true, hb_maps:get(<<"deleted">>, DeleteBody, Opts)),
+    {ok, ListAfterDelete} = list(#{}, #{ <<"name">> => <<"update-demo">> }, Opts),
+    ListAfterBody = hb_json:decode(hb_maps:get(<<"body">>, ListAfterDelete, Opts)),
+    ?assertEqual(
+        [],
+        hb_maps:get(<<"items">>, hb_maps:get(<<"result">>, ListAfterBody, Opts), Opts)
+    ),
+    ?assertMatch({error, _}, resolve_record(#{}, #{ <<"claim-id">> => DataID }, Opts)),
+    ?assertMatch({error, _}, indexed_record_id(NewRecordID, Opts)).
+
 upload_accepts_params64_base64_content_test() ->
     Opts = test_opts(),
     Params = #{
@@ -1795,6 +2161,15 @@ auth_hook_upload_roundtrip(Token, UploadReq) ->
 
 signed(Msg, Opts) ->
     hb_message:commit(Msg, Opts#{ <<"priv-wallet">> => ar_wallet:new() }).
+
+signed_with(Msg, Wallet, Opts) ->
+    hb_message:commit(Msg, Opts#{ <<"priv-wallet">> => Wallet }).
+
+params64_req(Payload) ->
+    #{
+        <<"params64">> => hb_util:encode(hb_json:encode(Payload)),
+        <<"content-type">> => <<"application/json">>
+    }.
 
 test_opts() ->
     Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),

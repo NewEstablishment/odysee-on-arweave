@@ -6,6 +6,8 @@ import { Lbryio, doFetchViewCount } from 'lbryinc';
 import Lbry from 'lbry';
 import { normalizeURI } from 'util/lbryURI';
 import { fetchHyperbeamUploadList } from 'util/hyperbeam';
+import { canDeleteThroughHyperbeam, deleteThroughHyperbeam } from 'services/hyperbeamUpload';
+import { getAuthToken } from 'util/saved-passwords';
 import { doToast } from 'redux/actions/notifications';
 import {
   selectMyClaimsRaw,
@@ -379,17 +381,18 @@ export function doFetchClaimListMine(
       claimTypes = claimTypes.filter((t) => filterBy.includes(t));
     }
 
-    Lbry.claim_list({
-      page: page,
-      page_size: pageSize,
-      claim_type: claimTypes,
-      channel_id: channelIds,
-      resolve,
-    })
-      .then(async (result: StreamListResponse) => {
-        const mergedResult = await fetchClaimListMineWithLocalUploads(result, page, pageSize, claimTypes, channelIds);
-        // Log stuck claims
-        const claims = mergedResult.items;
+    const completeClaimListMine = async (result: StreamListResponse, legacyFailed: boolean) => {
+      const mergedResult = await fetchClaimListMineWithLocalUploads(result, page, pageSize, claimTypes, channelIds);
+      // If the legacy list failed and HyperBEAM has nothing to show either,
+      // surface the failure. Otherwise render whatever we have, so native
+      // uploads still appear when legacy auth is unavailable.
+      if (legacyFailed && (!mergedResult.items || mergedResult.items.length === 0)) {
+        dispatch({ type: ACTIONS.FETCH_CLAIM_LIST_MINE_FAILED });
+        return;
+      }
+
+      // Log stuck claims
+      const claims = mergedResult.items;
         const pendingClaimsById = selectPendingClaimsById(state);
 
         for (let i = 0; i < claims.length - 1; i++) {
@@ -451,12 +454,21 @@ export function doFetchClaimListMine(
         if (fetchViewCount && claimIds.length > 0) {
           dispatch(doFetchViewCount(claimIds.join(',')));
         }
-      })
-      .catch(() => {
-        dispatch({
-          type: ACTIONS.FETCH_CLAIM_LIST_MINE_FAILED,
-        });
-      });
+    };
+
+    Lbry.claim_list({
+      page: page,
+      page_size: pageSize,
+      claim_type: claimTypes,
+      channel_id: channelIds,
+      resolve,
+    })
+      .then((result: StreamListResponse) => completeClaimListMine(result, false))
+      .catch(() =>
+        completeClaimListMine({ items: [], total_items: 0, total_pages: 1 } as StreamListResponse, true).catch(() =>
+          dispatch({ type: ACTIONS.FETCH_CLAIM_LIST_MINE_FAILED })
+        )
+      );
   };
 }
 export type DoFetchClaimListMine = typeof doFetchClaimListMine;
@@ -550,6 +562,23 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
   const { txid, nout } = claim;
   const outpoint = `${txid}:${nout}`;
   return (dispatch: Dispatch, getState: GetState) => {
+    if (canDeleteThroughHyperbeam(claim)) {
+      const data = { claimId: claim.claim_id };
+      dispatch({ type: ACTIONS.ABANDON_CLAIM_STARTED, data });
+
+      return deleteThroughHyperbeam(claim, getAuthToken() || undefined).then(
+        () => {
+          dispatch({ type: ACTIONS.ABANDON_CLAIM_SUCCEEDED, data });
+          if (cb) cb(ABANDON_STATES.DONE);
+          dispatch(doToast({ message: __('Successfully removed your upload.') }));
+        },
+        () => {
+          if (cb) cb(ABANDON_STATES.ERROR);
+          dispatch(doToast({ message: __('Error abandoning your claim/support'), isError: true }));
+        }
+      );
+    }
+
     const state = getState();
     const myClaims: Array<Claim> = selectMyClaimsRaw(state);
     const mySupports: Record<string, Support> = selectSupportsByOutpoint(state);
