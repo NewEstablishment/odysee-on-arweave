@@ -57,6 +57,7 @@ const HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
   '/~odysee-account@1.0/user-signin',
   '/~odysee-account@1.0/user-me',
   '/~odysee-account@1.0/user-email-resend-token',
+  '/~odysee-account@1.0/user-email-confirm',
   '/~odysee-account@1.0/account-status',
   '/~odysee-comment@1.0/create',
   '/~odysee-comment@1.0/edit',
@@ -134,7 +135,10 @@ async function postHyperbeamAuthDevice(ctx) {
 
   const authToken = getRequestAuthToken(ctx);
   const requestBody = await readJsonBody(ctx);
-  const body = authToken ? { ...requestBody, auth_token: authToken } : requestBody;
+  // An auth_token supplied explicitly in the request body (e.g. the magic-link
+  // verify flow, where the token identifies the signing-in session) wins over
+  // the browser cookie; the cookie only fills in when the body carries none.
+  const body = authToken ? { auth_token: authToken, ...requestBody } : requestBody;
 
   const response = await postJson(`${nodeUrl}${devicePath}`, body);
 

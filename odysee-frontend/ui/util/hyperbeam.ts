@@ -51,6 +51,7 @@ const AUTH_REQUIRED_DEVICE_PATHS = new Set([
   `${ACCOUNT_DEVICE}/user-signin`,
   `${ACCOUNT_DEVICE}/user-me`,
   `${ACCOUNT_DEVICE}/user-email-resend-token`,
+  `${ACCOUNT_DEVICE}/user-email-confirm`,
   `${ACCOUNT_DEVICE}/account-status`,
   `${FILE_DEVICE}/view-count`,
   `${FILE_REACTION_DEVICE}/list`,

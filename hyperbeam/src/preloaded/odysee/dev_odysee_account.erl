@@ -17,6 +17,7 @@
     user_signin/3,
     user_me/3,
     user_email_resend_token/3,
+    user_email_confirm/3,
     account_status/3,
     'sub-count'/3,
     sub_count/3
@@ -41,6 +42,7 @@ info(_Opts) ->
             <<"user-signin">>,
             <<"user-me">>,
             <<"user-email-resend-token">>,
+            <<"user-email-confirm">>,
             <<"account-status">>,
             <<"sub-count">>
         ]
@@ -56,6 +58,7 @@ user_new(Base, Req, Opts) -> api(<<"user">>, <<"new">>, Base, Req, Opts).
 user_signin(Base, Req, Opts) -> api(<<"user">>, <<"signin">>, Base, Req, Opts).
 user_me(Base, Req, Opts) -> api(<<"user">>, <<"me">>, Base, Req, Opts).
 user_email_resend_token(Base, Req, Opts) -> api(<<"user_email">>, <<"resend_token">>, Base, Req, Opts).
+user_email_confirm(Base, Req, Opts) -> api(<<"user_email">>, <<"confirm">>, Base, Req, Opts).
 account_status(Base, Req, Opts) -> api(<<"account">>, <<"status">>, Base, Req, Opts).
 'sub-count'(Base, Req, Opts) -> sub_count(Base, Req, Opts).
 sub_count(Base, Req, Opts) -> dev_odysee_subscription:sub_count(Base, Req, Opts).
