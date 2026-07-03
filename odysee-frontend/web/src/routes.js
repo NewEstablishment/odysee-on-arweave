@@ -480,9 +480,35 @@ async function getHyperbeamLargeUpload(ctx) {
   const manifest = await uploadManifestFromResponse(nodeUrl, id, manifestResponse);
 
   if (!manifest || manifest.type !== HYPERBEAM_UPLOAD_MANIFEST_KIND || !Array.isArray(manifest.chunks)) {
-    ctx.status = manifestResponse.statusCode;
+    const body = manifestResponse.body;
+    const ok = manifestResponse.statusCode >= 200 && manifestResponse.statusCode < 300;
+
+    if (!ok || !Buffer.isBuffer(body) || body.length === 0) {
+      ctx.status = manifestResponse.statusCode;
+      copyHeader(ctx, manifestResponse.headers, 'content-type');
+      ctx.body = body;
+      return;
+    }
+
+    const bodySize = body.length;
+    const bodyRange = parseByteRange(ctx.get('range'), bodySize);
+    ctx.set('Accept-Ranges', 'bytes');
     copyHeader(ctx, manifestResponse.headers, 'content-type');
-    ctx.body = manifestResponse.body;
+
+    if (ctx.get('range') && !bodyRange) {
+      ctx.status = 416;
+      ctx.set('Content-Range', `bytes */${bodySize}`);
+      return;
+    }
+
+    if (bodyRange) {
+      ctx.status = 206;
+      ctx.set('Content-Range', `bytes ${bodyRange.start}-${bodyRange.end}/${bodySize}`);
+      ctx.body = body.subarray(bodyRange.start, bodyRange.end + 1);
+    } else {
+      ctx.status = manifestResponse.statusCode;
+      ctx.body = body;
+    }
     return;
   }
 
