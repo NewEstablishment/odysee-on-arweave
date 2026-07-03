@@ -44,6 +44,7 @@ const SAME_ORIGIN_COOKIE_AUTH = '__same_origin_cookie_auth__';
 const deviceReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
 let localAuthTokenPromise: Promise<string | null> | null = null;
 const tracedAuthSources = new Set<string>();
+const PRESERVE_PRIVATE_DEVICE_PATHS = new Set([`${ACCOUNT_DEVICE}/user-new`]);
 const AUTH_REQUIRED_DEVICE_PATHS = new Set([
   `${ACCOUNT_DEVICE}/user-exists`,
   `${ACCOUNT_DEVICE}/user-new`,
@@ -747,13 +748,14 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
   try {
     if (AUTH_REQUIRED_DEVICE_PATHS.has(path)) {
       const authToken = await getOdyseeAuthToken(path);
+      const params = deviceRequestParams(path, body);
       traceAuthDeviceRequest(path, authToken);
-      traceAuthRequestBody(path, stripPrivateParams(compactParams(body)), authToken);
-      return await fetchAuthDeviceJson(path, stripPrivateParams(compactParams(body)), authToken);
+      traceAuthRequestBody(path, params, authToken);
+      return await fetchAuthDeviceJson(path, params, authToken);
     }
 
     const authToken = await getOdyseeAuthToken(path);
-    const params = withAuthParams(stripPrivateParams(compactParams(body)), authToken);
+    const params = withAuthParams(deviceRequestParams(path, body), authToken);
     traceAuthDeviceRequest(path, authToken);
     traceAuthRequestBody(path, params, authToken);
 
@@ -1066,6 +1068,11 @@ function compactParams(params: Record<string, any>): Record<string, any> {
   return Object.fromEntries(
     Object.entries(params).filter(([key, value]) => key !== 'no_auth' && value !== undefined && value !== null)
   );
+}
+
+function deviceRequestParams(path: string, body: Record<string, any>): Record<string, any> {
+  const params = compactParams(body);
+  return PRESERVE_PRIVATE_DEVICE_PATHS.has(path) ? params : stripPrivateParams(params);
 }
 
 function stripPrivateParams(source: any): any {
