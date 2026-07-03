@@ -70,13 +70,13 @@ delete(_Base, Req, Opts) ->
             {ok, ClaimID} ?= delete_claim_id(Req, Opts),
             {ok, State0} ?= read_index(Owner, Opts),
             Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
-            Existing = hb_maps:get(ClaimID, Uploads0, undefined, Opts),
-            Uploads1 = maps:remove(ClaimID, Uploads0),
+            {ok, {IndexKey, Existing}} ?= find_owned_claim(ClaimID, Uploads0, Opts),
+            Uploads1 = maps:remove(IndexKey, Uploads0),
             State1 = State0#{ <<"uploads">> => Uploads1 },
             ok ?= write_index(Owner, State1, Opts),
-            ok ?= delete_global_claim(ClaimID, Opts),
-            ok ?= delete_search_claim(ClaimID, Existing, Opts),
-            {ok, json_response(#{ <<"claim_id">> => ClaimID, <<"deleted">> => true, <<"signers">> => Signers })}
+            ok ?= delete_global_claim(IndexKey, Opts),
+            ok ?= delete_search_claim(IndexKey, Existing, Opts),
+            {ok, json_response(#{ <<"claim_id">> => IndexKey, <<"deleted">> => true, <<"signers">> => Signers })}
         else
             Error -> Error
         end
@@ -97,6 +97,7 @@ update(_Base, Req, Opts) ->
             Claim = merge_indexed_claim(Existing, Patch, Opts),
             {ok, State0} ?= read_index(Owner, Opts),
             Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
+            {ok, {_OwnedKey, _Owned}} ?= find_owned_claim(ClaimID, Uploads0, Opts),
             Uploads1 = Uploads0#{ ClaimID => Claim },
             State1 = State0#{ <<"uploads">> => Uploads1 },
             ok ?= write_index(Owner, State1, Opts),
@@ -492,6 +493,32 @@ delete_claim_id(Req, Opts) ->
             };
         ClaimID ->
             {ok, hb_util:bin(ClaimID)}
+    end.
+
+%% Uploads can only be deleted or updated by the identity whose index
+%% contains them. Every created upload is written into its owner's index,
+%% so absence there means the caller does not own the claim. The requested
+%% ID may be any of the claim's known aliases (immutable claim id, upload
+%% or media id), so fall back to scanning the owner's uploads before
+%% rejecting. Returns the actual index key so removal touches the right
+%% entry even when the request used an alias.
+find_owned_claim(ClaimID, Uploads, Opts) ->
+    case hb_maps:get(ClaimID, Uploads, undefined, Opts) of
+        undefined -> find_owned_claim_by_alias(ClaimID, maps:to_list(Uploads), Opts);
+        Claim -> {ok, {ClaimID, Claim}}
+    end.
+
+find_owned_claim_by_alias(_ClaimID, [], _Opts) ->
+    {error,
+        #{
+            <<"status">> => 403,
+            <<"body">> => <<"Upload is owned by another identity.">>
+        }
+    };
+find_owned_claim_by_alias(ClaimID, [{Key, Claim} | Rest], Opts) ->
+    case lists:member(ClaimID, [upload_id(Claim, Opts), media_id(Claim, Opts)]) of
+        true -> {ok, {Key, Claim}};
+        false -> find_owned_claim_by_alias(ClaimID, Rest, Opts)
     end.
 
 upload_id(Claim, Opts) ->
@@ -1379,3 +1406,72 @@ upload_index_list_normalizes_legacy_nested_upload_id_test() ->
     [Item] = hb_maps:get(<<"items">>, Result, [], Opts),
     ?assertEqual(UploadID, hb_maps:get(<<"immutable_id">>, Item, undefined, Opts)),
     ?assertEqual(UploadID, hb_maps:get(<<"upload_id">>, hb_maps:get(<<"hyperbeam">>, Item, #{}, Opts), undefined, Opts)).
+
+upload_delete_and_update_require_owner_test() ->
+    application:ensure_all_started(hb),
+    Store =
+        #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> =>
+                <<"/tmp/odysee-upload-owner-TEST-", (integer_to_binary(os:system_time(millisecond)))/binary>>
+        },
+    hb_store:reset(Store),
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => ar_wallet:new() },
+    ClaimID = <<"owned-upload-1">>,
+    Claim =
+        #{
+            <<"id">> => ClaimID,
+            <<"value_type">> => <<"stream">>,
+            <<"timestamp">> => 10,
+            <<"title">> => <<"mine">>
+        },
+    Signed =
+        hb_message:commit(
+            #{
+                <<"method">> => <<"POST">>,
+                <<"body">> => hb_json:encode(#{ <<"claim">> => Claim })
+            },
+            Opts
+        ),
+    {ok, IndexRes} = index(#{}, Signed, Opts),
+    ?assertEqual(200, hb_maps:get(<<"status">>, IndexRes, undefined, Opts)),
+    IndexedResult = hb_maps:get(<<"result">>, IndexRes, #{}, Opts),
+    IndexedItem = hb_maps:get(<<"item">>, IndexedResult, #{}, Opts),
+    ImmutableID = hb_maps:get(<<"claim_id">>, IndexedItem, undefined, Opts),
+    ?assert(is_binary(ImmutableID) andalso ImmutableID =/= <<>>),
+    OtherOpts = Opts#{ <<"priv-wallet">> => ar_wallet:new() },
+    ForeignDelete =
+        (hb_message:commit(
+            #{
+                <<"method">> => <<"POST">>,
+                <<"body">> => hb_json:encode(#{ <<"id">> => ImmutableID })
+            },
+            OtherOpts
+        ))#{ <<"x-odysee-upload-id">> => ImmutableID },
+    ?assertMatch({error, #{ <<"status">> := 403 }}, delete(#{}, ForeignDelete, Opts)),
+    ForeignUpdate =
+        hb_message:commit(
+            #{
+                <<"method">> => <<"POST">>,
+                <<"body">> =>
+                    hb_json:encode(#{ <<"claim_id">> => ImmutableID, <<"title">> => <<"hijacked">> })
+            },
+            OtherOpts
+        ),
+    ?assertMatch({error, #{ <<"status">> := 403 }}, update(#{}, ForeignUpdate, Opts)),
+    ListReq = #{ <<"method">> => <<"POST">>, <<"body">> => <<"{}">> },
+    {ok, ListRes} = list(#{}, ListReq, Opts),
+    Result = hb_maps:get(<<"result">>, ListRes, #{}, Opts),
+    ?assertEqual(1, hb_maps:get(<<"total_items">>, Result, 0, Opts)),
+    OwnerDelete =
+        Signed#{
+            <<"body">> => hb_json:encode(#{ <<"id">> => ClaimID }),
+            <<"x-odysee-upload-id">> => ClaimID
+        },
+    {ok, DeleteRes} = delete(#{}, OwnerDelete, Opts),
+    ?assertEqual(200, hb_maps:get(<<"status">>, DeleteRes, undefined, Opts)),
+    DeleteResult = hb_maps:get(<<"result">>, DeleteRes, #{}, Opts),
+    ?assertEqual(ImmutableID, hb_maps:get(<<"claim_id">>, DeleteResult, undefined, Opts)),
+    {ok, EmptyListRes} = list(#{}, ListReq, Opts),
+    EmptyResult = hb_maps:get(<<"result">>, EmptyListRes, #{}, Opts),
+    ?assertEqual(0, hb_maps:get(<<"total_items">>, EmptyResult, 0, Opts)).
