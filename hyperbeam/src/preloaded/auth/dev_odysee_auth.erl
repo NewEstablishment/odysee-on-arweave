@@ -4,6 +4,22 @@
 %%% `auth_token' cookie. The token is used only as private entropy for
 %%% HyperBEAM's hosted secret/wallet flow; it is removed from the normalized
 %%% request before the auth hook signs or stores anything.
+%%%
+%%% Odysee mints many session tokens per account (one per installation/login),
+%%% all resolving to a single account. The node-hosted wallet is the
+%%% per-ACCOUNT identity that owns a user's mutable state, so when an account
+%%% source is configured the secret is derived from the account a session
+%%% belongs to, not from the session token itself. Two sources are supported:
+%%% the `odysee-session-accounts' node option (a `token => account-id' map,
+%%% an offline stand-in for `user/me'), and the `odysee-account-api' node
+%%% option (an Odysee internal-apis base URL; the token is resolved with a
+%%% real `user/me' call and the account is the returned user id). When either
+%%% source is configured, a token neither can vouch for is rejected (401; an
+%%% unreachable API is 502, never a silent fallback). When no source is
+%%% configured every session resolves to itself, preserving per-session
+%%% wallets. The PBKDF2 input is domain-separated (`odysee-account:' vs
+%%% `odysee-token:' prefixes) so an account identifier and a raw token can
+%%% never collide in the derived keyspace.
 -module(dev_odysee_auth).
 -implements(<<"odysee-auth@1.0">>).
 -export([commit/3, verify/3]).
@@ -83,7 +99,7 @@ generate(_Msg, Req, Opts) ->
             case hb_maps:get(<<"raw">>, Req, false, Opts) of
                 true -> {ok, Token};
                 false ->
-                    case derive_key(Token, Req, Opts) of
+                    case derive_secret(Token, Req, Opts) of
                         {ok, Secret} ->
                             {ok, strip_token_fields(Req#{ <<"secret">> => Secret }, Opts)};
                         {error, _} = Error ->
@@ -146,7 +162,108 @@ token_value(#{ <<"value">> := Value }) ->
 token_value(Value) ->
     Value.
 
-derive_key(Token, Req, Opts) ->
+%% @doc Resolve the session token to its owning identity, then derive the
+%% secret from that identity so every session of an account shares one wallet.
+derive_secret(Token, Req, Opts) ->
+    case resolve_account(Token, Opts) of
+        {ok, {account, Account}} ->
+            derive_key(account, Account, Req, Opts);
+        {ok, {token, SelfToken}} ->
+            derive_key(token, SelfToken, Req, Opts);
+        {error, unknown} ->
+            {error,
+                #{
+                    <<"status">> => 401,
+                    <<"details">> => <<"Unknown Odysee session token.">>
+                }
+            };
+        {error, unavailable} ->
+            {error,
+                #{
+                    <<"status">> => 502,
+                    <<"details">> =>
+                        <<"The Odysee account API could not be reached "
+                            "to validate the session token.">>
+                }
+            }
+    end.
+
+%% @doc Resolve a session token to the account that owns it. Sources, in order:
+%% 1. The node's `odysee-session-accounts' option: a `token => account-id' map
+%%    (an offline stand-in for the Odysee `user/me' lookup).
+%% 2. On a map miss, the node's `odysee-account-api' option: the base URL of an
+%%    Odysee internal-apis deployment. The token is resolved with a real
+%%    `user/me' call; the account identity is the user id from the response.
+%% 3. With neither source able to vouch for the token: rejected
+%%    (`{error, unknown}') if either source is configured, else the token
+%%    resolves to itself, preserving per-session behaviour on unconfigured
+%%    nodes.
+resolve_account(Token, Opts) ->
+    Accounts = hb_opts:get(<<"odysee-session-accounts">>, #{}, Opts),
+    case hb_maps:find(Token, Accounts, Opts) of
+        {ok, Account} ->
+            {ok, {account, hb_util:bin(Account)}};
+        error ->
+            case hb_opts:get(<<"odysee-account-api">>, not_configured, Opts) of
+                not_configured ->
+                    case hb_maps:size(Accounts, Opts) of
+                        0 -> {ok, {token, Token}};
+                        _ -> {error, unknown}
+                    end;
+                Endpoint ->
+                    resolve_account_via_api(Endpoint, Token, Opts)
+            end
+    end.
+
+%% @doc Resolve a token to its account with a `user/me' call against an Odysee
+%% internal-apis deployment. Shapes mirror the odysee-frontend `Lbryio.call'
+%% client: a form-encoded POST carrying the token as `auth_token', answered
+%% with a `{"success": bool, "error": ..., "data": ...}' envelope where a
+%% successful `data.id' identifies the account. A 4xx response is
+%% `{error, unknown}'; a transport failure or 5xx is `{error, unavailable}' so
+%% an API outage cannot be mistaken for a bad credential.
+resolve_account_via_api(Endpoint, Token, Opts) ->
+    Base = string:trim(hb_util:bin(Endpoint), trailing, "/"),
+    Query = hb_util:bin(uri_string:compose_query([{<<"auth_token">>, Token}])),
+    Request = #{
+        <<"method">> => <<"POST">>,
+        <<"path">> => <<Base/binary, "/user/me">>,
+        <<"content-type">> => <<"application/x-www-form-urlencoded">>,
+        <<"body">> => Query
+    },
+    case hb_http:request(Request, Opts) of
+        {ok, Response} ->
+            parse_user_me(Response, Opts);
+        {error, Rejection} when is_map(Rejection) ->
+            {error, unknown};
+        _Failure ->
+            {error, unavailable}
+    end.
+
+%% @doc Extract the account identity from a `user/me' response envelope. A body
+%% that is not the expected envelope is treated as an unavailable API rather
+%% than a rejected credential.
+parse_user_me(Response, Opts) ->
+    Body = hb_maps:get(<<"body">>, Response, <<>>, Opts),
+    try hb_json:decode(Body) of
+        #{ <<"success">> := true, <<"data">> := #{ <<"id">> := Id } } ->
+            {ok, {account, hb_util:bin(Id)}};
+        #{ <<"success">> := false } ->
+            {error, unknown};
+        _Other ->
+            {error, unavailable}
+    catch _:_ ->
+        {error, unavailable}
+    end.
+
+%% @doc The PBKDF2 password prefix that separates the account-identifier space
+%% from the raw-token space, so the two can never collide in the derived
+%% keyspace.
+domain_tag(account) -> <<"odysee-account:">>;
+domain_tag(token) -> <<"odysee-token:">>.
+
+derive_key(Domain, Identity, Req, Opts) ->
+    Password = <<(domain_tag(Domain))/binary, (hb_util:bin(Identity))/binary>>,
     Alg = hb_util:atom(hb_maps:get(<<"alg">>, Req, <<"sha256">>, Opts)),
     Salt =
         hb_maps:get(
@@ -157,7 +274,7 @@ derive_key(Token, Req, Opts) ->
         ),
     Iterations = int_option(<<"iterations">>, 2 * 600_000, Req, Opts),
     KeyLength = int_option(<<"key-length">>, 64, Req, Opts),
-    case hb_crypto:pbkdf2(Alg, Token, Salt, Iterations, KeyLength) of
+    case hb_crypto:pbkdf2(Alg, Password, Salt, Iterations, KeyLength) of
         {ok, Key} -> {ok, hb_util:encode(Key)};
         {error, _Err} ->
             {error,
@@ -283,3 +400,59 @@ priv_cookie_matches_raw_cookie_secret_test() ->
         ),
     {ok, #{ <<"secret">> := PrivSecret }} = generate(#{}, PrivCookieReq, #{}),
     ?assertEqual(RawSecret, PrivSecret).
+
+mapped_sessions_share_account_secret_test() ->
+    Opts = #{
+        <<"odysee-session-accounts">> => #{
+            <<"phone-token">> => <<"account-1">>,
+            <<"laptop-token">> => <<"account-1">>,
+            <<"other-token">> => <<"account-2">>
+        }
+    },
+    Req = #{ <<"iterations">> => 1, <<"key-length">> => 32 },
+    {ok, #{ <<"secret">> := Phone }} =
+        generate(#{}, Req#{ <<"x-odysee-auth-token">> => <<"phone-token">> }, Opts),
+    {ok, #{ <<"secret">> := Laptop }} =
+        generate(#{}, Req#{ <<"x-odysee-auth-token">> => <<"laptop-token">> }, Opts),
+    {ok, #{ <<"secret">> := Other }} =
+        generate(#{}, Req#{ <<"x-odysee-auth-token">> => <<"other-token">> }, Opts),
+    ?assertEqual(Phone, Laptop),
+    ?assertNotEqual(Phone, Other).
+
+configured_map_rejects_unknown_token_test() ->
+    Opts = #{ <<"odysee-session-accounts">> => #{ <<"known">> => <<"account-1">> } },
+    Req = #{
+        <<"x-odysee-auth-token">> => <<"unknown-token">>,
+        <<"iterations">> => 1,
+        <<"key-length">> => 32
+    },
+    ?assertMatch({error, #{ <<"status">> := 401 }}, generate(#{}, Req, Opts)).
+
+account_and_token_domains_do_not_collide_test() ->
+    Req = #{ <<"iterations">> => 1, <<"key-length">> => 32 },
+    MappedOpts = #{ <<"odysee-session-accounts">> => #{ <<"tok">> => <<"identity">> } },
+    {ok, #{ <<"secret">> := AccountSecret }} =
+        generate(#{}, Req#{ <<"x-odysee-auth-token">> => <<"tok">> }, MappedOpts),
+    {ok, #{ <<"secret">> := TokenSecret }} =
+        generate(#{}, Req#{ <<"x-odysee-auth-token">> => <<"identity">> }, #{}),
+    ?assertNotEqual(AccountSecret, TokenSecret).
+
+parse_user_me_envelope_test() ->
+    ?assertEqual(
+        {ok, {account, <<"12345">>}},
+        parse_user_me(
+            #{ <<"body">> => <<"{\"success\":true,\"data\":{\"id\":12345}}">> },
+            #{}
+        )
+    ),
+    ?assertEqual(
+        {error, unknown},
+        parse_user_me(
+            #{ <<"body">> => <<"{\"success\":false,\"error\":\"bad token\"}">> },
+            #{}
+        )
+    ),
+    ?assertEqual(
+        {error, unavailable},
+        parse_user_me(#{ <<"body">> => <<"<html>">> }, #{})
+    ).

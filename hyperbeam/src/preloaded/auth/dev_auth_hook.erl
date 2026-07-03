@@ -227,14 +227,32 @@ is_relevant_from_keys(Base, Request, Opts) ->
         <<"always">> -> true;
         RelevantKeys ->
             lists:any(
-                fun(Key) ->
-                    case hb_maps:find(Key, Request, Opts) of
-                        {ok, _} -> true;
-                        error -> false
-                    end
-                end,
+                fun(Key) -> key_present(Key, Request, Opts) end,
                 RelevantKeys
             )
+    end.
+
+%% @doc Check whether a `when.keys' entry is present on the request. A private
+%% path (e.g. `priv/cookie') is resolved through `hb_private' so the gate can
+%% match state the HTTP layer reshaped into the private element before the hook
+%% ran (an inbound `cookie' header is stripped from the top level and stored
+%% under `priv/cookie'); an empty private map counts as absent. A plain key is
+%% matched at the top level. This lets a node gate on a browser cookie over the
+%% wire while a request with neither the plain key nor a non-empty private
+%% value still skips.
+key_present(Key, Request, Opts) ->
+    case hb_private:is_private(Key) of
+        true ->
+            case hb_private:get(Key, Request, not_found, Opts) of
+                not_found -> false;
+                Map when is_map(Map) -> hb_maps:size(Map, Opts) > 0;
+                _ -> true
+            end;
+        false ->
+            case hb_maps:find(Key, Request, Opts) of
+                {ok, _} -> true;
+                error -> false
+            end
     end.
 
 %% @doc Normalize authentication credentials, generating new ones if needed.
