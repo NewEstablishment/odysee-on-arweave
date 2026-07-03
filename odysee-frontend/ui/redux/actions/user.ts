@@ -85,6 +85,13 @@ function callOdyseeAccountApi(resource: string, action: string, params: any = {}
   });
 }
 
+function resendVerificationEmail(email: string) {
+  return callOdyseeAccountApi('user_email', 'resend_token', {
+    email,
+    only_if_expired: true,
+  });
+}
+
 function authenticateThroughHyperbeam(domain: string, language: string, dispatch: Dispatch) {
   return Lbryio.getAuthToken()
     .then((token) => {
@@ -537,15 +544,7 @@ export function doUserEmailNew(email) {
           dispatch({
             type: ACTIONS.USER_EMAIL_NEW_EXISTS,
           });
-          return Lbryio.call(
-            'user_email',
-            'resend_token',
-            {
-              email,
-              only_if_expired: true,
-            },
-            'post'
-          ).then(success, failure);
+          return resendVerificationEmail(email).then(success, failure);
         }
 
         throw error;
@@ -576,16 +575,7 @@ export function doUserCheckIfEmailExists(email) {
           type: ACTIONS.USER_PASSWORD_EXISTS,
         });
       } else {
-        // If they don't have a password, they will need to use the email verification api
-        Lbryio.call(
-          'user_email',
-          'resend_token',
-          {
-            email,
-            only_if_expired: true,
-          },
-          'post'
-        );
+        resendVerificationEmail(email);
       }
     };
 
@@ -870,15 +860,7 @@ export function doUserResendVerificationEmail(email) {
       });
     };
 
-    Lbryio.call(
-      'user_email',
-      'resend_token',
-      {
-        email,
-        only_if_expired: true,
-      },
-      'post'
-    )
+    resendVerificationEmail(email)
       .catch((error) => {
         if (error.response && error.response.status === 409) {
           throw error;
