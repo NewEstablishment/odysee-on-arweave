@@ -29,10 +29,14 @@
 %%% `authorization' header with any `Bearer ' scheme stripped) and mapped to its
 %%% account via the node's `odysee-session-accounts' option (a `token =>
 %%% account-id' map), which stands in for the `user/me' lookup in a self-hosted
-%%% deployment.
+%%% deployment. Alternatively (or additionally, as a fallback on a map miss) the
+%%% `odysee-account-api' option names an Odysee internal-apis base URL and the
+%%% token is resolved with a REAL `user/me' call, the account being the user id
+%%% it returns.
 %%%
-%%% When the map is configured, a token absent from it is REJECTED (401): an
-%%% unknown session is not a valid credential. When NO map is configured every
+%%% When either source is configured, a token neither can vouch for is REJECTED
+%%% (401; an unreachable API is 502, never a silent fallback). When NO source is
+%%% configured every
 %%% session resolves to itself (the prior per-session behaviour), so an
 %%% unconfigured node is unchanged and existing keyspaces are unaffected. Two
 %%% sessions of the same account derive the same secret and share one wallet;
@@ -142,6 +146,16 @@ generate(_Msg, Req, Opts) ->
                         #{
                             <<"status">> => 401,
                             <<"details">> => <<"Unknown Odysee session token.">>
+                        }
+                    };
+                {error, unavailable} ->
+                    ?event(key_gen, {account_api_unavailable, {priv_token, Token}}),
+                    {error,
+                        #{
+                            <<"status">> => 502,
+                            <<"details">> =>
+                                <<"The Odysee account API could not be reached "
+                                    "to validate the session token.">>
                         }
                     }
             end;
@@ -280,22 +294,85 @@ cookie_value(Value) when is_map(Value) ->
 cookie_value(Value) ->
     hb_util:bin(Value).
 
-%% @doc Resolve a session token to the account identity that owns it. The node's
-%% `odysee-session-accounts' option holds a `token => account-id' map that stands
-%% in for the Odysee `user/me' lookup. When the map is configured, a mapped token
-%% resolves to its account and an UNKNOWN token is rejected (`{error, unknown}');
-%% when NO map is configured, every token resolves to itself
-%% (`{ok, {token, Token}}'), preserving the prior per-session behaviour.
+%% @doc Resolve a session token to the account identity that owns it. Sources
+%% are tried in order:
+%%
+%% 1. The node's `odysee-session-accounts' option, a `token => account-id' map
+%%    (an offline stand-in for the Odysee `user/me' lookup); a mapped token
+%%    resolves to its account.
+%% 2. On a map miss, the node's `odysee-account-api' option: the base URL of an
+%%    Odysee internal-apis deployment (e.g. `https://api.odysee.com'). The token
+%%    is resolved with a real `user/me' call; the account identity is the user
+%%    id from the response. An API rejection is `{error, unknown}'; an
+%%    unreachable API is `{error, unavailable}'.
+%% 3. With neither source able to vouch for the token: rejected
+%%    (`{error, unknown}') if either source is configured, else the token
+%%    resolves to itself (`{ok, {token, Token}}'), preserving the prior
+%%    per-session behaviour on unconfigured nodes.
 resolve_account(Token, Opts) ->
     Accounts = hb_opts:get(<<"odysee-session-accounts">>, #{}, Opts),
     case hb_maps:find(Token, Accounts, Opts) of
         {ok, Account} ->
             {ok, {account, hb_util:bin(Account)}};
         error ->
-            case hb_maps:size(Accounts, Opts) of
-                0 -> {ok, {token, Token}};
-                _ -> {error, unknown}
+            case hb_opts:get(<<"odysee-account-api">>, not_configured, Opts) of
+                not_configured ->
+                    case hb_maps:size(Accounts, Opts) of
+                        0 -> {ok, {token, Token}};
+                        _ -> {error, unknown}
+                    end;
+                Endpoint ->
+                    resolve_account_via_api(Endpoint, Token, Opts)
             end
+    end.
+
+%% @doc Resolve a token to its account with a `user/me' call against an Odysee
+%% internal-apis deployment. Request and response shapes mirror the
+%% odysee-frontend `Lbryio.call' client: a form-encoded POST carrying the token
+%% as the `auth_token' parameter, answered with a
+%% `{"success": bool, "error": string|null, "data": object|null}' JSON envelope
+%% where a successful `data' carries the user record and its `id' identifies the
+%% account. A 4xx response (invalid/expired token) is `{error, unknown}'; a
+%% transport failure or 5xx is `{error, unavailable}' so an API outage cannot be
+%% mistaken for a bad credential.
+resolve_account_via_api(Endpoint, Token, Opts) ->
+    Base = string:trim(hb_util:bin(Endpoint), trailing, "/"),
+    Query = hb_util:bin(uri_string:compose_query([{<<"auth_token">>, Token}])),
+    Request = #{
+        <<"method">> => <<"POST">>,
+        <<"path">> => <<Base/binary, "/user/me">>,
+        <<"content-type">> => <<"application/x-www-form-urlencoded">>,
+        <<"body">> => Query
+    },
+    case hb_http:request(Request, Opts) of
+        {ok, Response} ->
+            parse_user_me(Response, Opts);
+        {error, Rejection} when is_map(Rejection) ->
+            % A 4xx response message: the API answered and rejected the token.
+            ?event(key_gen, {user_me_rejected_token, {priv_token, Token}}),
+            {error, unknown};
+        Failure ->
+            % A transport-level error or 5xx: the API did not answer.
+            ?event(key_gen, {user_me_unavailable, {response, Failure}}),
+            {error, unavailable}
+    end.
+
+%% @doc Extract the account identity from a successful `user/me' response: the
+%% `id' of the `data' user record. A body that is not the expected envelope is
+%% treated as an unavailable API rather than a rejected credential.
+parse_user_me(Response, Opts) ->
+    Body = hb_maps:get(<<"body">>, Response, <<>>, Opts),
+    try hb_json:decode(Body) of
+        #{ <<"success">> := true, <<"data">> := #{ <<"id">> := Id } } ->
+            {ok, {account, hb_util:bin(Id)}};
+        #{ <<"success">> := false } ->
+            {error, unknown};
+        Other ->
+            ?event(key_gen, {user_me_unexpected_body, {body, Other}}),
+            {error, unavailable}
+    catch _:_ ->
+        ?event(key_gen, {user_me_undecodable_body, {priv_body, Body}}),
+        {error, unavailable}
     end.
 
 %% @doc The PBKDF2 password prefix that separates the account-identifier space

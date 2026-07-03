@@ -20,3 +20,4 @@ odysee-frontend/node_modules/
 odysee-frontend/web/node_modules/
 odysee-frontend/playwright-report/
 odysee-frontend/test-results/
+.test_account

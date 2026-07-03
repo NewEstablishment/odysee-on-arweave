@@ -452,6 +452,75 @@ migration_imports_existing_wallet_test() ->
         signer_via_cookie(<<"sess-one-laptop">>, ServerID)
     ).
 
+%% @doc The `odysee-account-api' option resolves tokens with a real `user/me'
+%% call against an Odysee internal-apis deployment. Mocked here with the
+%% envelope shapes the production API returns: two sessions the API attributes
+%% to one user id share ONE wallet, distinct users differ, an API-rejected
+%% token is 401, and an unreachable API is 502 -- an outage is never mistaken
+%% for a bad credential (and never a silent self-resolve fallback).
+account_api_resolves_user_me_test() ->
+    {ok, ApiURL, Handle} =
+        hb_mock_server:start([{"/user/me", user_me, fun user_me_mock/1}]),
+    Opts = #{ <<"odysee-account-api">> => ApiURL },
+    Provider = #{ <<"device">> => <<"odysee-auth@1.0">> },
+    Generate =
+        fun(Token) ->
+            hb_ao:resolve(
+                Provider,
+                #{
+                    <<"path">> => <<"generate">>,
+                    <<"authorization">> => <<"Bearer ", Token/binary>>
+                },
+                Opts
+            )
+        end,
+    {ok, Laptop} = Generate(<<"api-sess-laptop">>),
+    {ok, Phone} = Generate(<<"api-sess-phone">>),
+    ?assertEqual(Laptop, Phone),
+    {ok, Foreign} = Generate(<<"api-sess-other">>),
+    ?assertNotEqual(Laptop, Foreign),
+    ?assertMatch(
+        {error, #{ <<"status">> := 401 }},
+        Generate(<<"api-sess-expired">>)
+    ),
+    hb_mock_server:stop(Handle),
+    ?assertMatch(
+        {error, #{ <<"status">> := 502 }},
+        Generate(<<"api-sess-laptop">>)
+    ).
+
+%% @doc A `user/me' handler answering with the production envelope shapes: a
+%% form-encoded `auth_token' parameter in, a `{"success", "error", "data"}'
+%% JSON envelope out, the user record's `id' identifying the account. Two
+%% tokens belong to one user, one to another, anything else is rejected the
+%% way the production API rejects an invalid token (403, `success: false').
+user_me_mock(Req) ->
+    Query = hb_maps:get(<<"body">>, Req, <<>>, #{}),
+    Params = maps:from_list(uri_string:dissect_query(Query)),
+    case maps:get(<<"auth_token">>, Params, undefined) of
+        <<"api-sess-laptop">> -> user_me_user(777);
+        <<"api-sess-phone">> -> user_me_user(777);
+        <<"api-sess-other">> -> user_me_user(888);
+        _ ->
+            {403,
+                hb_json:encode(#{
+                    <<"success">> => false,
+                    <<"error">> =>
+                        <<"you are not authorized to perform this action">>,
+                    <<"data">> => null
+                })
+            }
+    end.
+
+user_me_user(Id) ->
+    {200,
+        hb_json:encode(#{
+            <<"success">> => true,
+            <<"error">> => null,
+            <<"data">> => #{ <<"id">> => Id, <<"has_verified_email">> => true }
+        })
+    }.
+
 %%% ==================== Over-the-wire ====================
 
 %% @doc Start a live HTTP node with the request hook and session->account map

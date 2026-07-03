@@ -7,8 +7,18 @@ set -euo pipefail
 #
 #   ./scripts/odysee-auth-demo.sh
 #   AUTH_DEMO_PORT=19736 ./scripts/odysee-auth-demo.sh   # override the port
+#
+# Real-account flow: set ODYSEE_ACCOUNT_API to an Odysee internal-apis base URL
+# (production: https://api.odysee.com) and the node resolves tokens the demo
+# map does not know with a REAL `user/me` call. Set your real odysee.com
+# auth_token as the browser cookie (view 6 of the UI, or paste it into the
+# Authorization views) and the node derives your account's hosted wallet from
+# the user id the API returns.
+#
+#   ODYSEE_ACCOUNT_API=https://api.odysee.com ./scripts/odysee-auth-demo.sh
 
 export AUTH_DEMO_PORT="${AUTH_DEMO_PORT:-18736}"
+export ODYSEE_ACCOUNT_API="${ODYSEE_ACCOUNT_API:-}"
 export HB_PORT="${AUTH_DEMO_SUPERVISOR_PORT:-0}"
 
 port_in_use() {
@@ -56,16 +66,32 @@ Hook = #{
     }
 },
 
-Node = hb_http_server:start_node(#{
+%% With ODYSEE_ACCOUNT_API set, tokens the demo map does not know are resolved
+%% with a real user/me call against that internal-apis deployment; the account
+%% is the user id it returns. Without it, unknown tokens are rejected.
+ApiOpts =
+    case os:getenv("ODYSEE_ACCOUNT_API") of
+        false -> #{};
+        "" -> #{};
+        Api -> #{ <<"odysee-account-api">> => unicode:characters_to_binary(Api) }
+    end,
+
+Node = hb_http_server:start_node(maps:merge(#{
     <<"port">> => Port,
     <<"priv-wallet">> => ar_wallet:new(),
     <<"odysee-session-accounts">> => Accounts,
     <<"hyperbuddy-serve">> => #{ <<"odysee-demo.html">> => <<"odysee-demo.html">> },
     <<"on">> => #{ <<"request">> => Hook }
-}),
+}, ApiOpts)),
 
 io:format("~nOdysee auth demo is running.~n", []),
-io:format("  Open: ~s~s~n~n", [Node, <<"~hyperbuddy@1.0/odysee-demo.html">>]).
+io:format("  Open: ~s~s~n", [Node, <<"~hyperbuddy@1.0/odysee-demo.html">>]),
+case ApiOpts of
+    #{ <<"odysee-account-api">> := ApiBin } ->
+        io:format("  Account API: ~s (unmapped tokens resolve via user/me)~n~n", [ApiBin]);
+    _ ->
+        io:format("  Account API: none (only the demo session map is accepted)~n~n", [])
+end.
 ERL
 )
 
