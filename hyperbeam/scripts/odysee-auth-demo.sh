@@ -80,7 +80,10 @@ Node = hb_http_server:start_node(maps:merge(#{
     <<"port">> => Port,
     <<"priv-wallet">> => ar_wallet:new(),
     <<"odysee-session-accounts">> => Accounts,
-    <<"hyperbuddy-serve">> => #{ <<"odysee-demo.html">> => <<"odysee-demo.html">> },
+    <<"hyperbuddy-serve">> => #{
+        <<"odysee-demo.html">> => <<"odysee-demo.html">>,
+        <<"odysee-migrate-demo.html">> => <<"odysee-migrate-demo.html">>
+    },
     <<"on">> => #{ <<"request">> => Hook }
 }, ApiOpts)),
 
