@@ -572,13 +572,12 @@ async function fetchHyperbeamImmutableSubmessage(baseUrl: string, claimId: strin
   }
 }
 
-async function fetchHyperbeamUploadClaims(body: Record<string, any>, headers: Record<string, string> = {}) {
+async function fetchHyperbeamUploadClaims(body: Record<string, any>, _headers: Record<string, string> = {}) {
   try {
-    const url = '/$/api/hyperbeam-upload/v1/list';
+    const url = hyperbeamUploadListUrl(body);
+    if (!url) return [];
     const requestHeaders = {
       accept: 'application/json',
-      'content-type': 'application/json',
-      ...headers,
     };
     const callId = `upload-list-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     pushHyperbeamDebug(
@@ -598,11 +597,11 @@ async function fetchHyperbeamUploadClaims(body: Record<string, any>, headers: Re
       },
       'info'
     );
-    const response = await fetch('/$/api/hyperbeam-upload/v1/list', {
-      method: 'POST',
-      credentials: 'include',
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: hyperbeamFetchCredentials(url),
       headers: requestHeaders,
-      body: JSON.stringify(body),
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
     const json = await response.json().catch(() => null);
     pushHyperbeamDebug(
@@ -636,6 +635,19 @@ async function fetchHyperbeamUploadClaims(body: Record<string, any>, headers: Re
   } catch {
     return [];
   }
+}
+
+function hyperbeamUploadListUrl(params: Record<string, any>) {
+  const baseUrl = hyperbeamBaseUrl();
+  if (!baseUrl) return '';
+
+  const query = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    query.set(key, Array.isArray(value) ? value.filter(Boolean).join(',') : String(value));
+  });
+  const suffix = query.toString();
+  return `${baseUrl}/~odysee-upload@1.0/list${suffix ? `?${suffix}` : ''}`;
 }
 
 function uploadListLifecycleKey(requestBody: Record<string, any>) {

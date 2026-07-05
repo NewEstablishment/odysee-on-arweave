@@ -38,10 +38,11 @@ import { sanitizeName, buildURI } from 'util/lbryURI';
 import { getVideoBitrate, resolvePublishPayload } from 'util/publish';
 import { parsePurchaseTag, parseRentalTag, TO_SECONDS } from 'util/stripe';
 import {
+  canUpdateThroughHyperbeam,
   canPublishThroughHyperbeam,
   listHyperbeamPublishes,
   publishThroughHyperbeam,
-  updateHyperbeamPublish,
+  updateThroughHyperbeam,
 } from 'services/hyperbeamUpload';
 import uploadThumbnail from 'services/thumbnailUpload';
 import Lbry from 'lbry';
@@ -1440,10 +1441,13 @@ export const doPublish =
     }
 
     const publishFile = publishData.filePath;
-    if (myClaimForUri && isHyperbeamUploadClaim(myClaimForUri)) {
-      return updateHyperbeamPublish(
+    const hyperbeamPublishPayload = withPublishMediaDuration(publishPayload, publishData);
+    const hyperbeamAuthToken = getHyperbeamPublishAuthToken();
+    if (myClaimForUri && isHyperbeamUploadClaim(myClaimForUri) && canUpdateThroughHyperbeam(myClaimForUri, publishPayload)) {
+      return updateThroughHyperbeam(
         myClaimForUri,
-        withPublishMediaDuration(publishPayload, publishData),
+        hyperbeamPublishPayload,
+        hyperbeamAuthToken,
         myChannels
       ).then(success, fail);
     }
@@ -1451,7 +1455,8 @@ export const doPublish =
     if (canPublishThroughHyperbeam(publishFile, publishPayload, publishData.type)) {
       return publishThroughHyperbeam(
         publishFile,
-        withPublishMediaDuration(publishPayload, publishData),
+        hyperbeamPublishPayload,
+        hyperbeamAuthToken,
         myChannels
       ).then(success, fail);
     }
@@ -1518,6 +1523,11 @@ function withPublishMediaDuration(publishPayload: PublishParams, publishData: an
   }
 
   return publishPayload;
+}
+
+function getHyperbeamPublishAuthToken() {
+  const headers = Lbry.getApiRequestHeaders();
+  return headers && Object.keys(headers).includes(X_LBRY_AUTH_TOKEN) ? headers[X_LBRY_AUTH_TOKEN] : '';
 }
 export const doPublishWithEarlyUpload =
   (tusUrlPromise: Promise<{ tusUrl: string }>, guid: string) => async (dispatch: Dispatch, getState: GetState) => {

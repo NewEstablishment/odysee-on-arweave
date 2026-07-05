@@ -6,11 +6,13 @@ const HYPERBEAM_DEVICE_CLAIM = '~odysee-claim@1.0';
 const HYPERBEAM_DEVICE_STREAM = '~odysee-stream@1.0';
 const HYPERBEAM_DEVICE_ACCOUNT = '~odysee-account@1.0';
 const HYPERBEAM_DEVICE_SEARCH = '~odysee-search@1.0';
+const HYPERBEAM_DEVICE_UPLOAD = '~odysee-upload@1.0';
 const HYPERBEAM_DEVICES = new Set([
   HYPERBEAM_DEVICE_ACCOUNT,
   HYPERBEAM_DEVICE_CLAIM,
   HYPERBEAM_DEVICE_SEARCH,
   HYPERBEAM_DEVICE_STREAM,
+  HYPERBEAM_DEVICE_UPLOAD,
   '~odysee-channel@1.0',
   '~odysee-comment@1.0',
   '~odysee-file@1.0',
@@ -97,7 +99,8 @@ async function hyperbeamNodeResolveEntries(urls, extraHeaders) {
         hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'resolve', { uri }),
         extraHeaders
       );
-      return [uri, sdkClaimFromHyperbeam((result && result[uri]) || result)];
+      const claim = sdkClaimFromHyperbeam((result && result[uri]) || result);
+      return [uri, claim || (await hyperbeamNodeUploadResolve(uri, extraHeaders))];
     })
   );
 }
@@ -128,10 +131,72 @@ async function hyperbeamNodeClaimSearch(params, extraHeaders) {
   const storeResult = await hyperbeamNodeChannelClaimSearch(params || {}, extraHeaders);
   if (storeResult) return storeResult;
 
-  const searchResult = await hyperbeamNodeSearch(params || {}, extraHeaders);
+  const [searchResult, uploadResult] = await Promise.all([
+    hyperbeamNodeSearch(params || {}, extraHeaders),
+    hyperbeamNodeUploadList(params || {}, extraHeaders),
+  ]);
+  if (uploadResult && Array.isArray(uploadResult.items) && uploadResult.items.length) {
+    return mergeHyperbeamSearchResults(searchResult, uploadResult, params || {});
+  }
   if (searchResult) return searchResult;
 
   return null;
+}
+
+function mergeHyperbeamSearchResults(searchResult, uploadResult, params) {
+  if (!searchResult || !Array.isArray(searchResult.items)) return uploadResult;
+
+  const existingIds = new Set(searchResult.items.map((claim) => claim && claim.claim_id).filter(Boolean));
+  const uploadItems = uploadResult.items.filter((claim) => claim && !existingIds.has(claim.claim_id));
+  if (!uploadItems.length) return searchResult;
+
+  const items = [...uploadItems, ...searchResult.items];
+  const pageSize = Number(searchResult.page_size || params.page_size || items.length || 1);
+  const totalItems = Number(searchResult.total_items || searchResult.items.length) + uploadItems.length;
+  return {
+    ...searchResult,
+    items,
+    page_size: pageSize,
+    total_items: totalItems,
+    total_pages: Math.max(Number(searchResult.total_pages || 1), Math.ceil(totalItems / Math.max(1, pageSize))),
+  };
+}
+
+async function hyperbeamNodeUploadResolve(uri, extraHeaders) {
+  const modifier = routeModifierFromUri(uri);
+  const name = claimNameFromUri(uri);
+  if (!modifier && !name) return null;
+
+  const result = await hyperbeamNodeUploadList(
+    {
+      ...(modifier ? { claim_ids: [modifier] } : {}),
+      ...(name ? { name } : {}),
+      page_size: 1,
+    },
+    extraHeaders
+  ).catch(() => null);
+  return Array.isArray(result && result.items) ? result.items[0] || null : null;
+}
+
+async function hyperbeamNodeUploadList(params, extraHeaders) {
+  try {
+    const base = deviceBase(HYPERBEAM_DEVICE_UPLOAD);
+    if (!base) return null;
+
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return;
+      query.set(key, Array.isArray(value) ? value.filter(Boolean).join(',') : String(value));
+    });
+    const suffix = query.toString();
+    const result = await hyperbeamNodeFetchJson(`${base}/list${suffix ? `?${suffix}` : ''}`, extraHeaders);
+    const search = sdkSearchFromHyperbeam(result);
+    const items = Array.isArray(search && search.items) ? search.items.map(sdkClaimFromHyperbeam).filter(Boolean) : [];
+    return items.length ? { ...search, items } : null;
+  } catch (e) {
+    void e;
+    return null;
+  }
 }
 
 async function hyperbeamNodeSearch(params, extraHeaders) {
@@ -207,6 +272,11 @@ async function hyperbeamNodeGet(params, extraHeaders) {
   const uri = params && (params.uri || params.url);
   const id = params && (params.id || params.outpoint || params.immutable_id || params.immutableId);
   if (!uri && !id) return null;
+
+  if (uri) {
+    const uploadPayload = playbackPayloadFromUploadClaim(await hyperbeamNodeUploadResolve(uri, extraHeaders));
+    if (uploadPayload) return uploadPayload;
+  }
 
   const result = await hyperbeamNodeFetchJson(
     hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_STREAM, 'playback', id ? { id } : { uri }),
@@ -368,6 +438,16 @@ function claimIdFromUri(uri) {
   return match ? match[1] : null;
 }
 
+function routeModifierFromUri(uri) {
+  const match = String(uri || '').match(/^lbry:\/\/(?:@[^#:/]+(?:[#:][^/]+)?\/)?[^#:/]+(?:[#:]([^/]+))?/);
+  return match && match[1] ? match[1] : null;
+}
+
+function claimNameFromUri(uri) {
+  const match = String(uri || '').match(/^lbry:\/\/(?:@[^#:/]+(?:[#:][^/]+)?\/)?([^#:/]+)/);
+  return match && match[1] ? match[1] : null;
+}
+
 function isHyperbeamDeviceEnabled(device) {
   const mode = hyperbeamMode();
   if (mode === 'original') return false;
@@ -476,6 +556,35 @@ function playbackPayloadFromHyperbeam(result) {
     claim_id: result.claim_id || result['claim-id'],
     claim_name: result.claim_name || result['claim-name'],
   };
+}
+
+function playbackPayloadFromUploadClaim(claim) {
+  if (!claim) return null;
+
+  const source = (claim.value && claim.value.source) || {};
+  const hyperbeam = claim.hyperbeam || {};
+  const recordId = hyperbeam['record-id'] || hyperbeam.record_id || claim.claim_id || claim['claim-id'];
+  const dataId = hyperbeam['data-id'] || hyperbeam.data_id || source.sd_hash || source['sd-hash'];
+  const mediaUrl = absoluteHyperbeamUrl(claim.streaming_url || claim.download_url || source.url || (recordId ? `/${recordId}` : ''));
+  if (!mediaUrl) return null;
+
+  return {
+    streaming_url: mediaUrl,
+    download_url: mediaUrl,
+    media_type: source.media_type || source['media-type'] || 'application/octet-stream',
+    source_size: source.size,
+    claim_id: claim.claim_id || claim['claim-id'],
+    claim_name: claim.name,
+    file_name: source.name,
+    sd_hash: dataId,
+  };
+}
+
+function absoluteHyperbeamUrl(url) {
+  if (typeof url !== 'string' || !url) return '';
+  if (/^https?:\/\//.test(url)) return url;
+  const base = hyperbeamNodeBase();
+  return base ? `${base}${url.startsWith('/') ? '' : '/'}${url}` : url;
 }
 
 module.exports = {

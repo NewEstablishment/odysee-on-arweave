@@ -4,6 +4,7 @@ import { getAuthToken } from 'util/saved-passwords';
 
 export const HYPERBEAM_DEVICE = {
   account: '~odysee-account@1.0',
+  cache: '~cache@1.0',
   claim: '~odysee-claim@1.0',
   channel: '~odysee-channel@1.0',
   comment: '~odysee-comment@1.0',
@@ -15,7 +16,9 @@ export const HYPERBEAM_DEVICE = {
   stream: '~odysee-stream@1.0',
   streamDescriptor: '~odysee-stream-descriptor@1.0',
   subscription: '~odysee-account@1.0',
+  sync: '~odysee-sync@1.0',
   upload: '~odysee-upload@1.0',
+  userState: '~odysee-user-state@1.0',
 };
 
 export function hyperbeamNodeBase() {
@@ -55,8 +58,9 @@ export function hyperbeamDevicePostJson(
 ) {
   const base = hyperbeamDeviceBase(device);
   if (!base) return null;
+  const { path, fields } = hyperbeamKeyFields(key);
 
-  return fetch(`${base}/${key}`, {
+  return fetch(`${base}/${path}`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -65,7 +69,7 @@ export function hyperbeamDevicePostJson(
       ...authTokenHeader(),
       ...headers,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...fields, ...body }),
   });
 }
 
@@ -84,17 +88,38 @@ export function hyperbeamDevicePostParams64(
   return hyperbeamDevicePostJson(device, key, { [paramName]: base64Url(JSON.stringify(value || {})) }, headers);
 }
 
+function hyperbeamKeyFields(key: string) {
+  const [path, ...parts] = key.split('&');
+  const fields = parts.reduce<Record<string, any>>((acc, part) => {
+    if (!part) return acc;
+
+    const equals = part.indexOf('=');
+    const name = decodeURIComponent(equals === -1 ? part : part.slice(0, equals));
+    const value = equals === -1 ? true : decodeURIComponent(part.slice(equals + 1));
+    acc[name] = value;
+    return acc;
+  }, {});
+
+  return { path, fields };
+}
+
 export function hyperbeamSdkPostParams64(
   method: string,
   value: any,
   headers: Record<string, string> = {},
   paramName = 'params64'
 ) {
-  void method;
-  void value;
-  void headers;
-  void paramName;
-  return null;
+  return hyperbeamDevicePostParams64(
+    HYPERBEAM_DEVICE.userState,
+    'call&!',
+    {
+      kind: 'sdk',
+      method,
+      params: value || {},
+    },
+    headers,
+    paramName
+  );
 }
 
 const HYPERBEAM_ROUTED_METHODS = new Set([
@@ -103,6 +128,7 @@ const HYPERBEAM_ROUTED_METHODS = new Set([
   'get',
   'stream_list',
   'blob_list',
+  'channel_sign',
   'comment_list',
   'comment_by_id',
   'comment_abandon',
@@ -117,6 +143,9 @@ const HYPERBEAM_ROUTED_METHODS = new Set([
   'moderation_list_delegates',
   'moderation_remove_delegate',
   'moderation_unblock',
+  'collection_create',
+  'collection_list',
+  'collection_update',
   'preference_get',
   'preference_set',
   'reaction_list',
@@ -130,6 +159,8 @@ const HYPERBEAM_ROUTED_METHODS = new Set([
   'settings_get',
   'settings_set',
   'settings_clear',
+  'sync_apply',
+  'sync_hash',
   'commentron',
 ]);
 
@@ -138,9 +169,7 @@ export function isHyperbeamMethodEnabled(method: string) {
 }
 
 export function hyperbeamMethodDevice(method: string) {
-  if (['preference_get', 'preference_set', 'settings_get', 'settings_set', 'settings_clear'].includes(method)) {
-    return HYPERBEAM_DEVICE.account;
-  }
+  if (HYPERBEAM_STATE_METHODS.has(method)) return HYPERBEAM_DEVICE.userState;
   if (
     method.startsWith('comment_') ||
     method.startsWith('reaction_') ||
@@ -151,3 +180,17 @@ export function hyperbeamMethodDevice(method: string) {
   }
   return HYPERBEAM_DEVICE.claim;
 }
+
+const HYPERBEAM_STATE_METHODS = new Set([
+  'channel_sign',
+  'collection_create',
+  'collection_list',
+  'collection_update',
+  'preference_get',
+  'preference_set',
+  'settings_clear',
+  'settings_get',
+  'settings_set',
+  'sync_apply',
+  'sync_hash',
+]);

@@ -1,8 +1,8 @@
 %%% @doc LBRY header-commitment primitives: SHA256d hashing, the Merkle Mountain
 %%% Range (MMR) over block hashes, and the Electrum transaction-merkle fold.
 %%%
-%%% The MMR is the 32-byte commitment from which Odysee header trust bootstraps
-%%% (see `aidocs/003_header_commitment_design.md'). Leaves are block hashes
+%%% The MMR is the 32-byte commitment from which Odysee header trust bootstraps.
+%%% Leaves are block hashes
 %%% (`sha256d(header)'), interior nodes are `sha256d(L || R)', peaks are bagged
 %%% right-to-left, and a chunk is the height-10 perfect subtree over exactly
 %%% 1024 block hashes. These constructions are byte-validated against mainnet.
@@ -14,7 +14,7 @@
 -export([sha256/1, sha256d/1]).
 -export([mmr_peaks/1, bag_peaks/1, insert_at/3, fold_to_peak/4]).
 -export([mmr_append/2, mmr_root/1, chunk_subtree_root/1]).
--export([verify_membership/5, verify_consistency/4]).
+-export([verify_membership/5, verify_consistency/5]).
 -export([merkle_fold/3]).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -60,9 +60,12 @@ bag_peaks(Peaks) ->
     lists:foldl(fun(P, Acc) -> sha256d(<<P/binary, Acc/binary>>) end, Last, RevRest).
 
 %% @doc Insert `Elem' at 0-based `Index' of `List'.
-insert_at(List, Index, Elem) ->
+insert_at(List, Index, Elem)
+        when is_list(List), is_integer(Index), Index >= 0, Index =< length(List) ->
     {Before, After} = lists:split(Index, List),
-    Before ++ [Elem | After].
+    Before ++ [Elem | After];
+insert_at(_List, _Index, _Elem) ->
+    invalid.
 
 find_peak(_Height, [], _Start) -> not_found;
 find_peak(Height, [Size | Rest], Start) ->
@@ -76,8 +79,7 @@ find_peak(Height, [Size | Rest], Start) ->
 %%% --------------------------------------------------------------------------
 
 %% @doc Append one leaf hash to a peaks list of `{Height, Hash}' (strictly
-%% decreasing height), merging equal-height peaks. Matches the Python reference
-%% (`aidocs/007_roll_forward_headers.py').
+%% decreasing height), merging equal-height peaks.
 mmr_append(Peaks, LeafHash) ->
     mmr_append(lists:reverse(Peaks), LeafHash, 0).
 
@@ -129,22 +131,40 @@ fold_siblings(Hash, LocalIdx, [Sib | Rest]) ->
 %% committed to by `Root'. The proof folds the leaf to its peak, splices that
 %% peak into `OtherPeaks' at `PeakIndex', and re-bags. All hashes are raw
 %% 32-byte binaries. Returns a boolean.
-verify_membership(LeafHash, Height, {Siblings, OtherPeaks, PeakIndex}, N, Root) ->
+verify_membership(LeafHash, Height, {Siblings, OtherPeaks, PeakIndex}, N, Root)
+        when is_integer(Height), Height >= 0,
+             is_integer(N), N > Height,
+             is_integer(PeakIndex), PeakIndex >= 0,
+             is_list(Siblings), is_list(OtherPeaks),
+             is_binary(LeafHash), byte_size(LeafHash) =:= 32,
+             is_binary(Root), byte_size(Root) =:= 32 ->
     ComputedPeak = fold_to_peak(LeafHash, Height, N, Siblings),
-    AllPeaks = insert_at(OtherPeaks, PeakIndex, ComputedPeak),
-    bag_peaks(AllPeaks) =:= Root.
+    case valid_hashes(Siblings) andalso valid_hashes(OtherPeaks) of
+        false -> false;
+        true ->
+            case insert_at(OtherPeaks, PeakIndex, ComputedPeak) of
+                invalid -> false;
+                AllPeaks -> bag_peaks(AllPeaks) =:= Root
+            end
+    end;
+verify_membership(_LeafHash, _Height, _Proof, _N, _Root) ->
+    false.
 
 %%% --------------------------------------------------------------------------
 %%% Consistency proof (roll-forward)
 %%% --------------------------------------------------------------------------
 
 %% @doc Verify an MMR roll-forward from `FromRoot' to `ToRoot'. `OldPeaks' is the
-%% list of `{Height, Hash}' peaks of the size-from MMR (the consistency proof);
-%% `DeltaLeaves' are the (independently validated) new leaf hashes appended.
-%% Binds the old root, appends the delta, and confirms the new root.
-%% Per `aidocs/007_roll_forward_headers.py'. Returns a boolean.
-verify_consistency(FromRoot, OldPeaks, DeltaLeaves, ToRoot) ->
-    case bag_peaks([P || {_H, P} <- OldPeaks]) =:= FromRoot of
+%% list of `{Height, Hash}' peaks of the size-`FromN' MMR; `DeltaLeaves' are the
+%% independently validated new leaf hashes appended.
+verify_consistency(FromRoot, FromN, OldPeaks, DeltaLeaves, ToRoot)
+        when is_binary(FromRoot), byte_size(FromRoot) =:= 32,
+             is_integer(FromN), FromN >= 0,
+             is_list(OldPeaks), is_list(DeltaLeaves),
+             is_binary(ToRoot), byte_size(ToRoot) =:= 32 ->
+    case canonical_peaks(FromN, OldPeaks)
+            andalso valid_hashes(DeltaLeaves)
+            andalso bag_peaks([P || {_H, P} <- OldPeaks]) =:= FromRoot of
         false -> false;
         true ->
             NewPeaks =
@@ -154,7 +174,29 @@ verify_consistency(FromRoot, OldPeaks, DeltaLeaves, ToRoot) ->
                     DeltaLeaves
                 ),
             bag_peaks([P || {_H, P} <- NewPeaks]) =:= ToRoot
-    end.
+    end;
+verify_consistency(_FromRoot, _FromN, _OldPeaks, _DeltaLeaves, _ToRoot) ->
+    false.
+
+canonical_peaks(N, Peaks) ->
+    ExpectedHeights = [bit_length(Size) - 1 || Size <- mmr_peaks(N)],
+    ActualHeights = [H || {H, _Hash} <- Peaks],
+    ExpectedHeights =:= ActualHeights andalso
+        lists:all(
+            fun
+                ({H, Hash}) when is_integer(H), is_binary(Hash), byte_size(Hash) =:= 32 ->
+                    true;
+                (_) ->
+                    false
+            end,
+            Peaks
+        ).
+
+valid_hashes(Hashes) ->
+    lists:all(
+        fun(Hash) -> is_binary(Hash) andalso byte_size(Hash) =:= 32 end,
+        Hashes
+    ).
 
 %%% --------------------------------------------------------------------------
 %%% Transaction merkle fold (Electrum)
@@ -218,10 +260,21 @@ verify_consistency_test() ->
     OldPeaks = lists:foldl(fun(X, Acc) -> mmr_append(Acc, X) end, [], Old),
     FromRoot = bag_peaks([P || {_, P} <- OldPeaks]),
     ToRoot = mmr_root(All),
-    ?assert(verify_consistency(FromRoot, OldPeaks, Delta, ToRoot)),
-    ?assertNot(verify_consistency(FromRoot, OldPeaks, Delta, sha256d(<<"bad">>))),
+    ?assert(verify_consistency(FromRoot, length(Old), OldPeaks, Delta, ToRoot)),
+    ?assertNot(verify_consistency(FromRoot, length(Old), OldPeaks, Delta, sha256d(<<"bad">>))),
     ?assertNot(
-        verify_consistency(sha256d(<<"badfrom">>), OldPeaks, Delta, ToRoot)).
+        verify_consistency(sha256d(<<"badfrom">>), length(Old), OldPeaks, Delta, ToRoot)).
+
+verify_consistency_rejects_noncanonical_peaks_test() ->
+    All = [sha256d(<<"h", (integer_to_binary(I))/binary>>) || I <- lists:seq(0, 6)],
+    {Old, Delta} = lists:split(4, All),
+    OldPeaks = lists:foldl(fun(X, Acc) -> mmr_append(Acc, X) end, [], Old),
+    FromRoot = bag_peaks([P || {_, P} <- OldPeaks]),
+    ForgedOldPeaks = [{0, FromRoot}],
+    ForgedNewPeaks = lists:foldl(fun(X, Acc) -> mmr_append(Acc, X) end, ForgedOldPeaks, Delta),
+    ForgedToRoot = bag_peaks([P || {_, P} <- ForgedNewPeaks]),
+    ?assertNot(
+        verify_consistency(FromRoot, length(Old), ForgedOldPeaks, Delta, ForgedToRoot)).
 
 merkle_fold_test() ->
     Tx = [sha256d(<<"tx", (integer_to_binary(I))/binary>>) || I <- lists:seq(0, 3)],

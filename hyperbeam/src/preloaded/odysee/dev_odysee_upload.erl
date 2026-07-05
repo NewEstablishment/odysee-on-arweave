@@ -1,131 +1,209 @@
-%%% @doc Odysee HyperBEAM-native upload/write demo device.
-%%%
-%%% The request must be signed by the node's auth hook, normally via an
-%%% Odysee `auth_token' cookie or token header plus the `!' commit marker.
-%%% Only committed fields are persisted, so auth cookies and token headers are
-%%% not written to the public store.
 -module(dev_odysee_upload).
 -implements(<<"odysee-upload@1.0">>).
--export([chunk/3, delete/3, finalize/3, index/3, info/1, list/3, update/3, write/3]).
--ifdef(TEST).
--export([search_document/2]).
--endif.
+-export([info/1, submit/3, upload/3, write/3, chunk/3, finalize/3, index/3, update/3, delete/3, record/3, media/3, list/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+-define(DEVICE, <<"odysee-upload@1.0">>).
+-define(DEFAULT_MAX_BYTES, 104857600).
+-define(CHUNKED_MANIFEST_KIND, <<"odysee-hyperbeam-chunked-upload">>).
+
 info(_Opts) ->
-    #{ exports => [<<"chunk">>, <<"delete">>, <<"finalize">>, <<"index">>, <<"list">>, <<"update">>, <<"write">>] }.
+    #{
+        exports => [
+            <<"submit">>,
+            <<"upload">>,
+            <<"write">>,
+            <<"chunk">>,
+            <<"finalize">>,
+            <<"index">>,
+            <<"update">>,
+            <<"delete">>,
+            <<"record">>,
+            <<"media">>,
+            <<"list">>
+        ]
+    }.
+
+upload(Base, Req, Opts) ->
+    submit(Base, Req, Opts).
+
+write(Base, Req, Opts) ->
+    raw_write(Base, Req, Opts).
 
 chunk(Base, Req, Opts) ->
-    write(Base, Req, Opts).
+    raw_write(Base, Req, Opts).
 
 finalize(Base, Req, Opts) ->
-    write(Base, Req, Opts).
+    raw_write(Base, Req, Opts).
 
-index(_Base, Req, Opts) ->
+index(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Payload0} ?= request_payload(Base, Req, Opts),
+                    Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
+                    {ok, DataID} ?= required_first([<<"data-id">>, <<"data_id">>, <<"id">>], Payload, Opts),
+                    Record0 = upload_index_record(Owner, DataID, Payload, Opts),
+                    {ok, RecordID} ?= hb_cache:write(Record0, Opts),
+                    Record = enrich_record(RecordID, Record0, Opts),
+                    ok ?= write_indexes(Record, Opts),
+                    {ok, index_response(Record, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
+update(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Payload0} ?= request_payload(Base, Req, Opts),
+                    Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
+                    {ok, OldRecord} ?= resolve_record(Base, Payload, Opts),
+                    ok ?= require_record_owner(Owner, OldRecord, Opts),
+                    OldRecordID = hb_maps:get(<<"record-id">>, OldRecord, not_found, Opts),
+                    Metadata = update_metadata(OldRecord, Payload, Opts),
+                    Record0 = rebuild_index_record(OldRecord, Metadata, Opts),
+                    {ok, RecordID} ?= hb_cache:write(Record0, Opts),
+                    Record = enrich_record(RecordID, Record0, Opts),
+                    ok ?= remove_from_list_indexes(OldRecord, OldRecordID, Opts),
+                    ok ?= write_indexes(Record, Opts),
+                    {ok, index_response(Record, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
+delete(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Payload0} ?= request_payload(Base, Req, Opts),
+                    Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
+                    {ok, Record} ?= resolve_record(Base, Payload, Opts),
+                    ok ?= require_record_owner(Owner, Record, Opts),
+                    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+                    ok ?= remove_from_list_indexes(Record, RecordID, Opts),
+                    ok ?= tombstone_indexes(Record, Opts),
+                    {ok, delete_response(RecordID, Record, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
+submit(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Payload0} ?= request_payload(Base, Req, Opts),
+                    Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
+                    {ok, Bytes} ?= payload_bytes(Payload, Req, Opts),
+                    ok ?= enforce_size(Bytes, Base, Req, Opts),
+                    {ok, DataID} ?= hb_cache:write(Bytes, Opts),
+                    RecordBase = upload_record(Owner, DataID, Bytes, Payload, Opts),
+                    {ok, MediaBytes} ?= media_bytes(RecordBase, Bytes, Opts),
+                    Record0 = RecordBase#{ <<"body">> => MediaBytes },
+                    {ok, RecordID} ?= hb_cache:write(Record0, Opts),
+                    Record = enrich_record(RecordID, Record0, Opts),
+                    ok ?= write_indexes(Record, Opts),
+                    {ok, response(Record, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
+raw_write(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    {ok, Bytes} ?= raw_body(Req, Opts),
+                    ok ?= enforce_size(Bytes, Base, Req, Opts),
+                    {ok, ID} ?= hb_cache:write(Bytes, Opts),
+                    {ok, raw_write_response(ID, Owner)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
+
+record(Base, Req, Opts) ->
     safe(fun() ->
         maybe
-            ok ?= require_post(Req, Opts),
-            {ok, Signers} ?= require_signed(Req, Opts),
-            {ok, Owner} ?= owner_identity(Req, Signers, Opts),
-            {ok, Payload} ?= request_json_body(Req, Opts),
-            {ok, Claim0} ?= indexed_claim(Payload, Opts),
-            {ok, Claim} ?= write_immutable_claim(Claim0, Opts),
-            {ok, State0} ?= read_index(Owner, Opts),
-            ClaimID = hb_maps:get(<<"claim_id">>, Claim, <<>>, Opts),
-            Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
-            Uploads1 = Uploads0#{ ClaimID => Claim },
-            State1 = State0#{ <<"uploads">> => Uploads1 },
-            ok ?= write_index(Owner, State1, Opts),
-            ok ?= write_global_claim(ClaimID, Claim, Opts),
-            ok ?= index_search_claim(Claim, Opts),
-            {ok, json_response(#{ <<"item">> => Claim, <<"signers">> => Signers })}
+            {ok, ID} ?= requested_id(Base, Req, Opts),
+            {ok, Msg} ?= hb_cache:read(ID, Opts),
+            Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
+            {ok, enrich_record(ID, Loaded, Opts)}
         else
             Error -> Error
         end
     end).
 
-list(_Base, Req, Opts) ->
-    safe(fun() ->
-        maybe
-            ok ?= require_post(Req, Opts),
-            {ok, Filters} ?= list_filters(Req, Opts),
-            {ok, Uploads} ?= indexed_uploads(Filters, Opts),
-            {ok,
-                json_response(#{
-                    <<"items">> => Uploads,
-                    <<"total_items">> => length(Uploads)
-                })}
-        else
-            Error -> Error
-        end
-    end).
+list(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                Params = maps:merge(map_or_empty(Base), map_or_empty(Req)),
+                IDs = upload_list_ids(Params, Opts),
+                Claims0 = upload_claims_from_ids(IDs, Opts),
+                Claims = sort_claims(filter_claims(Claims0, Params, Opts), Params, Opts),
+                Page = max(1, integer_param(Base, Req, <<"page">>, 1, Opts)),
+                PageSize =
+                    max(
+                        1,
+                        integer_param(
+                            Base,
+                            Req,
+                            <<"page-size">>,
+                            integer_param(Base, Req, <<"page_size">>, 50, Opts),
+                            Opts
+                        )
+                    ),
+                {ok, list_response(page_items(Claims, Page, PageSize), length(Claims), Page, PageSize)}
+            end)
+    end.
 
-delete(_Base, Req, Opts) ->
-    safe(fun() ->
-        maybe
-            ok ?= require_post(Req, Opts),
-            {ok, Signers} ?= require_signed(Req, Opts),
-            {ok, Owner} ?= owner_identity(Req, Signers, Opts),
-            {ok, ClaimID} ?= delete_claim_id(Req, Opts),
-            {ok, State0} ?= read_index(Owner, Opts),
-            Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
-            {ok, {IndexKey, Existing}} ?= find_owned_claim(ClaimID, Uploads0, Opts),
-            Uploads1 = maps:remove(IndexKey, Uploads0),
-            State1 = State0#{ <<"uploads">> => Uploads1 },
-            ok ?= write_index(Owner, State1, Opts),
-            ok ?= delete_global_claim(IndexKey, Opts),
-            ok ?= delete_search_claim(IndexKey, Existing, Opts),
-            {ok, json_response(#{ <<"claim_id">> => IndexKey, <<"deleted">> => true, <<"signers">> => Signers })}
-        else
-            Error -> Error
-        end
-    end).
-
-update(_Base, Req, Opts) ->
-    safe(fun() ->
-        maybe
-            ok ?= require_post(Req, Opts),
-            {ok, Signers} ?= require_signed(Req, Opts),
-            {ok, Owner} ?= owner_identity(Req, Signers, Opts),
-            {ok, Payload} ?= request_json_body(Req, Opts),
-            {ok, Patch0} ?= indexed_claim_update(Payload, Opts),
-            ClaimID = hb_maps:get(<<"claim_id">>, Patch0, upload_id(Patch0, Opts), Opts),
-            {ok, Existing} ?= read_claim_index(ClaimID, Opts),
-            OldChannelID = channel_id_from_claim(Existing, Opts),
-            Patch = sanitize_indexed_claim(Patch0, Opts),
-            Claim = merge_indexed_claim(Existing, Patch, Opts),
-            {ok, State0} ?= read_index(Owner, Opts),
-            Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
-            {ok, {_OwnedKey, _Owned}} ?= find_owned_claim(ClaimID, Uploads0, Opts),
-            Uploads1 = Uploads0#{ ClaimID => Claim },
-            State1 = State0#{ <<"uploads">> => Uploads1 },
-            ok ?= write_index(Owner, State1, Opts),
-            ok ?= case OldChannelID =:= channel_id_from_claim(Claim, Opts) of
-                true -> ok;
-                false -> delete_channel_claim(OldChannelID, ClaimID, Opts)
-            end,
-            ok ?= write_global_claim(ClaimID, Claim, Opts),
-            ok ?= delete_search_claim(ClaimID, Existing, Opts),
-            ok ?= index_search_claim(Claim, Opts),
-            {ok, json_response(#{ <<"item">> => Claim, <<"signers">> => Signers })}
-        else
-            Error -> Error
-        end
-    end).
-
-write(_Base, Req, Opts) ->
-    safe(fun() ->
-        maybe
-            ok ?= require_post(Req, Opts),
-            {ok, Signers} ?= require_signed(Req, Opts),
-            {ok, Stored} ?= upload_message(Req, Signers, Opts),
-            {ok, Path} ?= hb_cache:write(Stored, Opts),
-            {ok, response(Path, Signers)}
-        else
-            Error -> Error
-        end
-    end).
+media(Base, Req, Opts) ->
+    case method(Req, Opts) of
+        <<"options">> ->
+            {ok, cors_preflight_response()};
+        _ ->
+            safe(fun() ->
+                maybe
+                    {ok, Record} ?= read_record(Base, Req, Opts),
+                    {ok, MediaBytes} ?= record_media_bytes(Record, Opts),
+                    {ok, media_response(Record, MediaBytes, Req, Opts)}
+                else
+                    Error -> Error
+                end
+            end)
+    end.
 
 safe(Fun) ->
     try Fun() of
@@ -135,1343 +213,1972 @@ safe(Fun) ->
         _:Reason -> {error, Reason}
     end.
 
-require_post(Req, Opts) ->
-    case hb_maps:get(<<"method">>, Req, <<"GET">>, Opts) of
-        <<"POST">> -> ok;
-        _ ->
-            {error,
-                #{
-                    <<"status">> => 405,
-                    <<"body">> => <<"Use POST for Odysee upload writes.">>
-                }
-            }
-    end.
-
-require_signed(Req, Opts) ->
-    case hb_message:signers(Req, Opts) of
+authenticated_owner(_Base, Req, Opts) ->
+    case request_signers(Req, Opts) of
         [] ->
-            {error,
-                #{
-                    <<"status">> => 401,
-                    <<"www-authenticate">> => <<"OdyseeAuthToken">>,
-                    <<"body">> =>
-                        <<"Odysee upload writes require an auth-signed request.">>
-                }
-            };
+            {error, #{
+                <<"status">> => 401,
+                <<"body">> => <<"Signed request required.">>
+            }};
         Signers ->
-            {ok, Signers}
+            case request_signature_valid(Req, Opts) of
+                true ->
+                    case token_owner(Req, Opts) of
+                        {ok, Owner} -> {ok, Owner};
+                        not_found -> {ok, hd(Signers)}
+                    end;
+                _ -> {error, #{
+                    <<"status">> => 401,
+                    <<"body">> => <<"Invalid request signature.">>
+                }}
+            end
     end.
 
-upload_message(Req, Signers, Opts) ->
-    case hb_maps:find(<<"body">>, Req, Opts) of
-        {ok, Body} ->
-            ContentType = hb_maps:get(<<"content-type">>, Req, <<"application/octet-stream">>, Opts),
-            Clean =
-                #{
-                    <<"body">> => Body,
-                    <<"content-type">> => ContentType,
-                    <<"upload-auth-signers">> => Signers
-                },
-            {ok, hb_message:commit(Clean, Opts)};
-        error ->
-            {error,
-                #{
-                    <<"status">> => 400,
-                    <<"body">> => <<"Upload write request requires a body.">>
-                }
-            }
-    end.
-
-owner_identity(Req, Signers, Opts) ->
+token_owner(Req, Opts) ->
     case auth_token(Req, Opts) of
         {ok, Token} -> {ok, token_secret(Token)};
-        not_found ->
-            case Signers of
-                [Signer | _] -> {ok, Signer};
-                [] -> {error, no_upload_owner}
-            end
+        not_found -> not_found
     end.
 
 auth_token(Req, Opts) ->
     case authorization_token(Req, Opts) of
         {ok, _Token} = Found -> Found;
-        not_found -> token_field(Req, Opts)
+        not_found ->
+            case first_field(auth_token_keys(), Req, Opts) of
+                not_found -> cookie_auth_token(Req, Opts);
+                Token -> {ok, hb_util:bin(Token)}
+            end
     end.
 
 authorization_token(Req, Opts) ->
     case first_field([<<"authorization">>], Req, Opts) of
         not_found -> not_found;
         Auth ->
-            try authorization_value(hb_util:bin(Auth))
-            catch _:_ -> not_found
+            case binary:split(string:trim(hb_util:bin(Auth)), <<" ">>) of
+                [Scheme, Value0] ->
+                    Value = string:trim(Value0, leading),
+                    case hb_util:to_lower(Scheme) of
+                        <<"bearer">> when Value =/= <<>> -> {ok, Value};
+                        <<"token">> when Value =/= <<>> -> {ok, Value};
+                        _ -> not_found
+                    end;
+                _ -> not_found
             end
     end.
 
-authorization_value(Auth) ->
-    case binary:split(string:trim(Auth), <<" ">>) of
-        [Scheme, Value0] ->
-            Value = string:trim(Value0, leading),
-            case hb_util:to_lower(Scheme) of
-                <<"bearer">> when Value =/= <<>> -> {ok, Value};
-                <<"token">> when Value =/= <<>> -> {ok, Value};
-                _ -> not_found
+cookie_auth_token(Req, Opts) ->
+    try dev_cookie:extract(Req, #{}, Opts) of
+        {ok, Cookies} ->
+            case first_field(auth_token_keys(), Cookies, Opts) of
+                not_found -> not_found;
+                Token -> {ok, hb_util:bin(Token)}
             end;
-        _ ->
-            not_found
+        _ -> not_found
+    catch _:_ ->
+        not_found
     end.
 
-token_field(Req, Opts) ->
-    case first_field(token_keys(), Req, Opts) of
-        not_found -> not_found;
-        Token -> {ok, Token}
-    end.
-
-token_secret(Token0) ->
-    Token = hb_util:bin(Token0),
-    hb_util:encode(hb_crypto:sha256(<<"odysee-upload:", Token/binary>>)).
-
-token_keys() ->
+auth_token_keys() ->
     [
         <<"auth-token">>,
         <<"auth_token">>,
-        <<"odysee-auth-token">>,
-        <<"odysee_auth_token">>,
-        <<"x-odysee-auth-token">>,
-        <<"x_odysee_auth_token">>,
+        <<"authtoken">>,
+        <<"lbry-auth-token">>,
+        <<"lbry_auth_token">>,
         <<"x-lbry-auth-token">>,
-        <<"x_lbry_auth_token">>
+        <<"x_lbry_auth_token">>,
+        <<"odysee-auth-token">>,
+        <<"odysee_auth_token">>
     ].
 
-request_json_body(Req, Opts) ->
-    case upload_claim_header(Req, Opts) of
-        {ok, Claim} ->
-            {ok, #{ <<"claim">> => Claim }};
-        not_found ->
-            request_json_body_from_payload(Req, Opts)
-    end.
+token_secret(Token0) ->
+    Token = hb_util:bin(Token0),
+    hb_util:encode(hb_crypto:sha256(<<"odysee-auth:", Token/binary>>)).
 
-request_json_body_from_payload(Req, Opts) ->
-    case request_json_payload(Req, Opts) of
-        {ok, Body} when is_binary(Body) ->
-            try {ok, hb_json:decode(Body)}
-            catch _:_ ->
-                {error,
-                    #{
-                        <<"status">> => 400,
-                        <<"body">> => <<"Upload index request body must be JSON.">>
-                    }
-                }
-            end;
-        {ok, Body} when is_map(Body) ->
-            {ok, Body};
-        request_fields ->
-            {ok, Req};
-        _ ->
-            {error,
-                #{
-                    <<"status">> => 400,
-                    <<"body">> => <<"Upload index request requires a JSON body.">>
-                }
-            }
-    end.
+request_signers(Req, Opts) ->
+    lists:usort(signers(Req, Opts)).
 
-upload_claim_header(Req, Opts) ->
-    case first_field([<<"x-odysee-upload-claim">>, <<"odysee-upload-claim">>], Req, Opts) of
-        not_found ->
-            not_found;
+signers(Msg, Opts) when is_map(Msg) ->
+    try hb_message:signers(Msg, Opts)
+    catch _:_ -> []
+    end;
+signers(_Msg, _Opts) ->
+    [].
+
+request_signature_valid(Req, Opts) ->
+    hb_message:verify(Req, signers, Opts)
+        orelse hb_message:verify(hb_maps:without(auth_hook_ignored_keys(), Req, Opts), signers, Opts).
+
+auth_hook_ignored_keys() ->
+    [
+        <<"secret">>,
+        <<"cookie">>,
+        <<"set-cookie">>,
+        <<"path">>,
+        <<"method">>,
+        <<"authorization">>,
+        <<"!">>
+    ].
+
+request_payload(Base, Req, Opts) ->
+    Raw = maps:merge(map_or_empty(Base), map_or_empty(Req)),
+    case first_field([<<"params64">>, <<"params-64">>], Raw, Opts) of
+        not_found -> {ok, Raw};
         Encoded ->
-            try {ok, hb_json:decode(hb_util:decode(hb_util:bin(Encoded)))}
-            catch _:_ ->
-                {error,
-                    #{
-                        <<"status">> => 400,
-                        <<"body">> => <<"Upload index claim header must be base64url JSON.">>
-                    }
-                }
+            case decode_params64(Encoded) of
+                {ok, Decoded} when is_map(Decoded) ->
+                    {ok, maps:merge(Raw, Decoded)};
+                {ok, _} ->
+                    {error, invalid_upload_params};
+                Error ->
+                    Error
             end
     end.
 
-request_json_payload(Req, Opts) ->
-    case hb_maps:find(<<"body">>, Req, Opts) of
-        {ok, Body = #{}} ->
-            case hb_maps:find(<<"data">>, Body, Opts) of
-                {ok, Data} -> {ok, Data};
-                error -> {ok, Body}
-            end;
-        {ok, Body} ->
-            {ok, Body};
-        error ->
-            case hb_maps:find(<<"data">>, Req, Opts) of
-                {ok, Data} -> {ok, Data};
-                error ->
-                    case hb_maps:find(<<"claim">>, Req, Opts) of
-                        {ok, _Claim} -> request_fields;
-                        error -> error
-                    end
-            end
-    end.
-
-indexed_claim(Payload, Opts) ->
-    Claim = hb_maps:get(<<"claim">>, Payload, Payload, Opts),
-    case Claim of
-        ClaimMap when is_map(ClaimMap) ->
-            PublicClaimMap = sanitize_indexed_claim(ClaimMap, Opts),
-            case media_id(PublicClaimMap, Opts) of
-                <<>> ->
-                    {error,
-                        #{
-                            <<"status">> => 400,
-                            <<"body">> => <<"Upload index claim requires an immutable upload id.">>
-                        }
-                    };
-                _MediaID ->
-                    {ok, PublicClaimMap}
-            end;
-        _ ->
-            {error,
-                #{
-                    <<"status">> => 400,
-                    <<"body">> => <<"Upload index request requires a claim object.">>
-                }
-            }
-    end.
-
-indexed_claim_update(Payload, Opts) ->
-    Claim = hb_maps:get(<<"claim">>, Payload, Payload, Opts),
-    case Claim of
-        ClaimMap when is_map(ClaimMap) ->
-            case hb_util:bin(hb_maps:get(<<"claim_id">>, ClaimMap, upload_id(ClaimMap, Opts), Opts)) of
-                <<>> ->
-                    {error,
-                        #{
-                            <<"status">> => 400,
-                            <<"body">> => <<"Upload update requires an immutable upload id.">>
-                        }
-                    };
-                _ClaimID ->
-                    {ok, ClaimMap}
-            end;
-        _ ->
-            {error,
-                #{
-                    <<"status">> => 400,
-                    <<"body">> => <<"Upload update request requires a claim object.">>
-                }
-            }
-    end.
-
-merge_indexed_claim(Existing, Patch, Opts) ->
-    ClaimID = hb_maps:get(<<"claim_id">>, Existing, upload_id(Existing, Opts), Opts),
-    Value = merge_claim_value(
-        hb_maps:get(<<"value">>, Existing, #{}, Opts),
-        hb_maps:get(<<"value">>, Patch, #{}, Opts),
-        Opts
-    ),
-    Hyperbeam0 = merge_hyperbeam_value(
-        hb_maps:get(<<"hyperbeam">>, Existing, #{}, Opts),
-        hb_maps:get(<<"hyperbeam">>, Patch, #{}, Opts),
-        Opts
-    ),
-    Hyperbeam = Hyperbeam0#{ <<"upload_id">> => ClaimID },
-    Meta = merge_map_value(hb_maps:get(<<"meta">>, Existing, #{}, Opts), hb_maps:get(<<"meta">>, Patch, #{}, Opts)),
-    Merged0 = merge_map_value(Existing, Patch),
-    Merged0#{
-        <<"claim_id">> => ClaimID,
-        <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, Existing, ClaimID, Opts),
-        <<"txid">> => hb_maps:get(<<"txid">>, Existing, ClaimID, Opts),
-        <<"nout">> => hb_maps:get(<<"nout">>, Existing, 0, Opts),
-        <<"value">> => Value,
-        <<"hyperbeam">> => Hyperbeam,
-        <<"meta">> => Meta
-    }.
-
-merge_claim_value(ExistingValue, PatchValue, Opts) ->
-    Existing = case is_map(ExistingValue) of true -> ExistingValue; false -> #{} end,
-    Patch = case is_map(PatchValue) of true -> PatchValue; false -> #{} end,
-    Source = merge_source_value(
-        hb_maps:get(<<"source">>, Existing, #{}, Opts),
-        hb_maps:get(<<"source">>, Patch, #{}, Opts),
-        Opts
-    ),
-    Merged = merge_map_value(Existing, Patch),
-    Merged#{ <<"source">> => Source }.
-
-merge_source_value(ExistingSource, PatchSource, Opts) ->
-    Existing = case is_map(ExistingSource) of true -> ExistingSource; false -> #{} end,
-    Patch = case is_map(PatchSource) of true -> PatchSource; false -> #{} end,
-    SourceID = hb_maps:get(<<"sd_hash">>, Existing, hb_maps:get(<<"sd_hash">>, Patch, <<>>, Opts), Opts),
-    Merged = merge_map_value(Existing, Patch),
-    Merged#{ <<"sd_hash">> => SourceID }.
-
-merge_hyperbeam_value(ExistingHyperbeam, PatchHyperbeam, Opts) ->
-    Existing = case is_map(ExistingHyperbeam) of true -> ExistingHyperbeam; false -> #{} end,
-    Patch = case is_map(PatchHyperbeam) of true -> PatchHyperbeam; false -> #{} end,
-    MediaID = hb_maps:get(<<"media_id">>, Existing, hb_maps:get(<<"media_id">>, Patch, <<>>, Opts), Opts),
-    UploadID = hb_maps:get(<<"upload_id">>, Existing, hb_maps:get(<<"upload_id">>, Patch, MediaID, Opts), Opts),
-    Merged = merge_map_value(Existing, Patch),
-    Merged#{
-        <<"media_id">> => MediaID,
-        <<"upload_id">> => UploadID
-    }.
-
-merge_map_value(Existing, Patch) when is_map(Existing), is_map(Patch) ->
-    maps:merge(Existing, Patch);
-merge_map_value(Existing, _Patch) when is_map(Existing) ->
-    Existing;
-merge_map_value(_Existing, Patch) when is_map(Patch) ->
-    Patch;
-merge_map_value(_Existing, _Patch) ->
-    #{}.
-
-write_immutable_claim(Claim0, Opts) ->
-    Claim1 = normalize_claim_before_immutable_write(Claim0, Opts),
-    maybe
-        {ok, ImmutableID} ?= hb_cache:write(hb_message:commit(Claim1, Opts), Opts),
-        Claim = Claim1#{
-            <<"claim_id">> => ImmutableID,
-            <<"immutable_id">> => ImmutableID,
-            <<"txid">> => ImmutableID
-        },
-        {ok, Claim}
-    end.
-
-normalize_claim_before_immutable_write(Claim, Opts) ->
-    MediaID = media_id(Claim, Opts),
-    Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim, #{}, Opts),
-    Hyperbeam1 =
-        case is_map(Hyperbeam0) of
-            true -> Hyperbeam0#{ <<"upload_id">> => MediaID, <<"media_id">> => MediaID };
-            false -> #{ <<"upload_id">> => MediaID, <<"media_id">> => MediaID }
-        end,
-    Value0 = hb_maps:get(<<"value">>, Claim, #{}, Opts),
-    Source0 =
-        case is_map(Value0) of
-            true -> hb_maps:get(<<"source">>, Value0, #{}, Opts);
-            false -> #{}
-        end,
-    Source1 =
-        case is_map(Source0) of
-            true -> Source0#{ <<"sd_hash">> => hb_maps:get(<<"sd_hash">>, Source0, MediaID, Opts) };
-            false -> #{ <<"sd_hash">> => MediaID }
-        end,
-    Value1 =
-        case is_map(Value0) of
-            true -> Value0#{ <<"source">> => Source1 };
-            false -> #{ <<"source">> => Source1 }
-        end,
-    Claim#{
-        <<"hyperbeam">> => Hyperbeam1,
-        <<"value">> => Value1
-    }.
-
-delete_claim_id(Req, Opts) ->
-    case first_field([
-        <<"x-odysee-upload-id">>,
-        <<"odysee-upload-id">>,
-        <<"id">>,
-        <<"immutable_id">>,
-        <<"immutable-id">>,
-        <<"upload_id">>,
-        <<"upload-id">>,
-        <<"x-odysee-upload-claim-id">>,
-        <<"odysee-upload-claim-id">>,
-        <<"claim_id">>
-    ], Req, Opts) of
-        not_found ->
-            {error,
-                #{
-                    <<"status">> => 400,
-                    <<"body">> => <<"Upload delete requires an immutable upload id.">>
-                }
-            };
-        <<>> ->
-            {error,
-                #{
-                    <<"status">> => 400,
-                    <<"body">> => <<"Upload delete requires an immutable upload id.">>
-                }
-            };
-        ClaimID ->
-            {ok, hb_util:bin(ClaimID)}
-    end.
-
-%% Uploads can only be deleted or updated by the identity whose index
-%% contains them. Every created upload is written into its owner's index,
-%% so absence there means the caller does not own the claim. The requested
-%% ID may be any of the claim's known aliases (immutable claim id, upload
-%% or media id), so fall back to scanning the owner's uploads before
-%% rejecting. Returns the actual index key so removal touches the right
-%% entry even when the request used an alias.
-find_owned_claim(ClaimID, Uploads, Opts) ->
-    case hb_maps:get(ClaimID, Uploads, undefined, Opts) of
-        undefined -> find_owned_claim_by_alias(ClaimID, maps:to_list(Uploads), Opts);
-        Claim -> {ok, {ClaimID, Claim}}
-    end.
-
-find_owned_claim_by_alias(_ClaimID, [], _Opts) ->
-    {error,
-        #{
-            <<"status">> => 403,
-            <<"body">> => <<"Upload is owned by another identity.">>
-        }
-    };
-find_owned_claim_by_alias(ClaimID, [{Key, Claim} | Rest], Opts) ->
-    case lists:member(ClaimID, [upload_id(Claim, Opts), media_id(Claim, Opts)]) of
-        true -> {ok, {Key, Claim}};
-        false -> find_owned_claim_by_alias(ClaimID, Rest, Opts)
-    end.
-
-upload_id(Claim, Opts) ->
-    case first_field([
-        <<"id">>,
-        <<"immutable_id">>,
-        <<"immutable-id">>,
-        <<"immutableId">>,
-        <<"upload_id">>,
-        <<"upload-id">>,
-        <<"uploadId">>
-    ], Claim, Opts) of
-        not_found ->
-            Hyperbeam = hb_maps:get(<<"hyperbeam">>, Claim, #{}, Opts),
-            NestedID = case is_map(Hyperbeam) of
-                true ->
-                    case first_field([
-                        <<"upload_id">>,
-                        <<"upload-id">>,
-                        <<"uploadId">>,
-                        <<"immutable_id">>,
-                        <<"immutable-id">>,
-                        <<"id">>
-                    ], Hyperbeam, Opts) of
-                        not_found -> <<>>;
-                        FoundNestedID -> hb_util:bin(FoundNestedID)
-                    end;
-                false ->
-                    <<>>
-            end,
-            case NestedID of
-                <<>> ->
-                    case first_field([<<"claim_id">>], Claim, Opts) of
-                        not_found -> <<>>;
-                        ClaimID -> hb_util:bin(ClaimID)
-                    end;
-                _ -> NestedID
-            end;
-        UploadID ->
-            hb_util:bin(UploadID)
-    end.
-
-media_id(Claim, Opts) ->
-    Hyperbeam = hb_maps:get(<<"hyperbeam">>, Claim, #{}, Opts),
-    NestedID = case is_map(Hyperbeam) of
-        true ->
-            case first_field([
-                <<"media_id">>,
-                <<"media-id">>,
-                <<"mediaId">>,
-                <<"upload_id">>,
-                <<"upload-id">>,
-                <<"uploadId">>
-            ], Hyperbeam, Opts) of
-                not_found -> <<>>;
-                FoundNestedID -> hb_util:bin(FoundNestedID)
-            end;
-        false ->
-            <<>>
-    end,
-    case NestedID of
-        <<>> ->
-            Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
-            Source = case is_map(Value) of
-                true -> hb_maps:get(<<"source">>, Value, #{}, Opts);
-                false -> #{}
-            end,
-            case is_map(Source) of
-                true ->
-                    case first_field([<<"sd_hash">>, <<"sd-hash">>, <<"sdHash">>], Source, Opts) of
-                        not_found -> upload_id(Claim, Opts);
-                        SourceID -> hb_util:bin(SourceID)
-                    end;
-                false ->
-                    upload_id(Claim, Opts)
-            end;
-        _ ->
-            NestedID
-    end.
-
-sanitize_indexed_claim(Claim, Opts) when is_map(Claim) ->
-    maps:fold(
-        fun(Key, Value, Acc) ->
-            case private_index_key(Key) of
-                true -> Acc;
-                false -> Acc#{ Key => sanitize_indexed_claim(Value, Opts) }
-            end
-        end,
-        #{},
-        Claim
-    );
-sanitize_indexed_claim(Values, Opts) when is_list(Values) ->
-    [sanitize_indexed_claim(Value, Opts) || Value <- Values];
-sanitize_indexed_claim(Value, _Opts) ->
-    Value.
-
-private_index_key(Key) ->
-    Normalized = binary:replace(lower_key(Key), <<"_">>, <<"-">>, [global]),
-    lists:member(
-        Normalized,
+payload_bytes(Payload, Req, Opts) ->
+    case first_field(
         [
-            <<"authorization">>,
-            <<"cookie">>,
-            <<"set-cookie">>,
-            <<"auth-token">>,
-            <<"auth-token">>,
-            <<"odysee-auth-token">>,
-            <<"x-odysee-auth-token">>,
-            <<"x-lbry-auth-token">>
+            <<"content-base64">>,
+            <<"content_base64">>,
+            <<"data-base64">>,
+            <<"data_base64">>
+        ],
+        Payload,
+        Opts
+    ) of
+        not_found ->
+            case hb_maps:get(<<"body">>, Req, not_found, Opts) of
+                Body when is_binary(Body) -> {ok, Body};
+                _ -> {error, upload_content_not_found}
+            end;
+        Encoded ->
+            try {ok, base64:decode(Encoded)}
+            catch _:_ -> {error, invalid_upload_content_base64}
+            end
+    end.
+
+raw_body(Req, Opts) ->
+    case hb_maps:get(<<"body">>, Req, not_found, Opts) of
+        Body when is_binary(Body) -> {ok, Body};
+        _ -> {error, upload_content_not_found}
+    end.
+
+decode_params64(Encoded) ->
+    try {ok, hb_json:decode(hb_util:decode(Encoded))}
+    catch _:_ -> {error, invalid_upload_params64}
+    end.
+
+enforce_size(Bytes, Base, Req, Opts) ->
+    Max = integer_param(Base, Req, <<"max-bytes">>, upload_max_bytes(Opts), Opts),
+    case byte_size(Bytes) =< Max of
+        true -> ok;
+        false -> {error, #{
+            <<"status">> => 413,
+            <<"body">> => <<"Upload exceeds configured maximum size.">>,
+            <<"max-bytes">> => Max,
+            <<"byte-size">> => byte_size(Bytes)
+        }}
+    end.
+
+upload_max_bytes(Opts) ->
+    hb_opts:get(odysee_upload_max_bytes, ?DEFAULT_MAX_BYTES, Opts).
+
+upload_record(Owner, DataID, Bytes, Payload, Opts) ->
+    Metadata = metadata(Payload, Opts),
+    Name = first_field([<<"name">>, <<"claim-name">>, <<"claim_name">>], Payload, Opts),
+    Title = first_field([<<"title">>], Metadata, Opts),
+    MediaType = media_type(Payload, Opts),
+    Filename = first_field([<<"filename">>, <<"file-name">>, <<"file_name">>], Payload, Opts),
+    ReleaseTime = first_field([<<"release-time">>, <<"release_time">>], Metadata, Opts),
+    RecordFilename = value_or(Filename, value_or(Name, <<"upload">>)),
+    DataKind =
+        case truthy(first_field([<<"chunked-manifest">>, <<"chunked_manifest">>], Payload, Opts)) of
+            true -> <<"chunked-manifest">>;
+            false -> <<"bytes">>
+        end,
+    Size =
+        integer_value(
+            first_field([<<"size">>, <<"file-size">>, <<"file_size">>], Payload, Opts),
+            byte_size(Bytes)
+        ),
+    #{
+        <<"device">> => ?DEVICE,
+        <<"type">> => <<"odysee-upload">>,
+        <<"version">> => <<"1">>,
+        <<"owner">> => Owner,
+        <<"data-id">> => DataID,
+        <<"data-kind">> => DataKind,
+        <<"byte-size">> => Size,
+        <<"content-length">> => Size,
+        <<"content-type">> => value_or(MediaType, <<"application/octet-stream">>),
+        <<"accept-ranges">> => <<"bytes">>,
+        <<"cache-control">> => [<<"store">>, <<"cache">>],
+        <<"filename">> => RecordFilename,
+        <<"created-at">> => integer_to_binary(erlang:system_time(second)),
+        <<"metadata">> => Metadata,
+        <<"claim">> =>
+            claim_summary(
+                Name,
+                Title,
+                Metadata,
+                DataID,
+                Owner,
+                ReleaseTime,
+                MediaType,
+                RecordFilename,
+                Size,
+                Opts
+            )
+    }.
+
+upload_index_record(Owner, DataID, Payload, Opts) ->
+    Metadata = metadata(Payload, Opts),
+    Name = value_or(first_field([<<"name">>, <<"claim-name">>, <<"claim_name">>], Payload, Opts), <<"upload">>),
+    MediaType =
+        value_or(
+            media_type(Payload, Opts),
+            <<"application/octet-stream">>
+        ),
+    Filename = value_or(first_field([<<"filename">>, <<"file-name">>, <<"file_name">>], Payload, Opts), Name),
+    Size = integer_value(first_field([<<"size">>, <<"byte-size">>, <<"byte_size">>], Payload, Opts), 0),
+    Claim =
+        normalize_index_claim(
+            value_or(first_field([<<"claim">>], Payload, Opts), #{}),
+            Owner,
+            DataID,
+            Name,
+            MediaType,
+            Filename,
+            Size,
+            Metadata,
+            Opts
+        ),
+    #{
+        <<"device">> => ?DEVICE,
+        <<"type">> => <<"odysee-upload-index">>,
+        <<"version">> => <<"1">>,
+        <<"owner">> => Owner,
+        <<"data-id">> => DataID,
+        <<"data-kind">> => <<"bytes">>,
+        <<"byte-size">> => Size,
+        <<"content-length">> => Size,
+        <<"content-type">> => MediaType,
+        <<"accept-ranges">> => <<"bytes">>,
+        <<"cache-control">> => [<<"store">>, <<"cache">>],
+        <<"filename">> => Filename,
+        <<"created-at">> => integer_to_binary(erlang:system_time(second)),
+        <<"metadata">> => Metadata,
+        <<"claim">> => Claim
+    }.
+
+metadata(Payload, Opts) ->
+    Source = case first_field([<<"metadata">>, <<"publish">>, <<"publish-payload">>, <<"publish_payload">>], Payload, Opts) of
+        Msg when is_map(Msg) ->
+            Msg;
+        _ ->
+            Payload
+    end,
+    without_control_keys(Source).
+
+media_type(Msg, Opts) ->
+    first_field([<<"content_type">>, <<"media_type">>, <<"content-type">>, <<"media-type">>], Msg, Opts).
+
+without_control_keys(Msg) ->
+    Control = control_keys(),
+    maps:filter(
+        fun(Key, _Value) -> not lists:member(lower_key(Key), Control) end,
+        Msg
+    ).
+
+claim_summary(Name0, Title0, Metadata, DataID, Owner, ReleaseTime, MediaType0, Filename0, Size, Opts) ->
+    Name = value_or(Name0, <<"upload">>),
+    Title = value_or(Title0, Name),
+    Filename = value_or(Filename0, Name),
+    Timestamp = release_time_or_now(ReleaseTime),
+    ClaimURI = claim_uri(Name, Metadata, Opts),
+    SigningChannel = signing_channel(Metadata, Opts),
+    Tags = list_value(first_field([<<"tags">>], Metadata, Opts)),
+    Languages = list_value(first_field([<<"languages">>], Metadata, Opts)),
+    Description = value_or(first_field([<<"description">>], Metadata, Opts), <<>>),
+    Thumbnail = first_field([<<"thumbnail-url">>, <<"thumbnail_url">>, <<"thumbnail">>], Metadata, Opts),
+    MediaType =
+        value_or(
+            media_type(Metadata, Opts),
+            value_or(MediaType0, <<"application/octet-stream">>)
+        ),
+    Claim0 = #{
+        <<"claim_id">> => DataID,
+        <<"claim-id">> => DataID,
+        <<"name">> => Name,
+        <<"permanent_url">> => ClaimURI,
+        <<"canonical_url">> => ClaimURI,
+        <<"short_url">> => ClaimURI,
+        <<"type">> => <<"claim">>,
+        <<"value_type">> => <<"stream">>,
+        <<"confirmations">> => 0,
+        <<"is_channel_signature_valid">> => SigningChannel =/= not_found,
+        <<"txid">> => DataID,
+        <<"nout">> => 0,
+        <<"timestamp">> => Timestamp,
+        <<"meta">> => #{
+            <<"creation_timestamp">> => Timestamp,
+            <<"effective_amount">> => <<"0">>
+        },
+        <<"value">> => #{
+            <<"title">> => Title,
+            <<"description">> => Description,
+            <<"thumbnail">> => thumbnail_value(Thumbnail),
+            <<"tags">> => Tags,
+            <<"languages">> => Languages,
+            <<"release_time">> => Timestamp,
+            <<"source">> => #{
+                <<"media_type">> => MediaType,
+                <<"media-type">> => MediaType,
+                <<"name">> => Filename,
+                <<"size">> => integer_to_binary(Size),
+                <<"source">> => DataID,
+                <<"sd_hash">> => DataID
+            }
+        },
+        <<"hyperbeam">> => #{
+            <<"owner">> => Owner,
+            <<"data-id">> => DataID,
+            <<"device">> => ?DEVICE
+        }
+    },
+    put_optional({<<"signing_channel">>, SigningChannel}, Claim0).
+
+normalize_index_claim(Claim0, Owner, DataID, Name, MediaType, Filename, Size, Metadata, Opts) when is_map(Claim0) ->
+    Timestamp = release_time_or_now(first_field([<<"release_time">>, <<"release-time">>], Metadata, Opts)),
+    Value0 = value_or(first_field([<<"value">>], Claim0, Opts), #{}),
+    Source0 = value_or(first_field([<<"source">>], Value0, Opts), #{}),
+    Hyperbeam0 = value_or(first_field([<<"hyperbeam">>], Claim0, Opts), #{}),
+    ClaimName = value_or(first_field([<<"name">>], Claim0, Opts), Name),
+    ClaimURI =
+        value_or(
+            first_field([<<"permanent_url">>, <<"canonical_url">>, <<"short_url">>], Claim0, Opts),
+            claim_uri(ClaimName, Metadata, Opts)
+        ),
+    SigningChannel =
+        value_or(
+            first_field([<<"signing_channel">>, <<"signing-channel">>], Claim0, Opts),
+            signing_channel(Metadata, Opts)
+        ),
+    Value1 =
+        put_optional(
+            {<<"audio">>,
+                value_or(
+                    first_field([<<"audio">>], Value0, Opts),
+                    first_field([<<"audio">>], Metadata, Opts)
+                )},
+            put_optional(
+                {<<"video">>,
+                    value_or(
+                        first_field([<<"video">>], Value0, Opts),
+                        first_field([<<"video">>], Metadata, Opts)
+                    )},
+                Value0
+            )
+        ),
+    Claim1 = Claim0#{
+        <<"claim_id">> => DataID,
+        <<"claim-id">> => DataID,
+        <<"name">> => ClaimName,
+        <<"normalized_name">> => hb_util:to_lower(ClaimName),
+        <<"permanent_url">> => ClaimURI,
+        <<"canonical_url">> => ClaimURI,
+        <<"short_url">> => ClaimURI,
+        <<"type">> => <<"claim">>,
+        <<"value_type">> => <<"stream">>,
+        <<"confirmations">> => 1,
+        <<"is_my_output">> => true,
+        <<"is_channel_signature_valid">> => SigningChannel =/= not_found,
+        <<"txid">> => DataID,
+        <<"nout">> => 0,
+        <<"timestamp">> => Timestamp,
+        <<"streaming_url">> => generic_read_path(DataID),
+        <<"download_url">> => generic_read_path(DataID),
+        <<"hyperbeam">> => Hyperbeam0#{
+            <<"owner">> => Owner,
+            <<"data-id">> => DataID,
+            <<"device">> => ?DEVICE,
+            <<"path">> => generic_read_path(DataID)
+        },
+        <<"value">> => Value1#{
+            <<"title">> =>
+                value_or(first_field([<<"title">>], Value0, Opts), value_or(first_field([<<"title">>], Metadata, Opts), ClaimName)),
+            <<"description">> =>
+                value_or(
+                    first_field([<<"description">>], Value0, Opts),
+                    value_or(first_field([<<"description">>], Metadata, Opts), <<>>)
+                ),
+            <<"thumbnail">> =>
+                thumbnail_value(
+                    value_or(
+                        first_field([<<"thumbnail">>], Value0, Opts),
+                        first_field([<<"thumbnail_url">>, <<"thumbnail">>], Metadata, Opts)
+                    )
+                ),
+            <<"tags">> =>
+                list_value(value_or(first_field([<<"tags">>], Value0, Opts), first_field([<<"tags">>], Metadata, Opts))),
+            <<"languages">> =>
+                list_value(
+                    value_or(first_field([<<"languages">>], Value0, Opts), first_field([<<"languages">>], Metadata, Opts))
+                ),
+            <<"release_time">> => Timestamp,
+            <<"source">> => Source0#{
+                <<"media_type">> => MediaType,
+                <<"media-type">> => MediaType,
+                <<"name">> => Filename,
+                <<"size">> => integer_to_binary(Size),
+                <<"source">> => DataID,
+                <<"sd_hash">> => DataID,
+                <<"url">> => generic_read_path(DataID)
+            }
+        }
+    },
+    put_optional({<<"signing_channel">>, SigningChannel}, Claim1);
+normalize_index_claim(_Claim, Owner, DataID, Name, MediaType, Filename, Size, Metadata, Opts) ->
+    normalize_index_claim(#{}, Owner, DataID, Name, MediaType, Filename, Size, Metadata, Opts).
+
+response(Record, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Record, Opts),
+    Msg = (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"id">> => RecordID,
+        <<"record-id">> => RecordID,
+        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, Opts),
+        <<"media-path">> => generic_read_path(RecordID),
+        <<"read-path">> => generic_read_path(RecordID),
+        <<"url">> => generic_read_path(RecordID),
+        <<"record">> => public_record(Record, Opts),
+        <<"claim">> => Claim,
+        <<"outputs">> => [Claim],
+        <<"result">> => #{ <<"outputs">> => [Claim] }
+    },
+    Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+index_response(Record, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
+    DataID = hb_maps:get(<<"data-id">>, Record, Opts),
+    Msg = (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"id">> => hb_maps:get(<<"record-id">>, Record, Opts),
+        <<"record-id">> => hb_maps:get(<<"record-id">>, Record, Opts),
+        <<"data-id">> => DataID,
+        <<"media-path">> => generic_read_path(DataID),
+        <<"record">> => public_record(Record, Opts),
+        <<"claim">> => Claim,
+        <<"outputs">> => [Claim],
+        <<"result">> => #{ <<"outputs">> => [Claim] }
+    },
+    Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+public_record(Record, Opts) ->
+    hb_maps:without([<<"body">>], Record, Opts).
+
+raw_write_response(ID, Owner) ->
+    ReadPath = <<"/", ID/binary>>,
+    Body = #{
+        <<"id">> => ID,
+        <<"path">> => ID,
+        <<"read_path">> => ReadPath,
+        <<"read-path">> => ReadPath
+    },
+    (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"id">> => ID,
+        <<"path">> => ID,
+        <<"read-path">> => ReadPath,
+        <<"url">> => ReadPath,
+        <<"signers">> => [Owner],
+        <<"body">> => hb_json:encode(Body)
+    }.
+
+enrich_record(RecordID, Record0, Opts) ->
+    case hb_maps:get(<<"type">>, Record0, not_found, Opts) of
+        <<"odysee-upload-index">> ->
+            enrich_index_record(RecordID, Record0, Opts);
+        _ ->
+            enrich_upload_record(RecordID, Record0, Opts)
+    end.
+
+enrich_upload_record(RecordID, Record0, Opts) ->
+    Claim0 = hb_maps:get(<<"claim">>, Record0, #{}, Opts),
+    Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim0, #{}, Opts),
+    Value0 = hb_maps:get(<<"value">>, Claim0, #{}, Opts),
+    Source0 = hb_maps:get(<<"source">>, Value0, #{}, Opts),
+    ReadPath = generic_read_path(RecordID),
+    Claim = Claim0#{
+        <<"claim_id">> => RecordID,
+        <<"claim-id">> => RecordID,
+        <<"txid">> => RecordID,
+        <<"permanent_url">> => <<"lbry://", RecordID/binary>>,
+        <<"canonical_url">> => <<"lbry://", RecordID/binary>>,
+        <<"short_url">> => <<"lbry://", RecordID/binary>>,
+        <<"streaming_url">> => ReadPath,
+        <<"download_url">> => ReadPath,
+        <<"hyperbeam">> => Hyperbeam0#{
+            <<"record-id">> => RecordID,
+            <<"path">> => ReadPath
+        },
+        <<"value">> => Value0#{
+            <<"source">> => Source0#{
+                <<"url">> => ReadPath
+            }
+        }
+    },
+    Record0#{
+        <<"id">> => RecordID,
+        <<"record-id">> => RecordID,
+        <<"claim">> => Claim
+    }.
+
+enrich_index_record(RecordID, Record0, Opts) ->
+    Claim0 = hb_maps:get(<<"claim">>, Record0, #{}, Opts),
+    Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim0, #{}, Opts),
+    DataID = hb_maps:get(<<"data-id">>, Record0, RecordID, Opts),
+    Claim = Claim0#{
+        <<"streaming_url">> => generic_read_path(DataID),
+        <<"download_url">> => generic_read_path(DataID),
+        <<"hyperbeam">> => Hyperbeam0#{
+            <<"record-id">> => RecordID,
+            <<"data-id">> => DataID,
+            <<"device">> => ?DEVICE,
+            <<"path">> => generic_read_path(DataID)
+        }
+    },
+    Record0#{
+        <<"id">> => RecordID,
+        <<"record-id">> => RecordID,
+        <<"claim">> => Claim
+    }.
+
+write_indexes(Record, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+    case {Store, RecordID} of
+        {[], _} -> ok;
+        {_, not_found} -> ok;
+        _ ->
+            Indexes = upload_indexes(Record, Opts),
+            case hb_store:write(Store, maps:from_list([{Path, RecordID} || Path <- Indexes]), Opts) of
+                ok -> write_list_indexes(Store, Record, Opts);
+                Error -> Error
+            end
+    end.
+
+upload_indexes(Record, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+    DataID = hb_maps:get(<<"data-id">>, Record, not_found, Opts),
+    Name = first_field([<<"name">>, <<"claim-name">>, <<"claim_name">>], Claim, Opts),
+    Metadata = hb_maps:get(<<"metadata">>, Record, #{}, Opts),
+    NamedURI =
+        case Name of
+            NameBin when is_binary(NameBin), NameBin =/= <<>> -> claim_uri(NameBin, Metadata, Opts);
+            _ -> not_found
+        end,
+    Values =
+        [
+            {<<"record-id">>, RecordID},
+            {<<"claim-id">>, RecordID},
+            {<<"claim-id">>, DataID},
+            {<<"name">>, Name},
+            {<<"uri">>, NamedURI}
+        ]
+            ++ [{<<"uri">>, URI} || URI <- claim_uris(Claim, Opts)],
+    lists:usort(
+        [
+            index_path(Type, Value)
+        ||
+            {Type, Value} <- Values,
+            is_binary(Value),
+            Value =/= <<>>,
+            Value =/= not_found
         ]
     ).
 
-read_index(Owner, Opts) ->
-    case hb_store:read(hb_opts:get(store, [], Opts), index_path(Owner), Opts) of
-        {ok, Bin} when is_binary(Bin) ->
-            try {ok, maps:merge(default_index(), hb_json:decode(Bin))}
-            catch _:_ -> {ok, default_index()}
-            end;
-        _ ->
-            {ok, default_index()}
-    end.
+claim_uris(Claim, Opts) ->
+    Values =
+        [
+            first_field([<<"canonical_url">>, <<"canonical-url">>], Claim, Opts),
+            first_field([<<"permanent_url">>, <<"permanent-url">>], Claim, Opts),
+            first_field([<<"short_url">>, <<"short-url">>], Claim, Opts)
+        ],
+    [URI || URI <- Values, is_binary(URI), URI =/= <<>>].
 
-write_index(Owner, State, Opts) ->
-    hb_store:write(hb_opts:get(store, [], Opts), #{ index_path(Owner) => hb_json:encode(State) }, Opts).
+index_path(Type, Value) ->
+    <<"odysee/upload/", Type/binary, "/", (hb_util:encode(hb_crypto:sha256(Value)))/binary>>.
 
-index_path(Owner) ->
-    <<"odysee/upload-index/", (owner_key(Owner))/binary, "/state.json">>.
-
-read_global_index(Opts) ->
-    case hb_store:read(hb_opts:get(store, [], Opts), global_index_path(), Opts) of
-        {ok, Bin} when is_binary(Bin) ->
-            try {ok, maps:merge(default_index(), hb_json:decode(Bin))}
-            catch _:_ -> {ok, default_index()}
-            end;
-        _ ->
-            {ok, default_index()}
-    end.
-
-write_global_claim(ClaimID, Claim, Opts) ->
-    maybe
-        {ok, State0} ?= read_global_index(Opts),
-        Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
-        Uploads1 = Uploads0#{ ClaimID => Claim },
-        State1 = State0#{ <<"uploads">> => Uploads1 },
-        ok ?= hb_store:write(hb_opts:get(store, [], Opts), #{ global_index_path() => hb_json:encode(State1) }, Opts),
-        ok ?= hb_store:write(hb_opts:get(store, [], Opts), #{ claim_index_path(ClaimID) => hb_json:encode(Claim) }, Opts),
-        write_channel_claim(channel_id_from_claim(Claim, Opts), ClaimID, Claim, Opts)
-    end.
-
-delete_global_claim(ClaimID, Opts) ->
-    maybe
-        {ok, State0} ?= read_global_index(Opts),
-        Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
-        Existing = hb_maps:get(ClaimID, Uploads0, undefined, Opts),
-        Uploads1 = maps:remove(ClaimID, Uploads0),
-        State1 = State0#{ <<"uploads">> => Uploads1 },
-        ok ?= hb_store:write(hb_opts:get(store, [], Opts), #{ global_index_path() => hb_json:encode(State1) }, Opts),
-        ok ?= hb_store:write(hb_opts:get(store, [], Opts), #{ claim_index_path(ClaimID) => <<>> }, Opts),
-        delete_channel_claim(channel_id_from_claim(Existing, Opts), ClaimID, Opts)
-    end.
-
-global_index_path() ->
-    <<"odysee/upload-index/global/state.json">>.
-
-claim_index_path(ClaimID) ->
-    <<"odysee/upload-index/claims/", (owner_key(ClaimID))/binary, ".json">>.
-
-channel_index_path(ChannelID) ->
-    <<"odysee/upload-index/channels/", (owner_key(ChannelID))/binary, "/state.json">>.
-
-write_channel_claim(undefined, _ClaimID, _Claim, _Opts) ->
-    ok;
-write_channel_claim(<<>>, _ClaimID, _Claim, _Opts) ->
-    ok;
-write_channel_claim(ChannelID, ClaimID, Claim, Opts) ->
-    maybe
-        {ok, State0} ?= read_channel_index(ChannelID, Opts),
-        Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
-        Uploads1 = Uploads0#{ ClaimID => Claim },
-        State1 = State0#{ <<"uploads">> => Uploads1 },
-        hb_store:write(hb_opts:get(store, [], Opts), #{ channel_index_path(ChannelID) => hb_json:encode(State1) }, Opts)
-    end.
-
-delete_channel_claim(undefined, _ClaimID, _Opts) ->
-    ok;
-delete_channel_claim(<<>>, _ClaimID, _Opts) ->
-    ok;
-delete_channel_claim(ChannelID, ClaimID, Opts) ->
-    maybe
-        {ok, State0} ?= read_channel_index(ChannelID, Opts),
-        Uploads0 = hb_maps:get(<<"uploads">>, State0, #{}, Opts),
-        Uploads1 = maps:remove(ClaimID, Uploads0),
-        State1 = State0#{ <<"uploads">> => Uploads1 },
-        hb_store:write(hb_opts:get(store, [], Opts), #{ channel_index_path(ChannelID) => hb_json:encode(State1) }, Opts)
-    end.
-
-index_search_claim(Claim, Opts) ->
-    try
-        case dev_odysee_search:index(#{}, #{ <<"document">> => search_document(Claim, Opts) }, Opts) of
-            {ok, _} -> ok;
-            _ -> ok
-        end
-    catch
-        _:_ -> ok
-    end.
-
-delete_search_claim(ClaimID, Existing, Opts) ->
-    try
-        case dev_odysee_search:delete(#{}, #{ <<"ids">> => search_document_ids(ClaimID, Existing, Opts) }, Opts) of
-            {ok, _} -> ok;
-            _ -> ok
-        end
-    catch
-        _:_ -> ok
-    end.
-
-search_document_ids(ClaimID, Existing, Opts) ->
-    IDs =
-        [ClaimID] ++
-            case Existing of
-                Claim when is_map(Claim) ->
-                    [
-                        hb_maps:get(<<"doc_id">>, Claim, not_found, Opts),
-                        hb_maps:get(<<"doc-id">>, Claim, not_found, Opts),
-                        hb_maps:get(<<"immutable_id">>, Claim, not_found, Opts),
-                        hb_maps:get(<<"immutable-id">>, Claim, not_found, Opts)
-                    ];
-                _ ->
-                    []
-            end,
-    lists:usort([hb_util:bin(ID) || ID <- IDs, is_binary(ID), ID =/= <<>>, ID =/= not_found]).
-
-search_document(Claim, Opts) ->
-    ClaimID = hb_maps:get(<<"claim_id">>, Claim, upload_id(Claim, Opts), Opts),
-    Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
-    Source = map_value(Value, <<"source">>, #{}, Opts),
-    SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
-    Timestamp = upload_timestamp(Claim, Opts),
-    ContentType = map_value(Source, <<"media_type">>, <<>>, Opts),
-    Name = hb_maps:get(<<"name">>, Claim, <<>>, Opts),
-    ClaimType = hb_maps:get(<<"value_type">>, Claim, <<"stream">>, Opts),
-    ThumbnailURL = thumbnail_url(Value, Opts),
-    HasThumbnail = truthy_int(ThumbnailURL =/= <<>>),
-    HasChannel = truthy_int(channel_id_from_claim(Claim, Opts) =/= <<>>),
-    IsChannel = truthy_int(ClaimType =:= <<"channel">>),
-    EffectiveAmount = number_value(hb_maps:get(<<"effective_amount">>, Claim, 0, Opts), 0),
-    CertificateAmount = number_value(map_value(SigningChannel, <<"effective_amount">>, 1, Opts), 1),
-    RecencyRank = recency_rank(Timestamp),
-    Rank = search_rank(#{
-        is_controlling => 0,
-        has_thumbnail => HasThumbnail,
-        effective_amount => EffectiveAmount,
-        certificate_amount => CertificateAmount,
-        view_count => 0,
-        sub_count => 0,
-        claim_count => 0,
-        is_channel => IsChannel,
-        duration => number_value(map_value(Source, <<"duration">>, 0, Opts), 0),
-        recency_rank => RecencyRank
-    }),
-    #{
-        <<"doc_id">> => ClaimID,
-        <<"claim_id">> => ClaimID,
-        <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, Claim, ClaimID, Opts),
-        <<"txid">> => hb_maps:get(<<"txid">>, Claim, ClaimID, Opts),
-        <<"name">> => Name,
-        <<"canonical_url">> => hb_maps:get(<<"canonical_url">>, Claim, <<>>, Opts),
-        <<"permanent_url">> => hb_maps:get(<<"permanent_url">>, Claim, <<>>, Opts),
-        <<"short_url">> => hb_maps:get(<<"short_url">>, Claim, <<>>, Opts),
-        <<"source_name">> => map_value(Source, <<"name">>, <<>>, Opts),
-        <<"searchable_name">> => searchable_name(Name),
-        <<"stripped_name">> => stripped_name(Name),
-        <<"title">> => map_value(Value, <<"title">>, <<>>, Opts),
-        <<"description">> => map_value(Value, <<"description">>, <<>>, Opts),
-        <<"channel_name">> => map_value(SigningChannel, <<"name">>, <<>>, Opts),
-        <<"channel_claim_id">> => channel_id_from_claim(Claim, Opts),
-        <<"bid_state">> => <<"Active">>,
-        <<"claim_type">> => ClaimType,
-        <<"content_type">> => ContentType,
-        <<"media_type">> => media_type(ContentType),
-        <<"tags">> => map_value(Value, <<"tags">>, [], Opts),
-        <<"language">> => first_list_value(map_value(Value, <<"languages">>, [], Opts), <<"">>),
-        <<"nsfw">> => 0,
-        <<"thumbnail_url">> => ThumbnailURL,
-        <<"release_time">> => Timestamp,
-        <<"created_at">> => Timestamp,
-        <<"transaction_time">> => Timestamp,
-        <<"duration">> => map_value(Source, <<"duration">>, 0, Opts),
-        <<"fee">> => map_value(Value, <<"fee">>, 0, Opts),
-        <<"view_count">> => 0,
-        <<"view_cnt">> => 0,
-        <<"sub_cnt">> => 0,
-        <<"claim_count">> => 0,
-        <<"claim_cnt">> => 0,
-        <<"channel_claim_count">> => 0,
-        <<"effective_amount">> => EffectiveAmount,
-        <<"certificate_amount">> => CertificateAmount,
-        <<"is_channel">> => IsChannel,
-        <<"has_thumbnail">> => HasThumbnail,
-        <<"has_channel">> => HasChannel,
-        <<"is_controlling">> => 0,
-        <<"recency_rank">> => RecencyRank,
-        <<"search_rank">> => Rank,
-        <<"source_system">> => <<"hyperbeam-native">>
-    }.
-
-truthy_int(true) -> 1;
-truthy_int(false) -> 0.
-
-number_value(Value, _Default) when is_integer(Value) -> Value;
-number_value(Value, _Default) when is_float(Value) -> Value;
-number_value(Value, Default) when is_binary(Value) ->
-    try binary_to_integer(Value)
-    catch _:_ ->
-        try binary_to_float(Value)
-        catch _:_ -> Default
-        end
-    end;
-number_value(_Value, Default) -> Default.
-
-search_rank(Values) ->
-    IsControlling = maps:get(is_controlling, Values, 0),
-    HasThumbnail = maps:get(has_thumbnail, Values, 0),
-    EffectiveAmount = maps:get(effective_amount, Values, 0),
-    CertificateAmount = maps:get(certificate_amount, Values, 1),
-    ViewCount = maps:get(view_count, Values, 0),
-    SubCount = maps:get(sub_count, Values, 0),
-    ClaimCount = maps:get(claim_count, Values, 0),
-    IsChannel = maps:get(is_channel, Values, 0),
-    Duration = maps:get(duration, Values, 0),
-    RecencyRank = maps:get(recency_rank, Values, 0),
-    SupportRank =
-        math:log(max(1, min(EffectiveAmount, 100000000)) * 21 + 1) * 2 +
-        math:log(max(1, min(CertificateAmount, 100000000)) * 21 + 1) * 2,
-    Rank =
-        RecencyRank * 20 +
-        IsControlling * 25 +
-        HasThumbnail * 20 +
-        SupportRank +
-        math:log(max(1, ViewCount) + 1) * 2 +
-        math:log(max(1, SubCount) + 1) * 3 +
-        channel_claim_count_boost(IsChannel, ClaimCount),
-    case Duration > 0 andalso Duration < 120 of
-        true -> Rank * 0.5;
-        false -> Rank
-    end.
-
-channel_claim_count_boost(1, ClaimCount) when ClaimCount > 10 -> 10;
-channel_claim_count_boost(_IsChannel, _ClaimCount) -> 0.
-
-recency_rank(Timestamp) ->
-    Now = erlang:system_time(second),
-    AgeDays = max(0, (Now - number_value(Timestamp, 0)) div 86400),
-    if
-        AgeDays =< 7 -> 60;
-        AgeDays =< 30 -> 45;
-        AgeDays =< 90 -> 30;
-        AgeDays =< 365 -> 18;
-        AgeDays =< 3650 -> max(0, 12 - ((AgeDays - 365) / 365));
-        true -> 0
-    end.
-
-map_value(Map, Key, Default, Opts) when is_map(Map) ->
-    hb_maps:get(Key, Map, Default, Opts);
-map_value(_Map, _Key, Default, _Opts) ->
-    Default.
-
-thumbnail_url(Value, Opts) ->
-    Thumbnail = map_value(Value, <<"thumbnail">>, #{}, Opts),
-    map_value(Thumbnail, <<"url">>, <<>>, Opts).
-
-media_type(ContentType) ->
-    case binary:split(hb_util:to_lower(hb_util:bin(ContentType)), <<"/">>) of
-        [<<"video">>, _] -> <<"video">>;
-        [<<"audio">>, _] -> <<"audio">>;
-        [<<"image">>, _] -> <<"image">>;
-        _ -> <<>>
-    end.
-
-first_list_value([Value | _], _Default) ->
-    Value;
-first_list_value(_Value, Default) ->
-    Default.
-
-searchable_name(Name) ->
-    normalize_search_text(Name).
-
-stripped_name(Name0) ->
-    Name1 = binary:replace(hb_util:bin(Name0), <<"-">>, <<>>, [global]),
-    Name2 = binary:replace(Name1, <<"_">>, <<>>, [global]),
-    Name3 = binary:replace(Name2, <<"The">>, <<>>, [global]),
-    binary:replace(Name3, <<"the">>, <<>>, [global]).
-
-normalize_search_text(Name0) ->
+write_list_indexes(Store, Record, Opts) ->
+    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+    Paths = upload_list_indexes(Record, Opts),
     lists:foldl(
-        fun(Sep, Name) -> binary:replace(Name, Sep, <<" ">>, [global]) end,
-        hb_util:bin(Name0),
-        [<<".">>, <<"_">>, <<"-">>, <<"(">>, <<")">>, <<"[">>, <<"]">>]
-    ).
-
-read_channel_index(ChannelID, Opts) ->
-    case hb_store:read(hb_opts:get(store, [], Opts), channel_index_path(ChannelID), Opts) of
-        {ok, Bin} when is_binary(Bin) ->
-            try {ok, maps:merge(default_index(), hb_json:decode(Bin))}
-            catch _:_ -> {ok, default_index()}
-            end;
-        _ ->
-            {ok, default_index()}
-    end.
-
-indexed_uploads(Filters, Opts) ->
-    ClaimIDs = claim_ids_from_filters(Filters, Opts),
-    ChannelIDs = channel_ids_from_filters(Filters, Opts),
-    case {ClaimIDs, ChannelIDs} of
-        {[_ | _], _} ->
-            {ok, sort_uploads(claim_uploads(ClaimIDs, Opts), Opts)};
-        {[], []} ->
-            maybe
-                {ok, State} ?= read_global_index(Opts),
-                Uploads = maps:values(hb_maps:get(<<"uploads">>, State, #{}, Opts)),
-                {ok, sort_uploads(Uploads, Opts)}
-            end;
-        {[], _} ->
-            {ok, sort_uploads(channel_uploads(ChannelIDs, Opts), Opts)}
-    end.
-
-claim_uploads(ClaimIDs, Opts) ->
-    [
-        Claim
-     || ClaimID <- ClaimIDs,
-        {ok, Claim} <- [read_claim_index(ClaimID, Opts)]
-    ].
-
-read_claim_index(ClaimID, Opts) ->
-    case hb_store:read(hb_opts:get(store, [], Opts), claim_index_path(ClaimID), Opts) of
-        {ok, Bin} when is_binary(Bin), Bin =/= <<>> ->
-            try {ok, hb_json:decode(Bin)}
-            catch _:_ -> not_found
-            end;
-        _ ->
-            not_found
-    end.
-
-channel_uploads(ChannelIDs, Opts) ->
-    UploadsByID =
-        lists:foldl(
-            fun(ChannelID, Acc) ->
-                case read_channel_index(ChannelID, Opts) of
-                    {ok, State} -> maps:merge(Acc, hb_maps:get(<<"uploads">>, State, #{}, Opts));
-                    _ -> Acc
-                end
-            end,
-            #{},
-            ChannelIDs
-        ),
-    maps:values(UploadsByID).
-
-sort_uploads(Uploads, Opts) ->
-    lists:sort(
-        fun(Left, Right) ->
-            upload_timestamp(Left, Opts) >= upload_timestamp(Right, Opts)
+        fun(Path, ok) -> append_list_index(Store, Path, RecordID, Opts);
+           (_Path, Error) -> Error
         end,
-        [normalize_indexed_upload(Upload, Opts) || Upload <- Uploads]
+        ok,
+        Paths
     ).
 
-normalize_indexed_upload(Claim, Opts) when is_map(Claim) ->
-    case upload_id(Claim, Opts) of
-        <<>> -> Claim;
-        UploadID ->
-            Hyperbeam0 = hb_maps:get(<<"hyperbeam">>, Claim, #{}, Opts),
-            Hyperbeam1 =
-                case is_map(Hyperbeam0) of
-                    true -> Hyperbeam0#{ <<"upload_id">> => UploadID };
-                    false -> #{ <<"upload_id">> => UploadID }
-                end,
-            Claim#{
-                <<"claim_id">> => hb_maps:get(<<"claim_id">>, Claim, UploadID, Opts),
-                <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, Claim, UploadID, Opts),
-                <<"hyperbeam">> => Hyperbeam1
-            }
+upload_list_indexes(Record, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
+    Owner = hb_maps:get(<<"owner">>, Record, not_found, Opts),
+    SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
+    ChannelID = first_field([<<"claim_id">>, <<"claim-id">>, <<"id">>], SigningChannel, Opts),
+    Values = [
+        {<<"all">>, <<"all">>},
+        {<<"owner">>, Owner},
+        {<<"channel">>, ChannelID}
+    ],
+    lists:usort(
+        [
+            list_index_path(Type, Value)
+        ||
+            {Type, Value} <- Values,
+            is_binary(Value),
+            Value =/= <<>>,
+            Value =/= not_found
+        ]
+    ).
+
+append_list_index(Store, Path, RecordID, Opts) ->
+    Existing = read_list_index(Store, Path, Opts),
+    Updated = dedupe_binaries([RecordID | Existing]),
+    hb_store:write(Store, #{ Path => hb_json:encode(Updated) }, Opts).
+
+read_list_index(Store, Path, Opts) ->
+    case hb_store:read(Store, Path, maps:without([<<"store">>, store], Opts)) of
+        {ok, Raw} -> decode_list_index(Raw);
+        Raw when is_binary(Raw) -> decode_list_index(Raw);
+        _ -> []
+    end.
+
+decode_list_index(Raw) when is_binary(Raw) ->
+    try hb_json:decode(Raw) of
+        IDs when is_list(IDs) -> [ID || ID <- IDs, is_binary(ID), ID =/= <<>>];
+        #{ <<"ids">> := IDs } when is_list(IDs) -> [ID || ID <- IDs, is_binary(ID), ID =/= <<>>];
+        _ -> []
+    catch _:_ ->
+        []
     end;
-normalize_indexed_upload(Claim, _Opts) ->
-    Claim.
-
-upload_timestamp(Claim, Opts) ->
-    case hb_maps:get(<<"timestamp">>, Claim, 0, Opts) of
-        Value when is_integer(Value) -> Value;
-        Value when is_binary(Value) ->
-            try binary_to_integer(Value)
-            catch _:_ -> 0
-            end;
-        _ -> 0
-    end.
-
-optional_json_body(Req, Opts) ->
-    case request_json_body_from_payload(Req, Opts) of
-        {ok, Body} -> {ok, Body};
-        _ -> {ok, #{}}
-    end.
-
-list_filters(Req, Opts) ->
-    maybe
-        {ok, BodyFilters} ?= optional_json_body(Req, Opts),
-        RequestChannelIDs = channel_ids_from_request(Req, Opts),
-        BodyChannelIDs = channel_ids_from_filters(BodyFilters, Opts),
-        RequestClaimIDs = claim_ids_from_request(Req, Opts),
-        BodyClaimIDs = claim_ids_from_filters(BodyFilters, Opts),
-        ChannelIDs = lists:usort(RequestChannelIDs ++ BodyChannelIDs),
-        ClaimIDs = lists:usort(RequestClaimIDs ++ BodyClaimIDs),
-        FiltersWithClaims =
-            case ClaimIDs of
-                [] -> BodyFilters;
-                _ -> BodyFilters#{ <<"claim_ids">> => ClaimIDs }
-            end,
-        case ChannelIDs of
-            [] -> {ok, FiltersWithClaims};
-            _ -> {ok, FiltersWithClaims#{ <<"channel_ids">> => ChannelIDs }}
-        end
-    end.
-
-claim_ids_from_request(Req, Opts) ->
-    case first_field(
-        [
-            <<"x-odysee-claim-ids">>,
-            <<"x-odysee-claim-id">>,
-            <<"claim-ids">>,
-            <<"claim-id">>,
-            <<"claim_ids">>,
-            <<"claim_id">>
-        ],
-        Req,
-        Opts
-    ) of
-        not_found -> [];
-        Value -> normalize_id_list(Value)
-    end.
-
-claim_ids_from_filters(Filters, Opts) ->
-    lists:usort(
-        normalize_id_list(hb_maps:get(<<"claim_ids">>, Filters, [], Opts)) ++
-            normalize_id_list(hb_maps:get(<<"claim_id">>, Filters, [], Opts))
-    ).
-
-channel_ids_from_request(Req, Opts) ->
-    case first_field(
-        [
-            <<"x-odysee-channel-ids">>,
-            <<"x-odysee-channel-id">>,
-            <<"channel-ids">>,
-            <<"channel-id">>,
-            <<"channel_ids">>,
-            <<"channel_id">>
-        ],
-        Req,
-        Opts
-    ) of
-        not_found -> [];
-        Value -> normalize_id_list(Value)
-    end.
-
-channel_ids_from_filters(Filters, Opts) ->
-    lists:usort(
-        normalize_id_list(hb_maps:get(<<"channel_ids">>, Filters, [], Opts)) ++
-            normalize_id_list(hb_maps:get(<<"channel_id">>, Filters, [], Opts))
-    ).
-
-normalize_id_list(Value) when is_list(Value) ->
-    lists:append([normalize_id_list(Item) || Item <- Value]);
-normalize_id_list(Value) when is_binary(Value), Value =/= <<>> ->
-    [
-        string:trim(Part)
-     || Part <- binary:split(Value, <<",">>, [global]),
-        string:trim(Part) =/= <<>>
-    ];
-normalize_id_list(_) ->
+decode_list_index(_Raw) ->
     [].
 
-channel_id_from_claim(Claim, Opts) when is_map(Claim) ->
-    case hb_maps:get(<<"channel_id">>, Claim, <<>>, Opts) of
-        <<>> ->
-            case hb_maps:get(<<"channel_claim_id">>, Claim, <<>>, Opts) of
-                <<>> ->
-                    Channel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
-                    hb_maps:get(<<"claim_id">>, Channel, <<>>, Opts);
-                ChannelID ->
-                    ChannelID
+list_index_path(Type, Value) ->
+    <<"odysee/upload/list/", Type/binary, "/", (hb_util:encode(hb_crypto:sha256(Value)))/binary>>.
+
+upload_list_ids(Params, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] ->
+            [];
+        _ ->
+            ChannelIDs =
+                list_value(
+                    first_field(
+                        [
+                            <<"channel_ids">>,
+                            <<"channel-ids">>,
+                            <<"channel_id">>,
+                            <<"channel-id">>
+                        ],
+                        Params,
+                        Opts
+                    )
+                ),
+            Owners =
+                list_value(
+                    first_field(
+                        [<<"owner">>, <<"owners">>, <<"hyperbeam-owner">>, <<"hyperbeam_owner">>],
+                        Params,
+                        Opts
+                    )
+                ),
+            Paths =
+                case {ChannelIDs, Owners} of
+                    {[_ | _], _} -> [list_index_path(<<"channel">>, ID) || ID <- ChannelIDs, is_binary(ID)];
+                    {_, [_ | _]} -> [list_index_path(<<"owner">>, Owner) || Owner <- Owners, is_binary(Owner)];
+                    _ -> [list_index_path(<<"all">>, <<"all">>)]
+                end,
+            dedupe_binaries(lists:flatmap(fun(Path) -> read_list_index(Store, Path, Opts) end, Paths))
+    end.
+
+upload_claims_from_ids(IDs, Opts) ->
+    lists:filtermap(
+        fun(ID) ->
+            case hb_cache:read(ID, Opts) of
+                {ok, Record0} when is_map(Record0) ->
+                    Record = enrich_record(ID, hb_cache:ensure_all_loaded(Record0, Opts), Opts),
+                    case hb_maps:get(<<"claim">>, Record, not_found, Opts) of
+                        Claim when is_map(Claim) -> {true, Claim};
+                        _ -> false
+                    end;
+                _ -> false
+            end
+        end,
+        IDs
+    ).
+
+filter_claims(Claims, Params, Opts) ->
+    lists:filter(fun(Claim) -> claim_matches(Claim, Params, Opts) end, Claims).
+
+claim_matches(Claim, Params, Opts) ->
+    claim_type_matches(Claim, Params, Opts)
+        andalso claim_ids_match(Claim, Params, Opts)
+        andalso name_matches(Claim, Params, Opts)
+        andalso channel_matches(Claim, Params, Opts)
+        andalso tags_match(Claim, Params, Opts).
+
+claim_type_matches(Claim, Params, Opts) ->
+    Types = list_value(first_field([<<"claim_type">>, <<"claim-type">>, <<"type">>], Params, Opts)),
+    Types =:= []
+        orelse lists:member(hb_maps:get(<<"value_type">>, Claim, not_found, Opts), Types)
+        orelse lists:member(hb_maps:get(<<"value-type">>, Claim, not_found, Opts), Types).
+
+claim_ids_match(Claim, Params, Opts) ->
+    IDs =
+        list_value(
+            first_field(
+                [<<"claim_ids">>, <<"claim-ids">>, <<"claim_id">>, <<"claim-id">>, <<"txid">>],
+                Params,
+                Opts
+            )
+        ),
+    IDs =:= []
+        orelse lists:any(
+            fun(ID) ->
+                ID =:= hb_maps:get(<<"claim_id">>, Claim, not_found, Opts)
+                    orelse ID =:= hb_maps:get(<<"claim-id">>, Claim, not_found, Opts)
+            end,
+            IDs
+        ).
+
+name_matches(Claim, Params, Opts) ->
+    Names = list_value(first_field([<<"name">>, <<"claim-name">>, <<"claim_name">>], Params, Opts)),
+    Names =:= [] orelse lists:member(hb_maps:get(<<"name">>, Claim, not_found, Opts), Names).
+
+channel_matches(Claim, Params, Opts) ->
+    ChannelIDs =
+        list_value(
+            first_field(
+                [<<"channel_ids">>, <<"channel-ids">>, <<"channel_id">>, <<"channel-id">>],
+                Params,
+                Opts
+            )
+        ),
+    SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
+    ChannelID = first_field([<<"claim_id">>, <<"claim-id">>, <<"id">>], SigningChannel, Opts),
+    ChannelIDs =:= [] orelse lists:member(ChannelID, ChannelIDs).
+
+tags_match(Claim, Params, Opts) ->
+    Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
+    Tags = list_value(hb_maps:get(<<"tags">>, Value, [], Opts)),
+    AnyTags = list_value(first_field([<<"any_tags">>, <<"any-tags">>], Params, Opts)),
+    NotTags = list_value(first_field([<<"not_tags">>, <<"not-tags">>], Params, Opts)),
+    (AnyTags =:= [] orelse lists:any(fun(Tag) -> lists:member(Tag, Tags) end, AnyTags))
+        andalso not lists:any(fun(Tag) -> lists:member(Tag, Tags) end, NotTags).
+
+sort_claims(Claims, Params, Opts) ->
+    OrderBy = list_value(first_field([<<"order_by">>, <<"order-by">>], Params, Opts)),
+    case OrderBy =:= [] orelse lists:member(<<"release_time">>, OrderBy) of
+        true ->
+            lists:sort(fun(A, B) -> claim_time(A, Opts) >= claim_time(B, Opts) end, Claims);
+        false ->
+            Claims
+    end.
+
+claim_time(Claim, Opts) ->
+    Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
+    case hb_maps:get(<<"release_time">>, Value, not_found, Opts) of
+        ReleaseInt when is_integer(ReleaseInt) -> ReleaseInt;
+        ReleaseBin when is_binary(ReleaseBin) ->
+            try binary_to_integer(ReleaseBin)
+            catch _:_ -> 0
             end;
-        ChannelID ->
-            ChannelID
-    end;
-channel_id_from_claim(_, _Opts) ->
-    undefined.
+        _ ->
+            case hb_maps:get(<<"timestamp">>, Claim, 0, Opts) of
+                TimestampInt when is_integer(TimestampInt) -> TimestampInt;
+                TimestampBin when is_binary(TimestampBin) ->
+                    try binary_to_integer(TimestampBin)
+                    catch _:_ -> 0
+                    end;
+                _ -> 0
+            end
+    end.
 
-owner_key(Owner) ->
-    hb_util:encode(hb_crypto:sha256(Owner)).
+page_items(Items, Page, PageSize) ->
+    Offset = (Page - 1) * PageSize,
+    case Offset >= length(Items) of
+        true -> [];
+        false -> lists:sublist(lists:nthtail(Offset, Items), PageSize)
+    end.
 
-default_index() ->
-    #{ <<"uploads">> => #{} }.
-
-response(Path, Signers) ->
-    ReadPath = <<"/", Path/binary>>,
-    #{
-        <<"status">> => 200,
-        <<"id">> => Path,
-        <<"path">> => Path,
-        <<"read-path">> => ReadPath,
-        <<"url">> => ReadPath,
-        <<"signers">> => Signers,
-        <<"content-type">> => <<"application/json">>,
-        <<"body">> =>
-            <<"{\"id\":\"", Path/binary, "\",\"read_path\":\"", ReadPath/binary, "\"}">>
-    }.
-
-json_response(Result) ->
-    Body = hb_json:encode(#{ <<"result">> => Result }),
-    #{
+list_response(Items, Total, Page, PageSize) ->
+    TotalPages = max(1, ceil_div(Total, PageSize)),
+    Result = #{
+        <<"items">> => Items,
+        <<"page">> => Page,
+        <<"page_size">> => PageSize,
+        <<"total_items">> => Total,
+        <<"total_pages">> => TotalPages
+    },
+    Msg = (cors_headers())#{
+        <<"device">> => ?DEVICE,
         <<"status">> => 200,
         <<"content-type">> => <<"application/json">>,
         <<"result">> => Result,
-        <<"body">> => Body
+        <<"items">> => Items,
+        <<"page">> => Page,
+        <<"page_size">> => PageSize,
+        <<"total_items">> => Total,
+        <<"total_pages">> => TotalPages
+    },
+    Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+ceil_div(0, _Denom) ->
+    0;
+ceil_div(Value, Denom) ->
+    (Value + Denom - 1) div Denom.
+
+dedupe_binaries(Values) ->
+    {Items, _Seen} =
+        lists:foldl(
+            fun(Value, {Acc, Seen}) ->
+                case is_binary(Value) andalso Value =/= <<>> andalso not lists:member(Value, Seen) of
+                    true -> {[Value | Acc], [Value | Seen]};
+                    false -> {Acc, Seen}
+                end
+            end,
+            {[], []},
+            Values
+        ),
+    lists:reverse(Items).
+
+read_record(Base, Req, Opts) ->
+    maybe
+        {ok, ID} ?= requested_id(Base, Req, Opts),
+        {ok, Msg} ?= hb_cache:read(ID, Opts),
+        Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
+        case Loaded of
+            #{ <<"data-id">> := _ } -> {ok, enrich_record(ID, Loaded, Opts)};
+            _ -> {error, invalid_upload_record}
+        end
+    end.
+
+resolve_record(Base, Req, Opts) ->
+    case read_record(Base, Req, Opts) of
+        {ok, Record} ->
+            {ok, Record};
+        _ ->
+            maybe
+                {ok, ID} ?= requested_id(Base, Req, Opts),
+                {ok, RecordID} ?= indexed_record_id(ID, Opts),
+                {ok, Msg} ?= hb_cache:read(RecordID, Opts),
+                Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
+                case Loaded of
+                    #{ <<"data-id">> := _ } -> {ok, enrich_record(RecordID, Loaded, Opts)};
+                    _ -> {error, invalid_upload_record}
+                end
+            end
+    end.
+
+indexed_record_id(ID, Opts) ->
+    Store = hb_opts:get(store, no_viable_store, Opts),
+    case Store of
+        no_viable_store ->
+            {error, upload_record_not_found};
+        _ ->
+            first_index_value(
+                Store,
+                [index_path(<<"record-id">>, ID), index_path(<<"claim-id">>, ID)],
+                Opts
+            )
+    end.
+
+first_index_value(_Store, [], _Opts) ->
+    {error, upload_record_not_found};
+first_index_value(Store, [Path | Rest], Opts) ->
+    case hb_store:read(Store, Path, maps:without([<<"store">>, store], Opts)) of
+        {ok, RecordID} when is_binary(RecordID), RecordID =/= <<>> -> {ok, RecordID};
+        RecordID when is_binary(RecordID), RecordID =/= <<>> -> {ok, RecordID};
+        _ -> first_index_value(Store, Rest, Opts)
+    end.
+
+require_record_owner(Owner, Record, Opts) ->
+    case hb_maps:get(<<"owner">>, Record, not_found, Opts) of
+        Owner ->
+            ok;
+        _ ->
+            {error, #{
+                <<"status">> => 403,
+                <<"body">> => <<"Record is owned by another identity.">>
+            }}
+    end.
+
+update_metadata(OldRecord, Payload, Opts) ->
+    OldMetadata = strip_commitments(map_or_empty(hb_maps:get(<<"metadata">>, OldRecord, #{}, Opts))),
+    NewMetadata =
+        case first_field([<<"metadata">>, <<"publish">>, <<"publish-payload">>, <<"publish_payload">>], Payload, Opts) of
+            Msg when is_map(Msg) -> without_control_keys(hb_cache:ensure_all_loaded(Msg, Opts));
+            _ -> #{}
+        end,
+    maps:merge(OldMetadata, NewMetadata).
+
+strip_commitments(Map) when is_map(Map) ->
+    maps:map(
+        fun(_Key, Value) -> strip_commitments(Value) end,
+        maps:without([<<"commitments">>, <<"priv">>], Map)
+    );
+strip_commitments(List) when is_list(List) ->
+    [strip_commitments(Value) || Value <- List];
+strip_commitments(Value) ->
+    Value.
+
+rebuild_index_record(OldRecord, Metadata, Opts) ->
+    Claim0 = strip_commitments(map_or_empty(hb_maps:get(<<"claim">>, OldRecord, #{}, Opts))),
+    BaseClaim = maps:without([<<"value">>], Claim0),
+    Owner = hb_maps:get(<<"owner">>, OldRecord, not_found, Opts),
+    DataID = hb_maps:get(<<"data-id">>, OldRecord, not_found, Opts),
+    Name = value_or(first_field([<<"name">>], Claim0, Opts), <<"upload">>),
+    MediaType =
+        value_or(
+            hb_maps:get(<<"content-type">>, OldRecord, not_found, Opts),
+            <<"application/octet-stream">>
+        ),
+    Filename = value_or(hb_maps:get(<<"filename">>, OldRecord, not_found, Opts), Name),
+    Size = integer_value(hb_maps:get(<<"byte-size">>, OldRecord, 0, Opts), 0),
+    Claim = normalize_index_claim(BaseClaim, Owner, DataID, Name, MediaType, Filename, Size, Metadata, Opts),
+    maps:without(
+        [<<"id">>, <<"record-id">>, <<"commitments">>, <<"priv">>],
+        OldRecord#{
+            <<"metadata">> => Metadata,
+            <<"claim">> => Claim,
+            <<"updated-at">> => integer_to_binary(erlang:system_time(second))
+        }
+    ).
+
+remove_from_list_indexes(_Record, not_found, _Opts) ->
+    ok;
+remove_from_list_indexes(Record, RecordID, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] ->
+            ok;
+        _ ->
+            lists:foldl(
+                fun(Path, ok) ->
+                    Existing = read_list_index(Store, Path, Opts),
+                    Updated = [ID || ID <- Existing, ID =/= RecordID],
+                    hb_store:write(Store, #{ Path => hb_json:encode(Updated) }, Opts);
+                   (_Path, Error) ->
+                    Error
+                end,
+                ok,
+                upload_list_indexes(Record, Opts)
+            )
+    end.
+
+tombstone_indexes(Record, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] ->
+            ok;
+        _ ->
+            case upload_indexes(Record, Opts) of
+                [] -> ok;
+                Paths -> hb_store:write(Store, maps:from_list([{Path, <<>>} || Path <- Paths]), Opts)
+            end
+    end.
+
+delete_response(RecordID, Record, Opts) ->
+    Msg = (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"id">> => RecordID,
+        <<"record-id">> => RecordID,
+        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, not_found, Opts),
+        <<"deleted">> => true
+    },
+    Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+record_media_bytes(Record, Opts) ->
+    case hb_maps:get(<<"body">>, Record, not_found, Opts) of
+        Body when is_binary(Body) ->
+            {ok, Body};
+        _ ->
+            maybe
+                {ok, DataID} ?= field(<<"data-id">>, Record, Opts),
+                {ok, Bytes} ?= hb_cache:read(DataID, Opts),
+                media_bytes(Record, Bytes, Opts)
+            end
+    end.
+
+requested_id(Base, Req, Opts) ->
+    case first_found(
+        [
+            {Req, <<"id">>},
+            {Req, <<"record-id">>},
+            {Req, <<"record_id">>},
+            {Req, <<"claim-id">>},
+            {Req, <<"claim_id">>},
+            {Base, <<"id">>},
+            {Base, <<"record-id">>},
+            {Base, <<"record_id">>},
+            {Base, <<"claim-id">>},
+            {Base, <<"claim_id">>}
+        ],
+        Opts
+    ) of
+        not_found -> {error, upload_record_id_not_found};
+        ID -> {ok, ID}
+    end.
+
+media_response(Record, Bytes, Req, Opts) ->
+    Headers = media_headers(Record, Bytes, Opts),
+    case method(Req, Opts) of
+        <<"head">> ->
+            Headers#{ <<"body">> => <<>> };
+        _ ->
+            case requested_range(Req, byte_size(Bytes), Opts) of
+                not_found ->
+                    Headers#{ <<"body">> => Bytes };
+                {ok, Start, End} ->
+                    Length = End - Start + 1,
+                    Headers#{
+                        <<"status">> => 206,
+                        <<"content-length">> => Length,
+                        <<"content-range">> => content_range(Start, End, byte_size(Bytes)),
+                        <<"body">> => binary:part(Bytes, Start, Length)
+                    };
+                invalid ->
+                    (cors_headers())#{
+                        <<"status">> => 416,
+                        <<"content-type">> =>
+                            hb_maps:get(<<"content-type">>, Record, <<"application/octet-stream">>, Opts),
+                        <<"content-length">> => 0,
+                        <<"content-range">> => content_range_invalid(byte_size(Bytes)),
+                        <<"body">> => <<>>
+                    }
+            end
+    end.
+
+media_bytes(Record, Bytes, Opts) ->
+    case hb_maps:get(<<"data-kind">>, Record, <<"bytes">>, Opts) of
+        <<"chunked-manifest">> -> chunked_manifest_bytes(Bytes, Opts);
+        _ -> {ok, Bytes}
+    end.
+
+chunked_manifest_bytes(Bytes, Opts) ->
+    maybe
+        {ok, Manifest} ?= decode_manifest(Bytes),
+        true ?= hb_maps:get(<<"type">>, Manifest, not_found, Opts) =:= ?CHUNKED_MANIFEST_KIND,
+        Chunks = hb_maps:get(<<"chunks">>, Manifest, [], Opts),
+        {ok, Parts} ?= read_manifest_chunks(Chunks, Opts, []),
+        {ok, iolist_to_binary(Parts)}
+    else
+        false -> {error, invalid_upload_manifest};
+        Error -> Error
+    end.
+
+decode_manifest(Bytes) ->
+    try hb_json:decode(Bytes) of
+        Manifest when is_map(Manifest) -> {ok, Manifest};
+        _ -> {error, invalid_upload_manifest}
+    catch _:_ ->
+        {error, invalid_upload_manifest}
+    end.
+
+read_manifest_chunks([], _Opts, Acc) ->
+    {ok, lists:reverse(Acc)};
+read_manifest_chunks([Chunk | Rest], Opts, Acc) ->
+    maybe
+        {ok, ID} ?= manifest_chunk_id(Chunk, Opts),
+        {ok, Bytes} ?= hb_cache:read(ID, Opts),
+        read_manifest_chunks(Rest, Opts, [Bytes | Acc])
+    end.
+
+manifest_chunk_id(Chunk, Opts) when is_map(Chunk) ->
+    case first_field([<<"id">>, <<"path">>, <<"chunk-id">>, <<"chunk_id">>], Chunk, Opts) of
+        not_found -> {error, invalid_upload_manifest_chunk};
+        ID -> {ok, ID}
+    end;
+manifest_chunk_id(ID, _Opts) when is_binary(ID) ->
+    {ok, ID};
+manifest_chunk_id(_Chunk, _Opts) ->
+    {error, invalid_upload_manifest_chunk}.
+
+media_headers(Record, Bytes, Opts) ->
+    (cors_headers())#{
+        <<"status">> => 200,
+        <<"content-type">> =>
+            hb_maps:get(<<"content-type">>, Record, <<"application/octet-stream">>, Opts),
+        <<"content-length">> => byte_size(Bytes),
+        <<"accept-ranges">> => <<"bytes">>
     }.
 
-first_field(Keys, Msg, Opts) when is_map(Msg) ->
-    case first_exact_field(Keys, Msg, Opts) of
-        not_found -> first_case_insensitive_field(Keys, hb_maps:to_list(Msg, Opts));
+requested_range(Req, Size, Opts) ->
+    case first_field([<<"range">>], Req, Opts) of
+        not_found -> not_found;
+        Range -> parse_range(hb_util:bin(Range), Size)
+    end.
+
+parse_range(_Range, 0) ->
+    invalid;
+parse_range(<<"bytes=", Descriptor/binary>>, Size) ->
+    parse_range_descriptor(Descriptor, Size);
+parse_range(<<"bytes ", Descriptor/binary>>, Size) ->
+    parse_range_descriptor(Descriptor, Size);
+parse_range(_Range, _Size) ->
+    invalid.
+
+parse_range_descriptor(Descriptor, Size) ->
+    case binary:split(Descriptor, <<",">>) of
+        [Single] -> parse_single_range(string:trim(Single), Size);
+        _ -> invalid
+    end.
+
+parse_single_range(<<"-", SuffixBin/binary>>, Size) ->
+    case parse_non_neg_int(SuffixBin) of
+        {ok, 0} -> invalid;
+        {ok, Suffix} ->
+            Start = max(0, Size - Suffix),
+            {ok, Start, Size - 1};
+        error -> invalid
+    end;
+parse_single_range(Descriptor, Size) ->
+    case binary:split(Descriptor, <<"-">>) of
+        [StartBin, <<>>] ->
+            range_from_start(StartBin, Size);
+        [StartBin, EndBin] ->
+            range_from_start_end(StartBin, EndBin, Size);
+        _ ->
+            invalid
+    end.
+
+range_from_start(StartBin, Size) ->
+    case parse_non_neg_int(StartBin) of
+        {ok, Start} when Start < Size -> {ok, Start, Size - 1};
+        _ -> invalid
+    end.
+
+range_from_start_end(StartBin, EndBin, Size) ->
+    case {parse_non_neg_int(StartBin), parse_non_neg_int(EndBin)} of
+        {{ok, Start}, {ok, End0}} when Start < Size, End0 >= Start ->
+            {ok, Start, min(End0, Size - 1)};
+        _ ->
+            invalid
+    end.
+
+parse_non_neg_int(Bin) ->
+    try
+        Int = binary_to_integer(Bin),
+        case Int >= 0 of
+            true -> {ok, Int};
+            false -> error
+        end
+    catch _:_ ->
+        error
+    end.
+
+content_range(Start, End, Size) ->
+    <<"bytes ", (integer_to_binary(Start))/binary, "-", (integer_to_binary(End))/binary, "/", (integer_to_binary(Size))/binary>>.
+
+content_range_invalid(Size) ->
+    <<"bytes */", (integer_to_binary(Size))/binary>>.
+
+method(Req, Opts) ->
+    hb_util:to_lower(hb_util:bin(hb_maps:get(<<"method">>, Req, <<"GET">>, Opts))).
+
+cors_preflight_response() ->
+    (cors_headers())#{
+        <<"status">> => 204,
+        <<"content-type">> => <<"text/plain">>,
+        <<"content-length">> => 0,
+        <<"body">> => <<>>
+    }.
+
+cors_headers() ->
+    #{
+        <<"access-control-allow-origin">> => <<"*">>,
+        <<"access-control-allow-methods">> => <<"GET,HEAD,POST,OPTIONS">>,
+        <<"access-control-allow-headers">> =>
+            <<"Range,Content-Type,Accept,Authorization,X-Lbry-Auth-Token">>,
+        <<"access-control-expose-headers">> =>
+            <<"Content-Length,Content-Range,Accept-Ranges,Location,Content-Digest">>
+    }.
+
+field(Key, Msg, Opts) ->
+    case hb_maps:get(Key, Msg, not_found, Opts) of
+        not_found -> {error, {missing_upload_field, Key}};
+        Value -> {ok, Value}
+    end.
+
+first_field(Keys, Msg, Opts) ->
+    first_found([{Msg, Key} || Key <- Keys], Opts).
+
+required_first(Keys, Map, Opts) ->
+    case first_field(Keys, Map, Opts) of
+        not_found -> {error, {missing_required_param, hd(Keys)}};
+        <<>> -> {error, {missing_required_param, hd(Keys)}};
+        Value -> {ok, Value}
+    end.
+
+first_found([], _Opts) ->
+    not_found;
+first_found([{Msg, Key} | Rest], Opts) when is_map(Msg) ->
+    case hb_maps:get(Key, Msg, not_found, Opts) of
+        not_found -> first_found(Rest, Opts);
         Value -> Value
     end;
-first_field(_Keys, _Msg, _Opts) ->
-    not_found.
+first_found([_ | Rest], Opts) ->
+    first_found(Rest, Opts).
 
-first_exact_field([], _Msg, _Opts) ->
-    not_found;
-first_exact_field([Key | Rest], Msg, Opts) ->
-    case hb_maps:get(Key, Msg, not_found, Opts) of
-        not_found -> first_exact_field(Rest, Msg, Opts);
-        Value -> Value
+integer_param(Base, Req, Key, Default, Opts) ->
+    case first_found([{Req, Key}, {Base, Key}], Opts) of
+        not_found -> Default;
+        Int when is_integer(Int) -> Int;
+        Bin when is_binary(Bin) ->
+            try binary_to_integer(Bin)
+            catch _:_ -> Default
+            end;
+        _ -> Default
     end.
 
-first_case_insensitive_field(_Keys, []) ->
-    not_found;
-first_case_insensitive_field(Keys, [{Key, Value} | Rest]) ->
-    LowerKeys = [lower_key(K) || K <- Keys],
-    case lists:member(lower_key(Key), LowerKeys) of
-        true -> Value;
-        false -> first_case_insensitive_field(Keys, Rest)
+integer_value(not_found, Default) ->
+    Default;
+integer_value(Int, _Default) when is_integer(Int), Int >= 0 ->
+    Int;
+integer_value(Bin, Default) when is_binary(Bin) ->
+    try
+        Int = binary_to_integer(Bin),
+        case Int >= 0 of
+            true -> Int;
+            false -> Default
+        end
+    catch _:_ ->
+        Default
+    end;
+integer_value(_Value, Default) ->
+    Default.
+
+truthy(true) -> true;
+truthy(<<"true">>) -> true;
+truthy(<<"1">>) -> true;
+truthy(1) -> true;
+truthy(_Value) -> false.
+
+release_time_or_now(not_found) ->
+    erlang:system_time(second);
+release_time_or_now(Int) when is_integer(Int) ->
+    Int;
+release_time_or_now(Bin) when is_binary(Bin) ->
+    try binary_to_integer(Bin)
+    catch _:_ -> erlang:system_time(second)
+    end;
+release_time_or_now(_Value) ->
+    erlang:system_time(second).
+
+thumbnail_value(not_found) ->
+    #{};
+thumbnail_value(#{ <<"url">> := _ } = Thumbnail) ->
+    Thumbnail;
+thumbnail_value(URL) when is_binary(URL) ->
+    #{ <<"url">> => URL };
+thumbnail_value(_Value) ->
+    #{}.
+
+claim_uri(Name, Metadata, Opts) ->
+    case channel_uri(Metadata, Opts) of
+        not_found -> <<"lbry://", Name/binary>>;
+        ChannelURI -> <<ChannelURI/binary, "/", Name/binary>>
     end.
+
+channel_uri(Metadata, Opts) ->
+    Channel = channel_metadata(Metadata, Opts),
+    case first_field([<<"short_url">>, <<"short-url">>, <<"canonical_url">>, <<"canonical-url">>, <<"permanent_url">>, <<"permanent-url">>], Channel, Opts) of
+        <<"lbry://", _/binary>> = URI -> URI;
+        _ ->
+            case first_field([<<"name">>, <<"channel_name">>, <<"channel-name">>], Channel, Opts) of
+                <<"@", _/binary>> = Name -> <<"lbry://", Name/binary>>;
+                _ -> not_found
+            end
+    end.
+
+signing_channel(Metadata, Opts) ->
+    Channel = channel_metadata(Metadata, Opts),
+    case first_field([<<"claim_id">>, <<"claim-id">>, <<"id">>], Channel, Opts) of
+        not_found -> not_found;
+        ClaimID ->
+            #{
+                <<"claim_id">> => ClaimID,
+                <<"name">> => first_field([<<"name">>, <<"channel_name">>, <<"channel-name">>], Channel, Opts),
+                <<"permanent_url">> => first_field([<<"permanent_url">>, <<"permanent-url">>], Channel, Opts),
+                <<"canonical_url">> => first_field([<<"canonical_url">>, <<"canonical-url">>], Channel, Opts),
+                <<"short_url">> => first_field([<<"short_url">>, <<"short-url">>], Channel, Opts),
+                <<"value">> => first_field([<<"value">>], Channel, Opts)
+            }
+    end.
+
+channel_metadata(Metadata, Opts) ->
+    case first_field([<<"channel">>, <<"signing_channel">>, <<"signing-channel">>], Metadata, Opts) of
+        Channel when is_map(Channel) ->
+            Channel;
+        _ ->
+            #{
+                <<"claim_id">> => first_field([<<"channel_id">>, <<"channel-id">>, <<"channel_claim_id">>, <<"channel-claim-id">>], Metadata, Opts),
+                <<"name">> => first_field([<<"channel_name">>, <<"channel-name">>], Metadata, Opts),
+                <<"permanent_url">> => first_field([<<"channel_url">>, <<"channel-url">>], Metadata, Opts)
+            }
+    end.
+
+list_value(not_found) ->
+    [];
+list_value(Value) when is_list(Value) ->
+    Value;
+list_value(Value) when is_binary(Value) ->
+    case binary:split(Value, <<",">>, [global]) of
+        [Value] -> [Value];
+        Parts -> [Part || Part <- Parts, Part =/= <<>>]
+    end;
+list_value(_Value) ->
+    [].
+
+value_or(not_found, Default) ->
+    Default;
+value_or(undefined, Default) ->
+    Default;
+value_or(<<>>, Default) ->
+    Default;
+value_or(null, Default) ->
+    Default;
+value_or(Value, _Default) ->
+    Value.
+
+put_optional({_Key, not_found}, Msg) ->
+    Msg;
+put_optional({_Key, undefined}, Msg) ->
+    Msg;
+put_optional({_Key, <<>>}, Msg) ->
+    Msg;
+put_optional({Key, Value}, Msg) ->
+    Msg#{ Key => Value }.
 
 lower_key(Key) when is_binary(Key) ->
     hb_util:to_lower(Key);
 lower_key(Key) ->
     hb_util:to_lower(hb_ao:normalize_key(Key)).
 
-upload_auth_ignored_keys() ->
+generic_read_path(ID) ->
+    <<"/", ID/binary>>.
+
+map_or_empty(Map) when is_map(Map) ->
+    Map;
+map_or_empty(_Value) ->
+    #{}.
+
+control_keys() ->
     [
-        <<"secret">>,
-        <<"cookie">>,
-        <<"set-cookie">>,
-        <<"auth_token">>,
-        <<"odysee-auth-token">>,
-        <<"x-odysee-auth-token">>,
-        <<"x-lbry-auth-token">>,
-        <<"path">>,
-        <<"method">>,
-        <<"authorization">>,
-        <<"host">>,
+        <<"!">>,
         <<"accept">>,
-        <<"accept-bundle">>,
-        <<"ao-peer">>,
-        <<"user-agent">>,
+        <<"accept-language">>,
+        <<"authorization">>,
+        <<"auth-token">>,
+        <<"auth_token">>,
+        <<"authtoken">>,
+        <<"body">>,
         <<"connection">>,
-        <<"content-type">>,
-        <<"content-length">>,
-        <<"transfer-encoding">>,
-        <<"content-digest">>,
-        <<"iterations">>,
-        <<"key-length">>,
-        <<"salt">>,
-        <<"alg">>,
-        <<"ignored-keys">>,
-        <<"!">>
+        <<"content-base64">>,
+        <<"content_base64">>,
+        <<"cookie">>,
+        <<"data-base64">>,
+        <<"data_base64">>,
+        <<"device">>,
+        <<"host">>,
+        <<"lbry-auth-token">>,
+        <<"lbry_auth_token">>,
+        <<"method">>,
+        <<"odysee-auth-token">>,
+        <<"odysee_auth_token">>,
+        <<"origin">>,
+        <<"params64">>,
+        <<"params-64">>,
+        <<"path">>,
+        <<"priv">>,
+        <<"referer">>,
+        <<"sec-ch-ua">>,
+        <<"sec-ch-ua-mobile">>,
+        <<"sec-ch-ua-platform">>,
+        <<"sec-fetch-dest">>,
+        <<"sec-fetch-mode">>,
+        <<"sec-fetch-site">>,
+        <<"user-agent">>,
+        <<"x-lbry-auth-token">>,
+        <<"x_lbry_auth_token">>
     ].
 
-%%% Tests
+-ifdef(TEST).
 
-search_document_normalizes_upload_claim_test() ->
-    ClaimID = <<"native-claim-id">>,
-    Claim =
-        #{
-            <<"claim_id">> => ClaimID,
-            <<"immutable_id">> => ClaimID,
-            <<"txid">> => ClaimID,
-            <<"name">> => <<"The-video_file">>,
-            <<"value_type">> => <<"stream">>,
-            <<"timestamp">> => <<"123">>,
-            <<"channel_id">> => <<"channel-id">>,
-            <<"signing_channel">> => #{ <<"name">> => <<"@rave">>, <<"claim_id">> => <<"signing-channel-id">> },
-            <<"value">> =>
-                #{
-                    <<"title">> => <<"Native upload">>,
-                    <<"description">> => <<"Indexed from HyperBEAM">>,
-                    <<"tags">> => [<<"hb">>, <<"search">>],
-                    <<"languages">> => [<<"en">>],
-                    <<"thumbnail">> => #{ <<"url">> => <<"https://example.test/thumb.jpg">> },
-                    <<"source">> => #{ <<"name">> => <<"The-video_file.mp4">>, <<"media_type">> => <<"video/mp4">>, <<"duration">> => 60 }
-                }
-        },
-    Doc = search_document(Claim, #{}),
-    ?assertEqual(ClaimID, hb_maps:get(<<"doc_id">>, Doc, undefined, #{})),
-    ?assertEqual(ClaimID, hb_maps:get(<<"claim_id">>, Doc, undefined, #{})),
-    ?assertEqual(ClaimID, hb_maps:get(<<"immutable_id">>, Doc, undefined, #{})),
-    ?assertEqual(<<"The-video_file">>, hb_maps:get(<<"searchable_name">>, Doc, undefined, #{})),
-    ?assertEqual(<<"The-video_file.mp4">>, hb_maps:get(<<"source_name">>, Doc, undefined, #{})),
-    ?assertEqual(<<"videofile">>, hb_maps:get(<<"stripped_name">>, Doc, undefined, #{})),
-    ?assertEqual(<<"Native upload">>, hb_maps:get(<<"title">>, Doc, undefined, #{})),
-    ?assertEqual(<<"@rave">>, hb_maps:get(<<"channel_name">>, Doc, undefined, #{})),
-    ?assertEqual(<<"channel-id">>, hb_maps:get(<<"channel_claim_id">>, Doc, undefined, #{})),
-    ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"content_type">>, Doc, undefined, #{})),
-    ?assertEqual(<<"video">>, hb_maps:get(<<"media_type">>, Doc, undefined, #{})),
-    ?assertEqual([<<"hb">>, <<"search">>], hb_maps:get(<<"tags">>, Doc, undefined, #{})),
-    ?assertEqual(<<"en">>, hb_maps:get(<<"language">>, Doc, undefined, #{})),
-    ?assertEqual(<<"https://example.test/thumb.jpg">>, hb_maps:get(<<"thumbnail_url">>, Doc, undefined, #{})),
-    ?assertEqual(123, hb_maps:get(<<"release_time">>, Doc, undefined, #{})),
-    ?assertEqual(60, hb_maps:get(<<"duration">>, Doc, undefined, #{})),
-    ?assertEqual(<<"hyperbeam-native">>, hb_maps:get(<<"source_system">>, Doc, undefined, #{})).
-
-write_requires_auth_signature_test() ->
+upload_requires_signed_request_test() ->
+    Opts = test_opts(),
     ?assertMatch(
         {error, #{ <<"status">> := 401 }},
-        write(#{}, #{ <<"method">> => <<"POST">>, <<"body">> => <<"test">> }, #{})
+        submit(#{}, #{ <<"body">> => <<"hello">> }, Opts)
     ).
 
-write_stores_only_committed_authenticated_request_test() ->
-    application:ensure_all_started(hb),
-    Store =
-        #{
-            <<"store-module">> => hb_store_fs,
-            <<"name">> =>
-                <<"/tmp/odysee-upload-TEST-", (integer_to_binary(os:system_time(millisecond)))/binary>>
-        },
-    hb_store:reset(Store),
-    Node =
-        hb_http_server:start_node(
-            #{
-                <<"store">> => Store,
-                <<"priv-wallet">> => ar_wallet:new(),
-                <<"on">> => #{
-                    <<"request">> => #{
-                        <<"device">> => <<"auth-hook@1.0">>,
-                        <<"path">> => <<"request">>,
-                        <<"when">> => #{ <<"keys">> => [<<"!">>] },
-                        <<"ignored-keys">> => upload_auth_ignored_keys(),
-                        <<"secret-provider">> =>
-                            #{
-                                <<"device">> => <<"odysee-auth@1.0">>,
-                                <<"access-control">> =>
-                                    #{ <<"device">> => <<"odysee-auth@1.0">> }
-                            }
-                    }
-                }
-            }
-        ),
-    {ok, Res} =
-        hb_http:post(
-            Node,
-            #{
-                <<"path">> => <<"/~odysee-upload@1.0/write">>,
-                <<"method">> => <<"POST">>,
-                <<"content-type">> => <<"text/plain">>,
-                <<"body">> => <<"hello upload">>,
-                <<"cookie">> => <<"auth_token=odysee-test-token">>,
-                <<"!">> => true,
-                <<"iterations">> => 1,
-                <<"key-length">> => 32
-            },
-            #{}
-        ),
-    ?assertEqual(200, hb_ao:get(<<"status">>, Res, #{})),
-    Path = hb_maps:get(<<"id">>, Res, <<>>, #{}),
-    ?assert(is_binary(Path)),
-    ?assertEqual(
-        [true],
-        [is_binary(S) || S <- hb_maps:get(<<"signers">>, Res, [], #{})]
+upload_rejects_signed_base_with_unsigned_request_test() ->
+    Opts = test_opts(),
+    Base = signed(#{ <<"body">> => <<"base">> }, Opts),
+    ?assertMatch(
+        {error, #{ <<"status">> := 401 }},
+        submit(Base, #{ <<"body">> => <<"hello">> }, Opts)
+    ).
+
+upload_stores_signed_body_and_reads_media_test() ->
+    Opts = test_opts(),
+    Req = signed(#{
+        <<"body">> => <<"hello">>,
+        <<"name">> => <<"demo">>,
+        <<"title">> => <<"Demo">>,
+        <<"content-type">> => <<"text/plain">>
+    }, Opts),
+    {ok, Res} = submit(#{}, Req, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Res, Opts),
+    DataID = hb_maps:get(<<"data-id">>, Res, Opts),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Res, Opts)),
+    ?assertMatch(<<"data/", _/binary>>, DataID),
+    ?assertEqual(<<"*">>, hb_maps:get(<<"access-control-allow-origin">>, Res, Opts)),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(
+            hb_maps:get(<<"access-control-allow-headers">>, Res, Opts),
+            <<"X-Lbry-Auth-Token">>
+        )
     ),
-    ?assertEqual(nomatch, binary:match(Path, <<"odysee-test-token">>)),
-    {ok, ReadBack0} =
-        hb_http:get(
-            Node,
-            <<"/~cache@1.0/read?read=", Path/binary>>,
+    ?assertEqual(RecordID, hb_maps:get(<<"claim_id">>, hd(hb_maps:get(<<"outputs">>, Res, Opts)), Opts)),
+    ?assertEqual(RecordID, hb_maps:get(<<"record-id">>, Body, Opts)),
+    ?assertEqual(generic_read_path(RecordID), hb_maps:get(<<"read-path">>, Body, Opts)),
+    ?assertEqual(generic_read_path(RecordID), hb_maps:get(<<"media-path">>, Body, Opts)),
+    ?assertEqual(RecordID, hb_maps:get(<<"claim_id">>, hd(hb_maps:get(<<"outputs">>, Body, Opts)), Opts)),
+    ?assertEqual(not_found, hb_maps:get(<<"body">>, hb_maps:get(<<"record">>, Body, Opts), not_found, Opts)),
+    Source =
+        hb_maps:get(
+            <<"source">>,
+            hb_maps:get(<<"value">>, hd(hb_maps:get(<<"outputs">>, Body, Opts)), Opts),
+            Opts
+        ),
+    ?assertEqual(<<"demo">>, hb_maps:get(<<"name">>, Source, Opts)),
+    ?assertEqual(<<"5">>, hb_maps:get(<<"size">>, Source, Opts)),
+    {ok, Record} = record(#{}, #{ <<"id">> => RecordID }, Opts),
+    ?assertEqual(RecordID, hb_maps:get(<<"record-id">>, Record, Opts)),
+    ?assertEqual(RecordID, hb_maps:get(<<"claim_id">>, hb_maps:get(<<"claim">>, Record, Opts), Opts)),
+    ?assertEqual(DataID, hb_maps:get(<<"data-id">>, Record, Opts)),
+    ?assertEqual(<<"hello">>, hb_maps:get(<<"body">>, Record, Opts)),
+    {ok, Media} = media(#{}, #{ <<"id">> => RecordID }, Opts),
+    ?assertEqual(<<"hello">>, hb_maps:get(<<"body">>, Media, Opts)),
+    ?assertEqual(<<"text/plain">>, hb_maps:get(<<"content-type">>, Media, Opts)).
+
+upload_response_includes_metadata_and_signature_context_test() ->
+    Opts = test_opts(),
+    Channel = #{
+        <<"claim_id">> => <<"channel-1">>,
+        <<"name">> => <<"@demo">>,
+        <<"permanent_url">> => <<"lbry://@demo#channel-1">>,
+        <<"canonical_url">> => <<"lbry://@demo#channel-1">>,
+        <<"short_url">> => <<"lbry://@demo#channel-1">>,
+        <<"value">> => #{ <<"title">> => <<"Demo Channel">> }
+    },
+    Metadata = #{
+        <<"title">> => <<"Signed Metadata">>,
+        <<"description">> => <<"metadata survives upload">>,
+        <<"tags">> => [<<"hyperbeam">>, <<"demo">>],
+        <<"languages">> => [<<"en">>],
+        <<"thumbnail_url">> => <<"https://example.test/thumb.jpg">>,
+        <<"release_time">> => 123,
+        <<"channel">> => Channel
+    },
+    Payload = #{
+        <<"content_base64">> => base64:encode(<<"signed upload">>),
+        <<"name">> => <<"signed-demo">>,
+        <<"filename">> => <<"signed-demo.txt">>,
+        <<"content_type">> => <<"text/plain">>,
+        <<"metadata">> => Metadata
+    },
+    Req = signed(#{ <<"params64">> => hb_util:encode(hb_json:encode(Payload)) }, Opts),
+    [Owner] = hb_message:signers(Req, Opts),
+    {ok, Res} = submit(#{}, Req, Opts),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Res, Opts)),
+    Record = hb_maps:get(<<"record">>, Body, Opts),
+    [Claim] = hb_maps:get(<<"outputs">>, Body, Opts),
+    Value = hb_maps:get(<<"value">>, Claim, Opts),
+    Source = hb_maps:get(<<"source">>, Value, Opts),
+    Hyperbeam = hb_maps:get(<<"hyperbeam">>, Claim, Opts),
+    SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, Opts),
+    ?assertEqual(Owner, hb_maps:get(<<"owner">>, Record, Opts)),
+    ?assertEqual(Owner, hb_maps:get(<<"owner">>, Hyperbeam, Opts)),
+    ?assertEqual(hb_maps:get(<<"record-id">>, Body, Opts), hb_maps:get(<<"claim_id">>, Claim, Opts)),
+    ?assertEqual(Metadata, hb_maps:get(<<"metadata">>, Record, Opts)),
+    ?assertEqual(<<"Signed Metadata">>, hb_maps:get(<<"title">>, Value, Opts)),
+    ?assertEqual(<<"metadata survives upload">>, hb_maps:get(<<"description">>, Value, Opts)),
+    ?assertEqual([<<"hyperbeam">>, <<"demo">>], hb_maps:get(<<"tags">>, Value, Opts)),
+    ?assertEqual([<<"en">>], hb_maps:get(<<"languages">>, Value, Opts)),
+    ?assertEqual(#{ <<"url">> => <<"https://example.test/thumb.jpg">> }, hb_maps:get(<<"thumbnail">>, Value, Opts)),
+    ?assertEqual(123, hb_maps:get(<<"release_time">>, Value, Opts)),
+    ?assertEqual(<<"text/plain">>, hb_maps:get(<<"media_type">>, Source, Opts)),
+    ?assertEqual(<<"signed-demo.txt">>, hb_maps:get(<<"name">>, Source, Opts)),
+    ?assertEqual(<<"13">>, hb_maps:get(<<"size">>, Source, Opts)),
+    ?assertEqual(true, hb_maps:get(<<"is_channel_signature_valid">>, Claim, Opts)),
+    ?assertEqual(Channel, SigningChannel).
+
+upload_index_prefers_payload_media_type_over_transport_content_type_test() ->
+    Opts = test_opts(),
+    DataID = <<"data-id-1">>,
+    Payload = #{
+        <<"data_id">> => DataID,
+        <<"name">> => <<"mov-demo">>,
+        <<"filename">> => <<"demo.mov">>,
+        <<"content_type">> => <<"video/quicktime">>,
+        <<"size">> => 1234,
+        <<"metadata">> => #{
+            <<"title">> => <<"MOV Demo">>
+        }
+    },
+    Req =
+        signed(
+            #{
+                <<"params64">> => hb_util:encode(hb_json:encode(Payload)),
+                <<"content-type">> => <<"application/json">>
+            },
+            Opts
+        ),
+    {ok, Res} = index(#{}, Req, Opts),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Res, Opts)),
+    Record = hb_maps:get(<<"record">>, Body, Opts),
+    [Claim] = hb_maps:get(<<"outputs">>, Body, Opts),
+    Source = hb_maps:get(<<"source">>, hb_maps:get(<<"value">>, Claim, Opts), Opts),
+    ?assertEqual(<<"video/quicktime">>, hb_maps:get(<<"content-type">>, Record, Opts)),
+    ?assertEqual(<<"video/quicktime">>, hb_maps:get(<<"media_type">>, Source, Opts)),
+    ?assertEqual(<<"/", DataID/binary>>, hb_maps:get(<<"media-path">>, Body, Opts)).
+
+upload_owner_is_stable_across_signing_wallets_with_same_token_test() ->
+    Opts = test_opts(),
+    Token = <<"stable-user-token">>,
+    DataID = <<"data-token-owned-1">>,
+    IndexPayload = #{
+        <<"data_id">> => DataID,
+        <<"name">> => <<"token-owned">>,
+        <<"content_type">> => <<"video/mp4">>,
+        <<"size">> => 10,
+        <<"metadata">> => #{ <<"title">> => <<"Before">> }
+    },
+    %% First session: wallet A signs, but the Bearer token carries the identity.
+    ReqA = (signed(params64_req(IndexPayload), Opts))#{ <<"authorization">> => <<"Bearer ", Token/binary>> },
+    {ok, IndexRes} = index(#{}, ReqA, Opts),
+    IndexBody = hb_json:decode(hb_maps:get(<<"body">>, IndexRes, Opts)),
+    RecordID = hb_maps:get(<<"record-id">>, IndexBody, Opts),
+    ?assertEqual(token_secret(Token), hb_maps:get(<<"owner">>, hb_maps:get(<<"record">>, IndexBody, Opts), Opts)),
+    %% Second session: a DIFFERENT signing wallet, same token -> edit succeeds.
+    UpdatePayload = #{ <<"record_id">> => RecordID, <<"metadata">> => #{ <<"title">> => <<"After">> } },
+    ReqB = (signed(params64_req(UpdatePayload), Opts))#{ <<"authorization">> => <<"Bearer ", Token/binary>> },
+    {ok, UpdateRes} = update(#{}, ReqB, Opts),
+    UpdateBody = hb_json:decode(hb_maps:get(<<"body">>, UpdateRes, Opts)),
+    [UpdatedClaim] = hb_maps:get(<<"outputs">>, UpdateBody, Opts),
+    ?assertEqual(<<"After">>, hb_maps:get(<<"title">>, hb_maps:get(<<"value">>, UpdatedClaim, Opts), Opts)),
+    %% A different token must NOT be able to edit.
+    ReqC = (signed(params64_req(UpdatePayload), Opts))#{ <<"authorization">> => <<"Bearer other-token">> },
+    ?assertMatch({error, #{ <<"status">> := 403 }}, update(#{}, ReqC, Opts)).
+
+upload_update_and_delete_roundtrip_test() ->
+    Opts = test_opts(),
+    Wallet = ar_wallet:new(),
+    DataID = <<"data-update-1">>,
+    IndexPayload = #{
+        <<"data_id">> => DataID,
+        <<"name">> => <<"update-demo">>,
+        <<"filename">> => <<"update-demo.mp4">>,
+        <<"content_type">> => <<"video/mp4">>,
+        <<"size">> => 10,
+        <<"metadata">> => #{
+            <<"title">> => <<"Before">>,
+            <<"video">> => #{ <<"duration">> => 42 }
+        }
+    },
+    {ok, IndexRes} = index(#{}, signed_with(params64_req(IndexPayload), Wallet, Opts), Opts),
+    IndexBody = hb_json:decode(hb_maps:get(<<"body">>, IndexRes, Opts)),
+    RecordID = hb_maps:get(<<"record-id">>, IndexBody, Opts),
+    [IndexClaim] = hb_maps:get(<<"outputs">>, IndexBody, Opts),
+    IndexValue = hb_maps:get(<<"value">>, IndexClaim, Opts),
+    ?assertEqual(<<"Before">>, hb_maps:get(<<"title">>, IndexValue, Opts)),
+    ?assertEqual(42, hb_maps:get(<<"duration">>, hb_maps:get(<<"video">>, IndexValue, Opts), Opts)),
+    UpdatePayload = #{
+        <<"record_id">> => RecordID,
+        <<"metadata">> => #{ <<"title">> => <<"After">> }
+    },
+    ?assertMatch(
+        {error, #{ <<"status">> := 403 }},
+        update(#{}, signed(params64_req(UpdatePayload), Opts), Opts)
+    ),
+    {ok, UpdateRes} = update(#{}, signed_with(params64_req(UpdatePayload), Wallet, Opts), Opts),
+    UpdateBody = hb_json:decode(hb_maps:get(<<"body">>, UpdateRes, Opts)),
+    NewRecordID = hb_maps:get(<<"record-id">>, UpdateBody, Opts),
+    [UpdatedClaim] = hb_maps:get(<<"outputs">>, UpdateBody, Opts),
+    UpdatedValue = hb_maps:get(<<"value">>, UpdatedClaim, Opts),
+    ?assertEqual(<<"After">>, hb_maps:get(<<"title">>, UpdatedValue, Opts)),
+    ?assertNotEqual(RecordID, NewRecordID),
+    UpdatedVideo = hb_maps:get(<<"video">>, UpdatedValue, Opts),
+    ?assertEqual(42, hb_maps:get(<<"duration">>, UpdatedVideo, Opts)),
+    ?assertEqual(not_found, hb_maps:get(<<"commitments">>, UpdatedVideo, not_found, Opts)),
+    ?assertEqual(DataID, hb_maps:get(<<"claim_id">>, UpdatedClaim, Opts)),
+    {ok, ListRes} = list(#{}, #{ <<"name">> => <<"update-demo">> }, Opts),
+    ListBody = hb_json:decode(hb_maps:get(<<"body">>, ListRes, Opts)),
+    ListItems = hb_maps:get(<<"items">>, hb_maps:get(<<"result">>, ListBody, Opts), Opts),
+    ?assertEqual(1, length(ListItems)),
+    ?assertEqual(
+        <<"After">>,
+        hb_maps:get(<<"title">>, hb_maps:get(<<"value">>, hd(ListItems), Opts), Opts)
+    ),
+    DeletePayload = #{ <<"record_id">> => NewRecordID },
+    ?assertMatch(
+        {error, #{ <<"status">> := 403 }},
+        delete(#{}, signed(params64_req(DeletePayload), Opts), Opts)
+    ),
+    {ok, DeleteRes} = delete(#{}, signed_with(params64_req(DeletePayload), Wallet, Opts), Opts),
+    DeleteBody = hb_json:decode(hb_maps:get(<<"body">>, DeleteRes, Opts)),
+    ?assertEqual(true, hb_maps:get(<<"deleted">>, DeleteBody, Opts)),
+    {ok, ListAfterDelete} = list(#{}, #{ <<"name">> => <<"update-demo">> }, Opts),
+    ListAfterBody = hb_json:decode(hb_maps:get(<<"body">>, ListAfterDelete, Opts)),
+    ?assertEqual(
+        [],
+        hb_maps:get(<<"items">>, hb_maps:get(<<"result">>, ListAfterBody, Opts), Opts)
+    ),
+    ?assertMatch({error, _}, resolve_record(#{}, #{ <<"claim-id">> => DataID }, Opts)),
+    ?assertMatch({error, _}, indexed_record_id(NewRecordID, Opts)).
+
+upload_accepts_params64_base64_content_test() ->
+    Opts = test_opts(),
+    Params = #{
+        <<"name">> => <<"demo64">>,
+        <<"content_type">> => <<"text/plain">>,
+        <<"content_base64">> => base64:encode(<<"hello64">>),
+        <<"metadata">> => #{
+            <<"title">> => <<"Demo 64">>,
+            <<"tags">> => [<<"test">>]
+        }
+    },
+    Req = signed(#{ <<"params64">> => hb_util:encode(hb_json:encode(Params)) }, Opts),
+    {ok, Res} = submit(#{}, Req, Opts),
+    {ok, Media} = media(#{}, #{ <<"id">> => hb_maps:get(<<"record-id">>, Res, Opts) }, Opts),
+    ?assertEqual(<<"hello64">>, hb_maps:get(<<"body">>, Media, Opts)).
+
+upload_chunked_manifest_reads_media_test() ->
+    Opts = test_opts(),
+    {ok, Chunk1} = chunk(#{}, signed(#{ <<"body">> => <<"hello ">> }, Opts), Opts),
+    {ok, Chunk2} = chunk(#{}, signed(#{ <<"body">> => <<"world">> }, Opts), Opts),
+    ChunkID1 = hb_maps:get(<<"id">>, Chunk1, Opts),
+    ChunkID2 = hb_maps:get(<<"id">>, Chunk2, Opts),
+    Manifest =
+        hb_json:encode(#{
+            <<"type">> => ?CHUNKED_MANIFEST_KIND,
+            <<"version">> => 1,
+            <<"size">> => 11,
+            <<"chunks">> => [
+                #{ <<"id">> => ChunkID1, <<"size">> => 6 },
+                #{ <<"id">> => ChunkID2, <<"size">> => 5 }
+            ]
+        }),
+    Req =
+        signed(
+            #{
+                <<"body">> => Manifest,
+                <<"name">> => <<"chunked-demo">>,
+                <<"content-type">> => <<"text/plain">>,
+                <<"chunked_manifest">> => true,
+                <<"size">> => 11
+            },
+            Opts
+        ),
+    {ok, Res} = submit(#{}, Req, Opts),
+    Record = hb_maps:get(<<"record">>, Res, Opts),
+    ?assertEqual(<<"chunked-manifest">>, hb_maps:get(<<"data-kind">>, Record, Opts)),
+    ?assertEqual(11, hb_maps:get(<<"byte-size">>, Record, Opts)),
+    Source =
+        hb_maps:get(
+            <<"source">>,
+            hb_maps:get(<<"value">>, hd(hb_maps:get(<<"outputs">>, Res, Opts)), Opts),
+            Opts
+        ),
+    ?assertEqual(<<"11">>, hb_maps:get(<<"size">>, Source, Opts)),
+    {ok, Media} = media(#{}, #{ <<"id">> => hb_maps:get(<<"record-id">>, Res, Opts) }, Opts),
+    ?assertEqual(<<"hello world">>, hb_maps:get(<<"body">>, Media, Opts)),
+    ?assertEqual(<<"text/plain">>, hb_maps:get(<<"content-type">>, Media, Opts)).
+
+upload_resolves_native_claim_and_stream_media_test() ->
+    Opts = test_opts(),
+    Req = signed(#{
+        <<"body">> => <<"native media">>,
+        <<"name">> => <<"native-demo">>,
+        <<"content-type">> => <<"text/plain">>,
+        <<"metadata">> => #{
+            <<"title">> => <<"Native Demo">>,
+            <<"channel">> => #{
+                <<"claim_id">> => <<"channel-1">>,
+                <<"name">> => <<"@native">>,
+                <<"short_url">> => <<"lbry://@native#channel-1">>
+            }
+        }
+    }, Opts),
+    {ok, Res} = submit(#{}, Req, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Res, Opts),
+    URI = <<"lbry://@native#channel-1/native-demo">>,
+    Store = hb_opts:get(store, no_viable_store, Opts),
+    {ok, IndexedRecordID} = hb_store:read(
+        Store,
+        index_path(<<"uri">>, URI),
+        maps:without([<<"store">>, store], Opts)
+    ),
+    ?assertEqual(RecordID, IndexedRecordID),
+    {ok, Record0} = hb_cache:read(RecordID, Opts),
+    Record = enrich_record(RecordID, hb_cache:ensure_all_loaded(Record0, Opts), Opts),
+    Claim = hb_maps:get(<<"claim">>, Record, Opts),
+    ?assertEqual(RecordID, hb_maps:get(<<"claim-id">>, Claim, Opts)),
+    ?assertEqual(true, hb_maps:get(<<"is_channel_signature_valid">>, Claim, Opts)),
+    {ok, Media} = media(#{}, #{ <<"id">> => RecordID }, Opts),
+    ?assertEqual(<<"native media">>, hb_maps:get(<<"body">>, Media, Opts)).
+
+upload_list_indexes_all_channel_and_name_test() ->
+    Opts = test_opts(),
+    Req1 = signed(#{
+        <<"body">> => <<"one">>,
+        <<"name">> => <<"first-upload">>,
+        <<"metadata">> => #{
+            <<"title">> => <<"First Upload">>,
+            <<"release_time">> => 100,
+            <<"channel">> => #{
+                <<"claim_id">> => <<"channel-1">>,
+                <<"name">> => <<"@one">>,
+                <<"short_url">> => <<"lbry://@one#channel-1">>
+            }
+        }
+    }, Opts),
+    Req2 = signed(#{
+        <<"body">> => <<"two">>,
+        <<"name">> => <<"second-upload">>,
+        <<"metadata">> => #{
+            <<"title">> => <<"Second Upload">>,
+            <<"release_time">> => 200,
+            <<"channel">> => #{
+                <<"claim_id">> => <<"channel-2">>,
+                <<"name">> => <<"@two">>,
+                <<"short_url">> => <<"lbry://@two#channel-2">>
+            }
+        }
+    }, Opts),
+    {ok, Res1} = submit(#{}, Req1, Opts),
+    {ok, Res2} = submit(#{}, Req2, Opts),
+    RecordID1 = hb_maps:get(<<"record-id">>, Res1, Opts),
+    RecordID2 = hb_maps:get(<<"record-id">>, Res2, Opts),
+    {ok, All} = list(#{}, #{ <<"page_size">> => 10 }, Opts),
+    AllBody = hb_json:decode(hb_maps:get(<<"body">>, All, Opts)),
+    AllItems = hb_maps:get(<<"items">>, AllBody, Opts),
+    ?assertEqual(2, length(AllItems)),
+    ?assertEqual(RecordID2, hb_maps:get(<<"claim_id">>, hd(AllItems), Opts)),
+    {ok, ChannelList} = list(#{}, #{ <<"channel_ids">> => [<<"channel-1">>] }, Opts),
+    ChannelBody = hb_json:decode(hb_maps:get(<<"body">>, ChannelList, Opts)),
+    [ChannelItem] = hb_maps:get(<<"items">>, ChannelBody, Opts),
+    ?assertEqual(RecordID1, hb_maps:get(<<"claim_id">>, ChannelItem, Opts)),
+    {ok, NameList} = list(#{}, #{ <<"name">> => <<"second-upload">> }, Opts),
+    NameBody = hb_json:decode(hb_maps:get(<<"body">>, NameList, Opts)),
+    [NameItem] = hb_maps:get(<<"items">>, NameBody, Opts),
+    ?assertEqual(RecordID2, hb_maps:get(<<"claim_id">>, NameItem, Opts)).
+
+upload_options_response_test() ->
+    {ok, Res} = submit(#{}, #{ <<"method">> => <<"OPTIONS">> }, #{}),
+    ?assertEqual(204, hb_maps:get(<<"status">>, Res, #{})),
+    ?assertEqual(<<>>, hb_maps:get(<<"body">>, Res, #{})),
+    ?assertEqual(<<"GET,HEAD,POST,OPTIONS">>, hb_maps:get(<<"access-control-allow-methods">>, Res, #{})).
+
+media_options_response_test() ->
+    {ok, Res} = media(#{}, #{ <<"method">> => <<"OPTIONS">> }, #{}),
+    ?assertEqual(204, hb_maps:get(<<"status">>, Res, #{})),
+    ?assertEqual(<<>>, hb_maps:get(<<"body">>, Res, #{})),
+    ?assertEqual(<<"GET,HEAD,POST,OPTIONS">>, hb_maps:get(<<"access-control-allow-methods">>, Res, #{})).
+
+media_head_response_test() ->
+    Opts = test_opts(),
+    Req = signed(#{
+        <<"body">> => <<"hello">>,
+        <<"name">> => <<"head-demo">>,
+        <<"content-type">> => <<"text/plain">>
+    }, Opts),
+    {ok, Res} = submit(#{}, Req, Opts),
+    {ok, Head} = media(#{}, #{ <<"id">> => hb_maps:get(<<"record-id">>, Res, Opts), <<"method">> => <<"HEAD">> }, Opts),
+    ?assertEqual(200, hb_maps:get(<<"status">>, Head, Opts)),
+    ?assertEqual(5, hb_maps:get(<<"content-length">>, Head, Opts)),
+    ?assertEqual(<<>>, hb_maps:get(<<"body">>, Head, Opts)).
+
+media_range_response_test() ->
+    Opts = test_opts(),
+    Req = signed(#{
+        <<"body">> => <<"hello">>,
+        <<"name">> => <<"range-demo">>,
+        <<"content-type">> => <<"text/plain">>
+    }, Opts),
+    {ok, Res} = submit(#{}, Req, Opts),
+    {ok, Range} =
+        media(
+            #{},
+            #{
+                <<"id">> => hb_maps:get(<<"record-id">>, Res, Opts),
+                <<"range">> => <<"bytes=1-3">>
+            },
+            Opts
+        ),
+    ?assertEqual(206, hb_maps:get(<<"status">>, Range, Opts)),
+    ?assertEqual(3, hb_maps:get(<<"content-length">>, Range, Opts)),
+    ?assertEqual(<<"bytes 1-3/5">>, hb_maps:get(<<"content-range">>, Range, Opts)),
+    ?assertEqual(<<"ell">>, hb_maps:get(<<"body">>, Range, Opts)).
+
+upload_strips_auth_fields_from_metadata_test() ->
+    Opts = test_opts(),
+    Req = signed(#{
+        <<"body">> => <<"hello">>,
+        <<"name">> => <<"demo">>,
+        <<"!">> => true,
+        <<"X-Lbry-Auth-Token">> => <<"secret-token">>,
+        <<"auth_token">> => <<"cookie-token">>
+    }, Opts),
+    {ok, Res} = submit(#{}, Req, Opts),
+    Metadata = hb_maps:get(<<"metadata">>, hb_maps:get(<<"record">>, Res, Opts), Opts),
+    ?assertEqual(not_found, hb_maps:get(<<"!">>, Metadata, not_found, Opts)),
+    ?assertEqual(not_found, hb_maps:get(<<"X-Lbry-Auth-Token">>, Metadata, not_found, Opts)),
+    ?assertEqual(not_found, hb_maps:get(<<"auth_token">>, Metadata, not_found, Opts)).
+
+upload_rejects_oversized_content_test() ->
+    Opts = test_opts(),
+    Req = signed(#{ <<"body">> => <<"too big">>, <<"max-bytes">> => <<"3">> }, Opts),
+    ?assertMatch(
+        {error, #{ <<"status">> := 413 }},
+        submit(#{}, Req, Opts)
+    ).
+
+auth_hook_signed_upload_roundtrip_test() ->
+    Token = <<"demo-token">>,
+    UploadReq = #{
+        <<"Authorization">> => <<"Bearer ", Token/binary>>,
+        <<"!">> => true,
+        <<"body">> => <<"hook upload">>,
+        <<"name">> => <<"hook-upload">>,
+        <<"title">> => <<"Hook Upload">>,
+        <<"content-type">> => <<"text/plain">>
+    },
+    auth_hook_upload_roundtrip(Token, UploadReq).
+
+auth_hook_cookie_signed_upload_roundtrip_test() ->
+    Token = <<"cookie-token">>,
+    UploadReq = #{
+        <<"cookie">> => <<"auth_token=", Token/binary>>,
+        <<"!">> => true,
+        <<"body">> => <<"cookie hook upload">>,
+        <<"name">> => <<"cookie-hook-upload">>,
+        <<"title">> => <<"Cookie Hook Upload">>,
+        <<"content-type">> => <<"text/plain">>
+    },
+    auth_hook_upload_roundtrip(Token, UploadReq).
+
+auth_hook_upload_roundtrip(Token, UploadReq) ->
+    {ok, AuthMsg} =
+        hb_ao:resolve(
+            #{ <<"device">> => <<"odysee-auth@1.0">> },
+            #{
+                <<"path">> => <<"generate">>,
+                <<"authorization">> => <<"Bearer ", Token/binary>>
+            },
             #{}
         ),
-    ReadBack = hb_cache:ensure_all_loaded(ReadBack0, #{}),
-    ?assertEqual(<<"hello upload">>, hb_maps:get(<<"body">>, ReadBack, #{})),
-    ?assertNotEqual([], hb_message:signers(ReadBack, #{})),
-    ?assertEqual(error, hb_maps:find(<<"auth_token">>, ReadBack, #{})),
-    ?assertEqual(error, hb_maps:find(<<"x-odysee-auth-token">>, ReadBack, #{})).
-
-upload_index_list_is_public_and_channel_scoped_test() ->
-    Store =
-        #{
-            <<"store-module">> => hb_store_fs,
-            <<"name">> =>
-                <<"/tmp/odysee-upload-index-TEST-", (integer_to_binary(os:system_time(millisecond)))/binary>>
-        },
-    hb_store:reset(Store),
-    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => hb:wallet() },
-    ChannelID = <<"channel-1">>,
-    ClaimID = <<"upload-1">>,
-    Claim =
-        #{
-            <<"id">> => ClaimID,
-            <<"value_type">> => <<"stream">>,
-            <<"timestamp">> => 10,
-            <<"channel_id">> => ChannelID,
-            <<"auth_token">> => <<"private-token">>,
-            <<"value">> => #{ <<"source">> => #{ <<"x-odysee-auth-token">> => <<"nested-private-token">> } }
-        },
-    Signed =
-        hb_message:commit(
+    Secret = hb_maps:get(<<"secret">>, AuthMsg, #{}),
+    Wallet = ar_wallet:new(),
+    Address = hb_util:human_id(ar_wallet:to_address(Wallet)),
+    AccessControl = #{
+        <<"device">> => <<"odysee-auth@1.0">>,
+        <<"wallet-address">> => Address
+    },
+    {ok, InitializedAuth} =
+        hb_ao:resolve(
+            AccessControl,
+            #{ <<"path">> => <<"commit">>, <<"secret">> => Secret },
+            #{}
+        ),
+    [Committer] = hb_message:signers(InitializedAuth, #{}),
+    KeyID = <<"secret:", (hb_util:secret_key_to_committer(Secret))/binary>>,
+    WalletDetails = #{
+        <<"wallet">> => ar_wallet:to_json(Wallet),
+        <<"address">> => Address,
+        <<"persist">> => <<"in-memory">>,
+        <<"access-control">> => hb_private:reset(InitializedAuth),
+        <<"committer">> => Committer,
+        <<"controllers">> => [],
+        <<"required-controllers">> => 1
+    },
+    Opts = (test_opts())#{
+        <<"priv-wallet">> => ar_wallet:new(),
+        <<"priv-wallet-hosted">> => #{ KeyID => WalletDetails }
+    },
+    HookBase = #{
+        <<"when">> => #{ <<"keys">> => [<<"authorization">>, <<"!">>] },
+        <<"secret-provider">> => #{
+            <<"device">> => <<"odysee-auth@1.0">>,
+            <<"access-control">> => #{ <<"device">> => <<"odysee-auth@1.0">> }
+        }
+    },
+    {ok, #{ <<"request">> := SignedReq }} =
+        hb_ao:resolve(
+            HookBase#{ <<"device">> => <<"auth-hook@1.0">> },
             #{
-                <<"method">> => <<"POST">>,
-                <<"body">> => hb_json:encode(#{ <<"claim">> => Claim })
+                <<"path">> => <<"request">>,
+                <<"request">> => UploadReq,
+                <<"body">> => []
             },
             Opts
         ),
-    {ok, IndexRes} = index(#{}, Signed, Opts),
-    ?assertEqual(200, hb_maps:get(<<"status">>, IndexRes, undefined, Opts)),
-    IndexedResult = hb_maps:get(<<"result">>, IndexRes, #{}, Opts),
-    IndexedItem = hb_maps:get(<<"item">>, IndexedResult, #{}, Opts),
-    ?assertEqual(ClaimID, hb_maps:get(<<"claim_id">>, IndexedItem, undefined, Opts)),
-    ?assertEqual(ClaimID, hb_maps:get(<<"immutable_id">>, IndexedItem, undefined, Opts)),
-    ?assertEqual(error, hb_maps:find(<<"auth_token">>, IndexedItem, Opts)),
-    IndexedValue = hb_maps:get(<<"value">>, IndexedItem, #{}, Opts),
-    IndexedSource = hb_maps:get(<<"source">>, IndexedValue, #{}, Opts),
-    ?assertEqual(error, hb_maps:find(<<"x-odysee-auth-token">>, IndexedSource, Opts)),
-    PublicListReq = #{ <<"method">> => <<"POST">>, <<"body">> => <<"{}">> },
-    {ok, PublicListRes} = list(#{}, PublicListReq, Opts),
-    PublicResult = hb_maps:get(<<"result">>, PublicListRes, #{}, Opts),
-    ?assertEqual(1, hb_maps:get(<<"total_items">>, PublicResult, 0, Opts)),
-    ChannelListReq =
-        #{
-            <<"method">> => <<"POST">>,
-            <<"body">> => hb_json:encode(#{ <<"channel_ids">> => [ChannelID] })
-        },
-    {ok, ChannelListRes} = list(#{}, ChannelListReq, Opts),
-    ChannelResult = hb_maps:get(<<"result">>, ChannelListRes, #{}, Opts),
-    ?assertEqual(1, hb_maps:get(<<"total_items">>, ChannelResult, 0, Opts)),
-    EmptyListReq =
-        #{
-            <<"method">> => <<"POST">>,
-            <<"body">> => hb_json:encode(#{ <<"channel_ids">> => [<<"other-channel">>] })
-        },
-    {ok, EmptyListRes} = list(#{}, EmptyListReq, Opts),
-    EmptyResult = hb_maps:get(<<"result">>, EmptyListRes, #{}, Opts),
-    ?assertEqual(0, hb_maps:get(<<"total_items">>, EmptyResult, 0, Opts)),
-    DeleteReq =
-        Signed#{
-            <<"body">> => hb_json:encode(#{ <<"id">> => ClaimID }),
-            <<"x-odysee-upload-id">> => ClaimID
-        },
-    {ok, DeleteRes} = delete(#{}, DeleteReq, Opts),
-    ?assertEqual(200, hb_maps:get(<<"status">>, DeleteRes, undefined, Opts)),
-    {ok, DeletedListRes} = list(#{}, PublicListReq, Opts),
-    DeletedResult = hb_maps:get(<<"result">>, DeletedListRes, #{}, Opts),
-    ?assertEqual(0, hb_maps:get(<<"total_items">>, DeletedResult, 0, Opts)).
+    ?assertNotEqual([], hb_message:signers(SignedReq, Opts)),
+    {ok, Res} = submit(#{}, SignedReq, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Res, Opts),
+    {ok, Media} = media(#{}, #{ <<"id">> => RecordID }, Opts),
+    ?assertEqual(hb_maps:get(<<"body">>, UploadReq, Opts), hb_maps:get(<<"body">>, Media, Opts)).
 
-upload_index_list_normalizes_legacy_nested_upload_id_test() ->
-    Store =
-        #{
-            <<"store-module">> => hb_store_fs,
-            <<"name">> =>
-                <<"/tmp/odysee-upload-legacy-index-TEST-", (integer_to_binary(os:system_time(millisecond)))/binary>>
-        },
-    hb_store:reset(Store),
-    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => hb:wallet() },
-    UploadID = <<"legacy-upload-id">>,
-    LegacyClaim =
-        #{
-            <<"claim_id">> => <<"old-local-claim-id">>,
-            <<"timestamp">> => 10,
-            <<"hyperbeam">> => #{ <<"upload_id">> => UploadID }
-        },
-    ok = write_global_claim(UploadID, LegacyClaim, Opts),
-    {ok, ListRes} = list(#{}, #{ <<"method">> => <<"POST">>, <<"body">> => <<"{}">> }, Opts),
-    Result = hb_maps:get(<<"result">>, ListRes, #{}, Opts),
-    [Item] = hb_maps:get(<<"items">>, Result, [], Opts),
-    ?assertEqual(UploadID, hb_maps:get(<<"immutable_id">>, Item, undefined, Opts)),
-    ?assertEqual(UploadID, hb_maps:get(<<"upload_id">>, hb_maps:get(<<"hyperbeam">>, Item, #{}, Opts), undefined, Opts)).
+signed(Msg, Opts) ->
+    hb_message:commit(Msg, Opts#{ <<"priv-wallet">> => ar_wallet:new() }).
 
-upload_delete_and_update_require_owner_test() ->
-    application:ensure_all_started(hb),
-    Store =
-        #{
-            <<"store-module">> => hb_store_fs,
-            <<"name">> =>
-                <<"/tmp/odysee-upload-owner-TEST-", (integer_to_binary(os:system_time(millisecond)))/binary>>
-        },
-    hb_store:reset(Store),
-    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => ar_wallet:new() },
-    ClaimID = <<"owned-upload-1">>,
-    Claim =
-        #{
-            <<"id">> => ClaimID,
-            <<"value_type">> => <<"stream">>,
-            <<"timestamp">> => 10,
-            <<"title">> => <<"mine">>
-        },
-    Signed =
-        hb_message:commit(
-            #{
-                <<"method">> => <<"POST">>,
-                <<"body">> => hb_json:encode(#{ <<"claim">> => Claim })
-            },
-            Opts
-        ),
-    {ok, IndexRes} = index(#{}, Signed, Opts),
-    ?assertEqual(200, hb_maps:get(<<"status">>, IndexRes, undefined, Opts)),
-    IndexedResult = hb_maps:get(<<"result">>, IndexRes, #{}, Opts),
-    IndexedItem = hb_maps:get(<<"item">>, IndexedResult, #{}, Opts),
-    ImmutableID = hb_maps:get(<<"claim_id">>, IndexedItem, undefined, Opts),
-    ?assert(is_binary(ImmutableID) andalso ImmutableID =/= <<>>),
-    OtherOpts = Opts#{ <<"priv-wallet">> => ar_wallet:new() },
-    ForeignDelete =
-        (hb_message:commit(
-            #{
-                <<"method">> => <<"POST">>,
-                <<"body">> => hb_json:encode(#{ <<"id">> => ImmutableID })
-            },
-            OtherOpts
-        ))#{ <<"x-odysee-upload-id">> => ImmutableID },
-    ?assertMatch({error, #{ <<"status">> := 403 }}, delete(#{}, ForeignDelete, Opts)),
-    ForeignUpdate =
-        hb_message:commit(
-            #{
-                <<"method">> => <<"POST">>,
-                <<"body">> =>
-                    hb_json:encode(#{ <<"claim_id">> => ImmutableID, <<"title">> => <<"hijacked">> })
-            },
-            OtherOpts
-        ),
-    ?assertMatch({error, #{ <<"status">> := 403 }}, update(#{}, ForeignUpdate, Opts)),
-    ListReq = #{ <<"method">> => <<"POST">>, <<"body">> => <<"{}">> },
-    {ok, ListRes} = list(#{}, ListReq, Opts),
-    Result = hb_maps:get(<<"result">>, ListRes, #{}, Opts),
-    ?assertEqual(1, hb_maps:get(<<"total_items">>, Result, 0, Opts)),
-    OwnerDelete =
-        Signed#{
-            <<"body">> => hb_json:encode(#{ <<"id">> => ClaimID }),
-            <<"x-odysee-upload-id">> => ClaimID
-        },
-    {ok, DeleteRes} = delete(#{}, OwnerDelete, Opts),
-    ?assertEqual(200, hb_maps:get(<<"status">>, DeleteRes, undefined, Opts)),
-    DeleteResult = hb_maps:get(<<"result">>, DeleteRes, #{}, Opts),
-    ?assertEqual(ImmutableID, hb_maps:get(<<"claim_id">>, DeleteResult, undefined, Opts)),
-    {ok, EmptyListRes} = list(#{}, ListReq, Opts),
-    EmptyResult = hb_maps:get(<<"result">>, EmptyListRes, #{}, Opts),
-    ?assertEqual(0, hb_maps:get(<<"total_items">>, EmptyResult, 0, Opts)).
+signed_with(Msg, Wallet, Opts) ->
+    hb_message:commit(Msg, Opts#{ <<"priv-wallet">> => Wallet }).
+
+params64_req(Payload) ->
+    #{
+        <<"params64">> => hb_util:encode(hb_json:encode(Payload)),
+        <<"content-type">> => <<"application/json">>
+    }.
+
+test_opts() ->
+    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+    Store = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"_build/odysee-upload-test-", Timestamp/binary>>
+    },
+    ok = hb_store:start(Store),
+    ok = hb_store:reset(Store),
+    #{
+        <<"store">> => Store,
+        <<"cache-control">> => [<<"no-cache">>, <<"no-store">>],
+        <<"store-all-signed">> => false
+    }.
+
+-endif.
