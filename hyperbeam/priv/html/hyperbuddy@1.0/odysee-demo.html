@@ -78,6 +78,18 @@
 <script>
 // --- Tiny helpers --------------------------------------------------------
 const BASE = location.origin;
+// The auth hook fires on any request carrying an auth_token cookie -- and a
+// dead token 401s the request, INCLUDING this page's own fetch if the cookie
+// were scoped to path=/. So the cookie-leg views scope the cookie to
+// /commitments only: the browser attaches it to the proof request but never
+// to the page, so a stale token can never brick the demo. Clearing drops both
+// the scoped cookie and any legacy path=/ one from older page versions.
+function setAuthCookie(tok){ document.cookie="auth_token="+tok+"; path=/commitments; SameSite=Strict"; }
+function clearAuthCookie(){
+  document.cookie="auth_token=; path=/commitments; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  document.cookie="auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+}
+clearAuthCookie();
 // Colour an address deterministically so "same address" is obvious at a glance.
 function colorFor(addr){ if(!addr) return "#2a2f3a"; let h=0; for(const c of addr) h=(h*31+c.charCodeAt(0))>>>0; return `hsl(${h%360} 60% 30%)`; }
 function badge(addr){ const b=document.createElement("span"); b.className="badge"; b.textContent=addr?(addr.slice(0,10)+"…"+addr.slice(-6)):"(none)"; b.style.background=colorFor(addr); return b; }
@@ -226,11 +238,14 @@ function firstSigner(r){ return r.signers[0] || null; }
     prove.innerHTML="";
     const viaCookieBtn=document.createElement("button"); viaCookieBtn.className="sec"; viaCookieBtn.textContent="Prove it: send as browser cookie";
     viaCookieBtn.onclick=async()=>{ out.innerHTML="";
-      document.cookie="auth_token="+tok+"; path=/; SameSite=Strict";
-      const viaCk=firstSigner(await commitmentsFor(null));
-      const row2=line(out,"cookie / header"); row2.appendChild(badge(viaCk)); row2.appendChild(badge(addr));
-      verdict(out, viaCk===addr, viaCk===addr?"the browser cookie reaches the same wallet":"cookie path differs");
-      document.cookie="auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+      setAuthCookie(tok);
+      try{
+        const viaCk=firstSigner(await commitmentsFor(null));
+        const row2=line(out,"cookie / header"); row2.appendChild(badge(viaCk)); row2.appendChild(badge(addr));
+        verdict(out, viaCk===addr, viaCk===addr?"the browser cookie reaches the same wallet":"cookie path differs");
+      } finally {
+        clearAuthCookie();
+      }
     };
     const tamperBtn=document.createElement("button"); tamperBtn.className="sec"; tamperBtn.textContent="Prove it: tamper one character";
     tamperBtn.onclick=async()=>{ out.innerHTML="";
@@ -307,15 +322,19 @@ function firstSigner(r){ return r.signers[0] || null; }
 (function(){
   const {card:c,out}=card("6 · The browser cookie fires the hook", "Set the Odysee auth_token as a real cookie and send NO Authorization header. Same-origin, the browser attaches the cookie; the node reshapes it and the hook still fires — deriving the same wallet as the header path.");
   runBtn(c,"Set cookie & run",async()=>{ out.innerHTML="";
-    document.cookie = "auth_token=" + SESS.laptop + "; path=/; SameSite=Strict";
-    const viaCookie = firstSigner(await commitmentsFor(null));       // no auth header — cookie only
-    const viaBearer = firstSigner(await commitmentsFor(SESS.laptop));
-    const row=line(out,"via cookie / via header"); row.appendChild(badge(viaCookie)); row.appendChild(badge(viaBearer));
-    verdict(out, viaCookie&&viaCookie===viaBearer, viaCookie?(viaCookie===viaBearer?"cookie == header — same wallet":"signed, but differs from header"):"cookie did not fire");
-    const n=document.createElement("p"); n.className="note"; n.textContent="If this shows no signer, the node lacks the priv/cookie gate key or is not same-origin."; out.appendChild(n);
+    setAuthCookie(SESS.laptop);
+    try{
+      const viaCookie = firstSigner(await commitmentsFor(null));       // no auth header — cookie only
+      const viaBearer = firstSigner(await commitmentsFor(SESS.laptop));
+      const row=line(out,"via cookie / via header"); row.appendChild(badge(viaCookie)); row.appendChild(badge(viaBearer));
+      verdict(out, viaCookie&&viaCookie===viaBearer, viaCookie?(viaCookie===viaBearer?"cookie == header — same wallet":"signed, but differs from header"):"cookie did not fire");
+      const n=document.createElement("p"); n.className="note"; n.textContent="If this shows no signer, the node lacks the priv/cookie gate key or is not same-origin."; out.appendChild(n);
+    } finally {
+      clearAuthCookie();
+    }
   });
   const clr=document.createElement("button"); clr.className="sec"; clr.textContent="Clear cookie"; clr.style.marginLeft="8px";
-  clr.onclick=()=>{ document.cookie="auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"; };
+  clr.onclick=clearAuthCookie;
   c.querySelector("button").after(clr);
 })();
 
