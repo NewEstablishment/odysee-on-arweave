@@ -34,6 +34,7 @@
 -module(hb_odysee_auth_test).
 -include_lib("eunit/include/eunit.hrl").
 -include("include/hb.hrl").
+-include("include/lbry_test_keys.hrl").
 
 %%% ==================== Shared helpers ====================
 
@@ -451,6 +452,33 @@ migration_imports_existing_wallet_test() ->
         ExistingAddress,
         signer_via_cookie(<<"sess-one-laptop">>, ServerID)
     ).
+
+%% @doc Migration of REAL LBRY channel keys through the full pipeline. Each key
+%% is a genuine secp256k1 channel key recovered from an LBRY wallet-sync blob;
+%% `lbry_channel_key:pem_to_jwk' converts its PEM to the JWK `~secret@1.0'
+%% imports, and it is bound to an account. Two distinct users' channel keys are
+%% migrated to two accounts: each account's session then signs with ITS migrated
+%% channel identity (the address derived from the real key), and the two accounts
+%% remain isolated. This is the account map + `pem_to_jwk' standing in for the
+%% production path (decrypt the sync blob upstream, resolve the account via
+%% `user/me', import the user's own channel key).
+migration_imports_real_lbry_channel_keys_test() ->
+    ServerID = start_account_node(<<"real-migration">>),
+    [{PemOne, _}, {PemTwo, _} | _] = ?LBRY_CHANNEL_KEYS,
+    MigratedAddress =
+        fun(Pem) ->
+            Jwk = lbry_channel_key:pem_to_jwk(Pem),
+            Wallet = ar_wallet:from_json(Jwk),
+            {Jwk, hb_util:human_id(ar_wallet:to_address(Wallet))}
+        end,
+    {JwkOne, AddressOne} = MigratedAddress(PemOne),
+    {JwkTwo, AddressTwo} = MigratedAddress(PemTwo),
+    ?assertMatch({ok, _}, import_wallet(JwkOne, <<"sess-one-laptop">>, ServerID)),
+    ?assertMatch({ok, _}, import_wallet(JwkTwo, <<"sess-two-laptop">>, ServerID)),
+    ?assertEqual(AddressOne, signer_via_cookie(<<"sess-one-laptop">>, ServerID)),
+    ?assertEqual(AddressOne, signer_via_cookie(<<"sess-one-phone">>, ServerID)),
+    ?assertEqual(AddressTwo, signer_via_cookie(<<"sess-two-laptop">>, ServerID)),
+    ?assertNotEqual(AddressOne, AddressTwo).
 
 %% @doc The `odysee-account-api' option resolves tokens with a real `user/me'
 %% call against an Odysee internal-apis deployment. Mocked here with the
