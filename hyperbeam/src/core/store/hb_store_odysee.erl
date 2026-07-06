@@ -1322,7 +1322,7 @@ classify_channel_claims_list_path(_Path) ->
 
 classify_native_path(<<TxID:64/binary, ":", NOut/binary>>) ->
     case valid_hex_size(TxID, 32) andalso valid_uint(NOut) of
-        true -> {ok, <<"odysee/claim-proof/", TxID/binary, "/", NOut/binary>>};
+        true -> {ok, <<"odysee/claim-output/", TxID/binary, "/", NOut/binary>>};
         false -> not_found
     end;
 classify_native_path(Path) ->
@@ -1630,11 +1630,11 @@ direct_outpoint_get_returns_native_claim_output_test() ->
     Store = #{
         <<"store-module">> => ?MODULE,
         <<"fixtures">> => #{
-            <<"odysee/claim-proof/", TxID/binary, "/0">> => ClaimOutput
+            <<"odysee/claim-output/", TxID/binary, "/0">> => ClaimOutput
         }
     },
     ?assertEqual(
-        <<"odysee/claim-proof/", TxID/binary, "/0">>,
+        <<"odysee/claim-output/", TxID/binary, "/0">>,
         canonical_read_path(Outpoint)
     ),
     {ok, StoreMsg} = read(Store, #{ <<"read">> => Outpoint }, #{}),

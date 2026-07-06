@@ -962,6 +962,7 @@ expected_remote_commitment(Key) when is_binary(Key) ->
                 {{ok, TxIDHex, _}, {ok, Nout}} ->
                     {ok,
                         [
+                            <<"lbry-claim-output@1.0">>,
                             <<"lbry-claim@1.0">>,
                             <<"lbry-channel@1.0">>,
                             <<"lbry-stream@1.0">>
@@ -986,7 +987,8 @@ expected_remote_commitment(Key) when is_binary(Key) ->
 expected_remote_commitment(_) ->
     untyped.
 
-require_native_commitments(Devices, NativeIDHex, Key, Msg, Opts) when is_map(Msg) ->
+require_native_commitments(Devices, NativeIDHex, Key, Msg0, Opts) when is_map(Msg0) ->
+    Msg = materialize_native_commitment(Devices, Msg0, Opts),
     RemoteCommitments =
         hb_cache:ensure_all_loaded(
             hb_maps:get(<<"commitments">>, Msg, #{}, Opts),
@@ -1030,6 +1032,20 @@ require_native_commitments(Devices, NativeIDHex, Key, Msg, Opts) when is_map(Msg
     end;
 require_native_commitments(_Devices, _NativeIDHex, Key, _Msg, _Opts) ->
     {error, {missing_native_commitment, Key}}.
+
+materialize_native_commitment(Devices, Msg, Opts) ->
+    case {
+        lists:member(<<"lbry-claim-output@1.0">>, Devices),
+        hb_maps:get(<<"device">>, Msg, undefined, Opts)
+    } of
+        {true, <<"lbry-claim-output@1.0">>} ->
+            case hb_ao:raw(<<"lbry-claim-output@1.0">>, <<"commit">>, Msg, #{}, Opts) of
+                {ok, Committed} -> Committed;
+                _ -> Msg
+            end;
+        _ ->
+            Msg
+    end.
 
 ensure_native_derived_fields(Msg, Commitments, Opts) ->
     ensure_blob_content_digest(Msg, Commitments, Opts).
@@ -1081,7 +1097,8 @@ canonical_committed_keys(Msg, Commitments) ->
         [
             device_committed_list(
                 maps:get(<<"commitment-device">>, Commitment, undefined),
-                Ancestry
+                Ancestry,
+                Msg
             )
          ||
             Commitment <- maps:values(Commitments),
@@ -1103,27 +1120,59 @@ canonical_committed_keys(Msg, Commitments) ->
             )
     end.
 
-device_committed_list(<<"lbry-blob@1.0">>, _Ancestry) ->
+device_committed_list(<<"lbry-blob@1.0">>, _Ancestry, _Msg) ->
     [<<"blob-hash">>, <<"content-digest">>, <<"data">>, <<"device">>];
-device_committed_list(<<"lbry-transaction@1.0">>, _Ancestry) ->
+device_committed_list(<<"lbry-transaction@1.0">>, _Ancestry, _Msg) ->
     [<<"device">>, <<"raw">>, <<"txid">>];
-device_committed_list(<<"lbry-stream-descriptor@1.0">>, _Ancestry) ->
+device_committed_list(<<"lbry-stream-descriptor@1.0">>, _Ancestry, _Msg) ->
     [<<"device">>, <<"raw">>, <<"sd-hash">>];
-device_committed_list(<<"lbry-claim@1.0">>, Ancestry) ->
+device_committed_list(<<"lbry-claim-output@1.0">>, _Ancestry, Msg) ->
+    claim_output_committed_list(Msg);
+device_committed_list(<<"lbry-claim@1.0">>, Ancestry, _Msg) ->
     claim_committed_list(Ancestry);
-device_committed_list(<<"lbry-channel@1.0">>, Ancestry) ->
+device_committed_list(<<"lbry-channel@1.0">>, Ancestry, _Msg) ->
     lists:sort(
         claim_committed_list(Ancestry) ++ [<<"channel-id">>, <<"public-key">>]
     );
-device_committed_list(<<"lbry-stream@1.0">>, Ancestry) ->
+device_committed_list(<<"lbry-stream@1.0">>, Ancestry, _Msg) ->
     lists:sort(claim_committed_list(Ancestry) ++ [<<"sd-hash">>]);
-device_committed_list(<<"lbry-channel-attestation@1.0">>, _Ancestry) ->
+device_committed_list(<<"lbry-channel-attestation@1.0">>, _Ancestry, _Msg) ->
     [
         <<"channel-evidence">>, <<"claim">>, <<"claim-id">>, <<"claim-op">>,
         <<"device">>, <<"nout">>, <<"raw-transaction">>, <<"txid">>
     ];
-device_committed_list(_Device, _Ancestry) ->
+device_committed_list(_Device, _Ancestry, _Msg) ->
     [].
+
+claim_output_committed_list(Msg) ->
+    Candidates = [
+        <<"address-script-hex">>,
+        <<"amount">>,
+        <<"body">>,
+        <<"claim-id">>,
+        <<"claim-id-valid">>,
+        <<"claim-name">>,
+        <<"claim-name-valid">>,
+        <<"claim-op">>,
+        <<"claim-proof-store-path">>,
+        <<"claim-script-valid">>,
+        <<"claim-value-hash">>,
+        <<"claim-value-hash-valid">>,
+        <<"claim-value-hex">>,
+        <<"claim-value-size">>,
+        <<"content-type">>,
+        <<"device">>,
+        <<"nout">>,
+        <<"nout-valid">>,
+        <<"proof-tier">>,
+        <<"script-hex">>,
+        <<"tx-hex">>,
+        <<"txid">>,
+        <<"txid-internal">>,
+        <<"txid-valid">>,
+        <<"valid">>
+    ],
+    lists:sort([Key || Key <- Candidates, maps:is_key(Key, Msg)]).
 
 lbry_commitment(#{ <<"commitment-device">> := <<"lbry-", _/binary>> }) -> true;
 lbry_commitment(_) -> false.
