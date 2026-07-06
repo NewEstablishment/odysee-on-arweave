@@ -29,6 +29,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(DEVICE, <<"odysee@1.0">>).
+-define(DEFAULT_PROXY_URL, <<"https://api.na-backend.odysee.com/api/v1/proxy">>).
 -define(LBRY_BLOB_COMMITMENT_DEVICE, <<"lbry-blob@1.0">>).
 -define(LBRY_STREAM_DESCRIPTOR_COMMITMENT_DEVICE, <<"lbry-stream-descriptor@1.0">>).
 -define(LBRY_CLAIM_COMMITMENT_DEVICE, <<"lbry-claim@1.0">>).
@@ -148,16 +149,65 @@ source_view(Msg, Req, Opts) ->
 
 read_source_key(Key, Opts) when is_binary(Key) ->
     read_source_key([Key], Opts);
-read_source_key([Key | Rest], Opts) ->
+read_source_key(Keys, Opts) when is_list(Keys) ->
     Store = hb_opts:get(store, no_viable_store, Opts),
-    case hb_store:read(Store, Key, maps:without([<<"store">>, store], Opts)) of
-        {error, not_found} when Rest =/= [] ->
-            read_source_key(Rest, Opts);
-        not_found when Rest =/= [] ->
-            read_source_key(Rest, Opts);
-        Result ->
-            Result
+    case read_source_from_store(Keys, Store, Opts) of
+        {ok, _} = Hit -> Hit;
+        _Miss -> resolve_and_cache_source(Keys, Store, Opts)
     end.
+
+read_source_from_store([], _Store, _Opts) ->
+    not_found;
+read_source_from_store([Key | Rest], Store, Opts) ->
+    case hb_store:read(Store, Key, maps:without([<<"store">>, store], Opts)) of
+        {ok, _} = Hit -> Hit;
+        _ -> read_source_from_store(Rest, Store, Opts)
+    end.
+
+%% @doc Cold-resolve a legacy source object directly through the read-only
+%% Odysee source store (via the LBRY proxy) when it is not in the node's store
+%% list, then cache it in the node's local store under its native key. This lets
+%% a later bare `GET /<id>' resolve from the local cache without the Odysee store
+%% being registered in the node's fallthrough — the device warms the cache on
+%% first access, and every access after is a local store hit.
+resolve_and_cache_source(Keys, NodeStore, Opts) ->
+    OdyseeStore = [
+        #{
+            <<"store-module">> => hb_store_odysee,
+            <<"walk-ancestry">> => true,
+            <<"lbry-proxy-url">> =>
+                hb_opts:get(<<"lbry-proxy-url">>, ?DEFAULT_PROXY_URL, Opts)
+        }
+    ],
+    ReadOpts = maps:without([<<"store">>, store], Opts),
+    resolve_and_cache_source(source_cache_keys(Keys), OdyseeStore, ReadOpts, NodeStore, Opts).
+
+resolve_and_cache_source([], _OdyseeStore, _ReadOpts, _NodeStore, _Opts) ->
+    {error, not_found};
+resolve_and_cache_source([Key | Rest], OdyseeStore, ReadOpts, NodeStore, Opts) ->
+    case hb_store:read(OdyseeStore, Key, ReadOpts) of
+        {ok, Msg} ->
+            cache_source_object(Key, Msg, NodeStore, Opts),
+            {ok, Msg};
+        _ ->
+            resolve_and_cache_source(Rest, OdyseeStore, ReadOpts, NodeStore, Opts)
+    end.
+
+%% Warm-cache under the bare native key (e.g. `txid:nout') before `odysee/...'
+%% path keys, so we cache under the identifier a bare `GET /<id>' will request.
+source_cache_keys(Keys) ->
+    [K || K <- Keys, not is_odysee_path_key(K)] ++
+        [K || K <- Keys, is_odysee_path_key(K)].
+
+is_odysee_path_key(<<"odysee/", _/binary>>) -> true;
+is_odysee_path_key(_) -> false.
+
+cache_source_object(Key, Msg, NodeStore, Opts) ->
+    catch begin
+        {ok, Id} = hb_cache:write(Msg, Opts),
+        hb_store:link(NodeStore, #{ Key => Id }, Opts)
+    end,
+    ok.
 
 transaction(Base, Req, Opts) ->
     with_txid(Base, Req, Opts, fun(TxID) ->
@@ -2036,6 +2086,47 @@ source_json_view_reads_bare_outpoint_test() ->
     ?assertEqual(0, hb_maps:get(<<"nout">>, View, #{})),
     ?assertEqual(TxHex, hb_maps:get(<<"raw-transaction">>, View, #{})),
     ?assertEqual(false, hb_maps:is_key(<<"commitments">>, View, #{})).
+
+%% When the Odysee source store is NOT in the node's store list, the source
+%% device must cold-resolve legacy content directly through the proxy and warm
+%% the node's local cache, so a subsequent bare `GET /<txid>:<nout>' resolves
+%% from the local store with no legacy store registered (no config, no cold miss
+%% visible to the client, which reaches the source device on the first access).
+source_cold_resolve_warms_local_cache_test() ->
+    {TxHex, TxID, ClaimID} = proof_tx_fixture(<<"example">>, <<"raw claim">>),
+    Raw = hb_json:encode(#{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"result">> => #{
+            <<"txid">> => TxID,
+            <<"hex">> => TxHex,
+            <<"outputs">> => []
+        },
+        <<"id">> => 1
+    }),
+    {ok, MockServer, ServerHandle} =
+        hb_mock_server:start([
+            {"/", transaction_show, {200, Raw}},
+            {"/api/v1/proxy", transaction_show, {200, Raw}}
+        ]),
+    try
+        NodeStore = #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> => <<"cache-TEST/source-warm-", TxID/binary>>
+        },
+        hb_store:reset(NodeStore),
+        Opts = #{ <<"store">> => [NodeStore], <<"lbry-proxy-url">> => MockServer },
+        Outpoint = <<TxID/binary, ":0">>,
+        %% Cold: store list has no odysee store, so the device resolves via proxy.
+        {ok, Msg} = source(#{}, #{ <<"id">> => Outpoint }, Opts),
+        ?assertEqual(ClaimID, hb_maps:get(<<"claim-id">>, Msg, #{})),
+        %% Warm: the outpoint is now in the local store; a bare read resolves it.
+        {ok, Cached0} = hb_cache:read(Outpoint, Opts),
+        Cached = hb_cache:ensure_all_loaded(Cached0, Opts),
+        ?assertEqual(ClaimID, hb_maps:get(<<"claim-id">>, Cached, #{})),
+        ?assertEqual(TxID, hb_maps:get(<<"txid">>, Cached, #{}))
+    after
+        hb_mock_server:stop(ServerHandle)
+    end.
 
 source_reads_store_path_surface_objects_test() ->
     Store = surface_fixture_store(),

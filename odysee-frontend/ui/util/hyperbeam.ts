@@ -183,15 +183,8 @@ type HyperbeamChannel = {
   [key: string]: any;
 };
 
-type ProtoField = {
-  number: number;
-  wireType: number;
-  value: number | Uint8Array;
-};
-
 type DecodedClaimMetadata = {
   signedChannelId?: string;
-  value?: Record<string, any>;
 };
 
 export async function fetchHyperbeamCommentList(params: CommentListParams): Promise<CommentListResponse | null> {
@@ -444,7 +437,9 @@ function fetchCachedImmutableJsonOrNull(id: string): Promise<any | null> {
 
 async function fetchImmutableJsonOrNull(id: string): Promise<any | null> {
   if (isOutpointId(id) || isStandaloneImmutableId(id)) {
-    const source = await fetchStoreJsonOrNull(encodeDataPath(id), false);
+    // `accept-bundle` inlines the node-decoded native `value` sub-message so the
+    // client reads `claim.value.*` the same way for legacy and native content.
+    const source = await fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false);
     if (source) return source;
   }
 
@@ -605,8 +600,10 @@ function immutableClaimFromHyperbeam(
 
   const immutableOutpoint = outpointParts(immutableId);
   const claimMetadata = decodedClaim || decodeClaimMetadata(payload);
-  const decodedValue = isObject(claimMetadata?.value) ? claimMetadata.value : {};
-  const decodedSource = isObject(value(decodedValue, 'source')) ? value(decodedValue, 'source') : {};
+  // Metadata now comes from the node-decoded `value` (existingValue below);
+  // these remain only as empty fallbacks for pre-normalization responses.
+  const decodedValue: Record<string, any> = {};
+  const decodedSource: Record<string, any> = {};
   const channelPayload = storePayload(channelResult);
   const channelClaim = sdkClaimFromHyperbeam(channelPayload) || channelPayload;
   const claim = sdkClaimFromHyperbeam(payload) || payload;
@@ -1027,21 +1024,106 @@ function parseMultipartBytes(body: Uint8Array, contentType: string): Record<stri
   if (!boundary) return { body: new TextDecoder().decode(body) };
 
   const text = bytesToBinaryString(body);
-  const parts: Record<string, any> = {};
+  const result: Record<string, any> = {};
   for (const segment of text.split(`--${boundary}`)) {
+    // Sub-message parts (e.g. `value`, `value/source`) are header-only and have
+    // no `\r\n\r\n` body separator; blob parts (`claim`, `raw-transaction`) do.
     const separator = segment.indexOf('\r\n\r\n');
-    if (separator === -1) continue;
-
-    const rawHeaders = segment.slice(0, separator);
+    const rawHeaders = separator === -1 ? segment : segment.slice(0, separator);
     const name = rawHeaders.match(/name="([^"]+)"/i)?.[1];
-    if (!name) continue;
+    if (!name || isBundleHousekeepingPart(name)) continue;
 
-    let value = segment.slice(separator + 4);
-    value = value.replace(/\r\n$/, '');
-    parts[name] = latin1ToHex(value);
+    const path = name.split('/').filter(Boolean);
+    const fields = parsePartHeaderFields(rawHeaders);
+    if (Object.keys(fields).length > 0) {
+      // Scalar fields live in the part headers; reconstruct the nested object.
+      Object.assign(ensureNestedObject(result, path), fields);
+    } else if (separator !== -1) {
+      // A binary blob part: keep its body.
+      const partBody = segment.slice(separator + 4).replace(/\r\n$/, '');
+      setNestedValue(result, path, latin1ToHex(partBody));
+    }
   }
 
-  return parts;
+  return arrayifyNumericMaps(result);
+}
+
+function isBundleHousekeepingPart(name: string): boolean {
+  const segments = name.split('/');
+  return segments.includes('commitments') || segments[segments.length - 1] === 'committed';
+}
+
+function parsePartHeaderFields(rawHeaders: string): Record<string, any> {
+  const types = parseAoTypes(rawHeaders);
+  const fields: Record<string, any> = {};
+  for (const line of rawHeaders.split(/\r\n/)) {
+    const separator = line.indexOf(':');
+    if (separator === -1) continue;
+
+    const key = line.slice(0, separator).trim().toLowerCase();
+    const raw = line.slice(separator + 1).trim();
+    if (!key || BUNDLE_META_HEADERS.has(key)) continue;
+
+    // Header values are latin1 slices of the raw bytes; text fields must be
+    // re-decoded as UTF-8 (e.g. accented titles) rather than left as mojibake.
+    fields[key] = types[key] === 'integer' ? Number(raw) : latin1ToUtf8(raw);
+  }
+  return fields;
+}
+
+function latin1ToUtf8(value: string): string {
+  const bytes = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index += 1) bytes[index] = value.charCodeAt(index) & 0xff;
+  return new TextDecoder().decode(bytes);
+}
+
+const BUNDLE_META_HEADERS = new Set([
+  'content-disposition',
+  'content-type',
+  'ao-types',
+  'content-digest',
+  'signature',
+  'signature-input',
+]);
+
+function parseAoTypes(rawHeaders: string): Record<string, string> {
+  const line = rawHeaders.match(/ao-types:\s*([^\r\n]+)/i)?.[1];
+  if (!line) return {};
+
+  const types: Record<string, string> = {};
+  for (const match of line.matchAll(/([a-z0-9_-]+)\s*=\s*"([^"]+)"/gi)) {
+    types[match[1].toLowerCase()] = match[2];
+  }
+  return types;
+}
+
+function ensureNestedObject(root: Record<string, any>, path: Array<string>): Record<string, any> {
+  let current = root;
+  for (const key of path) {
+    if (typeof current[key] !== 'object' || current[key] === null) current[key] = {};
+    current = current[key];
+  }
+  return current;
+}
+
+function setNestedValue(root: Record<string, any>, path: Array<string>, value: any): void {
+  if (!path.length) return;
+  const leaf = path[path.length - 1];
+  ensureNestedObject(root, path.slice(0, -1))[leaf] = value;
+}
+
+// HyperBEAM encodes list values as objects with sequential numeric keys
+// (e.g. tags -> { "1": "a", "2": "b" }); restore them to arrays.
+function arrayifyNumericMaps(value: any): any {
+  if (!isObject(value)) return value;
+
+  const keys = Object.keys(value);
+  const isSequential = keys.length > 0 && keys.every((key, index) => key === String(index + 1));
+  if (isSequential) return keys.map((key) => arrayifyNumericMaps(value[key]));
+
+  const result: Record<string, any> = {};
+  for (const key of keys) result[key] = arrayifyNumericMaps(value[key]);
+  return result;
 }
 
 function bytesToBinaryString(bytes: Uint8Array): string {
@@ -1077,50 +1159,17 @@ function storePayload(result: any): any {
   return payload;
 }
 
+// The node now decodes claim metadata into a native `value` (see
+// hb_lbry_claim_proto:decode_metadata), so the client reads `claim.value.*` for
+// legacy and native content through one path. This only extracts the signing
+// channel id from the claim envelope, to resolve the channel for display.
 function decodeClaimMetadata(payload: any): DecodedClaimMetadata | null {
   const claimHex = value(payload, 'claim', 'claim-value-hex', 'claim_value_hex');
   const bytes = hexToBytes(claimHex);
   if (!bytes) return null;
 
   try {
-    const envelope = claimEnvelope(bytes);
-    const claimFields = protoFields(envelope.message);
-    const stream = protoBytes(claimFields, 1);
-    const streamFields = stream ? protoFields(stream) : [];
-    const source = protoBytes(streamFields, 1);
-    const sourceFields = source ? protoFields(source) : [];
-    const thumbnail = protoBytes(claimFields, 10);
-    const thumbnailFields = thumbnail ? protoFields(thumbnail) : [];
-    const video = protoBytes(streamFields, 11);
-    const videoFields = video ? protoFields(video) : [];
-    const thumbnailUrl = protoString(thumbnailFields, 5) || protoString(thumbnailFields, 1);
-    const mediaType = protoString(sourceFields, 4);
-
-    return {
-      signedChannelId: envelope.signedChannelId,
-      value: compactParams({
-        title: protoString(claimFields, 8),
-        description: protoString(claimFields, 9),
-        thumbnail: thumbnailUrl ? { url: thumbnailUrl } : undefined,
-        tags: protoStrings(claimFields, 11),
-        license: protoString(streamFields, 3),
-        release_time: protoNumber(streamFields, 5),
-        stream_type: streamTypeFromMediaType(mediaType),
-        source: compactParams({
-          hash: protoBytesHex(sourceFields, 1),
-          name: protoString(sourceFields, 2),
-          size: protoNumber(sourceFields, 3),
-          media_type: mediaType,
-          url: protoString(sourceFields, 5),
-          sd_hash: protoBytesHex(sourceFields, 6),
-        }),
-        video: compactParams({
-          width: protoNumber(videoFields, 1),
-          height: protoNumber(videoFields, 2),
-          duration: protoNumber(videoFields, 3),
-        }),
-      }),
-    };
+    return { signedChannelId: claimEnvelope(bytes).signedChannelId };
   } catch {
     return null;
   }
@@ -1139,82 +1188,6 @@ function claimEnvelope(bytes: Uint8Array): { message: Uint8Array; signedChannelI
   }
 
   return { message: bytes };
-}
-
-function protoFields(bytes: Uint8Array): Array<ProtoField> {
-  const fields: Array<ProtoField> = [];
-  let offset = 0;
-  while (offset < bytes.length) {
-    const key = readProtoVarint(bytes, offset);
-    offset = key.offset;
-    const number = Math.floor(key.value / 8);
-    const wireType = key.value % 8;
-    let fieldValue: number | Uint8Array;
-
-    if (wireType === 0) {
-      const next = readProtoVarint(bytes, offset);
-      fieldValue = next.value;
-      offset = next.offset;
-    } else if (wireType === 1) {
-      fieldValue = bytes.slice(offset, offset + 8);
-      offset += 8;
-    } else if (wireType === 2) {
-      const length = readProtoVarint(bytes, offset);
-      offset = length.offset;
-      fieldValue = bytes.slice(offset, offset + length.value);
-      offset += length.value;
-    } else if (wireType === 5) {
-      fieldValue = bytes.slice(offset, offset + 4);
-      offset += 4;
-    } else {
-      throw new Error('unsupported protobuf field');
-    }
-
-    fields.push({ number, wireType, value: fieldValue });
-  }
-  return fields;
-}
-
-function readProtoVarint(bytes: Uint8Array, start: number): { value: number; offset: number } {
-  let value = 0;
-  let shift = 0;
-  for (let offset = start; offset < bytes.length && offset < start + 10; offset += 1) {
-    const byte = bytes[offset];
-    value += (byte & 0x7f) * 2 ** shift;
-    if ((byte & 0x80) === 0) return { value, offset: offset + 1 };
-    shift += 7;
-  }
-  throw new Error('invalid protobuf varint');
-}
-
-function protoBytes(fields: Array<ProtoField>, number: number): Uint8Array | undefined {
-  const field = fields.find(
-    (item) => item.number === number && item.wireType === 2 && item.value instanceof Uint8Array
-  );
-  return field?.value instanceof Uint8Array ? field.value : undefined;
-}
-
-function protoBytesHex(fields: Array<ProtoField>, number: number): string | undefined {
-  const bytes = protoBytes(fields, number);
-  return bytes ? bytesToHex(bytes) : undefined;
-}
-
-function protoString(fields: Array<ProtoField>, number: number): string | undefined {
-  const bytes = protoBytes(fields, number);
-  return bytes ? new TextDecoder().decode(bytes) : undefined;
-}
-
-function protoStrings(fields: Array<ProtoField>, number: number): Array<string> | undefined {
-  const values = fields
-    .filter((item) => item.number === number && item.wireType === 2 && item.value instanceof Uint8Array)
-    .map((item) => new TextDecoder().decode(item.value as Uint8Array))
-    .filter(Boolean);
-  return values.length ? values : undefined;
-}
-
-function protoNumber(fields: Array<ProtoField>, number: number): number | undefined {
-  const field = fields.find((item) => item.number === number && item.wireType === 0 && typeof item.value === 'number');
-  return typeof field?.value === 'number' ? field.value : undefined;
 }
 
 function hexToBytes(value: any): Uint8Array | null {

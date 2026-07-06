@@ -369,7 +369,9 @@ async function hyperbeamNodeFetchStorePath(path, preferJson = true) {
 
 async function hyperbeamNodeFetchImmutableJson(id) {
   if (isOutpointId(id) || isStandaloneImmutableId(id)) {
-    const source = await hyperbeamNodeFetchStorePath(encodeDataPath(id), false);
+    // `accept-bundle` inlines the node-decoded native `value` sub-message so
+    // legacy and native content parse through one shape.
+    const source = await hyperbeamNodeFetchStorePath(`${encodeDataPath(id)}?accept-bundle=true`, false);
     if (source) return source;
   }
 
@@ -421,21 +423,94 @@ function parseMultipartBytes(body, contentType) {
   if (!boundary) return { body: body.toString('utf8') };
 
   const text = body.toString('latin1');
-  const parts = {};
+  const result = {};
   for (const segment of text.split(`--${boundary}`)) {
+    // Sub-message parts (e.g. `value`, `value/source`) are header-only; blob
+    // parts (`claim`, `raw-transaction`) carry a `\r\n\r\n` body.
     const separator = segment.indexOf('\r\n\r\n');
-    if (separator === -1) continue;
-
-    const rawHeaders = segment.slice(0, separator);
+    const rawHeaders = separator === -1 ? segment : segment.slice(0, separator);
     const name = rawHeaders.match(/name="([^"]+)"/i)?.[1];
-    if (!name) continue;
+    if (!name || isBundleHousekeepingPart(name)) continue;
 
-    let value = segment.slice(separator + 4);
-    value = value.replace(/\r\n$/, '');
-    parts[name] = Buffer.from(value, 'latin1').toString('hex');
+    const path = name.split('/').filter(Boolean);
+    const fields = parsePartHeaderFields(rawHeaders);
+    if (Object.keys(fields).length > 0) {
+      Object.assign(ensureNestedObject(result, path), fields);
+    } else if (separator !== -1) {
+      const partBody = segment.slice(separator + 4).replace(/\r\n$/, '');
+      setNestedValue(result, path, Buffer.from(partBody, 'latin1').toString('hex'));
+    }
   }
 
-  return parts;
+  return arrayifyNumericMaps(result);
+}
+
+function isBundleHousekeepingPart(name) {
+  const segments = name.split('/');
+  return segments.includes('commitments') || segments[segments.length - 1] === 'committed';
+}
+
+const BUNDLE_META_HEADERS = new Set([
+  'content-disposition',
+  'content-type',
+  'ao-types',
+  'content-digest',
+  'signature',
+  'signature-input',
+]);
+
+function parsePartHeaderFields(rawHeaders) {
+  const types = parseAoTypes(rawHeaders);
+  const fields = {};
+  for (const line of rawHeaders.split(/\r\n/)) {
+    const separator = line.indexOf(':');
+    if (separator === -1) continue;
+
+    const key = line.slice(0, separator).trim().toLowerCase();
+    const raw = line.slice(separator + 1).trim();
+    if (!key || BUNDLE_META_HEADERS.has(key)) continue;
+
+    fields[key] = types[key] === 'integer' ? Number(raw) : Buffer.from(raw, 'latin1').toString('utf8');
+  }
+  return fields;
+}
+
+function parseAoTypes(rawHeaders) {
+  const line = rawHeaders.match(/ao-types:\s*([^\r\n]+)/i)?.[1];
+  if (!line) return {};
+
+  const types = {};
+  for (const match of line.matchAll(/([a-z0-9_-]+)\s*=\s*"([^"]+)"/gi)) {
+    types[match[1].toLowerCase()] = match[2];
+  }
+  return types;
+}
+
+function ensureNestedObject(root, path) {
+  let current = root;
+  for (const key of path) {
+    if (typeof current[key] !== 'object' || current[key] === null) current[key] = {};
+    current = current[key];
+  }
+  return current;
+}
+
+function setNestedValue(root, path, value) {
+  if (!path.length) return;
+  const leaf = path[path.length - 1];
+  ensureNestedObject(root, path.slice(0, -1))[leaf] = value;
+}
+
+function arrayifyNumericMaps(value) {
+  if (!isObject(value)) return value;
+
+  const keys = Object.keys(value);
+  const isSequential = keys.length > 0 && keys.every((key, index) => key === String(index + 1));
+  if (isSequential) return keys.map((key) => arrayifyNumericMaps(value[key]));
+
+  const result = {};
+  for (const key of keys) result[key] = arrayifyNumericMaps(value[key]);
+  return result;
 }
 
 function hyperbeamNodeMediaUrl(uri) {

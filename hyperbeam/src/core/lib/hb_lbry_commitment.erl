@@ -216,19 +216,28 @@ claim_output_message(Raw, Nout, Ancestry) when is_binary(Raw), is_integer(Nout) 
         ClaimID = maps:get(<<"claim-id">>, Output),
         {ok, Type} ?= ancestry_claim_type(ClaimOp, Raw, Nout, Ancestry),
         Strength = proof_strength(Type),
+        Envelope = maps:get(<<"claim-envelope">>, Output),
+        % Attach a native, Odysee-shaped `value' decoded from the committed
+        % claim protobuf, so the client parses legacy and native content through
+        % one identical codepath. Committed (deterministic, derived from the
+        % already-committed `claim') so it survives caching and stays verifiable.
+        {ValueFields, ValueKeys} = decoded_value_fields(Envelope),
         Msg = with_ancestry_field(
-            #{
-                <<"device">> => <<"lbry-claim@1.0">>,
-                <<"claim-id">> => ClaimID,
-                <<"claim-op">> => ClaimOp,
-                <<"claim-name">> => maps:get(<<"claim-name">>, Output),
-                <<"claim">> => maps:get(<<"claim">>, Output),
-                <<"claim-envelope">> => maps:get(<<"claim-envelope">>, Output),
-                <<"claim-proof-strength">> => Strength,
-                <<"txid">> => TxIDHex,
-                <<"nout">> => Nout,
-                <<"raw-transaction">> => Raw
-            },
+            maps:merge(
+                ValueFields,
+                #{
+                    <<"device">> => <<"lbry-claim@1.0">>,
+                    <<"claim-id">> => ClaimID,
+                    <<"claim-op">> => ClaimOp,
+                    <<"claim-name">> => maps:get(<<"claim-name">>, Output),
+                    <<"claim">> => maps:get(<<"claim">>, Output),
+                    <<"claim-envelope">> => Envelope,
+                    <<"claim-proof-strength">> => Strength,
+                    <<"txid">> => TxIDHex,
+                    <<"nout">> => Nout,
+                    <<"raw-transaction">> => Raw
+                }
+            ),
             Ancestry
         ),
         {ok,
@@ -237,7 +246,7 @@ claim_output_message(Raw, Nout, Ancestry) when is_binary(Raw), is_integer(Nout) 
                 <<"lbry-claim@1.0">>,
                 Type,
                 {<<"outpoint">>, outpoint_bytes(TxIDHex, Nout)},
-                claim_committed_list(Ancestry),
+                lists:sort(claim_committed_list(Ancestry) ++ ValueKeys),
                 #{
                     <<"claim-id">> => ClaimID,
                     <<"claim-op">> => ClaimOp,
@@ -269,6 +278,17 @@ ancestry_claim_type(_ClaimOp, _Raw, _Nout, _Ancestry) ->
 
 with_ancestry_field(Msg, undefined) -> Msg;
 with_ancestry_field(Msg, Ancestry) -> Msg#{ <<"claim-ancestry">> => Ancestry }.
+
+%% Decode the claim protobuf into a native Odysee-shaped `value' map. Returns
+%% `{Fields, CommittedKeys}' so the caller can both attach the field and extend
+%% its commitment. Empty for non-stream claims (e.g. channels).
+decoded_value_fields(Envelope) when is_map(Envelope) ->
+    case hb_lbry_claim_proto:decode_metadata(maps:get(<<"message">>, Envelope, <<>>)) of
+        {ok, Value} when map_size(Value) > 0 -> {#{ <<"value">> => Value }, [<<"value">>]};
+        _ -> {#{}, []}
+    end;
+decoded_value_fields(_Envelope) ->
+    {#{}, []}.
 
 claim_committed_list(undefined) ->
     [
@@ -351,6 +371,9 @@ stream_claim_message(Raw, Nout, Ancestry) ->
         ClaimOp = maps:get(<<"claim-op">>, ClaimMsg),
         Type = claim_commitment_type(ClaimMsg),
         TxIDHex = maps:get(<<"txid">>, ClaimMsg),
+        % `value' is decoded and committed by claim_output_message above; carry
+        % it into the stream commitment's committed set so it stays verifiable.
+        ValueKeys = case maps:is_key(<<"value">>, ClaimMsg) of true -> [<<"value">>]; false -> [] end,
         Msg = ClaimMsg#{
             <<"device">> => <<"lbry-stream@1.0">>,
             <<"sd-hash">> => SDHash
@@ -362,7 +385,7 @@ stream_claim_message(Raw, Nout, Ancestry) ->
                     <<"lbry-stream@1.0">>,
                     Type,
                     {<<"sd-hash">>, binary:decode_hex(SDHash)},
-                    lists:sort(claim_committed_list(Ancestry) ++ [<<"sd-hash">>]),
+                    lists:sort(claim_committed_list(Ancestry) ++ [<<"sd-hash">>] ++ ValueKeys),
                     #{
                         <<"claim-id">> => ClaimID,
                         <<"claim-op">> => ClaimOp,
