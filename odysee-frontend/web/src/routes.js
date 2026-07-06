@@ -35,9 +35,9 @@ const RSS_MEDIA_AUTH_DEFAULT_TTL_SECONDS = 600;
 const RSS_MEDIA_AUTH_MAX_TTL_SECONDS = 600;
 const AUTH_TOKEN_COOKIE = 'auth_token';
 const HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
-const HYPERBEAM_UPLOAD_PATH = '/~odysee-upload@1.0/write?!=true';
-const HYPERBEAM_UPLOAD_CHUNK_PATH = '/~odysee-upload@1.0/chunk?!=true';
-const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/~odysee-upload@1.0/finalize?!=true';
+const HYPERBEAM_UPLOAD_PATH = '/id?!=true';
+const HYPERBEAM_UPLOAD_CHUNK_PATH = '/id?!=true';
+const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/id?!=true';
 const HYPERBEAM_UPLOAD_INDEX_PATH = '/~odysee-upload@1.0/index?!=true';
 const HYPERBEAM_UPLOAD_LIST_PATH = '/~odysee-upload@1.0/list';
 const HYPERBEAM_UPLOAD_DELETE_PATH = '/~odysee-upload@1.0/delete?!=true';
@@ -240,6 +240,7 @@ async function postHyperbeamLargeUpload(ctx) {
     'x-odysee-auth-token': authToken,
   });
   const finalizeJson = parseJsonBuffer(finalizeResponse.body);
+  const manifestId = storeIdFromResponse(finalizeResponse, finalizeJson);
 
   ctx.status = finalizeResponse.statusCode;
   ctx.set('Cache-Control', 'no-store');
@@ -251,8 +252,11 @@ async function postHyperbeamLargeUpload(ctx) {
   copyHeader(ctx, finalizeResponse.headers, 'signers');
   copyHeader(ctx, finalizeResponse.headers, 'signers+link');
   ctx.body = {
-    id: finalizeJson && finalizeJson.id ? finalizeJson.id : finalizeResponse.headers.id,
-    read_path: finalizeJson && finalizeJson.read_path ? finalizeJson.read_path : finalizeResponse.headers['read-path'],
+    id: manifestId,
+    read_path:
+      (finalizeJson && (finalizeJson.read_path || finalizeJson['read-path'])) ||
+      finalizeResponse.headers['read-path'] ||
+      (manifestId ? `/${manifestId}` : undefined),
     size: totalBytes,
     sha256: manifest.sha256,
     chunk_size: HYPERBEAM_UPLOAD_CHUNK_SIZE,
@@ -280,10 +284,16 @@ async function postHyperbeamUploadIndex(ctx) {
 
   const requestBody = await readJsonBody(ctx);
   const claim = requestBody.claim || requestBody;
+  const uploadId = uploadIdFromClaim(claim) || uploadIdFromClaim(requestBody);
+  const uploadMetadata = uploadMetadataFromClaim(claim);
   const encodedClaim = Buffer.from(JSON.stringify(claim)).toString('base64url');
   const response = await postJson(
     `${nodeUrl}${HYPERBEAM_UPLOAD_INDEX_PATH}`,
-    { claim },
+    {
+      claim,
+      ...uploadMetadata,
+      ...(uploadId ? { id: uploadId, data_id: uploadId } : {}),
+    },
     {
       authorization: `Bearer ${authToken}`,
       'x-odysee-auth-token': authToken,
@@ -308,7 +318,7 @@ async function postHyperbeamUploadIndex(ctx) {
   }
 
   ctx.set('Content-Type', contentType || 'application/json');
-  ctx.body = response.body;
+  ctx.body = normalizeUploadIndexResponse(parseJsonBuffer(response.body)) || response.body;
 }
 
 async function postHyperbeamThumbnailUpload(ctx) {
@@ -649,6 +659,61 @@ function mediaIdFromClaim(claim) {
   ).replace(/^\//, '');
 }
 
+function uploadIdFromClaim(claim) {
+  if (!claim || typeof claim !== 'object') return '';
+  const hyperbeam = claim.hyperbeam || claim['hyperbeam'] || {};
+  return String(
+    hyperbeam['upload-id'] ||
+      hyperbeam.upload_id ||
+      hyperbeam.uploadId ||
+      hyperbeam['media-id'] ||
+      hyperbeam.media_id ||
+      hyperbeam.mediaId ||
+      claim['upload-id'] ||
+      claim.upload_id ||
+      claim.uploadId ||
+      claim['immutable-id'] ||
+      claim.immutable_id ||
+      claim.immutableId ||
+      claim['claim-id'] ||
+      claim.claim_id ||
+      claim.claimId ||
+      claim.id ||
+      ''
+  ).replace(/^\/+/, '');
+}
+
+function uploadMetadataFromClaim(claim) {
+  if (!claim || typeof claim !== 'object') return {};
+  const value = claim.value && typeof claim.value === 'object' ? claim.value : {};
+  const source = value.source && typeof value.source === 'object' ? value.source : {};
+  return {
+    ...(source.media_type || source['media-type'] ? { media_type: source.media_type || source['media-type'] } : {}),
+    ...(source.name
+      ? { filename: source.name, name: claim.name || source.name }
+      : claim.name
+        ? { name: claim.name }
+        : {}),
+    ...(source.size ? { size: source.size } : {}),
+    ...(value.title ? { title: value.title } : {}),
+  };
+}
+
+function normalizeUploadIndexResponse(json) {
+  if (!json || typeof json !== 'object') return null;
+  const result = json.result && typeof json.result === 'object' ? json.result : {};
+  const item = result.item || json.item || (Array.isArray(result.outputs) ? result.outputs[0] : null);
+  if (!item) return json;
+  return {
+    ...json,
+    item: json.item || item,
+    result: {
+      ...result,
+      item,
+    },
+  };
+}
+
 function parseByteRange(header, totalSize) {
   if (!header || !Number.isFinite(totalSize) || totalSize <= 0) return null;
   const match = String(header).match(/^bytes=(\d*)-(\d*)$/);
@@ -701,7 +766,7 @@ async function writeHyperbeamUploadChunk(nodeUrl, authToken, chunk, index) {
     'x-odysee-upload-chunk-sha256': sha256,
   });
   const body = parseJsonBuffer(response.body);
-  const id = body && body.id ? body.id : response.headers.id;
+  const id = storeIdFromResponse(response, body);
 
   if (response.statusCode < 200 || response.statusCode >= 300 || !id) {
     throw new Error(`HyperBEAM chunk write failed at ${index}: ${response.statusCode}`);
@@ -726,6 +791,17 @@ function parseJsonBuffer(body) {
   } catch {
     return null;
   }
+}
+
+function storeIdFromResponse(response, json) {
+  const value =
+    (json && (json.id || json.path || json['read-path'] || json.read_path || json.body)) ||
+    response.headers.id ||
+    response.headers.path ||
+    response.headers['read-path'] ||
+    response.headers.url ||
+    (Buffer.isBuffer(response.body) ? response.body.toString('utf8') : String(response.body || ''));
+  return typeof value === 'string' ? value.trim().replace(/^\/+/, '') : '';
 }
 
 function parseJsonString(value) {
