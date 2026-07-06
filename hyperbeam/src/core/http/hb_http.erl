@@ -500,16 +500,19 @@ reply(InitReq, TABMReq, RawStatus, RawMessage, Opts) ->
             ?event(warning, {reply_handle_cookies_error, {error, Error}}, Opts),
             {ok, InitReq, KeyNormMessage}
         end,
-    {Status, HeadersBeforeCors, EncodedBody} =
+    {EncStatus, HeadersBeforeRange, FullEncodedBody} =
         encode_reply(
             RawStatus,
             TABMReq,
             Message,
             Opts
         ),
+    {Status, HeadersBeforeCors, EncodedBody} =
+        apply_range_request(Req, EncStatus, HeadersBeforeRange, FullEncodedBody),
     % Get the CORS request headers from the message, if they exist.
     ReqHdr = cowboy_req:header(<<"access-control-request-headers">>, Req, <<"">>),
-    HeadersWithCors = add_cors_headers(HeadersBeforeCors, ReqHdr, Opts),
+    Origin = cowboy_req:header(<<"origin">>, Req, <<"">>),
+    HeadersWithCors = add_cors_headers(HeadersBeforeCors, ReqHdr, Origin, Opts),
     EncodedHeaders = hb_private:reset(HeadersWithCors),
     ?event(debug_http,
         {http_replying,
@@ -558,6 +561,99 @@ reply(InitReq, TABMReq, RawStatus, RawMessage, Opts) ->
 %% @doc Determine if the stream should be finalized.
 should_finalize_stream(429, _EncodedBody) -> true;
 should_finalize_stream(_, _EncodedBody) -> false.
+
+%% @doc Serve HTTP range requests over fully-encoded binary response bodies.
+%% Only applies to `GET' requests that resolved to a `200' with a single
+%% satisfiable `bytes=' range; every other response passes through unchanged.
+%% Signature-related headers still describe the full representation: a range
+%% response is a transport-level slice and is not independently verifiable.
+apply_range_request(Req, 200, Headers, Body) when is_binary(Body), byte_size(Body) > 0 ->
+    try {cowboy_req:method(Req), cowboy_req:header(<<"range">>, Req)} of
+        {<<"GET">>, RangeHeader} when is_binary(RangeHeader) ->
+            Total = byte_size(Body),
+            case parse_byte_range(RangeHeader, Total) of
+                {Start, End} ->
+                    {206,
+                        maps:merge(Headers, #{
+                            <<"accept-ranges">> => <<"bytes">>,
+                            <<"content-range">> =>
+                                <<
+                                    "bytes ",
+                                    (integer_to_binary(Start))/binary, "-",
+                                    (integer_to_binary(End))/binary, "/",
+                                    (integer_to_binary(Total))/binary
+                                >>,
+                            <<"content-length">> => integer_to_binary(End - Start + 1)
+                        }),
+                        binary:part(Body, Start, End - Start + 1)
+                    };
+                unsatisfiable ->
+                    {416,
+                        maps:merge(Headers, #{
+                            <<"accept-ranges">> => <<"bytes">>,
+                            <<"content-range">> =>
+                                <<"bytes */", (integer_to_binary(Total))/binary>>,
+                            <<"content-length">> => <<"0">>
+                        }),
+                        <<>>
+                    };
+                no_range ->
+                    {200, Headers, Body}
+            end;
+        _ ->
+            {200, Headers, Body}
+    catch _:_ ->
+        {200, Headers, Body}
+    end;
+apply_range_request(_Req, Status, Headers, Body) ->
+    {Status, Headers, Body}.
+
+%% @doc Parse a `Range' header against a known representation size. Returns an
+%% inclusive `{Start, End}' byte pair, `unsatisfiable', or `no_range' when the
+%% header is absent, malformed, or requests multiple ranges.
+parse_byte_range(<<"bytes=", Spec/binary>>, Total) ->
+    case binary:match(Spec, <<",">>) of
+        nomatch -> parse_byte_range_spec(Spec, Total);
+        _ -> no_range
+    end;
+parse_byte_range(_RangeHeader, _Total) ->
+    no_range.
+
+parse_byte_range_spec(<<"-", Suffix/binary>>, Total) ->
+    case parse_range_int(Suffix) of
+        N when is_integer(N), N > 0 -> {max(0, Total - N), Total - 1};
+        _ -> no_range
+    end;
+parse_byte_range_spec(Spec, Total) ->
+    case binary:split(Spec, <<"-">>) of
+        [StartBin, EndBin] ->
+            case {parse_range_int(StartBin), EndBin} of
+                {Start, <<>>} when is_integer(Start), Start < Total ->
+                    {Start, Total - 1};
+                {Start, <<>>} when is_integer(Start) ->
+                    unsatisfiable;
+                {Start, _} when is_integer(Start) ->
+                    case parse_range_int(EndBin) of
+                        End when is_integer(End), Start =< End, Start < Total ->
+                            {Start, min(End, Total - 1)};
+                        End when is_integer(End), Start > End ->
+                            no_range;
+                        End when is_integer(End) ->
+                            unsatisfiable;
+                        _ ->
+                            no_range
+                    end;
+                _ ->
+                    no_range
+            end;
+        _ ->
+            no_range
+    end.
+
+parse_range_int(Bin) ->
+    try binary_to_integer(Bin)
+    catch _:_ -> invalid
+    end.
 
 %% @doc Handle replying with cookies if the message contains them. Returns the
 %% new Cowboy `Req` object, and the message with the cookies removed. Both
@@ -609,21 +705,38 @@ reply_handle_cookies(Req, Message, Opts) ->
 
 %% @doc Add permissive CORS headers to a message, if the message has not already
 %% specified CORS headers.
-add_cors_headers(Msg, ReqHdr, Opts) ->
-    CorHeaders = #{
-        <<"access-control-allow-origin">> => <<"*">>,
-        <<"access-control-allow-methods">> => <<"GET, POST, PUT, DELETE, OPTIONS">>,
-        <<"access-control-expose-headers">> => <<"*">>
+add_cors_headers(Msg, ReqHdr, Origin, Opts) ->
+    WithCors = hb_maps:merge(cors_headers(ReqHdr, Origin), Msg, Opts),
+    case Origin of
+        <<>> -> WithCors;
+        _ -> hb_maps:merge(WithCors, cors_headers(ReqHdr, Origin), Opts)
+    end.
+
+cors_headers(ReqHdr, Origin) ->
+    Headers0 = #{
+        <<"access-control-allow-origin">> => allow_origin(Origin),
+        <<"access-control-allow-methods">> => <<"GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH">>,
+        <<"access-control-allow-headers">> => allow_headers(ReqHdr),
+        <<"access-control-expose-headers">> => expose_headers(Origin),
+        <<"vary">> => <<"Origin, Access-Control-Request-Method, Access-Control-Request-Headers">>
     },
-     WithAllowHeaders = case ReqHdr of
-        <<>> -> CorHeaders;
-        _ -> CorHeaders#{
-             <<"access-control-allow-headers">> => ReqHdr
-        }
-    end,
-    % Keys in the given message will overwrite the defaults listed below if 
-    % included, due to `hb_maps:merge''s precidence order.
-    hb_maps:merge(WithAllowHeaders, Msg, Opts).
+    case Origin of
+        <<>> -> Headers0;
+        _ -> Headers0#{ <<"access-control-allow-credentials">> => <<"true">> }
+    end.
+
+allow_origin(<<>>) -> <<"*">>;
+allow_origin(Origin) -> Origin.
+
+allow_headers(<<>>) ->
+    <<"Accept, Authorization, Content-Type, Range, X-Lbry-Auth-Token, X-Odysee-Auth-Token">>;
+allow_headers(ReqHdr) ->
+    ReqHdr.
+
+expose_headers(<<>>) ->
+    <<"*">>;
+expose_headers(_) ->
+    <<"Accept-Ranges, Ao-Result, Content-Digest, Content-Length, Content-Range, Location, Signature, Signature-Input">>.
 
 %% @doc Generate the headers and body for a HTTP response message.
 encode_reply(Status, TABMReq, Message, Opts) ->
@@ -1020,16 +1133,7 @@ httpsig_to_tabm_singleton(PrimMsg, Req, Body, Opts) ->
             case Signers =/= [] andalso hb_opts:get(store_all_signed, false, Opts) of
                 true ->
                     ?event(http_verify, {storing_signed_from_wire, Decoded}),
-                    {ok, _} =
-                        hb_cache:write(Decoded,
-                            Opts#{
-                                <<"store">> =>
-                                    #{
-                                        <<"store-module">> => hb_store_fs,
-                                        <<"name">> => <<"cache-http">>
-                                    }
-                            }
-                        );
+                    {ok, _} = hb_cache:write(Decoded, Opts);
                 false ->
                     do_nothing
             end,
@@ -1306,6 +1410,28 @@ cors_get_test() ->
         hb_ao:get(<<"access-control-allow-origin">>, Res, LocalOpts)
     ).
 
+cors_credentials_get_test() ->
+    URL = hb_http_server:start_node(),
+    LocalOpts = test_opts(),
+    Origin = <<"http://localhost:9090">>,
+    {ok, Res} =
+        get(
+            URL,
+            #{
+                <<"path">> => <<"/~meta@1.0/info">>,
+                <<"origin">> => Origin
+            },
+            LocalOpts
+        ),
+    ?assertEqual(
+        Origin,
+        hb_ao:get(<<"access-control-allow-origin">>, Res, LocalOpts)
+    ),
+    ?assertEqual(
+        <<"true">>,
+        hb_ao:get(<<"access-control-allow-credentials">>, Res, LocalOpts)
+    ).
+
 ans104_wasm_test() ->
     ServerStore = [hb_test_utils:test_store()],
     ServerOpts =
@@ -1498,3 +1624,55 @@ header_value_safe_test() ->
     ?assertNot(header_value_safe(<<"del", 16#7f, "byte">>)),
     ?assertNot(header_value_safe(binary:copy(<<"a">>, ?MAX_EXTRA_HEADER_VALUE + 1))),
     ?assert(header_value_safe(binary:copy(<<"a">>, ?MAX_EXTRA_HEADER_VALUE))).
+
+parse_byte_range_test() ->
+    ?assertEqual({0, 99}, parse_byte_range(<<"bytes=0-99">>, 1000)),
+    ?assertEqual({0, 999}, parse_byte_range(<<"bytes=0-">>, 1000)),
+    ?assertEqual({500, 999}, parse_byte_range(<<"bytes=500-">>, 1000)),
+    ?assertEqual({900, 999}, parse_byte_range(<<"bytes=-100">>, 1000)),
+    ?assertEqual({0, 999}, parse_byte_range(<<"bytes=-5000">>, 1000)),
+    ?assertEqual({0, 999}, parse_byte_range(<<"bytes=0-99999">>, 1000)),
+    ?assertEqual(unsatisfiable, parse_byte_range(<<"bytes=1000-">>, 1000)),
+    ?assertEqual(unsatisfiable, parse_byte_range(<<"bytes=1000-2000">>, 1000)),
+    ?assertEqual(no_range, parse_byte_range(<<"bytes=0-1,5-9">>, 1000)),
+    ?assertEqual(no_range, parse_byte_range(<<"bytes=9-5">>, 1000)),
+    ?assertEqual(no_range, parse_byte_range(<<"bytes=abc">>, 1000)),
+    ?assertEqual(no_range, parse_byte_range(<<"bytes=-0">>, 1000)),
+    ?assertEqual(no_range, parse_byte_range(<<"items=0-99">>, 1000)),
+    ?assertEqual(no_range, parse_byte_range(<<"0-99">>, 1000)).
+
+apply_range_request_slices_binary_body_test() ->
+    Req = #{ method => <<"GET">>, headers => #{ <<"range">> => <<"bytes=2-5">> } },
+    {Status, Headers, Body} = apply_range_request(Req, 200, #{}, <<"0123456789">>),
+    ?assertEqual(206, Status),
+    ?assertEqual(<<"2345">>, Body),
+    ?assertEqual(<<"bytes 2-5/10">>, maps:get(<<"content-range">>, Headers)),
+    ?assertEqual(<<"4">>, maps:get(<<"content-length">>, Headers)),
+    ?assertEqual(<<"bytes">>, maps:get(<<"accept-ranges">>, Headers)).
+
+apply_range_request_passthrough_test() ->
+    NoRangeReq = #{ method => <<"GET">>, headers => #{} },
+    ?assertEqual(
+        {200, #{}, <<"0123456789">>},
+        apply_range_request(NoRangeReq, 200, #{}, <<"0123456789">>)
+    ),
+    PostReq = #{ method => <<"POST">>, headers => #{ <<"range">> => <<"bytes=2-5">> } },
+    ?assertEqual(
+        {200, #{}, <<"0123456789">>},
+        apply_range_request(PostReq, 200, #{}, <<"0123456789">>)
+    ),
+    ErrorReq = #{ method => <<"GET">>, headers => #{ <<"range">> => <<"bytes=2-5">> } },
+    ?assertEqual(
+        {404, #{}, <<"missing">>},
+        apply_range_request(ErrorReq, 404, #{}, <<"missing">>)
+    ),
+    {Status416, Headers416, Body416} =
+        apply_range_request(
+            #{ method => <<"GET">>, headers => #{ <<"range">> => <<"bytes=50-">> } },
+            200,
+            #{},
+            <<"0123456789">>
+        ),
+    ?assertEqual(416, Status416),
+    ?assertEqual(<<>>, Body416),
+    ?assertEqual(<<"bytes */10">>, maps:get(<<"content-range">>, Headers416)).

@@ -139,13 +139,15 @@ request(Base, HookReq, Opts) ->
                 SignedReq,
                 NewOpts
             ),
+        ok ?= maybe_store_signed([SignedReq | MessageSequence], NewOpts),
         ?event(auth_hook_processed_messages),
         % Call the key provider to finalize the response
+        ExecutableSequence = executable_sequence(MessageSequence, NewOpts),
         {ok, FinalSequence} ?=
             finalize(
                 NormProvider,
                 SignedReq,
-                MessageSequence,
+                ExecutableSequence,
                 NewOpts
             ),
         ?event({auth_hook_returning, {priv_final_sequence, FinalSequence}}),
@@ -347,6 +349,25 @@ maybe_sign_messages(Provider, SignedReq, Opts) ->
     Processed = maybe_sign_messages(Provider, SignKey, Parsed, Opts),
     {ok, Processed}.
 maybe_sign_messages(_Provider, _Key, [], _Opts) -> [];
+maybe_sign_messages(Provider, Key, [{as, Device, Msg} | Rest], Opts) when is_map(Msg) ->
+    case hb_util:atom(hb_maps:get(Key, Msg, false, Opts)) of
+        true ->
+            Uncommitted = hb_message:uncommitted(Msg, Opts),
+            ?event({auth_hook_signing_message, {priv_uncommitted, Msg}}),
+            case sign_request(Provider, Uncommitted, Opts) of
+                {ok, Signed} ->
+                    [
+                        {as, Device, Signed}
+                    |
+                        maybe_sign_messages(Provider, Key, Rest, Opts)
+                    ];
+                {error, Err} ->
+                    ?event({auth_hook_sign_error, Err}),
+                    [{error, Err}]
+            end;
+        _ ->
+            [{as, Device, Msg} | maybe_sign_messages(Provider, Key, Rest, Opts)]
+    end;
 maybe_sign_messages(Provider, Key, [Msg | Rest], Opts) when is_map(Msg) ->
     case hb_util:atom(hb_maps:get(Key, Msg, false, Opts)) of
         true ->
@@ -369,6 +390,35 @@ maybe_sign_messages(Provider, Key, [Msg | Rest], Opts) when is_map(Msg) ->
 maybe_sign_messages(Provider, Key, [Msg | Rest], Opts) ->
     [Msg | maybe_sign_messages(Provider, Key, Rest, Opts)].
 
+executable_sequence([_Base, #{ <<"path">> := <<"id">> }] = Messages, Opts) ->
+    case hb_ao:resolve_many(Messages, Opts#{ <<"force-message">> => true }) of
+        {ok, Res} -> [Res];
+        _ -> Messages
+    end;
+executable_sequence(Messages, _Opts) ->
+    Messages.
+
+maybe_store_signed(Messages, Opts) ->
+    case hb_opts:get(store_all_signed, false, Opts) of
+        true -> store_signed(Messages, Opts);
+        false -> ok
+    end.
+
+store_signed([], _Opts) ->
+    ok;
+store_signed([{as, _Device, Msg} | Rest], Opts) when is_map(Msg) ->
+    store_signed([Msg | Rest], Opts);
+store_signed([Msg | Rest], Opts) when is_map(Msg) ->
+    case hb_message:signers(Msg, Opts) of
+        [] ->
+            store_signed(Rest, Opts);
+        _ ->
+            {ok, _} = hb_cache:write(Msg, Opts),
+            store_signed(Rest, Opts)
+    end;
+store_signed([_ | Rest], Opts) ->
+    store_signed(Rest, Opts).
+
 %% @doc Finalize the response by adding authentication state
 finalize(KeyProvider, SignedReq, MessageSequence, Opts) ->
     % Add the signed request and message sequence to the response, mirroring the
@@ -389,9 +439,19 @@ finalize(KeyProvider, SignedReq, MessageSequence, Opts) ->
 
 %%% Utility functions
 
-%% @doc Refresh the options and log an event if they have changed.
+%% @doc Refresh the options and log an event if they have changed. Falls back
+%% to the given options when no HTTP server is running (e.g. direct device
+%% resolution in tests).
 refresh_opts(Opts) ->
-    NewOpts = hb_http_server:get_opts(Opts),
+    NewOpts =
+        case hb_opts:get(http_server, no_server_ref, Opts) of
+            no_server_ref ->
+                Opts;
+            _ ->
+                try merge_refreshed_opts(Opts, hb_http_server:get_opts(Opts))
+                catch _:_ -> Opts
+                end
+        end,
     case NewOpts of
         Opts -> ?event(auth_hook_no_opts_change);
         _ ->
@@ -405,6 +465,15 @@ refresh_opts(Opts) ->
             )
     end,
     NewOpts.
+
+merge_refreshed_opts(Opts, Refreshed) when is_map(Refreshed) ->
+    Merged = hb_maps:merge(Refreshed, Opts, Opts),
+    case hb_maps:find(<<"priv-wallet-hosted">>, Refreshed, Opts) of
+        {ok, Wallets} -> Merged#{ <<"priv-wallet-hosted">> => Wallets };
+        error -> Merged
+    end;
+merge_refreshed_opts(Opts, _Refreshed) ->
+    Opts.
 
 %% @doc Get the key provider from the base message or the defaults.
 find_provider(Base, Opts) ->
@@ -785,7 +854,103 @@ when_test() ->
         )
     ).
 
-%% @doc The cookie hook test(s) call `GET /commitments', which returns the 
+%% @doc Generic-path write law: `POST /id?!=true' through the cookie-secured
+%% auth hook (with `store-all-signed' enabled) must persist the signed message
+%% to the node's store, and a bare `GET /<id>' must serve it back.
+cookie_hook_upload_store_get_by_id_test() ->
+    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+    Store =
+        #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> => <<"_build/auth-hook-TEST/upload-", Timestamp/binary>>
+        },
+    hb_store:reset(Store),
+    Opts = #{ <<"store">> => [Store] },
+    Node =
+        hb_http_server:start_node(
+            Opts#{
+                <<"store-all-signed">> => true,
+                <<"on">> => #{
+                    <<"request">> => #{
+                        <<"device">> => <<"auth-hook@1.0">>,
+                        <<"path">> => <<"request">>,
+                        <<"when">> => #{ <<"keys">> => [<<"!">>] },
+                        <<"secret-provider">> => #{ <<"device">> => <<"cookie@1.0">> }
+                    }
+                }
+            }
+        ),
+    Body = <<"hello-sam">>,
+    {ok, UploadRes} =
+        hb_http:post(
+            Node,
+            #{
+                <<"path">> => <<"/id?!=true">>,
+                <<"body">> => Body,
+                <<"accept">> => <<"application/json">>,
+                <<"accept-bundle">> => false
+            },
+            #{}
+    ),
+    ID = stored_id(UploadRes, Opts),
+    {ok, Stored} = hb_cache:read(ID, Opts),
+    ?assertEqual(Body, hb_maps:get(<<"body">>, hb_cache:ensure_all_loaded(Stored, Opts), not_found, Opts)),
+    ?assertMatch(
+        {ok, #{ <<"body">> := Body }},
+        hb_http:get(Node, <<"/", ID/binary>>, #{ <<"accept">> => <<"application/json">> })
+    ).
+
+stored_id(Res, Opts) when is_binary(Res) ->
+    case hb_cache:read(Res, Opts) of
+        {ok, _} ->
+            Res;
+        _ ->
+            stored_id(hb_json:decode(Res), Opts)
+    end;
+stored_id(Res, Opts) when is_map(Res) ->
+    readable_id(id_candidates(Res, Opts), Opts).
+
+id_candidates(Res, Opts) ->
+    Direct =
+        [
+            hb_maps:get(<<"id">>, Res, not_found, Opts),
+            hb_maps:get(<<"path">>, Res, not_found, Opts),
+            hb_maps:get(<<"read-path">>, Res, not_found, Opts),
+            hb_maps:get(<<"read_path">>, Res, not_found, Opts),
+            hb_maps:get(<<"body">>, Res, not_found, Opts)
+        ],
+    Commitments = hb_maps:get(<<"commitments">>, Res, #{}, Opts),
+    [
+        Candidate
+    ||
+        Candidate <- lists:map(
+            fun normalize_id_candidate/1,
+            Direct ++ commitment_ids(Commitments, Opts)
+        ),
+        is_binary(Candidate)
+    ].
+
+commitment_ids(Commitments, Opts) when is_map(Commitments) ->
+    hb_maps:keys(Commitments, Opts);
+commitment_ids(_Commitments, _Opts) ->
+    [].
+
+normalize_id_candidate(<<"/", ID/binary>>) ->
+    ID;
+normalize_id_candidate(Candidate) ->
+    Candidate.
+
+readable_id([ID | Rest], Opts) ->
+    case hb_cache:read(ID, Opts) of
+        {ok, _} ->
+            ID;
+        _ ->
+            readable_id(Rest, Opts)
+    end;
+readable_id([], _Opts) ->
+    erlang:error(upload_id_not_found).
+
+%% @doc The cookie hook test(s) call `GET /commitments', which returns the
 %% commitments found on the client request during execution on the server.
 %% This function filters the response to return only the signers of that message,
 %% excluding the server's own signature.

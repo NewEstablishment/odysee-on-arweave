@@ -36,8 +36,9 @@ import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
-import { fetchHyperbeamResolveClaimIds } from 'util/hyperbeam';
-import { deleteHyperbeamPublish, listHyperbeamPublishes } from 'services/hyperbeamUpload';
+import { fetchHyperbeamResolveClaimIds, fetchHyperbeamUploadList } from 'util/hyperbeam';
+import { canDeleteThroughHyperbeam, deleteThroughHyperbeam } from 'services/hyperbeamUpload';
+import { getAuthToken } from 'util/saved-passwords';
 let onChannelConfirmCallback;
 let checkPendingInterval;
 
@@ -98,58 +99,70 @@ async function getCostInfoForFee(claimId: string, fee: Fee | undefined): Promise
   */
 }
 
-async function mergeHyperbeamPublishesIntoClaimList(
+async function fetchClaimListMineWithLocalUploads(
   result: StreamListResponse,
   page: number,
-  channelIds: Array<string | null | undefined> = []
+  pageSize: number,
+  claimTypes: Array<string>,
+  channelIds: Array<string | null | undefined>
 ): Promise<StreamListResponse> {
-  if (page !== 1) return result;
+  if (!claimTypes.includes('stream')) return result;
 
-  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
-  if (!hyperbeamClaims.length) return result;
+  try {
+    const normalizedChannelIds = channelIds.filter(Boolean);
+    const localUploads = await fetchHyperbeamUploadList({
+      page,
+      page_size: pageSize,
+      claim_type: ['stream'],
+      ...(normalizedChannelIds.length ? { channel_ids: normalizedChannelIds } : {}),
+    });
+    const localItems = Array.isArray(localUploads?.items) ? localUploads.items : [];
+    if (!localItems.length) return result;
 
-  const wantedChannelIds = new Set(channelIds.filter(Boolean));
-  const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
-  const indexedClaims = hyperbeamClaims.filter((claim) => {
-    if (existingIds.has(claim.claim_id)) return false;
-    if (wantedChannelIds.size === 0) return true;
-    const channelId = getHyperbeamUploadChannelId(claim);
-    return Boolean(channelId && wantedChannelIds.has(channelId));
+    const items = mergeClaims(localItems, result.items || []);
+    return {
+      ...result,
+      items,
+      total_items:
+        Math.max(result.total_items || 0, result.items?.length || 0) + items.length - (result.items?.length || 0),
+      total_pages: Math.max(result.total_pages || 1, Math.ceil(items.length / Math.max(1, pageSize))),
+    };
+  } catch {
+    return result;
+  }
+}
+
+function mergeClaims(...claimGroups: Array<Array<Claim>>): Array<Claim> {
+  const seen = new Set<string>();
+  const claims: Array<Claim> = [];
+
+  claimGroups.flat().forEach((claim) => {
+    if (!claim || !claim.claim_id || seen.has(claim.claim_id)) return;
+    seen.add(claim.claim_id);
+    claims.push(claim);
   });
 
-  if (!indexedClaims.length) return result;
-
-  return {
-    ...result,
-    items: sortClaimsByNewest([...(result.items || []), ...indexedClaims]),
-    total_items: Number(result.total_items || 0) + indexedClaims.length,
-  };
+  return claims;
 }
 
-function sortClaimsByNewest(claims: Array<Claim>) {
-  return claims
-    .map((claim, index) => ({ claim, index, timestamp: claimNewestTimestamp(claim) }))
-    .sort((a, b) => b.timestamp - a.timestamp || a.index - b.index)
-    .map(({ claim }) => claim);
-}
-
-function claimNewestTimestamp(claim: Claim) {
-  const anyClaim = claim as any;
-  return firstPositiveNumber([
-    anyClaim?.meta?.creation_timestamp,
-    anyClaim?.timestamp,
-    anyClaim?.value?.release_time,
-    anyClaim?.height,
-  ]);
-}
-
-function firstPositiveNumber(values: Array<any>) {
-  for (const value of values) {
-    const number = Number(value);
-    if (Number.isFinite(number) && number > 0) return number;
+// Same contract as the old `listHyperbeamPublishes({ channelIds })`: a flat
+// claim array for the channel/search merge paths, now sourced from the
+// `~odysee-upload@1.0` list device.
+async function listLocalHyperbeamUploads(
+  channelIds: Array<string | null | undefined> = []
+): Promise<Array<StreamClaim>> {
+  try {
+    const normalizedChannelIds = channelIds.filter(Boolean);
+    const result = await fetchHyperbeamUploadList({
+      page: 1,
+      page_size: 50,
+      claim_type: ['stream'],
+      ...(normalizedChannelIds.length ? { channel_ids: normalizedChannelIds } : {}),
+    });
+    return Array.isArray(result?.items) ? (result.items as Array<StreamClaim>) : [];
+  } catch {
+    return [];
   }
-
-  return 0;
 }
 
 function emptyClaimListResult(page: number, pageSize: number): StreamListResponse {
@@ -170,7 +183,7 @@ async function mergeHyperbeamPublishesIntoChannelResult(
   if (page !== 1) return result;
 
   const channelIds = getHyperbeamChannelIdsFromClaims(result.items || []);
-  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
+  const hyperbeamClaims = await listLocalHyperbeamUploads(channelIds);
   if (!hyperbeamClaims.length) return result;
 
   const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
@@ -215,7 +228,7 @@ async function mergeHyperbeamPublishesIntoSearchResult(
 
   if (!channelIds.length) return result;
 
-  const hyperbeamClaims = await listHyperbeamPublishes({ channelIds });
+  const hyperbeamClaims = await listLocalHyperbeamUploads(channelIds);
   if (!hyperbeamClaims.length) return result;
 
   const wantedChannelIds = new Set(channelIds.filter(Boolean));
@@ -697,6 +710,81 @@ export function doFetchClaimListMine(
       claimTypes = claimTypes.filter((t) => filterBy.includes(t));
     }
 
+    const completeClaimListMine = async (result: StreamListResponse, legacyFailed: boolean) => {
+      const mergedResult = await fetchClaimListMineWithLocalUploads(result, page, pageSize, claimTypes, channelIds);
+      // If the legacy list failed and HyperBEAM has nothing to show either,
+      // surface the failure. Otherwise render whatever we have, so native
+      // uploads still appear when legacy auth is unavailable.
+      if (legacyFailed && (!mergedResult.items || mergedResult.items.length === 0)) {
+        dispatch({ type: ACTIONS.FETCH_CLAIM_LIST_MINE_FAILED });
+        return;
+      }
+
+      // Log stuck claims
+      const claims = mergedResult.items;
+      const pendingClaimsById = selectPendingClaimsById(state);
+
+      for (let i = 0; i < claims.length - 1; i++) {
+        if (Object.keys(pendingClaimsById).includes(claims[i].claim_id)) {
+          continue;
+        }
+
+        if (claims[i].confirmations > claims[i + 1].confirmations) {
+          Lbryio.call('event', 'desktop_error', {
+            error_message: `CLAIM STUCK IN UPLOADS: ${claims[i].claim_id}`,
+          });
+          break;
+        }
+      }
+
+      dispatch({
+        type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
+        data: {
+          result: mergedResult,
+          resolve,
+          setNewPageItems: pageSize !== FILE_LIST.PAGE_SIZE_ALL_ITEMS,
+          isAllMyClaimsFetched: pageSize === FILE_LIST.PAGE_SIZE_ALL_ITEMS,
+          isPublicationOnlyClaimList: true,
+        },
+      });
+      const claimIds: Array<ClaimId> = [];
+      const membersOnlyClaimIds = new Set([]);
+      const channelClaimIds = new Set([]);
+      const costInfos = new Set<Promise<CostInfo>>();
+      mergedResult.items.forEach((item) => {
+        if (!isHyperbeamUploadClaim(item)) claimIds.push(item.claim_id);
+
+        if (item.value_type !== 'channel' && item.value_type !== 'collection') {
+          const isProtected = isClaimProtected(item);
+          if (isProtected) membersOnlyClaimIds.add(item.claim_id);
+        }
+
+        const channelId = getChannelIdFromClaim(item);
+        if (channelId) channelClaimIds.add(channelId);
+        costInfos.add(getCostInfoForFee(item.claim_id, item.value ? (item.value as StreamMetadata).fee : undefined));
+      });
+
+      if (costInfos.size > 0) {
+        const settledCostInfosById = await Promise.all(Array.from(costInfos));
+        dispatch({
+          type: ACTIONS.SET_COST_INFOS_BY_ID,
+          data: settledCostInfosById,
+        });
+      }
+
+      if (membersOnlyClaimIds.size > 0) {
+        dispatch(doMembershipContentForStreamClaimIds(Array.from(membersOnlyClaimIds)));
+      }
+
+      if (channelClaimIds.size > 0) {
+        dispatch(doFetchOdyseeMembershipForChannelIds(Array.from(channelClaimIds)));
+      }
+
+      if (fetchViewCount && claimIds.length > 0) {
+        dispatch(doFetchViewCount(claimIds.join(',')));
+      }
+    };
+
     Lbry.claim_list({
       page: page,
       page_size: pageSize,
@@ -704,78 +792,12 @@ export function doFetchClaimListMine(
       channel_id: channelIds,
       resolve,
     })
-      .catch(() => emptyClaimListResult(page, pageSize))
-      .then(async (result: StreamListResponse) => {
-        result = await mergeHyperbeamPublishesIntoClaimList(result, page, channelIds);
-        // Log stuck claims
-        const claims = result.items;
-        const pendingClaimsById = selectPendingClaimsById(state);
-
-        for (let i = 0; i < claims.length - 1; i++) {
-          if (Object.keys(pendingClaimsById).includes(claims[i].claim_id)) {
-            continue;
-          }
-
-          if (claims[i].confirmations > claims[i + 1].confirmations) {
-            Lbryio.call('event', 'desktop_error', {
-              error_message: `CLAIM STUCK IN UPLOADS: ${claims[i].claim_id}`,
-            });
-            break;
-          }
-        }
-
-        dispatch({
-          type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
-          data: {
-            result,
-            resolve,
-            setNewPageItems: pageSize !== FILE_LIST.PAGE_SIZE_ALL_ITEMS,
-            isAllMyClaimsFetched: pageSize === FILE_LIST.PAGE_SIZE_ALL_ITEMS,
-            isPublicationOnlyClaimList: true,
-          },
-        });
-        const claimIds: Array<ClaimId> = [];
-        const membersOnlyClaimIds = new Set([]);
-        const channelClaimIds = new Set([]);
-        const costInfos = new Set<Promise<CostInfo>>();
-        result.items.forEach((item) => {
-          if (!isHyperbeamUploadClaim(item)) claimIds.push(item.claim_id);
-
-          if (item.value_type !== 'channel' && item.value_type !== 'collection') {
-            const isProtected = isClaimProtected(item);
-            if (isProtected) membersOnlyClaimIds.add(item.claim_id);
-          }
-
-          const channelId = getChannelIdFromClaim(item);
-          if (channelId) channelClaimIds.add(channelId);
-          costInfos.add(getCostInfoForFee(item.claim_id, item.value ? (item.value as StreamMetadata).fee : undefined));
-        });
-
-        if (costInfos.size > 0) {
-          const settledCostInfosById = await Promise.all(Array.from(costInfos));
-          dispatch({
-            type: ACTIONS.SET_COST_INFOS_BY_ID,
-            data: settledCostInfosById,
-          });
-        }
-
-        if (membersOnlyClaimIds.size > 0) {
-          dispatch(doMembershipContentForStreamClaimIds(Array.from(membersOnlyClaimIds)));
-        }
-
-        if (channelClaimIds.size > 0) {
-          dispatch(doFetchOdyseeMembershipForChannelIds(Array.from(channelClaimIds)));
-        }
-
-        if (fetchViewCount && claimIds.length > 0) {
-          dispatch(doFetchViewCount(claimIds.join(',')));
-        }
-      })
-      .catch(() => {
-        dispatch({
-          type: ACTIONS.FETCH_CLAIM_LIST_MINE_FAILED,
-        });
-      });
+      .then((result: StreamListResponse) => completeClaimListMine(result, false))
+      .catch(() =>
+        completeClaimListMine(emptyClaimListResult(page, pageSize), true).catch(() =>
+          dispatch({ type: ACTIONS.FETCH_CLAIM_LIST_MINE_FAILED })
+        )
+      );
   };
 }
 export type DoFetchClaimListMine = typeof doFetchClaimListMine;
@@ -869,45 +891,21 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
   const { txid, nout } = claim;
   const outpoint = `${txid}:${nout}`;
   return (dispatch: Dispatch, getState: GetState) => {
-    if (isHyperbeamUploadClaim(claim)) {
-      const uploadId =
-        (claim as any).hyperbeam?.upload_id || (claim as any).immutable_id || (claim as any).outpoint || claim.claim_id;
-      const data = {
-        claimId: claim.claim_id,
-      };
-      dispatch({
-        type: ACTIONS.ABANDON_CLAIM_STARTED,
-        data,
-      });
+    if (canDeleteThroughHyperbeam(claim)) {
+      const data = { claimId: claim.claim_id };
+      dispatch({ type: ACTIONS.ABANDON_CLAIM_STARTED, data });
 
-      deleteHyperbeamPublish(uploadId).then(
+      return deleteThroughHyperbeam(claim, getAuthToken() || undefined).then(
         () => {
-          dispatch({
-            type: ACTIONS.ABANDON_CLAIM_SUCCEEDED,
-            data,
-          });
+          dispatch({ type: ACTIONS.ABANDON_CLAIM_SUCCEEDED, data });
           if (cb) cb(ABANDON_STATES.DONE);
-          dispatch(
-            doToast({
-              message: __('Successfully removed your upload.'),
-            })
-          );
+          dispatch(doToast({ message: __('Successfully removed your upload.') }));
         },
         () => {
-          dispatch({
-            type: ACTIONS.ABANDON_CLAIM_SUCCEEDED,
-            data,
-          });
-          dispatch(
-            doToast({
-              message: 'Error removing your HyperBEAM upload',
-              isError: true,
-            })
-          );
           if (cb) cb(ABANDON_STATES.ERROR);
+          dispatch(doToast({ message: __('Error abandoning your claim/support'), isError: true }));
         }
       );
-      return;
     }
 
     const state = getState();

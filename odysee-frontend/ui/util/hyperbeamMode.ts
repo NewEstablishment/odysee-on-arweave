@@ -1,4 +1,4 @@
-import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { HYPERBEAM_ALLOW_COMPATIBILITY_READS, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 
 export const HYPERBEAM_MODE_STORAGE_KEY = 'odysee-hyperbeam-mode';
 
@@ -21,6 +21,7 @@ const CANONICAL_NATIVE_DEVICES = new Set([
   '~odysee-stream@1.0',
   '~odysee-upload@1.0',
 ]);
+const CANONICAL_WRITE_DEVICES = new Set(['~cache@1.0', '~odysee-upload@1.0']);
 
 export function getHyperbeamMode(): HyperbeamMode {
   if (!ODYSEE_HYPERBEAM_NODE_API) return HYPERBEAM_MODES.original;
@@ -49,13 +50,17 @@ export function isHyperbeamFullMode() {
   return Boolean(ODYSEE_HYPERBEAM_NODE_API) && getHyperbeamMode() === HYPERBEAM_MODES.hyperbeam;
 }
 
+export function allowHyperbeamCompatibilityReads() {
+  return HYPERBEAM_ALLOW_COMPATIBILITY_READS !== false;
+}
+
 export function isHyperbeamPublicReadDevice(device: string) {
-  return CANONICAL_NATIVE_DEVICES.has(device);
+  return allowHyperbeamCompatibilityReads() && CANONICAL_NATIVE_DEVICES.has(device);
 }
 
 export function isHyperbeamDeviceEnabled(device: string) {
   if (!isHyperbeamEnabled()) return false;
-  return isHyperbeamPublicReadDevice(device);
+  return isHyperbeamPublicReadDevice(device) || CANONICAL_WRITE_DEVICES.has(device);
 }
 
 export function shouldSendHyperbeamAuthHeaders() {

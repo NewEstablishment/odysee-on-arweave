@@ -1,19 +1,16 @@
-import { HYPERBEAM_PLAYBACK_URL } from 'config';
+import { HYPERBEAM_BASE_URL, HYPERBEAM_PLAYBACK_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 
 const HYPERBEAM_TIMEOUT_MS = 5000;
+const STREAM_DEVICE = '~odysee-stream@1.0';
 
-export function buildHyperbeamPlaybackUrl(uri: string, immutableId?: string | null): string {
-  if (!HYPERBEAM_PLAYBACK_URL) return '';
+export function buildHyperbeamPlaybackUrl(uri: string): string {
+  const playbackUrl = hyperbeamPlaybackUrl();
+  if (!playbackUrl) return '';
 
   try {
-    const url = new URL(HYPERBEAM_PLAYBACK_URL);
-    if (immutableId) {
-      url.searchParams.set('id', immutableId);
-      url.searchParams.delete('url');
-      url.searchParams.delete('uri');
-    } else {
-      url.searchParams.set('url', uri);
-    }
+    const url = new URL(playbackUrl);
+    url.searchParams.set('url', uri);
+    url.searchParams.set('mode', 'hyperbeam');
     if (!url.searchParams.has('media-base-url')) {
       url.searchParams.set('media-base-url', url.origin);
     }
@@ -23,17 +20,76 @@ export function buildHyperbeamPlaybackUrl(uri: string, immutableId?: string | nu
   }
 }
 
-export async function fetchHyperbeamPlaybackUrl(uri: string, immutableId?: string | null): Promise<string> {
-  const requestUrl = buildHyperbeamPlaybackUrl(uri, immutableId);
+function hyperbeamPlaybackUrl() {
+  if (HYPERBEAM_PLAYBACK_URL) return HYPERBEAM_PLAYBACK_URL;
+  const node = String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  return node ? `${node}/~odysee-stream@1.0/playback` : '';
+}
+
+export async function fetchHyperbeamPlaybackUrl(uri: string): Promise<string> {
+  const storeUrl = buildHyperbeamStoreStreamUrl(uri);
+  const storePlaybackUrl = storeUrl ? await fetchPlaybackUrl(storeUrl) : '';
+  if (storePlaybackUrl) return storePlaybackUrl;
+
+  const requestUrl = buildHyperbeamPlaybackUrl(uri);
   if (!requestUrl) return '';
 
+  return fetchPlaybackUrl(requestUrl);
+}
+
+async function fetchPlaybackUrl(requestUrl: string): Promise<string> {
   try {
     const response = await fetch(requestUrl, { signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS) });
     const body = response.ok ? await response.json().catch(() => null) : null;
-    return (body && (body.download_url || body['download-url'] || body.streaming_url || body['streaming-url'])) || '';
+    const payload = playbackPayload(body);
+    const mediaUrl = hyperbeamMediaUrlFromPayload(payload);
+    return (
+      mediaUrl ||
+      (payload &&
+        (payload.download_url || payload['download-url'] || payload.streaming_url || payload['streaming-url'])) ||
+      ''
+    );
   } catch {
     return '';
   }
+}
+
+function buildHyperbeamStoreStreamUrl(uri: string): string {
+  const node = String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  return node ? `${node}/odysee/stream/${encodeURIComponent(uri)}` : '';
+}
+
+function playbackPayload(body: any): any {
+  if (body?.body && typeof body.body === 'string') {
+    try {
+      return playbackPayload(JSON.parse(body.body));
+    } catch {
+      return body;
+    }
+  }
+
+  return body?.result || body;
+}
+
+function hyperbeamMediaUrlFromPayload(payload: any): string {
+  const node = String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  if (!node || !payload) return '';
+
+  const streamStorePath = payload['stream-store-path'] || payload.stream_store_path;
+  if (typeof streamStorePath === 'string') {
+    if (streamStorePath.startsWith('odysee/stream-id/')) {
+      return `${node}/odysee/media/stream-id/${encodeURIComponent(streamStorePath.slice('odysee/stream-id/'.length))}`;
+    }
+    if (streamStorePath.startsWith('odysee/stream/')) {
+      return `${node}/odysee/media/stream/${encodeURIComponent(streamStorePath.slice('odysee/stream/'.length))}`;
+    }
+  }
+
+  const claimId = payload.claim_id || payload['claim-id'];
+  if (claimId) return `${node}/odysee/media/stream-id/${encodeURIComponent(String(claimId))}`;
+
+  const sdHash = payload.sd_hash || payload['sd-hash'];
+  return sdHash ? `${node}/${STREAM_DEVICE}/media?sd-hash=${encodeURIComponent(String(sdHash))}` : '';
 }
 
 function timeoutSignal(ms: number): AbortSignal | undefined {

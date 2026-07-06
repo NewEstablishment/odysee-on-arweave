@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from 'react-redux';
 import { buildURI, isURIValid, isNameValid } from 'util/lbryURI';
 import { lazyImport } from 'util/lazyImport';
+import { resolvePublishPayload } from 'util/publish';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import Button from 'component/button';
 import ChannelSelector from 'component/channelSelector';
@@ -34,14 +35,13 @@ import PublishControlTags from 'component/publish/shared/publishControlTags/view
 import PublishSummary from 'component/publish/shared/publishSummary/view';
 import PublishTagsPicker from 'component/publish/shared/publishTagsPicker/view';
 import * as ACTIONS from 'constants/action_types';
-import { doAddPipelineItem, doRemovePipelineItem, doUpdatePipelineItem } from 'redux/actions/publishPipeline';
+import { doAddPipelineItem, doUpdatePipelineItem } from 'redux/actions/publishPipeline';
 import type { PipelineStage } from 'redux/actions/publishPipeline';
 import { runConversion, runOptimization } from 'util/upload-conversion-pipeline';
 import { enqueue, promote, release, dequeue } from 'util/pipeline-queue';
+import { canPublishThroughHyperbeam } from 'services/hyperbeamUpload';
 import { v4 as uuid } from 'uuid';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { canPublishThroughHyperbeam } from 'services/hyperbeamUpload';
-import { resolvePublishPayload } from 'util/publish';
 import {
   doResetThumbnailStatus,
   doClearPublish,
@@ -51,6 +51,7 @@ import {
   doCreateClaimForEarlyUpload,
 } from 'redux/actions/publish';
 import { doResolveUri, doCheckPublishNameAvailability } from 'redux/actions/claims';
+import { selectIsStreamPlaceholderForUri, selectMyChannelClaims } from 'redux/selectors/claims';
 import {
   selectPublishFormValues,
   selectIsStillEditing,
@@ -61,7 +62,6 @@ import {
   selectActivePipelineItems,
 } from 'redux/selectors/publish';
 import type { PipelineItem } from 'redux/actions/publishPipeline';
-import { selectIsStreamPlaceholderForUri, selectMyChannelClaims } from 'redux/selectors/claims';
 import * as RENDER_MODES from 'constants/file_render_modes';
 import * as SETTINGS from 'constants/settings';
 import { doClaimInitialRewards } from 'redux/actions/rewards';
@@ -94,6 +94,7 @@ function UploadForm(props: Props) {
 
   const publishFormValues = useAppSelector(selectPublishFormValues);
   const myClaimForUri = useAppSelector((state) => selectMyClaimForUri(state, true));
+  const myChannels = useAppSelector(selectMyChannelClaims) as Array<ChannelClaim> | null | undefined;
   const permanentUrl = (myClaimForUri && myClaimForUri.permanent_url) || '';
   const isPostClaim = useAppSelector(
     (state) => makeSelectFileRenderModeForUri(permanentUrl)(state) === RENDER_MODES.MARKDOWN
@@ -110,7 +111,6 @@ function UploadForm(props: Props) {
   const modal = useAppSelector(selectModal);
   const enablePublishPreview = useAppSelector((state) => selectClientSetting(state, SETTINGS.ENABLE_PUBLISH_PREVIEW));
   const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
-  const myChannels = useAppSelector(selectMyChannelClaims) as Array<ChannelClaim> | null | undefined;
   const incognito = useAppSelector(selectIncognito);
   const isClaimingInitialRewards = useAppSelector(selectIsClaimingInitialRewards);
   const hasClaimedInitialRewards = useAppSelector(selectHasClaimedInitialRewards);
@@ -146,20 +146,6 @@ function UploadForm(props: Props) {
   const checkAvailability = React.useCallback((n: string) => dispatch(doCheckPublishNameAvailability(n)), [dispatch]);
   const claimInitialRewards = React.useCallback(() => dispatch(doClaimInitialRewards()), [dispatch]);
   const fetchCreatorSettings = React.useCallback((cid: string) => dispatch(doFetchCreatorSettings(cid)), [dispatch]);
-  const canUseHyperbeamPublish = React.useCallback(
-    (file: unknown) => {
-      if (!(file instanceof File)) return false;
-      const publishPayload = resolvePublishPayload(
-        publishFormValues,
-        myClaimForUri,
-        myChannels,
-        memberRestrictionStatus,
-        false
-      );
-      return canPublishThroughHyperbeam(file, publishPayload, publishFormValues.type);
-    },
-    [memberRestrictionStatus, myChannels, myClaimForUri, publishFormValues]
-  );
 
   const pipelineItems = useAppSelector(selectActivePipelineItems) as PipelineItem[];
   const inEditMode = Boolean(editingURI);
@@ -334,6 +320,22 @@ function UploadForm(props: Props) {
   }, []);
 
   // -- Handlers --
+  function canUseDirectHyperbeamUpload(candidateFile: any) {
+    const publishPayload = resolvePublishPayload(
+      publishFormValues,
+      myClaimForUri,
+      myChannels,
+      memberRestrictionStatus,
+      false
+    );
+    return (
+      !pipelineInFlightRef.current &&
+      !earlyUploadPromiseRef.current &&
+      candidateFile !== preparedOutputFileRef.current &&
+      canPublishThroughHyperbeam(candidateFile, publishPayload, PUBLISH_MODES.FILE)
+    );
+  }
+
   async function handlePublish() {
     let outputFile = filePath;
     let runPublish = false;
@@ -356,6 +358,11 @@ function UploadForm(props: Props) {
     }
 
     if (runPublish) {
+      if (canUseDirectHyperbeamUpload(outputFile)) {
+        publish(outputFile, false);
+        return;
+      }
+
       const items = (reduxStore.getState() as any).publish.pipelineItems || {};
       const activePipelineItem = Object.values(items).find(
         (item: any) => item.formId === pipelineIdForForm.current && item.stage !== 'error' && item.stage !== 'published'
@@ -363,11 +370,9 @@ function UploadForm(props: Props) {
       const pipelineId = activePipelineItem?.id || pipelineItemIdRef.current;
       const pipelineStage = activePipelineItem?.stage;
       dispatch(doUpdatePipelineItem(pipelineId, { publishStarted: true }));
-      const hyperbeamPublish = canUseHyperbeamPublish(outputFile);
 
       if (
         mode === PUBLISH_MODES.FILE &&
-        !hyperbeamPublish &&
         pipelineStage &&
         ['queued', 'converting', 'optimizing', 'paused', 'pausing'].includes(pipelineStage)
       ) {
@@ -398,15 +403,7 @@ function UploadForm(props: Props) {
         const uploadHandle = (window as any).__earlyUploadHandles?.[pipelineId];
         const uploadPromise = earlyUploadPromiseRef.current || uploadHandle?.promise;
 
-        if (hyperbeamPublish) {
-          uploadHandle?.abort?.();
-          earlyUploadAbortRef.current?.();
-          earlyUploadPromiseRef.current = null;
-          earlyUploadAbortRef.current = null;
-          delete (window as any).__earlyUploadHandles?.[pipelineId];
-          dispatch(doRemovePipelineItem(pipelineId));
-          publish(outputFile, false);
-        } else if (uploadPromise && mode === PUBLISH_MODES.FILE) {
+        if (uploadPromise && mode === PUBLISH_MODES.FILE) {
           dispatch(doPublishWithEarlyUpload(uploadPromise, pipelineId));
         } else {
           dispatch(doUpdatePipelineItem(pipelineId, { stage: 'processing', progress: 0 }));
@@ -683,6 +680,13 @@ function UploadForm(props: Props) {
         pipelineInFlightRef.current ||
         filePath === preparedSourceFileRef.current ||
         filePath === preparedOutputFileRef.current;
+      const directHyperbeamUpload = canUseDirectHyperbeamUpload(filePath) && !needsConvert && !needsOptimize;
+
+      if (directHyperbeamUpload) {
+        setActiveStep(newStep);
+        updatePublishForm({ activeStep: newStep } as any);
+        return;
+      }
 
       if ((needsConvert || needsOptimize) && !pipelineAlreadyHandled) {
         const steps: PipelineStage[] = [];
@@ -714,7 +718,7 @@ function UploadForm(props: Props) {
         if (!started) {
           dispatch(doUpdatePipelineItem(itemId, { stage: 'queued' }));
         }
-      } else if (!pipelineAlreadyHandled && !earlyUploadPromiseRef.current && !canUseHyperbeamPublish(filePath)) {
+      } else if (!pipelineAlreadyHandled && !earlyUploadPromiseRef.current) {
         const itemId = pipelineItemIdRef.current;
         const file = filePath;
 

@@ -17,6 +17,7 @@
 -define(LBRY_CLAIM_OUTPUT_COMMITMENT_DEVICE, <<"lbry-claim-output@1.0">>).
 -define(LBRY_TRANSACTION_COMMITMENT_DEVICE, <<"lbry-transaction@1.0">>).
 -define(SHA384_HEX_SIZE, 96).
+-define(DEFAULT_RANGE_SIZE, 1048576).
 -define(DEFAULT_BLOB_BASE_URLS, [
     <<"https://blobcache-eu.odycdn.com">>,
     <<"https://blobcache-us.odycdn.com">>,
@@ -71,15 +72,33 @@ link(_StoreOpts, _Req, _NodeOpts) ->
     {error, read_only}.
 
 %% @doc Read a public Odysee object by a stable store path.
-read(StoreOpts, #{ <<"read">> := Key }, NodeOpts) ->
-    Path = canonical_read_path(normalize_key(Key)),
+read(StoreOpts, Req = #{ <<"read">> := Key }, NodeOpts) ->
+    BareKey = normalize_key(Key),
+    Path = canonical_read_path(BareKey),
     case fixture(Path, StoreOpts, NodeOpts) of
         {ok, Msg} ->
             Type = infer_type(Path, Msg, NodeOpts),
             commit_result(enrich_surface(Path, Type, Msg), Type, NodeOpts);
         not_found ->
-            read_live(Path, StoreOpts, NodeOpts)
+            case read_live(Path, Req, StoreOpts, NodeOpts) of
+                {ok, LiveMsg} = OK when is_map(LiveMsg) ->
+                    maybe_warm_bare_key(BareKey, LiveMsg, StoreOpts, NodeOpts),
+                    OK;
+                Other ->
+                    Other
+            end
     end.
+
+read_live(<<"odysee/media/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
+    media_from_stream_path(<<"odysee/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
+read_live(<<"odysee/media/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
+    media_from_stream_path(<<"odysee/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
+read_live(<<"odysee/media/sd-hash/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
+    media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
+read_live(<<"odysee/media/descriptor/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
+    media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
+read_live(Path, _Req, StoreOpts, NodeOpts) ->
+    read_live(Path, StoreOpts, NodeOpts).
 
 read_live(<<"odysee/claim/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
@@ -190,7 +209,12 @@ read_live(<<"odysee/outpoint/", Rest/binary>>, StoreOpts, NodeOpts) ->
 read_live(<<"odysee/claim-output/", Rest/binary>>, StoreOpts, NodeOpts) ->
     read_claim_output_live(Rest, StoreOpts, NodeOpts);
 read_live(<<"odysee/claim-proof/", Rest/binary>>, StoreOpts, NodeOpts) ->
-    read_claim_output_live(Rest, StoreOpts, NodeOpts);
+    maybe
+        {ok, TxID, NOut} ?= claim_proof_path(Rest),
+        read_native_outpoint(TxID, NOut, StoreOpts, NodeOpts)
+    else
+        Error -> Error
+    end;
 read_live(<<"odysee/transaction/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, TxID0} ?= decode_component(Encoded),
@@ -410,6 +434,267 @@ require_outpoint_match(Claim, TxID, NOut, Opts) ->
         {TxID, ExpectedNOut} -> ok;
         _ -> {error, claim_surface_outpoint_mismatch}
     end.
+
+%% @doc Resolve a bare outpoint to a native committed `lbry-claim@1.0'/
+%% `lbry-stream@1.0' message through the claim-output store, trying the
+%% stream and channel kinds before the default, and falling back to a
+%% locally verified claim proof.
+read_native_outpoint(TxID, NOut, StoreOpts, NodeOpts) ->
+    Outpoint = <<TxID/binary, ":", (integer_to_binary(NOut))/binary>>,
+    Kinds = [
+        maps:put(<<"kind">>, <<"stream">>, StoreOpts),
+        maps:put(<<"kind">>, <<"channel">>, StoreOpts),
+        maps:remove(<<"kind">>, StoreOpts)
+    ],
+    read_native_outpoint(TxID, NOut, Outpoint, Kinds, StoreOpts, NodeOpts).
+
+read_native_outpoint(TxID, NOut, Outpoint, [KindStore | Rest], StoreOpts, NodeOpts) ->
+    case hb_store_lbry_claim_output:read(KindStore, #{ <<"read">> => Outpoint }, NodeOpts) of
+        {ok, _Msg} = OK -> OK;
+        _ -> read_native_outpoint(TxID, NOut, Outpoint, Rest, StoreOpts, NodeOpts)
+    end;
+read_native_outpoint(TxID, NOut, _Outpoint, [], StoreOpts, NodeOpts) ->
+    read_verified_claim_proof(TxID, NOut, StoreOpts, NodeOpts).
+
+read_verified_claim_proof(TxID, NOut, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Transaction} ?=
+            hb_ao:raw(
+                <<"odysee-claim@1.0">>,
+                <<"transaction">>,
+                #{},
+                #{ <<"txid">> => TxID },
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        {ok, Proof} ?=
+            hb_ao:raw(
+                <<"odysee-claim-proof@1.0">>,
+                <<"verify">>,
+                Transaction,
+                #{ <<"txid">> => TxID, <<"nout">> => NOut },
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        ok ?= require_valid_proof(Proof, NodeOpts),
+        commit_result(Proof, <<"claim-proof">>, NodeOpts)
+    end.
+
+media_from_stream_path(Path, Req, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Stream} ?= read(StoreOpts, #{ <<"read">> => Path }, NodeOpts),
+        {ok, Source} ?= stream_media_source(Stream, NodeOpts),
+        media_response(Source, Req, store_node_opts(StoreOpts, NodeOpts))
+    end.
+
+stream_media_source(Stream, Opts) ->
+    maybe
+        SDHash = first_present([<<"sd-hash">>, <<"sd_hash">>], Stream, Opts),
+        true ?= is_binary(SDHash),
+        Source0 = #{
+            <<"sd-hash">> => SDHash,
+            <<"byte-size">> =>
+                integer_or_undefined(
+                    first_present(
+                        [
+                            <<"source-size">>,
+                            <<"source_size">>,
+                            <<"byte-size">>,
+                            <<"media-size">>
+                        ],
+                        Stream,
+                        Opts
+                    )
+                ),
+            <<"content-type">> =>
+                first_present([<<"media-type">>, <<"media_type">>, <<"content-type">>], Stream, Opts),
+            <<"claim-id">> => first_present([<<"claim-id">>, <<"claim_id">>], Stream, Opts),
+            <<"filename">> => first_present([<<"source-name">>, <<"source_name">>, <<"filename">>], Stream, Opts)
+        },
+        {ok, maps:filter(fun(_Key, Value) -> present_optional(Value) end, Source0)}
+    else
+        false -> {error, missing_sd_hash};
+        not_found -> {error, missing_sd_hash}
+    end.
+
+media_response(Source, Req, Opts) ->
+    maybe
+        {ok, Start, End} ?= request_range(Req, Opts),
+        {ok, BoundedStart, BoundedEnd} ?= bounded_range(Source, Start, End),
+        SDHash = hb_maps:get(<<"sd-hash">>, Source, Opts),
+        {ok, Result} ?= hb_lbry_bridge:stream_range(SDHash, BoundedStart, BoundedEnd, Opts),
+        Body = hb_maps:get(<<"bytes">>, Result, Opts),
+        ActualEnd = hb_maps:get(<<"end">>, Result, Opts),
+        Total = hb_maps:get(<<"byte-size">>, Source, undefined, Opts),
+        {ok,
+            maps:merge(
+                #{
+                    <<"status">> => 206,
+                    <<"content-type">> =>
+                        hb_maps:get(
+                            <<"content-type">>,
+                            Source,
+                            <<"application/octet-stream">>,
+                            Opts
+                        ),
+                    <<"content-length">> => byte_size(Body),
+                    <<"accept-ranges">> => <<"bytes">>,
+                    <<"content-range">> => content_range(BoundedStart, ActualEnd, Total),
+                    <<"sd-hash">> => hb_util:to_lower(SDHash),
+                    <<"start">> => BoundedStart,
+                    <<"end">> => ActualEnd,
+                    <<"requested-end">> => hb_maps:get(<<"requested-end">>, Result, Opts),
+                    <<"body">> => Body
+                },
+                media_metadata(Source, Total)
+            )}
+    end.
+
+request_range(Req, Opts) ->
+    case {
+        integer_or_undefined(hb_maps:get(<<"start">>, Req, undefined, Opts)),
+        integer_or_undefined(hb_maps:get(<<"end">>, Req, undefined, Opts))
+    } of
+        {Start, End} when is_integer(Start), is_integer(End), End >= Start ->
+            {ok, Start, End};
+        _ ->
+            case first_present([<<"range">>, <<"Range">>], Req, Opts) of
+                Range when is_binary(Range) -> parse_range(Range, Opts);
+                _ -> {ok, 0, default_range_size(Opts) - 1}
+            end
+    end.
+
+parse_range(<<"bytes=", Spec/binary>>, Opts) ->
+    case binary:split(Spec, <<"-">>) of
+        [StartBin, EndBin] when byte_size(StartBin) > 0 ->
+            maybe
+                {ok, Start} ?= non_negative_integer(StartBin),
+                {ok, End} ?= range_end(Start, EndBin, Opts),
+                true ?= End >= Start orelse {error, invalid_range},
+                {ok, Start, End}
+            end;
+        _ ->
+            {error, invalid_range}
+    end;
+parse_range(_Range, _Opts) ->
+    {error, invalid_range}.
+
+range_end(Start, <<>>, Opts) ->
+    {ok, Start + default_range_size(Opts) - 1};
+range_end(_Start, EndBin, _Opts) ->
+    non_negative_integer(EndBin).
+
+default_range_size(Opts) ->
+    hb_maps:get(<<"odysee-default-range-size">>, Opts, ?DEFAULT_RANGE_SIZE, Opts).
+
+bounded_range(Source, Start, End) ->
+    case hb_maps:get(<<"byte-size">>, Source, undefined, #{}) of
+        undefined ->
+            {ok, Start, End};
+        Size when Start < Size ->
+            {ok, Start, min(End, Size - 1)};
+        _ ->
+            {error, invalid_range}
+    end.
+
+content_range(Start, End, undefined) ->
+    content_range(Start, End, <<"*">>);
+content_range(Start, End, Total) when is_integer(Total) ->
+    content_range(Start, End, integer_to_binary(Total));
+content_range(Start, End, Total) ->
+    iolist_to_binary([
+        <<"bytes ">>,
+        integer_to_binary(Start),
+        <<"-">>,
+        integer_to_binary(End),
+        <<"/">>,
+        Total
+    ]).
+
+media_metadata(Source, Total) ->
+    maps:from_list([
+        {Key, Value}
+     ||
+        {Key, Value} <- [
+            {<<"byte-size">>, Total},
+            {<<"claim-id">>, hb_maps:get(<<"claim-id">>, Source, undefined, #{})},
+            {<<"filename">>, hb_maps:get(<<"filename">>, Source, undefined, #{})}
+        ],
+        present_optional(Value)
+    ]).
+
+present_optional(undefined) ->
+    false;
+present_optional(not_found) ->
+    false;
+present_optional(_Value) ->
+    true.
+
+first_present([], _Msg, _Opts) ->
+    not_found;
+first_present([Key | Rest], Msg, Opts) ->
+    case hb_maps:get(Key, Msg, not_found, Opts) of
+        not_found -> first_present(Rest, Msg, Opts);
+        Value -> Value
+    end.
+
+integer_or_undefined(Value) when is_integer(Value) ->
+    Value;
+integer_or_undefined(Value) when is_binary(Value) ->
+    try binary_to_integer(Value) of
+        Int -> Int
+    catch
+        _:_ -> undefined
+    end;
+integer_or_undefined(_Value) ->
+    undefined.
+
+%% @doc Best-effort cache warming for legacy content resolved live: write the
+%% committed message into the node's local store(s) and link the originally
+%% requested bare key to it, so a later bare `GET /<id>' hits the local store
+%% before falling through to this (remote, read-only) store. Only bare
+%% outpoint reads warm the cache — those are the keys a generic `GET /<id>'
+%% requests. A warming failure never breaks the read.
+maybe_warm_bare_key(Key, Msg, StoreOpts, NodeOpts) ->
+    case is_bare_outpoint(Key) of
+        true -> maybe_warm_cache(Key, Msg, StoreOpts, NodeOpts);
+        false -> ok
+    end.
+
+maybe_warm_cache(Key, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
+    catch warm_cache(Key, Msg, StoreOpts, NodeOpts),
+    ok;
+maybe_warm_cache(_Key, _Msg, _StoreOpts, _NodeOpts) ->
+    ok.
+
+warm_cache(Key, Msg, StoreOpts, NodeOpts) ->
+    case warm_stores(StoreOpts, NodeOpts) of
+        [] ->
+            ok;
+        LocalStores ->
+            {ok, Id} = hb_cache:write(Msg, #{ <<"store">> => LocalStores }),
+            hb_store:link(LocalStores, #{ Key => Id }, #{}),
+            ok
+    end.
+
+%% Follow `hb_store_gateway''s `local-store' convention when provided;
+%% otherwise warm the node's local-scope stores (this store's scope is
+%% `remote', so it excludes itself).
+warm_stores(StoreOpts, NodeOpts) ->
+    case hb_maps:get(<<"local-store">>, StoreOpts, not_found, NodeOpts) of
+        not_found ->
+            case hb_opts:get(store, [], NodeOpts) of
+                Stores when is_list(Stores) -> hb_store:scope(Stores, local);
+                Store when is_map(Store) -> hb_store:scope([Store], local);
+                _ -> []
+            end;
+        false -> [];
+        Stores when is_list(Stores) -> Stores;
+        Store -> [Store]
+    end.
+
+is_bare_outpoint(<<TxID:64/binary, ":", NOut/binary>>) ->
+    valid_hex_size(TxID, 32) andalso valid_uint(NOut);
+is_bare_outpoint(_Key) ->
+    false.
 
 list_live(<<"odysee/channel-id/", Rest/binary>>, Req, StoreOpts, NodeOpts) ->
     case binary:split(Rest, <<"/">>) of
@@ -1037,7 +1322,7 @@ classify_channel_claims_list_path(_Path) ->
 
 classify_native_path(<<TxID:64/binary, ":", NOut/binary>>) ->
     case valid_hex_size(TxID, 32) andalso valid_uint(NOut) of
-        true -> {ok, <<"odysee/claim-output/", TxID/binary, "/", NOut/binary>>};
+        true -> {ok, <<"odysee/claim-proof/", TxID/binary, "/", NOut/binary>>};
         false -> not_found
     end;
 classify_native_path(Path) ->
@@ -1153,12 +1438,10 @@ direct_claim_id_http_get_returns_committed_claim_test() ->
     URL = binary_to_list(<<Node/binary, ClaimID/binary>>),
     {ok, {{_, 200, _}, Headers, _Body}} =
         httpc:request(get, {URL, []}, [], [{body_format, binary}]),
+    % The `odysee@1.0' catch-all commitment device was removed; claim
+    % surfaces are served under the node's own response signature.
     SignatureInput = http_header(<<"signature-input">>, Headers),
-    ?assertNotEqual(not_found, SignatureInput),
-    ?assertNotEqual(
-        nomatch,
-        binary:match(SignatureInput, <<"alg=\"odysee@1.0/claim\"">>)
-    ).
+    ?assertNotEqual(not_found, SignatureInput).
 
 claim_id_store(ClaimID) ->
     Claim = #{
@@ -1347,11 +1630,11 @@ direct_outpoint_get_returns_native_claim_output_test() ->
     Store = #{
         <<"store-module">> => ?MODULE,
         <<"fixtures">> => #{
-            <<"odysee/claim-output/", TxID/binary, "/0">> => ClaimOutput
+            <<"odysee/claim-proof/", TxID/binary, "/0">> => ClaimOutput
         }
     },
     ?assertEqual(
-        <<"odysee/claim-output/", TxID/binary, "/0">>,
+        <<"odysee/claim-proof/", TxID/binary, "/0">>,
         canonical_read_path(Outpoint)
     ),
     {ok, StoreMsg} = read(Store, #{ <<"read">> => Outpoint }, #{}),
@@ -1393,6 +1676,35 @@ claim_output_path_aliases_return_native_claim_output_test() ->
     ?assertEqual(0, maps:get(<<"nout">>, ClaimProofMsg)),
     ?assertEqual(TxID, maps:get(<<"txid">>, OutpointMsg)),
     ?assertEqual(0, maps:get(<<"nout">>, OutpointMsg)).
+
+%% Warming mechanics: a live-resolved native claim output written through
+%% `maybe_warm_cache' must be readable back from the local store by its bare
+%% outpoint key, so a later bare `GET /<id>' never re-hits the proxy.
+bare_outpoint_warm_cache_links_local_store_test() ->
+    Raw = binary:decode_hex(hb_lbry_tx:task0_tx_hex()),
+    TxID = hb_lbry_tx:txid(Raw),
+    Outpoint = <<TxID/binary, ":0">>,
+    {ok, ClaimOutput} = hb_lbry_commitment:claim_output_message(Raw, 0),
+    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/odysee-warm-", Timestamp/binary>>
+    },
+    hb_store:reset(LocalStore),
+    Opts = #{ <<"store">> => [LocalStore] },
+    ?assert(is_bare_outpoint(Outpoint)),
+    ok = maybe_warm_bare_key(Outpoint, ClaimOutput, #{}, Opts),
+    {ok, Cached0} = hb_cache:read(Outpoint, Opts),
+    Cached = hb_cache:ensure_all_loaded(Cached0, Opts),
+    ?assertEqual(TxID, hb_maps:get(<<"txid">>, Cached, not_found, Opts)),
+    ?assertEqual(
+        <<"lbry-claim@1.0">>,
+        hb_maps:get(<<"device">>, Cached, not_found, Opts)
+    ),
+    %% Non-outpoint keys never warm, and warming without local stores is a
+    %% harmless no-op.
+    ?assertEqual(ok, maybe_warm_bare_key(<<"odysee/claim/x">>, ClaimOutput, #{}, Opts)),
+    ?assertEqual(ok, maybe_warm_bare_key(Outpoint, ClaimOutput, #{}, #{})).
 
 http_header(Name, Headers) ->
     LowerName = hb_util:bin(string:lowercase(hb_util:bin(Name))),

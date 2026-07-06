@@ -1,3 +1,5 @@
+import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+
 export const HLS_FILETYPE = 'application/x-mpegURL';
 
 const HLS_CONTENT_TYPES = new Set(['application/x-mpegurl', 'application/vnd.apple.mpegurl']);
@@ -85,17 +87,41 @@ export function isHyperbeamPlaybackUrl(src: string | null | undefined): boolean 
     const baseUrl = typeof window !== 'undefined' ? window.location.href : undefined;
     const url = new URL(src, baseUrl);
     return (
+      url.pathname.includes('/odysee/media/') ||
       url.pathname.includes('/~lbry-stream@1.0/media') ||
       url.pathname.includes('/~odysee-stream@1.0/media') ||
-      url.pathname.startsWith('/$/api/hyperbeam-upload/v1/read/')
+      url.pathname.startsWith('/$/api/hyperbeam-upload/v1/read/') ||
+      isConfiguredHyperbeamNodeUrl(url)
     );
   } catch {
     return (
+      src.includes('/odysee/media/') ||
       src.includes('~lbry-stream@1.0/media') ||
       src.includes('~odysee-stream@1.0/media') ||
       src.includes('/$/api/hyperbeam-upload/v1/read/')
     );
   }
+}
+
+function isConfiguredHyperbeamNodeUrl(url: URL) {
+  return [HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API].some((rawBase) => {
+    const base = String(rawBase || '').replace(/\/+$/, '');
+    if (!base) return false;
+
+    try {
+      const configured = new URL(base);
+      const configuredPath = configured.pathname.replace(/\/+$/, '');
+      return (
+        url.origin === configured.origin &&
+        (!configuredPath ||
+          configuredPath === '/' ||
+          url.pathname === configuredPath ||
+          url.pathname.startsWith(`${configuredPath}/`))
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function isHlsPlaybackUrl(src: string | null | undefined): boolean {

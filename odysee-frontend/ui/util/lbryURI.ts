@@ -2,7 +2,6 @@ import { htmlDecode } from 'util/url';
 const isProduction = process.env.NODE_ENV === 'production';
 const channelNameMinLength = 1;
 const claimIdMaxLength = 40;
-const hyperbeamClaimIdLength = 43;
 // see https://spec.lbry.com/#urls
 export const regexInvalidURI =
   /[ =&#:$@%?;/\\\n"<>%{}|^~[\]`\u{0000}-\u{0008}\u{000b}-\u{000c}\u{000e}-\u{001F}\u{D800}-\u{DFFF}\u{FFFE}-\u{FFFF}]/u; // eslint-disable-line no-control-regex
@@ -244,10 +243,11 @@ function parseURIModifier(modSeperator: string | null | undefined, modValue: str
 }
 
 function isClaimIdModifierValid(claimId: string) {
-  return (
-    (claimId.length <= claimIdMaxLength && /^[0-9a-f]+$/.test(claimId)) ||
-    (claimId.length === hyperbeamClaimIdLength && /^[0-9A-Za-z_-]+$/.test(claimId))
-  );
+  return (claimId.length <= claimIdMaxLength && /^[0-9a-f]+$/.test(claimId)) || isHyperbeamDataId(claimId);
+}
+
+function isHyperbeamDataId(claimId: string) {
+  return claimId.length > claimIdMaxLength && claimId.length <= 128 && /^[0-9A-Za-z_-]+$/.test(claimId);
 }
 
 const errorHistory = [];

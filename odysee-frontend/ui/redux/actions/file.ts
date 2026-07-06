@@ -19,10 +19,10 @@ import { doToast } from 'redux/actions/notifications';
 import { selectBalance } from 'redux/selectors/wallet';
 import { makeSelectFileInfoForUri, selectOutpointFetchingForUri } from 'redux/selectors/file_info';
 import { getStripeEnvironment } from 'util/stripe';
-import { getChannelIdFromClaim, getClaimOutpoint, isClaimUnlisted } from 'util/claim';
+import { getChannelIdFromClaim, isClaimUnlisted } from 'util/claim';
 import { toHex } from 'util/hex';
-import { localHyperbeamUploadFileInfo } from 'util/hyperbeam-file-info';
 import { fetchHyperbeamPlaybackUrl } from 'util/hyperbeam-playback';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 const stripeEnvironment = getStripeEnvironment();
 
 async function getOwnedClaimAccessKey(
@@ -89,19 +89,14 @@ export function doDeleteFile(
   claim: Claim
 ) {
   return (dispatch: Dispatch) => {
-    const isHyperbeamUpload = Boolean(
-      claim && ((claim as any).hyperbeam_upload || (claim as any).hyperbeam?.upload_id)
-    );
     if (abandonClaim) {
       dispatch(doAbandonClaim(claim, cb));
     }
 
-    if (!isHyperbeamUpload) {
-      Lbry.file_delete({
-        outpoint,
-        delete_from_download_dir: deleteFromComputer,
-      });
-    }
+    Lbry.file_delete({
+      outpoint,
+      delete_from_download_dir: deleteFromComputer,
+    });
     dispatch({
       type: ACTIONS.FILE_DELETE,
       data: {
@@ -121,7 +116,8 @@ export function doDeleteFileAndMaybeGoBack(
     const state = getState();
     const playingUri = selectPlayingUri(state);
     const { outpoint } = makeSelectFileInfoForUri(uri)(state) || '';
-    const claimOutpoint = getClaimOutpoint(selectClaimForUri(state, uri));
+    const { nout, txid } = selectClaimForUri(state, uri);
+    const claimOutpoint = `${txid}:${nout}`;
     const actions = [];
 
     if (!abandonClaim) {
@@ -173,8 +169,6 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
     }
 
     const outpoint = selectClaimOutpointForUri(state, uri);
-    const claim = selectClaimForUri(state, uri);
-    const hyperbeamUploadFileInfo = localHyperbeamUploadFileInfo(claim, uri, outpoint);
     const keyFromOpt = opt && (opt as any).uriAccessKey;
     const cachedKey: UriAccessKey | null | undefined = state.content.uriAccessKeys[uri];
     let accessKey: UriAccessKey | null | undefined = keyFromOpt || cachedKey || null;
@@ -185,23 +179,41 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
       },
     });
 
-    if (hyperbeamUploadFileInfo) {
+    if (!accessKey) {
+      accessKey = (await getOwnedClaimAccessKey(dispatch, state, uri)) || null;
+    }
+
+    const claim = selectClaimForUri(getState(), uri);
+    const rawClaimStreamingUrl = claim?.streaming_url || claim?.download_url || claim?.value?.source?.url;
+    const nodeBase = hyperbeamNodeBase();
+    const claimStreamingUrl =
+      typeof rawClaimStreamingUrl === 'string' && rawClaimStreamingUrl.startsWith('/') && nodeBase
+        ? `${nodeBase}${rawClaimStreamingUrl}`
+        : rawClaimStreamingUrl;
+    const immutableId =
+      claim?.hyperbeam?.immutable_id ||
+      claim?.hyperbeam?.['immutable-id'] ||
+      claim?.hyperbeam?.record_id ||
+      claim?.hyperbeam?.['record-id'] ||
+      claim?.hyperbeam?.data_id ||
+      claim?.hyperbeam?.['data-id'];
+    if (!accessKey && claimStreamingUrl && immutableId) {
+      const streamInfo = {
+        ...claim,
+        streaming_url: claimStreamingUrl,
+        download_url: claim?.download_url || claimStreamingUrl,
+      };
       dispatch({
         type: ACTIONS.FETCH_FILE_INFO_COMPLETED,
         data: {
-          fileInfo: hyperbeamUploadFileInfo,
-          outpoint: hyperbeamUploadFileInfo.outpoint,
+          fileInfo: streamInfo,
+          outpoint,
         },
       });
-
       if (onSuccess) {
-        onSuccess(hyperbeamUploadFileInfo);
+        onSuccess(streamInfo);
       }
       return;
-    }
-
-    if (!accessKey) {
-      accessKey = (await getOwnedClaimAccessKey(dispatch, state, uri)) || null;
     }
 
     Lbry.get({
@@ -226,9 +238,7 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
             })
           );
         } else {
-          const hyperbeamPlaybackUrl = !accessKey
-            ? await fetchHyperbeamPlaybackUrl(uri, claim?.immutable_id || claim?.outpoint || outpoint)
-            : '';
+          const hyperbeamPlaybackUrl = !accessKey ? await fetchHyperbeamPlaybackUrl(uri) : '';
           const resolvedStreamInfo = hyperbeamPlaybackUrl
             ? { ...streamInfo, streaming_url: hyperbeamPlaybackUrl }
             : streamInfo;
@@ -320,7 +330,6 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
       });
   };
 };
-
 export function doPurchaseUri(
   uri: string,
   costInfo: {

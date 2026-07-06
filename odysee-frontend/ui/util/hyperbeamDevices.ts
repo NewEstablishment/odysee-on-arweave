@@ -4,6 +4,7 @@ import { getAuthToken } from 'util/saved-passwords';
 
 export const HYPERBEAM_DEVICE = {
   account: '~odysee-account@1.0',
+  cache: '~cache@1.0',
   claim: '~odysee-claim@1.0',
   channel: '~odysee-channel@1.0',
   comment: '~odysee-comment@1.0',
@@ -55,8 +56,9 @@ export function hyperbeamDevicePostJson(
 ) {
   const base = hyperbeamDeviceBase(device);
   if (!base) return null;
+  const { path, fields } = hyperbeamKeyFields(key);
 
-  return fetch(`${base}/${key}`, {
+  return fetch(`${base}/${path}`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -65,8 +67,23 @@ export function hyperbeamDevicePostJson(
       ...authTokenHeader(),
       ...headers,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...fields, ...body }),
   });
+}
+
+function hyperbeamKeyFields(key: string) {
+  const [path, ...parts] = key.split('&');
+  const fields = parts.reduce<Record<string, any>>((acc, part) => {
+    if (!part) return acc;
+
+    const equals = part.indexOf('=');
+    const name = decodeURIComponent(equals === -1 ? part : part.slice(0, equals));
+    const value = equals === -1 ? true : decodeURIComponent(part.slice(equals + 1));
+    acc[name] = value;
+    return acc;
+  }, {});
+
+  return { path, fields };
 }
 
 function authTokenHeader(): Record<string, string> {

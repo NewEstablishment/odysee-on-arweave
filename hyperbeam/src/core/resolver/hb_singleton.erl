@@ -145,13 +145,14 @@ from(RawMsg, Opts) ->
             Query
         ),
     % 2. Decode, split, and sanitize path segments. Each yields one step message.
-    RawMsgs =
+    RawMsgs0 =
         lists:flatten(
             lists:map(
                 fun(Msg) -> path_messages(Msg, Opts) end,
                 Path
             )
         ),
+    RawMsgs = maybe_inherit_message_id(RawMsgs0, MsgWithoutBasePath, Opts),
     ?event_debug(parsing, {raw_messages, RawMsgs}),
     Msgs = normalize_base(RawMsgs),
     ?event_debug(parsing, {normalized_messages, Msgs}),
@@ -416,6 +417,14 @@ maybe_subpath(Str, Opts) when byte_size(Str) >= 2 ->
     end;
 maybe_subpath(Other, _Opts) -> Other.
 
+maybe_inherit_message_id([Msg = #{ <<"path">> := <<"id">> }], Base, Opts) ->
+    case hb_maps:find(<<"body">>, Base, Opts) of
+        {ok, Body} when is_binary(Body) -> [{as, <<"message@1.0">>, Msg}];
+        _ -> [Msg]
+    end;
+maybe_inherit_message_id(Msgs, _Base, _Opts) ->
+    Msgs.
+
 %% @doc Parse a key's type (applying it to the value) and device name if present.
 %% We allow ` ` characters as type indicators because some URL-string encoders
 %% (e.g. Chrome) will encode `+` characters in a form that query-string parsers
@@ -478,6 +487,17 @@ parse_explicit_message_test() ->
     ?assertEqual(
         [DummyID, #{ <<"path">> => <<"a">>, <<"a">> => <<"b">> }],
         from(Singleton3, #{})
+    ).
+
+inherited_id_message_body_test() ->
+    Body = <<"hello-sam">>,
+    ?assertEqual(
+        [{as, <<"message@1.0">>, #{ <<"path">> => <<"id">>, <<"body">> => Body }}],
+        from(#{ <<"path">> => <<"/id">>, <<"body">> => Body }, #{})
+    ),
+    ?assertEqual(
+        [#{}, #{ <<"path">> => <<"id">> }],
+        from(#{ <<"path">> => <<"/id">> }, #{})
     ).
 
 %%% `to/1' function tests
