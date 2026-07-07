@@ -16,10 +16,10 @@
 %%%   <li>login as access: the same session reaches the same wallet;</li>
 %%%   <li>ACCOUNT identity: many session tokens of one account share ONE wallet;</li>
 %%%   <li>isolation: distinct accounts get distinct wallets;</li>
-%%%   <li>account-owned preferences: the account wallet writes a preference via
-%%%       `~owned-reference@1.0', any of its sessions updates the same slot, a
-%%%       read-back shows the account wallet as owner, and a foreign account's
-%%%       write is rejected;</li>
+%%%   <li>account-owned settings: the account wallet creates a settings
+%%%       reference via `~reference@1.0' (becoming its authority), any of its
+%%%       sessions updates the settings, a read-back shows the account wallet
+%%%       as authority, and a foreign account's update is rejected;</li>
 %%%   <li>token validation: on a node configured with a session->account map, an
 %%%       unknown token is rejected rather than minting a wallet.</li>
 %%% </ol>
@@ -362,52 +362,73 @@ distinct_accounts_are_isolated_test() ->
     ?assertNotEqual(none, Two),
     ?assertNotEqual(One, Two).
 
-%% @doc Write a preference to `~owned-reference@1.0' as the account behind
-%% `Token': the hook signs the request with the account wallet, and the signed
-%% request is routed to the device's `point'. Returns the device response.
-write_pref(Token, Key, Preference, ServerID) ->
+%% @doc Create a settings reference as the account behind `Token': the hook
+%% signs the request with the account wallet, and the signed request is routed
+%% to `~reference@1.0''s `create'. The account wallet becomes the reference's
+%% authority. Returns the device response (carrying `reference-id').
+create_settings(Token, Value, ServerID) ->
     Request =
         #{
-            <<"device">> => <<"owned-reference@1.0">>,
-            <<"key">> => Key,
-            <<"preference">> => Preference,
+            <<"device">> => <<"reference@1.0">>,
+            <<"reference-value">> => Value,
             <<"cookie">> => cookie(Token)
         },
     {ok, #{ <<"request">> := Signed }} = run_hook(Request, ServerID),
-    hb_ao:resolve(Signed, <<"point">>, server_opts(ServerID)).
+    hb_ao:resolve(Signed, <<"create">>, server_opts(ServerID)).
 
-%% @doc Read a preference slot back, returning `{Preference, Owner}'.
-read_pref(Key, ServerID) ->
+%% @doc Move the settings reference to `Value' at `Timestamp' as the account
+%% behind `Token', via the device's `update'.
+update_settings(Token, ReferenceID, Value, Timestamp, ServerID) ->
+    Request =
+        #{
+            <<"device">> => <<"reference@1.0">>,
+            <<"reference-id">> => ReferenceID,
+            <<"reference-value">> => Value,
+            <<"timestamp">> => Timestamp,
+            <<"cookie">> => cookie(Token)
+        },
+    {ok, #{ <<"request">> := Signed }} = run_hook(Request, ServerID),
+    hb_ao:resolve(Signed, <<"update">>, server_opts(ServerID)).
+
+%% @doc Read the settings reference back, returning `{Value, Authority}'.
+read_settings(ReferenceID, ServerID) ->
     Opts = server_opts(ServerID),
-    Base = #{ <<"device">> => <<"owned-reference@1.0">>, <<"key">> => Key },
-    {ok, Value} = hb_ao:resolve(Base, <<"current">>, Opts),
+    Base = #{
+        <<"device">> => <<"reference@1.0">>,
+        <<"reference-id">> => ReferenceID
+    },
+    {ok, State} = hb_ao:resolve(Base, <<"current">>, Opts),
     {
-        hb_ao:get(<<"preference">>, Value, not_found, Opts),
-        hb_ao:get(<<"owner">>, Value, not_found, Opts)
+        hb_ao:get(<<"reference-value">>, State, not_found, Opts),
+        hb_ao:get(<<"authority">>, State, not_found, Opts)
     }.
 
-%% @doc Act 5 -- account-owned preferences. The account wallet writes a
-%% preference; a second session of the SAME account updates the same slot; a
-%% read-back shows the account wallet as owner and the latest value; a different
-%% account's write is rejected (403) and does not mutate the slot.
+%% @doc Act 5 -- account-owned settings on `~reference@1.0'. The account wallet
+%% creates a settings reference (becoming its authority); a second session of
+%% the SAME account updates the settings; a read-back shows the latest value
+%% with the account wallet as authority; a different account's update is
+%% rejected (403) and does not move the reference. (`~owned-reference@1.0'
+%% previously played this role; the reference record model supersedes it for
+%% account state.)
 preferences_owned_by_account_test() ->
     ServerID = start_account_node(<<"prefs">>),
     Owner = signer_via_cookie(<<"sess-one-laptop">>, ServerID),
-    Key = <<"prefs:account-one">>,
+    {ok, Created} = create_settings(<<"sess-one-laptop">>, <<"theme=dark">>, ServerID),
+    ?assertMatch(#{ <<"status">> := 200 }, Created),
+    ReferenceID =
+        hb_ao:get(<<"reference-id">>, Created, not_found, server_opts(ServerID)),
+    ?assertNotEqual(not_found, ReferenceID),
+    ?assertEqual({<<"theme=dark">>, Owner}, read_settings(ReferenceID, ServerID)),
     ?assertMatch(
         {ok, #{ <<"status">> := 200 }},
-        write_pref(<<"sess-one-laptop">>, Key, <<"theme=dark">>, ServerID)
+        update_settings(<<"sess-one-phone">>, ReferenceID, <<"theme=light">>, 1, ServerID)
     ),
-    ?assertMatch(
-        {ok, #{ <<"status">> := 200 }},
-        write_pref(<<"sess-one-phone">>, Key, <<"theme=light">>, ServerID)
-    ),
-    ?assertEqual({<<"theme=light">>, Owner}, read_pref(Key, ServerID)),
+    ?assertEqual({<<"theme=light">>, Owner}, read_settings(ReferenceID, ServerID)),
     ?assertMatch(
         {ok, #{ <<"status">> := 403 }},
-        write_pref(<<"sess-two-laptop">>, Key, <<"hijack">>, ServerID)
+        update_settings(<<"sess-two-laptop">>, ReferenceID, <<"hijack">>, 2, ServerID)
     ),
-    ?assertEqual({<<"theme=light">>, Owner}, read_pref(Key, ServerID)).
+    ?assertEqual({<<"theme=light">>, Owner}, read_settings(ReferenceID, ServerID)).
 
 %% @doc Token validation. On a node configured with a session->account map, a
 %% mapped session signs, but an UNKNOWN token is rejected (401) rather than

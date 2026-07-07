@@ -1,4 +1,9 @@
-%%% @doc An OWNER-gated mutable reference: the "who owns this slot" companion to
+%%% @doc DEPRECATED for account state: prefer `~reference@1.0', whose records
+%%% carry an explicit authority and timestamp-ordered updates -- the standard
+%%% record shape for user settings. This device remains for named-slot use
+%%% cases until its callers migrate.
+%%%
+%%% An OWNER-gated mutable reference: the "who owns this slot" companion to
 %%% `~odysee-reference@1.0'. Where the reference device gates writes on the node
 %%% OPERATOR (via `~meta@1.0/is-operator'), this device gates them on the
 %%% per-resource OWNER -- the wallet that first wrote the slot. This is the

@@ -4,7 +4,7 @@
   Served same-origin by the node itself (see the `hyperbuddy-serve' node option),
   so document.cookie + fetch reach the node's own endpoints with no CORS. This is
   a demo asset only: it is never part of a device's default serve map, and it
-  drives only existing endpoints (/commitments, ~owned-reference@1.0). Session
+  drives only existing endpoints (/commitments, ~reference@1.0). Session
   tokens below match the node's `odysee-session-accounts' map.
 -->
 <html lang="en">
@@ -338,31 +338,35 @@ function firstSigner(r){ return r.signers[0] || null; }
   c.querySelector("button").after(clr);
 })();
 
-// --- 7. Account-owned preferences ----------------------------------------
+// --- 7. Account-owned settings on ~reference@1.0 --------------------------
 (function(){
-  const {card:c,out}=card("7 · Account-owned preferences", "Write a preference as the account (signed via the hook, stored by ~owned-reference@1.0), read it back, then watch a different account's write get rejected.");
-  async function point(auth, key, pref){
-    const res=await fetch(BASE+"/~owned-reference@1.0/point?key="+encodeURIComponent(key)+"&preference="+encodeURIComponent(pref),
+  const {card:c,out}=card("7 · Account-owned settings", "Create a settings reference as the account (signed via the hook; the account wallet becomes the reference's authority), update it from another session, then watch a different account's update get rejected.");
+  async function refCall(auth, verb, params){
+    const qs=Object.entries(params).map(([k,v])=>k+"="+encodeURIComponent(v)).join("&");
+    const res=await fetch(BASE+"/~reference@1.0/"+verb+(qs?"?"+qs:""),
       { method:"POST", headers:{ "x-odysee-auth-token":auth, "accept":"application/json" }, credentials:"same-origin" });
     return { status:res.status, raw:await res.text() };
   }
-  async function current(key){
-    const res=await fetch(BASE+"/~owned-reference@1.0/current?key="+encodeURIComponent(key), { headers:{accept:"application/json"}, credentials:"same-origin" });
+  async function current(refId){
+    const res=await fetch(BASE+"/~reference@1.0/current?reference-id="+encodeURIComponent(refId), { headers:{accept:"application/json"}, credentials:"same-origin" });
     return { status:res.status, raw:await res.text() };
   }
-  runBtn(c,"Write · update · foreign-reject",async()=>{ out.innerHTML="";
-    const key="prefs:account-one:"+Date.now();
-    const w1=await point(SESS.laptop,key,"theme=dark");
-    line(out,"account-one writes theme=dark").appendChild(badge("HTTP "+w1.status));
-    const w2=await point(SESS.phone,key,"theme=light");
+  runBtn(c,"Create · update · foreign-reject",async()=>{ out.innerHTML="";
+    const created=await refCall(SESS.laptop,"create",{ "reference-value":"theme=dark" });
+    line(out,"account-one creates settings theme=dark").appendChild(badge("HTTP "+created.status));
+    let refId=null;
+    try{ refId=JSON.parse(created.raw)["reference-id"]; }catch(e){}
+    if(!refId){ verdict(out,false,"no reference-id returned"); rawBox(out,created.raw); return; }
+    line(out,"reference-id").appendChild(badge(refId));
+    const w2=await refCall(SESS.phone,"update",{ "reference-id":refId, "reference-value":"theme=light", "timestamp":"1" });
     line(out,"same account (phone) updates theme=light").appendChild(badge("HTTP "+w2.status));
-    const rd=await current(key);
+    const rd=await current(refId);
     const readRow=line(out,"read-back"); readRow.appendChild(badge("HTTP "+rd.status));
-    const bad=await point(SESS.other,key,"hijack");
-    const fr=line(out,"account-two attempts to overwrite"); fr.appendChild(badge("HTTP "+bad.status));
-    verdict(out, String(bad.status)==="403", String(bad.status)==="403"?"foreign write rejected (403)":"foreign write not rejected as expected");
-    rawBox(out, "read-back:\n"+rd.raw+"\n\nforeign write:\n"+bad.raw);
-    const n=document.createElement("p"); n.className="note"; n.textContent="This view drives the hook + ~owned-reference@1.0 over HTTP; the in-process equivalent is proven by preferences_owned_by_account_test."; out.appendChild(n);
+    const bad=await refCall(SESS.other,"update",{ "reference-id":refId, "reference-value":"hijack", "timestamp":"2" });
+    const fr=line(out,"account-two attempts to update"); fr.appendChild(badge("HTTP "+bad.status));
+    verdict(out, String(bad.status)==="403", String(bad.status)==="403"?"foreign update rejected (403)":"foreign update not rejected as expected");
+    rawBox(out, "read-back:\n"+rd.raw+"\n\nforeign update:\n"+bad.raw);
+    const n=document.createElement("p"); n.className="note"; n.textContent="This view drives the hook + ~reference@1.0 over HTTP (init/set records, authority-committed, strictly-newer timestamps); the in-process equivalent is proven by preferences_owned_by_account_test."; out.appendChild(n);
   });
 })();
 
