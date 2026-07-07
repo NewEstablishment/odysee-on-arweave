@@ -482,7 +482,7 @@ load_and_verify({wallet, WalletKey}, _Base, _Request, _Opts) ->
         <<"persist">> => <<"client">>,
         <<"committer">> => << "publickey:", (hb_util:encode(PubKey))/binary >>
     }};
-load_and_verify({secret, KeyID, _}, _Base, Request, Opts) ->
+load_and_verify({secret, KeyID, Secret}, _Base, Request, Opts) ->
     % Get the wallet from the node's options.
     case find_wallet(KeyID, Opts) of
         not_found -> {error, <<"Wallet not hosted on node.">>};
@@ -493,7 +493,8 @@ load_and_verify({secret, KeyID, _}, _Base, Request, Opts) ->
                     % return the request as-is with the wallet.
                     {ok, WalletDetails};
                 false ->
-                    case verify_auth(WalletDetails, Request, Opts) of
+                    AuthRequest = with_known_secret(KeyID, Secret, Request, Opts),
+                    case verify_auth(WalletDetails, AuthRequest, Opts) of
                         {ok, true} ->
                             {ok, WalletDetails};
                         {ok, false} ->
@@ -503,6 +504,22 @@ load_and_verify({secret, KeyID, _}, _Base, Request, Opts) ->
                     end
             end
     end.
+
+%% @doc Hand an already-derived secret to the access-control device alongside
+%% the request, so that verification succeeds even when the pipeline (e.g. a
+%% secret-provider's `generate') has stripped the original credential carriers
+%% from the request. The secret is only attached when it provably corresponds
+%% to the requested `KeyID', proving that the caller presented the matching
+%% credential in the first place.
+with_known_secret(KeyID, Secret, Request, Opts) when is_binary(Secret) ->
+    SecretKeyID = <<"secret:", (hb_util:secret_key_to_committer(Secret))/binary>>,
+    HasSecret = hb_maps:is_key(<<"secret">>, Request, Opts),
+    case {KeyID, HasSecret} of
+        {SecretKeyID, false} -> Request#{ <<"secret">> => Secret };
+        _ -> Request
+    end;
+with_known_secret(_KeyID, _Secret, Request, _Opts) ->
+    Request.
 
 %% @doc Validate if a calling message has the required `controllers' for the
 %% given wallet.

@@ -58,7 +58,8 @@ proxy_commit(Base, Req, Key, Opts) ->
         Base,
         Req#{
             <<"commitment-device">> => <<"odysee-auth@1.0">>,
-            <<"secret">> => Key
+            <<"secret">> => Key,
+            <<"message">> => Base
         },
         Opts
     ).
@@ -84,7 +85,10 @@ proxy_verify(Base, Req, Key, Opts) ->
         <<"httpsig@1.0">>,
         <<"proxy-verify">>,
         Base,
-        Req#{ <<"secret">> => Key },
+        Req#{
+            <<"secret">> => Key,
+            <<"message">> => Base
+        },
         Opts
     ).
 
