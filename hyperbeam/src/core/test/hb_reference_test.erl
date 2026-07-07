@@ -174,6 +174,31 @@ explicit_authority_overrides_committer_test() ->
         current(ReferenceID, Opts)
     ).
 
+%% @doc An update's signature must cover the payload it applies. A message
+%% committed over only the reference-id, then given an appended (unsigned)
+%% newer timestamp and value, must NOT move the reference to those values: the
+%% uncommitted fields are stripped before they are read, so the appended
+%% timestamp does not exist (the update is stale, 409) and the appended value
+%% never lands. Defends against an untrusted relay rewriting the payload behind
+%% a valid authority signature.
+update_signature_must_cover_payload_test() ->
+    Opts = opts(<<"ref-scope">>),
+    Authority = ar_wallet:new(),
+    Wopts = Opts#{ <<"priv-wallet">> => Authority },
+    {ok, Created} = create(<<"v1">>, Authority, Opts),
+    ReferenceID = hb_ao:get(<<"reference-id">>, Created, not_found, Opts),
+    Base = #{ <<"device">> => <<"reference@1.0">>, <<"reference-id">> => ReferenceID },
+    Signed = hb_message:commit(Base, Wopts),
+    Tampered = Signed#{ <<"reference-value">> => <<"HIJACKED">>, <<"timestamp">> => 99 },
+    ?assertMatch(
+        {ok, #{ <<"status">> := 409 }},
+        hb_ao:resolve(Tampered, <<"update">>, Opts)
+    ),
+    ?assertEqual(
+        {<<"v1">>, address(Authority), 0, <<"init">>},
+        current(ReferenceID, Opts)
+    ).
+
 %% @doc The settings act: a user's settings are a reference whose authority is
 %% the user's account wallet. The account updates its own settings, the latest
 %% version is retrievable by reference id, and a foreign account cannot move it.

@@ -49,8 +49,12 @@ create(Base, Req, Opts) ->
     Subject = signed_subject(Base, Req, Opts),
     case verified_signer(Subject, Opts) of
         {ok, Signer} ->
+            %% Read record fields from the COMMITTED projection only, so a field
+            %% the authority did not sign (appended by an untrusted relay) can
+            %% never enter the stored record. See `committed_view/2'.
+            Committed = committed_view(Subject, Opts),
             Authority =
-                case param(Base, Req, [<<"authority">>], Opts) of
+                case param(Committed, Committed, [<<"authority">>], Opts) of
                     {ok, Explicit} -> Explicit;
                     {error, _} -> Signer
                 end,
@@ -59,10 +63,10 @@ create(Base, Req, Opts) ->
                     State = #{
                         <<"reference-id">> => ReferenceID,
                         <<"authority">> => Authority,
-                        <<"timestamp">> => timestamp_of(Base, Req, Opts),
+                        <<"timestamp">> => timestamp_of(Committed, Committed, Opts),
                         <<"source">> => <<"init">>
                     },
-                    store_state(with_value(State, Base, Req, Opts), Opts);
+                    store_state(with_value(State, Committed, Committed, Opts), Opts);
                 {error, Reason} ->
                     error_response(Reason)
             end;
@@ -89,8 +93,13 @@ apply_update(ReferenceID, State, Base, Req, Opts) ->
     Authority = hb_maps:get(<<"authority">>, State, undefined, Opts),
     case verified_signer(Subject, Opts) of
         {ok, Authority} ->
+            %% The new timestamp and value MUST come from the committed
+            %% projection: the authority's signature has to actually cover the
+            %% payload it is moving the reference to, or an untrusted relay
+            %% could rewrite the value/timestamp behind a valid signature.
+            Committed = committed_view(Subject, Opts),
             Current = hb_maps:get(<<"timestamp">>, State, 0, Opts),
-            Proposed = timestamp_of(Base, Req, Opts),
+            Proposed = timestamp_of(Committed, Committed, Opts),
             case Proposed > Current of
                 true ->
                     Next = State#{
@@ -99,7 +108,7 @@ apply_update(ReferenceID, State, Base, Req, Opts) ->
                     },
                     store_state(
                         with_value(hb_maps:without([<<"reference-value">>], Next, Opts),
-                            Base, Req, Opts),
+                            Committed, Committed, Opts),
                         Opts
                     );
                 false ->
@@ -189,6 +198,16 @@ signed_subject(Base, Req, Opts) ->
             end;
         _ ->
             Req
+    end.
+
+%% @doc The subject reduced to only the keys its commitment actually covers.
+%% Reading record fields from this projection means a key the authority did not
+%% sign cannot influence the stored record, even though it rode along on the
+%% request -- the signature must bind the payload, not merely name the signer.
+committed_view(Subject, Opts) ->
+    case hb_message:with_only_committed(Subject, Opts) of
+        {ok, Committed} -> Committed;
+        {error, _} -> #{}
     end.
 
 %% @doc Verify the subject's signer commitment and return the committer. An
