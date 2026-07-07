@@ -391,12 +391,33 @@ maybe_sign_messages(Provider, Key, [Msg | Rest], Opts) ->
     [Msg | maybe_sign_messages(Provider, Key, Rest, Opts)].
 
 executable_sequence([_Base, #{ <<"path">> := <<"id">> }] = Messages, Opts) ->
-    case hb_ao:resolve_many(Messages, Opts#{ <<"force-message">> => true }) of
-        {ok, Res} -> [Res];
-        _ -> Messages
-    end;
+    resolve_executable_sequence(Messages, Opts);
+%% `hb_singleton:maybe_inherit_message_id' parses `POST /id' with a binary body
+%% into a single `{as, message@1.0, ...}' element rather than a two-element
+%% sequence; without this clause the id is never pre-resolved for that shape
+%% (e.g. the `~odysee-auth@1.0' provider path) and the response carries no id.
+executable_sequence([{as, Dev, #{ <<"path">> := <<"id">> } = Msg}] = Messages, Opts) ->
+    % `hb_singleton:maybe_inherit_message_id' collapses `POST /id' with a binary
+    % body into a single `{as, message@1.0, Msg}' element. `hb_ao:resolve_many'
+    % returns a one-element sequence verbatim (nothing applies the `id' path),
+    % so the raw tuple would reach the encoder and be dropped from the response.
+    % Re-split it into an explicit base + path step and resolve that instead.
+    Base = {as, Dev, hb_maps:without([<<"path">>], Msg, Opts)},
+    resolve_executable_sequence(
+        [Base, #{ <<"path">> => <<"id">> }],
+        Messages,
+        Opts
+    );
 executable_sequence(Messages, _Opts) ->
     Messages.
+
+resolve_executable_sequence(Messages, Opts) ->
+    resolve_executable_sequence(Messages, Messages, Opts).
+resolve_executable_sequence(Executable, Fallback, Opts) ->
+    case hb_ao:resolve_many(Executable, Opts#{ <<"force-message">> => true }) of
+        {ok, Res} -> [Res];
+        _ -> Fallback
+    end.
 
 maybe_store_signed(Messages, Opts) ->
     case hb_opts:get(store_all_signed, false, Opts) of
