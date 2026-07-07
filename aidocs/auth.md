@@ -170,21 +170,44 @@ surface the client signer.
 
 ## Relationship to the master auth stack
 
-`master` already carries a `dev_odysee_auth` (merged as PR #2, Rave's work).
-It derives the hosted wallet **per token**: PBKDF2 directly over the
-`auth_token` with a constant salt, no validation, plus a
-`legacy_api_headers/3` passthrough so devices can call `api.odysee.com` as
-the user. The `victor/latest` version described here derives **per account**
-and validates the token.
+**Converged (2026-07-03).** `master`'s `dev_odysee_auth` originally derived
+the hosted wallet **per token** (PBKDF2 directly over the `auth_token`, no
+validation — merged as PR #2, Rave's work). The account-keyed model described
+in this document was then ported into master's device as commit `012bde5`
+("Key hosted wallets by Odysee account instead of session token", crediting
+`victor/latest c5f92e3` + `261ea94`): account resolution via the
+`odysee-session-accounts` map or a real `user/me` call, unknown token → 401 /
+unreachable API → 502, domain-separated PBKDF2, and the `priv/cookie` hook
+gate. Master remains the source of truth for the device going forward.
+
+Two differences of master's device to be aware of:
+
+- **Token carriers.** Master accepts the `auth_token` cookie and the
+  `x-odysee-auth-token` / `odysee-auth-token` / `x-lbry-auth-token` headers.
+  It does **not** accept a plain `Authorization` header (no `Bearer`
+  stripping). Master also strips the token carriers from the request after
+  derivation and keeps `legacy_api_headers/3` (a sanitized passthrough so
+  devices can call `api.odysee.com` as the user).
+- **Salt.** Master's PBKDF2 salt is `constant:odysee-auth-token` (this
+  branch used `constant:odysee`), so derived addresses differ between the
+  branches. Moot once real key migration is used, since imported keys bypass
+  derivation entirely.
 
 Account-keying matters because tokens are per-device and expire: per-token
 wallets fragment one user into many identities, and a wallet that changes
 whenever a token rotates can never own account state. Two sessions of one
-account must reach ONE wallet. Compare the shapes yourself:
+account must reach ONE wallet.
 
-```bash
-git show origin/master:hyperbeam/src/preloaded/auth/dev_odysee_auth.erl
-```
+The rest of this branch's work — the `~reference@1.0` settings device, the
+real LBRY channel-key migration (`lbry_channel_key` PEM→JWK codec + fixtures),
+the ported test suite (adapted to master's carriers), and both demo pages —
+is staged for master on the `victor/port-auth-migration` branch. That branch
+also carries a fix for a latent master bug the port exposed: hosted-wallet
+access-control verification was a vacuous no-op (`proxy_verify` never passed
+the message, so `hb_message:verify` ran against a commitment-less default);
+the fix makes verification real and re-attaches the derived secret for
+credential-stripped requests — the two changes are interdependent and land
+as one commit.
 
 ## Out of scope (documented, not built)
 
@@ -207,4 +230,13 @@ Landed on `victor/latest` as: `c5f92e3` (auth deliverable), `bc6226a`
 (standalone `ar_wallet` secp256k1 JWK-export fix), `a039f66` (migration act
 uses secp256k1), `64f39b5` (demo launcher + tracked UI), `261ea94` (real
 `user/me` resolution via `odysee-account-api`), `f433199` (live-account demo
-hero). Doc commits: `f35ab49`, `405e177`.
+hero), `229a8b2` (cookie scoped to `/commitments` so a dead token cannot
+brick the page), `cb675ea` (`~reference@1.0` settings device), `ffe7a2a`
+(real LBRY channel-key migration via PEM→JWK), `77b8e77` (wallet-migration
+demo page). Doc commits: `f35ab49`, `405e177`, `8b53391`.
+
+Converged into `master` as `012bde5` (account keying, Niko's port) and,
+pending review, the `victor/port-auth-migration` branch (reference device,
+migration codec, ported suite, demos, and the access-control verification
+fix). With those merged, `victor/latest` is superseded for code; this
+`aidocs/` tree remains its unique content.
