@@ -8,6 +8,7 @@
 -export([benchmark_print/2, benchmark_print/3, benchmark_print/4]).
 -export([compare_events/3, compare_events/4, compare_events/5]).
 -export([preload/2]).
+-export([client_commitment_signers/2]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -15,6 +16,27 @@
 -define(DEFAULT_STORE_MODULE, hb_store_volatile).
 %%% The number of seconds to run a benchmark for when no time is specified.
 -define(DEFAULT_BENCHMARK_TIME, 1).
+
+%% @doc Filter a `/commitments' response to the client signer addresses,
+%% excluding the given server wallet's own signature. Shared by the
+%% `~auth-hook@1.0' and `~odysee-auth@1.0' over-the-wire tests.
+client_commitment_signers(Response, ServerWallet) ->
+    ServerAddress = ar_wallet:to_address(ServerWallet),
+    hb_maps:values(hb_maps:filtermap(
+        fun(Key, Value) when ?IS_ID(Key) ->
+                Type = hb_maps:get(<<"type">>, Value, not_found, #{}),
+                Committer = hb_maps:get(<<"committer">>, Value, not_found, #{}),
+                case {Type, Committer} of
+                    {<<"rsa-pss-sha512">>, ServerAddress} -> false;
+                    {<<"rsa-pss-sha512">>, _} -> {true, Committer};
+                    _ -> false
+                end;
+           (_Key, _Value) ->
+                false
+        end,
+        Response,
+        #{}
+    )).
 
 %% @doc Generate a new, unique test store as an isolated context for an execution.
 test_store() ->
