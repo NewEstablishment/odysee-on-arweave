@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<!--
+  TEMPORARY demonstration UI for the Odysee hosted-wallet auth model on HyperBEAM.
+  Served same-origin by the node itself (see the `hyperbuddy-serve' node option),
+  so document.cookie + fetch reach the node's own endpoints with no CORS. This is
+  a demo asset only: it is never part of a device's default serve map, and it
+  drives only existing endpoints (/commitments, ~owned-reference@1.0). Session
+  tokens below match the node's `odysee-session-accounts' map.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Odysee &times; HyperBEAM — Auth Demo</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262b36; --fg:#e6e9ef; --mut:#8b93a4; --acc:#6ea8fe; --ok:#43c59e; --bad:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { padding:24px 20px 8px; }
+  h1 { margin:0 0 4px; font-size:20px; }
+  header p { margin:0; color:var(--mut); }
+  .wrap { max-width:920px; margin:0 auto; padding:12px 16px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:14px 0; }
+  .card h2 { margin:0 0 4px; font-size:16px; }
+  .card .desc { color:var(--mut); margin:0 0 12px; font-size:13.5px; }
+  button { background:var(--acc); color:#08111f; border:0; border-radius:8px; padding:8px 14px; font-weight:600; cursor:pointer; }
+  button:hover { filter:brightness(1.08); }
+  button.sec { background:#2a2f3a; color:var(--fg); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+  .badge { font:12px/1.4 "Geist Mono",ui-monospace,Menlo,monospace; padding:4px 8px; border-radius:6px; background:#20242e; border:1px solid var(--line); white-space:nowrap; }
+  .lbl { color:var(--mut); font-size:12.5px; }
+  .verdict { font-weight:600; }
+  .verdict.ok { color:var(--ok); } .verdict.bad { color:var(--bad); }
+  pre { background:#0b0d11; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; max-height:220px; font:11.5px/1.4 ui-monospace,Menlo,monospace; color:#aeb6c4; margin:8px 0 0; }
+  details summary { cursor:pointer; color:var(--mut); font-size:12.5px; }
+  .note { color:var(--mut); font-size:12.5px; border-left:2px solid var(--line); padding-left:10px; }
+  code { font-family:ui-monospace,Menlo,monospace; color:var(--acc); }
+
+  /* --- Live-account hero -------------------------------------------------- */
+  :root { --ody:#fa3661; }
+  .hero { border-color:#3a2230; background:linear-gradient(180deg,#1d1620 0%,var(--card) 55%); }
+  .hero h2 { font-size:18px; }
+  .hero h2 em { color:var(--ody); font-style:normal; }
+  .tokrow { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0 4px; }
+  .tokrow input { flex:1 1 260px; min-width:200px; background:#0b0d11; border:1px solid var(--line); border-radius:8px; color:var(--fg); padding:9px 12px; font:13px ui-monospace,Menlo,monospace; }
+  .tokrow input:focus { outline:2px solid var(--ody); outline-offset:1px; border-color:transparent; }
+  button.ody { background:var(--ody); color:#fff; }
+  .pipe { display:flex; align-items:flex-start; gap:0; margin:18px 0 6px; }
+  .stage { flex:1; text-align:center; min-width:0; }
+  .dot { width:14px; height:14px; border-radius:50%; margin:0 auto 6px; background:#2a2f3a; border:2px solid var(--line); transition:background .3s,border-color .3s,box-shadow .3s; }
+  .stage.active .dot { border-color:var(--ody); animation:pulse 1s ease-in-out infinite; }
+  .stage.ok .dot { background:var(--ok); border-color:var(--ok); }
+  .stage.fail .dot { background:var(--bad); border-color:var(--bad); box-shadow:0 0 0 4px rgba(255,107,107,.18); }
+  .stage .slabel { font-size:11.5px; color:var(--mut); line-height:1.3; padding:0 4px; }
+  .stage.ok .slabel, .stage.fail .slabel { color:var(--fg); }
+  .stage .sdetail { font-size:10.5px; color:var(--mut); min-height:14px; }
+  .stage.fail .sdetail { color:var(--bad); }
+  .link { flex:0 0 34px; height:2px; background:var(--line); margin-top:6px; position:relative; overflow:hidden; }
+  .link::after { content:""; position:absolute; inset:0; background:var(--ody); transform:scaleX(0); transform-origin:left; transition:transform .45s ease; }
+  .link.lit::after { transform:scaleX(1); }
+  @keyframes pulse { 50% { box-shadow:0 0 0 5px rgba(250,54,97,.22); } }
+  @media (prefers-reduced-motion: reduce) { .stage.active .dot{animation:none;} .link::after{transition:none;} .dot{transition:none;} }
+  .reveal { text-align:center; margin:14px 0 4px; display:none; }
+  .reveal.show { display:block; }
+  .reveal .who { color:var(--mut); font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
+  .reveal .addr { font:600 clamp(15px,3.2vw,24px)/1.3 ui-monospace,Menlo,monospace; letter-spacing:.02em; word-break:break-all; padding:4px 10px; }
+  .reveal .under { height:3px; width:min(420px,80%); margin:2px auto 0; border-radius:2px; }
+  .proverow { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Odysee &times; HyperBEAM — Auth Demo</h1>
+  <p>Each session is a hosted wallet. The badge under each action is the wallet address that signed the request — watch which ones match.</p>
+</header>
+<div class="wrap" id="app"></div>
+
+<script>
+// --- Tiny helpers --------------------------------------------------------
+const BASE = location.origin;
+// The auth hook fires on any request carrying an auth_token cookie -- and a
+// dead token 401s the request, INCLUDING this page's own fetch if the cookie
+// were scoped to path=/. So the cookie-leg views scope the cookie to
+// /commitments only: the browser attaches it to the proof request but never
+// to the page, so a stale token can never brick the demo. Clearing drops both
+// the scoped cookie and any legacy path=/ one from older page versions.
+function setAuthCookie(tok){ document.cookie="auth_token="+tok+"; path=/commitments; SameSite=Strict"; }
+function clearAuthCookie(){
+  document.cookie="auth_token=; path=/commitments; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  document.cookie="auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+}
+clearAuthCookie();
+// Colour an address deterministically so "same address" is obvious at a glance.
+function colorFor(addr){ if(!addr) return "#2a2f3a"; let h=0; for(const c of addr) h=(h*31+c.charCodeAt(0))>>>0; return `hsl(${h%360} 60% 30%)`; }
+function badge(addr){ const b=document.createElement("span"); b.className="badge"; b.textContent=addr?(addr.slice(0,10)+"…"+addr.slice(-6)):"(none)"; b.style.background=colorFor(addr); return b; }
+
+// The node's own operator address, so we can exclude the server's response
+// commitment and surface the CLIENT hosted wallet (mirrors the Erlang
+// client_commitment_signers/2 filter). Learned once, then memoised.
+let SERVER_ADDR = null;
+async function serverAddr(){
+  if(SERVER_ADDR) return SERVER_ADDR;
+  try{
+    const res = await fetch(BASE+"/~meta@1.0/info", { headers:{accept:"application/json"}, credentials:"same-origin" });
+    const j = await res.json();
+    const scan = o => { if(o && typeof o==="object"){ if(typeof o.address==="string") return o.address; for(const k of Object.keys(o)){ const r=scan(o[k]); if(r) return r; } } return null; };
+    SERVER_ADDR = scan(j);
+  }catch(e){}
+  return SERVER_ADDR;
+}
+
+// Collect every rsa-pss-sha512 committer reachable from a response. The JSON
+// codec lifts nested sub-messages to `<id>+link` refs, and the client's
+// commitment lives on a linked sub-message — so we recurse inline maps AND
+// follow each link once. Defensive: unknown shapes just yield no signer.
+async function collectCommitters(obj, acc, visited){
+  acc = acc || new Set(); visited = visited || new Set();
+  if(obj && typeof obj==="object"){
+    if(obj.type==="rsa-pss-sha512" && typeof obj.committer==="string") acc.add(obj.committer);
+    for(const k of Object.keys(obj)){
+      const v = obj[k];
+      if(k.endsWith("+link") && typeof v==="string"){
+        if(!visited.has(v)){ visited.add(v);
+          try{ const r=await fetch(BASE+"/"+v, { headers:{accept:"application/json"}, credentials:"same-origin" });
+               await collectCommitters(await r.json(), acc, visited); }catch(e){}
+        }
+      } else { await collectCommitters(v, acc, visited); }
+    }
+  }
+  return acc;
+}
+
+// Fire a request through the node. `auth` is an Odysee auth token (or null to
+// rely on document.cookie). Returns { signers:[...], raw, status } — signers
+// are the client wallet(s), the node operator's own commitment excluded.
+async function commitmentsFor(auth, extra){
+  const headers = { "accept":"application/json" };
+  if(auth) headers["x-odysee-auth-token"] = auth;
+  let url = BASE + "/commitments?body=pref";
+  if(extra) url += extra;
+  const res = await fetch(url, { headers, credentials:"same-origin" });
+  const text = await res.text();
+  let raw = text, signers = [];
+  try {
+    const j = JSON.parse(text); raw = JSON.stringify(j, null, 2);
+    const all = [...(await collectCommitters(j))];
+    const srv = await serverAddr();
+    signers = all.filter(a => a !== srv);
+  } catch(e){}
+  return { signers, raw, status: res.status };
+}
+
+// --- View scaffolding ----------------------------------------------------
+function card(title, desc){
+  const c=document.createElement("div"); c.className="card";
+  c.innerHTML = `<h2>${title}</h2><p class="desc">${desc}</p>`;
+  const out=document.createElement("div"); c.appendChild(out);
+  document.getElementById("app").appendChild(c);
+  return { card:c, out };
+}
+function line(out, label){ const r=document.createElement("div"); r.className="row"; const l=document.createElement("span"); l.className="lbl"; l.textContent=label; r.appendChild(l); out.appendChild(r); return r; }
+function verdict(out, ok, msg){ const v=document.createElement("div"); v.className="verdict "+(ok?"ok":"bad"); v.textContent=(ok?"✓ ":"✗ ")+msg; out.appendChild(v); return v; }
+function rawBox(out, raw){ const d=document.createElement("details"); d.innerHTML="<summary>raw response</summary>"; const p=document.createElement("pre"); p.textContent=raw; d.appendChild(p); out.appendChild(d); }
+function runBtn(parent, label, fn){ const b=document.createElement("button"); b.textContent=label; b.onclick=async()=>{ b.disabled=true; try{ await fn(); } finally { b.disabled=false; } }; parent.insertBefore(b, parent.querySelector("div")); return b; }
+
+const SESS = { laptop:"sess-one-laptop", phone:"sess-one-phone", other:"sess-two-laptop", password:"pw:account-one" };
+function firstSigner(r){ return r.signers[0] || null; }
+
+// --- 0. Live account hero -------------------------------------------------
+// Paste a real odysee.com auth_token: the node resolves it with a real user/me
+// call (when launched with ODYSEE_ACCOUNT_API) and the pipeline lights up from
+// the ACTUAL request outcomes -- nothing below is simulated except the pacing.
+(function(){
+  const c=document.createElement("div"); c.className="card hero";
+  c.innerHTML = `<h2>Bring <em>your</em> Odysee account</h2>
+    <p class="desc">Paste your odysee.com session token (DevTools → Application → Cookies → <code>auth_token</code>). The node asks the real Odysee API who you are, then your account signs as a wallet — watch it happen.</p>`;
+  document.getElementById("app").appendChild(c);
+
+  const row=document.createElement("div"); row.className="tokrow";
+  const inp=document.createElement("input"); inp.type="password"; inp.placeholder="auth_token"; inp.autocomplete="off"; inp.spellcheck=false;
+  inp.value = localStorage.getItem("ody-demo-token") || "";
+  const eye=document.createElement("button"); eye.className="sec"; eye.textContent="Show"; eye.type="button";
+  eye.onclick=()=>{ const hid=inp.type==="password"; inp.type=hid?"text":"password"; eye.textContent=hid?"Hide":"Show"; };
+  const go=document.createElement("button"); go.className="ody"; go.textContent="Connect";
+  row.append(inp,eye,go); c.appendChild(row);
+
+  const STAGES=[
+    ["Session token","your odysee.com cookie"],
+    ["Account vouched","user/me at the Odysee API"],
+    ["Hosted wallet","derived for your account"],
+    ["Signs for you","every request, cookie or header"]
+  ];
+  const pipe=document.createElement("div"); pipe.className="pipe";
+  const stageEls=[], linkEls=[];
+  STAGES.forEach(([t,d],i)=>{
+    if(i){ const l=document.createElement("div"); l.className="link"; linkEls.push(l); pipe.appendChild(l); }
+    const s=document.createElement("div"); s.className="stage";
+    s.innerHTML=`<div class="dot"></div><div class="slabel">${t}</div><div class="sdetail">${d}</div>`;
+    stageEls.push(s); pipe.appendChild(s);
+  });
+  c.appendChild(pipe);
+
+  const reveal=document.createElement("div"); reveal.className="reveal";
+  reveal.innerHTML=`<div class="who">your account's hosted wallet</div><div class="addr"></div><div class="under"></div>`;
+  c.appendChild(reveal);
+  const prove=document.createElement("div"); prove.className="proverow"; c.appendChild(prove);
+  const out=document.createElement("div"); c.appendChild(out);
+
+  const wait=(ms)=>new Promise(r=>setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches?0:ms));
+  function setStage(i,state,detail){ stageEls[i].className="stage "+(state||""); if(detail!==undefined) stageEls[i].querySelector(".sdetail").textContent=detail; if(state==="ok"&&i>0) linkEls[i-1].classList.add("lit"); }
+  function resetPipe(){ stageEls.forEach((s,i)=>{ s.className="stage"; s.querySelector(".sdetail").textContent=STAGES[i][1]; }); linkEls.forEach(l=>l.classList.remove("lit")); reveal.classList.remove("show"); prove.innerHTML=""; out.innerHTML=""; }
+
+  async function connect(){
+    resetPipe();
+    const tok=inp.value.trim();
+    if(!tok){ setStage(0,"fail","paste a token first"); return; }
+    localStorage.setItem("ody-demo-token", tok);
+    setStage(0,"ok","present"); await wait(300);
+    setStage(1,"active","asking…");
+    const r=await commitmentsFor(tok);
+    if(r.status===401){ setStage(1,"fail","rejected — not a live session"); return; }
+    if(r.status===502){ setStage(1,"fail","Odysee API unreachable from the node"); return; }
+    const addr=firstSigner(r);
+    if(!addr){ setStage(1,"fail","no signer — is the hook configured?"); return; }
+    setStage(1,"ok","vouched"); await wait(300);
+    setStage(2,"active","deriving…"); await wait(300);
+    setStage(2,"ok",addr.slice(0,10)+"…");
+    reveal.querySelector(".addr").textContent=addr;
+    reveal.querySelector(".addr").style.color="#fff";
+    reveal.querySelector(".under").style.background=colorFor(addr);
+    reveal.classList.add("show");
+    await wait(300);
+    setStage(3,"active","re-signing…");
+    const again=firstSigner(await commitmentsFor(tok));
+    if(again===addr){ setStage(3,"ok","same wallet, every time"); } else { setStage(3,"fail","unstable signer"); return; }
+
+    // Prove-it actions: each runs a REAL request and reports its real outcome.
+    prove.innerHTML="";
+    const viaCookieBtn=document.createElement("button"); viaCookieBtn.className="sec"; viaCookieBtn.textContent="Prove it: send as browser cookie";
+    viaCookieBtn.onclick=async()=>{ out.innerHTML="";
+      setAuthCookie(tok);
+      try{
+        const viaCk=firstSigner(await commitmentsFor(null));
+        const row2=line(out,"cookie / header"); row2.appendChild(badge(viaCk)); row2.appendChild(badge(addr));
+        verdict(out, viaCk===addr, viaCk===addr?"the browser cookie reaches the same wallet":"cookie path differs");
+      } finally {
+        clearAuthCookie();
+      }
+    };
+    const tamperBtn=document.createElement("button"); tamperBtn.className="sec"; tamperBtn.textContent="Prove it: tamper one character";
+    tamperBtn.onclick=async()=>{ out.innerHTML="";
+      const bad=tok.slice(0,-1)+(tok.slice(-1)==="a"?"b":"a");
+      setStage(1,"active","asking about the tampered token…");
+      const rr=await commitmentsFor(bad);
+      const rejected=rr.status===401;
+      setStage(1, rejected?"fail":"ok", rejected?"tampered token rejected here":"unexpectedly accepted");
+      verdict(out, rejected, rejected?"one flipped character and the Odysee API refuses — the node never mints":"expected a 401");
+      const back=document.createElement("button"); back.className="sec"; back.textContent="Reconnect"; back.onclick=connect; out.appendChild(back);
+    };
+    prove.append(viaCookieBtn,tamperBtn);
+  }
+  go.onclick=connect;
+  inp.addEventListener("keydown",(e)=>{ if(e.key==="Enter") connect(); });
+})();
+
+// --- 1. Onboarding -------------------------------------------------------
+(function(){
+  const {card:c,out}=card("1 · Onboarding mints a wallet", "A never-before-seen session presents only a credential; the node mints a hosted wallet and signs. The user never handled a key.");
+  runBtn(c,"Run",async()=>{ out.innerHTML="";
+    const r=await commitmentsFor(SESS.laptop);
+    const row=line(out,"signer"); row.appendChild(badge(firstSigner(r)));
+    verdict(out, !!firstSigner(r), firstSigner(r)?"a wallet signed for this session":"no signer — is the node up with the hook?");
+    rawBox(out,r.raw);
+  });
+})();
+
+// --- 2. Login reuses -----------------------------------------------------
+(function(){
+  const {card:c,out}=card("2 · Login reuses the same wallet", "Present the same session again — it reaches the same hosted wallet. Login is “present your session”, not “hold a key”.");
+  runBtn(c,"Run twice",async()=>{ out.innerHTML="";
+    const a=firstSigner(await commitmentsFor(SESS.laptop));
+    const b=firstSigner(await commitmentsFor(SESS.laptop));
+    const row=line(out,"first / second"); row.appendChild(badge(a)); row.appendChild(badge(b));
+    verdict(out, a&&a===b, a&&a===b?"same wallet both times":"addresses differ");
+  });
+})();
+
+// --- 3. Account identity -------------------------------------------------
+(function(){
+  const {card:c,out}=card("3 · Many sessions, one account, one wallet", "Two different session tokens of the same account (laptop + phone) share ONE wallet — the per-account identity, not per-device.");
+  runBtn(c,"Compare laptop vs phone",async()=>{ out.innerHTML="";
+    const a=firstSigner(await commitmentsFor(SESS.laptop));
+    const b=firstSigner(await commitmentsFor(SESS.phone));
+    const row=line(out,"laptop / phone"); row.appendChild(badge(a)); row.appendChild(badge(b));
+    verdict(out, a&&a===b, a&&a===b?"one account → one wallet":"addresses differ");
+  });
+})();
+
+// --- 4. Isolation --------------------------------------------------------
+(function(){
+  const {card:c,out}=card("4 · Accounts are isolated", "A session of a different account gets a different wallet, so account state cannot cross accounts.");
+  runBtn(c,"Compare account-one vs account-two",async()=>{ out.innerHTML="";
+    const a=firstSigner(await commitmentsFor(SESS.laptop));
+    const b=firstSigner(await commitmentsFor(SESS.other));
+    const row=line(out,"account-one / account-two"); row.appendChild(badge(a)); row.appendChild(badge(b));
+    verdict(out, a&&b&&a!==b, a&&b&&a!==b?"different accounts → different wallets":"addresses match (unexpected)");
+  });
+})();
+
+// --- 5. Multiple methods, one wallet -------------------------------------
+(function(){
+  const {card:c,out}=card("5 · Multiple auth methods, one wallet", "A cookie session and a username/password-derived credential both resolve to account-one, so both reach the same wallet.");
+  runBtn(c,"Compare cookie vs password credential",async()=>{ out.innerHTML="";
+    const a=firstSigner(await commitmentsFor(SESS.laptop));
+    const b=firstSigner(await commitmentsFor(SESS.password));
+    const row=line(out,"cookie / password"); row.appendChild(badge(a)); row.appendChild(badge(b));
+    verdict(out, a&&a===b, a&&a===b?"both methods → one wallet":"addresses differ");
+  });
+})();
+
+// --- 6. Cookie fires over the wire ---------------------------------------
+(function(){
+  const {card:c,out}=card("6 · The browser cookie fires the hook", "Set the Odysee auth_token as a real cookie and send NO token header. Same-origin, the browser attaches the cookie; the node reshapes it and the hook still fires — deriving the same wallet as the header path.");
+  runBtn(c,"Set cookie & run",async()=>{ out.innerHTML="";
+    setAuthCookie(SESS.laptop);
+    try{
+      const viaCookie = firstSigner(await commitmentsFor(null));       // no auth header — cookie only
+      const viaBearer = firstSigner(await commitmentsFor(SESS.laptop));
+      const row=line(out,"via cookie / via header"); row.appendChild(badge(viaCookie)); row.appendChild(badge(viaBearer));
+      verdict(out, viaCookie&&viaCookie===viaBearer, viaCookie?(viaCookie===viaBearer?"cookie == header — same wallet":"signed, but differs from header"):"cookie did not fire");
+      const n=document.createElement("p"); n.className="note"; n.textContent="If this shows no signer, the node lacks the priv/cookie gate key or is not same-origin."; out.appendChild(n);
+    } finally {
+      clearAuthCookie();
+    }
+  });
+  const clr=document.createElement("button"); clr.className="sec"; clr.textContent="Clear cookie"; clr.style.marginLeft="8px";
+  clr.onclick=clearAuthCookie;
+  c.querySelector("button").after(clr);
+})();
+
+// --- 7. Account-owned preferences ----------------------------------------
+(function(){
+  const {card:c,out}=card("7 · Account-owned preferences", "Write a preference as the account (signed via the hook, stored by ~owned-reference@1.0), read it back, then watch a different account's write get rejected.");
+  async function point(auth, key, pref){
+    const res=await fetch(BASE+"/~owned-reference@1.0/point?key="+encodeURIComponent(key)+"&preference="+encodeURIComponent(pref),
+      { method:"POST", headers:{ "x-odysee-auth-token":auth, "accept":"application/json" }, credentials:"same-origin" });
+    return { status:res.status, raw:await res.text() };
+  }
+  async function current(key){
+    const res=await fetch(BASE+"/~owned-reference@1.0/current?key="+encodeURIComponent(key), { headers:{accept:"application/json"}, credentials:"same-origin" });
+    return { status:res.status, raw:await res.text() };
+  }
+  runBtn(c,"Write · update · foreign-reject",async()=>{ out.innerHTML="";
+    const key="prefs:account-one:"+Date.now();
+    const w1=await point(SESS.laptop,key,"theme=dark");
+    line(out,"account-one writes theme=dark").appendChild(badge("HTTP "+w1.status));
+    const w2=await point(SESS.phone,key,"theme=light");
+    line(out,"same account (phone) updates theme=light").appendChild(badge("HTTP "+w2.status));
+    const rd=await current(key);
+    const readRow=line(out,"read-back"); readRow.appendChild(badge("HTTP "+rd.status));
+    const bad=await point(SESS.other,key,"hijack");
+    const fr=line(out,"account-two attempts to overwrite"); fr.appendChild(badge("HTTP "+bad.status));
+    verdict(out, String(bad.status)==="403", String(bad.status)==="403"?"foreign write rejected (403)":"foreign write not rejected as expected");
+    rawBox(out, "read-back:\n"+rd.raw+"\n\nforeign write:\n"+bad.raw);
+    const n=document.createElement("p"); n.className="note"; n.textContent="This view drives the hook + ~owned-reference@1.0 over HTTP; the in-process equivalent is proven by preferences_owned_by_account_test."; out.appendChild(n);
+  });
+})();
+
+// --- 8 & 9. Explained (need server-side setup / two nodes) ----------------
+(function(){
+  const {out}=card("8 · Migration &amp; 9 · Cross-node sync", "Two capabilities proven by the test suite that need setup a single page can't stage live:");
+  const p=document.createElement("div"); p.className="note";
+  p.innerHTML = "<b>Migration</b> — an existing secp256k1 key (the LBRY wallet key type) is imported into <code>~secret@1.0</code> keyed to the account, after which the account signs with it (see <code>migration_imports_existing_wallet_test</code>; enabled by the <code>ar_wallet</code> secp256k1 JWK-export fix). "+
+                "<br><br><b>Cross-node sync</b> — two nodes sharing a non-volatile store resolve one account to the same wallet, so identity follows the user across nodes (see <code>cross_node_sync_test</code>).";
+  out.appendChild(p);
+})();
+</script>
+</body>
+</html>
