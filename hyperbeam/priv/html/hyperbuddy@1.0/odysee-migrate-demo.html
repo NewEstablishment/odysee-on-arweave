@@ -2,19 +2,27 @@
 <!--
   TEMPORARY demonstration UI for LBRY -> HyperBEAM wallet migration.
   Served same-origin by the node (see the `hyperbuddy-serve' node option), so
-  the token-validation fetch reaches the node's own /commitments with no CORS.
+  every fetch reaches the node's own endpoints with the session cookie and no
+  CORS. Launch with scripts/odysee-migrate-demo.sh -- that node PRE-HOSTS the
+  account's migrated channel key (imported at boot into ~secret@1.0).
 
-  What is real here, and what stands in:
-    - Token validation is REAL: the pasted auth_token is sent to the node, whose
-      ~auth-hook@1.0 resolves it against Odysee's user/me. 200 = vouched.
-    - The migrated key is a REAL secp256k1 LBRY channel key (the same fixture the
-      migration test suite uses). Its address is derived exactly as the node does
-      -- base64url(sha256(compressed-pubkey)) -- so the address shown IS the
-      address ~secret@1.0 would host after import (cross-checked against the node).
-    - Signing/verification run in-browser on that real key with noble-secp256k1.
-      In production the channel key is decrypted client-side from the user's
-      wallet-sync blob; here it is embedded so the demo needs no sync password.
-  Bundled library: noble-secp256k1 v1.7.1 (MIT, Paul Miller), inlined for CSP.
+  The point of this demo: the NODE signs, not the browser. What is real:
+    - Session validation is REAL: the token is sent to the node, whose
+      ~auth-hook@1.0 accepts a mapped demo session (or, with ODYSEE_ACCOUNT_API
+      set, vouches a real auth_token via user/me). 200 = accepted.
+    - The channel address is derived in-browser from a REAL secp256k1 LBRY
+      channel key (the migration-suite fixture), exactly as the node does
+      -- base64url(sha256(compressed-pubkey)). In production the key is
+      decrypted client-side from the user's wallet-sync blob; here it is embedded
+      so the demo needs no sync password. The browser never signs with it.
+    - Signing is done BY THE NODE: the browser asks the node to commit a request
+      for the session, then reads back the committer from /commitments (following
+      the JSON codec's `<id>+link' refs, excluding the node's own operator
+      commitment). That committer IS the migrated channel address -- proof the
+      node hosts the user's key and signs as them. A session that is not the
+      user's signs as a different identity, so the impostor check fails.
+  Bundled library: noble-secp256k1 v1.7.1 (MIT, Paul Miller), inlined for CSP;
+  used only to derive the channel address in-browser, never to sign.
 -->
 <html lang="en">
 <head>
@@ -103,42 +111,39 @@
 </head>
 <body>
 <header>
-  <h1>Bring your <em>Odysee</em> account &mdash; sign on HyperBEAM</h1>
-  <p>Paste an Odysee <code>auth_token</code>. The node vouches it against Odysee, your LBRY
-     channel key becomes your HyperBEAM signer, and it signs a message you type — then watch a
-     tampered signature get rejected.</p>
+  <h1>Bring your <em>Odysee</em> account &mdash; the node signs for you</h1>
+  <p>Give the node a session. It already hosts your migrated LBRY channel key, so it signs your
+     requests as your channel — the browser never touches a signing key. Then watch a session that
+     isn&rsquo;t yours get signed as someone else, and rejected.</p>
 </header>
 
 <div class="wrap">
   <div class="card hero">
     <div class="tokrow">
-      <input id="tok" type="password" autocomplete="off" spellcheck="false"
-             placeholder="paste your Odysee auth_token">
-      <button id="go">Migrate &amp; sign</button>
+      <input id="tok" type="text" autocomplete="off" spellcheck="false"
+             value="sess-one-laptop" placeholder="session token">
+      <button id="go">Sign with my channel</button>
       <button id="reset" class="sec">Reset</button>
     </div>
-    <div class="hint">Get one at odysee.com &rarr; DevTools &rarr; Application &rarr; Cookies &rarr;
-      <code>auth_token</code>. It never leaves this node.</div>
+    <div class="hint">Pre-filled with a demo session. With <code>ODYSEE_ACCOUNT_API</code> set, paste a
+      real odysee.com <code>auth_token</code> instead — it never leaves this node.</div>
 
     <div class="pipe" id="pipe"></div>
 
     <div class="reveal" id="reveal">
-      <div class="who">Your HyperBEAM signing identity</div>
+      <div class="who">Your channel identity (derived in-browser from your key)</div>
       <div class="addr mono" id="addr"></div>
       <div class="under"></div>
     </div>
 
     <div class="sigbox" id="sigbox">
-      <div class="msgrow">
-        <input id="msg" value="I authorize this action on HyperBEAM." spellcheck="false">
-      </div>
-      <div class="siglabel"><span class="lbl">secp256k1 signature</span>
+      <div class="siglabel"><span class="lbl">who the node signed as</span>
         <span class="lbl" id="sigmeta"></span></div>
       <div class="sig mono" id="sig"></div>
       <div class="verdict" id="verdict"></div>
       <div class="actions">
-        <button id="resign" class="sec">Re-sign this message</button>
-        <button id="tamper" class="danger">Tamper one character</button>
+        <button id="resign" class="sec">Sign again</button>
+        <button id="tamper" class="danger">Try a session that isn&rsquo;t yours</button>
       </div>
     </div>
 
@@ -1391,38 +1396,90 @@ const secp = window.__nobleSecp;
 const BASE = location.origin;
 
 // A REAL secp256k1 LBRY channel key (fixture shared with the migration test
-// suite: src/core/include/lbry_test_keys.hrl). In production this is decrypted
-// client-side from the user's wallet-sync blob.
+// suite: src/core/include/lbry_test_keys.hrl), matching the key the launcher
+// pre-hosts on the node for account-one. In production it is decrypted
+// client-side from the user's wallet-sync blob; the browser uses it only to
+// derive the channel ADDRESS to compare against, never to sign.
 const CHANNEL_SCALAR = "4d1feb05aebeec549f406c283d81a9fb8ddd55925fcc77f37f4c013bb336bd61";
+// A session of a DIFFERENT account, for the impostor check.
+const OTHER_SESSION = "sess-two-laptop";
 
 const STAGES = [
-  ["Validate token", "asks Odysee to vouch"],
-  ["Migrate key", "channel key → signer"],
-  ["Sign & verify", "the node signs for you"],
-  ["Reject tamper", "flip a byte, it fails"]
+  ["Validate session", "the node accepts it"],
+  ["Recover channel", "your key → address"],
+  ["Node signs", "as your channel"],
+  ["Reject impostor", "not your session"]
 ];
 
 const $ = id => document.getElementById(id);
-const enc = new TextEncoder();
 
-function hexToBytes(h){ const a=new Uint8Array(h.length/2);
-  for(let i=0;i<a.length;i++) a[i]=parseInt(h.substr(i*2,2),16); return a; }
-function bytesToHex(b){ return [...b].map(x=>x.toString(16).padStart(2,"0")).join(""); }
 function b64url(bytes){ let s=btoa(String.fromCharCode(...bytes));
   return s.replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function hexToBytes(h){ const a=new Uint8Array(h.length/2);
+  for(let i=0;i<a.length;i++) a[i]=parseInt(h.substr(i*2,2),16); return a; }
 async function sha256(bytes){ return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); }
 
 // Address exactly as the node derives it for a secp256k1 wallet:
 // base64url(sha256(compressed-pubkey)). Cross-checked against ar_wallet:to_address.
-async function addressOf(priv){
-  const pub = secp.getPublicKey(priv, true);   // 33-byte compressed
+async function addressOf(scalarHex){
+  const pub = secp.getPublicKey(hexToBytes(scalarHex), true);   // 33-byte compressed
   return b64url(await sha256(pub));
+}
+
+// The node's own operator address, so we can exclude the server's response
+// commitment and surface the CLIENT hosted wallet (mirrors the Erlang
+// client_commitment_signers/2 filter). Learned once, then memoised.
+let SERVER_ADDR = null;
+async function serverAddr(){
+  if(SERVER_ADDR) return SERVER_ADDR;
+  try{
+    const res = await fetch(BASE+"/~meta@1.0/info", { headers:{accept:"application/json"}, credentials:"same-origin" });
+    const j = await res.json();
+    const scan = o => { if(o && typeof o==="object"){ if(typeof o.address==="string") return o.address; for(const k of Object.keys(o)){ const r=scan(o[k]); if(r) return r; } } return null; };
+    SERVER_ADDR = scan(j);
+  }catch(e){}
+  return SERVER_ADDR;
+}
+
+// Collect every committer reachable from a response. The JSON codec lifts
+// nested sub-messages to `<id>+link' refs, and the client's commitment lives on
+// a linked sub-message — so we recurse inline maps AND follow each link once.
+async function collectCommitters(obj, acc, visited){
+  acc = acc || new Set(); visited = visited || new Set();
+  if(obj && typeof obj==="object"){
+    if(obj.type==="rsa-pss-sha512" && typeof obj.committer==="string") acc.add(obj.committer);
+    for(const k of Object.keys(obj)){
+      const v = obj[k];
+      if(k.endsWith("+link") && typeof v==="string"){
+        if(!visited.has(v)){ visited.add(v);
+          try{ const r=await fetch(BASE+"/"+v, { headers:{accept:"application/json"}, credentials:"same-origin" });
+               await collectCommitters(await r.json(), acc, visited); }catch(e){}
+        }
+      } else { await collectCommitters(v, acc, visited); }
+    }
+  }
+  return acc;
+}
+
+// Ask the node to commit a request for the given session, then read back the
+// CLIENT committer (node operator excluded). Returns { status, signer }.
+async function nodeSignerFor(token){
+  const res = await fetch(BASE+"/commitments?body=migrate",
+    { headers:{ "x-odysee-auth-token":token, accept:"application/json" }, credentials:"same-origin" });
+  if(res.status!==200) return { status:res.status, signer:null };
+  let signer=null;
+  try{
+    const all=[...(await collectCommitters(await res.json()))];
+    const srv=await serverAddr();
+    signer=all.filter(a=>a!==srv)[0]||null;
+  }catch(e){}
+  return { status:200, signer };
 }
 
 // --- pipeline rendering ---
 let stageEls=[], linkEls=[];
 function buildPipe(){
-  const p=$("pipe"); p.innerHTML="";
+  const p=$("pipe"); p.innerHTML=""; stageEls=[]; linkEls=[];
   STAGES.forEach((s,i)=>{
     const st=document.createElement("div"); st.className="stage";
     st.innerHTML='<div class="dot"></div><div class="slabel">'+s[0]+
@@ -1444,73 +1501,68 @@ function resetAll(){
   linkEls.forEach(l=>l.classList.remove("lit"));
   $("reveal").classList.remove("show"); $("sigbox").classList.remove("show");
   $("sig").innerHTML=""; $("verdict").textContent=""; $("verdict").className="verdict";
-  $("note").textContent="";
+  $("sigmeta").textContent=""; $("note").textContent="";
 }
 
-// --- step 1: validate the token against the node (real) ---
+let CHANNEL_ADDR=null;
+
+// --- step 1: the node accepts the session (real, over the wire) ---
 async function validate(token){
   setStage(0,"active");
   try{
     const res = await fetch(BASE+"/commitments?body=migrate",
-      { headers:{ "x-odysee-auth-token":token, accept:"application/json" }, credentials:"omit" });
-    if(res.status===200){ setStage(0,"ok","Odysee vouched (200)"); return {ok:true}; }
-    if(res.status===401||res.status===403){ setStage(0,"fail","rejected — not a live token"); return {ok:false,reason:"rejected"}; }
-    if(res.status===502){ setStage(0,"fail","Odysee API unreachable"); return {ok:false,reason:"api-down"}; }
+      { headers:{ "x-odysee-auth-token":token, accept:"application/json" }, credentials:"same-origin" });
+    if(res.status===200){ setStage(0,"ok","accepted (200)"); return {ok:true}; }
+    if(res.status===401||res.status===403){ setStage(0,"fail","rejected — unknown session"); return {ok:false,reason:"rejected"}; }
+    if(res.status===502){ setStage(0,"fail","account API unreachable"); return {ok:false,reason:"api-down"}; }
     setStage(0,"fail","unexpected "+res.status); return {ok:false,reason:"status "+res.status};
   }catch(e){ setStage(0,"fail","node unreachable"); return {ok:false,reason:"node-down"}; }
 }
 
-// --- current signing state ---
-let PRIV=null, PUB=null, ADDR=null, MSGHASH=null, SIGHEX=null, FLIP=null;
-
-// --- step 2: migrate the channel key into a signer ---
-async function migrate(){
+// --- step 2: derive the channel address in-browser (proves the browser holds
+// the key; the node will independently sign as the SAME address) ---
+async function recoverChannel(){
   setStage(1,"active");
-  PRIV = hexToBytes(CHANNEL_SCALAR);
-  PUB = secp.getPublicKey(PRIV, true);
-  ADDR = await addressOf(PRIV);
-  $("addr").textContent = ADDR;
+  CHANNEL_ADDR = await addressOf(CHANNEL_SCALAR);
+  $("addr").textContent = CHANNEL_ADDR;
   $("reveal").classList.add("show");
-  setStage(1,"ok","imported to ~secret@1.0");
+  setStage(1,"ok","key stays client-side");
 }
 
-// --- step 3: sign the typed message and verify ---
-async function signAndVerify(){
+// --- step 3: the NODE signs, and its committer is your channel address ---
+async function nodeSigns(token){
   setStage(2,"active");
-  const msg = $("msg").value;
-  MSGHASH = await sha256(enc.encode(msg));
-  const sig = await secp.sign(MSGHASH, PRIV, { der:false });
-  SIGHEX = typeof sig==="string" ? sig : bytesToHex(sig);
-  FLIP = null;
-  renderSig();
-  const ok = secp.verify(SIGHEX, MSGHASH, PUB);
+  const { status, signer } = await nodeSignerFor(token);
   $("sigbox").classList.add("show");
-  showVerdict(ok, ok ? "Signature verified against your channel key"
-                      : "Verification failed");
-  $("sigmeta").textContent = (SIGHEX.length/2)+" bytes · ECDSA/secp256k1";
-  setStage(2, ok?"ok":"fail", ok?"verified ✓":"failed");
+  if(status!==200 || !signer){
+    $("sig").textContent="(no client committer)";
+    showVerdict(false, "The node did not sign for this session ("+status+").");
+    setStage(2,"fail","no signer"); return false;
+  }
+  $("sig").textContent = signer;
+  const match = signer===CHANNEL_ADDR;
+  $("sigmeta").textContent = match ? "matches your channel" : "different identity";
+  showVerdict(match, match
+    ? "The node signed as YOUR channel — it hosts your migrated key."
+    : "The node signed as a different identity.");
+  setStage(2, match?"ok":"fail", match?"signed ✓":"mismatch");
+  return match;
 }
 
-// --- step 4: tamper one character and re-verify ---
-function tamper(){
-  if(!SIGHEX) return;
-  FLIP = Math.floor(Math.random()*SIGHEX.length);
-  const c = SIGHEX[FLIP];
-  const repl = c==="0" ? "1" : "0";       // guaranteed different hex digit
-  SIGHEX = SIGHEX.slice(0,FLIP)+repl+SIGHEX.slice(FLIP+1);
-  renderSig();
-  const ok = secp.verify(SIGHEX, MSGHASH, PUB);   // expected: false
-  showVerdict(ok, ok ? "unexpectedly still valid"
-                     : "Rejected — one flipped character breaks the signature");
-  setStage(3, ok?"ok":"fail", ok?"?":"rejected ✗");
+// --- step 4: a session that isn't yours signs as someone else -> rejected ---
+async function impostor(){
+  if(!CHANNEL_ADDR) return;
+  setStage(3,"active");
+  const { status, signer } = await nodeSignerFor(OTHER_SESSION);
+  $("sig").textContent = signer || "(no client committer)";
+  const isYou = signer===CHANNEL_ADDR;
+  $("sigmeta").textContent = "session "+OTHER_SESSION;
+  showVerdict(!isYou, isYou
+    ? "unexpectedly signed as your channel"
+    : "Rejected — a session that isn't yours signs as a different identity, never as your channel.");
+  setStage(3, isYou?"fail":"ok", isYou?"?":"rejected ✗");
 }
 
-function renderSig(){
-  const box=$("sig");
-  if(FLIP===null){ box.textContent=SIGHEX; return; }
-  box.innerHTML = SIGHEX.slice(0,FLIP) +
-    '<span class="flip">'+SIGHEX[FLIP]+'</span>' + SIGHEX.slice(FLIP+1);
-}
 function showVerdict(ok,msg){
   const v=$("verdict"); v.className="verdict "+(ok?"ok":"bad");
   v.textContent=(ok?"✓ ":"✗ ")+msg;
@@ -1519,27 +1571,27 @@ function showVerdict(ok,msg){
 // --- orchestration ---
 async function run(){
   const token=$("tok").value.trim();
-  if(!token){ $("note").textContent="Paste an auth_token first."; return; }
+  if(!token){ $("note").textContent="Enter a session token first."; return; }
   $("go").disabled=true; resetAll();
   try{
     const v=await validate(token);
     if(!v.ok){
       $("note").textContent = v.reason==="rejected"
-        ? "That token was not accepted by Odysee. Mint a fresh one and retry."
-        : "Could not reach the account API ("+v.reason+")." ;
+        ? "That session was not accepted. Use the pre-filled demo session, or set ODYSEE_ACCOUNT_API for a real token."
+        : "Could not reach the node/account API ("+v.reason+")." ;
       return;
     }
-    await migrate();
-    await signAndVerify();
-    $("note").innerHTML="Now hit <b>Tamper one character</b> to prove the signature is bound to these exact bytes.";
+    await recoverChannel();
+    await nodeSigns(token);
+    $("note").innerHTML="Now hit <b>Try a session that isn&rsquo;t yours</b> — the node signs it as a different identity, so it is rejected as you.";
   } finally { $("go").disabled=false; }
 }
 
 buildPipe();
 $("go").onclick=run;
-$("reset").onclick=()=>{ $("tok").value=""; resetAll(); };
-$("resign").onclick=signAndVerify;
-$("tamper").onclick=tamper;
+$("reset").onclick=()=>{ $("tok").value="sess-one-laptop"; resetAll(); };
+$("resign").onclick=()=>nodeSigns($("tok").value.trim());
+$("tamper").onclick=impostor;
 </script>
 </body>
 </html>
