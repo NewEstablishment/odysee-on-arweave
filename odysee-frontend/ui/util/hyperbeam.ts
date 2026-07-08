@@ -156,12 +156,6 @@ export async function fetchHyperbeamGet(params: any): Promise<any | null> {
 
     const uploadPayload = playbackPayloadFromUploadClaim(await fetchHyperbeamUploadResolve(uri).catch(() => null));
     if (uploadPayload) return uploadPayload;
-
-    const storeStream = await fetchStoreJsonOrNull(storePath('odysee/stream', uri))
-      .then(responsePayload)
-      .catch(() => null);
-    const storePlayback = playbackPayloadFromHyperbeam(storeStream);
-    if (storePlayback) return storePlayback;
   }
 
   const response = await fetchDeviceJson(
@@ -1357,12 +1351,14 @@ function playbackPayloadFromHyperbeam(result: any): any {
     claim_id: value(result, 'claim_id', 'claim-id') || result.claim_id,
     claim_name: value(result, 'claim_name', 'claim-name') || result.claim_name,
   };
-  const mediaUrl = hyperbeamMediaUrlFromPayload(payload);
+  // The stream device returns ready-to-use node media URLs; only fall back to
+  // reconstructing one when the payload does not carry them.
+  const mediaUrl = payload.streaming_url || payload.download_url ? '' : hyperbeamMediaUrlFromPayload(payload);
 
   return {
     ...payload,
-    streaming_url: mediaUrl || payload.streaming_url,
-    download_url: mediaUrl || payload.download_url,
+    streaming_url: payload.streaming_url || mediaUrl,
+    download_url: payload.download_url || mediaUrl,
   };
 }
 
@@ -2241,23 +2237,22 @@ function claimIdFromChannelUri(uri: string): string | null {
 function hyperbeamMediaUrlFromPayload(payload: any): string {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl || !payload) return '';
-
-  const sdHash = value(payload, 'sd_hash', 'sd-hash');
-  if (sdHash) return `${baseUrl}/${STREAM_DEVICE}/media?sd-hash=${encodeURIComponent(String(sdHash))}`;
   if (!allowHyperbeamCompatibilityReads()) return '';
 
-  const streamStorePath = value(payload, 'stream-store-path', 'stream_store_path');
-  if (typeof streamStorePath === 'string') {
-    if (streamStorePath.startsWith('odysee/stream-id/')) {
-      return `${baseUrl}/odysee/media/stream-id/${encodeURIComponent(streamStorePath.slice('odysee/stream-id/'.length))}`;
-    }
-    if (streamStorePath.startsWith('odysee/stream/')) {
-      return `${baseUrl}/odysee/media/stream/${encodeURIComponent(streamStorePath.slice('odysee/stream/'.length))}`;
-    }
+  const txid = value(payload, 'txid');
+  const nout = value(payload, 'nout');
+  const outpoint = value(payload, 'outpoint') || (txid != null && nout != null ? `${txid}:${nout}` : '');
+  if (outpoint) {
+    return `${baseUrl}/${STREAM_DEVICE}/media?id=${encodeURIComponent(String(outpoint))}`;
   }
 
   const claimId = value(payload, 'claim_id', 'claim-id');
-  if (claimId) return `${baseUrl}/odysee/media/stream-id/${encodeURIComponent(String(claimId))}`;
+  if (claimId) {
+    const claimName = value(payload, 'claim_name', 'claim-name');
+    const nameParam = claimName ? `&claim-name=${encodeURIComponent(String(claimName))}` : '';
+    return `${baseUrl}/${STREAM_DEVICE}/media?claim-id=${encodeURIComponent(String(claimId))}${nameParam}`;
+  }
+
   return '';
 }
 
