@@ -1,0 +1,5 @@
+{
+  "note": "First entry of the Erlang migration corpus (hyperbeam/src/core/include/lbry_test_keys.hrl, ?LBRY_CHANNEL_KEYS). Pins this JS PEM->JWK against the exact PEM the proven Erlang import->sign path (hb_odysee_auth_test:migration_imports_real_lbry_channel_keys_test) consumes, so the two implementations are one pipeline joined at a shared key.",
+  "pem": "-----BEGIN PRIVATE KEY-----\nMIGEAgEAMBAGByqGSM49AgEGBSuBBAAKBG0wawIBAQQgTR/rBa6+7FSfQGwoPYGp\n+43dVZJfzHfzf0wBO7M2vWGhRANCAATdndp4L1wmxMH4iROIkK7IUW2VPXhAu/gP\nuA+ZDDOqat4gAxdU86ss/YlmWuuaB89RIR6iurUY5v9yN5oI0akp\n-----END PRIVATE KEY-----\n",
+  "scalarHex": "4d1feb05aebeec549f406c283d81a9fb8ddd55925fcc77f37f4c013bb336bd61"
+}
