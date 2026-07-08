@@ -721,6 +721,77 @@ cross_node_sync_test() ->
     OtherOnB = http_signer_persisted(NodeB, <<"sess-two-laptop">>, WalletB),
     ?assertNotEqual(OnB, OtherOnB).
 
+%% @doc The NODE signs an account's session over REAL HTTP with its MIGRATED
+%% channel identity. The account's existing LBRY channel key (a secp256k1 JWK
+%% the client decrypted from its wallet-sync blob) is imported into
+%% `~secret@1.0' -- keyed to the account by the `~odysee-auth@1.0' access-control
+%% reading the session cookie, persisted non-volatile to the node's store.
+%% Thereafter a plain authenticated request over the wire is signed by the node
+%% with that imported wallet, whose address is the migrated channel identity,
+%% not a freshly minted one; a different account still mints its own. This is the
+%% architecture the browser demo takes: the node hosts the migrated key and
+%% signs; the browser only decrypts client-side (staying password-blind) and
+%% triggers node-signing. (Import here runs in-process, as at node boot; import
+%% driven over HTTP under an odysee-auth-gated secret does not yet register a
+%% wallet -- see the coordination note.)
+http_node_signs_with_migrated_identity_test() ->
+    %% The import must persist `non-volatile' to a disk store: over real HTTP
+    %% each request gets its own opts copy, so an in-memory wallet would not
+    %% survive to the request that signs. Isolate BOTH the main store and the
+    %% `priv-store' (where `~secret@1.0' persists non-volatile wallets); the
+    %% default `priv-store' is the shared `cache-priv', so an un-isolated import
+    %% would leak this account's wallet into every other account-one test.
+    Store = [hb_test_utils:test_store(hb_store_fs, <<"httpmigration">>)],
+    PrivStore = [hb_test_utils:test_store(hb_store_fs, <<"httpmigration-priv">>)],
+    ServerWallet = ar_wallet:new(),
+    Node =
+        hb_http_server:start_node(#{
+            <<"port">> => 0,
+            <<"priv-wallet">> => ServerWallet,
+            <<"store">> => Store,
+            <<"priv-store">> => PrivStore,
+            <<"odysee-session-accounts">> => accounts(),
+            <<"on">> => #{ <<"request">> => hook_base() }
+        }),
+    ServerID = hb_util:human_id(ar_wallet:to_address(ServerWallet)),
+    hb_http_server:set_proc_server_id(ServerID),
+    [{Pem, _} | _] = ?LBRY_CHANNEL_KEYS,
+    Jwk = lbry_channel_key:pem_to_jwk(Pem),
+    MigratedAddress = hb_util:human_id(ar_wallet:to_address(ar_wallet:from_json(Jwk))),
+    %% The node pre-hosts the account's migrated key (imported at boot,
+    %% non-volatile, from the JWK the client decrypted from its wallet-sync
+    %% blob). Import is keyed to the account by its cookie via the
+    %% `~odysee-auth@1.0' access-control.
+    {ok, ImportResult} =
+        hb_ao:resolve(
+            #{
+                <<"device">> => <<"secret@1.0">>,
+                <<"access-control">> => #{ <<"device">> => <<"odysee-auth@1.0">> }
+            },
+            #{
+                <<"path">> => <<"import">>,
+                <<"persist">> => <<"non-volatile">>,
+                <<"key">> => hb_escape:encode_quotes(Jwk),
+                <<"cookie">> => cookie(<<"sess-one-laptop">>)
+            },
+            server_opts(ServerID)
+        ),
+    ?assertMatch(
+        [MigratedAddress],
+        hb_maps:get(<<"imported">>, ImportResult, undefined, #{})
+    ),
+    %% Over the wire, the account's session is signed by the NODE with the
+    %% migrated channel identity, not a freshly minted wallet; a different
+    %% account still mints its own.
+    ?assertEqual(
+        MigratedAddress,
+        http_signer_persisted(Node, <<"sess-one-laptop">>, ServerWallet)
+    ),
+    ?assertNotEqual(
+        MigratedAddress,
+        http_signer_persisted(Node, <<"sess-two-laptop">>, ServerWallet)
+    ).
+
 %% @doc The temporary demo UI is served same-origin by the node itself (via the
 %% `hyperbuddy-serve' option), so a browser page can reach the node's endpoints
 %% with its own cookie and no CORS. Asserts the page is served as HTML.
