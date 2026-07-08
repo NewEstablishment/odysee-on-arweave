@@ -130,11 +130,16 @@ ensure_claim(Base, Req, Opts) ->
     end.
 
 claim_message_from_read(Read, Opts) when is_map(Read) ->
-    case hb_maps:get(<<"value">>, Read, not_found, Opts) of
+    case native_claim_message(Read, Opts) of
+        Message when is_binary(Message) ->
+            claim_message_from_native_stream(Read, Message, Opts);
         not_found ->
-            claim_message_from_body(Read, Opts);
-        _ ->
-            {ok, Read}
+            case hb_maps:get(<<"value">>, Read, not_found, Opts) of
+                not_found ->
+                    claim_message_from_body(Read, Opts);
+                _ ->
+                    {ok, Read}
+            end
     end;
 claim_message_from_read(_Read, _Opts) ->
     {error, invalid_claim_message}.
@@ -148,16 +153,23 @@ claim_message_from_body(Read, Opts) ->
     end.
 
 claim_message_from_native(Read, Opts) ->
+    case native_claim_message(Read, Opts) of
+        Message when is_binary(Message) ->
+            claim_message_from_native_stream(Read, Message, Opts);
+        not_found ->
+            {ok, Read}
+    end.
+
+native_claim_message(Read, Opts) ->
     case hb_maps:get(<<"claim-envelope">>, Read, not_found, Opts) of
         Envelope when is_map(Envelope) ->
             case hb_maps:get(<<"message">>, Envelope, not_found, Opts) of
-                Message when is_binary(Message) ->
-                    claim_message_from_native_stream(Read, Message, Opts);
+                Message when is_binary(Message) -> Message;
                 _ ->
-                    {ok, Read}
+                    not_found
             end;
         _ ->
-            {ok, Read}
+            not_found
     end.
 
 claim_message_from_native_stream(Read, Message, Opts) ->
@@ -1844,6 +1856,33 @@ media_player_proxy_head_uses_native_claim_metadata_test() ->
     ?assertEqual(63022475, hb_maps:get(<<"content-length">>, Res, #{})),
     ?assertEqual(<<"bytes">>, hb_maps:get(<<"accept-ranges">>, Res, #{})).
 
+media_player_proxy_head_uses_native_claim_with_value_metadata_test() ->
+    {ok, Res} =
+        media(
+            native_claim_output_read_with_value(),
+            #{ <<"method">> => <<"HEAD">> },
+            #{}
+        ),
+    ?assertEqual(200, hb_maps:get(<<"status">>, Res, #{})),
+    ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"content-type">>, Res, #{})),
+    ?assertEqual(63022475, hb_maps:get(<<"content-length">>, Res, #{})),
+    ?assertEqual(<<"bytes">>, hb_maps:get(<<"accept-ranges">>, Res, #{})).
+
+media_player_proxy_head_uses_cached_native_claim_metadata_test() ->
+    Opts = #{ <<"store">> => hb_test_utils:test_store() },
+    {ok, Path} = hb_cache:write(native_claim_output_read(), Opts),
+    ok = hb_cache:link(Path, native_outpoint(), Opts),
+    {ok, Res} =
+        media(
+            #{},
+            #{ <<"id">> => native_outpoint(), <<"method">> => <<"HEAD">> },
+            Opts
+        ),
+    ?assertEqual(200, hb_maps:get(<<"status">>, Res, #{})),
+    ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"content-type">>, Res, #{})),
+    ?assertEqual(63022475, hb_maps:get(<<"content-length">>, Res, #{})),
+    ?assertEqual(<<"bytes">>, hb_maps:get(<<"accept-ranges">>, Res, #{})).
+
 prefer_player_proxy_skips_blob_native_test() ->
     ?assertEqual(true, prefer_player_proxy(#{}, #{}, #{})),
     ?assertEqual(false, prefer_player_proxy(#{}, #{ <<"mode">> => <<"blob">> }, #{})),
@@ -2017,6 +2056,11 @@ native_claim_output_read() ->
         <<"txid">> => <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
         <<"nout">> => 0
     }.
+
+native_claim_output_read_with_value() ->
+    Message = native_claim_message(),
+    {ok, Value} = hb_lbry_claim_proto:decode_metadata(Message),
+    (native_claim_output_read())#{ <<"value">> => Value }.
 
 native_claim_message() ->
     binary:decode_hex(
