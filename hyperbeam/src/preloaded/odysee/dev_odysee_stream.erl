@@ -111,6 +111,8 @@ ensure_claim(Base = #{ <<"claim">> := Claim }, _Req, Opts) when is_map(Claim) ->
     end;
 ensure_claim(Base = #{ <<"body">> := _Body }, _Req, Opts) ->
     claim_message_from_read(Base, Opts);
+ensure_claim(Base = #{ <<"claim-envelope">> := _Envelope }, _Req, Opts) ->
+    claim_message_from_read(Base, Opts);
 ensure_claim(Base, Req, Opts) ->
     case immutable_id(Base, Req, Opts) of
         not_found ->
@@ -127,19 +129,78 @@ ensure_claim(Base, Req, Opts) ->
             end
     end.
 
-claim_message_from_read(Read, Opts) ->
+claim_message_from_read(Read, Opts) when is_map(Read) ->
     case hb_maps:get(<<"value">>, Read, not_found, Opts) of
         not_found ->
             claim_message_from_body(Read, Opts);
         _ ->
             {ok, Read}
-    end.
+    end;
+claim_message_from_read(_Read, _Opts) ->
+    {error, invalid_claim_message}.
 
 claim_message_from_body(Read, Opts) ->
     case claim_item_from_body(hb_maps:get(<<"body">>, Read, not_found, Opts), Opts) of
         Item when is_map(Item) ->
             {ok, claim_message_from_item(Read, Item, Opts)};
         not_found ->
+            claim_message_from_native(Read, Opts)
+    end.
+
+claim_message_from_native(Read, Opts) ->
+    case hb_maps:get(<<"claim-envelope">>, Read, not_found, Opts) of
+        Envelope when is_map(Envelope) ->
+            case hb_maps:get(<<"message">>, Envelope, not_found, Opts) of
+                Message when is_binary(Message) ->
+                    claim_message_from_native_stream(Read, Message, Opts);
+                _ ->
+                    {ok, Read}
+            end;
+        _ ->
+            {ok, Read}
+    end.
+
+claim_message_from_native_stream(Read, Message, Opts) ->
+    case hb_lbry_claim_proto:decode_metadata(Message) of
+        {ok, Value} ->
+            ClaimID = first_value([<<"claim-id">>, <<"claim_id">>], Read, Opts),
+            ClaimName = first_value([<<"claim-name">>, <<"claim_name">>, <<"name">>], Read, Opts),
+            TxID = first_value([<<"txid">>], Read, Opts),
+            NOut = first_value([<<"nout">>], Read, Opts),
+            ClaimOp = first_value([<<"claim-op">>, <<"claim_op">>], Read, Opts),
+            Claim0 =
+                case hb_maps:get(<<"claim">>, Read, not_found, Opts) of
+                    ClaimMap when is_map(ClaimMap) -> ClaimMap;
+                    _ -> #{}
+                end,
+            Claim =
+                lists:foldl(
+                    fun put_optional/2,
+                    Claim0#{ <<"value">> => Value },
+                    [
+                        {<<"claim-id">>, ClaimID},
+                        {<<"claim_id">>, ClaimID},
+                        {<<"claim-name">>, ClaimName},
+                        {<<"name">>, ClaimName},
+                        {<<"txid">>, TxID},
+                        {<<"nout">>, NOut},
+                        {<<"claim-op">>, ClaimOp},
+                        {<<"claim_op">>, ClaimOp}
+                    ]
+                ),
+            {ok,
+                lists:foldl(
+                    fun put_optional/2,
+                    Read#{ <<"claim">> => Claim, <<"value">> => Value },
+                    [
+                        {<<"claim-id">>, ClaimID},
+                        {<<"claim-name">>, ClaimName},
+                        {<<"txid">>, TxID},
+                        {<<"nout">>, NOut},
+                        {<<"claim-op">>, ClaimOp}
+                    ]
+                )};
+        _ ->
             {ok, Read}
     end.
 
@@ -1573,6 +1634,15 @@ stream_from_claim_output_body_surface_test() ->
         hb_maps:get(<<"claim-output-store-path">>, Stream, #{})
     ).
 
+stream_from_native_claim_output_message_test() ->
+    {ok, Stream} = stream(native_claim_output_read(), #{}, #{}),
+    Body = hb_json:decode(hb_maps:get(<<"body">>, Stream, #{})),
+    ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"media-type">>, Stream, #{})),
+    ?assertEqual(native_sd_hash(), hb_maps:get(<<"sd-hash">>, Stream, #{})),
+    ?assertEqual(native_source_hash(), hb_maps:get(<<"source-hash">>, Stream, #{})),
+    ?assertEqual(63022475, hb_maps:get(<<"source-size">>, Stream, #{})),
+    ?assertEqual(native_outpoint(), hb_maps:get(<<"outpoint">>, Body, #{})).
+
 playback_redirect_test() ->
     {ok, Redirect} =
         playback(
@@ -1767,6 +1837,13 @@ media_player_proxy_head_uses_claim_metadata_test() ->
     ?assertEqual(<<"proxied-range">>, hb_maps:get(<<"x-odysee-media-verification">>, Res, #{})),
     ?assertEqual(<<>>, hb_maps:get(<<"body">>, Res, #{})).
 
+media_player_proxy_head_uses_native_claim_metadata_test() ->
+    {ok, Res} = media(native_claim_output_read(), #{ <<"method">> => <<"HEAD">> }, #{}),
+    ?assertEqual(200, hb_maps:get(<<"status">>, Res, #{})),
+    ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"content-type">>, Res, #{})),
+    ?assertEqual(63022475, hb_maps:get(<<"content-length">>, Res, #{})),
+    ?assertEqual(<<"bytes">>, hb_maps:get(<<"accept-ranges">>, Res, #{})).
+
 prefer_player_proxy_skips_blob_native_test() ->
     ?assertEqual(true, prefer_player_proxy(#{}, #{}, #{})),
     ?assertEqual(false, prefer_player_proxy(#{}, #{ <<"mode">> => <<"blob">> }, #{})),
@@ -1918,6 +1995,37 @@ expected_immutable_media_url() ->
 
 expected_outpoint() ->
     <<"0bdd755efd133b1e156bde4c8f13a58903310f3c7cb015b8ef30909505cd21d3:0">>.
+
+native_outpoint() ->
+    <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460:0">>.
+
+native_sd_hash() ->
+    <<"3da16b833f169c21caeb62ca66111227413f30f63c9d2f52f2a787643e086c334ee6949e05875cfe94a816aba02e492e">>.
+
+native_source_hash() ->
+    <<"cb215d05f21823b1208313edeaf8d7af4b2d2d00acc58fac1a1cf40427351b3b79a636b70f5844f6c691330955a53b18">>.
+
+native_claim_output_read() ->
+    Message = native_claim_message(),
+    #{
+        <<"device">> => <<"lbry-claim@1.0">>,
+        <<"claim-id">> => <<"9cc7f0e3de8db3b2ffd6dc0b4f1a0f0ca48a6b49">>,
+        <<"claim-name">> => <<"native-stream">>,
+        <<"claim">> => Message,
+        <<"claim-envelope">> => #{ <<"message">> => Message },
+        <<"claim-op">> => <<"create">>,
+        <<"txid">> => <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
+        <<"nout">> => 0
+    }.
+
+native_claim_message() ->
+    binary:decode_hex(
+        hb_util:to_lower(
+            <<
+            "0AC5010AAB010A30CB215D05F21823B1208313EDEAF8D7AF4B2D2D00ACC58FAC1A1CF40427351B3B79A636B70F5844F6C691330955A53B18123541666661697265204272696769747465205F20C3A7612064C3A97261696C6C6520656E20706C65696E20646972656374202E6D7034188BCB861E2209766964656F2F6D703432303DA16B833F169C21CAEB62CA66111227413F30F63C9D2F52F2A787643E086C334EE6949E05875CFE94A816ABA02E492E1A044E6F6E6528FAA2A0D1065A0908800510E802188A08423141666661697265204272696769747465205F20C3A7612064C3A97261696C6C6520656E20706C65696E206469726563742052412A3F68747470733A2F2F7468756D62732E6F647963646E2E636F6D2F62353765383966656131653333636136623761616536386638363735623235622E7765627062020801"
+            >>
+        )
+    ).
 
 signed_odysee_policy(Rules) ->
     hb_message:commit(
