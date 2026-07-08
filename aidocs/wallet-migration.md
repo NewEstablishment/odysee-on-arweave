@@ -10,13 +10,13 @@ on this machine (`/home/user/repos/HB5/odysee-frontend` does not exist —
 *transport* endpoints therefore could not be read from frontend source; where a
 claim depends only on the frontend it is marked **[hypothesized]**. Everything
 about the wallet *format* and the *crypto* is read from the `lbry-sdk` daemon,
-which is the authoritative producer/consumer of the sync blob.
+which is the authoritative producer/consumer of the encrypted wallet file.
 
 ---
 
 ## 0. TL;DR — the crux (question #3)
 
-**The Odysee sync service stores an opaque blob it cannot decrypt.** The wallet
+**The Odysee sync service stores an opaque wallet file it cannot decrypt.** The wallet
 is compressed and encrypted client-side with a **user-held sync password** via
 scrypt+AES before it ever leaves the client (`Wallet.pack` → `better_aes_encrypt`).
 The server keeps only the ciphertext; the password is never transmitted.
@@ -24,16 +24,16 @@ The server keeps only the ciphertext; the password is never transmitted.
 Consequence: **a server-side bulk decrypt of all wallets is cryptographically
 impossible for any user who set a real wallet password.** Migration must be
 **lazy / client-side at next login**: the user (or the client on their behalf)
-supplies the password, the node pulls the blob, decrypts it, extracts the
+supplies the password, the node pulls the encrypted wallet file, decrypts it, extracts the
 identity keys, and imports them into `~secret@1.0`.
 
 The one escape hatch (**[measured]**, confirmed 2026-07-05): Odysee users who
-never set a wallet password have their blobs encrypted under the **empty
+never set a wallet password have their wallet files encrypted under the **empty
 string**. The frontend defaults a missing password to `''`
 (`odysee-frontend/extras/lbryinc/redux/actions/sync.ts:95`) and passes it
 through `sync_apply`; `Wallet.pack` unconditionally encrypts with whatever
 password it receives (`lbry-sdk/lbry/wallet/wallet.py:170-173`), so `''` is a
-valid — and publicly known — key input. Those blobs **are bulk-decryptable**
+valid — and publicly known — key input. Those wallet files **are bulk-decryptable**
 by anyone holding them, which means Odysee can run a server-side bulk
 migration for the no-password cohort (likely the large majority of users).
 Password-set users still require the lazy login-time path below.
@@ -83,7 +83,7 @@ path the whole document is then encrypted again by `pack`, see §2.)
 
 ## 2. Wallet-sync protocol and encryption
 
-### The transport blob (authoritative, from the daemon)
+### The encrypted wallet file (authoritative, from the daemon)
 
 - `Wallet.pack(password)` — `zlib.compress(to_json())` then
   `better_aes_encrypt(password, ...)` (**[measured]** `wallet.py:170-173`).
@@ -117,8 +117,8 @@ channel-key map (**[measured]** `daemon.py:1996`, `account.py:576-588`).
 ### The transport endpoints (frontend, not on disk)
 
 **[hypothesized]** The historical LBRY/Odysee wallet-sync API is
-`POST .../sync/get` (returns the stored blob + a `hash`) and
-`POST .../sync/set` (stores a new blob, guarded by the previous `hash` for
+`POST .../sync/get` (returns the stored encrypted wallet file + a `hash`) and
+`POST .../sync/set` (stores a new encrypted wallet file, guarded by the previous `hash` for
 optimistic concurrency), keyed by `auth_token`. The `hash` is `Wallet.hash`
 (**[measured]** the value exists: `wallet.py:158-168`, a SHA256 over the
 encryption password + preferences hash + per-account hashes) — note this hash
@@ -133,28 +133,28 @@ frontend clone is absent; confirm against `lbryinc`/`ui/redux` before coding.
 **[measured]** The sync password is the *only* input to the scrypt KDF that
 produces the AES key (`crypt.py:46,59`). It is supplied to the daemon as the
 `password` argument of `sync_apply` (`daemon.py:1968,1982`) and is never part of
-the stored blob (the blob is the output of `pack`, `wallet.py:170-173`). The
+the stored encrypted wallet file (the encrypted wallet file is the output of `pack`, `wallet.py:170-173`). The
 sync service stores ciphertext only.
 
 Therefore:
 
 - **Password-protected wallets: server-side bulk decrypt is impossible**
   **[measured, by construction]**. Odysee's sync service and internal-apis hold
-  the blob but not the password, and cannot derive the key. Migration for these
+  the encrypted wallet file but not the password, and cannot derive the key. Migration for these
   users is necessarily **lazy**: the password must be presented at login.
 
 - **No-password wallets: bulk-decryptable [measured].** LBRY still
   requires *a* password to `pack` (the assertion at `wallet.py:171` forbids
   packing a locked wallet, but an empty/constant string is a valid password),
   and the Odysee frontend defaults a missing password to the **empty string**
-  (`odysee-frontend/extras/lbryinc/redux/actions/sync.ts:95`). Those blobs can
+  (`odysee-frontend/extras/lbryinc/redux/actions/sync.ts:95`). Those wallet files can
   be decrypted by anyone holding them — which
   Odysee's servers would. This is the *only* route to a true server-side bulk
   migration, and its existence/value must be verified in frontend source. Do not
   assume it.
 
 **What Odysee would need for a bulk export:** direct DB access to the sync
-service's blob store (keyed by auth_token/account) — which they operate — **plus**
+service's wallet-file store (keyed by auth_token/account) — which they operate — **plus**
 the per-user password. They have the former, not the latter. So the realistic
 "mass import all existing wallets" plan Sam described is: bulk-export the
 *ciphertext* + account mapping now, but the *decrypt+import* step still runs
@@ -235,7 +235,7 @@ decode the PKCS8 PEM, and it is **verified end-to-end** against REAL channel key
   remain isolated.
 
 The decrypt half is **[measured]** in `scripts/gen-lbry-channel-keys.py`: empty-
-password blobs decrypt with no secret (bulk cohort), password blobs need the
+password-set wallet files decrypt with no secret (bulk cohort), password-set wallet files need the
 password (lazy cohort). Decryption is best done in the client/importer that
 holds the sync password, so HyperBEAM only ever receives a JWK — the
 `dev_secret` import path is unchanged.
@@ -255,9 +255,9 @@ in that window.
 ### Flow (per login)
 1. User authenticates with `auth_token` → node resolves account via `user/me`
    (existing path, `dev_odysee_auth.erl:312-360`).
-2. Client (or a trusted importer) obtains the sync blob for that account
+2. Client (or a trusted importer) obtains the encrypted wallet file for that account
    (`sync/get`, **[hypothesized]** endpoint) and the user's **wallet password**.
-3. Decrypt: `better_aes_decrypt(password, blob)` → `zlib` → JSON
+3. Decrypt: `better_aes_decrypt(password, encrypted wallet file)` → `zlib` → JSON
    (mirror `wallet.py:176-188`).
 4. Extract each account's `certificates` (channel PEM keys).
 5. Convert PEM → JWK (§4 conversion).
@@ -287,12 +287,12 @@ alternative (password enters only the enclave).
    `better_aes_decrypt`). Production decrypt still to be wired client-side/in-TEE:
    reimplement `better_aes_decrypt` (scrypt N=8192/r=16/p=1 + AES-CBC) in the
    importer; confirm against `crypt.py:44-63`.
-3. **Sync-blob fetch** — implement/confirm the `sync/get` call and account keying
+3. **Wallet-file fetch** — implement/confirm the `sync/get` call and account keying
    (frontend source: `odysee-on-arweave/odysee-frontend/extras/lbryinc/redux/actions/sync.ts`).
 4. **Lazy import at login** — wire steps 1–8 into the auth-hook login path;
    idempotent, one wallet per account.
 5. **Optional bulk pass** — the no-password cohort is confirmed decryptable
-   (empty-string passphrase, `sync.ts:95`): the server decrypts those blobs and
+   (empty-string passphrase, `sync.ts:95`): the server decrypts those wallet files and
    imports in batch. Password-set users always fall through to lazy.
 
 ### Open items to confirm (all currently [hypothesized])
