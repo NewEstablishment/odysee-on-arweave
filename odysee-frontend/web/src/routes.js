@@ -42,7 +42,10 @@ const HYPERBEAM_UPLOAD_INDEX_PATH = '/~odysee-upload@1.0/index?!=true';
 const HYPERBEAM_UPLOAD_LIST_PATH = '/~odysee-upload@1.0/list';
 const HYPERBEAM_UPLOAD_DELETE_PATH = '/~odysee-upload@1.0/delete?!=true';
 const HYPERBEAM_UPLOAD_UPDATE_PATH = '/~odysee-upload@1.0/update?!=true';
-const HYPERBEAM_THUMBNAIL_UPLOAD_PATH = '/~odysee-product-events@1.0/thumbnail-upload';
+// The thumbnail upload writes straight to the node's native, trust-gated cache.
+// There is no custom ~odysee-product-events@1.0 device any more: the proxy signs
+// the write, and the node's cache_writers gate (native ~cache@1.0) authorizes it.
+const HYPERBEAM_CACHE_WRITE_PATH = '/~cache@1.0/write';
 const HYPERBEAM_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 const HYPERBEAM_UPLOAD_MANIFEST_TYPE = 'application/vnd.odysee.hyperbeam-upload-manifest+json';
 const HYPERBEAM_UPLOAD_MANIFEST_KIND = 'odysee-hyperbeam-chunked-upload';
@@ -321,6 +324,83 @@ async function postHyperbeamUploadIndex(ctx) {
   ctx.body = normalizeUploadIndexResponse(parseJsonBuffer(response.body)) || response.body;
 }
 
+// The convenience the old device did node-side now lives here: pull the image
+// out of whatever the client sent (raw base64 or a data: URL) and its type.
+function decodeThumbnail(requestBody) {
+  const raw =
+    requestBody.content_base64 || requestBody['content-base64'] || requestBody.data || '';
+  const stripped = String(raw).replace(/^data:[^,]*,/, ''); // drop a data:...; prefix
+  return {
+    bytes: Buffer.from(stripped, 'base64'),
+    contentType: requestBody.content_type || requestBody['content-type'] || 'image/jpeg',
+  };
+}
+
+// The proxy is the single trusted cache writer: a server-held Arweave wallet
+// JWK whose address must be in the node's `cache_writers`. Loaded once.
+function cacheWriterKey() {
+  if (!cacheWriterKey._key) {
+    const source = process.env.HYPERBEAM_CACHE_WRITER_JWK;
+    if (!source) throw new Error('HYPERBEAM_CACHE_WRITER_JWK is not set');
+    const jwk = JSON.parse(source.trim().startsWith('{') ? source : require('node:fs').readFileSync(source, 'utf8'));
+    cacheWriterKey._key = {
+      jwk,
+      privateKey: crypto.createPrivateKey({ key: jwk, format: 'jwk' }),
+      keyid: 'publickey:' + Buffer.from(jwk.n, 'base64url').toString('base64'),
+    };
+  }
+  return cacheWriterKey._key;
+}
+
+// RFC-9421 components HyperBEAM treats as "derived" — they take an `@` prefix in
+// the @signature-params list, but NOT in the component lines of the signed base.
+const HB_DERIVED = new Set(['method', 'target-uri', 'authority', 'scheme', 'request-target', 'path', 'query', 'query-param']);
+
+// Produce the httpsig headers HyperBEAM's cache_writers gate accepts. This is a
+// self-contained HB-native signer (verified against a live node): the signed
+// base uses `@`-prefixed derived names and binds the body via `content-digest`;
+// the wire `signature-input` uses raw names (HB re-adds `@` on verify); the
+// dictionary label MUST start with `comm-` or the node ignores the signature.
+function hbSignedHeaders(method, path, contentType, bodyBuf) {
+  const { privateKey, keyid } = cacheWriterKey();
+  const contentDigest = 'sha-256=:' + crypto.createHash('sha256').update(bodyBuf).digest('base64') + ':';
+  const fields = { 'content-digest': contentDigest, 'content-type': contentType, method, path, type: 'single' };
+  const covered = ['content-digest', 'content-type', 'method', 'path', 'type'];
+  const baseItems = covered.map((c) => (HB_DERIVED.has(c) ? `"@${c}"` : `"${c}"`)).join(' ');
+  const baseParams = `(${baseItems});alg="rsa-pss-sha512";keyid="${keyid}"`;
+  const base = covered.map((c) => `"${c}": ${fields[c]}`).join('\n') + '\n"@signature-params": ' + baseParams;
+  const sig = crypto.sign('sha512', Buffer.from(base), { key: privateKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 64 });
+  const wireParams = `(${covered.map((c) => `"${c}"`).join(' ')});alg="rsa-pss-sha512";keyid="${keyid}"`;
+  return {
+    ...fields,
+    'signature-input': `comm-http=${wireParams}`,
+    signature: `comm-http=:${sig.toString('base64')}:`,
+    'content-length': String(bodyBuf.length),
+  };
+}
+
+// Sign and issue a native ~cache@1.0/write. Content-addressed: the response
+// carries the stored path/id. Content-type is not stored by the native cache
+// (the read URL is served as an image by the frontend, keeping the node generic).
+async function writeThumbnailToCache(nodeUrl, bytes, contentType) {
+  const headers = hbSignedHeaders('POST', HYPERBEAM_CACHE_WRITE_PATH, contentType, bytes);
+  const response = await postBuffer(`${nodeUrl}${HYPERBEAM_CACHE_WRITE_PATH}`, bytes, {
+    ...headers,
+    host: new URL(nodeUrl).host,
+    accept: 'application/json',
+    'accept-bundle': 'true',
+  });
+  const json = parseJsonBuffer(response.body) || {};
+  let id = null;
+  (function walk(o) {
+    if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) {
+      if (k === 'path' && typeof v === 'string' && v.length > 20) id = v;
+      walk(v);
+    }
+  })(json);
+  return id;
+}
+
 async function postHyperbeamThumbnailUpload(ctx) {
   const nodeUrl = hyperbeamNodeUrl();
 
@@ -330,25 +410,25 @@ async function postHyperbeamThumbnailUpload(ctx) {
     return;
   }
 
-  const requestBody = await readJsonBody(ctx);
-  const params64 = Buffer.from(JSON.stringify(requestBody)).toString('base64url');
-  const response = await postJson(
-    `${nodeUrl}${HYPERBEAM_THUMBNAIL_UPLOAD_PATH}`,
-    { params64 },
-    {
-      host: new URL(nodeUrl).host,
-    }
-  );
-
-  ctx.status = response.statusCode;
   ctx.set('Cache-Control', 'no-store');
-  ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
-  const json = parseJsonBuffer(response.body);
-  if (json && json.id && json.type === 'success') {
-    const url = `${nodeUrl}/~cache@1.0/read?read=${encodeURIComponent(json.id)}`;
-    ctx.body = { ...json, url, message: url };
-  } else {
-    ctx.body = response.body;
+  ctx.set('Content-Type', 'application/json');
+
+  try {
+    const { bytes, contentType } = decodeThumbnail(await readJsonBody(ctx));
+    const id = await writeThumbnailToCache(nodeUrl, bytes, contentType);
+    if (!id) {
+      ctx.status = 502;
+      ctx.body = { type: 'error', message: 'cache write returned no id' };
+      return;
+    }
+    const url = `${nodeUrl}/~cache@1.0/read?read=${encodeURIComponent(id)}`;
+    ctx.status = 200;
+    ctx.body = { type: 'success', id, url, message: url };
+  } catch (err) {
+    // An untrusted/unsigned write is rejected by the node's cache_writers gate;
+    // surface it rather than silently falling back to an anonymous write.
+    ctx.status = 502;
+    ctx.body = { type: 'error', message: String((err && err.message) || err) };
   }
 }
 
