@@ -11,8 +11,16 @@ import zlib from 'node:zlib';
 export function decryptWalletFile(password, encryptedB64) {
   const data = Buffer.from(encryptedB64.toString(), 'base64');
   const parts = []; let i = 0, start = 0;
-  while (parts.length < 4) { if (data[i] === 0x3a) { parts.push(data.subarray(start, i)); start = i + 1; } i++; }
-  const [, N, r, p] = parts.map((b) => parseInt(b.toString(), 10) || b.toString());
+  // Header is `s:N:r:p:` before the IV+ciphertext; scan only that far. A blob
+  // with fewer than 4 colons is not a wallet-sync payload -- reject it rather
+  // than scan past the buffer.
+  while (parts.length < 4 && i < data.length) {
+    if (data[i] === 0x3a) { parts.push(data.subarray(start, i)); start = i + 1; }
+    i++;
+  }
+  if (parts.length < 4) throw new Error('not a wallet-sync blob: missing s:N:r:p: header');
+  const [scheme, N, r, p] = parts.map((b) => b.toString());
+  if (scheme !== 's') throw new Error(`unsupported wallet-sync scheme: ${scheme}`);
   const rest = data.subarray(start);
   const iv = rest.subarray(0, 16), ct = rest.subarray(16);
   const key = crypto.scryptSync(Buffer.from(password), iv, 32, { N: Number(N), r: Number(r), p: Number(p), maxmem: 128 * Number(N) * Number(r) * 2 });

@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "file": "empty-single-raw.b64",
+      "password": "",
+      "expectKeys": [
+        "2a5a54fc87d6b7ad59d6a0e4bd3220ebad224dfdc7fb7875b21259284f946a22"
+      ]
+    },
+    {
+      "file": "empty-single-zlib.b64",
+      "password": "",
+      "expectKeys": [
+        "4b49155ed2f54ffb97bf7aeea7cff28e3f0e224621f056f10b520cd5f80c066e"
+      ]
+    },
+    {
+      "file": "password-single.b64",
+      "password": "hunter2",
+      "expectKeys": [
+        "1aec50e8c50365750a01af612de2dd0bd6a31a87da3ac538cbf332b45b7ae518"
+      ]
+    },
+    {
+      "file": "password-single.b64",
+      "password": "wrong",
+      "expectError": true
+    },
+    {
+      "file": "empty-multi.b64",
+      "password": "",
+      "expectKeys": [
+        "803cdf7d938e6d9f0a73bda73cf1ffa9842c027eca420efae1d4bd87130e81b9",
+        "11b369b7eae704446b95e6c31e8a0f0a1803a5248b647212e1f95a07d6bb7f15",
+        "2f5128b1c64b0d54bfd2915911785610ef1988357a6cf4aaf5e79d1ce1fe8a52"
+      ]
+    },
+    {
+      "file": "tampered.b64",
+      "password": "",
+      "expectError": true
+    },
+    {
+      "file": "malformed.b64",
+      "password": "",
+      "expectError": true
+    }
+  ]
+}

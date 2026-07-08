@@ -20,3 +20,12 @@ Because step 2 joins the two implementations at a shared key, the JS decrypt is 
 validated upstream extension of the proven Erlang import->sign path: the node
 never sees the password, only the JWK, and the JWK it receives is exactly the one
 the import path already carries through to a signature.
+
+## Verification sweep (`node sweep.mjs`)
+
+Runs the importer over a matrix of genuine wallet-sync payloads
+(`fixtures/`, regenerable with `gen-sweep-fixtures.py`): empty vs set password,
+single vs multi channel, the `Wallet.pack` zlib framing vs the raw primitive,
+and the adversarial cases that must be *rejected* rather than silently yield a
+wrong key — wrong password, tampered ciphertext, and a malformed blob. Success
+cases are checked byte-for-byte against the known scalars.
