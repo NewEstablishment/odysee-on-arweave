@@ -25,6 +25,10 @@ function getPreferenceMetadata(state) {
   const prefsReady = state?.sync?.prefsReady;
   return {
     preferenceKey: syncEnabled && hasVerifiedEmail && prefsReady ? 'shared' : 'local',
+    // On web there is no local wallet, and the wallet servers reject
+    // preference calls from users without a verified email ("authentication
+    // required"), so anonymous/unverified sessions must not attempt them.
+    canSyncPreferences: !IS_WEB || Boolean(hasVerifiedEmail),
   };
 }
 
@@ -67,7 +71,13 @@ export const buildSharedStateMiddleware =
       // Call `getState` after calling `next` to ensure the state has updated in response to the action
       function runPreferences() {
         const nextState = getState();
-        const { preferenceKey: currentPreferenceKey } = getPreferenceMetadata(nextState);
+        const { preferenceKey: currentPreferenceKey, canSyncPreferences } = getPreferenceMetadata(nextState);
+
+        if (!canSyncPreferences) {
+          clearTimeout(timeout);
+          return actionResult;
+        }
+
         const shared = buildSharedState(nextState, sharedStateFilters);
 
         if (!isEqual(oldShared, shared)) {
