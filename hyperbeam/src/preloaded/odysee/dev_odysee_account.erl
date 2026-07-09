@@ -61,7 +61,11 @@ user_email_resend_token(Base, Req, Opts) -> api(<<"user_email">>, <<"resend_toke
 user_email_confirm(Base, Req, Opts) -> api(<<"user_email">>, <<"confirm">>, Base, Req, Opts).
 account_status(Base, Req, Opts) -> api(<<"account">>, <<"status">>, Base, Req, Opts).
 'sub-count'(Base, Req, Opts) -> sub_count(Base, Req, Opts).
-sub_count(Base, Req, Opts) -> dev_odysee_subscription:sub_count(Base, Req, Opts).
+%% Forge packages each preloaded device under a content-hashed module name,
+%% so cross-device calls must go through the device registry rather than the
+%% source module name (which does not exist at runtime).
+sub_count(Base, Req, Opts) ->
+    hb_ao:raw(<<"odysee-subscription@1.0">>, <<"sub-count">>, Base, Req, Opts).
 
 sdk(Method, Base, Req, Opts) ->
     safe(fun() ->

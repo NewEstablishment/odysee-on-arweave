@@ -789,7 +789,9 @@ write_indexes(Record, Opts) ->
 index_search_record(Record, Opts) ->
     try
         Claim = search_claim(Record, Opts),
-        case dev_odysee_search:index(#{}, #{ <<"document">> => search_document(Claim, Opts) }, Opts) of
+        % Cross-device call via the registry: Forge renames device modules to
+        % content-hashed names, so `dev_odysee_search' is not callable directly.
+        case hb_ao:raw(<<"odysee-search@1.0">>, <<"index">>, #{}, #{ <<"document">> => search_document(Claim, Opts) }, Opts) of
             {ok, _} -> ok;
             _ -> ok
         end
@@ -801,7 +803,7 @@ delete_search_record(Record, Opts) ->
     try
         Claim = search_claim(Record, Opts),
         ClaimID = hb_maps:get(<<"claim_id">>, Claim, <<>>, Opts),
-        case dev_odysee_search:delete(#{}, #{ <<"ids">> => search_document_ids(ClaimID, Record, Claim, Opts) }, Opts) of
+        case hb_ao:raw(<<"odysee-search@1.0">>, <<"delete">>, #{}, #{ <<"ids">> => search_document_ids(ClaimID, Record, Claim, Opts) }, Opts) of
             {ok, _} -> ok;
             _ -> ok
         end
