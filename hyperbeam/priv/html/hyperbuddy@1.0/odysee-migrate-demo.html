@@ -1559,8 +1559,15 @@ async function impostor(){
   setStage(3,"active");
   const { status, signer } = await nodeSignerFor(OTHER_SESSION);
   $("sig").textContent = signer || "(no client committer)";
-  const isYou = signer===CHANNEL_ADDR;
   $("sigmeta").textContent = "session "+OTHER_SESSION;
+  // The security claim is proven only if the other session actually SIGNED, as
+  // a DIFFERENT identity. A missing signer (node error, 5xx) is inconclusive,
+  // not a pass -- don't flash green on a malfunction.
+  if(status!==200 || !signer){
+    showVerdict(false, "Inconclusive — the node did not sign for the other session ("+status+").");
+    setStage(3,"fail","no signer"); return;
+  }
+  const isYou = signer===CHANNEL_ADDR;
   showVerdict(!isYou, isYou
     ? "unexpectedly signed as your channel"
     : "Rejected — a session that isn't yours signs as a different identity, never as your channel.");

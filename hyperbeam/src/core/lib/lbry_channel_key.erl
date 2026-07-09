@@ -14,8 +14,7 @@
 %%%
 %%% Decryption of the wallet-sync blob (scrypt + AES-CBC, keyed by the user's
 %%% sync password) happens upstream -- in the client or a TEE -- so the plaintext
-%%% PEM, not the password, is what reaches this converter. See
-%%% `aidocs/wallet-migration.md'.
+%%% PEM, not the password, is what reaches this converter.
 -module(lbry_channel_key).
 -export([pem_to_jwk/1]).
 -include_lib("public_key/include/public_key.hrl").

@@ -82,6 +82,20 @@ def main():
     write("malformed.b64", base64.b64encode(b"not-a-wallet-blob"))
     cases.append({"file": "malformed.b64", "password": "", "expectError": True})
 
+    # 8. a valid wallet with NO channels -> legitimately recovers zero keys.
+    empty_wallet = {"version": 1, "name": "testwallet", "preferences": {},
+                    "accounts": [{"ledger": "lbc_mainnet", "name": "Account #1",
+                                  "certificates": {}}]}
+    write("no-channels.b64", better_aes_encrypt("", json.dumps(empty_wallet).encode()))
+    cases.append({"file": "no-channels.b64", "password": "", "expectKeys": []})
+
+    # 9. a certificate value that is not a PEM string -> reject, don't pass through.
+    bad_wallet = {"version": 1, "name": "testwallet", "preferences": {},
+                  "accounts": [{"ledger": "lbc_mainnet", "name": "Account #1",
+                                "certificates": {"fakeaddr0": 12345}}]}
+    write("bad-cert.b64", better_aes_encrypt("", json.dumps(bad_wallet).encode()))
+    cases.append({"file": "bad-cert.b64", "password": "", "expectError": True})
+
     with open(os.path.join(OUT, "manifest.json"), "w") as f:
         json.dump({"cases": cases}, f, indent=2)
     print(f"wrote {len(cases)} cases to {OUT}")
