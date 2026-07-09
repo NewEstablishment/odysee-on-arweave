@@ -277,6 +277,7 @@ request_metadata_keys() ->
         <<"connection">>,
         <<"content-length">>,
         <<"cookie">>,
+        <<"forwarded">>,
         <<"host">>,
         <<"origin">>,
         <<"priv">>,
@@ -288,7 +289,16 @@ request_metadata_keys() ->
         <<"sec-fetch-mode">>,
         <<"sec-fetch-site">>,
         <<"sec-gpc">>,
-        <<"user-agent">>
+        <<"signature-input">>,
+        <<"user-agent">>,
+        <<"via">>,
+        <<"x-forwarded-for">>,
+        <<"x-forwarded-host">>,
+        <<"x-forwarded-port">>,
+        <<"x-forwarded-proto">>,
+        <<"x-forwarded-server">>,
+        <<"x-forwarded-ssl">>,
+        <<"x-real-ip">>
     ].
 
 private_credential_keys() ->
