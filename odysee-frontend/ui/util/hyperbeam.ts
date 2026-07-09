@@ -23,6 +23,7 @@ const CHANNEL_DEVICE = '~odysee-channel@1.0';
 const STREAM_DEVICE = '~odysee-stream@1.0';
 const SEARCH_DEVICE = '~odysee-search@1.0';
 const UPLOAD_DEVICE = '~odysee-upload@1.0';
+const COMMENTRON_FAILURE = 'Failed to fetch (comments.odysee.tv)';
 const PRIVATE_PARAM_KEYS = new Set([
   'accesstoken',
   'authorization',
@@ -784,12 +785,12 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
     });
 
     if (!response.ok) {
-      if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
+      if (isHyperbeamEnabled()) throw hyperbeamDeviceError(path, response.status);
       return null;
     }
     return await response.json();
   } catch (error) {
-    if (isHyperbeamEnabled()) throw error;
+    if (isHyperbeamEnabled()) throw hyperbeamDeviceFetchError(path, error);
     return null;
   }
 }
@@ -819,16 +820,22 @@ async function fetchAuthDeviceJson(
     'info'
   );
 
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...authTokenHeader(authToken),
-    },
-    body: JSON.stringify(body),
-    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authTokenHeader(authToken),
+      },
+      body: JSON.stringify(body),
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (isHyperbeamEnabled()) throw hyperbeamDeviceFetchError(path, error);
+    return null;
+  }
   const elapsedMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
   const responseText = await response.text();
   const contentType = response.headers.get('content-type') || '';
@@ -852,7 +859,7 @@ async function fetchAuthDeviceJson(
   );
 
   if (!response.ok) {
-    if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
+    if (isHyperbeamEnabled()) throw hyperbeamDeviceError(path, response.status);
     return null;
   }
 
@@ -862,6 +869,28 @@ async function fetchAuthDeviceJson(
 function requestKeyForAuthDevice(path: string, body: Record<string, any>) {
   const claimId = body.claim_id || body.claim_ids || body['claim-id'] || body['claim-ids'];
   return claimId ? `claim:${claimId}` : `${path}:${stableJson(body).slice(0, 180)}`;
+}
+
+function hyperbeamDeviceError(path: string, status: number) {
+  if (isCommentronDevicePath(path) && status >= 500) return new TypeError(COMMENTRON_FAILURE);
+  return new Error(`HyperBEAM ${path} failed with ${status}`);
+}
+
+function hyperbeamDeviceFetchError(path: string, error: any) {
+  if (isCommentronDevicePath(path) && isFetchTimeoutOrNetworkError(error)) return new TypeError(COMMENTRON_FAILURE);
+  return error;
+}
+
+function isFetchTimeoutOrNetworkError(error: any) {
+  const name = String(error?.name || '');
+  const message = String(error?.message || error || '');
+  return (
+    name === 'TimeoutError' || name === 'AbortError' || message === 'Failed to fetch' || message === 'signal timed out'
+  );
+}
+
+function isCommentronDevicePath(path: string) {
+  return path.startsWith(`${COMMENT_DEVICE}/`) || path.startsWith(`${REACTION_DEVICE}/`);
 }
 
 function authTokenHeader(token: string | null): Record<string, string> {

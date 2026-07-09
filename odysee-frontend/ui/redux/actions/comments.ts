@@ -38,6 +38,7 @@ import { doAlertWaitingForSync } from 'redux/actions/app';
 import { getStripeEnvironment } from 'util/stripe';
 const stripeEnvironment = getStripeEnvironment();
 const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
+const COMMENTRON_FAILED_TO_FETCH = 'Failed to fetch (comments.odysee.tv)';
 const PROMISE_FULFILLED = 'fulfilled';
 const MENTION_REGEX = /(?:^| |\n)@[^\s=&#$@%?:;/"<>%{}|^~[]*(?::[\w]+)?/gm;
 
@@ -217,6 +218,12 @@ export function doCommentList(
               data: error,
             });
 
+          case COMMENTRON_FAILED_TO_FETCH:
+            return dispatch({
+              type: ACTIONS.COMMENT_LIST_FAILED,
+              data: error,
+            });
+
           default:
             dispatch(
               doToast({
@@ -326,6 +333,13 @@ export function doCommentListOwn(
       })
       .catch((error) => {
         switch (error.message) {
+          case COMMENTRON_FAILED_TO_FETCH:
+            dispatch({
+              type: ACTIONS.COMMENT_LIST_FAILED,
+              data: error,
+            });
+            break;
+
           case FETCH_API_FAILED_TO_FETCH:
             dispatch(
               doToast({

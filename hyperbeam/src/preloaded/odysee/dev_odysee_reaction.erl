@@ -9,7 +9,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(DEVICE, <<"odysee-reaction@1.0">>).
--define(DEFAULT_COMMENT_URL, <<"https://comments.odysee.com/api/v2">>).
+-define(DEFAULT_COMMENT_URL, <<"https://comments.odysee.tv/api/v2">>).
 
 %% @doc Return the public device API.
 info(_Opts) ->

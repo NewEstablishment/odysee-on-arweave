@@ -205,9 +205,19 @@ read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
         Error -> Error
     end;
 read_live(<<"odysee/outpoint/", Rest/binary>>, StoreOpts, NodeOpts) ->
-    read_claim_output_live(Rest, StoreOpts, NodeOpts);
+    maybe
+        {ok, TxID, NOut} ?= claim_proof_path(Rest),
+        read_native_outpoint(TxID, NOut, StoreOpts, NodeOpts)
+    else
+        Error -> Error
+    end;
 read_live(<<"odysee/claim-output/", Rest/binary>>, StoreOpts, NodeOpts) ->
-    read_claim_output_live(Rest, StoreOpts, NodeOpts);
+    maybe
+        {ok, TxID, NOut} ?= claim_proof_path(Rest),
+        read_native_outpoint(TxID, NOut, StoreOpts, NodeOpts)
+    else
+        Error -> Error
+    end;
 read_live(<<"odysee/claim-proof/", Rest/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, TxID, NOut} ?= claim_proof_path(Rest),

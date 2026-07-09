@@ -481,11 +481,11 @@ descriptor_media_request(Stream, Base, Req, Opts) ->
     ).
 
 media_response(Stream, Base, Req, Opts) ->
-    case prefer_player_proxy(Base, Req, Opts) of
-        true ->
+    case method(Req, Opts) of
+        <<"head">> ->
             player_media_response(Stream, Base, Req, Opts);
-        false ->
-            descriptor_or_player_media(Stream, Base, Req, Opts)
+        _ ->
+            bridge_or_descriptor_or_player_media(Stream, Base, Req, Opts)
     end.
 
 media_response_with_policy(Stream, Base, Req, Opts) ->
@@ -581,6 +581,94 @@ descriptor_or_player_media(Stream, Base, Req, Opts) ->
                 false -> Error
             end
     end.
+
+bridge_or_descriptor_or_player_media(Stream, Base, Req, Opts) ->
+    case bridge_media_response(Stream, Base, Req, Opts) of
+        {ok, _Res} = OK ->
+            OK;
+        _ ->
+            case prefer_player_proxy(Base, Req, Opts) of
+                true ->
+                    player_media_response(Stream, Base, Req, Opts);
+                false ->
+                    descriptor_or_player_media(Stream, Base, Req, Opts)
+            end
+    end.
+
+bridge_media_response(Stream, Base, Req, Opts) ->
+    maybe
+        SDHash = hb_maps:get(<<"sd-hash">>, Stream, not_found, Opts),
+        true ?= is_binary(SDHash),
+        {ok, Start, End} ?= bridge_range(Stream, Base, Req, Opts),
+        {ok, Result} ?= hb_lbry_bridge:stream_range(SDHash, Start, End, Opts),
+        Body = hb_maps:get(<<"bytes">>, Result, Opts),
+        ActualEnd = hb_maps:get(<<"end">>, Result, Opts),
+        Total = stream_size(Stream, Opts),
+        Msg0 =
+            (cors_headers())#{
+                <<"status">> => 206,
+                <<"content-type">> =>
+                    hb_maps:get(
+                        <<"media-type">>,
+                        Stream,
+                        <<"application/octet-stream">>,
+                        Opts
+                    ),
+                <<"content-length">> => byte_size(Body),
+                <<"accept-ranges">> => <<"bytes">>,
+                <<"content-range">> => bridge_content_range(Start, ActualEnd, Total),
+                <<"x-odysee-media-source">> => <<"lbry-bridge">>,
+                <<"x-odysee-media-verification">> => <<"descriptor-range">>,
+                <<"sd-hash">> => hb_util:to_lower(SDHash),
+                <<"start">> => Start,
+                <<"end">> => ActualEnd,
+                <<"requested-end">> => hb_maps:get(<<"requested-end">>, Result, Opts),
+                <<"body">> => Body
+            },
+        Msg1 = put_optional({<<"byte-size">>, Total}, Msg0),
+        Msg2 = put_optional({<<"claim-id">>, hb_maps:get(<<"claim-id">>, Stream, not_found, Opts)}, Msg1),
+        {ok, put_optional({<<"filename">>, hb_maps:get(<<"source-name">>, Stream, not_found, Opts)}, Msg2)}
+    else
+        false -> {error, missing_sd_hash};
+        not_found -> {error, missing_sd_hash};
+        Error -> Error
+    end.
+
+bridge_range(Stream, Base, Req, Opts) ->
+    range_tuple(player_proxy_range(Stream, Base, Req, Opts)).
+
+range_tuple(<<"bytes=", Descriptor/binary>>) ->
+    case binary:split(Descriptor, <<"-">>) of
+        [StartBin, EndBin] ->
+            case {safe_int(StartBin), safe_int(EndBin)} of
+                {{ok, Start}, {ok, End}} when End >= Start ->
+                    {ok, Start, End};
+                _ ->
+                    {error, invalid_range}
+            end;
+        _ ->
+            {error, invalid_range}
+    end;
+range_tuple(_Range) ->
+    {error, invalid_range}.
+
+bridge_content_range(Start, End, Total) when is_integer(Total) ->
+    <<
+        "bytes ",
+        (integer_to_binary(Start))/binary,
+        "-",
+        (integer_to_binary(End))/binary,
+        "/",
+        (integer_to_binary(Total))/binary
+    >>;
+bridge_content_range(Start, End, _Total) ->
+    <<
+        "bytes ",
+        (integer_to_binary(Start))/binary,
+        "-",
+        (integer_to_binary(End))/binary,
+        "/*"
+    >>.
 
 prefer_player_proxy(Base, Req, Opts) ->
     player_proxy_enabled(Base, Req, Opts)
