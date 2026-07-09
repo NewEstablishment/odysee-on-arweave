@@ -10,6 +10,10 @@ import zlib from 'node:zlib';
 // maxmem sized for N=8192/r=16 (128*N*r ~= 16 MiB) with headroom.
 const LBRY_SCRYPT = { N: 8192, r: 16, p: 1, maxmem: 64 * 1024 * 1024 };
 
+// Upper bound on a decrypted/inflated wallet-sync payload. Real wallets are
+// well under this; it caps the zlib-bomb blast radius on untrusted input.
+const MAX_WALLET_BYTES = 32 * 1024 * 1024;
+
 // Mirror of lbry-sdk better_aes_decrypt (crypt.py): base64 -> `s:N:r:p:` prefix
 // -> scrypt(password, salt=IV, N,r,p) -> AES-256-CBC -> PKCS7 unpad -> zlib? No:
 // pack() zlib-compresses BEFORE encrypt, so decrypt output is zlib-compressed.
@@ -41,14 +45,24 @@ export function decryptWalletFile(password, encryptedB64) {
   const dec = crypto.createDecipheriv('aes-256-cbc', key, iv);
   const plain = Buffer.concat([dec.update(ct), dec.final()]);
   // Wallet.pack zlib-compresses before encrypting; the raw encryption primitive
-  // does not. Inflate only when the plaintext is zlib-framed (0x78 magic).
-  return plain[0] === 0x78 ? zlib.inflateSync(plain) : plain;
+  // does not. Inflate only when the plaintext is zlib-framed (0x78 magic), and
+  // cap the output: the attacker controls this ciphertext, so an uncapped
+  // inflateSync is a memory-exhaustion bomb (a small blob can inflate to GBs).
+  return plain[0] === 0x78
+    ? zlib.inflateSync(plain, { maxOutputLength: MAX_WALLET_BYTES })
+    : plain;
 }
 
 // PKCS8 secp256k1 PEM -> HyperBEAM secp256k1 JWK ({kty:EC, crv:secp256k1, x,y,d}).
+// Reject any other curve rather than relabel its coordinates as secp256k1: an
+// LBRY channel key is always secp256k1, and a mislabeled JWK would derive a
+// wrong/garbage identity downstream instead of failing here.
 export function channelPemToJwk(pem) {
   const key = crypto.createPrivateKey({ key: pem, format: 'pem' });
-  const jwk = key.export({ format: 'jwk' });          // {kty:'EC',crv:'secp256k1',x,y,d}
+  const jwk = key.export({ format: 'jwk' });          // {kty:'EC',crv,x,y,d}
+  if (jwk.kty !== 'EC' || jwk.crv !== 'secp256k1') {
+    throw new Error(`not a secp256k1 channel key: kty=${jwk.kty} crv=${jwk.crv}`);
+  }
   return JSON.stringify({ kty: 'EC', crv: 'secp256k1', x: jwk.x, y: jwk.y, d: jwk.d });
 }
 

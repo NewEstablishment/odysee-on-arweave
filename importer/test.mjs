@@ -32,3 +32,16 @@ for (const field of ['kty', 'crv', 'x', 'y', 'd']) {
 const vectorD = Buffer.from(vectorJwk.d, 'base64url').toString('hex');
 assert.equal(vectorD, vector.scalarHex, 'JS JWK.d decodes to the corpus scalar');
 console.log('OK: JS PEM->JWK matches the Erlang import->sign JWK field-for-field (one pipeline)');
+
+// A non-secp256k1 (here P-256) key must be REJECTED, not relabeled as
+// secp256k1 carrying the wrong curve's coordinates (which would derive a
+// garbage identity downstream).
+const p256Pem =
+  '-----BEGIN PRIVATE KEY-----\n' +
+  'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJ1PD+DNe3z+2yn/j\n' +
+  'oGuZdqtyhb5FE6J3HDXxv4/KNhyhRANCAARtzBQS07Y4Ah8HoY9FYlvbdw1QckRV\n' +
+  'X9StvtdoznD2dZOgPIl5sBf/wWyAGgSGme/C9tZPRKc9VqM8z+T/2e99\n' +
+  '-----END PRIVATE KEY-----\n';
+assert.throws(() => channelPemToJwk(p256Pem), /not a secp256k1/,
+  'a P-256 key must be rejected, not mislabeled secp256k1');
+console.log('OK: non-secp256k1 key rejected (no wrong-curve mislabeling)');

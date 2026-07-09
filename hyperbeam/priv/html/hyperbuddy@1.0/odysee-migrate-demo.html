@@ -1473,9 +1473,14 @@ async function nodeSignerFor(token){
   if(res.status!==200) return { status:res.status, signer:null };
   let signer=null;
   try{
-    const all=[...(await collectCommitters(await res.json()))];
     const srv=await serverAddr();
-    signer=all.filter(a=>a!==srv)[0]||null;
+    // Without the operator address we cannot exclude the node's own commitment,
+    // so we must not report a client signer (else the operator leaks in and a
+    // negative check could flash a vacuous green). Treat as inconclusive.
+    if(srv){
+      const all=[...(await collectCommitters(await res.json()))];
+      signer=all.filter(a=>a!==srv)[0]||null;
+    }
   }catch(e){}
   return { status:200, signer };
 }
