@@ -85,6 +85,19 @@ pem_to_jwk_matches_shared_vector_test() ->
     ?assertEqual(<<"TR_rBa6-7FSfQGwoPYGp-43dVZJfzHfzf0wBO7M2vWE">>,
         hb_maps:get(<<"d">>, Jwk, undefined, #{})).
 
+%% @doc The address the node derives for the first corpus key is pinned to the
+%% literal the migrate demo hardcodes as `EXPECTED_CHANNEL_ADDR'
+%% (priv/html/hyperbuddy@1.0/odysee-migrate-demo.html). The demo compares the
+%% node's committer against that constant, so if the fixture key or
+%% `ar_wallet:to_address' derivation ever changes, this test goes red instead of
+%% the demo silently showing a false "different identity". Keep the two in sync.
+migrated_address_matches_demo_constant_test() ->
+    [{Pem, _} | _] = fixtures(),
+    Address = hb_util:human_id(
+        ar_wallet:to_address(ar_wallet:from_json(lbry_channel_key:pem_to_jwk(Pem)))
+    ),
+    ?assertEqual(<<"expBolS3uq6ZMLDsIoV47Smzo7Ku4cqDBad241d68EU">>, Address).
+
 %% @doc A non-secp256k1 PEM is rejected rather than silently imported.
 non_secp256k1_key_rejected_test() ->
     {ok, PrimePem} = generate_prime256v1_pem(),

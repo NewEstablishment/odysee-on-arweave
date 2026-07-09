@@ -218,11 +218,11 @@ async function collectCommitters(obj, acc, visited){
 // Ask the node to commit a request for the given session, then read back the
 // CLIENT committer (node operator excluded). Returns { status, signer }.
 async function nodeSignerFor(token){
-  const res = await fetch(BASE+"/commitments?body=migrate",
-    { headers:{ "x-odysee-auth-token":token, accept:"application/json" }, credentials:"same-origin" });
-  if(res.status!==200) return { status:res.status, signer:null };
   let signer=null;
   try{
+    const res = await fetch(BASE+"/commitments?body=migrate",
+      { headers:{ "x-odysee-auth-token":token, accept:"application/json" }, credentials:"same-origin" });
+    if(res.status!==200) return { status:res.status, signer:null };
     const srv=await serverAddr();
     // Without the operator address we cannot exclude the node's own commitment,
     // so we must not report a client signer (else the operator leaks in and a
@@ -231,8 +231,8 @@ async function nodeSignerFor(token){
       const all=[...(await collectCommitters(await res.json()))];
       signer=all.filter(a=>a!==srv)[0]||null;
     }
-  }catch(e){}
-  return { status:200, signer };
+    return { status:200, signer };
+  }catch(e){ return { status:0, signer:null }; }  // node death mid-flow -> inconclusive
 }
 
 // --- pipeline rendering ---
