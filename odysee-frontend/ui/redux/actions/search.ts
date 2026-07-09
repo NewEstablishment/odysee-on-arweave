@@ -95,6 +95,7 @@ const recsysFyp = {
 // ****************************************************************************
 // ****************************************************************************
 type SearchOptions = {
+  [key: string]: any;
   size?: number;
   from?: number;
   related_to?: string;
@@ -299,12 +300,41 @@ const orderedHyperbeamSearchUris = (
   return orderedUris.length ? orderedUris : fallbackUris;
 };
 
-const hyperbeamSearchParams = (query: string, searchOptions: SearchOptions) => ({
-  ...searchOptions,
-  s: query,
-  size: searchOptions.size,
-  from: searchOptions.from,
-});
+const HYPERBEAM_MEDIA_SEARCH_OPTIONS = [
+  SEARCH_OPTIONS.MEDIA_AUDIO,
+  SEARCH_OPTIONS.MEDIA_VIDEO,
+  SEARCH_OPTIONS.MEDIA_TEXT,
+  SEARCH_OPTIONS.MEDIA_IMAGE,
+  SEARCH_OPTIONS.MEDIA_APPLICATION,
+];
+
+const durationMinutesToSeconds = (value: any) => {
+  if (value === undefined || value === null || value === '') return value;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? Math.max(0, Math.round(numberValue * 60)) : value;
+};
+
+const hyperbeamSearchParams = (query: string, searchOptions: SearchOptions) => {
+  const params = {
+    ...searchOptions,
+    s: query,
+    size: searchOptions.size,
+    from: searchOptions.from,
+  };
+  const claimType = String(searchOptions[SEARCH_OPTIONS.CLAIM_TYPE] || '');
+  const fileOnly = claimType === SEARCH_OPTIONS.INCLUDE_FILES;
+
+  if (fileOnly) {
+    params[SEARCH_OPTIONS.MIN_DURATION] = durationMinutesToSeconds(searchOptions[SEARCH_OPTIONS.MIN_DURATION]);
+    params[SEARCH_OPTIONS.MAX_DURATION] = durationMinutesToSeconds(searchOptions[SEARCH_OPTIONS.MAX_DURATION]);
+  } else {
+    HYPERBEAM_MEDIA_SEARCH_OPTIONS.forEach((option) => delete params[option]);
+    delete params[SEARCH_OPTIONS.MIN_DURATION];
+    delete params[SEARCH_OPTIONS.MAX_DURATION];
+  }
+
+  return params;
+};
 
 const uniqueUris = (uris: Array<string>) => Array.from(new Set(uris.filter(Boolean)));
 
@@ -327,7 +357,7 @@ export const doSearch =
     // If we have already searched for something, we don't need to do anything
     const urisForQuery = makeSelectSearchUrisForQuery(queryWithOptions)(state);
 
-    if (!hyperbeamSearchEnabled && urisForQuery && !!urisForQuery.length) {
+    if (urisForQuery && !!urisForQuery.length) {
       if (!size || !from || from + size < urisForQuery.length) {
         return;
       }

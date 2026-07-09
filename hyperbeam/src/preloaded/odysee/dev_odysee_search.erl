@@ -223,7 +223,7 @@ search_item_key(Item, _Opts) ->
     hb_util:bin(Item).
 
 sort_search_items(Items, Params, Opts) ->
-    case normalize_sorts(list_value(value_or(first_value([<<"sort">>, <<"sort_by">>, <<"sort-by">>, <<"order_by">>, <<"order-by">>, <<"order">>], Params, Opts), [<<"release_time">>]))) of
+    case normalize_sorts(list_value(value_or(first_value([<<"sort">>, <<"sort_by">>, <<"sort-by">>, <<"order_by">>, <<"order-by">>, <<"order">>], Params, Opts), [<<"release_time">>])), Params, Opts) of
         [Sort | _] -> sort_search_items_by(Sort, Items, Opts);
         [] -> Items
     end.
@@ -231,6 +231,10 @@ sort_search_items(Items, Params, Opts) ->
 sort_search_items_by(<<"release_time:asc">>, Items, Opts) ->
     lists:sort(fun(A, B) -> item_time(A, Opts) =< item_time(B, Opts) end, Items);
 sort_search_items_by(<<"release_time:desc">>, Items, Opts) ->
+    lists:sort(fun(A, B) -> item_time(A, Opts) >= item_time(B, Opts) end, Items);
+sort_search_items_by(<<"created_at:asc">>, Items, Opts) ->
+    lists:sort(fun(A, B) -> item_time(A, Opts) =< item_time(B, Opts) end, Items);
+sort_search_items_by(<<"created_at:desc">>, Items, Opts) ->
     lists:sort(fun(A, B) -> item_time(A, Opts) >= item_time(B, Opts) end, Items);
 sort_search_items_by(_Sort, Items, _Opts) ->
     Items.
@@ -436,7 +440,7 @@ filters(Params, Opts) ->
         enum_filter(<<"media_type">>, media_type_value(media_type_param(Params, Opts))),
         enum_filter(<<"content_type">>, content_type_value(first_value([<<"content_type">>, <<"content-type">>, <<"contentType">>], Params, Opts))),
         enum_filter(<<"language">>, first_value([<<"language">>], Params, Opts)),
-        nsfw_filter(first_value([<<"nsfw">>], Params, Opts)),
+        nsfw_filter(Params, Opts),
         free_filter(first_value([<<"free_only">>, <<"free-only">>], Params, Opts)),
         tag_filter(<<"tags">>, first_value([<<"any_tags">>, <<"any-tags">>], Params, Opts), <<"OR">>),
         tag_filter(<<"tags">>, first_value([<<"all_tags">>, <<"all-tags">>], Params, Opts), <<"AND">>),
@@ -481,10 +485,35 @@ claim_type_one(<<"collection">>) -> <<"claimlist">>;
 claim_type_one(<<"collections">>) -> <<"claimlist">>;
 claim_type_one(Value) -> hb_util:bin(Value).
 
+claim_types(Params, Opts) ->
+    case claim_type_value(first_value([<<"claim_type">>, <<"claim-type">>, <<"claimType">>], Params, Opts)) of
+        not_found -> not_found;
+        Types -> Types
+    end.
+
+stream_only_search(Params, Opts) ->
+    case claim_types(Params, Opts) of
+        not_found ->
+            true;
+        Types ->
+            lists:member(<<"stream">>, Types) andalso not lists:member(<<"channel">>, Types)
+    end.
+
+channel_only_search(Params, Opts) ->
+    case claim_types(Params, Opts) of
+        [<<"channel">>] -> true;
+        _ -> false
+    end.
+
 media_type_param(Params, Opts) ->
-    case first_value([<<"stream_types">>, <<"stream-types">>, <<"media_type">>, <<"media-type">>, <<"mediaType">>], Params, Opts) of
-        not_found -> media_type_booleans(Params, Opts);
-        Value -> Value
+    case stream_only_search(Params, Opts) of
+        false ->
+            not_found;
+        true ->
+            case first_value([<<"stream_types">>, <<"stream-types">>, <<"media_type">>, <<"media-type">>, <<"mediaType">>], Params, Opts) of
+                not_found -> media_type_booleans(Params, Opts);
+                Value -> Value
+            end
     end.
 
 media_type_booleans(Params, Opts) ->
@@ -533,12 +562,15 @@ content_type_value(<<"application/json">>) ->
 content_type_value(Value) ->
     Value.
 
-nsfw_filter(not_found) ->
-    [];
-nsfw_filter(Value) ->
-    case truthy(Value) of
-        true -> [<<"nsfw = 1">>];
-        false -> [<<"nsfw = 0">>]
+nsfw_filter(Params, Opts) ->
+    case first_value([<<"include_mature">>, <<"include-mature">>, <<"includeMature">>, <<"nsfw">>], Params, Opts) of
+        not_found ->
+            [<<"nsfw = 0">>];
+        Value ->
+            case truthy(Value) of
+                true -> [];
+                false -> [<<"nsfw = 0">>]
+            end
     end.
 
 free_filter(not_found) ->
@@ -550,10 +582,15 @@ free_filter(Value) ->
     end.
 
 duration_filters(Params, Opts) ->
-    lists:flatten([
-        range_filter(<<"duration">>, <<">=">>, first_value([<<"min_duration">>, <<"min-duration">>, <<"duration_gte">>, <<"duration-gte">>], Params, Opts)),
-        range_filter(<<"duration">>, <<"<=">>, first_value([<<"max_duration">>, <<"max-duration">>, <<"duration_lte">>, <<"duration-lte">>], Params, Opts))
-    ]).
+    case stream_only_search(Params, Opts) of
+        false ->
+            [];
+        true ->
+            lists:flatten([
+                range_filter(<<"duration">>, <<">=">>, first_value([<<"min_duration">>, <<"min-duration">>, <<"duration_gte">>, <<"duration-gte">>], Params, Opts)),
+                range_filter(<<"duration">>, <<"<=">>, first_value([<<"max_duration">>, <<"max-duration">>, <<"duration_lte">>, <<"duration-lte">>], Params, Opts))
+            ])
+    end.
 
 range_filter(_Field, _Op, not_found) ->
     [];
@@ -563,7 +600,7 @@ range_filter(Field, Op, Value) ->
 sorts(Params, Opts) ->
     case first_value([<<"sort">>, <<"sort_by">>, <<"sort-by">>, <<"order_by">>, <<"order-by">>, <<"order">>], Params, Opts) of
         not_found -> default_sorts(Params, Opts);
-        Value -> normalize_sorts(list_value(Value))
+        Value -> normalize_sorts(list_value(Value), Params, Opts)
     end.
 
 default_sorts(Params, Opts) ->
@@ -600,29 +637,43 @@ default_popularity_sorts() ->
     ].
 
 normalize_sorts(Values) ->
-    lists:filtermap(fun normalize_sort/1, Values).
+    normalize_sorts(Values, #{}, #{}).
+
+normalize_sorts(Values, Params, Opts) ->
+    lists:filtermap(fun(Value) -> normalize_sort(Value, Params, Opts) end, Values).
 
 normalize_sort(Value) ->
+    normalize_sort(Value, #{}, #{}).
+
+normalize_sort(Value, Params, Opts) ->
     Bin = hb_util:bin(Value),
     case Bin of
         <<"trending_group">> -> {true, <<"search_rank:desc">>};
         <<"trending_mixed">> -> {true, <<"search_rank:desc">>};
-        <<"-", Field/binary>> -> {true, <<(sort_field(Field))/binary, ":desc">>};
-        <<"^", Field/binary>> -> {true, <<(sort_field(Field))/binary, ":asc">>};
-        <<"+", Field/binary>> -> {true, <<(sort_field(Field))/binary, ":asc">>};
+        <<"-", Field/binary>> -> {true, <<(sort_field(Field, Params, Opts))/binary, ":desc">>};
+        <<"^", Field/binary>> -> {true, <<(sort_field(Field, Params, Opts))/binary, ":asc">>};
+        <<"+", Field/binary>> -> {true, <<(sort_field(Field, Params, Opts))/binary, ":asc">>};
         <<>> -> false;
-        Field -> {true, <<(sort_field(Field))/binary, ":desc">>}
+        Field -> {true, <<(sort_field(Field, Params, Opts))/binary, ":desc">>}
     end.
 
-sort_field(<<"creation_timestamp">>) -> <<"created_at">>;
-sort_field(<<"activation_height">>) -> <<"created_at">>;
-sort_field(<<"amount">>) -> <<"effective_amount">>;
-sort_field(<<"effective_amount">>) -> <<"effective_amount">>;
-sort_field(<<"release_time">>) -> <<"release_time">>;
-sort_field(<<"created_at">>) -> <<"created_at">>;
-sort_field(<<"transaction_time">>) -> <<"transaction_time">>;
-sort_field(<<"name">>) -> <<"name">>;
-sort_field(Field) -> Field.
+sort_field(Field) ->
+    sort_field(Field, #{}, #{}).
+
+sort_field(<<"release_time">>, Params, Opts) ->
+    case channel_only_search(Params, Opts) of
+        true -> <<"created_at">>;
+        false -> <<"release_time">>
+    end;
+sort_field(<<"creation_timestamp">>, _Params, _Opts) -> <<"created_at">>;
+sort_field(<<"activation_height">>, _Params, _Opts) -> <<"created_at">>;
+sort_field(<<"amount">>, _Params, _Opts) -> <<"effective_amount">>;
+sort_field(<<"effective_amount">>, _Params, _Opts) -> <<"effective_amount">>;
+sort_field(<<"created_at">>, _Params, _Opts) -> <<"created_at">>;
+sort_field(<<"transaction_time">>, _Params, _Opts) -> <<"transaction_time">>;
+sort_field(<<"name">>, _Params, _Opts) -> <<"name">>;
+sort_field(Field, _Params, _Opts) ->
+    Field.
 
 enum_filter(_Field, not_found) ->
     [];
@@ -659,13 +710,16 @@ time_filter(Field, Value) ->
 
 release_time_filter(Params, Opts) ->
     case first_value([<<"release_time">>, <<"release-time">>], Params, Opts) of
-        not_found -> time_filter_value(first_value([<<"time_filter">>, <<"time-filter">>], Params, Opts));
+        not_found -> time_filter_value(time_filter_field(Params, Opts), first_value([<<"time_filter">>, <<"time-filter">>], Params, Opts));
         Value -> time_filter(<<"release_time">>, Value)
     end.
 
 time_filter_value(not_found) ->
+    time_filter_value(<<"release_time">>, not_found).
+
+time_filter_value(_Field, not_found) ->
     [];
-time_filter_value(Value) ->
+time_filter_value(Field, Value) ->
     Now = erlang:system_time(second),
     Cutoff =
         case hb_util:bin(Value) of
@@ -684,7 +738,13 @@ time_filter_value(Value) ->
         end,
     case Cutoff of
         not_found -> [];
-        _ -> [<<"release_time >= ", (integer_to_binary(Cutoff))/binary>>]
+        _ -> [<<Field/binary, " >= ", (integer_to_binary(Cutoff))/binary>>]
+    end.
+
+time_filter_field(Params, Opts) ->
+    case channel_only_search(Params, Opts) of
+        true -> <<"created_at">>;
+        false -> <<"release_time">>
     end.
 
 join_filters([]) -> not_found;
@@ -1000,6 +1060,37 @@ meili_search_body_test() ->
     ?assertNotEqual(nomatch, binary:match(Filter, <<"fee = 0">>)),
     ?assertNotEqual(nomatch, binary:match(Filter, <<"duration >= 30">>)),
     ?assertNotEqual(nomatch, binary:match(Filter, <<"duration <= 300">>)).
+
+channel_search_ignores_file_only_filters_test() ->
+    Body = meili_search_body(#{
+        <<"s">> => <<"test">>,
+        <<"claimType">> => <<"channel">>,
+        <<"video">> => true,
+        <<"min_duration">> => 60,
+        <<"max_duration">> => 600,
+        <<"time_filter">> => <<"today">>,
+        <<"sort_by">> => <<"release_time">>,
+        <<"nsfw">> => true
+    }, #{}),
+    Filter = maps:get(<<"filter">>, Body),
+    ?assertNotEqual(nomatch, binary:match(Filter, <<"claim_type = \"channel\"">>)),
+    ?assertEqual(nomatch, binary:match(Filter, <<"media_type">>)),
+    ?assertEqual(nomatch, binary:match(Filter, <<"duration">>)),
+    ?assertEqual(nomatch, binary:match(Filter, <<"nsfw">>)),
+    ?assertNotEqual(nomatch, binary:match(Filter, <<"created_at >= ">>)),
+    ?assertEqual([<<"created_at:desc">>], maps:get(<<"sort">>, Body)).
+
+mixed_search_ignores_stale_media_filters_test() ->
+    Body = meili_search_body(#{
+        <<"s">> => <<"test">>,
+        <<"claimType">> => <<"file,channel">>,
+        <<"video">> => true,
+        <<"nsfw">> => false
+    }, #{}),
+    Filter = maps:get(<<"filter">>, Body),
+    ?assertNotEqual(nomatch, binary:match(Filter, <<"claim_type IN [\"stream\", \"channel\"]">>)),
+    ?assertEqual(nomatch, binary:match(Filter, <<"media_type">>)),
+    ?assertNotEqual(nomatch, binary:match(Filter, <<"nsfw = 0">>)).
 
 normalize_search_response_test() ->
     Msg = #{
