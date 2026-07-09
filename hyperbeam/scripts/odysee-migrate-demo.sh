@@ -110,10 +110,22 @@ Opts = hb_http_server:get_opts(#{ <<"http-server">> => ServerID }),
     ),
 Imported = hb_maps:get(<<"imported">>, ImportResult, undefined, #{}),
 
+%% import_wallets drops failed registrations and still returns {ok, ...}, so an
+%% empty/absent `imported' means the boot import did NOT bind the migrated key.
+%% Fail loudly rather than announce an identity the node cannot actually sign as.
+case Imported of
+    [MigratedAddress] -> ok;
+    _ ->
+        io:format(standard_error,
+            "FATAL: boot import did not register ~s (got ~p); aborting.~n",
+            [MigratedAddress, Imported]),
+        halt(1)
+end,
+
 io:format("~nOdysee migrate demo is running.~n", []),
 io:format("  Open: ~s~s~n", [Node, <<"~hyperbuddy@1.0/odysee-migrate-demo.html">>]),
 io:format("  account-one now signs as its migrated channel identity: ~s~n", [MigratedAddress]),
-io:format("  boot import result: ~p~n~n", [Imported]).
+io:format("  boot import confirmed: ~p~n~n", [Imported]).
 ERL
 )
 

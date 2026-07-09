@@ -4,21 +4,21 @@
       "file": "empty-single-raw.b64",
       "password": "",
       "expectKeys": [
-        "4fa4042a595a8d01059f12f068317692503b94bd10386d4ba2f042359f66a717"
+        "2d52cf24071c28c1269a3c238cd537cad949ae80a2787af7c86820f4adc8b2a5"
       ]
     },
     {
       "file": "empty-single-zlib.b64",
       "password": "",
       "expectKeys": [
-        "c74a23a9682b22792ad9d38ba310402376a097efb5aa70bda8260f13b5c6575f"
+        "9725ffb12f40147dd161c81344cd3dfd5045c34fd408dbe6e676eb8410ef1343"
       ]
     },
     {
       "file": "password-single.b64",
       "password": "hunter2",
       "expectKeys": [
-        "35802c3277a497578b15485dcf92bd2dc375284dd05a4aeff95a9e893a5ce9da"
+        "ae52017e5142d4cc4b1d8059ce78d7e9d8e1754c67720d08ad48d489ecc4ca27"
       ]
     },
     {
@@ -30,9 +30,9 @@
       "file": "empty-multi.b64",
       "password": "",
       "expectKeys": [
-        "c90d58ea466e36cdeee580b7d44798db2c140840fe4e181830d5bfb19a2df224",
-        "09e492b73694e819871a9fc4c30b82e7438e886152265d883973c0d1484daace",
-        "93ff4a58292ce2fb9c8d9952ac34a92b0537f0efe5f833464696ecf6d1e83cd9"
+        "8d08d680ee5111771e1f4c0e4f8baacb3564ee69985a0a7b6d66fd21a7581f4c",
+        "54835329e0723d3eecb223ade5fbd4088df58a9abd49f0ccce5bb8c875adac97",
+        "62f2a27fde5dd3b7525a1a8fde304e2a81a12b8163b3f6dad8a25a62ffcd574d"
       ]
     },
     {
@@ -52,6 +52,16 @@
     },
     {
       "file": "bad-cert.b64",
+      "password": "",
+      "expectError": true
+    },
+    {
+      "file": "accounts-not-array.b64",
+      "password": "",
+      "expectError": true
+    },
+    {
+      "file": "certs-array.b64",
       "password": "",
       "expectError": true
     }

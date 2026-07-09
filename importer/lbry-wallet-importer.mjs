@@ -18,7 +18,15 @@ const MAX_WALLET_BYTES = 32 * 1024 * 1024;
 // -> scrypt(password, salt=IV, N,r,p) -> AES-256-CBC -> PKCS7 unpad -> zlib? No:
 // pack() zlib-compresses BEFORE encrypt, so decrypt output is zlib-compressed.
 export function decryptWalletFile(password, encryptedB64) {
-  const data = Buffer.from(encryptedB64.toString(), 'base64');
+  const b64 = encryptedB64.toString();
+  // Bound the untrusted input before allocating: a base64 blob decodes to ~3/4
+  // its length, so cap the encoded size so neither the decode nor the raw
+  // plaintext can exceed MAX_WALLET_BYTES (the inflate path is capped
+  // separately). Real wallet-sync payloads are orders of magnitude smaller.
+  if (b64.length > Math.ceil((MAX_WALLET_BYTES * 4) / 3) + 64) {
+    throw new Error('wallet-sync blob exceeds maximum size');
+  }
+  const data = Buffer.from(b64, 'base64');
   const parts = []; let i = 0, start = 0;
   // Header is `s:N:r:p:` before the IV+ciphertext; scan only that far. A blob
   // with fewer than 4 colons is not a wallet-sync payload -- reject it rather
@@ -44,6 +52,7 @@ export function decryptWalletFile(password, encryptedB64) {
     { N: LBRY_SCRYPT.N, r: LBRY_SCRYPT.r, p: LBRY_SCRYPT.p, maxmem: LBRY_SCRYPT.maxmem });
   const dec = crypto.createDecipheriv('aes-256-cbc', key, iv);
   const plain = Buffer.concat([dec.update(ct), dec.final()]);
+  if (plain.length > MAX_WALLET_BYTES) throw new Error('wallet-sync payload exceeds maximum size');
   // Wallet.pack zlib-compresses before encrypting; the raw encryption primitive
   // does not. Inflate only when the plaintext is zlib-framed (0x78 magic), and
   // cap the output: the attacker controls this ciphertext, so an uncapped
@@ -66,18 +75,27 @@ export function channelPemToJwk(pem) {
   return JSON.stringify({ kty: 'EC', crv: 'secp256k1', x: jwk.x, y: jwk.y, d: jwk.d });
 }
 
-// Returns the channel signing keys as PEM strings. A wallet with no channels
-// legitimately yields []; anything present that is not a PEM string (wrong
-// shape, numeric/object cert value) is rejected rather than passed downstream
-// to surface as an opaque failure later.
+const isPlainObject = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+
+// Returns the channel signing keys as PEM strings. Only a STRUCTURALLY VALID
+// wallet with an empty certificate map yields []; a malformed shape (wallet not
+// an object, `accounts` not an array, an account not an object, `certificates`
+// not a plain map, or a cert value that is not a PEM string) is rejected rather
+// than silently treated as "no channels" or passed downstream to fail opaquely.
 export function extractChannelKeys(password, encryptedB64) {
   const wallet = JSON.parse(decryptWalletFile(password, encryptedB64).toString());
-  const accounts = Array.isArray(wallet.accounts) ? wallet.accounts : [];
+  if (!isPlainObject(wallet)) throw new Error('malformed wallet: expected an object');
+  if (wallet.accounts !== undefined && !Array.isArray(wallet.accounts)) {
+    throw new Error('malformed wallet: `accounts` must be an array');
+  }
   const out = [];
-  for (const acct of accounts) {
-    const certs = acct && typeof acct.certificates === 'object' && acct.certificates
-      ? acct.certificates : {};
-    for (const pem of Object.values(certs)) {
+  for (const acct of wallet.accounts || []) {
+    if (!isPlainObject(acct)) throw new Error('malformed wallet: account must be an object');
+    if (acct.certificates === undefined) continue;
+    if (!isPlainObject(acct.certificates)) {
+      throw new Error('malformed wallet: `certificates` must be an object map');
+    }
+    for (const pem of Object.values(acct.certificates)) {
       if (typeof pem !== 'string' || !pem.includes('-----BEGIN')) {
         throw new Error('malformed certificate entry: expected a PEM string');
       }

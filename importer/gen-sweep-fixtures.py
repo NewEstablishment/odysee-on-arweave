@@ -96,6 +96,18 @@ def main():
     write("bad-cert.b64", better_aes_encrypt("", json.dumps(bad_wallet).encode()))
     cases.append({"file": "bad-cert.b64", "password": "", "expectError": True})
 
+    # 10. `accounts` is an object, not an array -> malformed shape, reject
+    #     (must NOT be silently treated as "no channels").
+    write("accounts-not-array.b64", better_aes_encrypt("", json.dumps(
+        {"version": 1, "name": "testwallet", "accounts": {}}).encode()))
+    cases.append({"file": "accounts-not-array.b64", "password": "", "expectError": True})
+
+    # 11. `certificates` is an array, not an object map -> malformed shape, reject.
+    write("certs-array.b64", better_aes_encrypt("", json.dumps(
+        {"version": 1, "name": "testwallet",
+         "accounts": [{"name": "Account #1", "certificates": []}]}).encode()))
+    cases.append({"file": "certs-array.b64", "password": "", "expectError": True})
+
     with open(os.path.join(OUT, "manifest.json"), "w") as f:
         json.dump({"cases": cases}, f, indent=2)
     print(f"wrote {len(cases)} cases to {OUT}")

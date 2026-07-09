@@ -67,6 +67,24 @@ distinct_keys_migrate_to_distinct_wallets_test() ->
         ],
     ?assertEqual(length(Addresses), length(lists:usort(Addresses))).
 
+%% @doc Pin the FULL JWK (not just the private scalar) for the first corpus key
+%% to the exact field values the JS importer's cross-check also pins
+%% (importer/fixture-erlang-corpus-vector.json). If either side's PEM->JWK ever
+%% changes its public-point (x/y) or scalar (d) encoding, one of the two suites
+%% goes red instead of both silently agreeing with a stale fixture -- closing the
+%% drift gap where the JS test compares only against a captured vector.
+pem_to_jwk_matches_shared_vector_test() ->
+    [{Pem, _} | _] = fixtures(),
+    Jwk = hb_json:decode(lbry_channel_key:pem_to_jwk(Pem)),
+    ?assertEqual(<<"EC">>, hb_maps:get(<<"kty">>, Jwk, undefined, #{})),
+    ?assertEqual(<<"secp256k1">>, hb_maps:get(<<"crv">>, Jwk, undefined, #{})),
+    ?assertEqual(<<"3Z3aeC9cJsTB-IkTiJCuyFFtlT14QLv4D7gPmQwzqmo">>,
+        hb_maps:get(<<"x">>, Jwk, undefined, #{})),
+    ?assertEqual(<<"3iADF1Tzqyz9iWZa65oHz1EhHqK6tRjm_3I3mgjRqSk">>,
+        hb_maps:get(<<"y">>, Jwk, undefined, #{})),
+    ?assertEqual(<<"TR_rBa6-7FSfQGwoPYGp-43dVZJfzHfzf0wBO7M2vWE">>,
+        hb_maps:get(<<"d">>, Jwk, undefined, #{})).
+
 %% @doc A non-secp256k1 PEM is rejected rather than silently imported.
 non_secp256k1_key_rejected_test() ->
     {ok, PrimePem} = generate_prime256v1_pem(),

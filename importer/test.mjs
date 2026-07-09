@@ -15,9 +15,12 @@ console.log('OK: blob -> decrypt -> PEM -> JWK preserves the channel key byte-fo
 // Cross-implementation join: this PEM->JWK must reproduce, field-for-field, the
 // FULL JWK that the proven Erlang import->sign path consumes for the same PEM.
 // `erlangJwk` is the verbatim `lbry_channel_key:pem_to_jwk` output captured from
-// the Erlang module; comparing every field (not just the private scalar) is
-// what makes "the JS decrypt is a drop-in upstream of the Erlang
-// import->sign" a measured fact rather than an assumption:
+// the Erlang module. The SAME field values are pinned on the Erlang side by
+// hb_lbry_channel_key_test:pem_to_jwk_matches_shared_vector_test, so if either
+// implementation's encoding drifts, one of the two suites goes red rather than
+// both silently agreeing with a stale fixture. Comparing every field (not just
+// the private scalar) is what makes "the JS decrypt is a drop-in upstream of the
+// Erlang import->sign" a measured fact rather than an assumption:
 // blob -> (JS) decrypt -> PEM -> JWK == (Erlang) JWK -> import -> sign.
 // (JSON key ORDER differs between the two emitters, so compare parsed fields,
 // not the raw string.)
