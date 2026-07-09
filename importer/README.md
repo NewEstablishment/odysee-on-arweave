@@ -9,9 +9,12 @@ password-blind; it only ever receives the JWK. Run `node test.mjs`.
    own encrypted wallet-sync output (`fixture-wallet-empty-pw.b64`); the migrated
    scalar is byte-for-byte the original channel key.
 2. **JS JWK == Erlang codec JWK** — this module's `channelPemToJwk` reproduces,
-   byte-for-byte, the JWK that `lbry_channel_key:pem_to_jwk` produces for the
-   same PEM (`fixture-erlang-corpus-vector.json`, the first entry of the Erlang
-   migration corpus in `hyperbeam/src/core/include/lbry_test_keys.hrl`).
+   field-for-field (`kty`/`crv`/`x`/`y`/`d`; JSON key order differs between the
+   emitters), the JWK that `lbry_channel_key:pem_to_jwk` produces for the same
+   PEM. The comparison is against `erlangJwk` in
+   `fixture-erlang-corpus-vector.json` — the verbatim Erlang output captured from
+   the module (first entry of the migration corpus in
+   `hyperbeam/src/core/include/lbry_test_keys.hrl`).
 3. **JWK -> import -> sign** — that exact JWK, fed to `~secret@1.0/import` keyed
    to an account, makes the account's sessions sign with the migrated channel
    identity (proven in `hb_odysee_auth_test:migration_imports_real_lbry_channel_keys_test`).

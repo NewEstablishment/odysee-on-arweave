@@ -1444,6 +1444,10 @@ async function serverAddr(){
 // Collect every committer reachable from a response. The JSON codec lifts
 // nested sub-messages to `<id>+link' refs, and the client's commitment lives on
 // a linked sub-message — so we recurse inline maps AND follow each link once.
+// NOTE: HyperBEAM currently tags the hosted wallet's commitment (even a
+// secp256k1 one) with the httpsig type `rsa-pss-sha512`; this filter matches
+// that label, the same one the Erlang client_commitment_signers helper uses. If
+// the node ever tags secp256k1 commitments with a truthful type, widen this.
 async function collectCommitters(obj, acc, visited){
   acc = acc || new Set(); visited = visited || new Set();
   if(obj && typeof obj==="object"){

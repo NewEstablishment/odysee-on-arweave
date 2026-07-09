@@ -19,8 +19,14 @@ for (const c of manifest.cases) {
   const blob = readFileSync(new URL(`./fixtures/${c.file}`, import.meta.url));
   const label = `${c.file} (pw=${JSON.stringify(c.password)})`;
   if (c.expectError) {
-    assert.throws(() => extractChannelKeys(c.password, blob), `${label}: expected rejection`);
-    console.log(`OK  reject   ${label}`);
+    // Assert it throws AND capture the reason, so a reject case can never pass
+    // vacuously (a string 2nd arg to assert.throws is the message, not a
+    // matcher). We also assert no key ever slips through on the failure path.
+    let threw = null;
+    try { extractChannelKeys(c.password, blob); }
+    catch (e) { threw = e; }
+    assert.ok(threw, `${label}: expected rejection, but it returned`);
+    console.log(`OK  reject   ${label} -> ${threw.message.split('\n')[0].slice(0, 60)}`);
   } else {
     const got = scalarsOf(extractChannelKeys(c.password, blob));
     const want = [...c.expectKeys].sort();
