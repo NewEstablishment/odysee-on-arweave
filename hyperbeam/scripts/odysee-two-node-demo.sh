@@ -71,14 +71,19 @@ NodeARemoteStore = #{
     <<"verify-remote-read">> => true,
     <<"local-store">> => [NodeALocalStore]
 },
+NodeAWallet = ar_wallet:new(),
+NodeAAddress = hb_util:human_id(ar_wallet:to_address(NodeAWallet)),
 NodeA = hb_http_server:start_node(#{
     <<"port">> => NodeAPort,
     <<"store">> => [NodeALocalStore, NodeARemoteStore],
-    <<"force-signed">> => false
+    <<"force-signed">> => false,
+    <<"priv-wallet">> => NodeAWallet,
+    <<"cache-writers">> => [NodeAAddress]
 }),
 
 io:format("~nOdysee two-node demo is running.~n", []),
 io:format("  Node A edge/cache: ~s~n", [NodeA]),
+io:format("  Node A trusted cache-writer address: ~s~n", [NodeAAddress]),
 io:format("  Node B odysee source: ~s~n", [NodeB]),
 io:format("  Verification: Node A verifies Node B native commitments before caching.~n", []),
 io:format("~nFrontend env:~n", []),

@@ -10,7 +10,6 @@ export const HYPERBEAM_DEVICE = {
   comment: '~odysee-comment@1.0',
   file: '~odysee-file@1.0',
   fileReaction: '~odysee-file-reaction@1.0',
-  productEvents: '~odysee-product-events@1.0',
   reaction: '~odysee-reaction@1.0',
   search: '~odysee-search@1.0',
   stream: '~odysee-stream@1.0',
