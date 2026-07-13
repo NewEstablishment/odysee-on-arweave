@@ -27,13 +27,15 @@
 %% @doc Cryptographically sign (claim ownership of) a v2 transaction.
 %% Used in tests and by the handler of the POST /unsigned_tx endpoint, which is
 %% disabled by default.
-sign(TX, {PrivKey, PubKey = {KeyType, Owner}}) ->
+sign(TX, Wallet = {PrivKey, PubKey = {KeyType, Owner}}) ->
+    ok = ar_wallet:validate_signing_wallet(Wallet),
     TX2 = TX#tx{ owner = Owner, signature_type = KeyType },
     TX3 = TX2#tx{ owner_address = get_owner_address(TX2) },
     SignatureDataSegment = generate_signature_data_segment(TX3),
     sign(TX3, PrivKey, PubKey, SignatureDataSegment).
 
 sign(TX, PrivKey, PubKey = {KeyType, Owner}) ->
+    ok = ar_wallet:validate_signing_wallet({PrivKey, PubKey}),
     TX2 = TX#tx{ owner = Owner, signature_type = KeyType },
     TX3 = TX2#tx{ owner_address = get_owner_address(TX2) },
     SignatureDataSegment = generate_signature_data_segment(TX3),
@@ -42,10 +44,12 @@ sign(TX, PrivKey, PubKey = {KeyType, Owner}) ->
 %% @doc Cryptographically sign (claim ownership of) a v1 transaction.
 %% Used in tests and by the handler of the POST /unsigned_tx endpoint, which is
 %% disabled by default.
-sign_v1(TX, {PrivKey, PubKey = {_, Owner}}) ->
+sign_v1(TX, Wallet = {PrivKey, PubKey = {_, Owner}}) ->
+    ok = ar_wallet:validate_signing_wallet(Wallet),
     sign(TX, PrivKey, PubKey, signature_data_segment_v1(TX#tx{ owner = Owner })).
 
 sign_v1(TX, PrivKey, PubKey = {_, Owner}) ->
+    ok = ar_wallet:validate_signing_wallet({PrivKey, PubKey}),
     sign(TX, PrivKey, PubKey, signature_data_segment_v1(TX#tx{ owner = Owner })).
 
 %% @doc Verify whether a transaction is valid.
@@ -326,11 +330,17 @@ verify_signature_type(_) ->
 
 %% @doc Verify the transaction's signature.
 verify_signature(TX = #tx{ signature_type = SigType }) ->
-    case generate_signature_data_segment(TX) of
+    try generate_signature_data_segment(TX) of
         error ->
             false;
         SignatureDataSegment ->
-            ar_wallet:verify({SigType, TX#tx.owner}, SignatureDataSegment, TX#tx.signature)
+            ar_wallet:verify(
+                {SigType, TX#tx.owner},
+                SignatureDataSegment,
+                TX#tx.signature
+            )
+    catch
+        _:_ -> false
     end.
 
 %% @doc Generate the data segment to be signed for a given TX.
@@ -566,6 +576,7 @@ tx_to_json_struct(
         format = Format,
         anchor = Anchor,
         owner = Owner,
+        signature_type = SignatureType,
         tags = Tags,
         target = Target,
         quantity = Quantity,
@@ -586,7 +597,11 @@ tx_to_json_struct(
             end},
         {<<"id">>, hb_util:encode(ID)},
         {<<"last_tx">>, hb_util:encode(Anchor)},
-        {<<"owner">>, hb_util:encode(Owner)},
+        {<<"owner">>,
+            case SignatureType of
+                ?ECDSA_KEY_TYPE -> <<>>;
+                _ -> hb_util:encode(Owner)
+            end},
         {<<"tags">>,
             lists:map(
                 fun({Name, Value}) ->

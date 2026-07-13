@@ -41,6 +41,47 @@ secp256k1_json_round_trips_test() ->
     Sig = ar_wallet:sign(Wallet, Msg),
     ?assert(ar_wallet:verify(PubKeyTuple, Msg, Sig)).
 
+malformed_and_mismatched_ec_jwks_rejected_test() ->
+    ?assertThrow({invalid_jwk, invalid_json}, ar_wallet:from_json(<<"not-json">>)),
+    {PrivKey1, _} = ar_wallet:new_ecdsa(),
+    {PrivKey2, _} = ar_wallet:new_ecdsa(),
+    Jwk1 = hb_json:decode(ar_wallet:to_json(PrivKey1)),
+    Jwk2 = hb_json:decode(ar_wallet:to_json(PrivKey2)),
+    Cases = [
+        {maps:remove(<<"kty">>, Jwk1), {invalid_jwk, missing_kty}},
+        {Jwk1#{ <<"kty">> => <<"oct">> },
+            {invalid_jwk, {unsupported_kty, <<"oct">>}}},
+        {Jwk1#{ <<"crv">> => <<"P-256">> },
+            {invalid_jwk, {unsupported_curve, <<"P-256">>}}},
+        {maps:remove(<<"y">>, Jwk1),
+            {invalid_jwk, {missing_field, <<"y">>}}},
+        {Jwk1#{ <<"x">> => <<"!!not_base64!!">> },
+            {invalid_jwk, {invalid_base64url, <<"x">>}}},
+        {Jwk1#{ <<"x">> => hb_util:encode(crypto:strong_rand_bytes(31)) },
+            {invalid_jwk, {invalid_size, <<"x">>, 31}}},
+        {Jwk1#{ <<"d">> => hb_util:encode(<<0:256>>) },
+            {invalid_jwk, invalid_private_key}},
+        {Jwk1#{ <<"x">> => maps:get(<<"x">>, Jwk2) },
+            {invalid_jwk, public_key_mismatch}}
+    ],
+    lists:foreach(
+        fun({Jwk, Expected}) ->
+            ?assertThrow(Expected, ar_wallet:from_json(hb_json:encode(Jwk)))
+        end,
+        Cases
+    ).
+
+rsa_and_okp_jwk_imports_preserved_test() ->
+    RsaWallet = {RsaPriv, _} = ar_wallet:new(),
+    ImportedRsa = ar_wallet:from_json(ar_wallet:to_json(RsaPriv)),
+    ?assertEqual(ar_wallet:to_address(RsaWallet), ar_wallet:to_address(ImportedRsa)),
+    OkpWallet = {OkpPriv, _} = ar_wallet:new(?EDDSA_KEY_TYPE),
+    {_ImportedOkpPriv, ImportedOkpPub} =
+        ar_wallet:from_json(ar_wallet:to_json(OkpPriv)),
+    Msg = <<"OKP import remains valid">>,
+    Sig = ar_wallet:sign(OkpWallet, Msg),
+    ?assert(ar_wallet:verify(ImportedOkpPub, Msg, Sig)).
+
 signature_has_low_s_test() ->
     Wallet = ar_wallet:new_ecdsa(),
     %% Sign multiple messages and verify all have low-S
@@ -270,19 +311,30 @@ zeroed_s_value_fails_test() ->
     Result = ar_wallet:recover_key(Msg, CorruptedSig, ?ECDSA_KEY_TYPE),
     ?assertNotEqual(Pub, Result).
 
-truncated_signature_fails_test() ->
+truncated_signature_fails_closed_test() ->
     Wallet = ar_wallet:new_ecdsa(),
     Msg = <<"truncated sig test">>,
     Sig = ar_wallet:sign(Wallet, Msg),
     <<TruncatedSig:64/binary, _RecId:8>> = Sig,
-    ?assertError(badarg, ar_wallet:recover_key(Msg, TruncatedSig, ?ECDSA_KEY_TYPE)).
+    ?assertEqual(<<>>, ar_wallet:recover_key(Msg, TruncatedSig, ?ECDSA_KEY_TYPE)).
 
-extended_signature_fails_test() ->
+extended_signature_fails_closed_test() ->
     Wallet = ar_wallet:new_ecdsa(),
     Msg = <<"extended sig test">>,
     Sig = ar_wallet:sign(Wallet, Msg),
     ExtendedSig = <<Sig/binary, 0:8>>,
-    ?assertError(badarg, ar_wallet:recover_key(Msg, ExtendedSig, ?ECDSA_KEY_TYPE)).
+    ?assertEqual(<<>>, ar_wallet:recover_key(Msg, ExtendedSig, ?ECDSA_KEY_TYPE)).
+
+malformed_65_byte_signature_fails_closed_test() ->
+    Wallet = {{KeyType, _Priv, Pub}, _} = ar_wallet:new_ecdsa(),
+    Msg = <<"malformed signature test">>,
+    MalformedSig = <<0:512, 255:8>>,
+    ?assertEqual(<<>>, ar_wallet:recover_key(Msg, MalformedSig, KeyType)),
+    ?assertNot(ar_wallet:verify({KeyType, Pub}, Msg, MalformedSig)),
+    TX = make_signed_ecdsa_tx(Wallet),
+    MalformedTX0 = TX#tx{signature = MalformedSig},
+    MalformedTX = MalformedTX0#tx{id = ar_tx:generate_id(MalformedTX0, signed)},
+    ?assertNot(ar_tx:verify(MalformedTX)).
 
 verify_rejects_wrong_signature_test() ->
     Wallet = {{KeyType, _Priv, Pub}, _} = ar_wallet:new_ecdsa(),
@@ -388,6 +440,25 @@ different_keys_produce_different_pubkeys_test() ->
     {{_KeyType1, _Priv1, Pub1}, _} = Wallet1,
     {{_KeyType2, _Priv2, Pub2}, _} = Wallet2,
     ?assertNotEqual(Pub1, Pub2).
+
+spliced_wallet_halves_rejected_test() ->
+    {{KeyType, Priv1, Pub1}, _} = ar_wallet:new_ecdsa(),
+    {{KeyType, _Priv2, Pub2}, _} = ar_wallet:new_ecdsa(),
+    TX = make_ecdsa_tx(),
+    HalvesSpliced = {{KeyType, Priv1, Pub1}, {KeyType, Pub2}},
+    ?assertError(
+        {invalid_signing_wallet, mismatched_halves},
+        ar_tx:sign(TX, HalvesSpliced)
+    ),
+    KeypairSpliced = {{KeyType, Priv1, Pub2}, {KeyType, Pub2}},
+    ?assertError(
+        {invalid_signing_wallet, public_key_mismatch},
+        ar_tx:sign(TX, KeypairSpliced)
+    ),
+    ?assertError(
+        {invalid_signing_wallet, public_key_mismatch},
+        ar_wallet:sign(KeypairSpliced, <<"must not sign">>)
+    ).
 
 valid_key_produces_33byte_compressed_pubkey_test() ->
     {{_KeyType, _Priv, Pub}, _} = ar_wallet:new_ecdsa(),
@@ -503,10 +574,11 @@ json_roundtrip_with_owner_recovery_test() ->
     TX = make_signed_ecdsa_tx(Wallet),
     ExpectedAddress = ar_wallet:to_address(Pub, KeyType),
     JSON = ar_tx:tx_to_json_struct(TX),
-    JSONEmptyOwner = JSON#{<<"owner">> => <<>>},
-    ParsedTX = ar_tx:json_struct_to_tx(JSONEmptyOwner),
+    ?assertEqual(<<>>, maps:get(<<"owner">>, JSON)),
+    ParsedTX = ar_tx:json_struct_to_tx(JSON),
     ?assertEqual(Pub, ParsedTX#tx.owner),
-    ?assertEqual(ExpectedAddress, ParsedTX#tx.owner_address).
+    ?assertEqual(ExpectedAddress, ParsedTX#tx.owner_address),
+    ?assertEqual(TX, ParsedTX).
 
 rsa_and_ecdsa_coexist_independently_test() ->
     EcdsaWallet = ar_wallet:new_ecdsa(),
@@ -525,9 +597,17 @@ full_sign_json_recover_verify_roundtrip_test() ->
     TX = make_signed_ecdsa_tx(Wallet),
     ?assertEqual(true, ar_tx:verify(TX)),
     JSON = ar_tx:tx_to_json_struct(TX),
-    JSONEmptyOwner = JSON#{<<"owner">> => <<>>},
-    ParsedTX = ar_tx:json_struct_to_tx(JSONEmptyOwner),
+    ?assertEqual(<<>>, maps:get(<<"owner">>, JSON)),
+    ParsedTX = ar_tx:json_struct_to_tx(JSON),
+    ?assertEqual(TX, ParsedTX),
     ?assertEqual(true, ar_tx:verify(ParsedTX)).
+
+rsa_json_keeps_owner_test() ->
+    Wallet = {{_KeyType, _Priv, Pub}, _} = ar_wallet:new(),
+    TX = ar_tx:sign(make_ecdsa_tx(), Wallet),
+    JSON = ar_tx:tx_to_json_struct(TX),
+    ?assertEqual(hb_util:encode(Pub), maps:get(<<"owner">>, JSON)),
+    ?assertEqual(TX, ar_tx:json_struct_to_tx(JSON)).
 
 sig_segment_excludes_owner_for_ecdsa_test() ->
     {{EcdsaKeyType1, _EcdsaPriv1, EcdsaPub1}, _} = ar_wallet:new_ecdsa(),

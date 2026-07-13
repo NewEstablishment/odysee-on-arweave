@@ -26,14 +26,21 @@ sign(Msg, PrivBytes, DigestType) ->
 %% @doc DigestType can be `sha256` or `ethereum`.
 ecrecover(Msg, Signature) ->
     ecrecover(Msg, Signature, sha256).
-ecrecover(Msg, Signature, DigestType) ->
-	Digest = digest_message(DigestType, Msg),
-    NormalizedSig = normalize_signature(Signature, DigestType),
-	case recover_pk_and_verify(Digest, NormalizedSig) of
-		{ok, true, PubKey} -> {true, PubKey};
-		{ok, false, _PubKey} -> {false, <<>>};
-		{error, _Reason} -> {false, <<>>}
-	end.
+ecrecover(Msg, Signature, DigestType)
+        when is_binary(Signature) andalso byte_size(Signature) =:= 65 ->
+    try
+        Digest = digest_message(DigestType, Msg),
+        NormalizedSig = normalize_signature(Signature, DigestType),
+        case recover_pk_and_verify(Digest, NormalizedSig) of
+            {ok, true, PubKey} -> {true, PubKey};
+            {ok, false, _PubKey} -> {false, <<>>};
+            {error, _Reason} -> {false, <<>>}
+        end
+    catch
+        _:_ -> {false, <<>>}
+    end;
+ecrecover(_Msg, _Signature, _DigestType) ->
+    {false, <<>>}.
 
 digest_message(sha256, Msg) -> crypto:hash(sha256, Msg);
 digest_message(ethereum, Msg) -> ethereum_hash(Msg).

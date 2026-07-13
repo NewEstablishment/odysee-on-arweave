@@ -17,37 +17,23 @@ commit(Msg, Req = #{ <<"type">> := <<"unsigned">> }, Opts) ->
     commit(Msg, Req#{ <<"type">> => <<"unsigned-sha256">> }, Opts);
 commit(Msg, Req = #{ <<"type">> := <<"signed">> }, Opts) ->
     commit(Msg, Req#{ <<"type">> => ?RSA_SIGN_TYPE }, Opts);
-commit(Msg, Req = #{ <<"type">> := ?RSA_SIGN_TYPE }, Opts) ->
+commit(Msg, Req = #{ <<"type">> := Type }, Opts)
+        when Type =:= ?RSA_SIGN_TYPE orelse Type =:= ?ECDSA_SIGN_TYPE ->
     ?event({committing, {msg, Msg}, {req, Req}}),
     % Convert the given message to an L1 TX record, sign it, and convert
     % it back to a structured message.
     {ok, TX} = to(hb_private:reset(Msg), Req, Opts),
-    Wallet = hb_opts:get(priv_wallet, no_viable_wallet, Opts),
-    Signed = ar_tx:sign(TX, Wallet),
-    SignedStructured =
-        hb_message:convert(
-            Signed,
-            <<"structured@1.0">>,
-            <<"tx@1.0">>,
-            Opts
-        ),
-    {ok, SignedStructured};
-commit(Msg, Req = #{ <<"type">> := ?ECDSA_SIGN_TYPE }, Opts) ->
-    ?event({committing, {msg, Msg}, {req, Req}}),
-    % Convert the given message to an L1 TX record, sign it, and convert
-    % it back to a structured message. The wallet's `{ecdsa,secp256k1}' key
-    % type drives `ar_tx:sign' to produce an ecdsa-secp256k1-sha256 commitment.
-    {ok, TX} = to(hb_private:reset(Msg), Req, Opts),
-    Wallet = hb_opts:get(priv_wallet, no_viable_wallet, Opts),
-    Signed = ar_tx:sign(TX, Wallet),
-    SignedStructured =
-        hb_message:convert(
-            Signed,
-            <<"structured@1.0">>,
-            <<"tx@1.0">>,
-            Opts
-        ),
-    {ok, SignedStructured};
+    case {hb_opts:get(priv_wallet, no_viable_wallet, Opts), Type} of
+        {{{?RSA_KEY_TYPE, _Priv, _Pub}, _} = Wallet, ?RSA_SIGN_TYPE} ->
+            sign_tx(TX, Wallet, Opts);
+        {{{?ECDSA_KEY_TYPE, _Priv, _Pub}, _} = Wallet, ?ECDSA_SIGN_TYPE} ->
+            sign_tx(TX, Wallet, Opts);
+        {{{WalletType, _, _}, _}, _Type} ->
+            ?event(warning, {wrong_wallet_to_sign,
+                {request_type, Type}, {wallet_type, WalletType}}),
+            throw({wrong_wallet_to_sign,
+                {request_type, Type}, {wallet_type, WalletType}})
+    end;
 commit(Msg, #{ <<"type">> := <<"unsigned-sha256">> }, Opts) ->
     % Remove the commitments from the message, convert it to an L1 TX, 
     % then back. This forces the message to be normalized and the unsigned ID
@@ -61,6 +47,17 @@ commit(Msg, #{ <<"type">> := <<"unsigned-sha256">> }, Opts) ->
             Opts
         )
     }.
+
+sign_tx(TX, Wallet, Opts) ->
+    Signed = ar_tx:sign(TX, Wallet),
+    SignedStructured =
+        hb_message:convert(
+            Signed,
+            <<"structured@1.0">>,
+            <<"tx@1.0">>,
+            Opts
+        ),
+    {ok, SignedStructured}.
 
 %% @doc Verify an L1 TX commitment.
 verify(Msg, Req, Opts) ->

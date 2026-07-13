@@ -30,3 +30,43 @@ ecdsa_commitment_verifies_test() ->
         ?ECDSA_TYPE,
         hb_maps:get(<<"type">>, Commitment, not_found, Opts)
     ).
+
+ecdsa_commitment_rejects_tamper_test() ->
+    Wallet = ar_wallet:new_ecdsa(),
+    Opts = #{ <<"priv-wallet">> => Wallet },
+    Committed =
+        hb_message:commit(
+            #{ <<"tag1">> => <<"value1">> },
+            Opts,
+            #{ <<"device">> => <<"tx@1.0">>, <<"type">> => ?ECDSA_TYPE }
+        ),
+    Tampered = Committed#{ <<"tag1">> => <<"tampered">> },
+    ?assertNot(hb_message:verify(Tampered, all, Opts)).
+
+rsa_wallet_rejected_for_ecdsa_commitment_test() ->
+    Wallet = ar_wallet:new(?RSA_KEY_TYPE),
+    Opts = #{ <<"priv-wallet">> => Wallet },
+    ?assertThrow(
+        {wrong_wallet_to_sign,
+            {request_type, ?ECDSA_TYPE},
+            {wallet_type, ?RSA_KEY_TYPE}},
+        hb_message:commit(
+            #{ <<"tag1">> => <<"value1">> },
+            Opts,
+            #{ <<"device">> => <<"tx@1.0">>, <<"type">> => ?ECDSA_TYPE }
+        )
+    ).
+
+ecdsa_wallet_rejected_for_rsa_commitment_test() ->
+    Wallet = ar_wallet:new_ecdsa(),
+    Opts = #{ <<"priv-wallet">> => Wallet },
+    ?assertThrow(
+        {wrong_wallet_to_sign,
+            {request_type, ?RSA_SIGN_TYPE},
+            {wallet_type, ?ECDSA_KEY_TYPE}},
+        hb_message:commit(
+            #{ <<"tag1">> => <<"value1">> },
+            Opts,
+            #{ <<"device">> => <<"tx@1.0">>, <<"type">> => ?RSA_SIGN_TYPE }
+        )
+    ).

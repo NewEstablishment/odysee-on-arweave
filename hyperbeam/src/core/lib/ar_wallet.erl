@@ -4,7 +4,7 @@
 -export([new_keyfile/2, load_keyfile/1, load_keyfile/2, load_key/1, load_key/2]).
 -export([to_json/1, from_json/1, from_json/2]).
 -export([recover_key/3]).
--export([compress_ecdsa_pubkey/1]).
+-export([compress_ecdsa_pubkey/1, validate_signing_wallet/1]).
 -include("include/ar.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
@@ -122,7 +122,13 @@ sign(Key, Data) ->
 
 %% @doc sign some data, hashed using the provided DigestType.
 %% RSA and ECDSA signatures use wallet-level wrappers.
-sign({{rsa, PublicExpnt}, Priv, Pub}, Data, DigestType) when PublicExpnt =:= 65537 ->
+sign(Wallet = {_PrivKey, _PubKey}, Data, DigestType) ->
+    ok = validate_signing_wallet(Wallet),
+    {PrivKey, _} = Wallet,
+    sign(PrivKey, Data, DigestType);
+sign(PrivKey = {{rsa, PublicExpnt}, Priv, Pub}, Data, DigestType)
+        when PublicExpnt =:= 65537 ->
+    ok = validate_signing_key(PrivKey),
     rsa_pss:sign(
         Data,
         DigestType,
@@ -132,15 +138,23 @@ sign({{rsa, PublicExpnt}, Priv, Pub}, Data, DigestType) when PublicExpnt =:= 655
             privateExponent = binary:decode_unsigned(Priv)
         }
     );
-sign({{KeyAlg, KeyCrv}, Priv, _Pub}, Data, _DigestType)
+sign(PrivKey = {{KeyAlg, KeyCrv}, Priv, _Pub}, Data, _DigestType)
         when KeyAlg =:= ?ECDSA_SIGN_ALG andalso KeyCrv =:= secp256k1 ->
+    ok = validate_signing_key(PrivKey),
     secp256k1_nif:sign(Data, Priv);
-sign({KeyType = {KeyAlg, Curve}, Priv, _Pub}, Data, _DigestType) when KeyType =:= {?EDDSA_SIGN_ALG, ed25519} ->
+sign(PrivKey = {KeyType = {KeyAlg, Curve}, Priv, _Pub}, Data, _DigestType)
+        when KeyType =:= {?EDDSA_SIGN_ALG, ed25519} ->
+    ok = validate_signing_key(PrivKey),
     crypto:sign(KeyAlg, none, Data, [Priv, Curve]);
-sign({ethereum, Priv, Pub}, Data, _DigestType) ->
-    secp256k1_nif:sign(Data, Priv, ethereum);
-sign({{KeyType, Priv, Pub}, {KeyType, Pub}}, Data, DigestType) ->
-    sign({KeyType, Priv, Pub}, Data, DigestType).
+sign(PrivKey = {ethereum, Priv, _Pub}, Data, _DigestType) ->
+    ok = validate_signing_key(PrivKey),
+    secp256k1_nif:sign(Data, Priv, ethereum).
+
+%% @doc Validate that the private and public wallet halves describe one keypair.
+validate_signing_wallet({PrivKey = {KeyType, _Priv, Pub}, {KeyType, Pub}}) ->
+    validate_signing_key(PrivKey);
+validate_signing_wallet(_Wallet) ->
+    erlang:error({invalid_signing_wallet, mismatched_halves}).
 
 hmac(Data) ->
     hmac(Data, sha256).
@@ -324,51 +338,133 @@ to_json({{?EDDSA_SIGN_ALG, ed25519}, Priv, Pub}) ->
 from_json(JsonBinary) ->
     from_json(JsonBinary, #{}).
 
-%% @doc Parse a wallet from JSON (JWK) format with options
+%% @doc Parse a wallet from JSON (JWK) format with options.
+%% Invalid JWKs always throw `{invalid_jwk, Reason}` rather than leaking decoder
+%% or crypto implementation exceptions.
 from_json(JsonBinary, Opts) ->
-    Key = hb_json:decode(JsonBinary),
+    Key =
+        try hb_json:decode(JsonBinary) of
+            Map when is_map(Map) -> Map;
+            _ -> invalid_jwk(invalid_json)
+        catch
+            _:_ -> invalid_jwk(invalid_json)
+        end,
     {Pub, Priv, KeyType} =
         case hb_maps:get(<<"kty">>, Key, undefined, Opts) of
-            <<"EC">> ->
-                XEncoded = hb_maps:get(<<"x">>, Key, undefined, Opts),
-                YEncoded = hb_maps:get(<<"y">>, Key, undefined, Opts),
-                PrivEncoded = hb_maps:get(<<"d">>, Key, undefined, Opts),
-                OrigPub = iolist_to_binary([<<4:8>>, hb_util:decode(XEncoded),
-                        hb_util:decode(YEncoded)]),
-                Pb = compress_ecdsa_pubkey(OrigPub),
-                Prv = hb_util:decode(PrivEncoded),
-                KyType = {?ECDSA_SIGN_ALG, secp256k1},
-                {Pb, Prv, KyType};
-            <<"OKP">> ->
-                PubEncoded = hb_maps:get(<<"x">>, Key, undefined, Opts),
-                PrivEncoded = hb_maps:get(<<"d">>, Key, undefined, Opts),
-                Pb = hb_util:decode(PubEncoded),
-                Prv = hb_util:decode(PrivEncoded),
-                KyType = {?EDDSA_SIGN_ALG, ed25519},
-                {Pb, Prv, KyType};
-            _ ->
-                PubEncoded = hb_maps:get(<<"n">>, Key, undefined, Opts),
-                PrivEncoded = hb_maps:get(<<"d">>, Key, undefined, Opts),
-                Pb = hb_util:decode(PubEncoded),
-                Prv = hb_util:decode(PrivEncoded),
-                KyType = {?RSA_SIGN_ALG, 65537},
-                {Pb, Prv, KyType}
+            <<"EC">> -> import_ec_jwk(Key, Opts);
+            <<"RSA">> -> import_rsa_jwk(Key, Opts);
+            <<"OKP">> -> import_okp_jwk(Key, Opts);
+            undefined -> invalid_jwk(missing_kty);
+            Kty -> invalid_jwk({unsupported_kty, Kty})
         end,
     {{KeyType, Priv, Pub}, {KeyType, Pub}}.
 
 %% @doc Recover the public key from a signature (for ECDSA).
 %% For ECDSA transactions, the public key is not included in the transaction,
 %% it must be recovered from the signature.
-recover_key(_Data, <<>>, ?ECDSA_KEY_TYPE) ->
-    <<>>;
-recover_key(Data, Signature, ?ECDSA_KEY_TYPE) ->
+recover_key(Data, Signature, ?ECDSA_KEY_TYPE)
+        when is_binary(Signature) andalso byte_size(Signature) =:= 65 ->
     {_Pass, PubKey} = secp256k1_nif:ecrecover(Data, Signature),
     %% Note: if Pass = false, then PubKey will be <<>>
-    PubKey.
+    PubKey;
+recover_key(_Data, _Signature, ?ECDSA_KEY_TYPE) ->
+    <<>>.
 
 %%%===================================================================
 %%% Private functions.
 %%%===================================================================
+
+import_ec_jwk(Key, Opts) ->
+    case hb_maps:get(<<"crv">>, Key, undefined, Opts) of
+        <<"secp256k1">> -> ok;
+        Curve -> invalid_jwk({unsupported_curve, Curve})
+    end,
+    X = decode_jwk_field(Key, <<"x">>, 32, Opts),
+    Y = decode_jwk_field(Key, <<"y">>, 32, Opts),
+    Priv = decode_jwk_field(Key, <<"d">>, 32, Opts),
+    case derive_ecdsa_public_key(Priv) of
+        {ok, <<4, X:32/binary, Y:32/binary>> = OrigPub} ->
+            {compress_ecdsa_pubkey(OrigPub), Priv, ?ECDSA_KEY_TYPE};
+        {ok, _OtherPub} ->
+            invalid_jwk(public_key_mismatch);
+        {error, invalid_private_key} ->
+            invalid_jwk(invalid_private_key)
+    end.
+
+import_rsa_jwk(Key, Opts) ->
+    Pub = decode_jwk_field(Key, <<"n">>, Opts),
+    Priv = decode_jwk_field(Key, <<"d">>, Opts),
+    {Pub, Priv, ?RSA_KEY_TYPE}.
+
+import_okp_jwk(Key, Opts) ->
+    Pub = decode_jwk_field(Key, <<"x">>, Opts),
+    Priv = decode_jwk_field(Key, <<"d">>, Opts),
+    {Pub, Priv, ?EDDSA_KEY_TYPE}.
+
+decode_jwk_field(Key, Field, Opts) ->
+    case hb_maps:get(Field, Key, undefined, Opts) of
+        undefined ->
+            invalid_jwk({missing_field, Field});
+        Encoded when is_binary(Encoded) ->
+            case hb_util:safe_decode(Encoded) of
+                {ok, Decoded} -> Decoded;
+                {error, _} -> invalid_jwk({invalid_base64url, Field})
+            end;
+        _ ->
+            invalid_jwk({invalid_field, Field})
+    end.
+
+decode_jwk_field(Key, Field, Size, Opts) ->
+    Decoded = decode_jwk_field(Key, Field, Opts),
+    case byte_size(Decoded) of
+        Size -> Decoded;
+        ActualSize -> invalid_jwk({invalid_size, Field, ActualSize})
+    end.
+
+invalid_jwk(Reason) ->
+    throw({invalid_jwk, Reason}).
+
+derive_ecdsa_public_key(Priv) when is_binary(Priv) andalso byte_size(Priv) =:= 32 ->
+    try crypto:generate_key(ecdh, secp256k1, Priv) of
+        {Pub = <<4, _:64/binary>>, Priv} -> {ok, Pub};
+        _ -> {error, invalid_private_key}
+    catch
+        _:_ -> {error, invalid_private_key}
+    end;
+derive_ecdsa_public_key(_Priv) ->
+    {error, invalid_private_key}.
+
+validate_signing_key({?RSA_KEY_TYPE, Priv, Pub})
+        when is_binary(Priv) andalso is_binary(Pub) ->
+    ok;
+validate_signing_key({?ECDSA_KEY_TYPE, Priv, Pub}) ->
+    case derive_ecdsa_public_key(Priv) of
+        {ok, OrigPub} ->
+            case compress_ecdsa_pubkey(OrigPub) of
+                Pub -> ok;
+                _ -> erlang:error({invalid_signing_wallet, public_key_mismatch})
+            end;
+        {error, invalid_private_key} ->
+            erlang:error({invalid_signing_wallet, invalid_private_key})
+    end;
+validate_signing_key({?EDDSA_KEY_TYPE, Priv, Pub})
+        when is_binary(Priv) andalso is_binary(Pub) ->
+    try crypto:generate_key(eddsa, ed25519, Priv) of
+        {Pub, Priv} -> ok;
+        _ -> erlang:error({invalid_signing_wallet, public_key_mismatch})
+    catch
+        _:_ -> erlang:error({invalid_signing_wallet, invalid_private_key})
+    end;
+validate_signing_key({ethereum, Priv, Pub})
+        when is_binary(Priv) andalso is_binary(Pub) ->
+    case derive_ecdsa_public_key(Priv) of
+        {ok, Pub} -> ok;
+        {ok, _} -> erlang:error({invalid_signing_wallet, public_key_mismatch});
+        {error, invalid_private_key} ->
+            erlang:error({invalid_signing_wallet, invalid_private_key})
+    end;
+validate_signing_key(_PrivKey) ->
+    erlang:error({invalid_signing_wallet, invalid_private_key}).
 
 to_rsa_address(PubKey) ->
     hash_address(PubKey).
