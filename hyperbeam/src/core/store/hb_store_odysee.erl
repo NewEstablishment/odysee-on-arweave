@@ -661,10 +661,13 @@ integer_or_undefined(_Value) ->
 %% committed message into the node's local store(s) and link the originally
 %% requested bare key to it, so a later bare `GET /<id>' hits the local store
 %% before falling through to this (remote, read-only) store. Only bare
-%% outpoint reads warm the cache — those are the keys a generic `GET /<id>'
-%% requests. A warming failure never breaks the read.
+%% outpoint and bare claim-id reads warm the cache — those are the keys a
+%% generic `GET /<id>' requests. Claim ids are mutable pointers (a claim
+%% update keeps the id), so a warmed claim surface can go stale until a
+%% reference/mutable-resolution layer exists; outpoints are immutable. A
+%% warming failure never breaks the read.
 maybe_warm_bare_key(Key, Msg, StoreOpts, NodeOpts) ->
-    case is_bare_outpoint(Key) of
+    case is_bare_outpoint(Key) orelse is_bare_claim_id(Key) of
         true -> maybe_warm_cache(Key, Msg, StoreOpts, NodeOpts);
         false -> ok
     end.
@@ -705,6 +708,9 @@ is_bare_outpoint(<<TxID:64/binary, ":", NOut/binary>>) ->
     valid_hex_size(TxID, 32) andalso valid_uint(NOut);
 is_bare_outpoint(_Key) ->
     false.
+
+is_bare_claim_id(Key) ->
+    valid_hex_size(Key, 20).
 
 list_live(<<"odysee/channel-id/", Rest/binary>>, Req, StoreOpts, NodeOpts) ->
     case binary:split(Rest, <<"/">>) of
@@ -1711,10 +1717,42 @@ bare_outpoint_warm_cache_links_local_store_test() ->
         <<"lbry-claim@1.0">>,
         hb_maps:get(<<"device">>, Cached, not_found, Opts)
     ),
-    %% Non-outpoint keys never warm, and warming without local stores is a
+    %% Non-bare keys never warm, and warming without local stores is a
     %% harmless no-op.
     ?assertEqual(ok, maybe_warm_bare_key(<<"odysee/claim/x">>, ClaimOutput, #{}, Opts)),
     ?assertEqual(ok, maybe_warm_bare_key(Outpoint, ClaimOutput, #{}, #{})).
+
+%% Bare claim-id reads warm the same way as outpoints: the live-resolved
+%% claim surface must be readable back from the local store by its bare
+%% claim id, so a later bare `GET /<claim-id>' never re-hits the proxy.
+bare_claim_id_warm_cache_links_local_store_test() ->
+    ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+    Claim = #{
+        <<"device">> => <<"odysee-claim@1.0">>,
+        <<"claim-id">> => ClaimID,
+        <<"claim-name">> => <<"sample">>,
+        <<"content-type">> => <<"application/json">>,
+        <<"value">> => #{ <<"title">> => <<"Sample">> }
+    },
+    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/odysee-warm-claim-", Timestamp/binary>>
+    },
+    hb_store:reset(LocalStore),
+    Opts = #{ <<"store">> => [LocalStore] },
+    ?assert(is_bare_claim_id(ClaimID)),
+    ok = maybe_warm_bare_key(ClaimID, Claim, #{}, Opts),
+    {ok, Cached0} = hb_cache:read(ClaimID, Opts),
+    Cached = hb_cache:ensure_all_loaded(Cached0, Opts),
+    ?assertEqual(ClaimID, hb_maps:get(<<"claim-id">>, Cached, not_found, Opts)),
+    ?assertEqual(
+        <<"odysee-claim@1.0">>,
+        hb_maps:get(<<"device">>, Cached, not_found, Opts)
+    ),
+    %% Short/non-hex ids are not bare claim ids.
+    ?assertNot(is_bare_claim_id(<<"346c1fed">>)),
+    ?assertNot(is_bare_claim_id(<<"not-a-claim-id-not-a-claim-id-not-a-claim">>)).
 
 http_header(Name, Headers) ->
     LowerName = hb_util:bin(string:lowercase(hb_util:bin(Name))),

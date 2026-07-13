@@ -113,12 +113,11 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
       const immutableClaim = await fetchHyperbeamImmutableResolve(uri).catch(() => null);
       if (immutableClaim) return [uri, immutableClaim];
 
-      const storeClaim = await fetchCachedStoreJsonOrNull(storePath('odysee/claim', uri))
-        .then(responsePayload)
-        .catch(() => null);
-      if (storeClaim) return [uri, sdkClaimFromHyperbeam(storeClaim)];
-
-      const claimId = claimIdFromUri(uri);
+      // A full claim id is the generic-path read: one bare `GET /<claim-id>`
+      // that the node store-serves after the first fetch. Prefer it over the
+      // uri-keyed compatibility path, which re-hits the legacy proxy on
+      // every read.
+      const claimId = fullClaimIdFromUri(uri);
       if (claimId) {
         try {
           const result = responsePayload(await fetchCacheJson(cacheReadPath(claimId)));
@@ -126,6 +125,11 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
           if (claim) return [uri, claim];
         } catch (_e) {}
       }
+
+      const storeClaim = await fetchCachedStoreJsonOrNull(storePath('odysee/claim', uri))
+        .then(responsePayload)
+        .catch(() => null);
+      if (storeClaim) return [uri, sdkClaimFromHyperbeam(storeClaim)];
 
       const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { uri }).catch(() => null);
       const result = responsePayload(response);
@@ -738,7 +742,14 @@ export async function fetchHyperbeamVerifyClaimSignature(
 export async function fetchHyperbeamChannel(claim: Claim | null | undefined): Promise<HyperbeamChannel | null> {
   if (!claim || isHyperbeamUploadClaim(claim)) return null;
 
-  const result = await fetchDeviceJson(`${CHANNEL_DEVICE}/channel`, { channel: claim.signing_channel || claim });
+  // The single `GET /<id>` resolve already carries the full signing channel;
+  // normalizing it locally saves a channel-device round trip.
+  const signingChannel: any = claim.signing_channel;
+  if (signingChannel && signingChannel.claim_id && signingChannel.value) {
+    return channelFromHyperbeam(signingChannel);
+  }
+
+  const result = await fetchDeviceJson(`${CHANNEL_DEVICE}/channel`, { channel: signingChannel || claim });
   return result ? channelFromHyperbeam(result) : null;
 }
 
@@ -1222,11 +1233,23 @@ function urlsFromResolveParams(params: any): Array<string> {
 function splitBatchedResolveUris(urls: Array<string>): { batchedUris: Array<string>; resolveUris: Array<string> } {
   return urls.reduce(
     (groups, uri) => {
-      groups[claimIdFromUri(uri) ? 'batchedUris' : 'resolveUris'].push(uri);
+      // A full claim id resolves through the single bare `GET /<claim-id>`
+      // store read (cached node-side after the first fetch), so it goes
+      // through the per-uri chain; only short-id uris gain anything from the
+      // batched device resolve.
+      const batched = claimIdFromUri(uri) && !fullClaimIdFromUri(uri);
+      groups[batched ? 'batchedUris' : 'resolveUris'].push(uri);
       return groups;
     },
     { batchedUris: [], resolveUris: [] } as { batchedUris: Array<string>; resolveUris: Array<string> }
   );
+}
+
+const FULL_CLAIM_ID_REGEX = /^[0-9a-f]{40}$/i;
+
+function fullClaimIdFromUri(uri: string): string | null {
+  const claimId = claimIdFromUri(uri);
+  return claimId && FULL_CLAIM_ID_REGEX.test(claimId) ? claimId : null;
 }
 
 function claimIdFromUri(uri: string): string | null {
