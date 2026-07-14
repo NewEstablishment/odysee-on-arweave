@@ -113,28 +113,27 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
       const immutableClaim = await fetchHyperbeamImmutableResolve(uri).catch(() => null);
       if (immutableClaim) return [uri, immutableClaim];
 
-      // A full claim id is the generic-path read: one bare `GET /<claim-id>`
-      // that the node store-serves after the first fetch. Prefer it over the
-      // uri-keyed compatibility path, which re-hits the legacy proxy on
-      // every read.
       const claimId = fullClaimIdFromUri(uri);
       if (claimId) {
         try {
-          const result = responsePayload(await fetchCacheJson(cacheReadPath(claimId)));
+          const result = messagePayload(await fetchCacheJson(cacheReadPath(`odysee/claim-id/${claimId}`), true));
           const claim = sdkClaimFromHyperbeam(cacheReadClaim(result), claimId);
-          if (claim) return [uri, claim];
+          if (claim) return [uri, await immutableClaimForResolvedUri(uri, claim)];
         } catch (_e) {}
       }
 
       const storeClaim = await fetchCachedStoreJsonOrNull(storePath('odysee/claim', uri))
         .then(responsePayload)
         .catch(() => null);
-      if (storeClaim) return [uri, sdkClaimFromHyperbeam(storeClaim)];
+      if (storeClaim) {
+        const claim = sdkClaimFromHyperbeam(storeClaim);
+        if (claim) return [uri, await immutableClaimForResolvedUri(uri, claim)];
+      }
 
       const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { uri }).catch(() => null);
       const result = responsePayload(response);
       const claim = sdkClaimFromHyperbeam(result?.[uri] || result);
-      if (claim) return [uri, claim];
+      if (claim) return [uri, await immutableClaimForResolvedUri(uri, claim)];
 
       return [uri, await fetchHyperbeamUploadResolve(uri).catch(() => null)];
     })
@@ -145,7 +144,12 @@ async function fetchBatchedResolveEntries(urls: Array<string>): Promise<Array<[s
   const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { urls });
   const result = responsePayload(response);
 
-  return urls.map((uri): [string, any] => [uri, sdkClaimFromHyperbeam(result?.[uri] || result)]);
+  return Promise.all(
+    urls.map(async (uri): Promise<[string, any]> => {
+      const claim = sdkClaimFromHyperbeam(result?.[uri] || result);
+      return [uri, claim ? await immutableClaimForResolvedUri(uri, claim) : null];
+    })
+  );
 }
 
 export async function fetchHyperbeamGet(params: any): Promise<any | null> {
@@ -451,6 +455,7 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
     const url = `${baseUrl}/${encodeURIComponent(claimId)}`;
     const requestHeaders = {
       accept: 'application/json',
+      'accept-bundle': 'true',
     };
     const callId = `immutable-read-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const immutablePath = `/${claimId}`;
@@ -478,7 +483,7 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
     const json = await response.json().catch(() => null);
-    const claimPayload = responsePayload(json);
+    const claimPayload = messagePayload(json);
     const expandedClaim = await expandHyperbeamImmutableClaim(baseUrl, claimId, cacheReadClaim(claimPayload));
     pushHyperbeamDebug(
       'response',
@@ -759,7 +764,11 @@ export async function fetchHyperbeamStreamVerification(
 ): Promise<any | null> {
   if (!claim || isHyperbeamUploadClaim(claim)) return null;
 
-  const result = await fetchDeviceJson(`${STREAM_DEVICE}/verified-stream`, compactParams({ claim, url: uri }));
+  const immutableId = immutableReadIdFromClaim(claim);
+  const result = await fetchDeviceJson(
+    `${STREAM_DEVICE}/verified-stream`,
+    immutableId ? { id: immutableId } : compactParams({ claim, url: uri })
+  );
   return responsePayload(result);
 }
 
@@ -1069,7 +1078,7 @@ function buildCacheUrl(baseUrl: string, path: string): string {
   return `${baseUrl}/~cache@1.0/${path}`;
 }
 
-async function fetchCacheJson(path: string): Promise<any | null> {
+async function fetchCacheJson(path: string, acceptBundle: boolean = false): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) {
     if (isHyperbeamEnabled()) throw new Error('HyperBEAM node is not configured');
@@ -1079,7 +1088,10 @@ async function fetchCacheJson(path: string): Promise<any | null> {
   const response = await fetch(buildCacheUrl(baseUrl, path), {
     method: 'GET',
     credentials: hyperbeamFetchCredentials(baseUrl),
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      ...(acceptBundle ? { 'Accept-Bundle': 'true' } : {}),
+    },
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
   });
 
@@ -1092,11 +1104,7 @@ async function fetchCacheJson(path: string): Promise<any | null> {
 }
 
 function cacheReadPath(id: string): string {
-  return `/${String(id)
-    .replace(/^\/+/, '')
-    .split('/')
-    .map((part) => encodeURIComponent(part))
-    .join('/')}`;
+  return `read?read=${encodeURIComponent(String(id).replace(/^\/+/, ''))}`;
 }
 
 function cacheListPath(path: string, params: Record<string, any> = {}): string {
@@ -1190,6 +1198,20 @@ function responsePayload(response: any): any {
   return payload;
 }
 
+function messagePayload(response: any): any {
+  if (!response) return null;
+  if (
+    isObject(response) &&
+    (value(response, 'device') ||
+      value(response, 'claim-id', 'claim_id') ||
+      value(response, 'claim+link', 'claim-link') ||
+      value(response, 'value+link', 'value-link'))
+  ) {
+    return response;
+  }
+  return responsePayload(response);
+}
+
 function countArray(source: any, countKey: string): Array<number> | null {
   if (Array.isArray(source)) return source;
   if (typeof source === 'number') return [source];
@@ -1233,10 +1255,6 @@ function urlsFromResolveParams(params: any): Array<string> {
 function splitBatchedResolveUris(urls: Array<string>): { batchedUris: Array<string>; resolveUris: Array<string> } {
   return urls.reduce(
     (groups, uri) => {
-      // A full claim id resolves through the single bare `GET /<claim-id>`
-      // store read (cached node-side after the first fetch), so it goes
-      // through the per-uri chain; only short-id uris gain anything from the
-      // batched device resolve.
       const batched = claimIdFromUri(uri) && !fullClaimIdFromUri(uri);
       groups[batched ? 'batchedUris' : 'resolveUris'].push(uri);
       return groups;
@@ -1262,6 +1280,49 @@ function claimIdFromUri(uri: string): string | null {
   }
 }
 
+async function immutableClaimForResolvedUri(uri: string, claim: any): Promise<any> {
+  const immutableId = immutableReadIdFromClaim(claim);
+  if (!immutableId || !isOutpointId(immutableId)) return claim;
+
+  const result = await fetchCachedImmutableJsonOrNull(immutableId).catch(() => null);
+  const payload = storePayload(result);
+  if (!payload) return claim;
+
+  const decodedClaim = decodeClaimMetadata(payload);
+  let name: string | undefined;
+  try {
+    const parsed = parseURI(uri);
+    name = parsed.streamName || parsed.claimName;
+  } catch {}
+
+  const immutableClaim = immutableClaimFromHyperbeam(result, immutableId, claim.signing_channel, decodedClaim, name);
+  if (!immutableClaim) return claim;
+
+  return {
+    ...claim,
+    ...immutableClaim,
+    signing_channel: immutableClaim.signing_channel || claim.signing_channel,
+    value: {
+      ...claim.value,
+      ...immutableClaim.value,
+      source: {
+        ...claim.value?.source,
+        ...immutableClaim.value?.source,
+      },
+    },
+  };
+}
+
+function immutableReadIdFromClaim(claim: any): string | null {
+  const explicit =
+    value(claim, 'outpoint', 'immutable_id', 'immutable-id') || value(claim?.hyperbeam, 'immutable_id', 'immutable-id');
+  if (explicit && (isOutpointId(explicit) || isStandaloneImmutableId(explicit))) return String(explicit);
+
+  const txid = value(claim, 'txid');
+  const nout = value(claim, 'nout');
+  return typeof txid === 'string' && (typeof nout === 'number' || typeof nout === 'string') ? `${txid}:${nout}` : null;
+}
+
 function uriWithClaimId(uri: any, claimId: any): string | null {
   if (!uri || !claimId) return null;
   const text = String(uri);
@@ -1271,7 +1332,7 @@ function uriWithClaimId(uri: any, claimId: any): string | null {
 
 function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   if (!result) return null;
-  const claim = responsePayload(result.claim || result);
+  const claim = messagePayload(result.claim || result);
   const nativeUpload = Boolean(
     value(claim, 'hyperbeam') ||
     value(claim, 'hyperbeam+link', 'hyperbeam-link') ||
@@ -1461,12 +1522,10 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
   const immutableId = immutableRouteIdFromUri(uri);
   if (!immutableId) return null;
 
-  const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
+  const result = await fetchCachedImmutableJsonOrNull(immutableId);
   const decodedClaim = decodeClaimMetadata(storePayload(result));
   const signingChannel = decodedClaim?.signedChannelId
-    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
-        .then(responsePayload)
-        .catch(() => null)
+    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId).catch(() => null)
     : null;
   const parsed = parseURI(uri);
   const name = parsed.streamName || parsed.claimName;
@@ -1508,7 +1567,8 @@ async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[s
   const storeEntries = await Promise.all(
     Array.from(uriByClaimId.entries()).map(async ([claimId, uri]): Promise<[string, any] | null> => {
       const storeClaim = await fetchCachedStoreJsonOrNull(storePath('odysee/claim-id', claimId)).then(responsePayload);
-      return storeClaim ? [uri, sdkClaimFromHyperbeam(storeClaim)] : null;
+      const claim = storeClaim ? sdkClaimFromHyperbeam(storeClaim) : null;
+      return claim ? [uri, await immutableClaimForResolvedUri(uri, claim)] : null;
     })
   );
   const resolvedEntries = storeEntries.filter(Boolean);
@@ -1524,14 +1584,16 @@ async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[s
   const search = sdkSearchFromHyperbeam(responsePayload(response));
   const items = Array.isArray(search?.items) ? search.items : [];
 
-  const fallbackEntries = items
-    .map((item: any): [string, any] | null => {
-      const claim = sdkClaimFromHyperbeam(item);
-      const claimId = value(claim, 'claim_id', 'claim-id');
-      const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
-      return uri ? [uri, claim] : null;
-    })
-    .filter(Boolean) as Array<[string, any]>;
+  const fallbackEntries = (
+    await Promise.all(
+      items.map(async (item: any): Promise<[string, any] | null> => {
+        const claim = sdkClaimFromHyperbeam(item);
+        const claimId = value(claim, 'claim_id', 'claim-id');
+        const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
+        return uri ? [uri, await immutableClaimForResolvedUri(uri, claim)] : null;
+      })
+    )
+  ).filter(Boolean) as Array<[string, any]>;
 
   return [...resolvedEntries, ...fallbackEntries];
 }
@@ -1567,12 +1629,10 @@ async function fetchHyperbeamImmutableList(
   const claims = (
     await Promise.all(
       uniqueIds.map(async (id) => {
-        const result = await fetchCachedImmutableJsonOrNull(id).then(responsePayload);
+        const result = await fetchCachedImmutableJsonOrNull(id);
         const decodedClaim = decodeClaimMetadata(storePayload(result));
         const signingChannel = decodedClaim?.signedChannelId
-          ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
-              .then(responsePayload)
-              .catch(() => null)
+          ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId).catch(() => null)
           : null;
         return immutableClaimFromHyperbeam(result, id, signingChannel, decodedClaim);
       })
@@ -2126,7 +2186,7 @@ function latin1ToHex(value: string): string {
 }
 
 function storePayload(result: any): any {
-  const payload = responsePayload(result);
+  const payload = messagePayload(result);
   if (!payload) return null;
   if (typeof payload === 'string') return { body: payload };
 
@@ -2169,6 +2229,23 @@ function claimEnvelope(bytes: Uint8Array): { message: Uint8Array; signedChannelI
 }
 
 function hexToBytes(value: any): Uint8Array | null {
+  if (
+    isObject(value) &&
+    value['$ao-type'] === 'binary' &&
+    typeof value.base64url === 'string' &&
+    typeof atob === 'function'
+  ) {
+    try {
+      const base64 = value.base64url
+        .replace(/-/g, '+')
+        .replace(/_/g, '/')
+        .padEnd(Math.ceil(value.base64url.length / 4) * 4, '=');
+      const decoded = atob(base64);
+      return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+    } catch {
+      return null;
+    }
+  }
   if (typeof value !== 'string' || value.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(value)) return null;
   const bytes = new Uint8Array(value.length / 2);
   for (let index = 0; index < bytes.length; index += 1) {

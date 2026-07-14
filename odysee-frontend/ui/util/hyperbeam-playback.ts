@@ -3,13 +3,17 @@ import { HYPERBEAM_BASE_URL, HYPERBEAM_PLAYBACK_URL, ODYSEE_HYPERBEAM_NODE_API }
 const HYPERBEAM_TIMEOUT_MS = 5000;
 const STREAM_DEVICE = '~odysee-stream@1.0';
 
-export function buildHyperbeamPlaybackUrl(uri: string): string {
+export function buildHyperbeamPlaybackUrl(uri: string, immutableId?: string): string {
   const playbackUrl = hyperbeamPlaybackUrl();
   if (!playbackUrl) return '';
 
   try {
     const url = new URL(playbackUrl);
-    url.searchParams.set('url', uri);
+    if (immutableId) {
+      url.searchParams.set('id', immutableId);
+    } else {
+      url.searchParams.set('url', uri);
+    }
     url.searchParams.set('mode', 'hyperbeam');
     if (!url.searchParams.has('media-base-url')) {
       url.searchParams.set('media-base-url', url.origin);
@@ -30,8 +34,8 @@ function hyperbeamNode() {
   return String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
 }
 
-export async function fetchHyperbeamPlaybackUrl(uri: string): Promise<string> {
-  const requestUrl = buildHyperbeamPlaybackUrl(uri);
+export async function fetchHyperbeamPlaybackUrl(uri: string, immutableId?: string): Promise<string> {
+  const requestUrl = buildHyperbeamPlaybackUrl(uri, immutableId);
   if (!requestUrl) return '';
 
   const playbackUrl = await fetchPlaybackUrl(requestUrl);
@@ -51,8 +55,7 @@ async function fetchPlaybackUrl(requestUrl: string): Promise<string> {
 
     // The stream device returns a ready-to-use node media URL; prefer it over
     // anything we could reconstruct locally.
-    const direct =
-      payload.streaming_url || payload['streaming-url'] || payload.download_url || payload['download-url'];
+    const direct = payload.streaming_url || payload['streaming-url'] || payload.download_url || payload['download-url'];
     if (typeof direct === 'string' && direct) return direct;
 
     return hyperbeamMediaUrlFromPayload(payload);

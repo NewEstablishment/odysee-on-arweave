@@ -56,13 +56,28 @@ json_safe(List) when is_list(List) ->
 json_safe(Bin) when is_binary(Bin) ->
     case unicode:characters_to_binary(Bin, utf8, utf8) of
         Bin -> Bin;
-        _ -> hb_util:encode(Bin)
+        _ -> #{
+            <<"$ao-type">> => <<"binary">>,
+            <<"base64url">> => hb_util:encode(Bin)
+        }
     end;
 json_safe(Value) ->
     Value.
 
+json_restore(#{ <<"$ao-type">> := <<"binary">>, <<"base64url">> := Encoded } = Value)
+        when map_size(Value) =:= 2, is_binary(Encoded) ->
+    try hb_util:decode(Encoded)
+    catch _:_ -> Value
+    end;
+json_restore(Map) when is_map(Map) ->
+    maps:map(fun(_Key, Value) -> json_restore(Value) end, Map);
+json_restore(List) when is_list(List) ->
+    [json_restore(Value) || Value <- List];
+json_restore(Value) ->
+    Value.
+
 %% @doc Decode a JSON string to a message.
-from(Map, _Req, _Opts) when is_map(Map) -> {ok, Map};
+from(Map, _Req, _Opts) when is_map(Map) -> {ok, json_restore(Map)};
 from(JSON, Req, Opts) ->
     ConvOpts = Opts#{ <<"hashpath">> => ignore },
     % The JSON string will be a partially-TABM encoded message: Rich number
@@ -72,7 +87,7 @@ from(JSON, Req, Opts) ->
     % results are fully normalized.
     Structured =
         hb_message:convert(
-            json:decode(JSON),
+            json_restore(json:decode(JSON)),
             <<"structured@1.0">>,
             tabm,
             ConvOpts
@@ -166,14 +181,17 @@ raw_binary_values_encode_as_base64url_test() ->
     },
     {ok, JSON} = to(Msg, #{}, #{}),
     Decoded = json:decode(JSON),
-    Encoded = hb_util:encode(RawBytes),
+    Encoded = #{
+        <<"$ao-type">> => <<"binary">>,
+        <<"base64url">> => hb_util:encode(RawBytes)
+    },
     Leaves = json_leaves(Decoded),
-    % Raw binaries are presented in their base64url form; UTF-8 passes
-    % through untouched; the raw bytes never reach the JSON output. The
-    % nesting layout (links, structured lists) is owned by the message
-    % conversion pipeline, so only assert on values.
     ?assertEqual(Encoded, maps:get(<<"raw-transaction">>, Decoded)),
-    ?assertNot(lists:member(RawBytes, Leaves)).
+    ?assertNot(lists:member(RawBytes, Leaves)),
+    {ok, Restored} = from(JSON, #{}, #{}),
+    ?assertEqual(RawBytes, maps:get(<<"raw-transaction">>, Restored)),
+    {ok, RestoredMap} = from(Decoded, #{}, #{}),
+    ?assertEqual(RawBytes, maps:get(<<"raw-transaction">>, RestoredMap)).
 
 json_leaves(Map) when is_map(Map) ->
     lists:append([json_leaves(Value) || Value <- maps:values(Map)]);
