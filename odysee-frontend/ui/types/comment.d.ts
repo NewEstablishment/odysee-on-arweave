@@ -10,7 +10,8 @@ type CommentCreateParams = {
   claim_id: string;
   channel_id: string;
   channel_name: string;
-  body: string;
+  body?: string;
+  comment?: string;
   parent_id?: string;
   signature: string;
   signing_ts: string;
@@ -18,6 +19,11 @@ type CommentCreateParams = {
   payment_intent_id?: string;
   environment?: string;
   sticker?: boolean;
+  mentioned_channels?: Array<any>;
+  amount?: number;
+  support_tx_id?: string;
+  is_protected?: boolean;
+  dry_run?: boolean;
   [key: string]: any;
 };
 
@@ -65,6 +71,7 @@ type CommentListParams = {
   is_channel_signature_valid?: boolean;
   hidden?: boolean;
   visible?: boolean;
+  author_claim_id?: string;
   [key: string]: any;
 };
 

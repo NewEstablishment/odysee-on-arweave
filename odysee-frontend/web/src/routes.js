@@ -160,14 +160,20 @@ async function postHyperbeamUpload(ctx) {
     return;
   }
 
-  const cookieHeader = ctx.get('cookie');
-  const authToken = ctx.cookies.get(AUTH_TOKEN_COOKIE) || getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE);
-
-  const response = await postStream(`${nodeUrl}${HYPERBEAM_UPLOAD_PATH}`, ctx.req, {
-    'content-type': ctx.get('content-type') || 'application/octet-stream',
-    ...(ctx.get('content-length') ? { 'content-length': ctx.get('content-length') } : {}),
+  const authToken = getRequestAuthToken(ctx);
+  const contentType = ctx.get('content-type') || 'application/octet-stream';
+  const authHeaders = {
     ...(authToken ? { 'x-odysee-auth-token': authToken } : {}),
-  });
+    accept: ctx.get('accept') || 'application/json',
+    'accept-bundle': ctx.get('accept-bundle') || 'false',
+  };
+  const response = contentType.includes('application/json')
+    ? await postJson(`${nodeUrl}${HYPERBEAM_UPLOAD_PATH}`, await readJsonBody(ctx), authHeaders)
+    : await postStream(`${nodeUrl}${HYPERBEAM_UPLOAD_PATH}`, ctx.req, {
+        'content-type': contentType,
+        ...(ctx.get('content-length') ? { 'content-length': ctx.get('content-length') } : {}),
+        ...authHeaders,
+      });
 
   ctx.status = response.statusCode;
   ctx.set('Cache-Control', 'no-store');

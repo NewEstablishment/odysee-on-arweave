@@ -31,7 +31,7 @@ import {
 import { makeSelectNotificationForCommentId } from 'redux/selectors/notifications';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { toHex } from 'util/hex';
-import { getChannelFromClaim, isHyperbeamUploadClaim } from 'util/claim';
+import { getChannelFromClaim } from 'util/claim';
 import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
@@ -41,28 +41,6 @@ const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
 const COMMENTRON_FAILED_TO_FETCH = 'Failed to fetch (comments.odysee.tv)';
 const PROMISE_FULFILLED = 'fulfilled';
 const MENTION_REGEX = /(?:^| |\n)@[^\s=&#$@%?:;/"<>%{}|^~[]*(?::[\w]+)?/gm;
-
-function dispatchEmptyCommentList(
-  dispatch: Dispatch,
-  claimId: string,
-  uri: string,
-  parentId: string | null | undefined,
-  page: number
-) {
-  return dispatch({
-    type: ACTIONS.COMMENT_LIST_COMPLETED,
-    data: {
-      comments: [],
-      parentId,
-      totalItems: 0,
-      totalFilteredItems: 0,
-      totalPages: 0,
-      claimId,
-      uri,
-      page,
-    },
-  });
-}
 
 export function doCommentList(
   uri: string,
@@ -91,10 +69,6 @@ export function doCommentList(
         parentId,
       },
     });
-
-    if (isHyperbeamUploadClaim(claim)) {
-      return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
-    }
 
     const activeChannelClaim = selectActiveChannelClaim(state);
     const activeChannelId = activeChannelClaim?.claim_id;
@@ -184,10 +158,6 @@ export function doCommentList(
       })
       .catch((error) => {
         const { message } = error;
-
-        if (isHyperbeamUploadClaim(claim)) {
-          return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
-        }
 
         switch (message) {
           case 'comments are disabled by the creator':
