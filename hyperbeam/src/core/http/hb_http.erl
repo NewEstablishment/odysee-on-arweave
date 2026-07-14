@@ -706,18 +706,18 @@ reply_handle_cookies(Req, Message, Opts) ->
 %% @doc Add permissive CORS headers to a message, if the message has not already
 %% specified CORS headers.
 add_cors_headers(Msg, ReqHdr, Origin, Opts) ->
-    WithCors = hb_maps:merge(cors_headers(ReqHdr, Origin), Msg, Opts),
+    WithCors = hb_maps:merge(cors_headers(Msg, ReqHdr, Origin, Opts), Msg, Opts),
     case Origin of
         <<>> -> WithCors;
-        _ -> hb_maps:merge(WithCors, cors_headers(ReqHdr, Origin), Opts)
+        _ -> hb_maps:merge(WithCors, cors_headers(Msg, ReqHdr, Origin, Opts), Opts)
     end.
 
-cors_headers(ReqHdr, Origin) ->
+cors_headers(Msg, ReqHdr, Origin, Opts) ->
     Headers0 = #{
         <<"access-control-allow-origin">> => allow_origin(Origin),
         <<"access-control-allow-methods">> => <<"GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH">>,
         <<"access-control-allow-headers">> => allow_headers(ReqHdr),
-        <<"access-control-expose-headers">> => expose_headers(Origin),
+        <<"access-control-expose-headers">> => expose_headers(Msg, Origin, Opts),
         <<"vary">> => <<"Origin, Access-Control-Request-Method, Access-Control-Request-Headers">>
     },
     case Origin of
@@ -733,9 +733,22 @@ allow_headers(<<>>) ->
 allow_headers(ReqHdr) ->
     ReqHdr.
 
-expose_headers(<<>>) ->
+%% @doc With `access-control-allow-credentials: true' a literal `*' is not a
+%% wildcard, so credentialed (Origin-bearing) requests must enumerate every
+%% header the browser may read. Message keys are returned to clients as HTTP
+%% headers, so we expose the response's actual header names alongside the
+%% static set.
+expose_headers(_Msg, <<>>, _Opts) ->
     <<"*">>;
-expose_headers(_) ->
+expose_headers(Msg, _Origin, Opts) when is_map(Msg) ->
+    Base = [
+        <<"accept-ranges">>, <<"ao-result">>, <<"content-digest">>,
+        <<"content-length">>, <<"content-range">>, <<"location">>,
+        <<"signature">>, <<"signature-input">>
+    ],
+    MsgKeys = [ Key || Key <- hb_maps:keys(Msg, Opts), is_binary(Key) ],
+    iolist_to_binary(lists:join(<<", ">>, lists:usort(Base ++ MsgKeys)));
+expose_headers(_Msg, _Origin, _Opts) ->
     <<"Accept-Ranges, Ao-Result, Content-Digest, Content-Length, Content-Range, Location, Signature, Signature-Input">>.
 
 %% @doc Generate the headers and body for a HTTP response message.

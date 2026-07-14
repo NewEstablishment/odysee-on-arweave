@@ -4,7 +4,7 @@ import * as FILE_LIST from 'constants/file_list';
 import * as TAGS from 'constants/tags';
 import { Lbryio, doFetchViewCount } from 'lbryinc';
 import Lbry from 'lbry';
-import { normalizeURI } from 'util/lbryURI';
+import { buildURI, normalizeURI } from 'util/lbryURI';
 import { doToast } from 'redux/actions/notifications';
 import {
   selectMyClaimsRaw,
@@ -635,23 +635,52 @@ async function fetchHyperbeamClaimIdChunk(dispatch: Dispatch, claimIds: Array<st
     const urls = [];
     data.items.forEach((claim: Claim) => {
       const claimUrl = claim.canonical_url || claim.permanent_url || claim.short_url || claim.claim_id;
-      resolveInfo[claimUrl] = { stream: claim };
+      const claimIdUrl = buildURI(
+        claim.value_type === 'channel'
+          ? { channelName: claim.name, channelClaimId: claim.claim_id }
+          : { streamName: claim.name, streamClaimId: claim.claim_id },
+        true
+      );
+      const resolvedClaim =
+        claim.value_type === 'channel'
+          ? { channel: claim, claimsInChannel: claim.meta?.claims_in_channel || 0 }
+          : { stream: claim };
+      resolveInfo[claimUrl] = resolvedClaim;
+      resolveInfo[claimIdUrl] = resolvedClaim;
       urls.push(claimUrl);
     });
 
-    dispatch({
-      type: ACTIONS.CLAIM_SEARCH_COMPLETED,
-      data: {
-        query,
-        resolveInfo,
-        urls,
-        append: false,
-        page: searchOptions.page,
-        pageSize: searchOptions.page_size,
-        totalItems: data.total_items,
-        totalPages: data.total_pages,
+    const costInfos = await Promise.all(
+      data.items
+        .filter((claim: Claim) => claim?.claim_id && claim.value_type !== 'channel')
+        .map((claim: Claim) =>
+          getCostInfoForFee(claim.claim_id, claim.value ? (claim.value as StreamMetadata).fee : undefined)
+        )
+    );
+    const actions: Array<any> = [
+      {
+        type: ACTIONS.CLAIM_SEARCH_COMPLETED,
+        data: {
+          query,
+          resolveInfo,
+          urls,
+          append: false,
+          page: searchOptions.page,
+          pageSize: searchOptions.page_size,
+          totalItems: data.total_items,
+          totalPages: data.total_pages,
+        },
       },
-    });
+    ];
+
+    if (costInfos.length) {
+      actions.push({
+        type: ACTIONS.SET_COST_INFOS_BY_ID,
+        data: costInfos,
+      });
+    }
+
+    dispatch({ type: 'BATCH_ACTIONS', actions });
 
     return resolveInfo;
   } catch (error) {

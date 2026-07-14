@@ -33,6 +33,7 @@ export default React.memo<Props>(function RecommendedContent(props: Props) {
   const recommendedContentUris = useAppSelector((state) => selectRecommendedContentForUri(state, uri));
   const nextRecommendedUri = recommendedContentUris && recommendedContentUris[0];
   const isSearching = useAppSelector(selectIsSearching);
+  const isLoadingRecommendations = isSearching && !recommendedContentUris?.length;
   const searchInLanguage = useAppSelector((state) => selectClientSetting(state, SETTINGS.SEARCH_IN_LANGUAGE));
 
   const currentLocation = location || routeLocation;
@@ -121,7 +122,7 @@ export default React.memo<Props>(function RecommendedContent(props: Props) {
       }
       body={
         <div>
-          {isSearching && (
+          {isLoadingRecommendations && (
             <>
               {Array.from({ length: 20 }, (_, i) => (
                 <ClaimPreview key={i} placeholder="loading" type="small" />
@@ -131,7 +132,7 @@ export default React.memo<Props>(function RecommendedContent(props: Props) {
           {viewMode === VIEW_ALL_RELATED && (
             <ClaimList
               type="small"
-              loading={isSearching}
+              loading={isLoadingRecommendations}
               uris={recommendedContentUris}
               empty={__('No related content found')}
               onClick={handleRecommendationClicked}

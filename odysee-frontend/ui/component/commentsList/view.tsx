@@ -158,14 +158,8 @@ export default function CommentList(props: Props) {
   }
 
   const threadTopLevelComment = threadCommentAncestors && threadCommentAncestors[threadCommentAncestors.length - 1];
-  // Display comments immediately if not fetching reactions
-  // If not, wait to show comments until reactions are fetched
-  const [readyToDisplayComments, setReadyToDisplayComments] = React.useState(
-    Boolean(othersReactsById) || !ENABLE_COMMENT_REACTIONS
-  );
-  // get commenter claim ids for checking premium status
   const commenterClaimIds = React.useMemo(() => {
-    return topLevelComments.map((comment) => comment.channel_id);
+    return Array.from(new Set(topLevelComments.map((comment) => comment.channel_id).filter(Boolean))) as Array<string>;
   }, [topLevelComments]);
   React.useEffect(() => {
     if (commenterClaimIds.length > 0 && channelId) {
@@ -261,6 +255,11 @@ export default function CommentList(props: Props) {
       dispatch(doCommentById(linkedCommentId));
     }
   }, [dispatch, linkedCommentId, threadCommentId]);
+  // If the claim behind the uri is re-resolved to a different claim id (e.g. a
+  // hyperbeam store claim corrected to its legacy claim id), refetch for it
+  useEffect(() => {
+    setInitialPageFetch(false);
+  }, [claimId]);
   // Fetch top-level comments
   useEffect(() => {
     const isInitialFetch = page === 1 && !didInitialPageFetch;
@@ -302,11 +301,7 @@ export default function CommentList(props: Props) {
         if (now - lastRequestedAt < COMMENT_REACTION_REQUEST_CACHE_MS) return;
 
         requestedReactionBatchesRef.current[batchKey] = now;
-        dispatch(doCommentReactList(idsForReactionFetch))
-          .then(() => {
-            setReadyToDisplayComments(true);
-          })
-          .catch(() => setReadyToDisplayComments(true));
+        dispatch(doCommentReactList(idsForReactionFetch)).catch(() => undefined);
       }
     }
   }, [
@@ -361,7 +356,7 @@ export default function CommentList(props: Props) {
       setInitialPageFetch(true);
     }
 
-    if (hasDefaultExpansion && !isFetchingComments && readyToDisplayComments && moreBelow) {
+    if (hasDefaultExpansion && !isFetchingComments && moreBelow) {
       const commentsInDrawer = Boolean(document.querySelector('.MuiDrawer-root .card--enable-overflow'));
       const scrollingElement = commentsInDrawer ? document.querySelector('.card--enable-overflow') : window;
 
@@ -378,7 +373,6 @@ export default function CommentList(props: Props) {
     isMobile,
     moreBelow,
     page,
-    readyToDisplayComments,
     topLevelTotalPages,
     uri,
   ]);
@@ -441,53 +435,49 @@ export default function CommentList(props: Props) {
               'comments--contracted': isSmallScreen && !expandedComments && totalUnfilteredComments > 1,
             })}
           >
-            {readyToDisplayComments && (
-              <>
-                {threadComment && (
+            {threadComment && (
+              <CommentView
+                key={threadComment.comment_id}
+                comment={threadComment}
+                disabled={notAuthedToChat}
+                updateUiFilteredComments={updateUiFilteredComments}
+                {...commentProps}
+              />
+            )}
+            {pinnedComments &&
+              pinnedComments.map((c) => {
+                if (threadComment && threadCommentAncestors && threadCommentAncestors.includes(c.comment_id)) {
+                  // Skip if part of the linked comment thread - thread is shown at the top
+                  return;
+                }
+
+                return (
                   <CommentView
-                    key={threadComment.comment_id}
-                    comment={threadComment}
+                    key={c.comment_id}
+                    comment={c}
                     disabled={notAuthedToChat}
                     updateUiFilteredComments={updateUiFilteredComments}
                     {...commentProps}
                   />
-                )}
-                {pinnedComments &&
-                  pinnedComments.map((c) => {
-                    if (threadComment && threadCommentAncestors && threadCommentAncestors.includes(c.comment_id)) {
-                      // Skip if part of the linked comment thread - thread is shown at the top
-                      return;
-                    }
+                );
+              })}
 
-                    return (
-                      <CommentView
-                        key={c.comment_id}
-                        comment={c}
-                        disabled={notAuthedToChat}
-                        updateUiFilteredComments={updateUiFilteredComments}
-                        {...commentProps}
-                      />
-                    );
-                  })}
+            {topLevelComments.map((c) => {
+              if (threadComment && threadCommentAncestors && threadCommentAncestors.includes(c.comment_id)) {
+                // Skip if part of the linked comment thread - thread is shown at the top
+                return;
+              }
 
-                {topLevelComments.map((c) => {
-                  if (threadComment && threadCommentAncestors && threadCommentAncestors.includes(c.comment_id)) {
-                    // Skip if part of the linked comment thread - thread is shown at the top
-                    return;
-                  }
-
-                  return (
-                    <CommentView
-                      key={c.comment_id}
-                      comment={c}
-                      disabled={notAuthedToChat}
-                      updateUiFilteredComments={updateUiFilteredComments}
-                      {...commentProps}
-                    />
-                  );
-                })}
-              </>
-            )}
+              return (
+                <CommentView
+                  key={c.comment_id}
+                  comment={c}
+                  disabled={notAuthedToChat}
+                  updateUiFilteredComments={updateUiFilteredComments}
+                  {...commentProps}
+                />
+              );
+            })}
           </ul>
 
           {!hasDefaultExpansion && (
@@ -523,7 +513,7 @@ export default function CommentList(props: Props) {
           )}
 
           {(threadCommentId
-            ? !readyToDisplayComments
+            ? isFetchingComments
             : isFetchingTopLevelComments || (hasDefaultExpansion && moreBelow)) && (
             <div className="main--empty" ref={spinnerRef}>
               <Spinner type="small" />

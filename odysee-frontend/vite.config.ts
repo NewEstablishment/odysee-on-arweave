@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 
@@ -22,6 +24,43 @@ const CUSTOM_HOMEPAGES_ROOT = path.resolve(__dirname, 'custom/homepages/v2');
 const CUSTOM_MEMES_ROOT = path.resolve(__dirname, 'custom/homepages/meme/index');
 const useCustomHomepages = process.env.CUSTOM_HOMEPAGE === 'true' && fs.existsSync(CUSTOM_HOMEPAGES_ROOT);
 const useCustomMemes = process.env.CUSTOM_HOMEPAGE === 'true' && fs.existsSync(CUSTOM_MEMES_ROOT);
+const DEV_AUTH_TOKEN_COOKIE = 'auth_token';
+const DEV_HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
+const DEV_HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
+  '/~odysee-account@1.0/preference-get',
+  '/~odysee-account@1.0/preference-set',
+  '/~odysee-account@1.0/settings-get',
+  '/~odysee-account@1.0/settings-set',
+  '/~odysee-account@1.0/settings-clear',
+  '/~odysee-account@1.0/user-exists',
+  '/~odysee-account@1.0/user-new',
+  '/~odysee-account@1.0/user-signin',
+  '/~odysee-account@1.0/user-me',
+  '/~odysee-account@1.0/user-email-resend-token',
+  '/~odysee-account@1.0/user-email-confirm',
+  '/~odysee-account@1.0/account-status',
+  '/~odysee-comment@1.0/create',
+  '/~odysee-comment@1.0/edit',
+  '/~odysee-comment@1.0/pin',
+  '/~odysee-comment@1.0/abandon',
+  '/~odysee-comment@1.0/reaction-react',
+  '/~odysee-comment@1.0/setting-get',
+  '/~odysee-comment@1.0/setting-list',
+  '/~odysee-comment@1.0/setting-update',
+  '/~odysee-comment@1.0/setting-block-word',
+  '/~odysee-comment@1.0/setting-unblock-word',
+  '/~odysee-comment@1.0/setting-list-blocked-words',
+  '/~odysee-comment@1.0/moderation-block',
+  '/~odysee-comment@1.0/moderation-unblock',
+  '/~odysee-comment@1.0/moderation-block-list',
+  '/~odysee-comment@1.0/moderation-add-delegate',
+  '/~odysee-comment@1.0/moderation-remove-delegate',
+  '/~odysee-comment@1.0/moderation-list-delegates',
+  '/~odysee-comment@1.0/moderation-am-i',
+  '/~odysee-file@1.0/view-count',
+  '/~odysee-file-reaction@1.0/list',
+  '/~odysee-account@1.0/sub-count',
+]);
 // Resolve pnpm's nested node_modules directories for SCSS loadPaths.
 // Only include directories that actually contain SCSS files to avoid
 // inflating the Sass resolver's search space with 800 irrelevant paths.
@@ -251,6 +290,116 @@ function devRssRoutesPlugin() {
           res.statusCode = 500;
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.end(error instanceof Error ? error.message : 'Internal Server Error');
+        }
+      });
+    },
+  };
+}
+
+function cookieValue(cookieHeader: string, name: string) {
+  const prefix = `${name}=`;
+  const cookie = cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+}
+
+function postDevHyperbeamJson(url: string, body: Record<string, any>) {
+  return new Promise<{ statusCode: number; contentType: string; body: Buffer }>((resolve, reject) => {
+    const target = new URL(url);
+    const payload = Buffer.from(JSON.stringify(body));
+    const request = (target.protocol === 'https:' ? https : http).request(
+      target,
+      {
+        method: 'POST',
+        insecureHTTPParser: true,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': payload.length,
+        },
+      },
+      (response) => {
+        const chunks: Array<Buffer> = [];
+        response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on('end', () => {
+          resolve({
+            statusCode: response.statusCode || 502,
+            contentType: String(response.headers['content-type'] || 'application/json'),
+            body: Buffer.concat(chunks),
+          });
+        });
+      }
+    );
+    request.setTimeout(15000, () => request.destroy(new Error('HyperBEAM auth proxy timed out')));
+    request.on('error', reject);
+    request.end(payload);
+  });
+}
+
+function devHyperbeamAuthRoutesPlugin() {
+  return {
+    name: 'dev-hyperbeam-auth-routes',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const requestUrl = new URL(req.url || '/', 'http://localhost');
+        const cookieHeader = req.headers.cookie || '';
+
+        if (requestUrl.pathname === '/$/api/auth-token/v1/get' && req.method === 'GET') {
+          const cookieNames = cookieHeader
+            .split(';')
+            .map((part) => part.trim().split('=')[0])
+            .filter(Boolean);
+          res.statusCode = 200;
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('Content-Type', 'application/json');
+          res.end(
+            JSON.stringify({
+              auth_cookie_present: Boolean(cookieValue(cookieHeader, DEV_AUTH_TOKEN_COOKIE)),
+              cookie_names: cookieNames,
+            })
+          );
+          return;
+        }
+
+        if (!requestUrl.pathname.startsWith(DEV_HYPERBEAM_AUTH_DEVICE_PREFIX) || req.method !== 'POST') {
+          return next();
+        }
+
+        const devicePath = requestUrl.pathname.slice(DEV_HYPERBEAM_AUTH_DEVICE_PREFIX.length);
+        const nodeUrl = String(process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || '').replace(
+          /\/+$/,
+          ''
+        );
+
+        if (!nodeUrl || !DEV_HYPERBEAM_AUTH_DEVICE_PATHS.has(devicePath)) {
+          res.statusCode = 404;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'unsupported hyperbeam auth device path' }));
+          return;
+        }
+
+        try {
+          const chunks = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const rawBody = Buffer.concat(chunks).toString('utf8');
+          const requestBody = rawBody ? JSON.parse(rawBody) : {};
+          const headerToken = req.headers['x-odysee-auth-token'] || req.headers['x-lbry-auth-token'];
+          const authToken =
+            cookieValue(cookieHeader, DEV_AUTH_TOKEN_COOKIE) ||
+            (Array.isArray(headerToken) ? headerToken[0] : headerToken) ||
+            null;
+          const body = authToken ? { auth_token: authToken, ...requestBody } : requestBody;
+          const response = await postDevHyperbeamJson(`${nodeUrl}${devicePath}`, body);
+          res.statusCode = response.statusCode;
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('Content-Type', response.contentType);
+          res.end(response.body);
+        } catch (error) {
+          res.statusCode = 502;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'hyperbeam auth proxy failed' }));
         }
       });
     },
@@ -847,6 +996,7 @@ export default defineConfig({
     uiModuleResolverPlugin(),
     preprocessPlugin(),
     devRssRoutesPlugin(),
+    devHyperbeamAuthRoutesPlugin(),
     providePlugin(),
     mediabunnyPausePatchPlugin(),
     // React Scan is opt-in in dev. Always injecting it proved too expensive on some heavy claim pages.

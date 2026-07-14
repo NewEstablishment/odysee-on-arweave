@@ -11,6 +11,7 @@ import { getAuthToken } from 'util/saved-passwords';
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const HYPERBEAM_FAILED_READ_CACHE_MS = 10 * 1000;
+const LBRY_CLAIM_ID_RE = /^[0-9a-f]{40}$/i;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const CLAIM_DEVICE = '~odysee-claim@1.0';
 const ACCOUNT_DEVICE = '~odysee-account@1.0';
@@ -708,7 +709,8 @@ function debugResponseHeaders(response: Response) {
 
 export async function fetchHyperbeamResolveClaimIds(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   const claimIds = stringList((params as any).claim_ids || (params as any).claimIds);
-  const uploadItems = claimIds.length ? await fetchHyperbeamUploadClaimsForIds(claimIds) : [];
+  const uploadIds = claimIds.filter((claimId) => !LBRY_CLAIM_ID_RE.test(claimId));
+  const uploadItems = uploadIds.length ? await fetchHyperbeamUploadClaimsForIds(uploadIds) : [];
   let result: any = null;
 
   try {
@@ -1078,7 +1080,23 @@ function buildCacheUrl(baseUrl: string, path: string): string {
   return `${baseUrl}/~cache@1.0/${path}`;
 }
 
-async function fetchCacheJson(path: string, acceptBundle: boolean = false): Promise<any | null> {
+function fetchCacheJson(path: string, acceptBundle: boolean = false): Promise<any | null> {
+  const key = `cache:${path}:${String(acceptBundle)}`;
+  const now = Date.now();
+  const cached = deviceReadCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+
+  const promise = fetchCacheJsonUncached(path, acceptBundle).catch((error) => {
+    const failed = Promise.reject(error);
+    failed.catch(() => {});
+    deviceReadCache.set(key, { expiresAt: Date.now() + HYPERBEAM_FAILED_READ_CACHE_MS, promise: failed });
+    throw error;
+  });
+  deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
+  return promise;
+}
+
+async function fetchCacheJsonUncached(path: string, acceptBundle: boolean): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) {
     if (isHyperbeamEnabled()) throw new Error('HyperBEAM node is not configured');
@@ -1298,9 +1316,27 @@ async function immutableClaimForResolvedUri(uri: string, claim: any): Promise<an
   const immutableClaim = immutableClaimFromHyperbeam(result, immutableId, claim.signing_channel, decodedClaim, name);
   if (!immutableClaim) return claim;
 
+  // The resolved claim is authoritative for the mutable lbry identity (claim id
+  // + claim urls); the store message keys are CORS-hidden header fields in the
+  // browser, so the immutable claim may only know the outpoint id.
+  const resolvedClaimId = String(claim.claim_id || '');
+  const legacyIdentity = FULL_CLAIM_ID_REGEX.test(resolvedClaimId)
+    ? {
+        claim_id: resolvedClaimId,
+        canonical_url: claim.canonical_url || immutableClaim.canonical_url,
+        permanent_url: claim.permanent_url || immutableClaim.permanent_url,
+        short_url: claim.short_url || immutableClaim.short_url,
+        hyperbeam: compactParams({
+          ...immutableClaim.hyperbeam,
+          'source-claim-id': value(immutableClaim.hyperbeam, 'source-claim-id') || resolvedClaimId,
+        }),
+      }
+    : {};
+
   return {
     ...claim,
     ...immutableClaim,
+    ...legacyIdentity,
     signing_channel: immutableClaim.signing_channel || claim.signing_channel,
     value: {
       ...claim.value,

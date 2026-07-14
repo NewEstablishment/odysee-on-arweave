@@ -394,9 +394,9 @@ export const doSearch =
       fetchLighthouseResults()
         .then(({ result, poweredBy, uuid, uris }) => {
           if (isSearchingRecommendations) {
-            // Temporarily resolve using `claim_search` until the SDK bug is fixed.
-            const claimIds = result.map((x) => x.claimId);
-            dispatch(doResolveClaimIds(claimIds)).finally(() => {
+            const claimIds = Array.from(new Set<string>(result.map((x) => x.claimId).filter(Boolean)));
+            const resolveTimeout = new Promise((resolve) => setTimeout(resolve, 2000));
+            Promise.race([dispatch(doResolveClaimIds(claimIds)).catch(() => undefined), resolveTimeout]).then(() => {
               dispatch({
                 type: ACTIONS.SEARCH_SUCCESS,
                 data: {

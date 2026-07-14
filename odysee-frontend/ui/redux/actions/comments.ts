@@ -173,14 +173,16 @@ export function doCommentList(
           return result;
         };
 
-        // Batch resolve comment authors
-        const commentChannelIds = comments && comments.map((comment) => comment.channel_id || '');
+        const commentChannelIds = Array.from(
+          new Set((comments || []).map((comment) => comment.channel_id).filter(Boolean))
+        ) as Array<string>;
+        returnResult();
 
-        if (commentChannelIds && !isLivestream) {
-          return dispatch(doResolveClaimIds(commentChannelIds)).finally(() => returnResult());
+        if (commentChannelIds.length && !isLivestream) {
+          dispatch(doResolveClaimIds(commentChannelIds)).catch(() => undefined);
         }
 
-        return returnResult();
+        return result;
       })
       .catch((error) => {
         const { message } = error;
