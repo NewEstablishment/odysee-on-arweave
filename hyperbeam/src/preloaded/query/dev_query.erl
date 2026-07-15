@@ -23,7 +23,7 @@
 %%% - `boolean': Return a boolean indicating whether any matches were found.
 -module(dev_query).
 %%% Message matching API:
--export([info/1, only/3, all/3, base/3]).
+-export([info/1, only/3, all/3, base/3, batch/3]).
 %%% GraphQL API:
 -export([graphql/3, has_results/3]).
 %%% Test setup:
@@ -40,6 +40,7 @@
         <<"return">>,
         <<"exclude">>,
         <<"only">>,
+        <<"queries">>,
         <<"offset">>,
         <<"limit">>,
         <<"sort-by">>,
@@ -116,6 +117,49 @@ only(Base, Req, Opts) ->
         not_found ->
             % We cannot find the key to match upon. Return an error.
             {error, not_found}
+    end.
+
+batch(Base, Req, Opts) ->
+    case batch_queries(hb_maps:get(<<"queries">>, Req, not_found, Opts), Opts) of
+        {ok, Queries} ->
+            case batch_results(Queries, Base, Opts, []) of
+                {ok, Results} ->
+                    {ok, #{
+                        <<"content-type">> => <<"application/json">>,
+                        <<"body">> => hb_json:encode(Results)
+                    }};
+                Error -> Error
+            end;
+        Error -> Error
+    end.
+
+batch_queries(Queries, _Opts) when is_list(Queries) ->
+    {ok, Queries};
+batch_queries(Queries, Opts) when is_map(Queries) ->
+    try {ok, hb_util:numbered_keys_to_list(Queries, Opts)}
+    catch _:_ -> {error, invalid_queries}
+    end;
+batch_queries(_Queries, _Opts) ->
+    {error, invalid_queries}.
+
+batch_results([], _Base, _Opts, Results) ->
+    {ok, lists:reverse(Results)};
+batch_results([Query | Rest], Base, Opts, Results) when is_map(Query) ->
+    case only(Base, normalize_batch_query(Query, Opts), Opts) of
+        {ok, Result} -> batch_results(Rest, Base, Opts, [Result | Results]);
+        Error -> Error
+    end;
+batch_results(_Queries, _Base, _Opts, _Results) ->
+    {error, invalid_query}.
+
+normalize_batch_query(Query, Opts) ->
+    case hb_maps:get(<<"only">>, Query, not_found, Opts) of
+        Only when is_map(Only) ->
+            case hb_util:is_ordered_list(Only, Opts) of
+                true -> Query#{ <<"only">> => hb_util:numbered_keys_to_list(Only, Opts) };
+                false -> Query
+            end;
+        _ -> Query
     end.
 
 %% @doc Match the request against the base message, using the keys to select
@@ -320,12 +364,16 @@ dedupe_query_matches(Matches, Opts) ->
     {_, DedupedRev} =
         lists:foldl(
             fun(Path, {Seen, Acc}) ->
-                {Key, CanonicalPath} = query_match_identity(Path, Opts),
-                case maps:is_key(Key, Seen) of
-                    true ->
+                case query_match_identity(Path, Opts) of
+                    query_control ->
                         {Seen, Acc};
-                    false ->
-                        {maps:put(Key, true, Seen), [CanonicalPath | Acc]}
+                    {Key, CanonicalPath} ->
+                        case maps:is_key(Key, Seen) of
+                            true ->
+                                {Seen, Acc};
+                            false ->
+                                {maps:put(Key, true, Seen), [CanonicalPath | Acc]}
+                        end
                 end
             end,
             {#{}, []},
@@ -337,18 +385,28 @@ query_match_identity(Path, Opts) ->
     case hb_cache:read(Path, Opts) of
         {ok, Msg} when is_map(Msg) ->
             Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
-            Payload =
-                hb_message:uncommitted_deep(
-                    hb_private:reset(Loaded),
-                    Opts
-                ),
-            {
-                hb_message:id(Payload, none, Opts#{ <<"linkify-mode">> => discard }),
-                hb_message:id(Loaded, #{}, Opts#{ <<"linkify-mode">> => discard })
-            };
+            case is_query_control_message(Loaded, Opts) of
+                true -> query_control;
+                false ->
+                    Payload =
+                        hb_message:uncommitted_deep(
+                            hb_private:reset(Loaded),
+                            Opts
+                        ),
+                    {
+                        hb_message:id(Payload, none, Opts#{ <<"linkify-mode">> => discard }),
+                        hb_message:id(Loaded, #{}, Opts#{ <<"linkify-mode">> => discard })
+                    }
+            end;
         _ ->
             {Path, Path}
     end.
+
+is_query_control_message(Msg, Opts) ->
+    lists:any(
+        fun(Key) -> hb_maps:get(Key, Msg, not_found, Opts) =/= not_found end,
+        [<<"only">>, <<"queries">>]
+    ).
 
 %%% Tests
 
@@ -408,6 +466,42 @@ only_test() ->
         ),
     ?assertEqual(<<"binary-value">>, hb_maps:get(<<"basic">>, Msg)),
     ok.
+
+batch_test() ->
+    {ok, Opts, _} = test_setup(),
+    PathsQuery = #{
+        <<"only">> => [<<"basic">>],
+        <<"basic">> => <<"binary-value">>,
+        <<"return">> => <<"paths">>
+    },
+    CountQuery = PathsQuery#{ <<"return">> => <<"count">> },
+    {ok, #{ <<"body">> := Body }} = batch(
+        #{},
+        #{ <<"queries">> => hb_util:list_to_numbered_message([PathsQuery, CountQuery]) },
+        Opts
+    ),
+    [Paths, 1] = hb_json:decode(Body),
+    ?assertEqual(1, length(Paths)).
+
+query_control_messages_excluded_test() ->
+    {ok, Opts, _} = test_setup(),
+    hb_cache:write(
+        #{
+            <<"basic">> => <<"binary-value">>,
+            <<"only">> => [<<"basic">>],
+            <<"return">> => <<"count">>
+        },
+        Opts
+    ),
+    {ok, 1} = only(
+        #{},
+        #{
+            <<"basic">> => <<"binary-value">>,
+            <<"only">> => [<<"basic">>],
+            <<"return">> => <<"count">>
+        },
+        Opts
+    ).
 
 %% @doc Ensure that we can specify multiple keys to match.
 multiple_test() ->

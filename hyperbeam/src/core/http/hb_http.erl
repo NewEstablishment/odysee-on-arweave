@@ -706,18 +706,19 @@ reply_handle_cookies(Req, Message, Opts) ->
 %% @doc Add permissive CORS headers to a message, if the message has not already
 %% specified CORS headers.
 add_cors_headers(Msg, ReqHdr, Origin, Opts) ->
-    WithCors = hb_maps:merge(cors_headers(ReqHdr, Origin), Msg, Opts),
+    CorsHeaders = cors_headers(ReqHdr, Origin, expose_headers(Msg, Origin)),
+    WithCors = hb_maps:merge(CorsHeaders, Msg, Opts),
     case Origin of
         <<>> -> WithCors;
-        _ -> hb_maps:merge(WithCors, cors_headers(ReqHdr, Origin), Opts)
+        _ -> hb_maps:merge(WithCors, CorsHeaders, Opts)
     end.
 
-cors_headers(ReqHdr, Origin) ->
+cors_headers(ReqHdr, Origin, ExposeHeaders) ->
     Headers0 = #{
         <<"access-control-allow-origin">> => allow_origin(Origin),
         <<"access-control-allow-methods">> => <<"GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH">>,
         <<"access-control-allow-headers">> => allow_headers(ReqHdr),
-        <<"access-control-expose-headers">> => expose_headers(Origin),
+        <<"access-control-expose-headers">> => ExposeHeaders,
         <<"vary">> => <<"Origin, Access-Control-Request-Method, Access-Control-Request-Headers">>
     },
     case Origin of
@@ -737,6 +738,13 @@ expose_headers(<<>>) ->
     <<"*">>;
 expose_headers(_) ->
     <<"Accept-Ranges, Ao-Result, Content-Digest, Content-Length, Content-Range, Location, Signature, Signature-Input">>.
+
+expose_headers(_Msg, <<>>) ->
+    <<"*">>;
+expose_headers(Msg, Origin) ->
+    Defaults = binary:split(expose_headers(Origin), <<", ">>, [global]),
+    MessageHeaders = [Key || Key <- maps:keys(Msg), is_binary(Key)],
+    iolist_to_binary(lists:join(<<", ">>, lists:usort(Defaults ++ MessageHeaders))).
 
 %% @doc Generate the headers and body for a HTTP response message.
 encode_reply(Status, TABMReq, Message, Opts) ->
@@ -1431,6 +1439,23 @@ cors_credentials_get_test() ->
         <<"true">>,
         hb_ao:get(<<"access-control-allow-credentials">>, Res, LocalOpts)
     ).
+
+cors_credentials_exposes_message_headers_test() ->
+    Origin = <<"http://localhost:9090">>,
+    Headers = add_cors_headers(
+        #{
+            <<"schema">> => <<"odysee-comment@1.0">>,
+            <<"type">> => <<"comment">>,
+            <<"comment">> => <<"visible in browsers">>
+        },
+        <<>>,
+        Origin,
+        #{}
+    ),
+    Exposed = maps:get(<<"access-control-expose-headers">>, Headers),
+    ?assertNotEqual(nomatch, binary:match(Exposed, <<"schema">>)),
+    ?assertNotEqual(nomatch, binary:match(Exposed, <<"type">>)),
+    ?assertNotEqual(nomatch, binary:match(Exposed, <<"comment">>)).
 
 ans104_wasm_test() ->
     ServerStore = [hb_test_utils:test_store()],

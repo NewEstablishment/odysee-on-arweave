@@ -6,7 +6,7 @@ import { Lbryio } from 'lbryinc';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { allowHyperbeamCompatibilityReads, isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { isHyperbeamUploadClaim } from 'util/claim';
-import { parseURI } from 'util/lbryURI';
+import { buildURI, parseURI } from 'util/lbryURI';
 import { getAuthToken } from 'util/saved-passwords';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
@@ -286,17 +286,46 @@ async function fetchNativeCommentSource(params: CommentListParams): Promise<Comm
     limit: page * pageSize,
   };
   const [pathsResponse, countResponse] = await Promise.all([
-    fetchPublicDeviceJson(`${QUERY_DEVICE}/only`, query),
-    fetchPublicDeviceJson(`${QUERY_DEVICE}/only`, { ...query, return: 'count' }),
+    fetchPublicQueryJson(query),
+    fetchPublicQueryJson({ ...query, return: 'count' }),
   ]);
   const paths = queryPaths(pathsResponse);
-  const comments = (await Promise.all(paths.map((path) => fetchNativeCommentById(path)))).filter(Boolean);
+  const loadedComments = (await Promise.all(paths.map((path) => fetchNativeCommentById(path)))).filter(Boolean);
+  const comments = await attachNativeReplyCounts(loadedComments, selectors.target);
 
   return {
     items: comments,
     totalItems: queryCount(countResponse, paths.length),
     hasHiddenComments: false,
   };
+}
+
+async function attachNativeReplyCounts(comments: Array<any>, target: string): Promise<Array<any>> {
+  return Promise.all(
+    comments.map(async (comment) => {
+      const commentId = String(comment?.comment_id || '');
+      if (!commentId || !target) return comment;
+
+      const selectors = {
+        type: 'comment',
+        target,
+        parent: commentId,
+        state: 'active',
+      };
+      const storedCount = toNumber(comment.replies, 0);
+
+      try {
+        const response = await fetchPublicQueryJson({
+          ...selectors,
+          only: Object.keys(selectors),
+          return: 'count',
+        });
+        return { ...comment, replies: Math.max(storedCount, queryCount(response, storedCount)) };
+      } catch {
+        return comment;
+      }
+    })
+  );
 }
 
 async function fetchLegacyCommentSource(params: CommentListParams): Promise<CommentSource | null> {
@@ -396,7 +425,7 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
 async function fetchNativeCommentById(id: string): Promise<any | null> {
   if (!id) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchStoreJsonOrNull(encodeDataPath(normalizedId), false);
+  const result = await fetchStoreJsonOrNull(`${encodeDataPath(normalizedId)}?accept-bundle=true`, false);
   const message = storePayload(result);
   if (!isNativeComment(message)) return null;
   return commentFromHyperbeam({ ...message, 'comment-id': normalizedId });
@@ -422,6 +451,56 @@ function isNativeComment(message: any): boolean {
   return Boolean(message && message.type === 'comment' && message.schema === 'odysee-comment@1.0');
 }
 
+type PendingPublicQuery = {
+  body: Record<string, any>;
+  resolve: (value: any) => void;
+  reject: (reason: any) => void;
+};
+
+const pendingPublicQueries: Array<PendingPublicQuery> = [];
+let publicQueryFlushScheduled = false;
+
+function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
+  return new Promise((resolve, reject) => {
+    pendingPublicQueries.push({ body, resolve, reject });
+    if (publicQueryFlushScheduled) return;
+
+    publicQueryFlushScheduled = true;
+    Promise.resolve().then(flushPublicQueryBatch);
+  });
+}
+
+async function flushPublicQueryBatch(): Promise<void> {
+  publicQueryFlushScheduled = false;
+  const pending = pendingPublicQueries.splice(0);
+  if (!pending.length) return;
+
+  const uniqueQueries: Array<Record<string, any>> = [];
+  const queryIndexes: Array<number> = [];
+  const indexesByQuery = new Map<string, number>();
+
+  for (const item of pending) {
+    const key = JSON.stringify(item.body);
+    let index = indexesByQuery.get(key);
+    if (index === undefined) {
+      index = uniqueQueries.length;
+      indexesByQuery.set(key, index);
+      uniqueQueries.push(item.body);
+    }
+    queryIndexes.push(index);
+  }
+
+  try {
+    const response = await fetchPublicDeviceJson(`${QUERY_DEVICE}/batch`, { queries: uniqueQueries });
+    const results = queryBatchResults(response);
+    if (results.length !== uniqueQueries.length)
+      throw new Error('HyperBEAM query batch returned an invalid result count');
+    pending.forEach((item, index) => item.resolve(results[queryIndexes[index]]));
+  } catch (error) {
+    pending.forEach((item) => item.reject(error));
+  }
+}
+
 async function fetchPublicDeviceJson(path: string, body: Record<string, any>): Promise<any> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) throw new Error('HyperBEAM node is not configured');
@@ -438,6 +517,17 @@ async function fetchPublicDeviceJson(path: string, body: Record<string, any>): P
   const text = await response.text();
   if (!response.ok) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
   return parseDeviceJson(text);
+}
+
+function queryBatchResults(response: any): Array<any> {
+  const payload = queryPayload(response);
+  if (Array.isArray(payload)) return payload.map(arrayifyNumericMaps);
+  if (!isObject(payload)) return [];
+
+  return Object.keys(payload)
+    .filter((key) => /^[1-9]\d*$/.test(key))
+    .sort((left, right) => Number(left) - Number(right))
+    .map((key) => arrayifyNumericMaps(payload[key]));
 }
 
 function queryPaths(response: any): Array<string> {
@@ -461,7 +551,10 @@ function queryCount(response: any, fallback: number): number {
 }
 
 function queryPayload(response: any): any {
-  const payload = responsePayload(response);
+  let payload = responsePayload(response);
+  if (isObject(payload) && payload['ao-result'] === 'body' && payload.body !== undefined) {
+    payload = payload.body;
+  }
   if (typeof payload !== 'string') return payload;
   try {
     return JSON.parse(payload);
@@ -1448,28 +1541,33 @@ function stableJson(value: any): string {
 
 function commentFromHyperbeam(comment: any): any {
   const parentId = value(comment, 'parent-id', 'parent_id', 'parent');
+  const channelId = value(comment, 'channel-id', 'channel_id', 'author');
+  const channelName = value(comment, 'channel-name', 'channel_name');
+  const channelUrl =
+    value(comment, 'channel-url', 'channel_url') ||
+    (channelName ? buildURI({ channelName, channelClaimId: channelId }, true) : undefined);
   return compactParams({
     ...comment.source,
     comment_id: value(comment, 'comment-id', 'comment_id', 'id'),
     comment: value(comment, 'comment', 'body', 'text'),
     claim_id: value(comment, 'claim-id', 'claim_id', 'target'),
     parent_id: parentId === 'root' ? undefined : parentId,
-    channel_id: value(comment, 'channel-id', 'channel_id', 'author'),
-    channel_name: value(comment, 'channel-name', 'channel_name'),
-    channel_url: value(comment, 'channel-url', 'channel_url'),
-    timestamp: value(comment, 'timestamp', 'created_at'),
+    channel_id: channelId,
+    channel_name: channelName,
+    channel_url: channelUrl,
+    timestamp: toNumber(value(comment, 'timestamp', 'created_at'), 0),
     updated_at: value(comment, 'updated-at', 'updated_at'),
     signature: value(comment, 'channel-signature', 'signature'),
     signing_ts: value(comment, 'signing-ts', 'signing_ts'),
-    is_pinned: value(comment, 'is-pinned', 'is_pinned'),
-    replies: value(comment, 'replies'),
+    is_pinned: toBoolean(value(comment, 'is-pinned', 'is_pinned')),
+    replies: toNumber(value(comment, 'replies'), 0),
     support_amount: value(comment, 'support-amount', 'support_amount'),
     support_tx_id: value(comment, 'support-tx-id', 'support_tx_id'),
-    sticker: value(comment, 'sticker'),
+    sticker: toBoolean(value(comment, 'sticker')),
     mentioned_channels: value(comment, 'mentioned-channels', 'mentioned_channels'),
-    removed: value(comment, 'removed'),
-    hidden: value(comment, 'hidden'),
-    blocked: value(comment, 'blocked'),
+    removed: toBoolean(value(comment, 'removed')),
+    hidden: toBoolean(value(comment, 'hidden')),
+    blocked: toBoolean(value(comment, 'blocked')),
     hyperbeam_signature_verification: value(comment, 'signature-verification'),
   });
 }
@@ -1740,6 +1838,16 @@ function toNumber(value: any, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toBoolean(value: any): boolean | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value.toLowerCase() === 'true') return true;
+    if (value.toLowerCase() === 'false') return false;
+  }
+  return Boolean(value);
+}
+
 // --- Generic-path upload/read-by-id support (ported from bhavyagor/auth-upload) ---
 
 async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> {
@@ -1790,26 +1898,13 @@ async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[s
     const claimId = claimIdFromChannelUri(uri);
     if (claimId) uriByClaimId.set(claimId.toLowerCase(), uri);
   });
-  const storeEntries = await Promise.all(
-    Array.from(uriByClaimId.entries()).map(async ([claimId, uri]): Promise<[string, any] | null> => {
-      const storeClaim = await fetchCachedStoreJsonOrNull(storePath('odysee/claim-id', claimId)).then(responsePayload);
-      return storeClaim ? [uri, sdkClaimFromHyperbeam(storeClaim)] : null;
-    })
-  );
-  const resolvedEntries = storeEntries.filter(Boolean);
-  const resolvedUris = new Set(resolvedEntries.map(([uri]) => uri));
-  const unresolvedClaimIds = Array.from(uriByClaimId.entries())
-    .filter(([, uri]) => !resolvedUris.has(uri))
-    .map(([claimId]) => claimId);
-  if (!unresolvedClaimIds.length) return resolvedEntries;
-
-  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, {
-    claim_ids: unresolvedClaimIds,
+  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, {
+    claim_ids: Array.from(uriByClaimId.keys()),
   });
   const search = sdkSearchFromHyperbeam(responsePayload(response));
   const items = Array.isArray(search?.items) ? search.items : [];
 
-  const fallbackEntries = items
+  return items
     .map((item: any): [string, any] | null => {
       const claim = sdkClaimFromHyperbeam(item);
       const claimId = value(claim, 'claim_id', 'claim-id');
@@ -1817,8 +1912,6 @@ async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[s
       return uri ? [uri, claim] : null;
     })
     .filter(Boolean) as Array<[string, any]>;
-
-  return [...resolvedEntries, ...fallbackEntries];
 }
 
 export async function fetchHyperbeamUploadList(params: ClaimSearchOptions = {}): Promise<ClaimSearchResponse | null> {
@@ -2298,6 +2391,10 @@ function responseHeadersObject(response: Response): Record<string, any> {
   response.headers.forEach((value, key) => {
     headers[key] = value;
   });
+  const types = parseAoTypesValue(headers['ao-types']);
+  for (const [key, type] of Object.entries(types)) {
+    if (key !== '.' && headers[key] !== undefined) headers[key] = decodeAoTypedValue(type, headers[key]);
+  }
   return headers;
 }
 
@@ -2348,7 +2445,7 @@ function parsePartHeaderFields(rawHeaders: string): Record<string, any> {
 
     // Header values are latin1 slices of the raw bytes; text fields must be
     // re-decoded as UTF-8 (e.g. accented titles) rather than left as mojibake.
-    fields[key] = types[key] === 'integer' ? Number(raw) : latin1ToUtf8(raw);
+    fields[key] = decodeAoTypedValue(types[key], latin1ToUtf8(raw));
   }
   return fields;
 }
@@ -2361,13 +2458,26 @@ function latin1ToUtf8(value: string): string {
 
 function parseAoTypes(rawHeaders: string): Record<string, string> {
   const line = rawHeaders.match(/ao-types:\s*([^\r\n]+)/i)?.[1];
-  if (!line) return {};
+  return parseAoTypesValue(line);
+}
+
+function parseAoTypesValue(value: any): Record<string, string> {
+  if (typeof value !== 'string' || !value) return {};
 
   const types: Record<string, string> = {};
-  for (const match of line.matchAll(/([a-z0-9_-]+)\s*=\s*"([^"]+)"/gi)) {
+  for (const match of value.matchAll(/([a-z0-9_.-]+)\s*=\s*"([^"]+)"/gi)) {
     types[match[1].toLowerCase()] = match[2];
   }
   return types;
+}
+
+function decodeAoTypedValue(type: string | undefined, value: any): any {
+  if (type === 'integer' || type === 'float') return Number(value);
+  if (type !== 'atom') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value === 'undefined') return null;
+  return value;
 }
 
 function ensureNestedObject(root: Record<string, any>, path: Array<string>): Record<string, any> {
