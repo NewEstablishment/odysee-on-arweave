@@ -32,6 +32,7 @@ import { makeSelectNotificationForCommentId } from 'redux/selectors/notification
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { toHex } from 'util/hex';
 import { getChannelFromClaim, isHyperbeamUploadClaim } from 'util/claim';
+import { invalidateHyperbeamClaimPage } from 'util/hyperbeam';
 import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
@@ -1057,6 +1058,7 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
           LocalStorage.setItem('lastCommentedClaims', JSON.stringify(lastCommentedClaims));
         }
 
+        invalidateHyperbeamClaimPage(claim_id);
         dispatch({
           type: ACTIONS.COMMENT_CREATE_COMPLETED,
           data: {
@@ -1175,6 +1177,7 @@ export function doCommentAbandon(
         // Comment may not be deleted if the signing channel can't be signed.
         // This will happen if the channel was recently created or abandoned.
         if (result.abandoned) {
+          invalidateHyperbeamClaimPage(result.claim_id);
           dispatch({
             type: ACTIONS.COMMENT_ABANDON_COMPLETED,
             data: {
@@ -1249,6 +1252,7 @@ export function doCommentUpdate(comment_id: string, comment: string) {
       } as unknown as CommentEditParams)
         .then((result: CommentEditResponse) => {
           if (result != null) {
+            invalidateHyperbeamClaimPage(result.claim_id);
             dispatch({
               type: ACTIONS.COMMENT_UPDATE_COMPLETED,
               data: {

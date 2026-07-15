@@ -650,13 +650,17 @@ async function fetchHyperbeamClaimIdChunk(dispatch: Dispatch, claimIds: Array<st
       urls.push(claimUrl);
     });
 
-    const costInfos = await Promise.all(
-      data.items
-        .filter((claim: Claim) => claim?.claim_id && claim.value_type !== 'channel')
-        .map((claim: Claim) =>
-          getCostInfoForFee(claim.claim_id, claim.value ? (claim.value as StreamMetadata).fee : undefined)
-        )
-    );
+    const costInfos = (
+      await Promise.all(
+        data.items
+          .filter((claim: Claim) => claim?.claim_id && claim.value_type !== 'channel')
+          .map((claim: Claim) =>
+            getCostInfoForFee(claim.claim_id, claim.value ? (claim.value as StreamMetadata).fee : undefined).catch(
+              () => null
+            )
+          )
+      )
+    ).filter(Boolean);
     const actions: Array<any> = [
       {
         type: ACTIONS.CLAIM_SEARCH_COMPLETED,

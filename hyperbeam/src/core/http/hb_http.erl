@@ -741,15 +741,17 @@ allow_headers(ReqHdr) ->
 expose_headers(_Msg, <<>>, _Opts) ->
     <<"*">>;
 expose_headers(Msg, _Origin, Opts) when is_map(Msg) ->
-    Base = [
+    MsgKeys = [ Key || Key <- hb_maps:keys(Msg, Opts), is_binary(Key) ],
+    iolist_to_binary(lists:join(<<", ">>, lists:usort(base_exposed_headers() ++ MsgKeys)));
+expose_headers(_Msg, _Origin, _Opts) ->
+    iolist_to_binary(lists:join(<<", ">>, base_exposed_headers())).
+
+base_exposed_headers() ->
+    [
         <<"accept-ranges">>, <<"ao-result">>, <<"content-digest">>,
         <<"content-length">>, <<"content-range">>, <<"location">>,
         <<"signature">>, <<"signature-input">>
-    ],
-    MsgKeys = [ Key || Key <- hb_maps:keys(Msg, Opts), is_binary(Key) ],
-    iolist_to_binary(lists:join(<<", ">>, lists:usort(Base ++ MsgKeys)));
-expose_headers(_Msg, _Origin, _Opts) ->
-    <<"Accept-Ranges, Ao-Result, Content-Digest, Content-Length, Content-Range, Location, Signature, Signature-Input">>.
+    ].
 
 %% @doc Generate the headers and body for a HTTP response message.
 encode_reply(Status, TABMReq, Message, Opts) ->

@@ -256,8 +256,9 @@ export default function CommentList(props: Props) {
     }
   }, [dispatch, linkedCommentId, threadCommentId]);
   // If the claim behind the uri is re-resolved to a different claim id (e.g. a
-  // hyperbeam store claim corrected to its legacy claim id), refetch for it
+  // hyperbeam store claim corrected to its legacy claim id), restart from page 1
   useEffect(() => {
+    setPage(1);
     setInitialPageFetch(false);
   }, [claimId]);
   // Fetch top-level comments

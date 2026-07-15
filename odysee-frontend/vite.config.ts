@@ -390,7 +390,7 @@ function devHyperbeamAuthRoutesPlugin() {
             cookieValue(cookieHeader, DEV_AUTH_TOKEN_COOKIE) ||
             (Array.isArray(headerToken) ? headerToken[0] : headerToken) ||
             null;
-          const body = authToken ? { auth_token: authToken, ...requestBody } : requestBody;
+          const body = authToken ? { ...requestBody, auth_token: authToken } : requestBody;
           const response = await postDevHyperbeamJson(`${nodeUrl}${devicePath}`, body);
           res.statusCode = response.statusCode;
           res.setHeader('Cache-Control', 'no-store');

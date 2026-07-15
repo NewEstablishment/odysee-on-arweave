@@ -103,14 +103,15 @@ read_live(Path, _Req, StoreOpts, NodeOpts) ->
 read_live(<<"odysee/claim/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, URI} ?= decode_component(Encoded),
-        {ok, Claim} ?=
+        {ok, Resolved} ?=
             hb_ao:raw(
                 <<"odysee-claim@1.0">>,
                 <<"resolve">>,
                 #{},
-                #{ <<"url">> => URI },
+                #{ <<"urls">> => [URI] },
                 store_node_opts(StoreOpts, NodeOpts)
             ),
+        {ok, Claim} ?= claim_from_resolve(Resolved, URI, NodeOpts),
         commit_result(Claim, <<"claim">>, NodeOpts)
     else
         Error -> Error
@@ -968,6 +969,29 @@ infer_type(_Path, Msg, Opts) when is_map(Msg) ->
     end;
 infer_type(_Path, _Msg, _Opts) ->
     <<"source">>.
+
+%% @doc Extract the single claim message from a `resolve' response. The
+%% urls-list resolve path returns a `result' map keyed by the (normalized)
+%% uri, so match the requested uri exactly and fall back to the only entry;
+%% a bare claim message passes through unchanged.
+claim_from_resolve(Resolved, URI, Opts) ->
+    case first_found([<<"result">>], Resolved, not_found, Opts) of
+        Result when is_map(Result) ->
+            case hb_maps:get(URI, Result, not_found, Opts) of
+                Claim when is_map(Claim) ->
+                    {ok, Claim};
+                _ ->
+                    case hb_maps:values(Result, Opts) of
+                        [Claim] when is_map(Claim) -> {ok, Claim};
+                        _ -> {error, claim_not_found}
+                    end
+            end;
+        _ ->
+            case first_found([<<"claim-id">>, <<"claim_id">>], Resolved, not_found, Opts) of
+                not_found -> {error, claim_not_found};
+                _ -> {ok, Resolved}
+            end
+    end.
 
 claim_from_search(Search, ClaimID, Opts) ->
     Claims = first_found([<<"claims">>, <<"items">>], Search, [], Opts),

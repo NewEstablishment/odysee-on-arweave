@@ -4,7 +4,7 @@
 %%% while preserving the raw JSON response for audit/debugging.
 -module(dev_odysee_claim).
 -implements(<<"odysee-claim@1.0">>).
--export([info/1, resolve/3, search/3, transaction/3]).
+-export([info/1, resolve/3, search/3, transaction/3, page/3, comments/3, videos/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -13,7 +13,12 @@
 
 %% @doc Return the public device API.
 info(_Opts) ->
-    #{ exports => [<<"resolve">>, <<"search">>, <<"transaction">>] }.
+    #{
+        exports => [
+            <<"resolve">>, <<"search">>, <<"transaction">>,
+            <<"page">>, <<"comments">>, <<"videos">>
+        ]
+    }.
 
 %% @doc Resolve and normalize an Odysee/LBRY claim.
 resolve(Base, Req, Opts) ->
@@ -78,6 +83,351 @@ transaction(Base, Req, Opts) ->
             Error -> Error
         end
     end).
+
+%% @doc Compose the full watch-page metadata for a claim as one message:
+%% the claim itself, its channel, the comment list, related channel uploads,
+%% and view/reaction/subscriber counts. Sections are fetched live; a failing
+%% section is omitted rather than failing the page. `GET /<claim-id>/page'.
+page(Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, ClaimMsg} ?= claim_message(Base, Req, Opts),
+            {ok, ClaimID} ?= required_first([<<"claim-id">>, <<"claim_id">>], ClaimMsg, Opts),
+            Claim = first_value([<<"claim">>], ClaimMsg, Opts),
+            Channel =
+                optional_section(fun() ->
+                    hb_ao:raw(
+                        <<"odysee-channel@1.0">>,
+                        <<"channel">>,
+                        #{ <<"claim">> => Claim },
+                        #{},
+                        Opts
+                    )
+                end),
+            ChannelID = section_first([<<"claim-id">>, <<"claim_id">>], Channel, Opts),
+            ChannelName = section_first([<<"name">>, <<"claim-name">>], Channel, Opts),
+            Comments =
+                optional_section(fun() ->
+                    hb_ao:raw(
+                        <<"odysee-comment@1.0">>,
+                        <<"list">>,
+                        #{},
+                        lists:foldl(
+                            fun put_if_found_pair/2,
+                            (comment_page_defaults(Req, Opts))#{
+                                <<"claim-id">> => ClaimID
+                            },
+                            [
+                                {<<"channel-id">>, ChannelID},
+                                {<<"channel-name">>, ChannelName}
+                            ]
+                        ),
+                        Opts
+                    )
+                end),
+            Related =
+                case ChannelID of
+                    NotFound when NotFound =:= not_found; NotFound =:= undefined ->
+                        not_found;
+                    _ ->
+                        optional_section(fun() ->
+                            channel_uploads_search(ChannelID, 1, 16, Opts)
+                        end)
+                end,
+            ViewCount =
+                optional_section(fun() ->
+                    hb_ao:raw(
+                        <<"odysee-file@1.0">>,
+                        <<"view-count">>,
+                        #{},
+                        #{ <<"claim-id">> => ClaimID },
+                        Opts
+                    )
+                end),
+            Reactions =
+                optional_section(fun() ->
+                    hb_ao:raw(
+                        <<"odysee-file-reaction@1.0">>,
+                        <<"list">>,
+                        #{},
+                        #{ <<"claim_ids">> => [ClaimID] },
+                        Opts
+                    )
+                end),
+            SubCount =
+                case ChannelID of
+                    NoChannel when NoChannel =:= not_found; NoChannel =:= undefined ->
+                        not_found;
+                    _ ->
+                        optional_section(fun() ->
+                            hb_ao:raw(
+                                <<"odysee-account@1.0">>,
+                                <<"sub-count">>,
+                                #{},
+                                #{ <<"claim-id">> => ChannelID },
+                                Opts
+                            )
+                        end)
+                end,
+            Doc0 = #{
+                <<"view">> => <<"page">>,
+                <<"claim-id">> => ClaimID,
+                <<"claim">> => section_message(ClaimMsg, Opts)
+            },
+            Optional = [
+                {<<"channel">>, Channel},
+                {<<"comments">>, Comments},
+                {<<"related">>, Related},
+                {<<"view-count">>, ViewCount},
+                {<<"reactions">>, Reactions},
+                {<<"sub-count">>, SubCount}
+            ],
+            PageDoc = lists:foldl(fun put_if_found_pair/2, Doc0, Optional),
+            % Encode the composition as a JSON body: nested sections would
+            % otherwise be flattened to `<key>+link' references on the wire,
+            % defeating the single-request page read.
+            ok_message((page_body(PageDoc))#{
+                <<"device">> => ?DEVICE,
+                <<"view">> => <<"page">>,
+                <<"claim-id">> => ClaimID,
+                % Comments/counts are volatile; do not persist the composition.
+                <<"cache-control">> => [<<"no-store">>, <<"no-cache">>]
+            })
+        else
+            Error -> Error
+        end
+    end).
+
+%% @doc Read the comment list for the base claim over the GET path:
+%% `GET /<claim-id>/comments?page=1&page-size=50&sort-by=3'. Query-string
+%% parameters arrive as binaries, so the known numeric/boolean parameters
+%% are coerced before delegating to the comment device.
+comments(Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, ClaimMsg} ?= claim_message(Base, Req, Opts),
+            {ok, ClaimID} ?=
+                required_first([<<"claim-id">>, <<"claim_id">>], ClaimMsg, Opts),
+            ParentID = first_value([<<"parent-id">>, <<"parent_id">>], Req, Opts),
+            Params0 = #{
+                <<"claim-id">> => ClaimID,
+                <<"page">> => int_param([<<"page">>], Req, 1, Opts),
+                <<"page-size">> =>
+                    int_param([<<"page-size">>, <<"page_size">>], Req, 50, Opts),
+                <<"top-level">> =>
+                    bool_param(
+                        [<<"top-level">>, <<"top_level">>],
+                        Req,
+                        ParentID =:= not_found,
+                        Opts
+                    )
+            },
+            Optional = [
+                {<<"parent-id">>, ParentID},
+                {<<"sort-by">>, int_or_not_found([<<"sort-by">>, <<"sort_by">>], Req, Opts)},
+                {<<"channel-id">>,
+                    first_value([<<"channel-id">>, <<"channel_id">>], Req, Opts)},
+                {<<"channel-name">>,
+                    first_value([<<"channel-name">>, <<"channel_name">>], Req, Opts)}
+            ],
+            Params = lists:foldl(fun put_if_found_pair/2, Params0, Optional),
+            hb_ao:raw(<<"odysee-comment@1.0">>, <<"list">>, #{}, Params, Opts)
+        else
+            Error -> Error
+        end
+    end).
+
+%% @doc List a channel's uploads (newest first) over the GET path:
+%% `GET /<channel-claim-id>/videos?page=1&page-size=20'. Listing filters
+%% (not-tags, release-time, exclude-shorts) are forwarded to claim_search
+%% so returned pages stay full and pagination math holds downstream.
+videos(Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, ClaimMsg} ?= claim_message(Base, Req, Opts),
+            {ok, ChannelID} ?=
+                required_first([<<"claim-id">>, <<"claim_id">>], ClaimMsg, Opts),
+            Page = int_param([<<"page">>], Req, 1, Opts),
+            PageSize = int_param([<<"page-size">>, <<"page_size">>], Req, 20, Opts),
+            channel_uploads_search(ChannelID, Page, PageSize, videos_filters(Req, Opts), Opts)
+        else
+            Error -> Error
+        end
+    end).
+
+videos_filters(Req, Opts) ->
+    Optional = [
+        {<<"not_tags">>, list_param([<<"not-tags">>, <<"not_tags">>], Req, Opts)},
+        {<<"release_time">>,
+            first_value([<<"release-time">>, <<"release_time">>], Req, Opts)},
+        {<<"exclude_shorts">>,
+            case bool_param([<<"exclude-shorts">>, <<"exclude_shorts">>], Req, false, Opts) of
+                true -> true;
+                false -> not_found
+            end},
+        {<<"exclude_shorts_duration_lte">>,
+            int_or_not_found(
+                [<<"exclude-shorts-duration-lte">>, <<"exclude_shorts_duration_lte">>],
+                Req,
+                Opts
+            )},
+        {<<"exclude_shorts_aspect_ratio_lte">>,
+            first_value(
+                [<<"exclude-shorts-aspect-ratio-lte">>, <<"exclude_shorts_aspect_ratio_lte">>],
+                Req,
+                Opts
+            )}
+    ],
+    lists:foldl(fun put_if_found_pair/2, #{}, Optional).
+
+list_param(Keys, Msg, Opts) ->
+    case first_value(Keys, Msg, Opts) of
+        List when is_list(List) -> List;
+        Bin when is_binary(Bin), Bin =/= <<>> -> binary:split(Bin, <<",">>, [global, trim_all]);
+        _ -> not_found
+    end.
+
+channel_uploads_search(ChannelID, Page, PageSize, Opts) ->
+    channel_uploads_search(ChannelID, Page, PageSize, #{}, Opts).
+channel_uploads_search(ChannelID, Page, PageSize, Filters, Opts) ->
+    hb_ao:raw(
+        ?DEVICE,
+        <<"search">>,
+        #{},
+        Filters#{
+            <<"channel_ids">> => [ChannelID],
+            <<"claim_type">> => [<<"stream">>, <<"repost">>],
+            <<"order_by">> => [<<"release_time">>],
+            <<"page">> => Page,
+            <<"page_size">> => PageSize
+        },
+        Opts
+    ).
+
+%% @doc Locate the claim message a page-style key operates on: the base
+%% message itself when it already is a claim message (the `GET /<claim-id>'
+%% surface), else a claim id supplied by the request.
+claim_message(Base, Req, Opts) ->
+    case is_claim_message(Base, Opts) of
+        true ->
+            {ok, Base};
+        false ->
+            case
+                first_found(
+                    [
+                        {Req, <<"claim-id">>},
+                        {Req, <<"claim_id">>},
+                        {Base, <<"claim-id">>},
+                        {Base, <<"claim_id">>}
+                    ],
+                    Opts
+                )
+            of
+                ClaimID when is_binary(ClaimID) ->
+                    fetch_claim_message(ClaimID, Opts);
+                _ ->
+                    {error, claim_not_found}
+            end
+    end.
+
+is_claim_message(Msg, Opts) when is_map(Msg) ->
+    first_value([<<"claim-id">>, <<"claim_id">>], Msg, Opts) =/= not_found
+        andalso first_value([<<"claim">>], Msg, Opts) =/= not_found;
+is_claim_message(_Msg, _Opts) ->
+    false.
+
+fetch_claim_message(ClaimID, Opts) ->
+    maybe
+        {ok, Search} ?=
+            hb_ao:raw(
+                ?DEVICE,
+                <<"search">>,
+                #{},
+                #{ <<"claim_ids">> => [ClaimID], <<"page_size">> => 1 },
+                Opts
+            ),
+        case first_value([<<"claims">>], Search, Opts) of
+            [ClaimMsg | _] when is_map(ClaimMsg) -> {ok, ClaimMsg};
+            _ -> {error, claim_not_found}
+        end
+    else
+        Error -> Error
+    end.
+
+comment_page_defaults(Req, Opts) ->
+    Params = #{
+        <<"page">> => int_param([<<"comments-page">>, <<"page">>], Req, 1, Opts),
+        <<"page-size">> =>
+            int_param([<<"comments-page-size">>, <<"page-size">>], Req, 50, Opts),
+        <<"top-level">> => true
+    },
+    put_if_found(
+        <<"sort-by">>,
+        int_or_not_found([<<"comments-sort-by">>, <<"sort-by">>], Req, Opts),
+        Params
+    ).
+
+int_param(Keys, Msg, Default, Opts) ->
+    case first_value(Keys, Msg, Opts) of
+        Int when is_integer(Int) -> Int;
+        Bin when is_binary(Bin) ->
+            try binary_to_integer(Bin) catch _:_ -> Default end;
+        _ -> Default
+    end.
+
+int_or_not_found(Keys, Msg, Opts) ->
+    int_param(Keys, Msg, not_found, Opts).
+
+bool_param(Keys, Msg, Default, Opts) ->
+    case first_value(Keys, Msg, Opts) of
+        Bool when is_boolean(Bool) -> Bool;
+        <<"true">> -> true;
+        <<"false">> -> false;
+        _ -> Default
+    end.
+
+page_body(PageDoc) ->
+    try
+        #{
+            <<"content-type">> => <<"application/json">>,
+            <<"body">> => hb_json:encode(PageDoc)
+        }
+    catch
+        % Non-encodable payloads fall back to the raw map; nested sections
+        % then arrive as `+link' references instead of inline JSON.
+        _:_ -> PageDoc
+    end.
+
+%% @doc Run a page section fetch, tolerating failure: an errored or crashed
+%% section resolves to `not_found' and is omitted from the composed page.
+optional_section(Fun) ->
+    optional_section(Fun, #{}).
+optional_section(Fun, Opts) ->
+    try Fun() of
+        {ok, Msg} when is_map(Msg) -> section_message(Msg, Opts);
+        _ -> not_found
+    catch
+        _:_ -> not_found
+    end.
+
+%% @doc Strip audit/raw payload baggage from a section message so the
+%% composed page stays lean; the raw bodies remain fetchable per-device.
+%% Lazily-linked values are loaded so the section can be JSON-encoded.
+section_message(Msg, Opts) when is_map(Msg) ->
+    Loaded =
+        try hb_cache:ensure_all_loaded(Msg, Opts) of
+            LoadedMsg when is_map(LoadedMsg) -> LoadedMsg;
+            _ -> Msg
+        catch
+            _:_ -> Msg
+        end,
+    hb_private:reset(maps:without([<<"body">>, <<"commitments">>], Loaded));
+section_message(Msg, _Opts) ->
+    Msg.
+
+section_first(_Keys, not_found, _Opts) -> not_found;
+section_first(Keys, Msg, Opts) when is_map(Msg) -> first_value(Keys, Msg, Opts);
+section_first(_Keys, _Msg, _Opts) -> not_found.
 
 safe(Fun) ->
     try Fun() of
