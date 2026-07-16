@@ -12,6 +12,8 @@ import { getAuthToken } from 'util/saved-passwords';
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const HYPERBEAM_FAILED_READ_CACHE_MS = 10 * 1000;
+const NATIVE_COMMENT_QUERY_CACHE_MS = 1000;
+const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const CLAIM_DEVICE = '~odysee-claim@1.0';
 const ACCOUNT_DEVICE = '~odysee-account@1.0';
@@ -24,6 +26,7 @@ const CHANNEL_DEVICE = '~odysee-channel@1.0';
 const STREAM_DEVICE = '~odysee-stream@1.0';
 const SEARCH_DEVICE = '~odysee-search@1.0';
 const QUERY_DEVICE = '~query@1.0';
+const CACHE_DEVICE = '~cache@1.0';
 const UPLOAD_DEVICE = '~odysee-upload@1.0';
 const HYPERBEAM_MESSAGE_WRITE_PROXY = '/$/api/hyperbeam-upload/v1/write';
 const COMMENTRON_FAILURE = 'Failed to fetch (comments.odysee.tv)';
@@ -47,6 +50,7 @@ const NORMALIZED_PRIVATE_PARAM_KEYS = new Set(
 );
 const SAME_ORIGIN_COOKIE_AUTH = '__same_origin_cookie_auth__';
 const deviceReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
+const nativeCommentQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<any>> }>();
 let localAuthTokenPromise: Promise<string | null> | null = null;
 const tracedAuthSources = new Set<string>();
 const PRESERVE_PRIVATE_DEVICE_PATHS = new Set([`${ACCOUNT_DEVICE}/user-new`]);
@@ -261,71 +265,85 @@ export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): 
   const commentId = nativeWriteId(result);
   if (!commentId) throw new Error('HyperBEAM native comment write did not return an ID');
 
+  nativeCommentQueryCache.clear();
   return commentFromHyperbeam({ ...message, 'comment-id': commentId });
 }
 
 type CommentSource = {
   items: Array<any>;
   totalItems: number;
+  totalFilteredItems: number;
   hasHiddenComments: boolean;
 };
 
 async function fetchNativeCommentSource(params: CommentListParams): Promise<CommentSource> {
   const selectors = nativeCommentSelectors(params);
-  if (!selectors) return { items: [], totalItems: 0, hasHiddenComments: false };
+  if (!selectors) return { items: [], totalItems: 0, totalFilteredItems: 0, hasHiddenComments: false };
 
-  const page = positiveInteger(params.page, 1);
-  const pageSize = positiveInteger(params.page_size, 10);
-  const query = {
-    ...selectors,
-    only: Object.keys(selectors),
-    return: 'paths',
-    'sort-by': 'timestamp',
-    'sort-order': nativeCommentSortOrder(params.sort_by),
-    offset: 0,
-    limit: page * pageSize,
-  };
-  const [pathsResponse, countResponse] = await Promise.all([
-    fetchPublicQueryJson(query),
-    fetchPublicQueryJson({ ...query, return: 'count' }),
-  ]);
-  const paths = queryPaths(pathsResponse);
-  const loadedComments = (await Promise.all(paths.map((path) => fetchNativeCommentById(path)))).filter(Boolean);
-  const comments = await attachNativeReplyCounts(loadedComments, selectors.target);
+  const comments = await fetchNativeCommentCollection(selectors);
+  const childCounts = nativeCommentChildCounts(comments);
+  const items = comments
+    .filter((comment) => nativeCommentMatchesParams(comment, params))
+    .map((comment) => ({
+      ...comment,
+      replies: Math.max(toNumber(comment.replies, 0), childCounts.get(String(comment.comment_id)) || 0),
+    }));
 
   return {
-    items: comments,
-    totalItems: queryCount(countResponse, paths.length),
+    items,
+    totalItems: params.claim_id && !params.parent_id ? comments.length : items.length,
+    totalFilteredItems: items.length,
     hasHiddenComments: false,
   };
 }
 
-async function attachNativeReplyCounts(comments: Array<any>, target: string): Promise<Array<any>> {
-  return Promise.all(
-    comments.map(async (comment) => {
-      const commentId = String(comment?.comment_id || '');
-      if (!commentId || !target) return comment;
+async function fetchNativeCommentCollection(selectors: Record<string, any>): Promise<Array<any>> {
+  const key = stableJson(selectors);
+  const now = Date.now();
+  const cached = nativeCommentQueryCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
 
-      const selectors = {
-        type: 'comment',
-        target,
-        parent: commentId,
-        state: 'active',
-      };
-      const storedCount = toNumber(comment.replies, 0);
+  const promise = fetchPublicQueryJson({
+    only: selectors,
+    return: 'paths',
+  })
+    .then(queryPaths)
+    .then(resolveNativeCommentPaths)
+    .then(dedupeNativeComments)
+    .catch((error) => {
+      nativeCommentQueryCache.delete(key);
+      throw error;
+    });
+  nativeCommentQueryCache.set(key, { expiresAt: now + NATIVE_COMMENT_QUERY_CACHE_MS, promise });
+  return promise;
+}
 
-      try {
-        const response = await fetchPublicQueryJson({
-          ...selectors,
-          only: Object.keys(selectors),
-          return: 'count',
-        });
-        return { ...comment, replies: Math.max(storedCount, queryCount(response, storedCount)) };
-      } catch {
-        return comment;
-      }
-    })
-  );
+async function resolveNativeCommentPaths(paths: Array<string>): Promise<Array<any>> {
+  const comments = new Array(paths.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(paths.length, NATIVE_COMMENT_READ_CONCURRENCY) }, async () => {
+    while (cursor < paths.length) {
+      const index = cursor++;
+      comments[index] = await fetchNativeCommentById(paths[index]);
+    }
+  });
+  await Promise.all(workers);
+  return comments.filter(Boolean);
+}
+
+function nativeCommentChildCounts(comments: Array<any>): Map<string, number> {
+  const counts = new Map<string, number>();
+  comments.forEach((comment) => {
+    const parentId = String(comment?.parent_id || 'root');
+    if (parentId !== 'root') counts.set(parentId, (counts.get(parentId) || 0) + 1);
+  });
+  return counts;
+}
+
+function nativeCommentMatchesParams(comment: any, params: CommentListParams): boolean {
+  if (params.claim_id && String(comment?.parent_id || 'root') !== String(params.parent_id || 'root')) return false;
+  if (params.author_claim_id && String(comment?.channel_id || '') !== String(params.author_claim_id)) return false;
+  return true;
 }
 
 async function fetchLegacyCommentSource(params: CommentListParams): Promise<CommentSource | null> {
@@ -343,6 +361,10 @@ async function fetchLegacyCommentSource(params: CommentListParams): Promise<Comm
   return {
     items: comments.map(commentFromHyperbeam),
     totalItems: toNumber(value(result, 'total-items', 'total_items'), comments.length),
+    totalFilteredItems: toNumber(
+      value(result, 'total-filtered-items', 'total_filtered_items'),
+      toNumber(value(result, 'total-items', 'total_items'), comments.length)
+    ),
     hasHiddenComments: Boolean(value(result, 'has-hidden-comments', 'has_hidden_comments')),
   };
 }
@@ -359,14 +381,15 @@ function mergeCommentSources(
   if (nativeItems.length) items.sort(commentComparator(params.sort_by));
   const start = (page - 1) * pageSize;
   const totalItems = (native?.totalItems || 0) + (legacy?.totalItems || 0);
+  const totalFilteredItems = (native?.totalFilteredItems || 0) + (legacy?.totalFilteredItems || 0);
 
   return {
     items: items.slice(start, start + pageSize),
     page,
     page_size: pageSize,
     total_items: totalItems,
-    total_filtered_items: totalItems,
-    total_pages: totalItems ? Math.ceil(totalItems / pageSize) : 0,
+    total_filtered_items: totalFilteredItems,
+    total_pages: totalFilteredItems ? Math.ceil(totalFilteredItems / pageSize) : 0,
     has_hidden_comments: Boolean(native?.hasHiddenComments || legacy?.hasHiddenComments),
   };
 }
@@ -374,9 +397,9 @@ function mergeCommentSources(
 function nativeCommentSelectors(params: CommentListParams): Record<string, any> | null {
   if (params.claim_id) {
     return {
+      schema: 'odysee-comment@1.0',
       type: 'comment',
       target: params.claim_id,
-      parent: params.parent_id || 'root',
       state: 'active',
       ...(params.author_claim_id ? { author: params.author_claim_id } : {}),
     };
@@ -384,6 +407,7 @@ function nativeCommentSelectors(params: CommentListParams): Record<string, any> 
 
   if (params.author_claim_id) {
     return {
+      schema: 'odysee-comment@1.0',
       type: 'comment',
       author: params.author_claim_id,
       state: 'active',
@@ -425,10 +449,41 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
 async function fetchNativeCommentById(id: string): Promise<any | null> {
   if (!id) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchStoreJsonOrNull(`${encodeDataPath(normalizedId)}?accept-bundle=true`, false);
-  const message = storePayload(result);
+  const result = await fetchStoreJsonOrNull(`${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`, false);
+  const message = { ...storePayload(result), 'comment-id': normalizedId };
   if (!isNativeComment(message)) return null;
-  return commentFromHyperbeam({ ...message, 'comment-id': normalizedId });
+  return commentFromHyperbeam(message);
+}
+
+function nativeCommentId(message: any): string | undefined {
+  const direct = value(message, 'comment-id', 'comment_id');
+  if (typeof direct === 'string' && direct) return direct;
+
+  const commitments = value(message, 'commitments');
+  if (isObject(commitments)) {
+    for (const [id, commitment] of Object.entries(commitments)) {
+      if (value(commitment, 'type') !== 'hmac-sha256') continue;
+      const signature = value(commitment, 'signature');
+      return normalizeMessageId(typeof signature === 'string' ? signature : id);
+    }
+  }
+
+  const signatureInput = String(value(message, 'signature-input') || '');
+  const hmacInput = signatureInput.split(/,\s+(?=[^=,\s]+=\()/).find((part) => part.includes('alg="hmac-sha256"'));
+  const label = hmacInput?.match(/^([^=]+)=/)?.[1];
+  if (!label) return undefined;
+
+  const signature = String(value(message, 'signature') || '');
+  const match = signature.match(new RegExp(`(?:^|,\\s*)${escapeRegExp(label)}=:([^:]+):`));
+  return match?.[1] ? normalizeMessageId(match[1]) : undefined;
+}
+
+function normalizeMessageId(id: string): string {
+  return id.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function escapeRegExp(source: string): string {
+  return source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function fetchNativeCommentAncestors(comment: any): Promise<Array<any>> {
@@ -448,56 +503,28 @@ async function fetchNativeCommentAncestors(comment: any): Promise<Array<any>> {
 }
 
 function isNativeComment(message: any): boolean {
-  return Boolean(message && message.type === 'comment' && message.schema === 'odysee-comment@1.0');
+  return Boolean(
+    message &&
+    value(message, 'device') !== 'cacheviz@1.0' &&
+    String(value(message, 'method') || '').toUpperCase() !== 'GET' &&
+    message.type === 'comment' &&
+    message.schema === 'odysee-comment@1.0' &&
+    typeof value(message, 'comment', 'body', 'text') === 'string' &&
+    typeof value(message, 'target', 'claim-id', 'claim_id') === 'string' &&
+    typeof value(message, 'channel-id', 'channel_id', 'author') === 'string' &&
+    Boolean(commentChannelUrl(message)) &&
+    Boolean(nativeCommentId(message))
+  );
 }
 
-type PendingPublicQuery = {
-  body: Record<string, any>;
-  resolve: (value: any) => void;
-  reject: (reason: any) => void;
-};
-
-const pendingPublicQueries: Array<PendingPublicQuery> = [];
-let publicQueryFlushScheduled = false;
-
-function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
-  return new Promise((resolve, reject) => {
-    pendingPublicQueries.push({ body, resolve, reject });
-    if (publicQueryFlushScheduled) return;
-
-    publicQueryFlushScheduled = true;
-    Promise.resolve().then(flushPublicQueryBatch);
-  });
-}
-
-async function flushPublicQueryBatch(): Promise<void> {
-  publicQueryFlushScheduled = false;
-  const pending = pendingPublicQueries.splice(0);
-  if (!pending.length) return;
-
-  const uniqueQueries: Array<Record<string, any>> = [];
-  const queryIndexes: Array<number> = [];
-  const indexesByQuery = new Map<string, number>();
-
-  for (const item of pending) {
-    const key = JSON.stringify(item.body);
-    let index = indexesByQuery.get(key);
-    if (index === undefined) {
-      index = uniqueQueries.length;
-      indexesByQuery.set(key, index);
-      uniqueQueries.push(item.body);
-    }
-    queryIndexes.push(index);
-  }
-
+async function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
   try {
-    const response = await fetchPublicDeviceJson(`${QUERY_DEVICE}/batch`, { queries: uniqueQueries });
-    const results = queryBatchResults(response);
-    if (results.length !== uniqueQueries.length)
-      throw new Error('HyperBEAM query batch returned an invalid result count');
-    pending.forEach((item, index) => item.resolve(results[queryIndexes[index]]));
+    return await fetchPublicDeviceJson(`${QUERY_DEVICE}/only`, body);
   } catch (error) {
-    pending.forEach((item) => item.reject(error));
+    const status = Number((error as any)?.status);
+    const responseBody = String((error as any)?.responseBody || '');
+    if (status === 404 || (status === 500 && responseBody.includes('not_found'))) return [];
+    throw error;
   }
 }
 
@@ -515,19 +542,12 @@ async function fetchPublicDeviceJson(path: string, body: Record<string, any>): P
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
   });
   const text = await response.text();
-  if (!response.ok) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`HyperBEAM ${path} failed with ${response.status}`);
+    Object.assign(error, { status: response.status, responseBody: text });
+    throw error;
+  }
   return parseDeviceJson(text);
-}
-
-function queryBatchResults(response: any): Array<any> {
-  const payload = queryPayload(response);
-  if (Array.isArray(payload)) return payload.map(arrayifyNumericMaps);
-  if (!isObject(payload)) return [];
-
-  return Object.keys(payload)
-    .filter((key) => /^[1-9]\d*$/.test(key))
-    .sort((left, right) => Number(left) - Number(right))
-    .map((key) => arrayifyNumericMaps(payload[key]));
 }
 
 function queryPaths(response: any): Array<string> {
@@ -542,12 +562,6 @@ function queryPaths(response: any): Array<string> {
     .sort((left, right) => Number(left) - Number(right))
     .map((key) => String(payload[key]))
     .filter(Boolean);
-}
-
-function queryCount(response: any, fallback: number): number {
-  const payload = queryPayload(response);
-  if (typeof payload === 'number') return payload;
-  return toNumber(value(payload, 'count', 'total'), fallback);
 }
 
 function queryPayload(response: any): any {
@@ -594,6 +608,10 @@ function dedupeComments(comments: Array<any>): Array<any> {
   });
 }
 
+function dedupeNativeComments(comments: Array<any>): Array<any> {
+  return dedupeComments(comments);
+}
+
 function commentComparator(sortBy?: number | null): (left: any, right: any) => number {
   return (left, right) => {
     if (sortBy === SORT_BY.NEWEST && Boolean(left.is_pinned) !== Boolean(right.is_pinned)) {
@@ -621,10 +639,6 @@ function commentTimestamp(comment: any): number {
 
 function commentIdOrder(left: any, right: any): number {
   return String(left?.comment_id || '').localeCompare(String(right?.comment_id || ''));
-}
-
-function nativeCommentSortOrder(sortBy?: number | null): string {
-  return sortBy === SORT_BY.OLDEST ? 'asc' : 'desc';
 }
 
 function positiveInteger(source: any, fallback: number): number {
@@ -1543,9 +1557,7 @@ function commentFromHyperbeam(comment: any): any {
   const parentId = value(comment, 'parent-id', 'parent_id', 'parent');
   const channelId = value(comment, 'channel-id', 'channel_id', 'author');
   const channelName = value(comment, 'channel-name', 'channel_name');
-  const channelUrl =
-    value(comment, 'channel-url', 'channel_url') ||
-    (channelName ? buildURI({ channelName, channelClaimId: channelId }, true) : undefined);
+  const channelUrl = commentChannelUrl(comment);
   return compactParams({
     ...comment.source,
     comment_id: value(comment, 'comment-id', 'comment_id', 'id'),
@@ -1570,6 +1582,29 @@ function commentFromHyperbeam(comment: any): any {
     blocked: toBoolean(value(comment, 'blocked')),
     hyperbeam_signature_verification: value(comment, 'signature-verification'),
   });
+}
+
+function commentChannelUrl(comment: any): string | undefined {
+  const existing = value(comment, 'channel-url', 'channel_url');
+  if (validChannelUrl(existing)) return existing;
+
+  const channelName = value(comment, 'channel-name', 'channel_name');
+  const channelId = value(comment, 'channel-id', 'channel_id', 'author');
+  if (typeof channelName !== 'string' || !channelName.trim() || typeof channelId !== 'string' || !channelId.trim()) {
+    return undefined;
+  }
+
+  const url = buildURI({ channelName: channelName.trim(), channelClaimId: channelId.trim() }, true);
+  return validChannelUrl(url) ? url : undefined;
+}
+
+function validChannelUrl(url: any): url is string {
+  if (typeof url !== 'string' || !url) return false;
+  try {
+    return Boolean(parseURI(url).channelName);
+  } catch {
+    return false;
+  }
 }
 
 function responsePayload(response: any): any {

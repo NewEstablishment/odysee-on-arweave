@@ -309,6 +309,7 @@ do_write_message(Msg, Store, Opts) when is_map(Msg) ->
     ?event_debug(debug_cache, {writing_message, Msg}),
     % Calculate the IDs of the message.
     UncommittedID = hb_message:id(Msg, none, Opts#{ <<"linkify-mode">> => discard }),
+    CanonicalID = hb_message:id(Msg, #{}, Opts#{ <<"linkify-mode">> => discard }),
     AllIDs = calculate_all_ids(Msg, Opts),
     AltIDs = AllIDs -- [UncommittedID],
     MsgHashpathAlg = hb_path:hashpath_alg(Msg, Opts),
@@ -324,7 +325,7 @@ do_write_message(Msg, Store, Opts) when is_map(Msg) ->
     % Optionally store the message into the match index, if configured.
     case hb_opts:get(match_index, false, Opts) of
         false -> ok;
-        _ -> write_match_index(AllIDs, Msg, Opts)
+        _ -> write_match_index([CanonicalID], Msg, Opts)
     end,
     % Write the commitments to the store, linking each commitment ID to the
     % uncommitted message.
@@ -1223,6 +1224,36 @@ test_match_typed_message(Store) ->
         ensure_all_loaded(Read2, Opts)
     ).
 
+test_match_signed_message_uses_canonical_id(Store)
+        when map_get(<<"store-module">>, Store) =/= hb_store_lmdb ->
+    skip;
+test_match_signed_message_uses_canonical_id(Store) ->
+    hb_store:reset(Store),
+    Opts = #{
+        <<"store">> => Store,
+        <<"match-index">> => [Store],
+        <<"priv-wallet">> => ar_wallet:new()
+    },
+    Msg = hb_message:commit(
+        #{
+            <<"schema">> => <<"test@1.0">>,
+            <<"type">> => <<"record">>,
+            <<"value">> => <<"canonical">>
+        },
+        Opts
+    ),
+    CanonicalID = hb_message:id(Msg, #{}, Opts),
+    CommitmentIDs = hb_maps:keys(hb_maps:get(<<"commitments">>, Msg, #{}, Opts), Opts),
+    {ok, _} = write(Msg, Opts),
+    ?assertEqual(
+        {ok, [CanonicalID]},
+        match(#{ <<"schema">> => <<"test@1.0">> }, Opts)
+    ),
+    lists:foreach(
+        fun(ID) -> ?assertMatch({ok, _}, read(ID, Opts)) end,
+        CommitmentIDs
+    ).
+
 test_raw_match_read(Store) when map_get(<<"store-module">>, Store) =/= hb_store_lmdb ->
     skip;
 test_raw_match_read(Store) ->
@@ -1262,6 +1293,8 @@ cache_suite_test_() ->
         {"match message", fun test_match_message/1},
         {"match linked message", fun test_match_linked_message/1},
         {"match typed message", fun test_match_typed_message/1},
+        {"match signed message uses canonical id",
+            fun test_match_signed_message_uses_canonical_id/1},
         {"raw match read", fun test_raw_match_read/1}
     ]).
 

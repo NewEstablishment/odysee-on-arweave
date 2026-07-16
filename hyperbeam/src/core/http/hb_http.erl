@@ -1141,7 +1141,10 @@ httpsig_to_tabm_singleton(PrimMsg, Req, Body, Opts) ->
             case Signers =/= [] andalso hb_opts:get(store_all_signed, false, Opts) of
                 true ->
                     ?event(http_verify, {storing_signed_from_wire, Decoded}),
-                    {ok, _} = hb_cache:write(Decoded, Opts);
+                    {ok, _} = hb_cache:write(
+                        Decoded,
+                        signed_wire_store_opts(Req, Opts)
+                    );
                 false ->
                     do_nothing
             end,
@@ -1154,6 +1157,12 @@ httpsig_to_tabm_singleton(PrimMsg, Req, Body, Opts) ->
                 }
             ),
             throw({invalid_commitments, Decoded})
+    end.
+
+signed_wire_store_opts(Req, Opts) ->
+    case cowboy_req:path(Req) of
+        <<"/id">> -> Opts;
+        _ -> Opts#{ <<"match-index">> => false }
     end.
 
 %% @doc Add the method and path to a message, if they are not already present.

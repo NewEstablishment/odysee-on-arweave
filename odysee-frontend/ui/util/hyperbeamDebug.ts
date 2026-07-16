@@ -1,5 +1,10 @@
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
-import { getHyperbeamMode, HYPERBEAM_MODES, shouldAllowOriginalNetworkFallback } from 'util/hyperbeamMode';
+import {
+  getHyperbeamMode,
+  HYPERBEAM_MODES,
+  isHyperbeamPublicReadDevice,
+  shouldAllowOriginalNetworkFallback,
+} from 'util/hyperbeamMode';
 
 export type HyperbeamDebugLevel = 'info' | 'ok' | 'warn' | 'error';
 
@@ -682,7 +687,7 @@ function hyperbeamDevice(url: string) {
 function hyperbeamDeviceLayer(url: string) {
   const device = hyperbeamDevice(url);
   if (!device) return undefined;
-  return 'compat-device';
+  return isHyperbeamPublicReadDevice(device) ? 'native-device' : 'compat-device';
 }
 
 export function sanitizeHyperbeamDebugValue(value: any): any {

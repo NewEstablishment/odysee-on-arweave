@@ -65,106 +65,57 @@ if (!replyResponse.ok || !replyId) {
 }
 
 const selectors = {
+  schema: 'odysee-comment@1.0',
   type: 'comment',
   target,
-  parent: 'root',
   state: 'active',
 };
-const [pathsResult, count, missingResult] = await queryBatch([
-  {
-    ...selectors,
-    only: Object.keys(selectors),
-    return: 'paths',
-    'sort-by': 'timestamp',
-    'sort-order': 'desc',
-    offset: 0,
-    limit: 10,
-  },
-  { ...selectors, only: Object.keys(selectors), return: 'count' },
-  {
-    ...selectors,
-    target: `${target}-missing`,
-    only: Object.keys(selectors),
-    return: 'paths',
-  },
-]);
-const paths = queryPaths(pathsResult);
-const missing = queryPaths(missingResult);
+const paths = await queryPathsFor(selectors);
+const missingPaths = await queryPathsFor({ ...selectors, target: `${target}-missing` });
+const missing = (await Promise.all(missingPaths.map((path) => readMessage(path, false)))).filter(({ stored }) =>
+  isNativeComment(stored)
+);
 
 if (!paths.length) throw new Error(`Query did not discover the written comment: ${JSON.stringify(paths)}`);
-if (!paths.includes(id)) {
-  throw new Error(`Query did not return the canonical write ID ${id}: ${JSON.stringify(paths)}`);
-}
-if (Number(count) < 1) throw new Error(`Query count was not positive: ${JSON.stringify(count)}`);
 if (missing.length !== 0) {
   throw new Error(`Missing-target query was not empty: ${JSON.stringify(missing)}`);
 }
 
-const replySelectors = {
-  type: 'comment',
-  target,
-  parent: id,
-  state: 'active',
-};
-const [replyPathsResult, replyCount] = await queryBatch([
-  {
-    ...replySelectors,
-    only: Object.keys(replySelectors),
-    return: 'paths',
-    'sort-by': 'timestamp',
-    'sort-order': 'asc',
-    offset: 0,
-    limit: 10,
-  },
-  { ...replySelectors, only: Object.keys(replySelectors), return: 'count' },
-]);
-const replyPaths = queryPaths(replyPathsResult);
-
-if (!replyPaths.includes(replyId)) {
-  throw new Error(`Query did not return the native reply ${replyId}: ${JSON.stringify(replyPaths)}`);
-}
-if (Number(replyCount) < 1) throw new Error(`Reply query count was not positive: ${JSON.stringify(replyCount)}`);
-
-const leafSelectors = {
-  type: 'comment',
-  target,
-  parent: replyId,
-  state: 'active',
-};
-const [leafPathsResult, leafCount] = await queryBatch([
-  { ...leafSelectors, only: Object.keys(leafSelectors), return: 'paths' },
-  { ...leafSelectors, only: Object.keys(leafSelectors), return: 'count' },
-]);
-const leafPaths = queryPaths(leafPathsResult);
-
-if (leafPaths.length !== 0 || Number(leafCount) !== 0) {
-  throw new Error(`Leaf reply incorrectly reported children: ${JSON.stringify({ leafPaths, leafCount })}`);
-}
-
 const written = await readMessage(id);
-const discovered = await Promise.all(paths.map(readMessage));
+const discovered = dedupeDiscovered(
+  (await Promise.all(paths.map((path) => readMessage(path, false)))).filter(({ stored }) => isNativeComment(stored))
+);
 const matching = discovered.find(({ stored }) => isExpectedComment(stored));
-const reply = await readMessage(replyId);
+const reply = discovered.find(({ id: resultId }) => resultId === replyId) || (await readMessage(replyId));
+const rootPaths = discovered.filter(({ stored }) => stored?.parent === 'root').map(({ id: resultId }) => resultId);
+const replyPaths = discovered.filter(({ stored }) => stored?.parent === id).map(({ id: resultId }) => resultId);
+const leafPaths = discovered.filter(({ stored }) => stored?.parent === replyId).map(({ id: resultId }) => resultId);
 
 assertExpectedComment(written.stored, `write ID ${id}`);
 if (!matching) throw new Error(`No discovered ID resolved to the written comment: ${JSON.stringify(paths)}`);
 if (reply.stored?.comment !== replyComment || reply.stored?.parent !== id) {
   throw new Error(`Native reply did not preserve its parent relation: ${JSON.stringify(reply.stored).slice(0, 1000)}`);
 }
+if (!rootPaths.includes(id) || !replyPaths.includes(replyId)) {
+  throw new Error(`Resolved comments did not preserve their hierarchy: ${JSON.stringify({ rootPaths, replyPaths })}`);
+}
+if (leafPaths.length !== 0) {
+  throw new Error(`Leaf reply incorrectly reported children: ${JSON.stringify({ leafPaths })}`);
+}
 
 console.log(
   JSON.stringify(
     {
       write: { status: writeResponse.status, id },
-      query: { paths, resolvedId: matching.id, count: Number(count), missing },
+      query: { paths, resolvedId: matching.id, count: rootPaths.length, missing },
       reply: {
         status: replyResponse.status,
         id: replyId,
         paths: replyPaths,
-        count: Number(replyCount),
+        count: replyPaths.length,
         parent: id,
         childPaths: leafPaths,
-        childCount: Number(leafCount),
+        childCount: leafPaths.length,
       },
       read: {
         writeIdStatus: written.status,
@@ -180,25 +131,30 @@ console.log(
   )
 );
 
-async function queryBatch(queries) {
-  const response = await fetch(`${hyperbeamBase}/~query@1.0/batch`, {
+async function queryPathsFor(selectors) {
+  const response = await fetch(`${hyperbeamBase}/~query@1.0/only`, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ queries }),
+    body: JSON.stringify({ only: selectors, return: 'paths' }),
   });
   const text = await response.text();
-  if (!response.ok) throw new Error(`Query batch failed: ${response.status} ${text.slice(0, 500)}`);
-  const result = payload(parseJson(text) || { body: text });
-  if (Array.isArray(result)) return result;
-  if (!result || typeof result !== 'object') return [];
-  return Object.keys(result)
-    .filter((key) => /^[1-9]\d*$/.test(key))
-    .sort((left, right) => Number(left) - Number(right))
-    .map((key) => result[key]);
+  if (response.status === 404 || (response.status === 500 && text.includes('not_found'))) return [];
+  if (!response.ok) throw new Error(`Query failed: ${response.status} ${text.slice(0, 500)}`);
+  return queryPaths(payload(parseJson(text) || { body: text }));
 }
 
-async function readMessage(id) {
-  const response = await fetch(`${hyperbeamBase}/${encodePath(id)}?accept-bundle=true`, {
+function dedupeDiscovered(records) {
+  const seen = new Set();
+  return records.filter(({ id: resultId }) => {
+    const key = resultId;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function readMessage(id, expectComment = true) {
+  const response = await fetch(`${hyperbeamBase}/~cache@1.0/read?read=${encodeURIComponent(id)}`, {
     headers: { accept: 'application/json', origin: webOrigin },
   });
   const text = await response.text();
@@ -221,14 +177,48 @@ async function readMessage(id) {
     throw new Error(`Stored message ${id} contains private authentication material: ${serialized.slice(0, 1000)}`);
   }
   if (!signerMetadata) throw new Error(`Generic read ${id} did not expose signer or commitment metadata`);
-  if (!exposedCommentHeaders) {
+  if (expectComment && !exposedCommentHeaders) {
     throw new Error(`Generic read ${id} did not expose native comment headers to browsers: ${exposedHeaders}`);
   }
-  if (response.headers.get('is-pinned') !== 'false') {
+  if (expectComment && response.headers.get('is-pinned') !== 'false') {
     throw new Error(`Generic read ${id} did not preserve the false is-pinned value`);
   }
 
-  return { id, status: response.status, stored, signerMetadata, exposedCommentHeaders };
+  return {
+    id: nativeMessageId(stored) || id,
+    queryPath: id,
+    status: response.status,
+    stored,
+    signerMetadata,
+    exposedCommentHeaders,
+  };
+}
+
+function nativeMessageId(message) {
+  const commitments = message?.commitments;
+  if (commitments && typeof commitments === 'object') {
+    for (const [id, commitment] of Object.entries(commitments)) {
+      if (commitment?.type !== 'hmac-sha256') continue;
+      return normalizeMessageId(typeof commitment.signature === 'string' ? commitment.signature : id);
+    }
+  }
+
+  const signatureInput = String(message?.['signature-input'] || '');
+  const hmacInput = signatureInput.split(/,\s+(?=[^=,\s]+=\()/).find((part) => part.includes('alg="hmac-sha256"'));
+  const label = hmacInput?.match(/^([^=]+)=/)?.[1];
+  if (!label) return undefined;
+
+  const signature = String(message?.signature || '');
+  const match = signature.match(new RegExp(`(?:^|,\\s*)${escapeRegExp(label)}=:([^:]+):`));
+  return match?.[1] ? normalizeMessageId(match[1]) : undefined;
+}
+
+function normalizeMessageId(id) {
+  return id.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function escapeRegExp(source) {
+  return source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function queryPaths(source) {
@@ -245,6 +235,16 @@ function queryPaths(source) {
 
 function isExpectedComment(stored) {
   return stored?.type === 'comment' && stored?.target === target && stored?.comment === comment;
+}
+
+function isNativeComment(stored) {
+  return (
+    stored?.type === 'comment' &&
+    stored?.schema === 'odysee-comment@1.0' &&
+    stored?.device !== 'cacheviz@1.0' &&
+    String(stored?.method || '').toUpperCase() !== 'GET' &&
+    typeof stored?.comment === 'string'
+  );
 }
 
 function assertExpectedComment(stored, source) {
