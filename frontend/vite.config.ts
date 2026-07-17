@@ -629,7 +629,7 @@ if(typeof ResizeObserver==='undefined')window.ResizeObserver=function(cb){var t=
 if(navigator.mediaSession&&navigator.mediaSession.setActionHandler){var _msSet=navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);navigator.mediaSession.setActionHandler=function(a,h){try{return _msSet(a,h)}catch(e){return null}};}
 var els=document.querySelectorAll('script[type=module],link[rel=modulepreload]');
 for(var i=0;i<els.length;i++)els[i].parentNode.removeChild(els[i]);
-var s=document.createElement('script');s.src='/${legacyFilename}';document.head.appendChild(s)}})();
+var s=document.createElement('script');s.src=((location.pathname.match(/^\\/[A-Za-z0-9_-]{43}(?=\\/|$)/)||[''])[0])+'/${legacyFilename}';document.head.appendChild(s)}})();
 </script>`;
 
         const htmlWithoutOldDetector = stripLegacyFallbackDetectors(html);
@@ -689,8 +689,14 @@ function ssrTemplatePlugin() {
 
         if (assetTags.length === 0) return;
 
+        // The static bundle uses relative URLs (base './'); the Koa server
+        // serves assets under /public/, so rebase the tags for the template.
+        const absoluteTags = assetTags.map((tag) =>
+          tag.replace(/(src|href)="\.?\/?(assets\/[^"]+)"/, '$1="/public/$2"')
+        );
+
         const cleanTemplate = stripInjectedAssetTags(template);
-        const injected = cleanTemplate.replace('</head>', `    ${assetTags.join('\n    ')}\n  </head>`);
+        const injected = cleanTemplate.replace('</head>', `    ${absoluteTags.join('\n    ')}\n  </head>`);
         fs.writeFileSync(templateHtml, injected, 'utf8');
       },
     },
@@ -770,7 +776,11 @@ const codeSplittingGroups = [
 export default defineConfig({
   root: __dirname,
   publicDir: 'static',
-  base: isServeCommand ? '/' : '/public/',
+  // Build with a relative base so the static bundle works from any subpath
+  // (e.g. a HyperBEAM node serving the Arweave path manifest at /<ManifestID>/).
+  // index.html injects a runtime <base> tag for manifest deep links, and
+  // ssrTemplatePlugin rewrites the tags back to /public/ for the Koa server.
+  base: isServeCommand ? '/' : './',
 
   define: {
     ...buildEnvDefines(),

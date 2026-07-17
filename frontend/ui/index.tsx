@@ -91,6 +91,7 @@ import { useAppDispatch } from 'redux/hooks';
 import { doSendPastRecsysEntries } from 'redux/actions/content';
 import { reloadOnceForDynamicImportError } from 'util/importFailure';
 import { installHyperbeamFetchDebug } from 'util/hyperbeamDebug';
+import { manifestPrefix } from 'util/manifest-prefix';
 // Import 3rd-party styles before ours for the current way we are code-splitting.
 import 'scss/third-party.scss';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -310,7 +311,7 @@ function AppWrapper() {
         loading={<div className="main--launching" />}
       >
         <div className="app-gate-root">
-          <BrowserRouter>
+          <BrowserRouter basename={manifestPrefix() || '/'}>
             <RouterSyncBridge />
             <ErrorBoundary>
               <App />
