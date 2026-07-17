@@ -427,7 +427,9 @@ share_committed_keys(Msg) ->
 %% must match the channel evidence, and the claim signature must verify
 %% against the channel key before the commitment is attached. The commitment
 %% records the channel outpoint so an independent verifier can re-fetch and
-%% re-verify the channel evidence by immutable identifier.
+%% re-verify the channel evidence by immutable identifier. The evidence is
+%% embedded as its committed view, matching the shape the remote-read trust
+%% boundary produces.
 with_attestation_commitment(StreamMsg, ChannelMsg) ->
     maybe
         true ?=
@@ -465,6 +467,14 @@ with_attestation_commitment(StreamMsg, ChannelMsg) ->
             ),
         TxIDHex = maps:get(<<"txid">>, StreamMsg),
         Nout = maps:get(<<"nout">>, StreamMsg),
+        % Embed the channel evidence as its committed view. An embedded
+        % committed child must carry no uncommitted keys: our commitments
+        % have no committer, so the id the HTTP layer links the child under
+        % is recalculated from its full key set, while the cache write
+        % registers ids for the committed view only -- an uncommitted key
+        % (such as the derived `claim-envelope') makes the two diverge,
+        % leaving a dangling link when the message is served.
+        {ok, ChannelView} ?= hb_message:with_only_committed(ChannelMsg, #{}),
         ID = commitment_id(Signature),
         Commitment = #{
             <<"commitment-device">> => <<"lbry@1.0">>,
@@ -489,7 +499,7 @@ with_attestation_commitment(StreamMsg, ChannelMsg) ->
         {ok,
             share_committed_keys(
                 StreamMsg#{
-                    <<"channel-evidence">> => ChannelMsg,
+                    <<"channel-evidence">> => ChannelView,
                     <<"commitments">> => Commitments#{ ID => Commitment }
                 }
             )}
@@ -2019,6 +2029,27 @@ remote_view_narrows_channel_evidence_test() ->
     ?assertEqual(
         true,
         hb_message:verify(View, #{ <<"commitment-ids">> => <<"all">> }, #{})
+    ).
+
+attestation_embeds_committed_channel_view_test() ->
+    % The embedded channel evidence must be exactly its committed view: our
+    % commitments carry no committer, so the id a nested committed message
+    % is linked under during HTTP encoding is recalculated from its full
+    % key set, while the cache write registers ids for the committed view
+    % only. An uncommitted key (such as the derived `claim-envelope') makes
+    % the two diverge, leaving a dangling link when the message is served.
+    {Compressed, _} = sample_channel_keys(),
+    ChannelRaw = channel_claim_tx(Compressed),
+    {ok, ChannelMsg} = channel_output_message(ChannelRaw, 0),
+    StreamMsg = signed_stream_claim_for_channel(ChannelMsg, <<1:256>>),
+    {ok, Committed} = with_attestation_commitment(StreamMsg, ChannelMsg),
+    ChanEv = maps:get(<<"channel-evidence">>, Committed),
+    ?assertEqual(false, maps:is_key(<<"claim-envelope">>, ChanEv)),
+    {ok, ChanEvView} = hb_message:with_only_committed(ChanEv, #{}),
+    ?assertEqual(ChanEvView, ChanEv),
+    ?assertEqual(
+        true,
+        hb_message:verify(Committed, #{ <<"commitment-ids">> => <<"all">> }, #{})
     ).
 
 attestation_commitment_requires_channel_evidence_test() ->
