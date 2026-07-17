@@ -1,0 +1,35 @@
+@import 'init/breakpoints';
+
+[data-reach-tooltip] {
+  border-radius: var(--border-radius);
+  border: none;
+  padding: var(--spacing-s);
+  overflow: hidden;
+  white-space: normal;
+}
+
+.MuiTooltip-tooltip {
+  border-radius: var(--border-radius) !important;
+  background-color: rgba(var(--color-header-background-base), 0.8) !important;
+  color: var(--color-text) !important;
+  font-size: var(--font-small) !important;
+  border: 2px solid var(--color-text);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.MuiTooltip-arrow {
+  color: var(--color-text) !important;
+  font-size: var(--font-xxsmall) !important;
+}
+
+@media (max-width: $breakpoint-small) {
+  .MuiTooltip-popper {
+    display: none !important;
+  }
+}
+
+.profile-badge__tooltip {
+  margin-top: 0px !important;
+  right: 0.5rem !important;
+}
