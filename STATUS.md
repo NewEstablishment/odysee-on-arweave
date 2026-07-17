@@ -3,6 +3,41 @@
 Status log for the overnight port. Newest entries first. Decisions with
 rationale live in `decisions/`.
 
+## 2026-07-17 (evening)
+
+- Devices/stores ported and green: single `lbry@1.0` commitment+codec
+  device + crypto helper modules + five read-only stores. 104 tests via
+  `rebar3 device test`, plus the store/codec/corpus/remote-read eunit
+  suites (`HB_PRELOADED_STORE=$PWD/_build/device-test-store` unlocks
+  eunit after a device-test run).
+- Live E2E against real mainnet Odysee: a seed node
+  (`hb_odysee_node:start_seed/1`) serves
+  `GET /~cache@1.0/read?read=odysee/claim-id/<id>` with full attested
+  evidence (claim + sd-hash + secp256k1 channel attestation), verified
+  fail-closed and narrowed before leaving the store.
+- Found+fixed: edge's `hb_link:normalize` links nested children by
+  full-content ID while `hb_cache:write` registers committed-view IDs —
+  divergent for committer-less commitments (dangling links, HTTP 500s).
+  Route-around: attestation embeds channel evidence as its committed
+  view. Upstream proposal in `patches/README.md` §3.
+- UI: static SPA build published into a node's store as a path manifest
+  (`hb_odysee_ui:publish/2`); `GET /<ManifestID>` serves the app.
+  A second, stock-config node with only `hb_store_remote_node` pointed
+  at the seed serves the same UI trustlessly (manifest + assets 200).
+- Frontend data layer rewritten store-first: all `~odysee-*@1.0` device
+  calls and Koa proxies removed from read paths; reads go through
+  `/~cache@1.0/read?read=odysee/...`; tsc/build/native-comment tests
+  green.
+- Deep links: manifest index-fallback covers only the first missing
+  path segment, so manifest-served mode uses hash routing; `~` (and
+  other path-syntax characters) in built chunk filenames 500 on nodes —
+  build sanitizes them. (In progress at time of writing.)
+- Auth: `POST /id?!=true` with the stock pipeline signs the request
+  with a hook-derived user wallet and returns the committed ID.
+  Persistence gap for hook-signed uploads documented as
+  `patches/README.md` §4 (store-all-signed runs pre-hook; cache_writers
+  is static).
+
 ## 2026-07-17
 
 - Familiarization complete: core resolver (`hb_ao`), base device
