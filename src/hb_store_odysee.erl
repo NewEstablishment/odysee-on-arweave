@@ -335,12 +335,30 @@ read_native_outpoint(_TxID, _Nout, [], _StoreOpts, _NodeOpts) ->
     {error, not_found}.
 
 %% @doc Fail closed and narrow: every message leaving the store must carry
-%% verifying native commitments, and only its committed keys.
+%% verifying native commitments, and only its committed keys. The narrowed
+%% message is written to the node's local stores before it is returned, so
+%% its sub-messages are servable wherever the evidence itself is -- the
+%% HTTP layer links nested maps against the local store when encoding
+%% unbundled responses, and peers read the same copies through the cache.
 evidence_result(Msg, Opts) ->
     case hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, Opts) of
-        true -> hb_message:with_only_committed(Msg, Opts);
+        true ->
+            case hb_message:with_only_committed(Msg, Opts) of
+                {ok, Narrowed} ->
+                    hb_cache:write(Narrowed, local_write_opts(Opts)),
+                    {ok, Narrowed};
+                Other -> Other
+            end;
         false -> {error, invalid_evidence}
     end.
+
+%% @doc The node options, with the store stack narrowed to local scope for
+%% evidence write-back. An empty local stack disables the write cleanly.
+local_write_opts(Opts) ->
+    Opts#{
+        <<"store">> =>
+            hb_store:scope(hb_opts:get(store, [], Opts), local)
+    }.
 
 require_claim_id(undefined, _Msg) ->
     ok;
