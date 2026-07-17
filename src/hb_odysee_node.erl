@@ -13,6 +13,7 @@
 %%% the store stack for that configuration.
 -module(hb_odysee_node).
 -export([start_seed/0, start_seed/1, seed_opts/1, serving_store/1]).
+-export([cookie_auth_hooks/1]).
 
 %% @doc Start a seed node on an OS-assigned port with default options.
 start_seed() ->
@@ -57,6 +58,31 @@ odysee_stores(Opts) ->
             <<"name">> => <<"cache-lbry-blob">>
         }
     ] ++ hb_opts:get(<<"odysee-extra-stores">>, [], Opts).
+
+%% @doc The node's default `on' hooks, with the `~auth-hook@1.0' request
+%% handler's secret provider swapped to `~cookie@1.0'. Browsers then
+%% receive a stable anonymous identity automatically: the first `?!=true'
+%% request mints a cookie-derived per-user wallet, and every subsequent
+%% request with that cookie commits as the same user. Pass the result as
+%% the node's `on' option.
+cookie_auth_hooks(Opts) ->
+    Hooks = hb_opts:get(on, #{}, Opts),
+    Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
+    Hooks#{
+        <<"request">> =>
+            [
+                case Handler of
+                    #{ <<"device">> := <<"auth-hook@1.0">> } ->
+                        Handler#{
+                            <<"secret-provider">> =>
+                                #{ <<"device">> => <<"cookie@1.0">> }
+                        };
+                    _ -> Handler
+                end
+            ||
+                Handler <- Pipeline
+            ]
+    }.
 
 %% @doc The store stack for a stock serving node: local caches first,
 %% then remote reads from the given seed peers. Results read from peers

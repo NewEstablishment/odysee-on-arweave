@@ -40,12 +40,13 @@ node operator who wants to serve Odysee data.
 
 ## Decision
 
-Option 2. All commitments carry `commitment-device => <<"lbry@1.0">>`.
-The commitment `native-id-type` (`outpoint`, `txid`, `sd-hash`,
-`blob-hash`) plus `type` (`hash160-outpoint`, `asserted-claim-id`,
-`ancestor-hash160-outpoint`, `secp256k1-sha256`, `sha-384`, `sha-256d`)
-select the verification recipe, exactly as `hb_lbry_commitment` already
-distinguishes them internally. `dev_message`'s `commitment-device`
+Option 2. All commitments carry `commitment-device => <<"lbry@1.0">>`
+plus an explicit `evidence` field (`claim`, `channel`, `stream`,
+`descriptor`, `blob`, `transaction`, `attestation`) that selects the
+verification recipe; `native-id-type` and `type` retain their vendored
+meanings. A forged `evidence` value can only select a recipe that then
+fails, since every recipe re-derives all facts from the committed raw
+bytes. `dev_message`'s `commitment-device`
 dispatch reaches one module; multiple commitments of different kinds
 coexist on one evidence message under a single device name, which also
 sidesteps `dev_message:id_device/2`'s multiple-device error path
