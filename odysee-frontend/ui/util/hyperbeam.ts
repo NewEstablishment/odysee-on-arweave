@@ -7,12 +7,33 @@ import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { allowHyperbeamCompatibilityReads, isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
+import { toHex } from 'util/hex';
+import {
+  collapseNativeCommentRevisions,
+  isNextNativeCommentRevision,
+  latestNativeCommentRevision,
+  nativeCommentSignatureData,
+} from 'util/nativeCommentRevisions';
+import {
+  hasNativeCommentControlAuthority,
+  isNativeCommentControlEnabled,
+  legacyBlockControlsToImport,
+  latestNativeCommentControls,
+  NATIVE_COMMENT_CONTROL_SCHEMA,
+  NATIVE_COMMENT_CONTROL_SIGNATURE_SCOPE,
+  NATIVE_COMMENT_CONTROL_TYPE,
+  nativeCommentControlSignatureData,
+  normalizeNativeCommentControl,
+  projectNativeCommentControlState,
+  type NativeCommentControl,
+} from 'util/nativeCommentControls';
 import { getAuthToken } from 'util/saved-passwords';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const HYPERBEAM_FAILED_READ_CACHE_MS = 10 * 1000;
 const NATIVE_COMMENT_QUERY_CACHE_MS = 1000;
+const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const CLAIM_DEVICE = '~odysee-claim@1.0';
@@ -51,6 +72,14 @@ const NORMALIZED_PRIVATE_PARAM_KEYS = new Set(
 const SAME_ORIGIN_COOKIE_AUTH = '__same_origin_cookie_auth__';
 const deviceReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
 const nativeCommentQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<any>> }>();
+const nativeCommentSignatureCache = new Map<string, Promise<boolean>>();
+const nativeCommentControlQueryCache = new Map<
+  string,
+  { expiresAt: number; promise: Promise<Array<NativeCommentControl>> }
+>();
+const nativeCommentControlSignatureCache = new Map<string, Promise<boolean>>();
+const nativeCommentTargetOwnerCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
+let lastNativeCommentControlTimestamp = 0;
 let localAuthTokenPromise: Promise<string | null> | null = null;
 const tracedAuthSources = new Set<string>();
 const PRESERVE_PRIVATE_DEVICE_PATHS = new Set([`${ACCOUNT_DEVICE}/user-new`]);
@@ -120,10 +149,11 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
       const immutableClaim = await fetchHyperbeamImmutableResolve(uri).catch(() => null);
       if (immutableClaim) return [uri, immutableClaim];
 
-      const storeClaim = await fetchCachedStoreJsonOrNull(storePath('odysee/claim', uri))
+      const storeResult = await fetchCachedStoreJsonOrNull(storePath('odysee/claim', uri))
         .then(responsePayload)
         .catch(() => null);
-      if (storeClaim) return [uri, sdkClaimFromHyperbeam(storeClaim)];
+      const storeClaim = sdkClaimFromHyperbeam(storeResult?.[uri] || storeResult);
+      if (value(storeClaim, 'claim_id', 'claim-id')) return [uri, storeClaim];
 
       const claimId = claimIdFromUri(uri);
       if (claimId) {
@@ -248,7 +278,16 @@ export async function fetchHyperbeamCommentById(params: CommentByIdParams): Prom
 export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): Promise<CommentCreateResponse | null> {
   if (params.dry_run) return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/create`, params);
 
-  const message = nativeCommentMessage(params);
+  await requireNativeCommentAuthorAllowed(params.claim_id, params.channel_id);
+  const message = await signNativeCommentMessage(nativeCommentMessage(params));
+  const commentId = await writeNativeMessage(message, 'comment');
+  clearNativeCommentCaches();
+  const comment = await fetchNativeCommentVersionById(commentId);
+  if (!comment) throw new Error('HyperBEAM native comment failed channel signature verification');
+  return comment;
+}
+
+async function writeNativeMessage(message: Record<string, any>, label: string): Promise<string> {
   const response = await fetch(HYPERBEAM_MESSAGE_WRITE_PROXY, {
     method: 'POST',
     credentials: 'include',
@@ -260,13 +299,11 @@ export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): 
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
   });
   const result = await responseJsonWithHeaders(response);
-  if (!response.ok) throw new Error(`HyperBEAM native comment write failed with ${response.status}`);
+  if (!response.ok) throw new Error(`HyperBEAM native ${label} write failed with ${response.status}`);
 
   const commentId = nativeWriteId(result);
-  if (!commentId) throw new Error('HyperBEAM native comment write did not return an ID');
-
-  nativeCommentQueryCache.clear();
-  return commentFromHyperbeam({ ...message, 'comment-id': commentId });
+  if (!commentId) throw new Error(`HyperBEAM native ${label} write did not return an ID`);
+  return commentId;
 }
 
 type CommentSource = {
@@ -281,8 +318,10 @@ async function fetchNativeCommentSource(params: CommentListParams): Promise<Comm
   if (!selectors) return { items: [], totalItems: 0, totalFilteredItems: 0, hasHiddenComments: false };
 
   const comments = await fetchNativeCommentCollection(selectors);
-  const childCounts = nativeCommentChildCounts(comments);
-  const items = comments
+  const projected = await projectNativeCommentCollection(comments);
+  const visibleComments = projected.items.filter((comment) => !comment.removed && !comment.hidden && !comment.blocked);
+  const childCounts = nativeCommentChildCounts(visibleComments);
+  const items = projected.items
     .filter((comment) => nativeCommentMatchesParams(comment, params))
     .map((comment) => ({
       ...comment,
@@ -291,13 +330,17 @@ async function fetchNativeCommentSource(params: CommentListParams): Promise<Comm
 
   return {
     items,
-    totalItems: params.claim_id && !params.parent_id ? comments.length : items.length,
+    totalItems: params.claim_id && !params.parent_id ? visibleComments.length : items.length,
     totalFilteredItems: items.length,
-    hasHiddenComments: false,
+    hasHiddenComments: projected.hasHiddenComments,
   };
 }
 
 async function fetchNativeCommentCollection(selectors: Record<string, any>): Promise<Array<any>> {
+  return collapseNativeCommentRevisions(await fetchNativeCommentVersions(selectors));
+}
+
+async function fetchNativeCommentVersions(selectors: Record<string, any>): Promise<Array<any>> {
   const key = stableJson(selectors);
   const now = Date.now();
   const cached = nativeCommentQueryCache.get(key);
@@ -309,7 +352,6 @@ async function fetchNativeCommentCollection(selectors: Record<string, any>): Pro
   })
     .then(queryPaths)
     .then(resolveNativeCommentPaths)
-    .then(dedupeNativeComments)
     .catch((error) => {
       nativeCommentQueryCache.delete(key);
       throw error;
@@ -319,12 +361,12 @@ async function fetchNativeCommentCollection(selectors: Record<string, any>): Pro
 }
 
 async function resolveNativeCommentPaths(paths: Array<string>): Promise<Array<any>> {
-  const comments = new Array(paths.length);
+  const comments = Array.from({ length: paths.length });
   let cursor = 0;
   const workers = Array.from({ length: Math.min(paths.length, NATIVE_COMMENT_READ_CONCURRENCY) }, async () => {
     while (cursor < paths.length) {
       const index = cursor++;
-      comments[index] = await fetchNativeCommentById(paths[index]);
+      comments[index] = await fetchNativeCommentVersionById(paths[index]);
     }
   });
   await Promise.all(workers);
@@ -343,7 +385,10 @@ function nativeCommentChildCounts(comments: Array<any>): Map<string, number> {
 function nativeCommentMatchesParams(comment: any, params: CommentListParams): boolean {
   if (params.claim_id && String(comment?.parent_id || 'root') !== String(params.parent_id || 'root')) return false;
   if (params.author_claim_id && String(comment?.channel_id || '') !== String(params.author_claim_id)) return false;
-  return true;
+  const isHidden = Boolean(comment?.removed || comment?.hidden || comment?.blocked);
+  if (params.hidden) return isHidden;
+  if (params.visible === false) return isHidden;
+  return !isHidden;
 }
 
 async function fetchLegacyCommentSource(params: CommentListParams): Promise<CommentSource | null> {
@@ -446,13 +491,408 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
   });
 }
 
+function nativeCommentRevisionMessage(root: any, current: any, params: CommentEditParams): Record<string, any> {
+  const comment = params.comment || params.body;
+  if (!comment) throw new Error('Native comment revision text is required');
+
+  const updatedAt = Math.floor(Date.now() / 1000);
+  return compactParams({
+    schema: 'odysee-comment@1.0',
+    type: 'comment',
+    target: root.claim_id,
+    parent: root.parent_id || 'root',
+    state: 'active',
+    author: root.channel_id,
+    comment,
+    'claim-id': root.claim_id,
+    'parent-id': root.parent_id,
+    'channel-id': root.channel_id,
+    'channel-name': root.channel_name,
+    'channel-signature': params.signature,
+    'signing-ts': params.signing_ts,
+    timestamp: root.timestamp,
+    'updated-at': updatedAt,
+    'revision-of': root.comment_id,
+    'previous-version': current.hyperbeam_message_id || current.comment_id,
+    revision: toNumber(current.revision, 0) + 1,
+    'revision-timestamp': Date.now(),
+    operation: 'edit',
+    'support-amount': root.support_amount,
+    'support-tx-id': root.support_tx_id,
+    sticker: root.sticker,
+    'mentioned-channels': root.mentioned_channels,
+    'is-protected': root.is_protected,
+    replies: root.replies,
+    'is-pinned': root.is_pinned,
+  });
+}
+
+async function signNativeCommentMessage(message: Record<string, any>): Promise<Record<string, any>> {
+  const scopedMessage = { ...message, 'signature-scope': 'native-comment-v1' };
+  const signed = await Lbry.channel_sign({
+    channel_id: value(scopedMessage, 'channel-id', 'channel_id', 'author'),
+    hexdata: toHex(nativeCommentSignatureData(scopedMessage)),
+  });
+  if (!signed?.signature || !signed?.signing_ts) throw new Error('Unable to sign native comment message');
+  return {
+    ...scopedMessage,
+    'channel-signature': signed.signature,
+    'signing-ts': signed.signing_ts,
+  };
+}
+
 async function fetchNativeCommentById(id: string): Promise<any | null> {
+  const comment = await fetchNativeCommentByIdRaw(id);
+  if (!comment) return null;
+  const projected = await projectNativeCommentCollection([comment]);
+  const item = projected.items[0];
+  return item && !item.removed && !item.hidden && !item.blocked ? item : null;
+}
+
+async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
+  const direct = await fetchNativeCommentVersionById(id);
+  if (!direct) return null;
+
+  const rootId = direct.revision_of || direct.comment_id;
+  const root = direct.revision_of ? await fetchNativeCommentVersionById(rootId) : direct;
+  if (!root) return null;
+
+  const revisions = await fetchNativeCommentVersions({
+    schema: 'odysee-comment@1.0',
+    type: 'comment',
+    'revision-of': rootId,
+    state: 'active',
+  });
+  return latestNativeCommentRevision(root, revisions);
+}
+
+async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
   if (!id) return null;
   const normalizedId = id.replace(/^\/+/, '');
   const result = await fetchStoreJsonOrNull(`${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`, false);
-  const message = { ...storePayload(result), 'comment-id': normalizedId };
+  const payload = storePayload(result);
+  const message = {
+    ...payload,
+    'message-id': normalizedId,
+    'comment-id': value(payload, 'comment-id', 'comment_id') || normalizedId,
+  };
   if (!isNativeComment(message)) return null;
-  return commentFromHyperbeam(message);
+  const comment = commentFromHyperbeam(message);
+  if (!(await verifyNativeCommentSignature(comment))) return null;
+  return {
+    ...comment,
+    hyperbeam_owner: comment.channel_id,
+    hyperbeam_signature_verification: 'valid',
+  };
+}
+
+async function verifyNativeCommentSignature(comment: any): Promise<boolean> {
+  const messageId = String(comment?.hyperbeam_message_id || '');
+  if (!messageId) return false;
+
+  const cached = nativeCommentSignatureCache.get(messageId);
+  if (cached) return cached;
+
+  const promise = fetchPublicDeviceResponse(`${COMMENT_DEVICE}/verify-signature`, {
+    'channel-id': comment.channel_id,
+    'channel-name': comment.channel_name,
+    data: nativeCommentSignatureData(comment),
+    signature: comment.signature,
+    'signing-ts': comment.signing_ts,
+  })
+    .then((result) => toBoolean(value(result, 'is-valid', 'is_valid')))
+    .catch(() => {
+      nativeCommentSignatureCache.delete(messageId);
+      return false;
+    });
+  nativeCommentSignatureCache.set(messageId, promise);
+  if (nativeCommentSignatureCache.size > 2000) {
+    const oldest = nativeCommentSignatureCache.keys().next().value;
+    if (oldest && oldest !== messageId) nativeCommentSignatureCache.delete(oldest);
+  }
+  return promise;
+}
+
+type NativeCommentControlState = {
+  owner: string | null;
+  controls: Map<string, NativeCommentControl>;
+};
+
+async function projectNativeCommentCollection(
+  comments: Array<any>
+): Promise<{ items: Array<any>; hasHiddenComments: boolean }> {
+  const groups = new Map<string, Array<any>>();
+  comments.forEach((comment) => {
+    const target = String(comment?.claim_id || '');
+    if (!target) return;
+    const group = groups.get(target) || [];
+    group.push(comment);
+    groups.set(target, group);
+  });
+
+  const states = new Map<string, NativeCommentControlState>();
+  await Promise.all(
+    Array.from(groups.entries()).map(async ([target, targetComments]) => {
+      states.set(target, await fetchNativeCommentControlState(target, targetComments));
+    })
+  );
+
+  let hasHiddenComments = false;
+  const items = comments.map((comment) => {
+    const state = states.get(String(comment?.claim_id || ''));
+    const controls = state?.controls || new Map<string, NativeCommentControl>();
+    const projection = projectNativeCommentControlState(comment, state?.owner || null, controls);
+    if (projection.removed || projection.hidden || projection.blocked) hasHiddenComments = true;
+    return {
+      ...comment,
+      ...projection,
+      native_owner_id: state?.owner || undefined,
+    };
+  });
+
+  return { items, hasHiddenComments };
+}
+
+async function fetchNativeCommentControlState(
+  target: string,
+  comments: Array<any>
+): Promise<NativeCommentControlState> {
+  const owner = await nativeCommentTargetOwner(target);
+  const [targetControls, blockControls] = await Promise.all([
+    fetchNativeCommentControls({
+      schema: NATIVE_COMMENT_CONTROL_SCHEMA,
+      type: NATIVE_COMMENT_CONTROL_TYPE,
+      target,
+    }),
+    owner ? fetchNativeBlockControls(owner) : Promise.resolve([]),
+  ]);
+  const byId = new Map<string, NativeCommentControl>();
+  [...targetControls, ...blockControls].forEach((control) => {
+    if (control.hyperbeam_message_id) byId.set(control.hyperbeam_message_id, control);
+  });
+  const authorized = (
+    await Promise.all(
+      Array.from(byId.values()).map(async (control) =>
+        (await authorizeNativeCommentControl(control, target, owner, comments)) ? control : null
+      )
+    )
+  ).filter(Boolean);
+  return { owner, controls: latestNativeCommentControls(authorized) };
+}
+
+async function fetchNativeBlockControls(owner: string): Promise<Array<NativeCommentControl>> {
+  return fetchNativeCommentControls({
+    schema: NATIVE_COMMENT_CONTROL_SCHEMA,
+    type: NATIVE_COMMENT_CONTROL_TYPE,
+    target: owner,
+    control: 'block',
+  });
+}
+
+async function fetchNativeCommentControls(selectors: Record<string, any>): Promise<Array<NativeCommentControl>> {
+  const key = stableJson(selectors);
+  const now = Date.now();
+  const cached = nativeCommentControlQueryCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+
+  const promise = fetchPublicQueryJson({ only: selectors, return: 'paths' })
+    .then(queryPaths)
+    .then(resolveNativeCommentControlPaths)
+    .catch((error) => {
+      nativeCommentControlQueryCache.delete(key);
+      throw error;
+    });
+  nativeCommentControlQueryCache.set(key, { expiresAt: now + NATIVE_COMMENT_QUERY_CACHE_MS, promise });
+  return promise;
+}
+
+async function resolveNativeCommentControlPaths(paths: Array<string>): Promise<Array<NativeCommentControl>> {
+  const controls = Array.from({ length: paths.length });
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(paths.length, NATIVE_COMMENT_READ_CONCURRENCY) }, async () => {
+    while (cursor < paths.length) {
+      const index = cursor++;
+      controls[index] = await fetchNativeCommentControlById(paths[index]);
+    }
+  });
+  await Promise.all(workers);
+  return controls.filter(Boolean);
+}
+
+async function fetchNativeCommentControlById(id: string): Promise<NativeCommentControl | null> {
+  if (!id) return null;
+  const normalizedId = id.replace(/^\/+/, '');
+  const result = await fetchStoreJsonOrNull(`${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`, false);
+  const payload = storePayload(result);
+  const control = normalizeNativeCommentControl({ ...payload, 'message-id': normalizedId });
+  if (!isNativeCommentControl(control) || !(await verifyNativeCommentControlSignature(control))) return null;
+  return control;
+}
+
+function isNativeCommentControl(control: NativeCommentControl): boolean {
+  return Boolean(
+    control.schema === NATIVE_COMMENT_CONTROL_SCHEMA &&
+    control.type === NATIVE_COMMENT_CONTROL_TYPE &&
+    control.signature_scope === NATIVE_COMMENT_CONTROL_SIGNATURE_SCOPE &&
+    control.control &&
+    control.action &&
+    control.target &&
+    control.owner &&
+    control.actor &&
+    control.actor_name &&
+    control.event_timestamp &&
+    control.signature &&
+    control.signing_ts &&
+    control.hyperbeam_message_id
+  );
+}
+
+async function verifyNativeCommentControlSignature(control: NativeCommentControl): Promise<boolean> {
+  const id = String(control.hyperbeam_message_id || '');
+  if (!id) return false;
+  const cached = nativeCommentControlSignatureCache.get(id);
+  if (cached) return cached;
+
+  const promise = fetchPublicDeviceResponse(`${COMMENT_DEVICE}/verify-signature`, {
+    'channel-id': control.actor,
+    'channel-name': control.actor_name,
+    data: nativeCommentControlSignatureData(control),
+    signature: control.signature,
+    'signing-ts': control.signing_ts,
+  })
+    .then((result) => toBoolean(value(result, 'is-valid', 'is_valid')))
+    .catch(() => {
+      nativeCommentControlSignatureCache.delete(id);
+      return false;
+    });
+  nativeCommentControlSignatureCache.set(id, promise);
+  if (nativeCommentControlSignatureCache.size > 2000) {
+    const oldest = nativeCommentControlSignatureCache.keys().next().value;
+    if (oldest && oldest !== id) nativeCommentControlSignatureCache.delete(oldest);
+  }
+  return promise;
+}
+
+async function authorizeNativeCommentControl(
+  control: NativeCommentControl,
+  target: string,
+  owner: string | null,
+  comments: Array<any>
+): Promise<boolean> {
+  if (!(await verifyNativeCommentControlSignature(control))) return false;
+  const comment = comments.find((item) => String(item?.comment_id || '') === String(control.comment_id || ''));
+  return hasNativeCommentControlAuthority(control, { target, owner, comment });
+}
+
+async function nativeCommentTargetOwner(target: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = nativeCommentTargetOwnerCache.get(target);
+  if (cached && cached.expiresAt > now) return cached.promise;
+  const promise = fetchHyperbeamClaimsByIds([target])
+    .then((claims) => nativeClaimOwnerId(claims.find((claim) => claim?.claim_id === target) || claims[0]))
+    .then((owner) => {
+      if (!owner) nativeCommentTargetOwnerCache.delete(target);
+      return owner;
+    })
+    .catch((error) => {
+      nativeCommentTargetOwnerCache.delete(target);
+      throw error;
+    });
+  nativeCommentTargetOwnerCache.set(target, {
+    expiresAt: now + NATIVE_COMMENT_TARGET_OWNER_CACHE_MS,
+    promise,
+  });
+  return promise;
+}
+
+function nativeClaimOwnerId(claim: any): string | null {
+  if (!claim) return null;
+  if (value(claim, 'value_type', 'value-type') === 'channel')
+    return String(value(claim, 'claim_id', 'claim-id') || '') || null;
+  const owner =
+    value(claim.signing_channel, 'claim_id', 'claim-id', 'id') ||
+    value(claim, 'channel_claim_id', 'channel-claim-id', 'signing_channel_id', 'signing-channel-id') ||
+    value(claim.hyperbeam, 'channel_id', 'channel-id');
+  return owner ? String(owner) : null;
+}
+
+function nativeCommentControlMessage(params: {
+  control: string;
+  action: string;
+  authority: string;
+  target: string;
+  owner: string;
+  actor: string;
+  actorName: string;
+  sourceSystem?: string;
+  commentId?: string;
+  subject?: string;
+  subjectName?: string;
+  expiresAt?: number;
+}): Record<string, any> {
+  return compactParams({
+    schema: NATIVE_COMMENT_CONTROL_SCHEMA,
+    type: NATIVE_COMMENT_CONTROL_TYPE,
+    control: params.control,
+    action: params.action,
+    authority: params.authority,
+    target: params.target,
+    owner: params.owner,
+    actor: params.actor,
+    'actor-name': params.actorName,
+    'channel-id': params.actor,
+    'channel-name': params.actorName,
+    'source-system': params.sourceSystem,
+    'comment-id': params.commentId,
+    subject: params.subject,
+    'subject-name': params.subjectName,
+    'event-timestamp': nextNativeCommentControlTimestamp(),
+    'expires-at': params.expiresAt,
+    'signature-scope': NATIVE_COMMENT_CONTROL_SIGNATURE_SCOPE,
+  });
+}
+
+async function signNativeCommentControlMessage(message: Record<string, any>): Promise<Record<string, any>> {
+  const signed = await Lbry.channel_sign({
+    channel_id: value(message, 'actor', 'channel-id'),
+    hexdata: toHex(nativeCommentControlSignatureData(message)),
+  });
+  if (!signed?.signature || !signed?.signing_ts) throw new Error('Unable to sign native comment control');
+  return { ...message, 'channel-signature': signed.signature, 'signing-ts': signed.signing_ts };
+}
+
+async function writeNativeCommentControl(message: Record<string, any>, label: string): Promise<string> {
+  const id = await writeNativeMessage(await signNativeCommentControlMessage(message), label);
+  clearNativeCommentCaches();
+  return id;
+}
+
+function nextNativeCommentControlTimestamp(): number {
+  lastNativeCommentControlTimestamp = Math.max(Date.now(), lastNativeCommentControlTimestamp + 1);
+  return lastNativeCommentControlTimestamp;
+}
+
+function clearNativeCommentCaches() {
+  nativeCommentQueryCache.clear();
+  nativeCommentControlQueryCache.clear();
+  nativeCommentTargetOwnerCache.clear();
+}
+
+async function requireNativeCommentAuthorAllowed(target: string, author: string) {
+  const owner = await nativeCommentTargetOwner(target);
+  if (!owner) return;
+  const controls = latestNativeCommentControls(
+    (
+      await Promise.all(
+        (
+          await fetchNativeBlockControls(owner)
+        ).map(async (control) => ((await authorizeNativeCommentControl(control, target, owner, [])) ? control : null))
+      )
+    ).filter(Boolean)
+  );
+  if (isNativeCommentControlEnabled(controls.get(`block:${owner}:${author}`))) {
+    throw new Error('This channel is blocked from commenting on the creator channel');
+  }
 }
 
 function nativeCommentId(message: any): string | undefined {
@@ -521,8 +961,8 @@ async function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
   try {
     return await fetchPublicDeviceJson(`${QUERY_DEVICE}/only`, body);
   } catch (error) {
-    const status = Number((error as any)?.status);
-    const responseBody = String((error as any)?.responseBody || '');
+    const status = Number(error?.status);
+    const responseBody = String(error?.responseBody || '');
     if (status === 404 || (status === 500 && responseBody.includes('not_found'))) return [];
     throw error;
   }
@@ -548,6 +988,23 @@ async function fetchPublicDeviceJson(path: string, body: Record<string, any>): P
     throw error;
   }
   return parseDeviceJson(text);
+}
+
+async function fetchPublicDeviceResponse(path: string, body: Record<string, any>): Promise<any> {
+  const baseUrl = hyperbeamBaseUrl();
+  if (!baseUrl) throw new Error('HyperBEAM node is not configured');
+  const response = await fetch(buildDeviceUrl(baseUrl, path), {
+    method: 'POST',
+    credentials: hyperbeamFetchCredentials(baseUrl),
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
+  return parseStoreResponse(response);
 }
 
 function queryPaths(response: any): Array<string> {
@@ -608,10 +1065,6 @@ function dedupeComments(comments: Array<any>): Array<any> {
   });
 }
 
-function dedupeNativeComments(comments: Array<any>): Array<any> {
-  return dedupeComments(comments);
-}
-
 function commentComparator(sortBy?: number | null): (left: any, right: any) => number {
   return (left, right) => {
     if (sortBy === SORT_BY.NEWEST && Boolean(left.is_pinned) !== Boolean(right.is_pinned)) {
@@ -647,21 +1100,114 @@ function positiveInteger(source: any, fallback: number): number {
 }
 
 export async function fetchHyperbeamCommentEdit(params: CommentEditParams): Promise<CommentEditResponse | null> {
-  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/edit`, params);
+  const current = await fetchNativeCommentByIdRaw(params.comment_id);
+  if (!current) return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/edit`, params);
+
+  const rootId = current.revision_of || current.comment_id;
+  const root = current.revision_of ? await fetchNativeCommentVersionById(rootId) : current;
+  if (!root) throw new Error('HyperBEAM native comment root is unavailable');
+  if (!params.channel_id || params.channel_id !== root.channel_id) {
+    throw new Error('HyperBEAM native comment must be edited by its original channel');
+  }
+
+  const message = await signNativeCommentMessage(nativeCommentRevisionMessage(root, current, params));
+  const revisionId = await writeNativeMessage(message, 'comment revision');
+  clearNativeCommentCaches();
+  const revision = await fetchNativeCommentVersionById(revisionId);
+  if (!revision || !isNextNativeCommentRevision(root, current, revision)) {
+    throw new Error('HyperBEAM native comment revision failed ownership or chain validation');
+  }
+  return revision;
 }
 
 export async function fetchHyperbeamCommentPin(params: CommentPinParams): Promise<CommentPinResponse | null> {
-  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/pin`, params);
+  const comment = await fetchNativeCommentByIdRaw(params.comment_id);
+  if (!comment) return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/pin`, params);
+  const owner = await nativeCommentTargetOwner(comment.claim_id);
+  if (!owner || params.channel_id !== owner) throw new Error('Only the content owner can pin this native comment');
+  if (comment.parent_id) throw new Error('Only top-level native comments can be pinned');
+
+  await writeNativeCommentControl(
+    nativeCommentControlMessage({
+      control: 'pin',
+      action: params.remove ? 'unpinned' : 'pinned',
+      authority: 'owner',
+      target: comment.claim_id,
+      owner,
+      actor: params.channel_id,
+      actorName: params.channel_name,
+      commentId: comment.comment_id,
+    }),
+    params.remove ? 'comment unpin' : 'comment pin'
+  );
+  return { items: { ...comment, is_pinned: !params.remove } } as unknown as CommentPinResponse;
 }
 
 export async function fetchHyperbeamCommentAbandon(
   params: CommentAbandonParams
 ): Promise<CommentAbandonResponse | null> {
-  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/abandon`, params);
+  const comment = await fetchNativeCommentByIdRaw(params.comment_id);
+  if (!comment) return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/abandon`, params);
+  const actor = params.channel_id || params.mod_channel_id;
+  const actorName = params.channel_name || params.mod_channel_name;
+  const owner = await nativeCommentTargetOwner(comment.claim_id);
+  const authority = actor === comment.channel_id ? 'author' : actor && actor === owner ? 'owner' : null;
+  if (!actor || !actorName || !owner || !authority) {
+    throw new Error('Native comment can only be removed by its author or content owner');
+  }
+
+  await writeNativeCommentControl(
+    nativeCommentControlMessage({
+      control: 'visibility',
+      action: 'hidden',
+      authority,
+      target: comment.claim_id,
+      owner,
+      actor,
+      actorName,
+      commentId: comment.comment_id,
+    }),
+    authority === 'author' ? 'comment deletion' : 'comment hide'
+  );
+  return { abandoned: true, claim_id: comment.claim_id };
 }
 
 export async function fetchHyperbeamReactionReact(params: ReactionReactParams): Promise<ReactionReactResponse | null> {
-  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/reaction-react`, params);
+  if (params.type !== 'creator_like') return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/reaction-react`, params);
+  const ids = stringList(params.comment_ids);
+  const comments = await Promise.all(ids.map(fetchNativeCommentByIdRaw));
+  const native = comments.filter(Boolean);
+  if (!native.length) return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/reaction-react`, params);
+
+  const legacyIds = ids.filter((_, index) => !comments[index]);
+  await Promise.all(
+    native.map(async (comment) => {
+      const owner = await nativeCommentTargetOwner(comment.claim_id);
+      if (!owner || params.channel_id !== owner) {
+        throw new Error('Only the content owner can add a creator heart to this native comment');
+      }
+      await writeNativeCommentControl(
+        nativeCommentControlMessage({
+          control: 'creator-like',
+          action: params.remove ? 'unliked' : 'liked',
+          authority: 'owner',
+          target: comment.claim_id,
+          owner,
+          actor: params.channel_id,
+          actorName: params.channel_name,
+          commentId: comment.comment_id,
+        }),
+        params.remove ? 'creator heart removal' : 'creator heart'
+      );
+    })
+  );
+  if (legacyIds.length) {
+    return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/reaction-react`, {
+      ...params,
+      comment_ids: legacyIds.join(','),
+    });
+  }
+  return { success: true };
 }
 
 export async function fetchHyperbeamSettingGet(params: SettingsParams): Promise<any | null> {
@@ -689,15 +1235,136 @@ export async function fetchHyperbeamSettingListBlockedWords(params: SettingsPara
 }
 
 export async function fetchHyperbeamModerationBlock(params: ModerationBlockParams): Promise<any | null> {
-  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-block`, params);
+  return writeNativeAndLegacyBlockControl(params, false);
 }
 
 export async function fetchHyperbeamModerationUnblock(params: ModerationBlockParams): Promise<any | null> {
-  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-unblock`, params);
+  return writeNativeAndLegacyBlockControl(params, true);
 }
 
 export async function fetchHyperbeamModerationBlockList(params: BlockedListArgs): Promise<any | null> {
-  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-block-list`, params);
+  const owner = params.mod_channel_id || params.channel_id;
+  const ownerName = params.mod_channel_name || params.channel_name;
+  const [legacyResult, nativeResult] = await Promise.allSettled([
+    fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-block-list`, params),
+    owner ? nativeBlockedList(owner) : Promise.resolve([]),
+  ]);
+  const legacy = legacyResult.status === 'fulfilled' ? legacyResult.value : null;
+  let native = nativeResult.status === 'fulfilled' ? nativeResult.value : [];
+  if (!legacy && nativeResult.status === 'rejected') throw nativeResult.reason;
+
+  if (legacy && owner && ownerName && nativeResult.status === 'fulfilled') {
+    const imported = await importLegacyBlockControls(owner, ownerName, legacy.blocked_channels, native);
+    if (imported) native = await nativeBlockedList(owner);
+  }
+
+  const byChannel = new Map<string, any>();
+  const nativeStates = new Map(native.map((entry) => [entry.blocked_channel_id, entry]));
+  (legacy?.blocked_channels || []).forEach((entry) => {
+    if (!nativeStates.has(entry.blocked_channel_id)) byChannel.set(entry.blocked_channel_id, entry);
+  });
+  native.filter((entry) => entry.blocked).forEach((entry) => byChannel.set(entry.blocked_channel_id, entry));
+  return {
+    ...legacy,
+    blocked_channels: Array.from(byChannel.values()),
+    globally_blocked_channels: legacy?.globally_blocked_channels || [],
+    delegated_blocked_channels: legacy?.delegated_blocked_channels || [],
+  };
+}
+
+async function importLegacyBlockControls(
+  owner: string,
+  ownerName: string,
+  legacyChannels: any,
+  nativeStates: Array<any>
+): Promise<boolean> {
+  if (!Array.isArray(legacyChannels) || !legacyChannels.length) return false;
+  const candidates = legacyBlockControlsToImport(legacyChannels, nativeStates);
+  if (!candidates.length) return false;
+
+  for (const entry of candidates) {
+    await writeNativeCommentControl(
+      nativeCommentControlMessage({
+        control: 'block',
+        action: 'blocked',
+        authority: 'owner',
+        target: owner,
+        owner,
+        actor: owner,
+        actorName: ownerName,
+        sourceSystem: 'legacy-commentron',
+        subject: entry.subject,
+        subjectName: entry.subject_name,
+        expiresAt: entry.expires_at,
+      }),
+      'legacy channel block import'
+    );
+  }
+  return true;
+}
+
+async function writeNativeAndLegacyBlockControl(params: ModerationBlockParams, unblock: boolean): Promise<any> {
+  const legacy = fetchHyperbeamCommentron(
+    `${COMMENT_DEVICE}/${unblock ? 'moderation-unblock' : 'moderation-block'}`,
+    params
+  );
+  const actor = params.mod_channel_id || params.channel_id;
+  const actorName = params.mod_channel_name || params.channel_name;
+  const owner = params.creator_channel_id || actor;
+  const subject = unblock ? params.un_blocked_channel_id : params.blocked_channel_id;
+  const subjectName = unblock ? params.un_blocked_channel_name : params.blocked_channel_name;
+  const native =
+    actor && actorName && owner === actor && subject && subjectName && !params.block_all && !params.global_un_block
+      ? writeNativeCommentControl(
+          nativeCommentControlMessage({
+            control: 'block',
+            action: unblock ? 'unblocked' : 'blocked',
+            authority: 'owner',
+            target: owner,
+            owner,
+            actor,
+            actorName,
+            subject,
+            subjectName,
+            expiresAt:
+              !unblock && params.time_out && params.time_out > 0
+                ? Math.floor(Date.now() / 1000) + params.time_out
+                : undefined,
+          }),
+          unblock ? 'channel unblock' : 'channel block'
+        ).then((id) => ({ success: true, id }))
+      : Promise.resolve(null);
+  const [legacyResult, nativeResult] = await Promise.allSettled([legacy, native]);
+  if (legacyResult.status === 'fulfilled' && legacyResult.value) return legacyResult.value;
+  if (nativeResult.status === 'fulfilled' && nativeResult.value) return nativeResult.value;
+  if (legacyResult.status === 'rejected') throw legacyResult.reason;
+  if (nativeResult.status === 'rejected') throw nativeResult.reason;
+  return null;
+}
+
+async function nativeBlockedList(owner: string): Promise<Array<any>> {
+  const controls = await fetchNativeBlockControls(owner);
+  const authorized = (
+    await Promise.all(
+      controls.map(async (control) =>
+        (await authorizeNativeCommentControl(control, owner, owner, [])) ? control : null
+      )
+    )
+  ).filter(Boolean);
+  return Array.from(latestNativeCommentControls(authorized).values())
+    .filter((control) => control.control === 'block' && control.subject)
+    .map((control) => {
+      const blockedAt = Math.floor(Number(control.event_timestamp || 0) / 1000);
+      const expiresAt = Number(control.expires_at || 0);
+      return compactParams({
+        blocked_channel_id: control.subject,
+        blocked_channel_name: value(control, 'subject-name', 'subject_name'),
+        blocked_at: blockedAt,
+        banned_for: expiresAt ? Math.max(0, expiresAt - blockedAt) : undefined,
+        ban_remaining: expiresAt ? Math.max(0, expiresAt - Math.floor(Date.now() / 1000)) : undefined,
+        blocked: isNativeCommentControlEnabled(control),
+      });
+    });
 }
 
 export async function fetchHyperbeamModerationAddDelegate(params: ModerationAddDelegateParams): Promise<any | null> {
@@ -727,8 +1394,68 @@ async function fetchHyperbeamCommentron(path: string, params: Record<string, any
 }
 
 export async function fetchHyperbeamReactionList(params: ReactionListParams): Promise<ReactionListResponse | null> {
-  const response = await fetchDeviceJson(`${REACTION_DEVICE}/list`, params);
-  return reactionListFromHyperbeam(responsePayload(response));
+  const ids = stringList(params.comment_ids);
+  const nativeResult = await Promise.allSettled([nativeCreatorHeartReactions(ids, params.channel_id)]).then(
+    ([result]) => result
+  );
+  const native = nativeResult.status === 'fulfilled' ? nativeResult.value : null;
+  const nativeIds = new Set(native?.native_ids || []);
+  const legacyIds = ids.filter((id) => !nativeIds.has(id));
+  const legacyResult = legacyIds.length
+    ? await Promise.allSettled([
+        fetchDeviceJson(`${REACTION_DEVICE}/list`, { ...params, comment_ids: legacyIds.join(',') }).then((response) =>
+          reactionListFromHyperbeam(responsePayload(response))
+        ),
+      ]).then(([result]) => result)
+    : ({ status: 'fulfilled', value: null } as PromiseFulfilledResult<null>);
+  const legacy = legacyResult.status === 'fulfilled' ? legacyResult.value : null;
+  if (!legacy && !native) {
+    const error =
+      legacyResult.status === 'rejected'
+        ? legacyResult.reason
+        : nativeResult.status === 'rejected'
+          ? nativeResult.reason
+          : null;
+    if (error) throw error;
+    return null;
+  }
+  return {
+    my_reactions: mergeReactionMaps(legacy?.my_reactions, native?.my_reactions),
+    others_reactions: mergeReactionMaps(legacy?.others_reactions, native?.others_reactions),
+  };
+}
+
+async function nativeCreatorHeartReactions(
+  ids: Array<string>,
+  viewerChannelId?: string
+): Promise<(ReactionListResponse & { native_ids: Array<string> }) | null> {
+  const comments = (await Promise.all(ids.map(fetchNativeCommentByIdRaw))).filter(Boolean);
+  if (!comments.length) return null;
+  const projected = await projectNativeCommentCollection(comments);
+  const myReactions: Record<string, any> = {};
+  const othersReactions: Record<string, any> = {};
+  projected.items.forEach((comment) => {
+    if (!comment.creator_liked) return;
+    const destination = viewerChannelId && viewerChannelId === comment.native_owner_id ? myReactions : othersReactions;
+    destination[comment.comment_id] = { creator_like: 1 };
+  });
+  return {
+    my_reactions: myReactions,
+    others_reactions: othersReactions,
+    native_ids: comments.map((comment) => comment.comment_id),
+  };
+}
+
+function mergeReactionMaps(left: any, right: any): Record<string, any> {
+  const result: Record<string, any> = {};
+  const keys = new Set([...Object.keys(isObject(left) ? left : {}), ...Object.keys(isObject(right) ? right : {})]);
+  keys.forEach((key) => {
+    result[key] = {
+      ...(isObject(left?.[key]) ? left[key] : {}),
+      ...(isObject(right?.[key]) ? right[key] : {}),
+    };
+  });
+  return result;
 }
 
 export async function fetchHyperbeamFileReactionList(params: { claim_ids: string }): Promise<any | null> {
@@ -767,22 +1494,95 @@ export async function fetchHyperbeamSubCount(claimIdCsv: string): Promise<Array<
 }
 
 export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
+  let result: any = null;
+
   try {
     const response = await fetchDeviceJson(`${SEARCH_DEVICE}/query`, params);
-    const result = sdkSearchFromHyperbeam(responsePayload(response));
-    const items = result && result.items;
-
-    if (!Array.isArray(items)) return null;
-
-    const resolvedItems = await hydrateNativeSearchItems(items);
-    return {
-      ...result,
-      items: resolvedItems,
-    };
-  } catch (error) {
-    void error;
-    return null;
+    result = sdkSearchFromHyperbeam(responsePayload(response));
+  } catch (_error) {
+    result = null;
   }
+
+  if (!Array.isArray(result?.items)) {
+    const [claimResult, uploadResult] = await Promise.all([
+      fetchDeviceJson(`${CLAIM_DEVICE}/search`, params)
+        .then(responsePayload)
+        .then(sdkSearchFromHyperbeam)
+        .catch(() => null),
+      isTargetedClaimSearch(params) ? fetchHyperbeamUploadList(params).catch(() => null) : Promise.resolve(null),
+    ]);
+    result = mergeClaimSearchResults(claimResult, uploadResult, params);
+  }
+
+  const items = result?.items;
+  if (!Array.isArray(items)) return null;
+
+  const resolvedItems = await hydrateNativeSearchItems(items);
+  return {
+    ...result,
+    items: resolvedItems,
+  };
+}
+
+function isTargetedClaimSearch(params: ClaimSearchOptions): boolean {
+  return Boolean(
+    paramValues(params, 'channel_ids', 'channel-ids', 'channel_id', 'channel-id').length ||
+      paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id', 'txid').length ||
+      paramValues(params, 'name', 'claim-name', 'claim_name').length ||
+      paramValues(params, 'uri', 'uris', 'url', 'urls').length
+  );
+}
+
+function mergeClaimSearchResults(
+  publicResult: ClaimSearchResponse | null,
+  localResult: ClaimSearchResponse | null,
+  params: ClaimSearchOptions
+): ClaimSearchResponse | null {
+  if (!publicResult) return localResult;
+  if (!localResult?.items?.length) return publicResult;
+
+  const publicItems = Array.isArray(publicResult.items) ? publicResult.items : [];
+  const publicIds = new Set(publicItems.map(claimSearchIdentity).filter(Boolean));
+  const localOnlyItems = localResult.items.filter((claim) => !publicIds.has(claimSearchIdentity(claim)));
+  if (!localOnlyItems.length) return publicResult;
+
+  const pageSize = toNumber(publicResult.page_size, params.page_size || publicItems.length + localOnlyItems.length || 1);
+  const items = sortMergedClaimSearchItems([...publicItems, ...localOnlyItems], params).slice(0, pageSize);
+  const totalItems = toNumber(publicResult.total_items, publicItems.length) + localOnlyItems.length;
+
+  return {
+    ...publicResult,
+    items,
+    page: toNumber(publicResult.page, params.page || 1),
+    page_size: pageSize,
+    total_items: totalItems,
+    total_pages: Math.max(toNumber(publicResult.total_pages, 1), totalPages(totalItems, pageSize)),
+  };
+}
+
+function claimSearchIdentity(claim: any): string {
+  return String(
+    value(claim, 'claim_id', 'claim-id') ||
+      value(claim?.hyperbeam, 'immutable_id', 'immutable-id', 'record_id', 'record-id') ||
+      ''
+  );
+}
+
+function sortMergedClaimSearchItems(items: Array<any>, params: ClaimSearchOptions): Array<any> {
+  const orderBy = paramValues(params, 'order_by', 'order-by')[0];
+  if (!orderBy || orderBy.replace(/^\^/, '') !== 'release_time') return items;
+
+  const direction = orderBy.startsWith('^') ? 1 : -1;
+  return items.sort((left, right) => direction * (claimReleaseTime(left) - claimReleaseTime(right)));
+}
+
+function claimReleaseTime(claim: any): number {
+  return toNumber(
+    value(claim?.value, 'release_time', 'release-time') ||
+      value(claim, 'release_time', 'release-time', 'timestamp') ||
+      value(claim?.meta, 'creation_timestamp', 'creation-timestamp'),
+    0
+  );
 }
 
 async function hydrateNativeSearchItems(items: Array<any>): Promise<Array<any>> {
@@ -1558,9 +2358,22 @@ function commentFromHyperbeam(comment: any): any {
   const channelId = value(comment, 'channel-id', 'channel_id', 'author');
   const channelName = value(comment, 'channel-name', 'channel_name');
   const channelUrl = commentChannelUrl(comment);
+  const revisionOf = value(comment, 'revision-of', 'revision_of');
+  const revision = value(comment, 'revision');
+  const revisionTimestamp = value(comment, 'revision-timestamp', 'revision_timestamp');
   return compactParams({
     ...comment.source,
-    comment_id: value(comment, 'comment-id', 'comment_id', 'id'),
+    schema: value(comment, 'schema'),
+    type: value(comment, 'type'),
+    comment_id: revisionOf || value(comment, 'comment-id', 'comment_id', 'id'),
+    hyperbeam_message_id: value(comment, 'message-id', 'message_id', 'comment-id', 'comment_id', 'id'),
+    revision_of: revisionOf,
+    previous_version: value(comment, 'previous-version', 'previous_version'),
+    revision: revision === undefined || revision === null ? undefined : toNumber(revision, 0),
+    revision_timestamp:
+      revisionTimestamp === undefined || revisionTimestamp === null ? undefined : toNumber(revisionTimestamp, 0),
+    operation: value(comment, 'operation'),
+    state: value(comment, 'state'),
     comment: value(comment, 'comment', 'body', 'text'),
     claim_id: value(comment, 'claim-id', 'claim_id', 'target'),
     parent_id: parentId === 'root' ? undefined : parentId,
@@ -1571,12 +2384,14 @@ function commentFromHyperbeam(comment: any): any {
     updated_at: value(comment, 'updated-at', 'updated_at'),
     signature: value(comment, 'channel-signature', 'signature'),
     signing_ts: value(comment, 'signing-ts', 'signing_ts'),
+    signature_scope: value(comment, 'signature-scope', 'signature_scope'),
     is_pinned: toBoolean(value(comment, 'is-pinned', 'is_pinned')),
     replies: toNumber(value(comment, 'replies'), 0),
     support_amount: value(comment, 'support-amount', 'support_amount'),
     support_tx_id: value(comment, 'support-tx-id', 'support_tx_id'),
     sticker: toBoolean(value(comment, 'sticker')),
     mentioned_channels: value(comment, 'mentioned-channels', 'mentioned_channels'),
+    is_protected: toBoolean(value(comment, 'is-protected', 'is_protected')),
     removed: toBoolean(value(comment, 'removed')),
     hidden: toBoolean(value(comment, 'hidden')),
     blocked: toBoolean(value(comment, 'blocked')),

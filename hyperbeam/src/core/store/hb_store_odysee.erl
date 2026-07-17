@@ -102,7 +102,7 @@ read_live(Path, _Req, StoreOpts, NodeOpts) ->
 
 read_live(<<"odysee/claim/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
-        {ok, URI} ?= decode_component(Encoded),
+        {ok, URI} ?= decode_uri_component(Encoded),
         {ok, Claim} ?=
             hb_ao:raw(
                 <<"odysee-claim@1.0">>,
@@ -133,7 +133,7 @@ read_live(<<"odysee/claim-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     end;
 read_live(<<"odysee/stream/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
-        {ok, URI} ?= decode_component(Encoded),
+        {ok, URI} ?= decode_uri_component(Encoded),
         {ok, Stream} ?=
             hb_ao:raw(
                 <<"odysee-stream@1.0">>,
@@ -1365,6 +1365,27 @@ decode_component(Encoded) ->
     try {ok, hb_util:bin(uri_string:percent_decode(Encoded))}
     catch _:_ -> {error, invalid_odysee_store_path}
     end.
+
+decode_uri_component(Encoded) ->
+    case decode_component(Encoded) of
+        {ok, URI} -> {ok, restore_uri_scheme(URI)};
+        Error -> Error
+    end.
+
+restore_uri_scheme(<<"lbry://", _/binary>> = URI) -> URI;
+restore_uri_scheme(<<"http://", _/binary>> = URI) -> URI;
+restore_uri_scheme(<<"https://", _/binary>> = URI) -> URI;
+restore_uri_scheme(<<"lbry:/", Rest/binary>>) -> <<"lbry://", Rest/binary>>;
+restore_uri_scheme(<<"http:/", Rest/binary>>) -> <<"http://", Rest/binary>>;
+restore_uri_scheme(<<"https:/", Rest/binary>>) -> <<"https://", Rest/binary>>;
+restore_uri_scheme(URI) -> URI.
+
+decoded_store_uri_preserves_claim_id_test() ->
+    URI = <<"lbry://@rave#5383026b8b74683313ad6ea5c72f27eedcae026c">>,
+    ?assertEqual(
+        {ok, URI},
+        decode_uri_component(<<"lbry:/@rave#5383026b8b74683313ad6ea5c72f27eedcae026c">>)
+    ).
 
 bare_sha384_read_returns_native_blob_test() ->
     Bytes = <<"encrypted blob payload">>,
