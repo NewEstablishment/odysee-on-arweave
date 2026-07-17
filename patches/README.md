@@ -43,3 +43,17 @@ dangles and any HTTP encode of the parent 500s. This repository routes
 around it by only embedding children in committed-view form
 (`dev_lbry_commitment:with_attestation_commitment/2`); upstream, the
 two paths should derive the same ID for every commitment shape.
+
+## 4. Persist auth-hook-committed requests (described proposal)
+
+`store-all-signed` persists signed inbound messages at HTTP decode
+time, which runs before the request hooks — so a request that only
+becomes signed via `~auth-hook@1.0`'s `?!=true` flow is never
+persisted, and `~cache@1.0/write` gates on the static `cache_writers`
+allowlist, which cannot enumerate the hook's dynamically-derived
+per-user wallets. Re-checking the `store-all-signed` condition after
+the request-hook pipeline (or an opt-in `store-hook-signed` node
+option) would let any stock node accept user uploads as signed cache
+messages with zero custom devices: POST with `?!=true`, hook signs
+with the user's node-hosted wallet, message persists, `~query@1.0`
+discovers it, and peers replicate it through remote-node stores.
