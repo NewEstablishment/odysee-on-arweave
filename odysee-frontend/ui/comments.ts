@@ -33,6 +33,29 @@ function hyperbeamOrLegacy<T>(hyperbeam: Promise<T | null>, legacy: () => Promis
   });
 }
 
+const commentListInFlight = new Map<string, Promise<CommentListResponse>>();
+
+function commentList(params: CommentListParams): Promise<CommentListResponse> {
+  const key = JSON.stringify(
+    Object.keys(params)
+      .sort()
+      .map((name) => [name, params[name]])
+  );
+  const existing = commentListInFlight.get(key);
+  if (existing) return existing;
+
+  let request: Promise<CommentListResponse>;
+  request = hyperbeamOrLegacy(
+    fetchHyperbeamCommentList(params),
+    () => fetchCommentsApi('comment.List', params),
+    'comment list'
+  ).finally(() => {
+    if (commentListInFlight.get(key) === request) commentListInFlight.delete(key);
+  });
+  commentListInFlight.set(key, request);
+  return request;
+}
+
 // prettier-ignore
 const Comments = {
   url: COMMENT_SERVER_API,
@@ -44,7 +67,7 @@ const Comments = {
   moderation_remove_delegate: (params: ModerationRemoveDelegateParams) => hyperbeamOrLegacy(fetchHyperbeamModerationRemoveDelegate(params), () => fetchCommentsApi('moderation.RemoveDelegate', params), 'moderation remove delegate'),
   moderation_list_delegates: (params: ModerationListDelegatesParams) => hyperbeamOrLegacy(fetchHyperbeamModerationListDelegates(params), () => fetchCommentsApi('moderation.ListDelegates', params), 'moderation list delegates'),
   moderation_am_i: (params: ModerationAmIParams) => hyperbeamOrLegacy(fetchHyperbeamModerationAmI(params), () => fetchCommentsApi('moderation.AmI', params), 'moderation am i'),
-  comment_list: (params: CommentListParams) => hyperbeamOrLegacy(fetchHyperbeamCommentList(params), () => fetchCommentsApi('comment.List', params), 'comment list'),
+  comment_list: commentList,
   comment_abandon: (params: CommentAbandonParams) => hyperbeamOrLegacy(fetchHyperbeamCommentAbandon(params), () => fetchCommentsApi('comment.Abandon', params), 'comment abandon'),
   comment_create: (params: CommentCreateParams) => hyperbeamOrLegacy(fetchHyperbeamCommentCreate(params), () => fetchCommentsApi('comment.Create', params), 'comment create'),
   comment_by_id: (params: CommentByIdParams) => hyperbeamOrLegacy(fetchHyperbeamCommentById(params), () => fetchCommentsApi('comment.ByID', params), 'comment lookup'),

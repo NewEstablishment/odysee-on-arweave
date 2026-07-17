@@ -428,7 +428,7 @@ export default function VideoFullscreenActions(props: Props) {
       </div>
     );
 
-    const commentsContent = isLivestreamClaim ? (
+    const commentsContent = !panelMode ? null : isLivestreamClaim ? (
       <React.Suspense fallback={null}>
         <ChatLayout uri={uri} />
       </React.Suspense>

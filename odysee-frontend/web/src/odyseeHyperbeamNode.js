@@ -87,8 +87,9 @@ async function hyperbeamNodeResolveEntries(urls, extraHeaders) {
       const immutableClaim = await hyperbeamNodeImmutableResolve(uri);
       if (immutableClaim) return [uri, immutableClaim];
 
-      const storeClaim = storeResponsePayload(await hyperbeamNodeFetchStoreJson(storePath('odysee/claim', uri)));
-      if (storeClaim) return [uri, sdkClaimFromHyperbeam(storeClaim)];
+      const storeResult = storeResponsePayload(await hyperbeamNodeFetchStoreJson(storePath('odysee/claim', uri)));
+      const storeClaim = sdkClaimFromHyperbeam((storeResult && storeResult[uri]) || storeResult);
+      if (storeClaim && (storeClaim.claim_id || storeClaim['claim-id'])) return [uri, storeClaim];
 
       const claimId = claimIdFromUri(uri);
       if (claimId) {

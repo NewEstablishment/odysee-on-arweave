@@ -1,3 +1,7 @@
+import { generateKeyPairSync, sign } from 'node:crypto';
+import { nativeCommentControlSignatureData } from '../../ui/util/nativeCommentControls.ts';
+import { collapseNativeCommentRevisions, nativeCommentSignatureData } from '../../ui/util/nativeCommentRevisions.ts';
+
 const webBase = (process.env.BASE_URL || 'http://localhost:9090').replace(/\/+$/, '');
 const hyperbeamBase = (process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18785').replace(/\/+$/, '');
 const webOrigin = new URL(webBase).origin;
@@ -64,6 +68,62 @@ if (!replyResponse.ok || !replyId) {
   throw new Error(`Native reply write failed: ${replyResponse.status} ${replyText.slice(0, 500)}`);
 }
 
+const revisionComment = `${comment} edited`;
+const revisionResponse = await fetch(`${webBase}/$/api/hyperbeam-upload/v1/write`, {
+  method: 'POST',
+  headers: {
+    accept: 'application/json',
+    cookie: `auth_token=${authToken}`,
+    'content-type': 'application/json',
+  },
+  body: JSON.stringify({
+    ...message,
+    comment: revisionComment,
+    'updated-at': message.timestamp + 2,
+    'revision-of': id,
+    'previous-version': id,
+    revision: 1,
+    'revision-timestamp': Date.now(),
+    operation: 'edit',
+  }),
+});
+const revisionText = await revisionResponse.text();
+const revisionBody = parseJson(revisionText) || { body: revisionText };
+const revisionId = responseId(revisionResponse, revisionBody);
+
+if (!revisionResponse.ok || !revisionId) {
+  throw new Error(`Native revision write failed: ${revisionResponse.status} ${revisionText.slice(0, 500)}`);
+}
+
+const secondRevisionComment = `${comment} edited twice`;
+const secondRevisionResponse = await fetch(`${webBase}/$/api/hyperbeam-upload/v1/write`, {
+  method: 'POST',
+  headers: {
+    accept: 'application/json',
+    cookie: `auth_token=${authToken}`,
+    'content-type': 'application/json',
+  },
+  body: JSON.stringify({
+    ...message,
+    comment: secondRevisionComment,
+    'updated-at': message.timestamp + 3,
+    'revision-of': id,
+    'previous-version': revisionId,
+    revision: 2,
+    'revision-timestamp': Date.now() + 1,
+    operation: 'edit',
+  }),
+});
+const secondRevisionText = await secondRevisionResponse.text();
+const secondRevisionBody = parseJson(secondRevisionText) || { body: secondRevisionText };
+const secondRevisionId = responseId(secondRevisionResponse, secondRevisionBody);
+
+if (!secondRevisionResponse.ok || !secondRevisionId) {
+  throw new Error(
+    `Second native revision write failed: ${secondRevisionResponse.status} ${secondRevisionText.slice(0, 500)}`
+  );
+}
+
 const selectors = {
   schema: 'odysee-comment@1.0',
   type: 'comment',
@@ -71,6 +131,7 @@ const selectors = {
   state: 'active',
 };
 const paths = await queryPathsFor(selectors);
+const revisionPaths = await queryPathsFor({ ...selectors, target: undefined, 'revision-of': id });
 const missingPaths = await queryPathsFor({ ...selectors, target: `${target}-missing` });
 const missing = (await Promise.all(missingPaths.map((path) => readMessage(path, false)))).filter(({ stored }) =>
   isNativeComment(stored)
@@ -87,6 +148,14 @@ const discovered = dedupeDiscovered(
 );
 const matching = discovered.find(({ stored }) => isExpectedComment(stored));
 const reply = discovered.find(({ id: resultId }) => resultId === replyId) || (await readMessage(replyId));
+const revision = discovered.find(({ id: resultId }) => resultId === revisionId) || (await readMessage(revisionId));
+const secondRevision =
+  discovered.find(({ id: resultId }) => resultId === secondRevisionId) || (await readMessage(secondRevisionId));
+const discoveredRevisions = dedupeDiscovered(
+  (await Promise.all(revisionPaths.map((path) => readMessage(path, false)))).filter(({ stored }) =>
+    isNativeComment(stored)
+  )
+);
 const rootPaths = discovered.filter(({ stored }) => stored?.parent === 'root').map(({ id: resultId }) => resultId);
 const replyPaths = discovered.filter(({ stored }) => stored?.parent === id).map(({ id: resultId }) => resultId);
 const leafPaths = discovered.filter(({ stored }) => stored?.parent === replyId).map(({ id: resultId }) => resultId);
@@ -102,6 +171,70 @@ if (!rootPaths.includes(id) || !replyPaths.includes(replyId)) {
 if (leafPaths.length !== 0) {
   throw new Error(`Leaf reply incorrectly reported children: ${JSON.stringify({ leafPaths })}`);
 }
+if (
+  revision.stored?.comment !== revisionComment ||
+  revision.stored?.['revision-of'] !== id ||
+  revision.stored?.['previous-version'] !== id ||
+  Number(revision.stored?.revision) !== 1 ||
+  revision.stored?.operation !== 'edit'
+) {
+  throw new Error(
+    `Native revision did not preserve its chain: ${JSON.stringify({
+      id,
+      revisionId,
+      comment: revision.stored?.comment,
+      revisionOf: revision.stored?.['revision-of'],
+      previousVersion: revision.stored?.['previous-version'],
+      revision: revision.stored?.revision,
+      operation: revision.stored?.operation,
+    })}`
+  );
+}
+if (
+  secondRevision.stored?.comment !== secondRevisionComment ||
+  secondRevision.stored?.['revision-of'] !== id ||
+  secondRevision.stored?.['previous-version'] !== revisionId ||
+  Number(secondRevision.stored?.revision) !== 2 ||
+  secondRevision.stored?.operation !== 'edit'
+) {
+  throw new Error(
+    `Second native revision did not preserve its chain: ${JSON.stringify({
+      id,
+      revisionId,
+      secondRevisionId,
+      comment: secondRevision.stored?.comment,
+      revisionOf: secondRevision.stored?.['revision-of'],
+      previousVersion: secondRevision.stored?.['previous-version'],
+      revision: secondRevision.stored?.revision,
+      operation: secondRevision.stored?.operation,
+    })}`
+  );
+}
+if (
+  ![revisionId, secondRevisionId].every((revisionPath) => discoveredRevisions.some(({ id }) => id === revisionPath))
+) {
+  throw new Error(`Exact revision query missed a stored revision: ${JSON.stringify(revisionPaths)}`);
+}
+const rootOwner = written.stored?.['channel-id'] || written.stored?.author;
+if (
+  !rootOwner ||
+  [revision, secondRevision].some(({ stored }) => (stored?.['channel-id'] || stored?.author) !== rootOwner)
+) {
+  throw new Error('Native revision chain did not preserve its channel owner');
+}
+const collapsed = collapseNativeCommentRevisions(discovered.map(nativeRevisionRecord));
+const latest = collapsed.find((item) => item.comment_id === id);
+if (
+  collapsed.length !== 2 ||
+  latest?.comment !== secondRevisionComment ||
+  latest?.hyperbeam_message_id !== secondRevisionId
+) {
+  throw new Error(
+    `Frontend revision collapse did not select the latest logical comment: ${JSON.stringify({ collapsed, latest })}`
+  );
+}
+const signatureVerification = await verifyCanonicalSignature();
+const ownerControls = await verifyNativeOwnerControls(id);
 
 console.log(
   JSON.stringify(
@@ -117,6 +250,20 @@ console.log(
         childPaths: leafPaths,
         childCount: leafPaths.length,
       },
+      revision: {
+        status: revisionResponse.status,
+        id: revisionId,
+        root: revision.stored['revision-of'],
+        previous: revision.stored['previous-version'],
+        number: revision.stored.revision,
+        secondId: secondRevisionId,
+        secondPrevious: secondRevision.stored['previous-version'],
+        secondNumber: secondRevision.stored.revision,
+        discoveredPaths: discoveredRevisions.map(({ id: resultId }) => resultId),
+        sameOwner: true,
+        collapsedCount: collapsed.length,
+        latestId: latest.hyperbeam_message_id,
+      },
       read: {
         writeIdStatus: written.status,
         queryIdStatus: matching.status,
@@ -125,11 +272,178 @@ console.log(
         signerMetadata: matching.signerMetadata,
         exposedCommentHeaders: matching.exposedCommentHeaders,
       },
+      signatureVerification,
+      ownerControls,
     },
     null,
     2
   )
 );
+
+async function verifyNativeOwnerControls(commentId) {
+  const owner = 'fedcba9876543210fedcba9876543210fedcba98';
+  const subject = '0123456789abcdef0123456789abcdef01234567';
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp256k1' });
+  const publicKeyHex = publicKey.export({ type: 'spki', format: 'der' }).toString('hex');
+  const base = {
+    schema: 'odysee-comment-control@1.0',
+    type: 'comment-control',
+    authority: 'owner',
+    owner,
+    actor: owner,
+    'actor-name': '@native-owner-smoke',
+    'channel-id': owner,
+    'channel-name': '@native-owner-smoke',
+    'signature-scope': 'native-comment-control-v1',
+  };
+  const controls = [
+    { ...base, control: 'visibility', action: 'hidden', target, 'comment-id': commentId },
+    { ...base, control: 'pin', action: 'pinned', target, 'comment-id': commentId },
+    { ...base, control: 'creator-like', action: 'liked', target, 'comment-id': commentId },
+    { ...base, control: 'block', action: 'blocked', target: owner, subject },
+  ];
+  const written = [];
+  for (let index = 0; index < controls.length; index += 1) {
+    const control = { ...controls[index], 'event-timestamp': Date.now() + index };
+    const signingTs = String(Math.floor(Date.now() / 1000));
+    const data = nativeCommentControlSignatureData(control);
+    const signatureData = Buffer.concat([
+      Buffer.from(signingTs),
+      Buffer.from(owner, 'hex').reverse(),
+      Buffer.from(data),
+    ]);
+    const signature = sign('sha256', signatureData, { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('hex');
+    const response = await fetch(`${webBase}/$/api/hyperbeam-upload/v1/write`, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        cookie: `auth_token=${authToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ ...control, 'channel-signature': signature, 'signing-ts': signingTs }),
+    });
+    const text = await response.text();
+    const controlId = responseId(response, parseJson(text) || { body: text });
+    if (!response.ok || !controlId) {
+      throw new Error(`Native owner control write failed: ${response.status} ${text.slice(0, 500)}`);
+    }
+    const stored = await readMessage(controlId, false);
+    const valid = await verifySignature({
+      channelId: owner,
+      data: nativeCommentControlSignatureData(stored.stored),
+      signature,
+      signingTs,
+      publicKeyHex,
+    });
+    if (!valid) throw new Error(`Native owner control signature failed for ${control.control}`);
+    written.push({ id: controlId, control: control.control, target: control.target });
+  }
+
+  const targetPaths = await queryPathsFor({
+    schema: 'odysee-comment-control@1.0',
+    type: 'comment-control',
+    target,
+  });
+  const blockPaths = await queryPathsFor({
+    schema: 'odysee-comment-control@1.0',
+    type: 'comment-control',
+    target: owner,
+    control: 'block',
+  });
+  const expectedTargetIds = written.filter((item) => item.target === target).map((item) => item.id);
+  const blockId = written.find((item) => item.control === 'block')?.id;
+  if (
+    !expectedTargetIds.every((controlId) => targetPaths.includes(controlId)) ||
+    !blockId ||
+    !blockPaths.includes(blockId)
+  ) {
+    throw new Error(
+      `Stock query missed native owner controls: ${JSON.stringify({ written, targetPaths, blockPaths })}`
+    );
+  }
+  return { written, targetPaths, blockPaths };
+}
+
+async function verifyCanonicalSignature() {
+  const channelId = '0123456789abcdef0123456789abcdef01234567';
+  const signingTs = String(Math.floor(Date.now() / 1000));
+  const signedMessage = {
+    schema: 'odysee-comment@1.0',
+    type: 'comment',
+    target: `${target}-signed`,
+    parent: 'root',
+    state: 'active',
+    author: channelId,
+    comment: revisionComment,
+    'claim-id': `${target}-signed`,
+    'channel-id': channelId,
+    'channel-name': '@native-comment-signature-smoke',
+    timestamp: message.timestamp,
+    'revision-of': id,
+    'previous-version': id,
+    revision: 1,
+    'revision-timestamp': Number(revision.stored['revision-timestamp']),
+    operation: 'edit',
+    'signature-scope': 'native-comment-v1',
+    'is-pinned': false,
+    replies: 0,
+    sticker: false,
+  };
+  const data = nativeCommentSignatureData(signedMessage);
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp256k1' });
+  const signatureData = Buffer.concat([
+    Buffer.from(signingTs),
+    Buffer.from(channelId, 'hex').reverse(),
+    Buffer.from(data),
+  ]);
+  const signature = sign('sha256', signatureData, { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('hex');
+  const publicKeyHex = publicKey.export({ type: 'spki', format: 'der' }).toString('hex');
+  const signedWrite = await fetch(`${webBase}/$/api/hyperbeam-upload/v1/write`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      cookie: `auth_token=${authToken}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ ...signedMessage, 'channel-signature': signature, 'signing-ts': signingTs }),
+  });
+  const signedWriteText = await signedWrite.text();
+  const signedId = responseId(signedWrite, parseJson(signedWriteText) || { body: signedWriteText });
+  if (!signedWrite.ok || !signedId) {
+    throw new Error(`Signed native revision write failed: ${signedWrite.status} ${signedWriteText.slice(0, 500)}`);
+  }
+  const stored = await readMessage(signedId);
+  const storedData = nativeCommentSignatureData(stored.stored);
+  const valid = await verifySignature({ channelId, data: storedData, signature, signingTs, publicKeyHex });
+  const tampered = await verifySignature({
+    channelId,
+    data: nativeCommentSignatureData({ ...signedMessage, 'previous-version': `${id}-tampered` }),
+    signature,
+    signingTs,
+    publicKeyHex,
+  });
+  if (!valid || tampered)
+    throw new Error(`Native canonical signature verification failed: ${JSON.stringify({ valid, tampered })}`);
+  return { id: signedId, valid, tampered, survivedStorage: storedData === data };
+}
+
+async function verifySignature({ channelId, data, signature, signingTs, publicKeyHex }) {
+  const response = await fetch(`${hyperbeamBase}/~odysee-comment@1.0/verify-signature`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      'channel-id': channelId,
+      data,
+      signature,
+      'signing-ts': signingTs,
+      'public-key': publicKeyHex,
+    }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Signature verification failed: ${response.status} ${text.slice(0, 500)}`);
+  const result = { ...responseHeaders(response), ...(parseJson(text) || {}) };
+  return String(result['is-valid'] ?? result.is_valid).toLowerCase() === 'true';
+}
 
 async function queryPathsFor(selectors) {
   const response = await fetch(`${hyperbeamBase}/~query@1.0/only`, {
@@ -185,40 +499,13 @@ async function readMessage(id, expectComment = true) {
   }
 
   return {
-    id: nativeMessageId(stored) || id,
+    id,
     queryPath: id,
     status: response.status,
     stored,
     signerMetadata,
     exposedCommentHeaders,
   };
-}
-
-function nativeMessageId(message) {
-  const commitments = message?.commitments;
-  if (commitments && typeof commitments === 'object') {
-    for (const [id, commitment] of Object.entries(commitments)) {
-      if (commitment?.type !== 'hmac-sha256') continue;
-      return normalizeMessageId(typeof commitment.signature === 'string' ? commitment.signature : id);
-    }
-  }
-
-  const signatureInput = String(message?.['signature-input'] || '');
-  const hmacInput = signatureInput.split(/,\s+(?=[^=,\s]+=\()/).find((part) => part.includes('alg="hmac-sha256"'));
-  const label = hmacInput?.match(/^([^=]+)=/)?.[1];
-  if (!label) return undefined;
-
-  const signature = String(message?.signature || '');
-  const match = signature.match(new RegExp(`(?:^|,\\s*)${escapeRegExp(label)}=:([^:]+):`));
-  return match?.[1] ? normalizeMessageId(match[1]) : undefined;
-}
-
-function normalizeMessageId(id) {
-  return id.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function escapeRegExp(source) {
-  return source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function queryPaths(source) {
@@ -263,6 +550,25 @@ function containsPrivateAuth(value) {
   return Object.entries(value).some(
     ([key, item]) => /^(auth[_-]?token|x-odysee-auth-token|x-lbry-auth-token)$/i.test(key) || containsPrivateAuth(item)
   );
+}
+
+function nativeRevisionRecord({ id: messageId, stored }) {
+  const revisionOf = stored?.['revision-of'];
+  const parent = stored?.['parent-id'] || stored?.parent;
+  return {
+    ...stored,
+    comment_id: revisionOf || messageId,
+    hyperbeam_message_id: messageId,
+    hyperbeam_owner: stored?.['channel-id'] || stored?.author,
+    revision_of: revisionOf,
+    previous_version: stored?.['previous-version'],
+    revision: Number(stored?.revision || 0),
+    revision_timestamp: Number(stored?.['revision-timestamp'] || 0),
+    channel_id: stored?.['channel-id'] || stored?.author,
+    claim_id: stored?.['claim-id'] || stored?.target,
+    parent_id: parent === 'root' ? undefined : parent,
+    timestamp: Number(stored?.timestamp || 0),
+  };
 }
 
 function payload(source) {
