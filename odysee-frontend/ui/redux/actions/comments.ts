@@ -1688,7 +1688,7 @@ async function allSettledSequential(items, fn) {
   return results;
 }
 
-export function doFetchModBlockedList() {
+export function doFetchModBlockedList(nativeSync: boolean = true) {
   return async (dispatch: Dispatch, getState: GetState) => {
     const LOOP_CHUNK_SIZE = 100;
 
@@ -1723,6 +1723,7 @@ export function doFetchModBlockedList() {
               mod_channel_name: signatureData.name,
               signature: signatureData.signature,
               signing_ts: signatureData.signing_ts,
+              native_sync: nativeSync,
             } as unknown as BlockedListArgs)
         )
           .then(async (res) => {

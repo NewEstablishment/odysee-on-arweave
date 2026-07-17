@@ -2138,6 +2138,7 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     if (path.includes('/$/api/') || authEvent) counters.ssrEvents += 1;
     if (
       path.includes('~cache@1.0') ||
+      storeBackend === 'cache@1.0' ||
       deviceLayer === 'store' ||
       nativeSource === 'store' ||
       isDirectImmutableStorePath(path)
@@ -2216,6 +2217,7 @@ function storeBackendName(data: Record<string, any>, path: string, device: strin
   const nativeSource = String(data.nativeSource || '');
 
   if (mediaRange) return 'hb_store_lbry_blob';
+  if (device === '~query@1.0' || path.includes('/~query@1.0/')) return 'cache@1.0';
   if (path.includes('~cache@1.0') || nativeSource === 'cache') return 'cache@1.0';
   if (path.includes('~arweave') || device.includes('arweave') || sourceLayer.includes('arweave')) return '';
   if (nativeSource === 'upload-index' || path.includes('/hyperbeam-upload/v1/list')) return '';

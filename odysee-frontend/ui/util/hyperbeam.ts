@@ -11,7 +11,6 @@ import { toHex } from 'util/hex';
 import {
   collapseNativeCommentRevisions,
   isNextNativeCommentRevision,
-  latestNativeCommentRevision,
   nativeCommentSignatureData,
 } from 'util/nativeCommentRevisions';
 import {
@@ -32,7 +31,7 @@ import { getAuthToken } from 'util/saved-passwords';
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const HYPERBEAM_FAILED_READ_CACHE_MS = 10 * 1000;
-const NATIVE_COMMENT_QUERY_CACHE_MS = 1000;
+const NATIVE_COMMENT_QUERY_CACHE_MS = HYPERBEAM_READ_CACHE_MS;
 const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
@@ -330,7 +329,7 @@ async function fetchNativeCommentSource(params: CommentListParams): Promise<Comm
 
   return {
     items,
-    totalItems: params.claim_id && !params.parent_id ? visibleComments.length : items.length,
+    totalItems: params.claim_id && !params.parent_id && !params.author_claim_id ? visibleComments.length : items.length,
     totalFilteredItems: items.length,
     hasHiddenComments: projected.hasHiddenComments,
   };
@@ -341,23 +340,13 @@ async function fetchNativeCommentCollection(selectors: Record<string, any>): Pro
 }
 
 async function fetchNativeCommentVersions(selectors: Record<string, any>): Promise<Array<any>> {
-  const key = stableJson(selectors);
-  const now = Date.now();
-  const cached = nativeCommentQueryCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
-
-  const promise = fetchPublicQueryJson({
-    only: selectors,
-    return: 'paths',
-  })
-    .then(queryPaths)
-    .then(resolveNativeCommentPaths)
-    .catch((error) => {
-      nativeCommentQueryCache.delete(key);
-      throw error;
-    });
-  nativeCommentQueryCache.set(key, { expiresAt: now + NATIVE_COMMENT_QUERY_CACHE_MS, promise });
-  return promise;
+  const request = nativeQueryRequest(selectors);
+  const key = stableJson(request);
+  return cachedNativeQuery(nativeCommentQueryCache, key, async () => {
+    const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+    const comments = await resolveNativeCommentPaths(paths);
+    return comments.filter((comment) => nativeCommentMatchesSelectors(comment, selectors));
+  });
 }
 
 async function resolveNativeCommentPaths(paths: Array<string>): Promise<Array<any>> {
@@ -389,6 +378,19 @@ function nativeCommentMatchesParams(comment: any, params: CommentListParams): bo
   if (params.hidden) return isHidden;
   if (params.visible === false) return isHidden;
   return !isHidden;
+}
+
+function nativeCommentMatchesSelectors(comment: any, selectors: Record<string, any>): boolean {
+  const fields: Record<string, any> = {
+    schema: comment?.schema,
+    type: comment?.type,
+    target: comment?.claim_id,
+    state: comment?.state,
+    author: comment?.channel_id,
+    parent: comment?.parent_id || 'root',
+    'revision-of': comment?.revision_of,
+  };
+  return Object.entries(selectors).every(([key, expected]) => fields[key] === expected);
 }
 
 async function fetchLegacyCommentSource(params: CommentListParams): Promise<CommentSource | null> {
@@ -446,7 +448,6 @@ function nativeCommentSelectors(params: CommentListParams): Record<string, any> 
       type: 'comment',
       target: params.claim_id,
       state: 'active',
-      ...(params.author_claim_id ? { author: params.author_claim_id } : {}),
     };
   }
 
@@ -554,22 +555,22 @@ async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
   if (!direct) return null;
 
   const rootId = direct.revision_of || direct.comment_id;
-  const root = direct.revision_of ? await fetchNativeCommentVersionById(rootId) : direct;
-  if (!root) return null;
-
-  const revisions = await fetchNativeCommentVersions({
+  const comments = await fetchNativeCommentCollection({
     schema: 'odysee-comment@1.0',
     type: 'comment',
-    'revision-of': rootId,
+    target: direct.claim_id,
     state: 'active',
   });
-  return latestNativeCommentRevision(root, revisions);
+  return comments.find((comment) => comment.comment_id === rootId) || direct;
 }
 
 async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
   if (!id) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchStoreJsonOrNull(`${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`, false);
+  const result = await fetchCachedStoreJsonOrNull(
+    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
+    false
+  );
   const payload = storePayload(result);
   const message = {
     ...payload,
@@ -658,16 +659,24 @@ async function fetchNativeCommentControlState(
   comments: Array<any>
 ): Promise<NativeCommentControlState> {
   const owner = await nativeCommentTargetOwner(target);
-  const [targetControls, blockControls] = await Promise.all([
-    fetchNativeCommentControls({
+  if (!owner) return { owner, controls: new Map() };
+
+  const authors = new Set(comments.map((comment) => String(comment?.channel_id || '')).filter(Boolean));
+  const controls = (
+    await fetchNativeCommentControls({
       schema: NATIVE_COMMENT_CONTROL_SCHEMA,
       type: NATIVE_COMMENT_CONTROL_TYPE,
-      target,
-    }),
-    owner ? fetchNativeBlockControls(owner) : Promise.resolve([]),
-  ]);
+      owner,
+    })
+  ).filter(
+    (control) =>
+      control.target === target ||
+      (control.control === 'block' &&
+        control.target === owner &&
+        Boolean(control.subject && authors.has(control.subject)))
+  );
   const byId = new Map<string, NativeCommentControl>();
-  [...targetControls, ...blockControls].forEach((control) => {
+  controls.forEach((control) => {
     if (control.hyperbeam_message_id) byId.set(control.hyperbeam_message_id, control);
   });
   const authorized = (
@@ -680,29 +689,67 @@ async function fetchNativeCommentControlState(
   return { owner, controls: latestNativeCommentControls(authorized) };
 }
 
-async function fetchNativeBlockControls(owner: string): Promise<Array<NativeCommentControl>> {
-  return fetchNativeCommentControls({
+async function fetchNativeBlockControls(owner: string, subjects?: Array<string>): Promise<Array<NativeCommentControl>> {
+  const selectors = {
     schema: NATIVE_COMMENT_CONTROL_SCHEMA,
     type: NATIVE_COMMENT_CONTROL_TYPE,
     target: owner,
     control: 'block',
-  });
+  };
+  if (!subjects) return fetchNativeCommentControls(selectors);
+  const controls = await Promise.all(subjects.map((subject) => fetchNativeCommentControls({ ...selectors, subject })));
+  return controls.flat();
 }
 
 async function fetchNativeCommentControls(selectors: Record<string, any>): Promise<Array<NativeCommentControl>> {
-  const key = stableJson(selectors);
-  const now = Date.now();
-  const cached = nativeCommentControlQueryCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
+  const request = nativeQueryRequest(selectors);
+  const key = stableJson(request);
+  return cachedNativeQuery(nativeCommentControlQueryCache, key, async () => {
+    const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+    const controls = await resolveNativeCommentControlPaths(paths);
+    return controls.filter((control) => nativeCommentControlMatchesSelectors(control, selectors));
+  });
+}
 
-  const promise = fetchPublicQueryJson({ only: selectors, return: 'paths' })
-    .then(queryPaths)
-    .then(resolveNativeCommentControlPaths)
+function nativeCommentControlMatchesSelectors(control: NativeCommentControl, selectors: Record<string, any>): boolean {
+  return Object.entries(selectors).every(
+    ([key, expected]) => control[key.replace(/-([a-z])/g, (_, char) => `_${char}`)] === expected
+  );
+}
+
+function uniquePaths(paths: Array<string>): Array<string> {
+  return Array.from(new Set(paths.map((path) => path.replace(/^\/+/, '')).filter(Boolean)));
+}
+
+function nativeQueryRequest(selectors: Record<string, any>): Record<string, any> {
+  return {
+    ...selectors,
+    only: [...Object.keys(selectors), 'accept'],
+    return: 'paths',
+    'cache-control': ['no-store', 'no-cache'],
+  };
+}
+
+function cachedNativeQuery<T>(
+  cache: Map<string, { expiresAt: number; promise: Promise<T> }>,
+  key: string,
+  load: () => Promise<T>
+): Promise<T> {
+  const cached = cache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+
+  let promise: Promise<T>;
+  promise = load()
+    .then((result) => {
+      const current = cache.get(key);
+      if (current?.promise === promise) current.expiresAt = Date.now() + NATIVE_COMMENT_QUERY_CACHE_MS;
+      return result;
+    })
     .catch((error) => {
-      nativeCommentControlQueryCache.delete(key);
+      if (cache.get(key)?.promise === promise) cache.delete(key);
       throw error;
     });
-  nativeCommentControlQueryCache.set(key, { expiresAt: now + NATIVE_COMMENT_QUERY_CACHE_MS, promise });
+  cache.set(key, { expiresAt: Number.POSITIVE_INFINITY, promise });
   return promise;
 }
 
@@ -722,7 +769,10 @@ async function resolveNativeCommentControlPaths(paths: Array<string>): Promise<A
 async function fetchNativeCommentControlById(id: string): Promise<NativeCommentControl | null> {
   if (!id) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchStoreJsonOrNull(`${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`, false);
+  const result = await fetchCachedStoreJsonOrNull(
+    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
+    false
+  );
   const payload = storePayload(result);
   const control = normalizeNativeCommentControl({ ...payload, 'message-id': normalizedId });
   if (!isNativeCommentControl(control) || !(await verifyNativeCommentControlSignature(control))) return null;
@@ -885,7 +935,7 @@ async function requireNativeCommentAuthorAllowed(target: string, author: string)
     (
       await Promise.all(
         (
-          await fetchNativeBlockControls(owner)
+          await fetchNativeBlockControls(owner, [author])
         ).map(async (control) => ((await authorizeNativeCommentControl(control, target, owner, [])) ? control : null))
       )
     ).filter(Boolean)
@@ -1243,10 +1293,14 @@ export async function fetchHyperbeamModerationUnblock(params: ModerationBlockPar
 }
 
 export async function fetchHyperbeamModerationBlockList(params: BlockedListArgs): Promise<any | null> {
-  const owner = params.mod_channel_id || params.channel_id;
-  const ownerName = params.mod_channel_name || params.channel_name;
+  const { native_sync: nativeSync, ...requestParams } = params as BlockedListArgs & { native_sync?: boolean };
+  const owner = requestParams.mod_channel_id || requestParams.channel_id;
+  const ownerName = requestParams.mod_channel_name || requestParams.channel_name;
+  if (nativeSync === false) {
+    return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-block-list`, requestParams);
+  }
   const [legacyResult, nativeResult] = await Promise.allSettled([
-    fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-block-list`, params),
+    fetchHyperbeamCommentron(`${COMMENT_DEVICE}/moderation-block-list`, requestParams),
     owner ? nativeBlockedList(owner) : Promise.resolve([]),
   ]);
   const legacy = legacyResult.status === 'fulfilled' ? legacyResult.value : null;
@@ -1527,9 +1581,9 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
 function isTargetedClaimSearch(params: ClaimSearchOptions): boolean {
   return Boolean(
     paramValues(params, 'channel_ids', 'channel-ids', 'channel_id', 'channel-id').length ||
-      paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id', 'txid').length ||
-      paramValues(params, 'name', 'claim-name', 'claim_name').length ||
-      paramValues(params, 'uri', 'uris', 'url', 'urls').length
+    paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id', 'txid').length ||
+    paramValues(params, 'name', 'claim-name', 'claim_name').length ||
+    paramValues(params, 'uri', 'uris', 'url', 'urls').length
   );
 }
 
@@ -1546,7 +1600,10 @@ function mergeClaimSearchResults(
   const localOnlyItems = localResult.items.filter((claim) => !publicIds.has(claimSearchIdentity(claim)));
   if (!localOnlyItems.length) return publicResult;
 
-  const pageSize = toNumber(publicResult.page_size, params.page_size || publicItems.length + localOnlyItems.length || 1);
+  const pageSize = toNumber(
+    publicResult.page_size,
+    params.page_size || publicItems.length + localOnlyItems.length || 1
+  );
   const items = sortMergedClaimSearchItems([...publicItems, ...localOnlyItems], params).slice(0, pageSize);
   const totalItems = toNumber(publicResult.total_items, publicItems.length) + localOnlyItems.length;
 
@@ -3146,13 +3203,13 @@ async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): P
   }
 }
 
-function fetchCachedStoreJsonOrNull(path: string): Promise<any | null> {
-  const key = `store:${path}`;
+function fetchCachedStoreJsonOrNull(path: string, preferJson: boolean = true): Promise<any | null> {
+  const key = `store:${preferJson ? 'json' : 'native'}:${path}`;
   const now = Date.now();
   const cached = deviceReadCache.get(key);
   if (cached && cached.expiresAt > now) return cached.promise;
 
-  const promise = fetchStoreJsonOrNull(path).catch((error) => {
+  const promise = fetchStoreJsonOrNull(path, preferJson).catch((error) => {
     deviceReadCache.delete(key);
     throw error;
   });

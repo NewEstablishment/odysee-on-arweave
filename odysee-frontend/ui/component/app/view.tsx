@@ -506,7 +506,7 @@ function App() {
 
     if (hasMyChannels) {
       const backgroundSyncTimer = setTimeout(async () => {
-        await dispatch(doFetchModBlockedList());
+        await dispatch(doFetchModBlockedList(false));
         await dispatch(doFetchCommentModAmIList());
         await dispatch(doCommentModListDelegatesForMyChannels());
       }, 2500);
