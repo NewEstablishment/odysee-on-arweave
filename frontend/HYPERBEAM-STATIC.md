@@ -10,9 +10,17 @@ GET /<ManifestID>/<asset-path> -> manifest asset
 ```
 
 where `<ManifestID>` is a 43-character base64url transaction ID. The manifest
-device falls back to `index.html` for a missing FIRST path segment under the
-manifest (SPA fallback), but 404s for a missing file inside an EXISTING
-manifest folder — so every asset request must hit a real manifest path.
+device falls back to `index.html` only for a SINGLE missing path segment under
+the manifest; a multi-segment missing path 404s (the fallback replaces the
+first missing segment, then the remaining segments fail to resolve against the
+index.html message), as does a missing file inside an existing manifest
+folder. So every asset request must hit a real manifest path, and deep links
+cannot rely on path-based SPA fallback.
+
+Additionally, HyperBEAM path syntax reserves `~ & ( ) + =` inside path
+segments (`~device@version` hints and hb_singleton operators), so emitted
+asset filenames must avoid them — a chunk named `vendor-ui~index-<hash>.js`
+returns 500 from a node.
 
 ## How to build
 
@@ -36,21 +44,31 @@ server) is optional enhancement (see below).
   under any prefix. JS-internal chunk/worker URLs are resolved against
   `import.meta.url`, which is prefix-independent by construction.
 
-- **`index.html` — runtime `<base>` bootstrap.** Relative URLs alone break on
-  deep links (`/<ID>/@channel/video` would resolve `./assets/…` against the
-  deep path and 404). A tiny inline script at the top of `<head>` matches a
-  43-char base64url first path segment and injects `<base href="/<ID>/">`
-  before any asset reference is parsed. When no manifest ID is present the
+- **`index.html` — runtime `<base>` bootstrap + path→hash rewrite.** A tiny
+  inline script at the top of `<head>` matches a 43-char base64url first path
+  segment and injects `<base href="/<ID>/">` before any asset reference is
+  parsed, so relative asset URLs always resolve to real manifest paths. It
+  also folds any path remainder into the URL hash
+  (`/<ID>/@chan` → `/<ID>#/@chan`) so single-segment fallback hits land on
+  the right route in hash-routing mode. When no manifest ID is present the
   script is a no-op and relative URLs resolve against the page URL (root
   serving). Keep its regex in sync with `ui/util/manifest-prefix.ts`.
+
+- **`vite.config.ts` — HyperBEAM-safe emitted filenames.**
+  `entryFileNames`/`chunkFileNames`/`assetFileNames` sanitize chunk and asset
+  names to `[A-Za-z0-9_.-]` (`sanitizeEmittedName`). The code-splitting group
+  merger otherwise joins names with `~`
+  (`vendor-ui~index-<hash>.js`), which a node parses as a device hint and
+  500s. Verified: zero emitted paths contain `~ & ( ) + =`.
 
 - **`ui/util/manifest-prefix.ts` (new).** Runtime detection of the serving
   prefix from `location.pathname`, computed once at module load.
   `manifestPrefix()` returns `'/<ID>'` or `''`; `isServedFromManifest()` is
   the boolean form.
 
-- **`ui/index.tsx` — `<BrowserRouter basename={manifestPrefix() || '/'}>`.**
-  See "Routing decision" below.
+- **`ui/index.tsx` — `HashRouter` under manifest serving, `BrowserRouter`
+  otherwise** (`AppRouter = isServedFromManifest() ? HashRouter :
+  BrowserRouter`). See "Routing decision" below.
 
 - **`ui/util/hyperbeam.ts` — `hyperbeamBaseUrl()` same-origin default.**
   When served from a manifest the node serving the app is the node to talk
@@ -82,29 +100,48 @@ server) is optional enhancement (see below).
 
 ## Routing decision and tradeoff
 
-**Chosen: history routing with a runtime `basename`** derived from the first
-path segment when it looks like a 43-char base64url ID (`manifestPrefix()`),
-combined with the runtime `<base>` tag for asset resolution.
+**Chosen: hash routing when served from a manifest** (`HashRouter`, URLs of
+the form `/<ManifestID>#/@channel/video`), history routing (`BrowserRouter`)
+for every other deployment. The runtime `<base>` tag is still injected under
+a manifest — it is what makes the relative asset URLs resolve.
 
-- Deep links work because the manifest device falls back to `index.html` for
-  any missing first segment under the manifest (`/<ID>/@channel/video` →
-  `@channel` is not a manifest folder → index.html), and the `<base>` tag
-  then anchors asset requests to real manifest paths, avoiding the
-  nested-404 gotcha.
-- Client navigation stays under `/<ID>/…` because React Router prepends the
-  basename to every link and navigation (verified in-browser).
-- URLs remain canonical-looking and shareable, unlike hash routing
-  (`/<ID>#/@channel/video`), which was the fallback option. Hash routing was
-  rejected because the manifest fallback semantics make history routing work
-  with no server cooperation, and hash URLs would diverge from the rest of
-  the Odysee ecosystem (share links, SEO, embed paths).
+History routing with a runtime basename was tried first and rejected against
+a live node: the manifest device's index fallback replaces only the FIRST
+missing path segment, so `/<ID>/@chan` serves index.html but
+`/<ID>/@chan/video` — i.e. every Odysee watch URL — 404s server-side
+(confirmed: `/<ID>` 200, `/<ID>/assets/…` 200, `/<ID>/@somechannel/somevideo`
+404). Multi-segment deep links therefore cannot work with history routing
+under a manifest; the hash keeps the entire app path client-side.
+
+- Hash deep links (`/<ID>#/$/settings`, `/<ID>#/@chan/video`) always load:
+  the server only ever sees `/<ID>`.
+- React Router's hash history is `<base>`-aware: rendered hrefs are full
+  URLs (`http://host/<ID>#/…`), so link clicks are same-document hash
+  navigations, not page loads (verified in-browser).
+- Single-segment path links (`/<ID>/@chan`) still work: the server falls
+  back to index.html and the bootstrap script rewrites the remainder into
+  the hash before the app boots.
+- In-app link generation and redirects go through the router
+  (`Link`/`navigate`/`redux/router`), so they inherit hash mode with no
+  changes.
 
 Tradeoffs / accepted edge cases:
+
+- Hash URLs diverge from canonical Odysee paths (share links, SEO, embeds).
+  That is inherent to serving from a manifest with single-segment-only
+  fallback; the Koa deployment keeps clean history URLs.
+- Code reading `window.location.hash` directly (rather than the router
+  location) sees `#/path…` under manifest serving; the boot-critical paths
+  use the router location, and the remaining direct readers are debug/edge
+  surfaces.
 
 - A root claim name that is exactly 43 chars of `[A-Za-z0-9_-]` would be
   misdetected as a manifest ID when the app is NOT served from a manifest.
   Claim names of that shape are vanishingly rare and the check only triggers
   on the first path segment.
+- Two Electron-only tray icons (`img/tray/mac/trayTemplate@2x*.png`) contain
+  `@`/space; they pass through from `static/` untouched and are never
+  fetched by the web app.
 - A handful of flows use raw `window.location.assign('/…')` (auth redirects,
   collections) and would drop the prefix; those flows depend on the Koa
   server/backends and are enhancement-only anyway.
@@ -128,11 +165,13 @@ when the app is served by the Koa server in `web/`:
 
 ## Local subpath verification
 
-A server mimicking the manifest semantics (first-segment fallback, nested
-404) lives in the session scratchpad (`manifest-serve/serve.py`). Steps:
+A server mimicking the manifest semantics (single-segment fallback,
+multi-segment/nested 404) lives in the session scratchpad
+(`manifest-serve/serve.py`). Steps:
 
 ```sh
 NODE_ENV=production pnpm build
+find web/dist/public -type f | grep -E '[~&()+=]'    # must print nothing
 ID=FakeManifestID_xxxxxxxxxxxxxxxxxxxxxxxxxxxx   # any 43-char base64url name
 mkdir -p /tmp/manifest-root/$ID
 cp -R web/dist/public/ /tmp/manifest-root/$ID/
@@ -142,10 +181,12 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8917/$ID/assets/index-<h
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8917/$ID/font/v1/400.woff        # 200
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8917/$ID/img/busy.gif            # 200 (CSS ../img ref)
 curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8917/$ID/assets/nope.js          # 404 (nested, no fallback)
-curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8917/$ID/@chan/video             # 200 index.html (fallback)
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8917/$ID/@chan                   # 200 (single-segment fallback)
+curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8917/$ID/@chan/video             # 404 (multi-segment)
 ```
 
-In-browser: the app boots at `/<ID>/`, deep links (`/$/settings`,
-`/@channel/video`) render fully styled, every asset request resolves under
-the prefix, HyperBEAM device calls go to the serving origin root
-(`/~odysee-claim@1.0/…`), and the console is free of errors.
+In-browser: the app boots at `/<ID>`, hash deep links (`/<ID>#/$/settings`,
+`/<ID>#/@channel/video`) render the right routes fully styled,
+`/<ID>/@chan` is rewritten to `/<ID>#/@chan` before boot, every asset
+request resolves under the prefix, HyperBEAM device calls go to the serving
+origin root (`/~odysee-claim@1.0/…`), and the console is free of errors.

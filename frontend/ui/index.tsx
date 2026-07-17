@@ -74,7 +74,7 @@ import { doFetchUserLocale } from 'redux/actions/user';
 import { Lbryio, doBlackListedDataSubscribe, doFilteredDataSubscribe } from 'lbryinc';
 import { store, persistor } from 'store';
 import app from './app';
-import { BrowserRouter, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
+import { BrowserRouter, HashRouter, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { PersistGate } from 'redux-persist/integration/react';
 import analytics from 'analytics';
 import { getAuthToken, setAuthToken, doAuthTokenRefresh } from 'util/saved-passwords';
@@ -91,7 +91,7 @@ import { useAppDispatch } from 'redux/hooks';
 import { doSendPastRecsysEntries } from 'redux/actions/content';
 import { reloadOnceForDynamicImportError } from 'util/importFailure';
 import { installHyperbeamFetchDebug } from 'util/hyperbeamDebug';
-import { manifestPrefix } from 'util/manifest-prefix';
+import { isServedFromManifest } from 'util/manifest-prefix';
 // Import 3rd-party styles before ours for the current way we are code-splitting.
 import 'scss/third-party.scss';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -242,6 +242,11 @@ document.addEventListener('drop', (event) => {
   event.preventDefault();
 });
 
+// The Arweave path-manifest device only falls back to index.html for a single
+// missing path segment, so multi-segment deep links cannot use history routing
+// when served from a manifest — route in the URL hash there instead.
+const AppRouter = isServedFromManifest() ? HashRouter : BrowserRouter;
+
 function RouterSyncBridge() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -311,13 +316,13 @@ function AppWrapper() {
         loading={<div className="main--launching" />}
       >
         <div className="app-gate-root">
-          <BrowserRouter basename={manifestPrefix() || '/'}>
+          <AppRouter>
             <RouterSyncBridge />
             <ErrorBoundary>
               <App />
               <SnackBar />
             </ErrorBoundary>
-          </BrowserRouter>
+          </AppRouter>
         </div>
       </PersistGate>
     </Provider>

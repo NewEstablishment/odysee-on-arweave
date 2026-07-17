@@ -12,6 +12,12 @@
           var base = document.createElement('base');
           base.href = match[0] + '/';
           document.head.appendChild(base);
+          // The app hash-routes under a manifest (only single-segment paths
+          // fall back to index.html), so fold any path remainder into the hash.
+          var rest = window.location.pathname.slice(match[0].length);
+          if (rest && rest !== '/' && !window.location.hash) {
+            window.history.replaceState(null, '', match[0] + '#' + rest + window.location.search);
+          }
         }
       })();
     </script>

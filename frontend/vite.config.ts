@@ -710,6 +710,13 @@ function stripInjectedAssetTags(html: string) {
   );
 }
 
+// HyperBEAM path syntax reserves ~ & ( ) + = (device hints / hb_singleton
+// operators) inside path segments, so emitted filenames must stay within
+// [A-Za-z0-9_.-] for manifest-served assets to resolve on a node.
+function sanitizeEmittedName(name: string) {
+  return name.replace(/[^A-Za-z0-9_.-]/g, '_');
+}
+
 const codeSplittingGroups = [
   {
     name: 'vendor-react',
@@ -1009,6 +1016,13 @@ export default defineConfig({
     rolldownOptions: {
       input: path.resolve(__dirname, 'index.html'),
       output: {
+        entryFileNames: (chunk) => `assets/${sanitizeEmittedName(chunk.name)}-[hash].js`,
+        chunkFileNames: (chunk) => `assets/${sanitizeEmittedName(chunk.name)}-[hash].js`,
+        assetFileNames: (asset) => {
+          const name = asset.names?.[0] || asset.name || 'asset';
+          const ext = path.extname(name);
+          return `assets/${sanitizeEmittedName(name.slice(0, name.length - ext.length))}-[hash]${ext}`;
+        },
         codeSplitting: {
           minSize: 20_000,
           groups: codeSplittingGroups,
