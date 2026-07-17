@@ -37,6 +37,13 @@ seed_opts(Overrides) ->
 %% @doc The read-only Odysee source stores.
 odysee_stores(Opts) ->
     [
+        % Signed inbound messages (uploads, comments) land in the node's
+        % `cache-http' store; stacking it makes them readable and
+        % `~query@1.0'-discoverable through the normal store path.
+        #{
+            <<"store-module">> => hb_store_fs,
+            <<"name">> => <<"cache-http">>
+        },
         #{
             <<"store-module">> => hb_store_odysee,
             <<"name">> => <<"cache-odysee">>

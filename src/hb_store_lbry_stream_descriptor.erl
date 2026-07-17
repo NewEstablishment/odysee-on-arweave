@@ -178,8 +178,11 @@ direct_hash_http_get_exposes_native_signature_input_test() ->
         <<"store-module">> => ?MODULE,
         <<"fixtures">> => #{ SDHash => Raw }
     },
-    Node = hb_http_server:start_node(#{ <<"store">> => [Store] }),
-    URL = binary_to_list(<<Node/binary, SDHash/binary>>),
+    Node = hb_http_server:start_node(#{ <<"store">> => [Store], <<"port">> => 0 }),
+    URL =
+        binary_to_list(
+            <<Node/binary, "~cache@1.0/read?read=", SDHash/binary>>
+        ),
     {ok, {{_, 200, _}, Headers, _Body}} =
         httpc:request(get, {URL, []}, [], [{body_format, binary}]),
     SignatureInput = http_header(<<"signature-input">>, Headers),

@@ -113,7 +113,13 @@ content_type(File) ->
 -include_lib("eunit/include/eunit.hrl").
 
 publish_test() ->
-    Opts = #{ <<"store">> => hb_test_utils:test_store() },
+    % `cache-control: always` mirrors the node's `http-extra-opts`, which
+    % provides the store-lookup directive on every HTTP resolution.
+    Opts =
+        #{
+            <<"store">> => hb_test_utils:test_store(),
+            <<"cache-control">> => [<<"always">>]
+        },
     Dir = filename:join(["/tmp", "hb-odysee-ui-test"]),
     ok = filelib:ensure_path(filename:join(Dir, "assets")),
     ok =
