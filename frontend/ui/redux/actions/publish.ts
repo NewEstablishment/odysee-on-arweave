@@ -37,7 +37,6 @@ import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { sanitizeName, buildURI } from 'util/lbryURI';
 import { getVideoBitrate, resolvePublishPayload } from 'util/publish';
 import { parsePurchaseTag, parseRentalTag, TO_SECONDS } from 'util/stripe';
-import { fetchHyperbeamUploadList } from 'util/hyperbeam';
 import {
   canPublishThroughHyperbeam,
   canUpdateThroughHyperbeam,
@@ -1033,19 +1032,6 @@ function extractStreamClaims(result: any): Array<StreamClaim> {
   return items.filter((item) => item && item.value_type === 'stream');
 }
 
-function mergeStreamClaims(...claimGroups: Array<Array<StreamClaim>>): Array<StreamClaim> {
-  const seen = new Set<string>();
-  const claims: Array<StreamClaim> = [];
-
-  claimGroups.flat().forEach((claim) => {
-    if (!claim || !claim.claim_id || seen.has(claim.claim_id)) return;
-    seen.add(claim.claim_id);
-    claims.push(claim);
-  });
-
-  return claims;
-}
-
 function clientTitleFilter(claims: Array<StreamClaim>, term: string): Array<StreamClaim> {
   const lower = term.toLowerCase();
   return claims.filter((c) => (c?.value?.title || c?.name || '').toLowerCase().includes(lower));
@@ -1080,16 +1066,6 @@ async function hydrateClaimsInStore(dispatch: Dispatch, claims: Array<StreamClai
   } catch {
     // Keep the existing result set if hydration fails; modal search should not hard-fail here.
     return claims;
-  }
-}
-
-async function fetchLocalUploadClaims(params: ClaimSearchOptions, term: string = ''): Promise<Array<StreamClaim>> {
-  try {
-    const result = await fetchHyperbeamUploadList(params);
-    const claims = extractStreamClaims(result);
-    return term.length > 0 ? clientTitleFilter(claims, term) : claims;
-  } catch {
-    return [];
   }
 }
 
@@ -1156,23 +1132,13 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
 
     // ── All uploads: short / empty query → claim_list ──
     if (term.length < 3) {
-      const [result, localClaims] = await Promise.all([
-        Lbry.claim_list({
-          page: 1,
-          page_size: RECENT_PAGE_SIZE,
-          resolve: true,
-          claim_type: ['stream'],
-        }),
-        fetchLocalUploadClaims({
-          page: 1,
-          page_size: RECENT_PAGE_SIZE,
-          claim_type: ['stream'],
-        }),
-      ]);
-      const claims = await hydrateClaimsInStore(
-        dispatch,
-        sortClaimsByNewest(mergeStreamClaims(localClaims, extractStreamClaims(result)))
-      );
+      const result = await Lbry.claim_list({
+        page: 1,
+        page_size: RECENT_PAGE_SIZE,
+        resolve: true,
+        claim_type: ['stream'],
+      });
+      const claims = await hydrateClaimsInStore(dispatch, sortClaimsByNewest(extractStreamClaims(result)));
       return {
         claims,
       };
@@ -1180,26 +1146,13 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
 
     // ── All uploads: no channels → title-filtered recent ──
     if (myChannelIds.length === 0) {
-      const [result, localClaims] = await Promise.all([
-        Lbry.claim_list({
-          page: 1,
-          page_size: RECENT_PAGE_SIZE,
-          resolve: true,
-          claim_type: ['stream'],
-        }),
-        fetchLocalUploadClaims(
-          {
-            page: 1,
-            page_size: RECENT_PAGE_SIZE,
-            claim_type: ['stream'],
-          },
-          term
-        ),
-      ]);
-      const claims = clientTitleFilter(
-        sortClaimsByNewest(mergeStreamClaims(localClaims, extractStreamClaims(result))),
-        term
-      );
+      const result = await Lbry.claim_list({
+        page: 1,
+        page_size: RECENT_PAGE_SIZE,
+        resolve: true,
+        claim_type: ['stream'],
+      });
+      const claims = clientTitleFilter(sortClaimsByNewest(extractStreamClaims(result)), term);
       const hydratedClaims = await hydrateClaimsInStore(dispatch, claims);
       return {
         claims: hydratedClaims,
@@ -1208,22 +1161,10 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
 
     // ── All uploads: Lighthouse search across user's channels ──
     const channelIdsCsv = myChannelIds.join(',');
-    const localClaimsPromise = fetchLocalUploadClaims(
-      {
-        page: 1,
-        page_size: RECENT_PAGE_SIZE,
-        claim_type: ['stream'],
-        channel_ids: myChannelIds,
-      },
-      term
-    );
     const queryBase = `from=0&s=${encodeURIComponent(term)}&sort_by=release_time&nsfw=${
       showMature ? 'true' : 'false'
     }&size=${SEARCH_PAGE_SIZE_PER_CHANNEL}`;
-    const [response, localClaims] = await Promise.all([
-      lighthouse.search(`${queryBase}&channel_id=${encodeURIComponent(channelIdsCsv)}`),
-      localClaimsPromise,
-    ]);
+    const response = await lighthouse.search(`${queryBase}&channel_id=${encodeURIComponent(channelIdsCsv)}`);
     const claimIds = [];
 
     if (Array.isArray(response?.body)) {
@@ -1246,7 +1187,7 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
     }
 
     return {
-      claims: sortClaimsByNewest(mergeStreamClaims(localClaims, resolvedClaims)),
+      claims: sortClaimsByNewest(resolvedClaims),
     };
   };
 };

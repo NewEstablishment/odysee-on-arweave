@@ -28,7 +28,6 @@ import { creditsToString } from 'util/format-credits';
 import {
   createNormalizedClaimSearchKey,
   getChannelIdFromClaim,
-  getClaimTags,
   isClaimProtected,
   isHyperbeamUploadClaim,
 } from 'util/claim';
@@ -36,7 +35,7 @@ import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
-import { fetchHyperbeamResolveClaimIds, fetchHyperbeamUploadList } from 'util/hyperbeam';
+import { fetchHyperbeamResolveClaimIds } from 'util/hyperbeam';
 import { canDeleteThroughHyperbeam, deleteThroughHyperbeam } from 'services/hyperbeamUpload';
 import { getAuthToken } from 'util/saved-passwords';
 let onChannelConfirmCallback;
@@ -99,72 +98,6 @@ async function getCostInfoForFee(claimId: string, fee: Fee | undefined): Promise
   */
 }
 
-async function fetchClaimListMineWithLocalUploads(
-  result: StreamListResponse,
-  page: number,
-  pageSize: number,
-  claimTypes: Array<string>,
-  channelIds: Array<string | null | undefined>
-): Promise<StreamListResponse> {
-  if (!claimTypes.includes('stream')) return result;
-
-  try {
-    const normalizedChannelIds = channelIds.filter(Boolean);
-    const localUploads = await fetchHyperbeamUploadList({
-      page,
-      page_size: pageSize,
-      claim_type: ['stream'],
-      ...(normalizedChannelIds.length ? { channel_ids: normalizedChannelIds } : {}),
-    });
-    const localItems = Array.isArray(localUploads?.items) ? localUploads.items : [];
-    if (!localItems.length) return result;
-
-    const items = mergeClaims(localItems, result.items || []);
-    return {
-      ...result,
-      items,
-      total_items:
-        Math.max(result.total_items || 0, result.items?.length || 0) + items.length - (result.items?.length || 0),
-      total_pages: Math.max(result.total_pages || 1, Math.ceil(items.length / Math.max(1, pageSize))),
-    };
-  } catch {
-    return result;
-  }
-}
-
-function mergeClaims(...claimGroups: Array<Array<Claim>>): Array<Claim> {
-  const seen = new Set<string>();
-  const claims: Array<Claim> = [];
-
-  claimGroups.flat().forEach((claim) => {
-    if (!claim || !claim.claim_id || seen.has(claim.claim_id)) return;
-    seen.add(claim.claim_id);
-    claims.push(claim);
-  });
-
-  return claims;
-}
-
-// Same contract as the old `listHyperbeamPublishes({ channelIds })`: a flat
-// claim array for the channel/search merge paths, now sourced from the
-// `~odysee-upload@1.0` list device.
-async function listLocalHyperbeamUploads(
-  channelIds: Array<string | null | undefined> = []
-): Promise<Array<StreamClaim>> {
-  try {
-    const normalizedChannelIds = channelIds.filter(Boolean);
-    const result = await fetchHyperbeamUploadList({
-      page: 1,
-      page_size: 50,
-      claim_type: ['stream'],
-      ...(normalizedChannelIds.length ? { channel_ids: normalizedChannelIds } : {}),
-    });
-    return Array.isArray(result?.items) ? (result.items as Array<StreamClaim>) : [];
-  } catch {
-    return [];
-  }
-}
-
 function emptyClaimListResult(page: number, pageSize: number): StreamListResponse {
   return {
     items: [],
@@ -173,163 +106,6 @@ function emptyClaimListResult(page: number, pageSize: number): StreamListRespons
     total_items: 0,
     total_pages: 0,
   };
-}
-
-async function mergeHyperbeamPublishesIntoChannelResult(
-  result: ClaimSearchResponse,
-  channelUri: string,
-  page: number
-): Promise<ClaimSearchResponse> {
-  if (page !== 1) return result;
-
-  const channelIds = getHyperbeamChannelIdsFromClaims(result.items || []);
-  const hyperbeamClaims = await listLocalHyperbeamUploads(channelIds);
-  if (!hyperbeamClaims.length) return result;
-
-  const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
-  const indexedClaims = hyperbeamClaims.filter(
-    (claim) =>
-      !existingIds.has(claim.claim_id) &&
-      (channelIds.length
-        ? channelIds.includes(getHyperbeamUploadChannelId(claim))
-        : hyperbeamClaimMatchesChannel(claim, channelUri))
-  );
-
-  if (!indexedClaims.length) return result;
-
-  return {
-    ...result,
-    items: [...indexedClaims, ...(result.items || [])],
-    total_items: Number(result.total_items || 0) + indexedClaims.length,
-  };
-}
-
-function getHyperbeamChannelIdsFromClaims(claims: Array<Claim>) {
-  return Array.from(
-    new Set(
-      claims.map((claim) => getChannelIdFromClaim(claim)).filter((channelId): channelId is string => Boolean(channelId))
-    )
-  );
-}
-
-async function mergeHyperbeamPublishesIntoSearchResult(
-  result: ClaimSearchResponse,
-  options: ClaimSearchOptions
-): Promise<ClaimSearchResponse> {
-  if (options.page && options.page !== 1) return result;
-
-  const channelIds = Array.isArray(options.channel_ids)
-    ? options.channel_ids
-    : options.channel_id
-      ? Array.isArray(options.channel_id)
-        ? options.channel_id
-        : [options.channel_id]
-      : [];
-
-  if (!channelIds.length) return result;
-
-  const hyperbeamClaims = await listLocalHyperbeamUploads(channelIds);
-  if (!hyperbeamClaims.length) return result;
-
-  const wantedChannelIds = new Set(channelIds.filter(Boolean));
-  const existingIds = new Set((result.items || []).map((claim) => claim.claim_id));
-  const indexedClaims = hyperbeamClaims.filter((claim) => {
-    if (existingIds.has(claim.claim_id)) return false;
-    if (!hyperbeamClaimMatchesSearchOptions(claim, options)) return false;
-    const channelId = getHyperbeamUploadChannelId(claim);
-    return Boolean(channelId && wantedChannelIds.has(channelId));
-  });
-
-  if (!indexedClaims.length) return result;
-
-  return {
-    ...result,
-    items: [...indexedClaims, ...(result.items || [])],
-    total_items: Number(result.total_items || 0) + indexedClaims.length,
-  };
-}
-
-function hyperbeamClaimMatchesChannel(claim: StreamClaim, channelUri: string) {
-  const directChannelId = getHyperbeamUploadChannelId(claim);
-  if (directChannelId && channelUri.includes(directChannelId)) return true;
-
-  const claimUrls = [claim.permanent_url, claim.canonical_url, claim.short_url].filter(Boolean);
-  if (claimUrls.some((url) => hyperbeamClaimUrlMatchesChannel(String(url), channelUri))) return true;
-
-  const channel = claim.signing_channel;
-  if (!channel || !channelUri) return false;
-
-  const channelId = channel.claim_id;
-  if (channelId && channelUri.includes(channelId)) return true;
-
-  const candidates = [channel.permanent_url, channel.canonical_url, channel.short_url, channel.name].filter(Boolean);
-  return candidates.some((candidate) => {
-    try {
-      return normalizeURI(String(candidate)) === normalizeURI(channelUri);
-    } catch {
-      return String(candidate) === channelUri;
-    }
-  });
-}
-
-function hyperbeamClaimMatchesSearchOptions(claim: StreamClaim, options: ClaimSearchOptions) {
-  if (!hyperbeamClaimMatchesSearchTags(claim, options)) return false;
-  if (!hyperbeamClaimMatchesReleaseTime(claim, options)) return false;
-  return true;
-}
-
-function hyperbeamClaimMatchesSearchTags(claim: StreamClaim, options: ClaimSearchOptions) {
-  const anyTags = normalizeSearchArray((options as any).any_tags || (options as any).anyTags);
-  if (!anyTags.length) return true;
-
-  const claimTags = new Set((getClaimTags(claim) || []).map(String));
-  return anyTags.some((tag) => claimTags.has(tag));
-}
-
-function hyperbeamClaimMatchesReleaseTime(claim: StreamClaim, options: ClaimSearchOptions) {
-  const filter = (options as any).release_time || (options as any).releaseTime;
-  if (!filter) return true;
-
-  const releaseTime = Number(
-    (claim.value as any)?.release_time || claim.timestamp || claim.meta?.creation_timestamp || 0
-  );
-  if (!Number.isFinite(releaseTime) || releaseTime <= 0) return false;
-
-  if (typeof filter === 'string') {
-    const text = filter.trim();
-    const target = Number(text.replace(/^[<>]=?/, ''));
-    if (!Number.isFinite(target)) return true;
-    if (text.startsWith('>=')) return releaseTime >= target;
-    if (text.startsWith('>')) return releaseTime > target;
-    if (text.startsWith('<=')) return releaseTime <= target;
-    if (text.startsWith('<')) return releaseTime < target;
-    return releaseTime === target;
-  }
-
-  if (typeof filter === 'number') return releaseTime === filter;
-  return true;
-}
-
-function normalizeSearchArray(value: any): Array<string> {
-  if (Array.isArray(value)) return value.map(String).filter(Boolean);
-  if (value) return [String(value)];
-  return [];
-}
-
-function hyperbeamClaimUrlMatchesChannel(claimUrl: string, channelUri: string) {
-  if (!claimUrl || !channelUri) return false;
-
-  try {
-    const normalizedClaimUrl = normalizeURI(claimUrl);
-    const normalizedChannelUri = normalizeURI(channelUri);
-    return normalizedClaimUrl === normalizedChannelUri || normalizedClaimUrl.startsWith(`${normalizedChannelUri}/`);
-  } catch {
-    return claimUrl === channelUri || claimUrl.startsWith(`${channelUri}/`);
-  }
-}
-
-function getHyperbeamUploadChannelId(claim: StreamClaim) {
-  return (claim as any).channel_id || (claim as any).channel_claim_id || getChannelIdFromClaim(claim);
 }
 
 export function doResolveUris(
@@ -711,17 +487,13 @@ export function doFetchClaimListMine(
     }
 
     const completeClaimListMine = async (result: StreamListResponse, legacyFailed: boolean) => {
-      const mergedResult = await fetchClaimListMineWithLocalUploads(result, page, pageSize, claimTypes, channelIds);
-      // If the legacy list failed and HyperBEAM has nothing to show either,
-      // surface the failure. Otherwise render whatever we have, so native
-      // uploads still appear when legacy auth is unavailable.
-      if (legacyFailed && (!mergedResult.items || mergedResult.items.length === 0)) {
+      if (legacyFailed && (!result.items || result.items.length === 0)) {
         dispatch({ type: ACTIONS.FETCH_CLAIM_LIST_MINE_FAILED });
         return;
       }
 
       // Log stuck claims
-      const claims = mergedResult.items;
+      const claims = result.items;
       const pendingClaimsById = selectPendingClaimsById(state);
 
       for (let i = 0; i < claims.length - 1; i++) {
@@ -740,7 +512,7 @@ export function doFetchClaimListMine(
       dispatch({
         type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
         data: {
-          result: mergedResult,
+          result: result,
           resolve,
           setNewPageItems: pageSize !== FILE_LIST.PAGE_SIZE_ALL_ITEMS,
           isAllMyClaimsFetched: pageSize === FILE_LIST.PAGE_SIZE_ALL_ITEMS,
@@ -751,7 +523,7 @@ export function doFetchClaimListMine(
       const membersOnlyClaimIds = new Set([]);
       const channelClaimIds = new Set([]);
       const costInfos = new Set<Promise<CostInfo>>();
-      mergedResult.items.forEach((item) => {
+      result.items.forEach((item) => {
         if (!isHyperbeamUploadClaim(item)) claimIds.push(item.claim_id);
 
         if (item.value_type !== 'channel' && item.value_type !== 'collection') {
@@ -1010,7 +782,6 @@ export function doFetchClaimsByChannel(uri: string, page: number = 1) {
       include_is_my_output: true,
       include_purchase_receipt: true,
     }).then(async (result: ClaimSearchResponse) => {
-      result = await mergeHyperbeamPublishesIntoChannelResult(result, uri, page || 1);
       const { items: claims, total_items: claimsInChannel, page: returnedPage, total_pages: totalPages } = result;
       dispatch({
         type: ACTIONS.FETCH_CHANNEL_CLAIMS_COMPLETED,
@@ -1270,7 +1041,6 @@ export function doClaimSearch(
     });
 
     const success = async (data: ClaimSearchResponse) => {
-      data = await mergeHyperbeamPublishesIntoSearchResult(data, options);
       const resolveInfo = {};
       const urls = [];
       const claimIds: Array<ClaimId> = [];

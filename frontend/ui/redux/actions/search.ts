@@ -22,8 +22,6 @@ import { SEARCH_OPTIONS } from 'constants/search';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
-import { fetchHyperbeamClaimsByIds, fetchHyperbeamSearch } from 'util/hyperbeam';
-import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 const isDev = process.env.NODE_ENV !== 'production';
 // ****************************************************************************
 // FYP
@@ -164,178 +162,6 @@ const processLighthouseResults = (results: Array<any>) => {
   return uris;
 };
 
-const processHyperbeamSearchResults = (results: Array<any>) => {
-  const uris = [];
-  const claimIds = [];
-  const immutableIds = [];
-  results.forEach((item) => {
-    if (!item) return;
-    const claimId = item.claim_id || item['claim-id'];
-    if (claimId) claimIds.push(claimId);
-    const immutableId = item.immutable_id || item['immutable-id'] || item.doc_id || item['doc-id'];
-    if (immutableId) immutableIds.push(immutableId);
-
-    const name = item.name || item.claim_name || item['claim-name'];
-    const canonicalUrl = item.canonical_url || item['canonical-url'] || item.permanent_url || item['permanent-url'];
-    if (!name || !claimId) {
-      if (canonicalUrl) uris.push(canonicalUrl);
-      return;
-    }
-
-    const claimType = item.claim_type || item['claim-type'] || item.type;
-    const channelName = item.channel_name || item['channel-name'];
-    const channelClaimId = item.channel_claim_id || item['channel-claim-id'];
-    const urlObj: LbryUrlObj = {};
-    if (String(name).startsWith('@') || claimType === 'channel') {
-      urlObj.channelName = name;
-      urlObj.channelClaimId = claimId;
-    } else {
-      if (channelName) urlObj.channelName = channelName;
-      if (channelClaimId) urlObj.channelClaimId = channelClaimId;
-      urlObj.streamName = name;
-      urlObj.streamClaimId = claimId;
-    }
-
-    const url = buildURI(urlObj, true);
-    if (isURIValid(url)) {
-      uris.push(url);
-    } else if (canonicalUrl) {
-      uris.push(canonicalUrl);
-    }
-  });
-  return { uris, claimIds, immutableIds };
-};
-
-const hitIds = (item: any) =>
-  [
-    item?.immutable_id,
-    item?.['immutable-id'],
-    item?.doc_id,
-    item?.['doc-id'],
-    item?.claim_id,
-    item?.['claim-id'],
-    item?.legacy_outpoint,
-    item?.['legacy-outpoint'],
-  ].filter(Boolean);
-
-const claimSearchUri = (claim: any) => claim?.canonical_url || claim?.permanent_url || claim?.short_url;
-
-const claimResolvePayload = (claim: any) => {
-  if (!claim) return null;
-  if (claim.value_type === 'channel') return { channel: claim, claimsInChannel: claim.meta?.claims_in_channel || 0 };
-  if (claim.value_type === 'collection') return { collection: claim };
-  return {
-    stream: claim,
-    channel: claim.signing_channel,
-    claimsInChannel: claim.signing_channel?.meta?.claims_in_channel || 0,
-  };
-};
-
-const hyperbeamStoreSearchResolution = (results: Array<any>, claims: Array<any>) => {
-  const claimsById = {};
-  claims.forEach((claim) => {
-    [
-      claim?.claim_id,
-      claim?.immutable_id,
-      claim?.outpoint,
-      claim?.txid && claim?.nout !== undefined ? `${claim.txid}:${claim.nout}` : null,
-    ]
-      .filter(Boolean)
-      .forEach((id) => {
-        claimsById[id] = claim;
-      });
-  });
-
-  const uris = [];
-  const resolveInfo = {};
-  const urisById = {};
-  const resolvedClaimIds = new Set();
-  results.forEach((item) => {
-    const ids = hitIds(item);
-    const claim = ids.map((id) => claimsById[id]).find(Boolean);
-    const uri = claimSearchUri(claim);
-    const payload = claimResolvePayload(claim);
-    if (!uri || !payload) return;
-    if (!uris.includes(uri)) uris.push(uri);
-    resolveInfo[uri] = payload;
-    ids.forEach((id) => {
-      urisById[id] = uri;
-    });
-    if (claim.claim_id) resolvedClaimIds.add(claim.claim_id);
-  });
-
-  return { uris, resolveInfo, resolvedClaimIds, urisById };
-};
-
-const orderedHyperbeamSearchUris = (
-  results: Array<any>,
-  resolveInfo: any,
-  fallbackUris: Array<string>,
-  storeUrisById: Record<string, string> = {}
-) => {
-  if (!resolveInfo) return fallbackUris;
-
-  const urisByClaimId = {};
-  Object.values(resolveInfo).forEach((resolved: any) => {
-    const claim = resolved && (resolved.stream || resolved.channel || resolved.collection || resolved);
-    if (!claim || !claim.claim_id) return;
-
-    const uri = claim.canonical_url || claim.permanent_url || claim.short_url;
-    if (uri) urisByClaimId[claim.claim_id] = uri;
-  });
-
-  const orderedUris = [];
-  results.forEach((item, index) => {
-    if (!item) return;
-    const storeUri = hitIds(item)
-      .map((id) => storeUrisById[id])
-      .find(Boolean);
-    const claimId = item.claim_id || item['claim-id'];
-    const uri = claimId && urisByClaimId[claimId];
-    const fallbackUri = fallbackUris[index];
-    const resultUri = storeUri || uri || fallbackUri;
-    if (resultUri && !orderedUris.includes(resultUri)) orderedUris.push(resultUri);
-  });
-
-  return orderedUris.length ? orderedUris : fallbackUris;
-};
-
-const HYPERBEAM_MEDIA_SEARCH_OPTIONS = [
-  SEARCH_OPTIONS.MEDIA_AUDIO,
-  SEARCH_OPTIONS.MEDIA_VIDEO,
-  SEARCH_OPTIONS.MEDIA_TEXT,
-  SEARCH_OPTIONS.MEDIA_IMAGE,
-  SEARCH_OPTIONS.MEDIA_APPLICATION,
-];
-
-const durationMinutesToSeconds = (value: any) => {
-  if (value === undefined || value === null || value === '') return value;
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? Math.max(0, Math.round(numberValue * 60)) : value;
-};
-
-const hyperbeamSearchParams = (query: string, searchOptions: SearchOptions) => {
-  const params = {
-    ...searchOptions,
-    s: query,
-    size: searchOptions.size,
-    from: searchOptions.from,
-  };
-  const claimType = String(searchOptions[SEARCH_OPTIONS.CLAIM_TYPE] || '');
-  const fileOnly = claimType === SEARCH_OPTIONS.INCLUDE_FILES;
-
-  if (fileOnly) {
-    params[SEARCH_OPTIONS.MIN_DURATION] = durationMinutesToSeconds(searchOptions[SEARCH_OPTIONS.MIN_DURATION]);
-    params[SEARCH_OPTIONS.MAX_DURATION] = durationMinutesToSeconds(searchOptions[SEARCH_OPTIONS.MAX_DURATION]);
-  } else {
-    HYPERBEAM_MEDIA_SEARCH_OPTIONS.forEach((option) => delete params[option]);
-    delete params[SEARCH_OPTIONS.MIN_DURATION];
-    delete params[SEARCH_OPTIONS.MAX_DURATION];
-  }
-
-  return params;
-};
-
 const uniqueUris = (uris: Array<string>) => Array.from(new Set(uris.filter(Boolean)));
 
 export const doSearch =
@@ -353,7 +179,6 @@ export const doSearch =
     const queryWithOptions = getSearchQueryString(query, searchOptions);
     const size = searchOptions.size;
     const from = searchOptions.from;
-    const hyperbeamSearchEnabled = isHyperbeamEnabled() && !searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
     // If we have already searched for something, we don't need to do anything
     const urisForQuery = makeSelectSearchUrisForQuery(queryWithOptions)(state);
 
@@ -419,55 +244,6 @@ export const doSearch =
             type: ACTIONS.SEARCH_FAIL,
           });
         });
-
-    if (hyperbeamSearchEnabled) {
-      fetchHyperbeamSearch(hyperbeamSearchParams(query, searchOptions))
-        .then(async (data) => {
-          if (!data || !Array.isArray(data.items)) throw new Error('HyperBEAM search returned no items array');
-          const { uris, claimIds, immutableIds } = processHyperbeamSearchResults(data.items);
-          const storeClaims = immutableIds.length
-            ? await fetchHyperbeamClaimsByIds(Array.from(new Set(immutableIds)))
-            : [];
-          const storeResolution = hyperbeamStoreSearchResolution(data.items, storeClaims);
-          if (Object.keys(storeResolution.resolveInfo).length) {
-            dispatch({
-              type: ACTIONS.RESOLVE_URIS_SUCCESS,
-              data: { resolveInfo: storeResolution.resolveInfo },
-            });
-          }
-          const unresolvedClaimIds = claimIds.filter((claimId) => !storeResolution.resolvedClaimIds.has(claimId));
-          if (!unresolvedClaimIds.length) {
-            const resolvedUris = orderedHyperbeamSearchUris(data.items, {}, uris, storeResolution.urisById);
-            finishSearch(uniqueUris(resolvedUris), 'HyperBEAM', undefined, true);
-            return;
-          }
-
-          dispatch(doResolveClaimIds(unresolvedClaimIds, false))
-            .then((resolveInfo) => {
-              const resolvedUris = orderedHyperbeamSearchUris(data.items, resolveInfo, uris, storeResolution.urisById);
-              dispatch(doResolveUris(resolvedUris, true));
-              dispatch({
-                type: ACTIONS.SEARCH_SUCCESS,
-                data: {
-                  query: queryWithOptions,
-                  from: from,
-                  size: size,
-                  uris: resolvedUris,
-                  poweredBy: 'HyperBEAM',
-                },
-              });
-            })
-            .catch(() => {
-              finishSearch(uniqueUris(uris), 'HyperBEAM');
-            });
-        })
-        .catch(() => {
-          dispatch({
-            type: ACTIONS.SEARCH_FAIL,
-          });
-        });
-      return;
-    }
 
     runLighthouseSearch();
   };

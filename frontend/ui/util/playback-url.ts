@@ -88,6 +88,7 @@ export function isHyperbeamPlaybackUrl(src: string | null | undefined): boolean 
     const url = new URL(src, baseUrl);
     return (
       url.pathname.includes('/odysee/media/') ||
+      isHyperbeamCacheMediaUrl(url) ||
       url.pathname.includes('/~lbry-stream@1.0/media') ||
       url.pathname.includes('/~odysee-stream@1.0/media') ||
       url.pathname.startsWith('/$/api/hyperbeam-upload/v1/read/') ||
@@ -96,11 +97,21 @@ export function isHyperbeamPlaybackUrl(src: string | null | undefined): boolean 
   } catch {
     return (
       src.includes('/odysee/media/') ||
+      src.includes('odysee%2Fmedia%2F') ||
       src.includes('~lbry-stream@1.0/media') ||
       src.includes('~odysee-stream@1.0/media') ||
       src.includes('/$/api/hyperbeam-upload/v1/read/')
     );
   }
+}
+
+// Media served through the cache device carries the store path in the
+// `read` query param rather than the pathname.
+function isHyperbeamCacheMediaUrl(url: URL): boolean {
+  return (
+    url.pathname.includes('/~cache@1.0/read') &&
+    String(url.searchParams.get('read') || '').startsWith('odysee/media/')
+  );
 }
 
 function isConfiguredHyperbeamNodeUrl(url: URL) {

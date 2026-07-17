@@ -1,29 +1,29 @@
 import { HYPERBEAM_BASE_URL, HYPERBEAM_PLAYBACK_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { fetchStoreStreamEvidenceForUri, hyperbeamStoreReadPath } from 'util/hyperbeam';
 
 const HYPERBEAM_TIMEOUT_MS = 5000;
-const STREAM_DEVICE = '~odysee-stream@1.0';
 
+// The playback request URL is a plain read-only store GET: the node's
+// `odysee/stream/<uri>` store path returns the stream claim evidence message
+// (claim + sd-hash), from which the media URL is constructed. An explicit
+// HYPERBEAM_PLAYBACK_URL config still wins as an external resolver.
 export function buildHyperbeamPlaybackUrl(uri: string): string {
-  const playbackUrl = hyperbeamPlaybackUrl();
-  if (!playbackUrl) return '';
-
-  try {
-    const url = new URL(playbackUrl);
-    url.searchParams.set('url', uri);
-    url.searchParams.set('mode', 'hyperbeam');
-    if (!url.searchParams.has('media-base-url')) {
-      url.searchParams.set('media-base-url', url.origin);
+  if (HYPERBEAM_PLAYBACK_URL) {
+    try {
+      const url = new URL(HYPERBEAM_PLAYBACK_URL);
+      url.searchParams.set('url', uri);
+      url.searchParams.set('mode', 'hyperbeam');
+      if (!url.searchParams.has('media-base-url')) {
+        url.searchParams.set('media-base-url', url.origin);
+      }
+      return url.toString();
+    } catch {
+      return '';
     }
-    return url.toString();
-  } catch {
-    return '';
   }
-}
 
-function hyperbeamPlaybackUrl() {
-  if (HYPERBEAM_PLAYBACK_URL) return HYPERBEAM_PLAYBACK_URL;
   const node = hyperbeamNode();
-  return node ? `${node}/${STREAM_DEVICE}/playback` : '';
+  return node ? `${node}/${hyperbeamStoreReadPath(`odysee/stream/${uri}`)}` : '';
 }
 
 function hyperbeamNode() {
@@ -34,7 +34,11 @@ export async function fetchHyperbeamPlaybackUrl(uri: string): Promise<string> {
   const requestUrl = buildHyperbeamPlaybackUrl(uri);
   if (!requestUrl) return '';
 
-  const playbackUrl = await fetchPlaybackUrl(requestUrl);
+  const playbackUrl = HYPERBEAM_PLAYBACK_URL
+    ? await fetchExternalPlaybackUrl(requestUrl)
+    : await fetchStoreStreamEvidenceForUri(uri)
+        .then(hyperbeamMediaUrlFromPayload)
+        .catch(() => '');
   if (!playbackUrl) {
     // eslint-disable-next-line no-console
     console.warn(`[hyperbeam] playback resolution failed for ${uri}; falling back to legacy CDN (node: ${requestUrl})`);
@@ -42,15 +46,18 @@ export async function fetchHyperbeamPlaybackUrl(uri: string): Promise<string> {
   return playbackUrl;
 }
 
-async function fetchPlaybackUrl(requestUrl: string): Promise<string> {
+async function fetchExternalPlaybackUrl(requestUrl: string): Promise<string> {
   try {
-    const response = await fetch(requestUrl, { signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS) });
+    const response = await fetch(requestUrl, {
+      headers: { accept: 'application/json' },
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+    });
     const body = response.ok ? await response.json().catch(() => null) : null;
     const payload = playbackPayload(body);
     if (!payload) return '';
 
-    // The stream device returns a ready-to-use node media URL; prefer it over
-    // anything we could reconstruct locally.
+    // An external playback resolver returns a ready-to-use media URL; prefer
+    // it over anything we could reconstruct locally.
     const direct =
       payload.streaming_url || payload['streaming-url'] || payload.download_url || payload['download-url'];
     if (typeof direct === 'string' && direct) return direct;
@@ -81,14 +88,12 @@ function hyperbeamMediaUrlFromPayload(payload: any): string {
   const nout = payload.nout;
   const outpoint = payload.outpoint || (txid != null && nout != null ? `${txid}:${nout}` : '');
   if (outpoint) {
-    return `${node}/${STREAM_DEVICE}/media?id=${encodeURIComponent(String(outpoint))}`;
+    return `${node}/${hyperbeamStoreReadPath(`odysee/media/stream-id/${outpoint}`)}`;
   }
 
-  const claimId = payload.claim_id || payload['claim-id'];
-  if (claimId) {
-    const claimName = payload.claim_name || payload['claim-name'];
-    const nameParam = claimName ? `&claim-name=${encodeURIComponent(String(claimName))}` : '';
-    return `${node}/${STREAM_DEVICE}/media?claim-id=${encodeURIComponent(String(claimId))}${nameParam}`;
+  const sdHash = payload['sd-hash'] || payload.sd_hash;
+  if (typeof sdHash === 'string' && /^[0-9a-f]{96}$/i.test(sdHash)) {
+    return `${node}/${hyperbeamStoreReadPath(`odysee/media/sd-hash/${sdHash}`)}`;
   }
 
   return '';

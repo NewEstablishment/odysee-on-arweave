@@ -1,7 +1,8 @@
 import React from 'react';
 import { sanitizeHyperbeamDebugValue, sanitizeHyperbeamDebugUrl, type HyperbeamDebugEvent } from 'util/hyperbeamDebug';
-import { fetchHyperbeamAccountSdk } from 'util/hyperbeam';
-import { HYPERBEAM_DEVICE, hyperbeamDeviceUrl } from 'util/hyperbeamDevices';
+import Lbry from 'lbry';
+import { hyperbeamStoreReadPath } from 'util/hyperbeam';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 import { getAuthToken } from 'util/saved-passwords';
 
 type TraceStatus = 'pending' | 'running' | 'ok' | 'warn' | 'failed' | 'skipped';
@@ -145,14 +146,17 @@ export default function ClaimTrace({
 
     const nativeUpload = isHyperbeamUploadTraceClaim(selectedClaim);
 
-    if (!nativeUpload && selectedClaim.txid && !cachedSourceObservation(events, selectedClaim.txid)) {
+    const nodeBase = hyperbeamNodeBase();
+
+    if (nodeBase && !nativeUpload && selectedClaim.txid && !cachedSourceObservation(events, selectedClaim.txid)) {
       enqueue(
         `tx:${selectedClaim.txid}`,
-        hyperbeamDeviceUrl(HYPERBEAM_DEVICE.claim, 'transaction', { txid: selectedClaim.txid })
+        `${nodeBase}/${hyperbeamStoreReadPath(`odysee/transaction/${selectedClaim.txid}`)}`
       );
     }
 
     if (
+      nodeBase &&
       !nativeUpload &&
       selectedClaim.valueType === 'stream' &&
       selectedClaim.sdHash &&
@@ -160,7 +164,7 @@ export default function ClaimTrace({
     ) {
       enqueue(
         `descriptor:${selectedClaim.sdHash}`,
-        hyperbeamDeviceUrl(HYPERBEAM_DEVICE.streamDescriptor, 'fetch', { 'sd-hash': selectedClaim.sdHash })
+        `${nodeBase}/${hyperbeamStoreReadPath(`odysee/descriptor/${selectedClaim.sdHash}`)}`
       );
     }
 
@@ -178,7 +182,7 @@ export default function ClaimTrace({
       };
     }
 
-    fetchHyperbeamAccountSdk('preference_get', { key: 'enable-sync' })
+    Lbry.preference_get({ key: 'enable-sync' })
       .then((response) => {
         if (cancelled) return;
         setProfile({
