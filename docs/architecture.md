@@ -22,8 +22,9 @@ The minimum HyperBEAM background needed to read these documents:
   `device` key resolves through the base `message@1.0` device, which simply
   returns stored values.
 - **HTTP is the API.** `GET /<ID>` reads a message from the node's stores.
-  `GET /<ID>/key` reads one key. Multi-segment paths resolve stepwise; a path
-  with no device involvement falls back to a flat store read. Responses are
+  `GET /<ID>/key` reads one key. Multi-segment paths resolve stepwise; an
+  ID-rooted path with no device involvement short-circuits to a direct store
+  read, and `/~cache@1.0/read` exposes arbitrary store paths. Responses are
   encoded with the `httpsig@1.0` codec: message keys become HTTP headers or
   multipart body parts, and commitments travel in RFC-9421 `signature` /
   `signature-input` headers — so a plain HTTP response is a verifiable message.
@@ -112,11 +113,11 @@ client-side routing. No web server, proxy, or SSR tier exists.
 
 The UI talks to nodes over two channels:
 
-- **Reads** are plain `GET /<path>` requests against store paths and message
-  IDs. Responses are httpsig-encoded messages; the browser parses the
-  multipart/header encoding, extracts the `lbry@1.0` commitments, and re-runs
-  the verification recipes in JavaScript. The node is a transport, not an
-  oracle.
+- **Reads** are plain `GET` requests against message IDs and — via
+  `/~cache@1.0/read` — store paths. Responses are httpsig-encoded messages;
+  the browser parses the multipart/header encoding, extracts the `lbry@1.0`
+  commitments, and re-runs the verification recipes in JavaScript. The node
+  is a transport, not an oracle.
 - **Writes** are `POST` requests carrying `?!=true` (or an inline `&!` path
   flag), which the stock `~auth-hook@1.0` request hook intercepts and signs
   with a node-hosted per-user wallet. See "Writes" below.
@@ -197,9 +198,10 @@ trigger single-ID resolution on a stock node.
 
 Two mitigations, in order of preference today:
 
-- **Namespaced store paths work now**: `GET /odysee/claim-id/<40hex>` is a
-  multi-segment deviceless path, which stock resolution retries as a flat
-  store read; the facade store answers it. All UI read paths use this form.
+- **Namespaced store paths work now**: the stock `~cache@1.0` device reads
+  arbitrary store paths, so `GET /~cache@1.0/read?read=odysee/claim-id/<40hex>`
+  reaches the facade store on any node that stacks it. All UI read paths use
+  this form.
 - **Anticipated upstream extension**: `?IS_ID` extended to accept 40-byte hex
   identifiers, enabling bare `GET /<claim-id>`. This is an upstream HyperBEAM
   change with its own justification, not part of this repository.
@@ -216,9 +218,11 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    user's node-hosted wallet from `~secret@1.0`, and signs both the request
    and the `!`-marked message with real RSA-PSS commitments. The user never
    handles key material.
-2. The node persists verified signed inbound messages to its cache
-   (`store_all_signed`, default on), which also populates the `~match@1.0`
-   reverse index as a side effect of every cache write.
+2. The node persists verified signed inbound messages to a dedicated
+   `cache-http` filesystem store (`store-all-signed`, default on); every
+   cache write also populates the `~match@1.0` reverse index in its target
+   store, so query-serving nodes include `cache-http` in their `store` and
+   `match-index` stacks.
 3. Readers discover writes via `~query@1.0`'s exact-match index —
    `POST /~query@1.0/only` with equality selectors (schema, type, target,
    author) returns matching message paths — and hydrate them with generic

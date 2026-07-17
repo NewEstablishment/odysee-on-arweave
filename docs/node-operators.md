@@ -104,9 +104,10 @@ performs **no cryptography**. Left there, a malicious seed could populate a
 serving node's cache with well-shaped forgeries. Close the gap with one of:
 
 ```erlang
-    %% Re-verify every message on cache read/write paths (recursive; dispatches
+    %% Re-verify every message recursively in all resolution contexts — or
+    %% scope with a topic list such as `[cache_read, cache_write]`. Dispatches
     %% each commitment to its commitment-device — i.e. through the pinned
-    %% lbry@1.0 archive):
+    %% lbry@1.0 archive:
     <<"paranoid-verify">> => true
 ```
 
@@ -203,7 +204,8 @@ are baked at build time). Host it as an Arweave **path manifest**:
    `device` tag or `content-type` — no extra configuration on a default
    node. Missing paths fall back to the index (`manifest-404: fallback`, the
    default), which is exactly SPA client-side routing; set
-   `<<"manifest-404">> => <<"error">>` to disable.
+   `<<"manifest-404">> => error` (atom-valued, like the `fallback` default)
+   to disable.
 
 The serving node must be able to *read* the manifest and every path-target ID
 through its store stack: either seed them into the local cache directly, or
