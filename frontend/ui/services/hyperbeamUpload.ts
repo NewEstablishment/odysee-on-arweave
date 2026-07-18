@@ -226,7 +226,7 @@ async function genericStoreWriteResponse(file: Blob) {
   const base = hyperbeamNodeBase();
   if (!base) return null;
 
-  return fetch(`${base}/id?!=true`, {
+  return fetch(`${base}/id?!=true&committers=all`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -268,7 +268,7 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     Object.entries(message).filter(([, value]) => value !== undefined && value !== null && value !== '')
   );
 
-  return fetch(`${base}/id?!=true`, {
+  return fetch(`${base}/id?!=true&committers=all`, {
     method: 'POST',
     credentials: 'include',
     headers: {

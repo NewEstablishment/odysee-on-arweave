@@ -68,12 +68,13 @@ odysee_stores(Opts) ->
 
 %% @doc The node's default `on' hooks, with the `~auth-hook@1.0' request
 %% handler's secret provider swapped to `~cookie@1.0', followed by a
-%% `~persist@1.0' stage that stores the hook-committed messages. Browsers
-%% then receive a stable anonymous identity automatically: the first
-%% `?!=true' request mints a cookie-derived per-user wallet, every
-%% subsequent request with that cookie commits as the same user, and the
-%% committed writes (uploads, comments) persist in the node's cache. Pass
-%% the result as the node's `on' option.
+%% `~reply-id@1.0' stage that surfaces the stored message's ID in the
+%% reply. Browsers then receive a stable anonymous identity
+%% automatically: the first commit-flag request mints a cookie-derived
+%% per-user wallet, every subsequent request with that cookie commits as
+%% the same user, and the committed writes (uploads, comments) persist
+%% via the hook's `store-all-signed' handling. Pass the result as the
+%% node's `on' option.
 cookie_auth_hooks(Opts) ->
     Hooks = hb_opts:get(on, #{}, Opts),
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
@@ -88,7 +89,7 @@ cookie_auth_hooks(Opts) ->
                                     #{ <<"device">> => <<"cookie@1.0">> }
                             },
                             #{
-                                <<"device">> => <<"persist@1.0">>,
+                                <<"device">> => <<"reply-id@1.0">>,
                                 <<"path">> => <<"request">>
                             }
                         ];

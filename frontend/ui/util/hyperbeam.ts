@@ -36,7 +36,10 @@ const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
 // Native writes POST straight to the node; `!` is the auth-hook commit flag,
 // so the node's configured auth hook decides whether the write is committed.
-const HYPERBEAM_NATIVE_WRITE_PATH = 'id?!=true';
+// The commit flag signs the request via the node's auth hook; committers=all
+// makes /id resolve to the signed ID (the bare id key recalculates the
+// unsigned ID over uncommitted keys too, which nothing registers).
+const HYPERBEAM_NATIVE_WRITE_PATH = 'id?!=true&committers=all';
 const COMMENTRON_FAILURE = 'Failed to fetch (comments.odysee.tv)';
 const storeReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
 const nativeCommentQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<any>> }>();
