@@ -47,6 +47,40 @@ Direction set by review feedback on the first pass:
    inverted index vs alternatives; justify the choice in a decision
    doc before building.
 
+### Progress on the review objectives
+
+- **(2) Encoding → done.** Embedded raw evidence (`claim`,
+  `raw-transaction`, transaction `raw`, ancestry txs) is now b64u via
+  `dev_lbry_commitment:evidence_encode/1`; decode is canonical-checked
+  (fail-closed). LBRY ids stay hex. 104/61 tests green.
+- **(3) Kernel discipline → done.** Flat-store-path and
+  persist-hook-signed proposals removed from `patches/`. Only `?IS_ID`
+  and Range remain (each a described upstream question, not a
+  dependency).
+- **(4) Upload flow → investigated.** Plain `POST /id?!=true` on a
+  fully default node returns the committed ID but does NOT persist:
+  `store-all-signed` runs at HTTP wire-decode, before the request
+  hooks, so a message that only becomes signed via the hook is never
+  stored; and the hook-processed sequence's IDs differ from the ID
+  `/id` returns (three distinct identities), so even persisting it
+  leaves the item unreachable. Captured as a failing repro test on the
+  HB worktree branch `fix/store-hook-signed-requests`
+  (`~/src/hyperbeam/.worktrees/store-hook-signed`, commit 5f3061a89) —
+  test only, no fix, because the fix requires an upstream design
+  decision on the canonical identity of "the posted item." This is a
+  genuinely-general HB gap, not app-specific; surfaced for the HB team.
+- **(5) Link-ID divergence → resolved by construction.** Our messages
+  never embed uncommitted keys in nested messages (attestation embeds
+  the committed channel view). No HB patch proposed.
+- **(6) Trust model → TEE, not client.** Docs already frame serving
+  trust as TEE-terminated SSL; the browser-verification note is being
+  removed from the frontend and docs in the clean.
+- **(1/8) Deep clean → in progress.** First pass removed 568 lines from
+  `src/`: dead `dev_lbry_mmr` + fixtures, the unreachable remote-read
+  re-verification layer, and the SDK-map codec branches. `decisions/
+  deep-clean-cuts.md` records rationale. Idiom audit + engine research
+  running.
+
 Media-range clarification for the record: 206 through
 `~cache@1.0/read` could never honor `Range:` because HTTP request
 headers do not reach store reads; the store was serving a fixed window
