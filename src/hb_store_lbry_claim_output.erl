@@ -56,7 +56,8 @@ fetch_output(StoreOpts, TxID, Nout, NodeOpts) ->
                 #{ <<"read">> => TxID },
                 NodeOpts
             ),
-        Raw = maps:get(<<"raw">>, TxMsg),
+        {ok, _RawHex, Raw} ?=
+            dev_lbry_commitment:native_id_bytes(maps:get(<<"raw">>, TxMsg)),
         {ok, Ancestry} ?= output_ancestry(StoreOpts, Raw, Nout, NodeOpts),
         case kind(StoreOpts, NodeOpts) of
             <<"channel">> ->
@@ -120,7 +121,9 @@ fetch_parent_transaction(TxID, StoreOpts, NodeOpts, Attempts) ->
         )
     of
         {ok, TxMsg} ->
-            {ok, maps:get(<<"raw">>, TxMsg)};
+            {ok, _RawHex, Raw} =
+                dev_lbry_commitment:native_id_bytes(maps:get(<<"raw">>, TxMsg)),
+            {ok, Raw};
         _Error when Attempts > 1 ->
             timer:sleep(300),
             fetch_parent_transaction(TxID, StoreOpts, NodeOpts, Attempts - 1);

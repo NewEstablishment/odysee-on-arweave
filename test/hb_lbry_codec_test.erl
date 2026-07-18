@@ -74,7 +74,7 @@ blob_rejects_hash_mismatch_test() ->
 transaction_roundtrip_test() ->
     RawTx = minimal_tx(),
     {ok, Tx} = dev_lbry_commitment:transaction_message(RawTx),
-    ?assertEqual(RawTx, maps:get(<<"raw">>, Tx)),
+    ?assertEqual(hb_util:to_hex(RawTx), maps:get(<<"raw">>, Tx)),
     ?assertNot(maps:is_key(<<"device">>, Tx)),
     Commitments = maps:get(<<"commitments">>, Tx),
     [Commitment] = maps:values(hb_cache:ensure_all_loaded(Commitments, opts())),

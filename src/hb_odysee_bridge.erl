@@ -131,8 +131,11 @@ verified_stream(ClaimIDOrName, Opts) ->
         ok ?= matching_claim_id(ClaimID, StreamMsg0),
         {ok, SignedSDHash} ?=
             matching_sd_hash(maps:get(<<"sd-hash">>, StreamMsg0), SDKSDHash),
-        {ok, ParsedTx} ?=
-            dev_lbry_tx:parse(maps:get(<<"raw-transaction">>, StreamMsg0)),
+        {ok, _RawHex, RawTx} ?=
+            dev_lbry_commitment:native_id_bytes(
+                maps:get(<<"raw-transaction">>, StreamMsg0)
+            ),
+        {ok, ParsedTx} ?= dev_lbry_tx:parse(RawTx),
         {ok, StreamMsg, ChannelMsg, Attestation} ?=
             channel_attestation(StreamMsg0, ParsedTx, Opts),
         ok ?= valid_attestation(Attestation),

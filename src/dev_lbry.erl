@@ -293,8 +293,10 @@ verify_transaction(Base, Req, Opts) ->
                 ),
             {ok, Hex, Bytes} ?= dev_lbry_commitment:native_id(Req, Opts),
             32 ?= byte_size(Bytes),
-            Raw = hb_maps:get(<<"raw">>, Base, undefined, Opts),
-            true ?= is_binary(Raw),
+            {ok, _RawHex, Raw} ?=
+                dev_lbry_commitment:native_id_bytes(
+                    hb_maps:get(<<"raw">>, Base, undefined, Opts)
+                ),
             Hex ?= dev_lbry_tx:txid(Raw),
             {ok, _Tx} ?= dev_lbry_tx:parse(Raw),
             Hex == hex_field(Base, <<"txid">>, Opts)
@@ -321,12 +323,23 @@ digest_field_valid(Base, Data, Opts) ->
 
 commit_claim_output(Msg, Construct, Opts) ->
     maybe
-        Raw = hb_maps:get(<<"raw-transaction">>, Msg, undefined, Opts),
-        true ?= is_binary(Raw) orelse {error, missing_raw_transaction},
+        Raw0 = hb_maps:get(<<"raw-transaction">>, Msg, undefined, Opts),
+        true ?= is_binary(Raw0) orelse {error, missing_raw_transaction},
         Nout = hb_maps:get(<<"nout">>, Msg, undefined, Opts),
         true ?= (Nout =/= undefined) orelse {error, missing_nout},
-        Construct(Raw, hb_util:int(Nout), ancestry_field(Msg, Opts))
+        Construct(raw_input(Raw0), hb_util:int(Nout), ancestry_field(Msg, Opts))
     end.
+
+%% @doc Accept raw evidence bytes either directly or in their hex message
+%% encoding. Real transactions are never all-hex-character byte strings,
+%% so the decode is unambiguous in practice.
+raw_input(Bin) when is_binary(Bin) ->
+    case dev_lbry_commitment:native_id_bytes(Bin) of
+        {ok, _Hex, Bytes} -> Bytes;
+        _ -> Bin
+    end;
+raw_input(Other) ->
+    Other.
 
 ancestry_field(Msg, Opts) ->
     Ancestry =
@@ -363,7 +376,7 @@ commit_transaction(Msg, Opts) ->
     maybe
         Raw = hb_maps:get(<<"raw">>, Msg, undefined, Opts),
         true ?= is_binary(Raw) orelse {error, missing_raw},
-        dev_lbry_commitment:transaction_message(Raw)
+        dev_lbry_commitment:transaction_message(raw_input(Raw))
     end.
 
 %%% Raw-input decoding
@@ -573,7 +586,11 @@ raw(Structured, Req, Opts) ->
         _ ->
             case maps:get(<<"raw">>, Structured, undefined) of
                 undefined -> {error, missing_raw};
-                Raw -> {ok, hb_cache:ensure_all_loaded(Raw, Opts)}
+                Raw ->
+                    % Transaction evidence carries `raw' in its hex message
+                    % encoding; descriptor evidence carries ASCII JSON.
+                    % `raw_input' decodes the former and passes the latter.
+                    {ok, raw_input(hb_cache:ensure_all_loaded(Raw, Opts))}
             end
     end.
 

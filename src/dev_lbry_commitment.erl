@@ -87,10 +87,12 @@ native_id(Commitment, Opts) ->
     end.
 
 %% @doc Decode a hex native identifier into normalized hex and raw bytes.
+%% Arbitrary (forged) bytes must fail closed, so normalization runs inside
+%% the guard as well: `hb_util:to_lower' raises on non-UTF-8 input.
 native_id_bytes(Hex) when is_binary(Hex) ->
-    Normalized = hb_util:to_lower(Hex),
-    try binary:decode_hex(Normalized) of
-        Bytes -> {ok, Normalized, Bytes}
+    try
+        Normalized = hb_util:to_lower(Hex),
+        {ok, Normalized, binary:decode_hex(Normalized)}
     catch
         _:_ -> {error, invalid_native_id}
     end;
@@ -162,7 +164,7 @@ transaction_message(Raw) when is_binary(Raw) ->
             TxIDHex = maps:get(<<"txid">>, Tx),
             {ok,
                 with_commitment(
-                    Tx,
+                    Tx#{ <<"raw">> => hb_util:to_hex(Raw) },
                     <<"transaction">>,
                     <<"sha-256d">>,
                     {<<"txid">>, binary:decode_hex(TxIDHex)},
@@ -227,12 +229,12 @@ claim_output_message(Raw, Nout, Ancestry) when is_binary(Raw), is_integer(Nout) 
                     <<"claim-id">> => ClaimID,
                     <<"claim-op">> => ClaimOp,
                     <<"claim-name">> => maps:get(<<"claim-name">>, Output),
-                    <<"claim">> => maps:get(<<"claim">>, Output),
+                    <<"claim">> => hb_util:to_hex(maps:get(<<"claim">>, Output)),
                     <<"claim-envelope">> => Envelope,
                     <<"claim-proof-strength">> => Strength,
                     <<"txid">> => TxIDHex,
                     <<"nout">> => Nout,
-                    <<"raw-transaction">> => Raw
+                    <<"raw-transaction">> => hb_util:to_hex(Raw)
                 }
             ),
             Ancestry
@@ -273,8 +275,29 @@ ancestry_claim_type(<<"update">>, Raw, Nout, Ancestry)
 ancestry_claim_type(_ClaimOp, _Raw, _Nout, _Ancestry) ->
     {error, invalid_ancestry}.
 
+%% Message-embedded raw bytes travel as lowercase hex (see `evidence
+%% encoding' note on the module doc): ancestry entries carry whole parent
+%% transactions, so their binary fields are hex-encoded on embed and
+%% decoded again by `normalized_ancestry' before replay.
 with_ancestry_field(Msg, undefined) -> Msg;
-with_ancestry_field(Msg, Ancestry) -> Msg#{ <<"claim-ancestry">> => Ancestry }.
+with_ancestry_field(Msg, Ancestry) ->
+    Msg#{
+        <<"claim-ancestry">> =>
+            [
+                Entry#{
+                    <<"raw-transaction">> =>
+                        hb_util:to_hex(maps:get(<<"raw-transaction">>, Entry)),
+                    <<"input-parents">> =>
+                        [
+                            hb_util:to_hex(Parent)
+                        ||
+                            Parent <- maps:get(<<"input-parents">>, Entry, [])
+                        ]
+                }
+            ||
+                Entry <- Ancestry
+            ]
+    }.
 
 %% Decode the claim protobuf into a native Odysee-shaped `value' map. Returns
 %% `{Fields, CommittedKeys}' so the caller can both attach the field and extend
@@ -451,7 +474,8 @@ with_attestation_commitment(StreamMsg, ChannelMsg) ->
             ChannelID == SigningChannelID
                 orelse {error, {channel_binding_mismatch, ChannelID, SigningChannelID}},
         PublicKeyHex = maps:get(<<"public-key">>, ChannelMsg),
-        Raw = maps:get(<<"raw-transaction">>, StreamMsg),
+        {ok, _RawHex, Raw} ?=
+            native_id_bytes(maps:get(<<"raw-transaction">>, StreamMsg)),
         {ok, Tx} ?= dev_lbry_tx:parse(Raw),
         [FirstInput | _] = maps:get(<<"inputs">>, Tx),
         Digest = dev_lbry_attestation:signature_digest(FirstInput, Envelope),
@@ -859,8 +883,8 @@ verify_claim_output(Base, Req, OutpointBytes, Opts) ->
         ClaimID = maps:get(<<"claim-id">>, Output),
         ClaimID ?= lower_field(Base, <<"claim-id">>, Opts),
         ClaimID ?= lower_field(Req, <<"claim-id">>, Opts),
-        ClaimBytes = maps:get(<<"claim">>, Output),
-        ClaimBytes ?= hb_maps:get(<<"claim">>, Base, undefined, Opts),
+        ClaimHex = hb_util:to_hex(maps:get(<<"claim">>, Output)),
+        ClaimHex ?= lower_field(Base, <<"claim">>, Opts),
         ClaimName = maps:get(<<"claim-name">>, Output),
         ClaimName ?= hb_maps:get(<<"claim-name">>, Base, undefined, Opts),
         ok ?=
@@ -886,8 +910,8 @@ verify_claim_output(Base, Req, OutpointBytes, Opts) ->
 output_evidence(Base, OutpointBytes, Opts) ->
     maybe
         {ok, TxIDHex, Nout} ?= split_outpoint(OutpointBytes),
-        Raw = hb_maps:get(<<"raw-transaction">>, Base, undefined, Opts),
-        true ?= is_binary(Raw) orelse {error, missing_raw_transaction},
+        {ok, _RawHex, Raw} ?=
+            native_id_bytes(hb_maps:get(<<"raw-transaction">>, Base, undefined, Opts)),
         {ok, Tx} ?= dev_lbry_tx:parse(Raw),
         TxIDHex ?= maps:get(<<"txid">>, Tx),
         TxIDHex ?= lower_field(Base, <<"txid">>, Opts),
@@ -1292,13 +1316,16 @@ claim_type_shape(_Type, _ClaimOp, _Ancestry) ->
     {error, claim_type_mismatch}.
 
 replay_ancestry(<<"ancestor-hash160-outpoint">>, Base, Ancestry, Opts) ->
-    Raw = hb_maps:get(<<"raw-transaction">>, Base, undefined, Opts),
-    Nout = integer_field(Base, <<"nout">>, Opts),
-    case
-        dev_lbry_ancestry:verify_walk(Raw, Nout, Ancestry, ancestry_depth_limit(Opts))
-    of
-        {ok, _CreateTxID} -> ok;
-        {error, Reason} -> {error, {invalid_ancestry, Reason}}
+    maybe
+        {ok, _RawHex, Raw} ?=
+            native_id_bytes(hb_maps:get(<<"raw-transaction">>, Base, undefined, Opts)),
+        Nout = integer_field(Base, <<"nout">>, Opts),
+        case
+            dev_lbry_ancestry:verify_walk(Raw, Nout, Ancestry, ancestry_depth_limit(Opts))
+        of
+            {ok, _CreateTxID} -> ok;
+            {error, Reason} -> {error, {invalid_ancestry, Reason}}
+        end
     end;
 replay_ancestry(_Type, _Base, _Ancestry, _Opts) ->
     ok.
@@ -1346,8 +1373,13 @@ normalize_ancestry_entries([Entry0 | Rest], Opts, Acc) when is_map(Entry0) ->
     maybe
         Nout = integer_field(Entry, <<"nout">>, Opts),
         true ?= is_integer(Nout) orelse {error, invalid_ancestry},
+        {ok, _RawHex, Raw} ?=
+            native_id_bytes(maps:get(<<"raw-transaction">>, Entry, undefined)),
         {ok, Normalized} ?=
-            normalize_input_parents(Entry#{ <<"nout">> => Nout }, Opts),
+            normalize_input_parents(
+                Entry#{ <<"nout">> => Nout, <<"raw-transaction">> => Raw },
+                Opts
+            ),
         normalize_ancestry_entries(Rest, Opts, [Normalized | Acc])
     else
         _ -> {error, invalid_ancestry}
@@ -1364,7 +1396,19 @@ normalize_input_parents(Entry, Opts) ->
         Raw0 ->
             try ancestry_entry_list(hb_cache:ensure_all_loaded(Raw0, Opts), Opts) of
                 Raws when is_list(Raws) ->
-                    {ok, Entry#{ <<"input-parents">> => Raws }};
+                    {ok,
+                        Entry#{
+                            <<"input-parents">> =>
+                                [
+                                    begin
+                                        {ok, _Hex, Parent} = native_id_bytes(RawParent),
+                                        Parent
+                                    end
+                                ||
+                                    RawParent <- Raws
+                                ]
+                        }
+                    };
                 _ ->
                     {error, invalid_ancestry}
             catch

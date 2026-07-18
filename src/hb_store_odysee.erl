@@ -944,7 +944,7 @@ bare_txid_read_returns_native_transaction_test() ->
     ?assertEqual(<<"odysee/transaction/", TxID/binary>>, canonical_read_path(TxID)),
     {ok, Msg} = read(Store, #{ <<"read">> => TxID }, #{}),
     ?assertEqual(TxID, maps:get(<<"txid">>, Msg)),
-    ?assertEqual(Raw, maps:get(<<"raw">>, Msg)),
+    ?assertEqual(hb_util:to_hex(Raw), maps:get(<<"raw">>, Msg)),
     [Commitment] = maps:values(maps:get(<<"commitments">>, Msg)),
     ?assertEqual(<<"transaction">>, maps:get(<<"evidence">>, Commitment)),
     ?assertEqual(
@@ -1014,7 +1014,7 @@ direct_txid_get_returns_native_transaction_test() ->
     },
     {ok, Msg} = hb_cache:read(TxID, #{ <<"store">> => [Store] }),
     ?assertEqual(TxID, maps:get(<<"txid">>, Msg)),
-    ?assertEqual(Raw, maps:get(<<"raw">>, Msg)).
+    ?assertEqual(hb_util:to_hex(Raw), maps:get(<<"raw">>, Msg)).
 
 direct_outpoint_get_returns_native_claim_output_test() ->
     Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
