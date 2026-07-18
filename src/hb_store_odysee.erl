@@ -397,9 +397,45 @@ stream_media_source(Stream, Opts) ->
         {ok, maps:filter(fun(_Key, Value) -> present_optional(Value) end, Source0)}
     end.
 
+%% @doc Serve media bytes for a stream. Explicit ranges (store request
+%% `start'/`end' keys or a `range' header value) yield a bounded 206
+%% slice; without one the FULL decrypted object is served with a plain
+%% 200. HTTP `Range' headers do not reach store reads through
+%% `~cache@1.0/read', so serving a partial window to a rangeless caller
+%% would hand video elements the same slice for every request.
 media_response(Source, Req, Opts) ->
+    case request_range(Req, Opts) of
+        full -> full_media_response(Source, Opts);
+        {ok, Start, End} -> ranged_media_response(Source, Start, End, Opts);
+        Error -> Error
+    end.
+
+full_media_response(Source, Opts) ->
     maybe
-        {ok, Start, End} ?= request_range(Req, Opts),
+        SDHash = hb_maps:get(<<"sd-hash">>, Source, not_found, Opts),
+        {ok, Result} ?= hb_odysee_bridge:reassemble_stream(SDHash, Opts),
+        Body = maps:get(<<"bytes">>, Result),
+        {ok,
+            maps:merge(
+                #{
+                    <<"status">> => 200,
+                    <<"content-type">> =>
+                        hb_maps:get(
+                            <<"content-type">>,
+                            Source,
+                            <<"application/octet-stream">>,
+                            Opts
+                        ),
+                    <<"content-length">> => byte_size(Body),
+                    <<"sd-hash">> => hb_util:to_lower(SDHash),
+                    <<"body">> => Body
+                },
+                media_metadata(Source, byte_size(Body))
+            )}
+    end.
+
+ranged_media_response(Source, Start, End, Opts) ->
+    maybe
         {ok, BoundedStart, BoundedEnd} ?= bounded_range(Source, Start, End),
         SDHash = hb_maps:get(<<"sd-hash">>, Source, not_found, Opts),
         {ok, Result} ?=
@@ -441,7 +477,7 @@ request_range(Req, Opts) ->
         _ ->
             case first_present([<<"range">>, <<"Range">>], Req, Opts) of
                 Range when is_binary(Range) -> parse_range(Range, Opts);
-                _ -> {ok, 0, default_range_size(Opts) - 1}
+                _ -> full
             end
     end.
 
