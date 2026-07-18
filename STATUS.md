@@ -3,6 +3,26 @@
 Status log for the overnight port. Newest entries first. Decisions with
 rationale live in `decisions/`.
 
+## 2026-07-18 (afternoon) — HB-side fix for hook-signed persistence
+
+Per review direction, the app-layer `persist@1.0` semantics moved into
+HyperBEAM itself: branch `fix/store-hook-signed-requests`
+(`~/src/hyperbeam/.worktrees/store-hook-signed`, rebased onto current
+edge). `dev_auth_hook` now stores the messages it commits (honouring
+`store-all-signed`), deduplicated per commitment set, with the caller-
+visible full content ID linked to the stored path. Two regression tests
+(http-auth readback, cookie-provider `/id` flow that previously 500'd).
+`rebar3 eunit-all`: 3495 passed; 3 failures shown pre-existing/flaky by
+A/B against clean edge (2× live-network legacy-scheduler tests, 1×
+rate-limit timing test that passes solo). A 4-lens adversarial review
+drove the dedup, removed a provably-redundant ID link, and surfaced the
+primary-store-vs-`cache-http` policy question (documented for the PR).
+App-side follow-up once merged to edge: slim `persist@1.0` to its
+`message-id` response annotation (the write/link halves become
+redundant); a Forge-packager `_checkouts` git-lock quirk blocked local
+pre-merge integration of the patched dep (not a merge blocker — the
+in-repo cookie test covers the flow).
+
 ## 2026-07-18 (day) — full-flow browser verification + write-path fixes
 
 All four flows verified in the browser with screenshots, on a seed node
