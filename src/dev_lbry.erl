@@ -92,8 +92,7 @@
 %%% request key), `descriptor' (with an optional `sd-hash'), `transaction'
 %%% (raw or hex bytes, with an optional `encoding' of `hex'), and `claim'
 %%% (a claim envelope, raw or hex). Map inputs are encoded directly, after
-%%% kind-specific normalization for `claim' (envelope extraction),
-%%% `channel', and `stream' (SDK-shaped claim maps). `to/3' re-encodes a
+%%% envelope extraction for `claim'. `to/3' re-encodes a
 %%% TABM to its structured form by default; a `format' request key of `raw'
 %%% returns the source object's raw bytes (the `data' field for blobs, the
 %%% `raw' field otherwise), and `hex' returns those bytes hex-encoded.
@@ -130,16 +129,6 @@ from(Msg, Req, Opts) when is_map(Msg) ->
     case hb_maps:get(<<"evidence">>, Req, undefined, Opts) of
         <<"claim">> ->
             from_structured(extract_envelope(Msg), Req, Opts);
-        <<"channel">> ->
-            case normalize_channel(Msg) of
-                {ok, Channel} -> from_structured(Channel, Req, Opts);
-                Error -> Error
-            end;
-        <<"stream">> ->
-            case normalize_stream(Msg) of
-                {ok, Stream} -> from_structured(Stream, Req, Opts);
-                Error -> Error
-            end;
         _ ->
             from_structured(Msg, Req, Opts)
     end;
@@ -480,75 +469,6 @@ extract_envelope(#{ <<"claim-envelope">> := Envelope }) when is_map(Envelope) ->
 extract_envelope(Msg) ->
     Msg.
 
-normalize_channel(Channel = #{ <<"raw">> := _ }) ->
-    {ok, Channel};
-normalize_channel(Channel) ->
-    maybe
-        {ok, ChannelHash} ?= dev_lbry_attestation:channel_hash(Channel),
-        {ok, PublicKey} ?= dev_lbry_attestation:channel_public_key(Channel),
-        {ok, #{
-            <<"raw">> => Channel,
-            <<"channel-id">> => hb_util:to_hex(reverse(ChannelHash)),
-            <<"channel-hash">> => ChannelHash,
-            <<"public-key">> => hb_util:to_hex(PublicKey)
-        }}
-    end.
-
-normalize_stream(Stream = #{ <<"raw">> := _ }) ->
-    {ok, Stream};
-normalize_stream(Stream) ->
-    case source_sd_hash(Stream) of
-        {ok, SDHash} -> {ok, normalize_stream(Stream, SDHash)};
-        not_found -> {ok, normalize_stream(Stream, undefined)};
-        Error -> Error
-    end.
-
-normalize_stream(Stream, SDHash) ->
-    fold_optional(
-        [
-            {<<"claim-id">>, maps:get(<<"claim_id">>, Stream, undefined)},
-            {<<"name">>, maps:get(<<"name">>, Stream, undefined)},
-            {<<"txid">>, maps:get(<<"txid">>, Stream, undefined)},
-            {<<"nout">>, maps:get(<<"nout">>, Stream, undefined)},
-            {<<"sd-hash">>, SDHash},
-            {<<"signing-channel">>, maps:get(<<"signing_channel">>, Stream, undefined)}
-        ],
-        #{ <<"raw">> => Stream }
-    ).
-
-source_sd_hash(Stream) ->
-    case claim_envelope(Stream) of
-        {ok, #{ <<"message">> := Message }} ->
-            dev_lbry_claim_proto:stream_sd_hash(Message);
-        {ok, _Envelope} ->
-            {error, missing_claim_message};
-        not_found ->
-            not_found;
-        Error ->
-            Error
-    end.
-
-claim_envelope(#{ <<"claim-envelope">> := Envelope }) when is_map(Envelope) ->
-    {ok, Envelope};
-claim_envelope(#{ <<"claim-envelope">> := _Envelope }) ->
-    {error, invalid_claim_envelope};
-claim_envelope(#{ <<"claim">> := #{ <<"claim-envelope">> := Envelope } })
-        when is_map(Envelope) ->
-    {ok, Envelope};
-claim_envelope(#{ <<"claim">> := #{ <<"claim-envelope">> := _Envelope } }) ->
-    {error, invalid_claim_envelope};
-claim_envelope(_) ->
-    not_found.
-
-fold_optional([], Acc) ->
-    Acc;
-fold_optional([{_Key, undefined} | Rest], Acc) ->
-    fold_optional(Rest, Acc);
-fold_optional([{_Key, not_found} | Rest], Acc) ->
-    fold_optional(Rest, Acc);
-fold_optional([{Key, Value} | Rest], Acc) ->
-    fold_optional(Rest, Acc#{ Key => Value }).
-
 %%% Conversion plumbing
 
 from_structured(Msg, Req, Opts) ->
@@ -601,12 +521,12 @@ hex_to_binary(Hex) when is_binary(Hex) ->
         _:_ -> {error, invalid_hex}
     end.
 
-reverse(Bin) ->
-    list_to_binary(lists:reverse(binary_to_list(Bin))).
-
 %%% Tests
 
 -ifdef(TEST).
+
+reverse(Bin) ->
+    binary:list_to_bin(lists:reverse(binary:bin_to_list(Bin))).
 
 blob_verify_test() ->
     Bytes = <<"encrypted blob bytes">>,
@@ -885,61 +805,6 @@ claim_codec_roundtrip_test() ->
         ),
     ?assertEqual({ok, Raw}, to(FromHex, #{ <<"format">> => <<"raw">> }, #{})).
 
-channel_codec_roundtrip_test() ->
-    Channel = sample_sdk_channel(),
-    {ok, TABM} = from(Channel, #{ <<"evidence">> => <<"channel">> }, #{}),
-    {ok, Structured} = to(TABM, #{}, #{}),
-    ?assertEqual(
-        maps:get(<<"claim_id">>, Channel),
-        maps:get(<<"channel-id">>, Structured)
-    ),
-    {ok, RoundTripped} =
-        to(TABM, #{ <<"evidence">> => <<"channel">>, <<"format">> => <<"raw">> }, #{}),
-    ?assertEqual(Channel, RoundTripped).
-
-stream_codec_roundtrip_test() ->
-    Stream = #{
-        <<"claim_id">> => <<"9cc7f0e3de8db3b2ffd6dc0b4f1a0f0ca48a6b49">>,
-        <<"name">> => <<"sample">>,
-        <<"txid">> =>
-            <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
-        <<"nout">> => 0,
-        <<"value">> => #{
-            <<"source">> => #{
-                <<"sd_hash">> => hb_util:to_hex(crypto:hash(sha384, <<"descriptor">>))
-            }
-        },
-        <<"signing_channel">> => sample_sdk_channel()
-    },
-    {ok, TABM} = from(Stream, #{ <<"evidence">> => <<"stream">> }, #{}),
-    {ok, Structured} = to(TABM, #{}, #{}),
-    % The SDK-reported `sd_hash' is untrusted: `sd-hash' derives only from a
-    % claim envelope.
-    ?assertNot(maps:is_key(<<"sd-hash">>, Structured)),
-    ?assertEqual(0, maps:get(<<"nout">>, Structured)),
-    {ok, RoundTripped} =
-        to(TABM, #{ <<"evidence">> => <<"stream">>, <<"format">> => <<"raw">> }, #{}),
-    ?assertEqual(Stream, RoundTripped).
-
-stream_codec_prefers_signed_claim_sd_hash_test() ->
-    {ok, Tx} = dev_lbry_tx:parse_hex(dev_lbry_tx:task0_tx_hex()),
-    [ClaimOutput | _] = maps:get(<<"outputs">>, Tx),
-    Envelope = maps:get(<<"claim-envelope">>, ClaimOutput),
-    Stream = #{
-        <<"claim_id">> => <<"9cc7f0e3de8db3b2ffd6dc0b4f1a0f0ca48a6b49">>,
-        <<"value">> => #{
-            <<"source">> => #{
-                <<"sd_hash">> => hb_util:to_hex(crypto:hash(sha384, <<"sdk">>))
-            }
-        },
-        <<"claim-envelope">> => Envelope
-    },
-    {ok, TABM} = from(Stream, #{ <<"evidence">> => <<"stream">> }, #{}),
-    ?assertEqual(
-        <<"3da16b833f169c21caeb62ca66111227413f30f63c9d2f52f2a787643e086c334ee6949e05875cfe94a816aba02e492e">>,
-        maps:get(<<"sd-hash">>, TABM)
-    ).
-
 to_hint_and_content_type_test() ->
     ?assertEqual({ok, #{ <<"bundle">> => true }}, to_hint(#{}, #{}, #{})),
     ?assertEqual({ok, <<"application/vnd.lbry">>}, content_type(#{})).
@@ -949,14 +814,6 @@ to_hint_and_content_type_test() ->
 sample_channel_keys() ->
     {Uncompressed, _} = crypto:generate_key(ecdh, secp256k1, <<1:256>>),
     {ar_wallet:compress_ecdsa_pubkey(Uncompressed), Uncompressed}.
-
-sample_sdk_channel() ->
-    {Compressed, _} = sample_channel_keys(),
-    ChannelHash = <<3:160>>,
-    #{
-        <<"claim_id">> => hb_util:to_hex(reverse(ChannelHash)),
-        <<"value">> => #{ <<"public_key">> => hb_util:to_hex(Compressed) }
-    }.
 
 sample_descriptor_json() ->
     Key = <<0:128>>,
