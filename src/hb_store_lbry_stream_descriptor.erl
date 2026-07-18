@@ -4,10 +4,9 @@
 %%% parses them as a descriptor and returns a message committed under a
 %%% native `lbry@1.0' commitment with `descriptor' evidence.
 -module(hb_store_lbry_stream_descriptor).
--export([scope/0, scope/1, type/3, read/3, resolve/3]).
+-export([scope/1, type/3, read/3, resolve/3]).
 
-scope() -> remote.
-scope(_) -> scope().
+scope(_) -> remote.
 
 resolve(_StoreOpts, #{ <<"resolve">> := Key }, _NodeOpts) ->
     case normalize_key(Key) of
@@ -111,7 +110,7 @@ normalize_key(Key0) ->
         {ok, Hash} ->
             {ok, Hash, strict};
         error ->
-            case valid_hash(Key) of
+            case hb_odysee_util:valid_hex(Key, 48) of
                 true -> {ok, hb_util:to_lower(Key), fallback};
                 false -> error
             end
@@ -131,7 +130,7 @@ descriptor_path_hash(_Key) ->
     error.
 
 explicit_hash(Hash) ->
-    case valid_hash(Hash) of
+    case hb_odysee_util:valid_hex(Hash, 48) of
         true -> {ok, hb_util:to_lower(Hash)};
         false -> error
     end.
@@ -140,15 +139,6 @@ strip_slash(<<"/", Rest/binary>>) ->
     strip_slash(Rest);
 strip_slash(Key) ->
     Key.
-
-valid_hash(Hash) when is_binary(Hash), byte_size(Hash) == 96 ->
-    try binary:decode_hex(Hash) of
-        Decoded -> byte_size(Decoded) == 48
-    catch
-        _:_ -> false
-    end;
-valid_hash(_) ->
-    false.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

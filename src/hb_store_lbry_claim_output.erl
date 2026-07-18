@@ -21,10 +21,9 @@
 %%% built, the output keeps its honest `asserted-claim-id' label. The
 %%% `ancestry-depth-limit' option bounds the walk.
 -module(hb_store_lbry_claim_output).
--export([scope/0, scope/1, type/3, read/3, resolve/3]).
+-export([scope/1, type/3, read/3, resolve/3]).
 
-scope() -> remote.
-scope(_) -> scope().
+scope(_) -> remote.
 
 resolve(_StoreOpts, #{ <<"resolve">> := Key }, _NodeOpts) ->
     case parse_outpoint(Key) of
@@ -75,10 +74,9 @@ fetch_output(StoreOpts, TxID, Nout, NodeOpts) ->
 %% Store options may arrive from JSON node configuration, where booleans
 %% and integers are carried in their encoded binary forms.
 output_ancestry(StoreOpts, Raw, Nout, NodeOpts) ->
-    case hb_maps:get(<<"walk-ancestry">>, StoreOpts, false, NodeOpts) of
+    case hb_util:bool(hb_maps:get(<<"walk-ancestry">>, StoreOpts, false, NodeOpts)) of
         true -> walk_ancestry(StoreOpts, Raw, Nout, NodeOpts);
-        <<"true">> -> walk_ancestry(StoreOpts, Raw, Nout, NodeOpts);
-        _ -> {ok, undefined}
+        false -> {ok, undefined}
     end.
 
 walk_ancestry(StoreOpts, Raw, Nout, NodeOpts) ->
@@ -146,21 +144,13 @@ parse_outpoint(_) ->
     {error, invalid_outpoint}.
 
 parse_nout(NoutBin) ->
-    try binary_to_integer(NoutBin) of
-        Nout when Nout >= 0 -> {ok, Nout};
+    case hb_util:safe_int(NoutBin) of
+        {ok, Nout} when Nout >= 0 -> {ok, Nout};
         _ -> {error, invalid_nout}
-    catch
-        _:_ -> {error, invalid_nout}
     end.
 
-valid_txid(TxID) when is_binary(TxID), byte_size(TxID) == 64 ->
-    try binary:decode_hex(TxID) of
-        Decoded -> byte_size(Decoded) == 32
-    catch
-        _:_ -> false
-    end;
-valid_txid(_) ->
-    false.
+valid_txid(TxID) ->
+    hb_odysee_util:valid_hex(TxID, 32).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

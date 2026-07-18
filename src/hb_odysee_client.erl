@@ -157,14 +157,8 @@ claim_separator_to_hash(Part) ->
             <<Name/binary, "#", ClaimID/binary>>
     end.
 
-valid_claim_id(ClaimID) when is_binary(ClaimID), byte_size(ClaimID) == 40 ->
-    try binary:decode_hex(ClaimID) of
-        Decoded -> byte_size(Decoded) == 20
-    catch
-        _:_ -> false
-    end;
-valid_claim_id(_) ->
-    false.
+valid_claim_id(ClaimID) ->
+    hb_odysee_util:valid_hex(ClaimID, 20).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").

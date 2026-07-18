@@ -31,7 +31,7 @@
 %%%       stream's descriptor, served through `hb_odysee_bridge'.</li>
 %%% </ul>
 -module(hb_store_odysee).
--export([start/3, stop/3, reset/3, scope/0, scope/1]).
+-export([start/3, stop/3, reset/3, scope/1]).
 -export([read/3, type/3, resolve/3, list/3]).
 -export([write/3, group/3, link/3]).
 
@@ -46,13 +46,8 @@ stop(_StoreOpts, _Req, _NodeOpts) ->
 reset(_StoreOpts, _Req, _NodeOpts) ->
     ok.
 
-scope() ->
-    remote.
-
-scope(#{ <<"scope">> := Scope }) ->
-    Scope;
 scope(_StoreOpts) ->
-    scope().
+    remote.
 
 resolve(_StoreOpts, #{ <<"resolve">> := Key }, _NodeOpts) ->
     {ok, normalize_key(Key)}.
@@ -475,7 +470,7 @@ request_range(Req, Opts) ->
         {Start, End} when is_integer(Start), is_integer(End), End >= Start ->
             {ok, Start, End};
         _ ->
-            case first_present([<<"range">>, <<"Range">>], Req, Opts) of
+            case first_present([<<"range">>], Req, Opts) of
                 Range when is_binary(Range) -> parse_range(Range, Opts);
                 _ -> full
             end
@@ -566,45 +561,36 @@ integer_or_undefined(Value) when is_binary(Value) ->
 integer_or_undefined(_Value) ->
     undefined.
 
-%% @doc Best-effort cache warming for content resolved live: write the
-%% committed message into the node's local store(s) and link the originally
-%% requested bare key to it, so a later bare `GET /(id)' hits the local store
-%% before falling through to this (remote, read-only) store. Only bare
-%% outpoint reads warm the cache -- those keys are immutable, so the cached
-%% copy can never go stale. A warming failure never breaks the read.
+%% @doc Link a resolved bare outpoint key to its evidence message, so a
+%% later bare read hits the local store before falling through to this
+%% (remote, read-only) store. Only bare outpoints warm -- those keys are
+%% immutable, so the link can never go stale. The message is written to
+%% obtain its canonical cache id (`lbry@1.0' commitments carry no
+%% committer, so the id cannot be recomputed independently of the write),
+%% then the request key is linked to it. A warming failure never breaks
+%% the read.
 maybe_warm_bare_key(Key, Msg, StoreOpts, NodeOpts) ->
-    case is_bare_outpoint(Key) of
-        true -> maybe_warm_cache(Key, Msg, StoreOpts, NodeOpts);
-        false -> ok
-    end.
-
-maybe_warm_cache(Key, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
-    catch warm_cache(Key, Msg, StoreOpts, NodeOpts),
-    ok;
-maybe_warm_cache(_Key, _Msg, _StoreOpts, _NodeOpts) ->
-    ok.
-
-warm_cache(Key, Msg, StoreOpts, NodeOpts) ->
-    case warm_stores(StoreOpts, NodeOpts) of
-        [] ->
+    case is_bare_outpoint(Key) andalso is_map(Msg) of
+        true ->
+            catch link_local(Key, Msg, local_stores(StoreOpts, NodeOpts), NodeOpts),
             ok;
-        LocalStores ->
-            {ok, Id} = hb_cache:write(Msg, #{ <<"store">> => LocalStores }),
-            hb_store:link(LocalStores, #{ Key => Id }, #{}),
+        false ->
             ok
     end.
 
+link_local(_Key, _Msg, [], _Opts) ->
+    ok;
+link_local(Key, Msg, LocalStores, Opts) ->
+    {ok, Id} = hb_cache:write(Msg, Opts#{ <<"store">> => LocalStores }),
+    hb_store:link(LocalStores, #{ Key => Id }, Opts),
+    ok.
+
 %% Follow `hb_store_gateway''s `local-store' convention when provided;
-%% otherwise warm the node's local-scope stores (this store's scope is
-%% `remote', so it excludes itself).
-warm_stores(StoreOpts, NodeOpts) ->
+%% otherwise the node's own local-scope stores (this store is `remote',
+%% so it excludes itself).
+local_stores(StoreOpts, NodeOpts) ->
     case hb_maps:get(<<"local-store">>, StoreOpts, not_found, NodeOpts) of
-        not_found ->
-            case hb_opts:get(store, [], NodeOpts) of
-                Stores when is_list(Stores) -> hb_store:scope(Stores, local);
-                Store when is_map(Store) -> hb_store:scope([Store], local);
-                _ -> []
-            end;
+        not_found -> hb_store:scope(hb_opts:get(store, [], NodeOpts), local);
         false -> [];
         Stores when is_list(Stores) -> Stores;
         Store -> [Store]
@@ -632,10 +618,10 @@ list_channel_search(Encoded, Req, StoreOpts, NodeOpts, Project) ->
         {ok, ChannelID} ?= decode_component(Encoded),
         Page = int_param(hb_maps:get(<<"page">>, Req, 1, NodeOpts), 1),
         PageSize = int_param(
-            hb_maps:get(<<"page-size">>, Req, hb_maps:get(<<"page_size">>, Req, 20, NodeOpts), NodeOpts),
+            hb_maps:get(<<"page-size">>, Req, 20, NodeOpts),
             20
         ),
-        OrderBy = hb_maps:get(<<"order-by">>, Req, hb_maps:get(<<"order_by">>, Req, [<<"release_time">>], NodeOpts), NodeOpts),
+        OrderBy = hb_maps:get(<<"order-by">>, Req, [<<"release_time">>], NodeOpts),
         {ok, Search} ?=
             hb_odysee_client:call(
                 <<"claim_search">>,
@@ -716,7 +702,7 @@ first_found([Key | Rest], Msg, Default, Opts) ->
     end.
 
 list_claim_ids(Search, Opts) ->
-    case first_found([<<"claim-ids">>, <<"claim_ids">>], Search, not_found, Opts) of
+    case first_found([<<"claim_ids">>], Search, not_found, Opts) of
         ClaimIDs when is_list(ClaimIDs) ->
             ClaimIDs;
         _ ->
@@ -724,7 +710,7 @@ list_claim_ids(Search, Opts) ->
                 ClaimID
             ||
                 Claim <- first_found([<<"claims">>, <<"items">>], Search, [], Opts),
-                ClaimID <- [first_found([<<"claim-id">>, <<"claim_id">>], Claim, not_found, Opts)],
+                ClaimID <- [first_found([<<"claim_id">>], Claim, not_found, Opts)],
                 ClaimID =/= not_found
             ]
     end.
@@ -745,8 +731,8 @@ list_claim_outputs(Search, Opts) ->
     ].
 
 claim_outpoint(Claim, Opts) ->
-    TxID = first_found([<<"txid">>, <<"tx-id">>], Claim, not_found, Opts),
-    Nout = first_found([<<"nout">>, <<"n-out">>], Claim, not_found, Opts),
+    TxID = first_found([<<"txid">>], Claim, not_found, Opts),
+    Nout = first_found([<<"nout">>], Claim, not_found, Opts),
     case {TxID, nout_binary(Nout)} of
         {TxID, NoutBin} when is_binary(TxID), is_binary(NoutBin) ->
             <<TxID/binary, ":", NoutBin/binary>>;
@@ -1201,7 +1187,7 @@ bare_channel_id_claims_list_returns_claim_ids_test() ->
             <<"odysee/channel-id/", ChannelID/binary, "/claims">> => #{
                 <<"items">> => [
                     #{ <<"claim_id">> => ClaimID1 },
-                    #{ <<"claim-id">> => ClaimID2 }
+                    #{ <<"claim_id">> => ClaimID2 }
                 ]
             }
         }
@@ -1224,8 +1210,8 @@ bare_channel_id_claim_outputs_list_returns_immutable_outpoints_test() ->
             <<"odysee/channel-id/", ChannelID/binary, "/claim-outputs">> => #{
                 <<"items">> => [
                     #{ <<"claim_id">> => ClaimID, <<"txid">> => TxID1, <<"nout">> => 0 },
-                    #{ <<"claim-id">> => ClaimID, <<"txid">> => TxID2, <<"nout">> => <<"2">> },
-                    #{ <<"claim-id">> => ClaimID }
+                    #{ <<"claim_id">> => ClaimID, <<"txid">> => TxID2, <<"nout">> => <<"2">> },
+                    #{ <<"claim_id">> => ClaimID }
                 ]
             }
         }

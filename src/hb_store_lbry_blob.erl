@@ -3,12 +3,11 @@
 %%% and only surface as a message carrying a native `lbry@1.0' commitment
 %%% with `blob' evidence when they match the requested hash.
 -module(hb_store_lbry_blob).
--export([scope/0, scope/1, type/3, read/3, resolve/3]).
+-export([scope/1, type/3, read/3, resolve/3]).
 
 -define(DEFAULT_NODE, <<"http://blobcache-eu.odycdn.com:5569">>).
 
-scope() -> remote.
-scope(_) -> scope().
+scope(_) -> remote.
 
 resolve(_StoreOpts, #{ <<"resolve">> := Key }, _NodeOpts) ->
     case normalize_hash_key(Key) of
@@ -151,15 +150,6 @@ blob_path(Hash, StoreOpts, Opts) ->
             <<"/blob?", Query/binary>>
     end.
 
-valid_hash(Hash) when is_binary(Hash), byte_size(Hash) == 96 ->
-    try binary:decode_hex(Hash) of
-        Decoded -> byte_size(Decoded) == 48
-    catch
-        _:_ -> false
-    end;
-valid_hash(_) ->
-    false.
-
 normalize_hash_key(<<"/", Rest/binary>>) ->
     normalize_hash_key(Rest);
 normalize_hash_key(<<"lbry/blob/", Hash/binary>>) ->
@@ -167,7 +157,7 @@ normalize_hash_key(<<"lbry/blob/", Hash/binary>>) ->
 normalize_hash_key(<<"odysee/blob/", Hash/binary>>) ->
     normalize_hash_key(Hash);
 normalize_hash_key(Hash) when is_binary(Hash) ->
-    case valid_hash(Hash) of
+    case hb_odysee_util:valid_hex(Hash, 48) of
         true -> {ok, hb_util:to_lower(Hash)};
         false -> error
     end;

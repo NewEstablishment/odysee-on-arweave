@@ -102,7 +102,7 @@ stream_graph(ClaimIDOrName, Opts) ->
         {ok, TxID} ?= claim_txid(Claim),
         {ok, Descriptor} ?= descriptor(SDHash, Opts),
         {ok, RawTxResult} ?= hb_odysee_client:transaction_show(TxID, Opts),
-        {ok, RawTxHex} ?= raw_tx_hex(RawTxResult),
+        {ok, RawTxHex} ?= hb_odysee_util:raw_tx_hex(RawTxResult),
         {ok, ParsedTx} ?= dev_lbry_tx:parse_hex(RawTxHex),
         {ok, #{
             <<"claim">> => Claim,
@@ -405,11 +405,9 @@ claim_nout(Claim) ->
     case maps:get(<<"nout">>, Claim, undefined) of
         Nout when is_integer(Nout), Nout >= 0 -> {ok, Nout};
         Nout when is_binary(Nout) ->
-            try binary_to_integer(Nout) of
-                Int when Int >= 0 -> {ok, Int};
+            case hb_util:safe_int(Nout) of
+                {ok, Int} when Int >= 0 -> {ok, Int};
                 _ -> {error, missing_nout}
-            catch
-                _:_ -> {error, missing_nout}
             end;
         _ ->
             {error, missing_nout}
@@ -425,12 +423,6 @@ matching_claim_id(ClaimID, ClaimOutput) ->
             end;
         _ ->
             {error, missing_claim_output_claim_id}
-    end.
-
-raw_tx_hex(TxResult) ->
-    case maps:get(<<"hex">>, TxResult, undefined) of
-        undefined -> {error, missing_raw_tx_hex};
-        Hex -> {ok, Hex}
     end.
 
 -ifdef(TEST).

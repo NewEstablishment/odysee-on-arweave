@@ -4,10 +4,9 @@
 %%% requested key. The result is a HyperBEAM message carrying the raw bytes
 %%% and a native `lbry@1.0' commitment with `transaction' evidence.
 -module(hb_store_lbry_transaction).
--export([scope/0, scope/1, type/3, read/3, resolve/3]).
+-export([scope/1, type/3, read/3, resolve/3]).
 
-scope() -> remote.
-scope(_) -> scope().
+scope(_) -> remote.
 
 resolve(_StoreOpts, #{ <<"resolve">> := TxID }, _NodeOpts) ->
     case valid_txid(TxID) of
@@ -34,24 +33,17 @@ fetch_transaction(StoreOpts, TxID, NodeOpts) ->
     maybe
         {ok, TxResult} ?=
             hb_odysee_client:transaction_show(TxID, proxy_opts(StoreOpts, NodeOpts)),
-        {ok, Hex} ?= raw_tx_hex(TxResult),
+        {ok, Hex} ?= hb_odysee_util:raw_tx_hex(TxResult),
         {ok, Raw} ?= decode_tx_hex(Hex),
         {ok, Msg} ?= dev_lbry_commitment:transaction_message(Raw),
         ok ?= matching_txid(TxID, Msg),
         {ok, Msg}
-    else
-        {error, _} = Error -> Error;
-        {failure, _} = Failure -> Failure
     end.
 
 %% The proxy node and HTTP client may be pinned per-store; otherwise the
 %% node options apply.
 proxy_opts(StoreOpts, NodeOpts) ->
-    ProxyNode =
-        case hb_maps:get(<<"lbry-proxy-node">>, StoreOpts, not_found, NodeOpts) of
-            not_found -> hb_maps:get(<<"lbry-proxy-url">>, StoreOpts, not_found, NodeOpts);
-            Node -> Node
-        end,
+    ProxyNode = hb_maps:get(<<"lbry-proxy-node">>, StoreOpts, not_found, NodeOpts),
     ProxyOpts =
         case ProxyNode of
             not_found -> #{};
@@ -62,14 +54,6 @@ proxy_opts(StoreOpts, NodeOpts) ->
         hb_maps:with([<<"http-client">>], StoreOpts, NodeOpts),
         NodeOpts
     ).
-
-raw_tx_hex(TxResult) when is_map(TxResult) ->
-    case maps:get(<<"hex">>, TxResult, undefined) of
-        Hex when is_binary(Hex) -> {ok, Hex};
-        _ -> {error, missing_raw_tx_hex}
-    end;
-raw_tx_hex(_) ->
-    {error, missing_raw_tx_hex}.
 
 decode_tx_hex(Hex) when is_binary(Hex) ->
     try binary:decode_hex(hb_util:to_lower(Hex)) of
@@ -85,14 +69,8 @@ matching_txid(TxID, #{ <<"txid">> := TxID }) ->
 matching_txid(TxID, #{ <<"txid">> := ActualTxID }) ->
     {error, {txid_mismatch, TxID, ActualTxID}}.
 
-valid_txid(TxID) when is_binary(TxID), byte_size(TxID) == 64 ->
-    try binary:decode_hex(TxID) of
-        Decoded -> byte_size(Decoded) == 32
-    catch
-        _:_ -> false
-    end;
-valid_txid(_) ->
-    false.
+valid_txid(TxID) ->
+    hb_odysee_util:valid_hex(TxID, 32).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
