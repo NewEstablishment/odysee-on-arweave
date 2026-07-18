@@ -176,6 +176,15 @@ Evidence messages are plain `message@1.0` maps; all proofs live in their
 `commitments` map with `commitment-device => <<"lbry@1.0">>`. Commitments are
 content-addressed: no wallet, no committer.
 
+Every value in an evidence message is header-safe on the wire. LBRY
+identifiers (`claim-id`, `txid`, `sd-hash`, `blob-hash`, `public-key`)
+keep their natural lowercase-hex display identity; embedded raw byte
+fields (`claim`, `raw-transaction`, transaction `raw`, ancestry entry
+transactions) are base64url (unpadded, the standard HyperBEAM binary
+encoding). Verifiers decode with a canonicality check — a value that
+does not round-trip through encode fails closed. Descriptor `raw` is
+the ASCII JSON of the descriptor blob itself.
+
 ### Commitment message fields
 
 | key | value |

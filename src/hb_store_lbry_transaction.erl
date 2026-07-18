@@ -110,7 +110,7 @@ read_returns_committed_transaction_message_test() ->
         ?assertEqual(<<"lbry@1.0">>, maps:get(<<"commitment-device">>, Commitment)),
         ?assertEqual(<<"transaction">>, maps:get(<<"evidence">>, Commitment)),
         ?assertEqual(
-            dev_lbry_tx:task0_tx_hex(),
+            hb_util:encode(binary:decode_hex(dev_lbry_tx:task0_tx_hex())),
             maps:get(<<"raw">>, Msg)
         ),
         ?assertEqual(

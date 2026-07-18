@@ -293,8 +293,8 @@ verify_transaction(Base, Req, Opts) ->
                 ),
             {ok, Hex, Bytes} ?= dev_lbry_commitment:native_id(Req, Opts),
             32 ?= byte_size(Bytes),
-            {ok, _RawHex, Raw} ?=
-                dev_lbry_commitment:native_id_bytes(
+            {ok, Raw} ?=
+                dev_lbry_commitment:evidence_decode(
                     hb_maps:get(<<"raw">>, Base, undefined, Opts)
                 ),
             Hex ?= dev_lbry_tx:txid(Raw),
@@ -334,8 +334,8 @@ commit_claim_output(Msg, Construct, Opts) ->
 %% encoding. Real transactions are never all-hex-character byte strings,
 %% so the decode is unambiguous in practice.
 raw_input(Bin) when is_binary(Bin) ->
-    case dev_lbry_commitment:native_id_bytes(Bin) of
-        {ok, _Hex, Bytes} -> Bytes;
+    case dev_lbry_commitment:evidence_decode(Bin) of
+        {ok, Bytes} -> Bytes;
         _ -> Bin
     end;
 raw_input(Other) ->

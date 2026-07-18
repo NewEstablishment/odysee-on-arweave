@@ -14,6 +14,7 @@
 -export([commitment_id/1, commitment/5, with_commitment/6]).
 -export([content_digest_sha384/1]).
 -export([native_id/2, native_id_bytes/1, outpoint_bytes/2]).
+-export([evidence_encode/1, evidence_decode/1]).
 -export([blob_message/2, transaction_message/1, descriptor_message/2]).
 -export([claim_output_message/2, claim_output_message/3]).
 -export([channel_output_message/2, channel_output_message/3]).
@@ -110,10 +111,33 @@ signature_matches(_, _) ->
     false.
 
 native_signature_encode(Bytes) ->
-    base64:encode(Bytes, #{mode => urlsafe, padding => false}).
+    hb_util:encode(Bytes).
 
 native_signature_decode(Encoded) ->
-    base64:decode(Encoded, #{mode => urlsafe, padding => false}).
+    hb_util:decode(Encoded).
+
+%% @doc Encode raw evidence bytes for embedding in a message. Message
+%% values must be header-safe on the wire; b64u is the standard binary
+%% encoding.
+evidence_encode(Bytes) ->
+    hb_util:encode(Bytes).
+
+%% @doc Decode embedded raw evidence bytes, failing closed on any value
+%% that is not b64u. The decoder is lenient, so canonicality is checked
+%% by re-encoding: forged or misplaced values cannot slip through as
+%% accidental decodes.
+evidence_decode(Encoded) when is_binary(Encoded) ->
+    try hb_util:decode(Encoded) of
+        Bytes ->
+            case hb_util:encode(Bytes) of
+                Encoded -> {ok, Bytes};
+                _ -> {error, invalid_evidence_bytes}
+            end
+    catch
+        _:_ -> {error, invalid_evidence_bytes}
+    end;
+evidence_decode(_) ->
+    {error, missing_evidence_bytes}.
 
 %% @doc Build the canonical blob message for verified encrypted blob bytes.
 %% The caller must have verified that `SHA-384(Bytes)' matches `HexHash'.
@@ -164,7 +188,7 @@ transaction_message(Raw) when is_binary(Raw) ->
             TxIDHex = maps:get(<<"txid">>, Tx),
             {ok,
                 with_commitment(
-                    Tx#{ <<"raw">> => hb_util:to_hex(Raw) },
+                    Tx#{ <<"raw">> => evidence_encode(Raw) },
                     <<"transaction">>,
                     <<"sha-256d">>,
                     {<<"txid">>, binary:decode_hex(TxIDHex)},
@@ -229,12 +253,12 @@ claim_output_message(Raw, Nout, Ancestry) when is_binary(Raw), is_integer(Nout) 
                     <<"claim-id">> => ClaimID,
                     <<"claim-op">> => ClaimOp,
                     <<"claim-name">> => maps:get(<<"claim-name">>, Output),
-                    <<"claim">> => hb_util:to_hex(maps:get(<<"claim">>, Output)),
+                    <<"claim">> => evidence_encode(maps:get(<<"claim">>, Output)),
                     <<"claim-envelope">> => Envelope,
                     <<"claim-proof-strength">> => Strength,
                     <<"txid">> => TxIDHex,
                     <<"nout">> => Nout,
-                    <<"raw-transaction">> => hb_util:to_hex(Raw)
+                    <<"raw-transaction">> => evidence_encode(Raw)
                 }
             ),
             Ancestry
@@ -286,10 +310,10 @@ with_ancestry_field(Msg, Ancestry) ->
             [
                 Entry#{
                     <<"raw-transaction">> =>
-                        hb_util:to_hex(maps:get(<<"raw-transaction">>, Entry)),
+                        evidence_encode(maps:get(<<"raw-transaction">>, Entry)),
                     <<"input-parents">> =>
                         [
-                            hb_util:to_hex(Parent)
+                            evidence_encode(Parent)
                         ||
                             Parent <- maps:get(<<"input-parents">>, Entry, [])
                         ]
@@ -474,8 +498,7 @@ with_attestation_commitment(StreamMsg, ChannelMsg) ->
             ChannelID == SigningChannelID
                 orelse {error, {channel_binding_mismatch, ChannelID, SigningChannelID}},
         PublicKeyHex = maps:get(<<"public-key">>, ChannelMsg),
-        {ok, _RawHex, Raw} ?=
-            native_id_bytes(maps:get(<<"raw-transaction">>, StreamMsg)),
+        {ok, Raw} ?= evidence_decode(maps:get(<<"raw-transaction">>, StreamMsg)),
         {ok, Tx} ?= dev_lbry_tx:parse(Raw),
         [FirstInput | _] = maps:get(<<"inputs">>, Tx),
         Digest = dev_lbry_attestation:signature_digest(FirstInput, Envelope),
@@ -883,8 +906,8 @@ verify_claim_output(Base, Req, OutpointBytes, Opts) ->
         ClaimID = maps:get(<<"claim-id">>, Output),
         ClaimID ?= lower_field(Base, <<"claim-id">>, Opts),
         ClaimID ?= lower_field(Req, <<"claim-id">>, Opts),
-        ClaimHex = hb_util:to_hex(maps:get(<<"claim">>, Output)),
-        ClaimHex ?= lower_field(Base, <<"claim">>, Opts),
+        ClaimEncoded = evidence_encode(maps:get(<<"claim">>, Output)),
+        ClaimEncoded ?= hb_maps:get(<<"claim">>, Base, undefined, Opts),
         ClaimName = maps:get(<<"claim-name">>, Output),
         ClaimName ?= hb_maps:get(<<"claim-name">>, Base, undefined, Opts),
         ok ?=
@@ -910,8 +933,7 @@ verify_claim_output(Base, Req, OutpointBytes, Opts) ->
 output_evidence(Base, OutpointBytes, Opts) ->
     maybe
         {ok, TxIDHex, Nout} ?= split_outpoint(OutpointBytes),
-        {ok, _RawHex, Raw} ?=
-            native_id_bytes(hb_maps:get(<<"raw-transaction">>, Base, undefined, Opts)),
+        {ok, Raw} ?= evidence_decode(hb_maps:get(<<"raw-transaction">>, Base, undefined, Opts)),
         {ok, Tx} ?= dev_lbry_tx:parse(Raw),
         TxIDHex ?= maps:get(<<"txid">>, Tx),
         TxIDHex ?= lower_field(Base, <<"txid">>, Opts),
@@ -1317,8 +1339,7 @@ claim_type_shape(_Type, _ClaimOp, _Ancestry) ->
 
 replay_ancestry(<<"ancestor-hash160-outpoint">>, Base, Ancestry, Opts) ->
     maybe
-        {ok, _RawHex, Raw} ?=
-            native_id_bytes(hb_maps:get(<<"raw-transaction">>, Base, undefined, Opts)),
+        {ok, Raw} ?= evidence_decode(hb_maps:get(<<"raw-transaction">>, Base, undefined, Opts)),
         Nout = integer_field(Base, <<"nout">>, Opts),
         case
             dev_lbry_ancestry:verify_walk(Raw, Nout, Ancestry, ancestry_depth_limit(Opts))
@@ -1373,8 +1394,7 @@ normalize_ancestry_entries([Entry0 | Rest], Opts, Acc) when is_map(Entry0) ->
     maybe
         Nout = integer_field(Entry, <<"nout">>, Opts),
         true ?= is_integer(Nout) orelse {error, invalid_ancestry},
-        {ok, _RawHex, Raw} ?=
-            native_id_bytes(maps:get(<<"raw-transaction">>, Entry, undefined)),
+        {ok, Raw} ?= evidence_decode(maps:get(<<"raw-transaction">>, Entry, undefined)),
         {ok, Normalized} ?=
             normalize_input_parents(
                 Entry#{ <<"nout">> => Nout, <<"raw-transaction">> => Raw },
@@ -1401,7 +1421,7 @@ normalize_input_parents(Entry, Opts) ->
                             <<"input-parents">> =>
                                 [
                                     begin
-                                        {ok, _Hex, Parent} = native_id_bytes(RawParent),
+                                        {ok, Parent} = evidence_decode(RawParent),
                                         Parent
                                     end
                                 ||
