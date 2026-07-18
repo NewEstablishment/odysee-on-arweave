@@ -20,23 +20,26 @@ prominently in the session report.
 
 ## 2026-07-18 (afternoon) — HB-side fix for hook-signed persistence
 
-Per review direction, the app-layer `persist@1.0` semantics moved into
-HyperBEAM itself: branch `fix/store-hook-signed-requests`
+Per review direction, the fix moved into HyperBEAM itself and shrank to
+Sam's shape: branch `fix/store-hook-signed-requests`
 (`~/src/hyperbeam/.worktrees/store-hook-signed`, rebased onto current
-edge). `dev_auth_hook` now stores the messages it commits (honouring
-`store-all-signed`), deduplicated per commitment set, with the caller-
-visible full content ID linked to the stored path. Two regression tests
-(http-auth readback, cookie-provider `/id` flow that previously 500'd).
-`rebar3 eunit-all`: 3495 passed; 3 failures shown pre-existing/flaky by
-A/B against clean edge (2× live-network legacy-scheduler tests, 1×
-rate-limit timing test that passes solo). A 4-lens adversarial review
-drove the dedup, removed a provably-redundant ID link, and surfaced the
-primary-store-vs-`cache-http` policy question (documented for the PR).
-App-side follow-up once merged to edge: slim `persist@1.0` to its
-`message-id` response annotation (the write/link halves become
-redundant); a Forge-packager `_checkouts` git-lock quirk blocked local
-pre-merge integration of the patched dep (not a merge blocker — the
-in-repo cookie test covers the flow).
+edge), 12 implementation lines + 2 regression tests (68 insertions).
+`dev_auth_hook` writes the committed sequence messages after signing
+(gated on `store-all-signed`); callers select the signed ID with
+`/id?committers=all` — the bare `id` key selects zero commitments
+(`committers` defaults to `none`) and recalculates the unsigned ID over
+the full message including uncommitted keys, which nothing registers.
+`committers`/`commitment-ids` joined the hook's ignored keys: they are
+ID-selection modifiers and were otherwise signed into the stored
+content (verified empirically). The earlier 105-line write+link+dedup
+version was superseded — no ID aliasing is needed once the caller asks
+for the signed ID. `rebar3 eunit-all`: 3496 passed, 2 failed — the two
+live-network legacy-scheduler tests, shown identical on clean edge with
+the patch reverted. App-side follow-ups when the dep bumps past the
+merge: frontend write paths add `&committers=all`, and `persist@1.0`
+slims to its `message-id` response annotation (held back now because
+the pinned dep would sign `committers` into content without the
+ignored-keys line).
 
 ## 2026-07-18 (day) — full-flow browser verification + write-path fixes
 
