@@ -2311,9 +2311,13 @@ async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): P
   if (!baseUrl) return null;
   if (!allowHyperbeamCompatibilityReads() && isCompatibilityStorePath(path)) return null;
 
+  // Store reads consume the node's native HTTPSig encoding: the JSON codec
+  // cannot represent the evidence messages' raw binary fields, and only the
+  // native encoding carries the commitment information verifiably on the
+  // wire. `accept-bundle` inlines nested maps as multipart parts.
+  const url = `${buildDeviceUrl(baseUrl, path)}${path.includes('?') ? '&' : '?'}accept-bundle=true`;
   try {
-    const response = await fetch(buildDeviceUrl(baseUrl, path), {
-      headers: preferJson ? { accept: 'application/json' } : undefined,
+    const response = await fetch(url, {
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
     if (!response.ok) return null;
