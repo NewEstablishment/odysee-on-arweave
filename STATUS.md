@@ -116,11 +116,17 @@ Direction set by review feedback on the first pass:
   - `esqlite` dep + macOS NIF-link `post_hook` (pc doesn't link on this
     rebar3/macOS; HB's own NIFs use Makefiles for the same reason; Linux
     links normally). Adding the dep did not regress the build.
-  - **Each link of the flow is independently proven** (hook fires on
-    write; `dev_search:write` indexes; `query` ranks). Remaining: a
-    full-node E2E with the project built against the write-hook branch
-    (composition demo), and 35M-scale validation (backfill + p99 against
-    the real query mix) — both documented in `docs/search.md`.
+  - **Full E2E proven** (project built against the write-hook branch via
+    a `_checkouts` override): `hb_cache:write(<committed message>)` →
+    the `write` hook fires → `dev_search:write` indexes the fields →
+    `~search@1.0/query?q=...` returns the message id, BM25-ranked. The
+    recursion guard was moved into `hb_hook:execute_handler` (mirroring
+    the `step` hook) so lookup still finds the handler; 41 hb_cache + 4
+    hb_hook tests pass on the branch. Project then restored to stock
+    `edge` (81 device tests green; the hook is a proposed HB change, not
+    a project dependency).
+  - Remaining: 35M-scale validation (bulk backfill + p99 against the
+    real Odysee query mix) — documented in `docs/search.md`.
 
 Media-range clarification for the record: 206 through
 `~cache@1.0/read` could never honor `Range:` because HTTP request
