@@ -57,3 +57,17 @@ option) would let any stock node accept user uploads as signed cache
 messages with zero custom devices: POST with `?!=true`, hook signs
 with the user's node-hosted wallet, message persists, `~query@1.0`
 discovers it, and peers replicate it through remote-node stores.
+
+## 5. RFC-7233 Range support for binary responses (described proposal)
+
+The HTTP layer ignores `Range` request headers, and store reads reached
+through `~cache@1.0/read` never see them, so any large binary served
+from a node (video, audio, large files) arrives as a full-body 200.
+Browsers treat rangeless media as unseekable and throttle/resume long
+downloads with `Range` requests they expect the server to honor. Native
+slicing of binary response bodies in `hb_http:encode_reply` (bytes
+ranges over the encoded body, 206/`Content-Range`/`Accept-Ranges`)
+would give every HyperBEAM-served media file browser-grade seeking with
+no application code. Until then this repository serves full media
+objects (correct but unseekable), and the prior demo's approach —
+proxy-side range slicing — is deliberately not reproduced.
