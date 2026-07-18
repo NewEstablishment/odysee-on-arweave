@@ -95,11 +95,32 @@ Direction set by review feedback on the first pass:
     on cleaned code, republished manifest, browser watch page renders and
     the video decodes end-to-end (640×360, readyState 4), zero console
     errors. Peer-serving path unchanged. Clean is done.
-- **(7) Search engine chosen.** SQLite FTS5 via the `esqlite` NIF —
-  single-file, BM25, mature Erlang binding, LMDB-terse. Full rationale +
-  rejected options in `decisions/search-engine.md`; research brief in
-  `scratchpad/search-research.txt`. Build only after the clean + UI
-  re-verify are done (Sam's ordering).
+- **(7) `~search@1.0` built.** Generic full-text search device, SQLite
+  FTS5 via the `esqlite` NIF (`decisions/search-engine.md`,
+  `docs/search.md`).
+  - `hb_search`: FTS5 index engine + node-scoped singleton server (write
+    connection serialized, like `hb_store_lmdb`). Indexes each message's
+    scalar UTF-8 string fields (or the `search-schema` field list);
+    BM25-ranked queries. 4 core tests: index, BM25 rank, OR queries,
+    diacritic folding, idempotent re-index, schema restriction,
+    private/binary field skipping.
+  - `dev_search` (`search@1.0`): write-hook handler (indexes each written
+    message) + `query` key (returns ranked message ids). Packages and
+    tests through the Forge (`write_then_query_test`); 81 device tests.
+  - **Generic `write` hook** added to `hb_cache` on HB worktree
+    `feat/cache-write-hook` (`~/src/hyperbeam/.worktrees/cache-write-hook`,
+    commit f87de8272): fires `on/write` after each top-level message
+    write, recursion-safe, no-op by default. 41 hb_cache tests pass.
+    This is the general trigger Sam described; a minimal, generally-
+    applicable HB addition.
+  - `esqlite` dep + macOS NIF-link `post_hook` (pc doesn't link on this
+    rebar3/macOS; HB's own NIFs use Makefiles for the same reason; Linux
+    links normally). Adding the dep did not regress the build.
+  - **Each link of the flow is independently proven** (hook fires on
+    write; `dev_search:write` indexes; `query` ranks). Remaining: a
+    full-node E2E with the project built against the write-hook branch
+    (composition demo), and 35M-scale validation (backfill + p99 against
+    the real query mix) — both documented in `docs/search.md`.
 
 Media-range clarification for the record: 206 through
 `~cache@1.0/read` could never honor `Range:` because HTTP request
