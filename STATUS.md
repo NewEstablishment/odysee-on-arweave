@@ -3,6 +3,58 @@
 Status log for the overnight port. Newest entries first. Decisions with
 rationale live in `decisions/`.
 
+## ACTIVE OBJECTIVES (from review, 2026-07-18) — read this on every context compaction
+
+Direction set by review feedback on the first pass:
+
+1. **Deep clean the entire build** for idiomatic HyperBEAM patterns and
+   simplification, then re-verify the full UI flows in the browser.
+   Follow `~/.config/llm-prefs/workflows/deep-clean/README.md`.
+2. **Encoding**: commitment/evidence values must be header-safe without
+   custom encodings; where a binary encoding is unavoidable use b64u
+   (`hb_util:encode`), never hex. Convert the raw evidence fields
+   (`claim`, `raw-transaction`, transaction `raw`, ancestry entries)
+   from hex to b64u. LBRY identifiers (claim-id/txid/sd-hash) remain
+   their natural hex display identity.
+3. **Kernel discipline**: zero/minimal HB edits. The flat store-path
+   fallback proposal is REJECTED (breaks the computation/cache model)
+   — remove it. Drop the persist-hook-signed proposal. Only generally
+   applicable fixes + `?IS_ID` may be proposed, each as a terse
+   (<= 20 lines test+fix) branch on a `~/src/hyperbeam` WORKTREE, and
+   only when certain it is an HB bug, not our misuse.
+4. **Uploads**: the intended flow is plain `POST /id` — the node stores
+   the item in its cache by default and `~query@1.0` finds it; peers
+   `GET` the ID from each other. Re-verify this on a DEFAULT-config
+   node; if it does not persist on stock edge, that is a candidate
+   generally-applicable fix (terse worktree branch), not an app device.
+   The team's custom auth is unnecessary except perhaps a very thin
+   wrapper to reuse the existing Odysee auth cookie.
+5. **Link-ID divergence**: our own messages must simply never embed
+   uncommitted keys in nested messages (done — keep it that way). If
+   still certain the divergence is an HB bug, produce the terse
+   worktree test+patch; otherwise drop the proposal.
+6. **Client-side verification is not the trust story** — TEE-terminated
+   SSL on the serving node is. Do not build browser verification;
+   remove it from docs as a trust mechanism.
+7. **After (and only after) the clean is truly done**: build
+   `~search@1.0` — a GENERIC full-text indexer device for HyperBEAM
+   data. Schema from node Opts `search-schema` (if needed at all);
+   invoked via a hook on message writes to the store; index all fields
+   by default; must scale to >= 35M records (existing Odysee search
+   dataset size). Engine must be terse and well-specified in the LMDB
+   spirit — no bloated over-engineered dependencies. Evaluate e.g.
+   SQLite FTS5 (single file, exact spec, BM25) vs a hand-rolled LMDB
+   inverted index vs alternatives; justify the choice in a decision
+   doc before building.
+
+Media-range clarification for the record: 206 through
+`~cache@1.0/read` could never honor `Range:` because HTTP request
+headers do not reach store reads; the store was serving a fixed window
+mislabeled as the requested one. The UI was NOT changed — browsers
+still send `Range:`; the store now ignores it and serves the full
+object (correct, unseekable). Real ranges remain an upstream question
+(kept as a described proposal only).
+
 ## 2026-07-18 (early morning) — end-to-end proof
 
 - **Full watch page rendered in a real browser from a stock-surface
