@@ -67,28 +67,36 @@ odysee_stores(Opts) ->
     ] ++ hb_opts:get(<<"odysee-extra-stores">>, [], Opts).
 
 %% @doc The node's default `on' hooks, with the `~auth-hook@1.0' request
-%% handler's secret provider swapped to `~cookie@1.0'. Browsers then
-%% receive a stable anonymous identity automatically: the first `?!=true'
-%% request mints a cookie-derived per-user wallet, and every subsequent
-%% request with that cookie commits as the same user. Pass the result as
-%% the node's `on' option.
+%% handler's secret provider swapped to `~cookie@1.0', followed by a
+%% `~persist@1.0' stage that stores the hook-committed messages. Browsers
+%% then receive a stable anonymous identity automatically: the first
+%% `?!=true' request mints a cookie-derived per-user wallet, every
+%% subsequent request with that cookie commits as the same user, and the
+%% committed writes (uploads, comments) persist in the node's cache. Pass
+%% the result as the node's `on' option.
 cookie_auth_hooks(Opts) ->
     Hooks = hb_opts:get(on, #{}, Opts),
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
     Hooks#{
         <<"request">> =>
-            [
-                case Handler of
-                    #{ <<"device">> := <<"auth-hook@1.0">> } ->
-                        Handler#{
-                            <<"secret-provider">> =>
-                                #{ <<"device">> => <<"cookie@1.0">> }
-                        };
-                    _ -> Handler
-                end
-            ||
-                Handler <- Pipeline
-            ]
+            lists:flatmap(
+                fun
+                    (Handler = #{ <<"device">> := <<"auth-hook@1.0">> }) ->
+                        [
+                            Handler#{
+                                <<"secret-provider">> =>
+                                    #{ <<"device">> => <<"cookie@1.0">> }
+                            },
+                            #{
+                                <<"device">> => <<"persist@1.0">>,
+                                <<"path">> => <<"request">>
+                            }
+                        ];
+                    (Handler) ->
+                        [Handler]
+                end,
+                Pipeline
+            )
     }.
 
 %% @doc The store stack for a stock serving node: local caches first,

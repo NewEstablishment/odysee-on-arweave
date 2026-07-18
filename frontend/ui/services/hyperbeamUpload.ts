@@ -341,13 +341,14 @@ function uploadRecordId(json: any, claim: any) {
 }
 
 function storeWriteId(json: any) {
-  const path = json?.path || json?.id || json?.['read-path'] || json?.read_path || json?.url || json?.body;
+  const path =
+    json?.['message-id'] || json?.path || json?.id || json?.['read-path'] || json?.read_path || json?.url || json?.body;
   return typeof path === 'string' ? path.replace(/^\//, '') : '';
 }
 
 async function responseJsonWithHeaders(response: Response) {
   const json = await responseJson(response);
-  const headers = ['id', 'path', 'read-path', 'url'].reduce<Record<string, string>>((acc, name) => {
+  const headers = ['message-id', 'id', 'path', 'read-path', 'url'].reduce<Record<string, string>>((acc, name) => {
     const value = response.headers.get(name);
     if (value) acc[name] = value;
     return acc;

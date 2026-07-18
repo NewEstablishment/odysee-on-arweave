@@ -325,7 +325,7 @@ function nativeCommentMatchesSelectors(comment: any, selectors: Record<string, a
   const fields: Record<string, any> = {
     schema: comment?.schema,
     type: comment?.type,
-    target: comment?.claim_id,
+    'claim-id': comment?.claim_id,
     state: comment?.state,
     author: comment?.channel_id,
     parent: comment?.parent_id || 'root',
@@ -386,7 +386,7 @@ function nativeCommentSelectors(params: CommentListParams): Record<string, any> 
     return {
       schema: 'odysee-comment@1.0',
       type: 'comment',
-      target: params.claim_id,
+      'claim-id': params.claim_id,
       state: 'active',
     };
   }
@@ -410,7 +410,6 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
-    target: params.claim_id,
     parent: params.parent_id || 'root',
     state: 'active',
     author: params.channel_id,
@@ -440,7 +439,6 @@ function nativeCommentRevisionMessage(root: any, current: any, params: CommentEd
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
-    target: root.claim_id,
     parent: root.parent_id || 'root',
     state: 'active',
     author: root.channel_id,
@@ -498,7 +496,7 @@ async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
   const comments = await fetchNativeCommentCollection({
     schema: 'odysee-comment@1.0',
     type: 'comment',
-    target: direct.claim_id,
+    'claim-id': direct.claim_id,
     state: 'active',
   });
   return comments.find((comment) => comment.comment_id === rootId) || direct;
@@ -613,7 +611,7 @@ async function fetchNativeBlockControls(owner: string, subjects?: Array<string>)
   const selectors = {
     schema: NATIVE_COMMENT_CONTROL_SCHEMA,
     type: NATIVE_COMMENT_CONTROL_TYPE,
-    target: owner,
+    'target-id': owner,
     control: 'block',
   };
   if (!subjects) return fetchNativeCommentControls(selectors);
@@ -632,9 +630,10 @@ async function fetchNativeCommentControls(selectors: Record<string, any>): Promi
 }
 
 function nativeCommentControlMatchesSelectors(control: NativeCommentControl, selectors: Record<string, any>): boolean {
-  return Object.entries(selectors).every(
-    ([key, expected]) => control[key.replace(/-([a-z])/g, (_, char) => `_${char}`)] === expected
-  );
+  return Object.entries(selectors).every(([key, expected]) => {
+    const field = key === 'target-id' ? 'target' : key.replace(/-([a-z])/g, (_, char) => `_${char}`);
+    return control[field] === expected;
+  });
 }
 
 function uniquePaths(paths: Array<string>): Array<string> {
@@ -779,7 +778,7 @@ function nativeCommentControlMessage(params: {
     control: params.control,
     action: params.action,
     authority: params.authority,
-    target: params.target,
+    'target-id': params.target,
     owner: params.owner,
     actor: params.actor,
     'actor-name': params.actorName,
@@ -963,8 +962,8 @@ function queryPayload(response: any): any {
 function nativeWriteId(result: any): string {
   const payload = responsePayload(result);
   const id =
-    value(result, 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
-    value(payload, 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
+    value(result, 'message-id', 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
+    value(payload, 'message-id', 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
     (typeof payload === 'string' ? payload : '');
   return typeof id === 'string' ? id.replace(/^\/+/, '') : '';
 }
@@ -973,7 +972,7 @@ function responseJsonWithHeaders(response: Response): Promise<any> {
   return response.text().then((text) => {
     const parsed = parseDeviceJson(text);
     const result = isObject(parsed) ? parsed : { body: parsed };
-    ['id', 'path', 'read-path', 'url'].forEach((name) => {
+    ['message-id', 'id', 'path', 'read-path', 'url'].forEach((name) => {
       const header = response.headers.get(name);
       if (header) result[name] = header;
     });
