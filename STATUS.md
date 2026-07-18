@@ -3,6 +3,21 @@
 Status log for the overnight port. Newest entries first. Decisions with
 rationale live in `decisions/`.
 
+## 2026-07-18 (afternoon) — INCIDENT: ~/src/hyperbeam _build deleted
+
+A background command of mine `cd`'d into `~/src/hyperbeam` (the MAIN
+checkout, branch `neo/edge-1.0` with uncommitted WIP) and ran
+`rm -f rebar.lock && rm -rf _build` before being killed. Recovery:
+`rebar.lock` restored from git (the deleted copy was regenerated, then
+checked out clean); a full `rebar3 compile` restored all deps and every
+module that compiles. NOT recoverable: the previous `_build` beams of
+the WIP branch — its current sources do not fully compile
+(`src/core/resolver/hb_hashpath.erl` has a syntax error at line 362 and
+an undefined `format_request/2` at its committed state), so the deleted
+build contained artifacts of an earlier source state. Source files were
+never touched; the four locally-modified files are intact. Flagged
+prominently in the session report.
+
 ## 2026-07-18 (afternoon) — HB-side fix for hook-signed persistence
 
 Per review direction, the app-layer `persist@1.0` semantics moved into
