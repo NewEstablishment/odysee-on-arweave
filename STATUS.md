@@ -89,7 +89,12 @@ Direction set by review feedback on the first pass:
     `hb_util` coercions, `scope/0` removal, dead aliases, `else`-block
     removal). `fixtures` test-seam kept deliberately
     (`decisions/keep-fixtures-test-seam.md`).
-  - `decisions/deep-clean-cuts.md` records all cuts.
+  - `decisions/deep-clean-cuts.md` records all cuts. **src/ went
+    10,128 → 8,662 lines (−1,466, ~14%)**, all tests green.
+  - **UI re-verified on the cleaned build** (2026-07-18): fresh seed node
+    on cleaned code, republished manifest, browser watch page renders and
+    the video decodes end-to-end (640×360, readyState 4), zero console
+    errors. Peer-serving path unchanged. Clean is done.
 - **(7) Search engine chosen.** SQLite FTS5 via the `esqlite` NIF —
   single-file, BM25, mature Erlang binding, LMDB-terse. Full rationale +
   rejected options in `decisions/search-engine.md`; research brief in
