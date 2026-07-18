@@ -75,11 +75,26 @@ Direction set by review feedback on the first pass:
 - **(6) Trust model → TEE, not client.** Docs already frame serving
   trust as TEE-terminated SSL; the browser-verification note is being
   removed from the frontend and docs in the clean.
-- **(1/8) Deep clean → in progress.** First pass removed 568 lines from
-  `src/`: dead `dev_lbry_mmr` + fixtures, the unreachable remote-read
-  re-verification layer, and the SDK-map codec branches. `decisions/
-  deep-clean-cuts.md` records rationale. Idiom audit + engine research
-  running.
+- **(1/8) Deep clean → in progress.**
+  - Pass 1 (−568 lines): dead `dev_lbry_mmr` + fixtures, the unreachable
+    remote-read re-verification layer, the SDK-map codec branches.
+  - Pass 2 (−670 lines in `dev_lbry`): reduced `lbry@1.0` to a
+    verification device (`verify`/`to_hint`/`content_type`); the codec +
+    commit surface was unreachable (stores construct via
+    `dev_lbry_commitment` directly). `to_hint` kept — `hb_message`'s
+    `add_bundle_hint` calls it during verify.
+  - Pass 3 (in progress): a 3-agent idiom audit (findings in
+    `scratchpad/audit-findings.txt`) drives a safe dedup sweep across the
+    store/bridge/client family (shared `valid_hex`/`raw_tx_hex`,
+    `hb_util` coercions, `scope/0` removal, dead aliases, `else`-block
+    removal). `fixtures` test-seam kept deliberately
+    (`decisions/keep-fixtures-test-seam.md`).
+  - `decisions/deep-clean-cuts.md` records all cuts.
+- **(7) Search engine chosen.** SQLite FTS5 via the `esqlite` NIF —
+  single-file, BM25, mature Erlang binding, LMDB-terse. Full rationale +
+  rejected options in `decisions/search-engine.md`; research brief in
+  `scratchpad/search-research.txt`. Build only after the clean + UI
+  re-verify are done (Sam's ordering).
 
 Media-range clarification for the record: 206 through
 `~cache@1.0/read` could never honor `Range:` because HTTP request
