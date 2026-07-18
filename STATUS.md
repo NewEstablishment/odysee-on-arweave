@@ -3,6 +3,52 @@
 Status log for the overnight port. Newest entries first. Decisions with
 rationale live in `decisions/`.
 
+## 2026-07-18 (day) — full-flow browser verification + write-path fixes
+
+All four flows verified in the browser with screenshots, on a seed node
+with `cookie_auth_hooks` (node on `127.0.0.1:10610`, left running for
+inspection — kill the `rebar3 shell` BEAM owning that port to tear
+down).
+
+- **Video loading ✓** — watch page renders, video decodes and plays
+  (readyState 4, 1920×1050, 33s in; full-page screenshot with player at
+  0:14/3:21).
+- **Comment rendering ✓** — a native comment (written over the UI's
+  exact transport) renders under the video with channel identity, age,
+  anonymous-user gating (log-in-to-reply), correct UTF-8.
+- **Comment writing ✓ (transport) / login-gated (form)** — the comment
+  box requires an Odysee account + channel (`Lbry.channel_sign` via the
+  legacy SDK); the underlying native write is verified end-to-end.
+- **Uploads ✓** — driven from the browser page context (the form itself
+  is `PrivateRoute`-gated on a verified account): file → `POST
+  /id?!=true` → `data-id`; index message → `POST /id?!=true` →
+  `record-id`; the published claim resolves through the immutable route
+  and renders with its media served from `GET /<data-id>`. Both
+  `#/<recordId>` and `#/name:<recordId>` URLs resolve.
+- **Auth ✓ (cookie identity)** — first `?!=true` POST mints the cookie
+  wallet, `document.cookie` holds the secret, identity is stable across
+  writes, responses carry the RFC-9421 signature of the derived wallet.
+  The legacy account login page renders; actual login needs real
+  credentials + reachable api.odysee.com ("could not get a user ID"
+  banner in this environment is that legacy dependency, not our stack).
+
+**The write path required real fixes** (`decisions/persist-device.md`):
+`POST /id?!=true` on a cookie-auth node 500'd (cookie finalize appends a
+`set` step → resolves the returned id as a base → hook-signed message
+was never persisted → unhandled `{error,not_found}` shape). Fixed at the
+app layer with **`persist@1.0`** — an `on/request` pipeline stage after
+the auth hook that persists hook-committed messages, aliases the
+resolver-visible ids to the stored path, and surfaces the stored id as
+`message-id`. Plus frontend fixes: `target` is a reserved HB request key
+(schema now uses `claim-id`/`target-id`), UTF-8 header decoding, native
+upload index (replaces the dropped `~odysee-upload@1.0` index call),
+`name:<id>` immutable-route resolution. 82 device tests green.
+
+Follow-ups: upload edit/delete need store-first mutability semantics
+(still device-targeted, will error); dev_query crashes on the
+empty-result store-match shape (frontend maps the 500 to `[]`, but it is
+an upstream shape bug worth noting alongside the hb_cache_control one).
+
 ## ACTIVE OBJECTIVES (from review, 2026-07-18) — read this on every context compaction
 
 Direction set by review feedback on the first pass:
