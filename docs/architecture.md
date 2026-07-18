@@ -5,8 +5,14 @@ implemented on AO-Core, such that **any standard HyperBEAM node can help
 serve Odysee trustlessly**. Legacy Odysee infrastructure (SDK proxy, blob
 CDNs, comment server) remains the origin of raw bytes, but every fact served
 to a client is re-derived from those bytes and carried as a content-addressed
-commitment that any party — another node or the browser itself — can re-verify
-without trusting the node that served it.
+commitment that any peer node can re-verify without trusting the node that
+served it. The end user's trust terminates in the serving node itself: a
+browser runs whatever code that node serves, so client-side re-verification
+of node-served data proves nothing. User-facing trust comes instead from
+terminating the client's TLS connection **inside** a serving node running in
+an attested trusted-execution environment — the bytes the browser receives
+are then guaranteed by the enclave, not by JavaScript the same node could
+have altered.
 
 Companion documents: [lbry-data-model.md](lbry-data-model.md) (the byte-level
 verification recipes), [data-sourcing.md](data-sourcing.md) (legacy endpoints
@@ -140,16 +146,16 @@ clients. A serving node never contacts legacy infrastructure and needs no code
 from this repository — the device loads from its published Forge archive.
 Config recipes for both roles: [node-operators.md](node-operators.md).
 
-**TEE routing nodes (future).** A third tier would run serving nodes inside
-attested trusted-execution environments, with routing nodes directing client
-traffic across an attested mesh. Because execution honesty is then
-hardware-attested, thin clients could elect to skip browser-side
-re-verification and trust the enclave's signature over results, and operators
-could form CDN-like topologies (range-request fan-out, regional replication)
-without expanding the trust surface. Nothing in the current design blocks
-this: commitments remain content-addressed and independently checkable, so TEE
-attestation is a latency/effort optimization layered on top, not a
-replacement for the trust model.
+**TEE routing nodes.** This is how end-user trust is actually established.
+Serving nodes run inside attested trusted-execution environments and terminate
+the client's TLS connection *inside* the enclave; routing nodes direct client
+traffic across the attested mesh. Because the connection is bytes-correct from
+inside a measured enclave, the client trusts what it receives without running
+any verification of its own — which it could not meaningfully do anyway
+against code the node itself served. The peer-to-peer commitment layer keeps
+the enclaves honest with respect to each other (a TEE still verifies evidence
+it replicates), so operators can form CDN-like topologies (range-request
+fan-out, regional replication) without expanding the trust surface.
 
 ## Trust model
 
@@ -172,7 +178,9 @@ Commitments carry no node signature. Consequences:
   — `lbry@1.0` commitments, being content-addressed, have neither. A caller
   using the defaults verifies nothing.
 
-Verification happens at three points:
+Verification happens **between nodes**, at two points. The end user does not
+verify (see above — client-side checks of node-served data are meaningless);
+their trust comes from the TEE-terminated connection.
 
 1. **At construction** (seed nodes): the stores verify raw bytes before any
    message exists, so a seed's cache contains only self-consistent evidence.
@@ -183,10 +191,10 @@ Verification happens at three points:
    explicitly after replication, so a malicious seed cannot seed a serving
    node's cache with forgeries. Because verification dispatches through
    `commitment-device`, the pinned `lbry@1.0` archive is what does the work.
-3. **In the browser**: the UI re-runs the recipes from
-   [lbry-data-model.md](lbry-data-model.md) over the httpsig-decoded message.
-   This check is sufficient on its own — points 1 and 2 protect node caches
-   and peers, not the end user, whose trust terminates in their own client.
+
+Both points protect node caches and peers from each other. The commitment
+layer is what lets an operator trust a peer's bytes without trusting the peer;
+the TEE layer is what lets an end user trust a serving node.
 
 ### The bare-claim-id caveat (`?IS_ID`)
 
@@ -228,15 +236,18 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    author) returns matching message paths — and hydrate them with generic
    `/~cache@1.0/read` calls.
 4. *Ownership* semantics ride inside the message as an LBRY channel signature
-   over a canonical statement, verified client-side against the channel's
-   committed public key. The node-wallet commitment from step 1 establishes
-   only a stable pseudonymous writer identity; it confers no authority.
+   over a canonical statement, checkable against the channel's committed
+   public key. The node-wallet commitment from step 1 establishes only a
+   stable pseudonymous writer identity; it confers no authority.
 5. Peers replicate write traffic the same way they replicate evidence: via
    `hb_store_remote_node` against nodes that accepted the writes.
 
-Readers re-filter query results against their selectors and re-verify channel
-signatures client-side; `~query@1.0` stays a dumb index and the serving node
-stays untrusted for write authenticity, exactly as for reads.
+As with reads, authenticity checks are a *between-node* concern: a replicating
+peer re-filters query results against their selectors and re-verifies the
+channel signature before caching a write, so `~query@1.0` stays a dumb index
+and no node is trusted for write authenticity by its peers. The end user, as
+always, trusts the TEE-terminated serving node rather than verifying in the
+browser.
 
 Legacy-only interactive surfaces with no verifiable representation — fuzzy
 text search, view counts, subscription counts, legacy comment writes — are
