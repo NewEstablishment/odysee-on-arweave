@@ -3,6 +3,32 @@
 Status log for the overnight port. Newest entries first. Decisions with
 rationale live in `decisions/`.
 
+## 2026-07-18 (evening) — rebased onto merged edge fix; flows retried
+
+Sam tuned and merged the auth-hook persistence fix to edge (daa72d0f3,
+merge a572d76eb: the gated one-line write; ignored-keys addition and
+cookie test dropped). Re-tracked `{branch, "edge"}` — the store-contract
+pin is gone: the map-based read shape is unchanged on edge, and the
+earlier "contract migration" claim was a MISDIAGNOSIS of unlinked
+pc-plugin NIFs (my raw probe passed a bare key where the contract has
+always wanted `#{<<"read">> => Path}`). The post-compile hook covers the
+NIFs. `persist@1.0` shrank to `reply-id@1.0` (~dev_reply_id): its only
+remaining job is rewriting the cookie provider's trailing `set` message
+to carry the stored message's signed ID under `message-id`. Frontend
+write paths request `committers=all`. 82 device tests green on edge.
+
+Flows retried on a fresh node (browser pane unavailable this session —
+MCP disconnected — so verification is at the exact HTTP layer the UI
+drives, using the UI's own request shapes): watch-page claim evidence
+(200, 11.6KB bundle), comment write → `message-id` → hydration (UTF-8
+intact) → `~query@1.0` (which now returns the SAME signed id as
+`message-id` — the canonical path), media stream serves valid MP4,
+upload two-step → UI-shape immutable resolve (name/title/data-id/
+streaming-url) → media byte-identical round-trip, and both writes from
+one cookie jar carry the SAME committer keyid (stable identity). Node
+left running on `127.0.0.1:10610`, manifest
+`XrI2rdHszP0rOFwfO7JB-iS7BXQSjaVLehygp7VD2lU`.
+
 ## 2026-07-18 (afternoon) — INCIDENT: ~/src/hyperbeam _build deleted
 
 A background command of mine `cd`'d into `~/src/hyperbeam` (the MAIN
