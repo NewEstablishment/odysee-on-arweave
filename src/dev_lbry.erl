@@ -1,5 +1,5 @@
-%%% @doc The `lbry@1.0' device: native LBRY commitments and codecs for
-%%% HyperBEAM messages.
+%%% @doc The `lbry@1.0' commitment device: verifies native LBRY
+%%% commitments on HyperBEAM messages.
 %%%
 %%% A native commitment binds a message to an LBRY source object through the
 %%% object's own content addressing -- a blob hash, stream-descriptor hash,
@@ -7,6 +7,15 @@
 %%% than through a node signature. No wallet and no trusted third party are
 %%% involved: any node holding the committed bytes can re-derive every fact
 %%% a commitment asserts.
+%%%
+%%% This device is a pure verifier: `verify/3' is its one load-bearing
+%%% key, reached through the `commitment-device' dispatch in `dev_message'.
+%%% Evidence messages are constructed by the store layer through
+%%% `dev_lbry_commitment' (which this module also dispatches into for the
+%%% claim-family recipes), so the device carries no `commit' or codec
+%%% surface of its own. `to_hint/3' remains because `hb_message' calls it
+%%% on the commitment device while converting a message to TABM for
+%%% verification.
 %%%
 %%% == Commitment shape ==
 %%%
@@ -75,28 +84,6 @@
 %%%
 %%% An unknown or missing `evidence' value verifies as `false'.
 %%%
-%%% == Committing ==
-%%%
-%%% `commit/3' re-derives a native commitment from raw evidence already
-%%% carried by the target message, selected by the request's `evidence' key:
-%%% `claim', `channel', and `stream' construct from `raw-transaction' and
-%%% `nout' (upgrading through `claim-ancestry' when present); `blob' from
-%%% `data' and `blob-hash'; `descriptor' from `raw' and `sd-hash';
-%%% `transaction' from `raw'. The result is the canonical evidence message
-%%% for the source object, carrying its native commitments.
-%%%
-%%% == Codec ==
-%%%
-%%% `from/3' converts source objects into TABM form. Raw binary inputs
-%%% dispatch on the request's `evidence' key: `blob' (with a `blob-hash'
-%%% request key), `descriptor' (with an optional `sd-hash'), `transaction'
-%%% (raw or hex bytes, with an optional `encoding' of `hex'), and `claim'
-%%% (a claim envelope, raw or hex). Map inputs are encoded directly, after
-%%% envelope extraction for `claim'. `to/3' re-encodes a
-%%% TABM to its structured form by default; a `format' request key of `raw'
-%%% returns the source object's raw bytes (the `data' field for blobs, the
-%%% `raw' field otherwise), and `hex' returns those bytes hex-encoded.
-%%%
 %%% == Trust model ==
 %%%
 %%% The commitment fields, including `evidence' and `committed', are
@@ -113,85 +100,22 @@
 %%% `commitment-ids' set to `all') for the dispatch entrypoint.
 -module(dev_lbry).
 -implements(<<"lbry@1.0">>).
--export([from/3, to/3, to_hint/3, commit/3, verify/3, content_type/1]).
+-export([verify/3, to_hint/3, content_type/1]).
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
-%% @doc Return the content type for the codec.
+%% @doc Return the content type for the device.
 content_type(_) ->
     {ok, <<"application/vnd.lbry">>}.
 
-%% @doc Convert a source object into TABM form. Raw binary inputs dispatch
-%% on the request's `evidence' key; map inputs are normalized per kind and
-%% encoded directly.
-from(Msg, Req, Opts) when is_map(Msg) ->
-    case hb_maps:get(<<"evidence">>, Req, undefined, Opts) of
-        <<"claim">> ->
-            from_structured(extract_envelope(Msg), Req, Opts);
-        _ ->
-            from_structured(Msg, Req, Opts)
-    end;
-from(Raw, Req, Opts) when is_binary(Raw) ->
-    case hb_maps:get(<<"evidence">>, Req, undefined, Opts) of
-        <<"blob">> -> from_blob(Raw, Req, Opts);
-        <<"descriptor">> -> from_descriptor(Raw, Req, Opts);
-        <<"transaction">> -> from_transaction(Raw, Req, Opts);
-        <<"claim">> -> from_claim(Raw, Req, Opts);
-        _ -> {error, missing_evidence}
-    end.
-
-%% @doc Re-encode a TABM. The default target is the structured form; a
-%% `format' of `raw' returns the source object's raw bytes, and `hex'
-%% returns those bytes hex-encoded.
-to(Bin, _Req, _Opts) when is_binary(Bin) ->
-    {ok, Bin};
-to(TABM, Req, Opts) ->
-    {ok, Structured} = to_structured(TABM, Req, Opts),
-    case hb_maps:get(<<"format">>, Req, <<"structured">>, Opts) of
-        <<"raw">> ->
-            raw(Structured, Req, Opts);
-        <<"hex">> ->
-            case raw(Structured, Req, Opts) of
-                {ok, Raw} when is_binary(Raw) -> {ok, hb_util:to_hex(Raw)};
-                {ok, _} -> {error, invalid_raw_hex};
-                Error -> Error
-            end;
-        _ ->
-            {ok, Structured}
-    end.
-
+%% @doc Bundle hint for the structured codec. Evidence messages carry
+%% nested submessages (a claim's decoded `value', an attestation's
+%% `channel-evidence'), so they are always bundled; `hb_message' calls
+%% this on the commitment device while converting a message to TABM for
+%% verification.
 to_hint(_Msg, Req, _Opts) ->
     {ok, Req#{ <<"bundle">> => true }}.
-
-%% @doc Re-derive a native commitment from raw evidence carried by the
-%% target message, selected by the request's `evidence' key. The result is
-%% the canonical evidence message for the source object.
-commit(Msg, Req, Opts) ->
-    case hb_maps:get(<<"evidence">>, Req, undefined, Opts) of
-        <<"claim">> ->
-            commit_claim_output(
-                Msg,
-                fun dev_lbry_commitment:claim_output_message/3,
-                Opts
-            );
-        <<"channel">> ->
-            commit_claim_output(
-                Msg,
-                fun dev_lbry_commitment:channel_output_message/3,
-                Opts
-            );
-        <<"stream">> ->
-            commit_claim_output(
-                Msg,
-                fun dev_lbry_commitment:stream_claim_message/3,
-                Opts
-            );
-        <<"blob">> -> commit_blob(Msg, Opts);
-        <<"descriptor">> -> commit_descriptor(Msg, Opts);
-        <<"transaction">> -> commit_transaction(Msg, Opts);
-        _ -> {error, unsupported_evidence}
-    end.
 
 %% @doc Verify a native commitment against its base message, dispatching on
 %% the commitment's `evidence' field. Unknown or missing evidence fails
@@ -308,219 +232,6 @@ digest_field_valid(Base, Data, Opts) ->
             true
     end.
 
-%%% Commit construction
-
-commit_claim_output(Msg, Construct, Opts) ->
-    maybe
-        Raw0 = hb_maps:get(<<"raw-transaction">>, Msg, undefined, Opts),
-        true ?= is_binary(Raw0) orelse {error, missing_raw_transaction},
-        Nout = hb_maps:get(<<"nout">>, Msg, undefined, Opts),
-        true ?= (Nout =/= undefined) orelse {error, missing_nout},
-        Construct(raw_input(Raw0), hb_util:int(Nout), ancestry_field(Msg, Opts))
-    end.
-
-%% @doc Accept raw evidence bytes either directly or in their hex message
-%% encoding. Real transactions are never all-hex-character byte strings,
-%% so the decode is unambiguous in practice.
-raw_input(Bin) when is_binary(Bin) ->
-    case dev_lbry_commitment:evidence_decode(Bin) of
-        {ok, Bytes} -> Bytes;
-        _ -> Bin
-    end;
-raw_input(Other) ->
-    Other.
-
-ancestry_field(Msg, Opts) ->
-    Ancestry =
-        hb_cache:ensure_all_loaded(
-            hb_maps:get(<<"claim-ancestry">>, Msg, undefined, Opts),
-            Opts
-        ),
-    case Ancestry of
-        undefined -> undefined;
-        List when is_list(List) -> List;
-        Map when is_map(Map) -> hb_util:message_to_ordered_list(Map, Opts)
-    end.
-
-commit_blob(Msg, Opts) ->
-    maybe
-        Data = hb_maps:get(<<"data">>, Msg, undefined, Opts),
-        true ?= is_binary(Data) orelse {error, missing_blob_data},
-        Hash = hb_maps:get(<<"blob-hash">>, Msg, undefined, Opts),
-        true ?= is_binary(Hash) orelse {error, missing_blob_hash},
-        ok ?= dev_lbry_stream_descriptor:verify_blob_hash(Hash, Data),
-        {ok, dev_lbry_commitment:blob_message(Hash, Data)}
-    end.
-
-commit_descriptor(Msg, Opts) ->
-    maybe
-        Raw = hb_maps:get(<<"raw">>, Msg, undefined, Opts),
-        true ?= is_binary(Raw) orelse {error, missing_raw},
-        SDHash = hb_maps:get(<<"sd-hash">>, Msg, undefined, Opts),
-        true ?= is_binary(SDHash) orelse {error, missing_sd_hash},
-        dev_lbry_commitment:descriptor_message(Raw, SDHash)
-    end.
-
-commit_transaction(Msg, Opts) ->
-    maybe
-        Raw = hb_maps:get(<<"raw">>, Msg, undefined, Opts),
-        true ?= is_binary(Raw) orelse {error, missing_raw},
-        dev_lbry_commitment:transaction_message(raw_input(Raw))
-    end.
-
-%%% Raw-input decoding
-
-from_blob(Raw, Req, Opts) ->
-    case hb_maps:get(<<"blob-hash">>, Req, undefined, Opts) of
-        undefined ->
-            {error, missing_blob_hash};
-        Hash ->
-            case dev_lbry_stream_descriptor:verify_blob_hash(Hash, Raw) of
-                ok ->
-                    from_structured(
-                        dev_lbry_commitment:blob_message(Hash, Raw),
-                        Req,
-                        Opts
-                    );
-                Error ->
-                    Error
-            end
-    end.
-
-from_descriptor(Raw, Req, Opts) ->
-    Result =
-        case hb_maps:get(<<"sd-hash">>, Req, undefined, Opts) of
-            undefined -> dev_lbry_stream_descriptor:parse(Raw);
-            SDHash -> dev_lbry_commitment:descriptor_message(Raw, SDHash)
-        end,
-    case Result of
-        {ok, Descriptor} ->
-            from_structured(Descriptor, Req, Opts);
-        Error ->
-            Error
-    end.
-
-from_transaction(Raw, Req, Opts) ->
-    Decoded =
-        case hb_maps:get(<<"encoding">>, Req, undefined, Opts) of
-            <<"hex">> ->
-                decode_tx_hex(Raw);
-            _ ->
-                {ok, Raw}
-        end,
-    Result =
-        case Decoded of
-            {ok, Bytes} ->
-                case dev_lbry_commitment:transaction_message(Bytes) of
-                    {ok, _} = Ok -> Ok;
-                    Error when Raw == Bytes -> retry_as_hex(Raw, Error);
-                    Error -> Error
-                end;
-            Error ->
-                Error
-        end,
-    case Result of
-        {ok, Tx} -> from_structured(Tx, Req, Opts);
-        DecodeError -> DecodeError
-    end.
-
-%% Bare binary inputs may be raw bytes or hex without an `encoding' hint;
-%% retry the hex interpretation before failing, matching the previous
-%% auto-detection behavior.
-retry_as_hex(Raw, ParseError) ->
-    case decode_tx_hex(Raw) of
-        {ok, Bytes} ->
-            case dev_lbry_commitment:transaction_message(Bytes) of
-                {ok, _} = Ok -> Ok;
-                _ -> ParseError
-            end;
-        _ ->
-            ParseError
-    end.
-
-decode_tx_hex(Raw) ->
-    case hex_to_binary(Raw) of
-        {ok, Bytes} -> {ok, Bytes};
-        _ -> {error, invalid_tx_hex}
-    end.
-
-from_claim(Raw, Req, Opts) ->
-    Decoded =
-        case hb_maps:get(<<"encoding">>, Req, undefined, Opts) of
-            <<"hex">> -> hex_to_binary(Raw);
-            _ -> {ok, Raw}
-        end,
-    case Decoded of
-        {ok, Bytes} ->
-            case dev_lbry_tx:parse_claim_envelope(Bytes) of
-                {ok, Envelope} ->
-                    from_structured(Envelope, Req, Opts);
-                Error ->
-                    Error
-            end;
-        Error ->
-            Error
-    end.
-
-%%% Map-input normalization
-
-extract_envelope(#{ <<"claim-envelope">> := Envelope }) when is_map(Envelope) ->
-    Envelope;
-extract_envelope(Msg) ->
-    Msg.
-
-%%% Conversion plumbing
-
-from_structured(Msg, Req, Opts) ->
-    ConvOpts = Opts#{ <<"hashpath">> => ignore },
-    {ok,
-        hb_message:convert(
-            Msg,
-            tabm,
-            Req#{
-                <<"device">> => <<"structured@1.0">>,
-                <<"bundle">> => true
-            },
-            ConvOpts
-        )
-    }.
-
-to_structured(TABM, _Req, Opts) ->
-    ConvOpts = Opts#{ <<"hashpath">> => ignore },
-    {ok,
-        hb_message:convert(
-            TABM,
-            <<"structured@1.0">>,
-            tabm,
-            ConvOpts
-        )
-    }.
-
-raw(Structured, Req, Opts) ->
-    case hb_maps:get(<<"evidence">>, Req, undefined, Opts) of
-        <<"blob">> ->
-            case maps:get(<<"data">>, Structured, undefined) of
-                undefined -> {error, missing_blob_data};
-                Data -> {ok, hb_cache:ensure_all_loaded(Data, Opts)}
-            end;
-        _ ->
-            case maps:get(<<"raw">>, Structured, undefined) of
-                undefined -> {error, missing_raw};
-                Raw ->
-                    % Transaction evidence carries `raw' in its hex message
-                    % encoding; descriptor evidence carries ASCII JSON.
-                    % `raw_input' decodes the former and passes the latter.
-                    {ok, raw_input(hb_cache:ensure_all_loaded(Raw, Opts))}
-            end
-    end.
-
-hex_to_binary(Hex) when is_binary(Hex) ->
-    try binary:decode_hex(hb_util:to_lower(Hex)) of
-        Bin -> {ok, Bin}
-    catch
-        _:_ -> {error, invalid_hex}
-    end.
-
 %%% Tests
 
 -ifdef(TEST).
@@ -547,375 +258,31 @@ transaction_verify_test() ->
     Tampered = Msg#{ <<"raw">> => <<(First bxor 1), Rest/binary>> },
     ?assertEqual({ok, false}, verify(Tampered, Commitment, #{})).
 
-descriptor_verify_test() ->
-    Raw = hb_json:encode(sample_descriptor_json()),
-    SDHash = dev_lbry_stream_descriptor:descriptor_hash(Raw),
-    {ok, Msg} = dev_lbry_commitment:descriptor_message(Raw, SDHash),
-    [Commitment] = maps:values(maps:get(<<"commitments">>, Msg)),
-    ?assertEqual({ok, true}, verify(Msg, Commitment, #{})),
-    Other =
-        hb_json:encode(
-            (sample_descriptor_json())#{ <<"stream_type">> => <<"other">> }
-        ),
-    ?assertEqual({ok, false}, verify(Msg#{ <<"raw">> => Other }, Commitment, #{})).
-
 claim_verify_test() ->
     Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
     {ok, Msg} = dev_lbry_commitment:claim_output_message(Raw, 0),
     [Commitment] = maps:values(maps:get(<<"commitments">>, Msg)),
     ?assertEqual(<<"claim">>, maps:get(<<"evidence">>, Commitment)),
-    ?assertEqual({ok, true}, verify(Msg, Commitment, #{})),
-    Tampered = Msg#{
-        <<"claim-id">> => <<"0000000000000000000000000000000000000000">>
-    },
-    ?assertEqual({ok, false}, verify(Tampered, Commitment, #{})).
+    ?assertEqual({ok, true}, verify(Msg, Commitment, #{})).
 
-channel_verify_test() ->
-    {Compressed, _} = sample_channel_keys(),
-    Raw = channel_claim_tx(Compressed),
-    {ok, Msg} = dev_lbry_commitment:channel_output_message(Raw, 0),
+%% The device dispatches on the commitment's `evidence' field alone.
+%% Relabeling a commitment to a different, mystery, or absent evidence
+%% kind must fail closed -- a wrong recipe cannot accept another recipe's
+%% message. The per-kind recipes are exercised end-to-end through
+%% `hb_message:verify' in `dev_lbry_commitment'.
+dispatch_fails_closed_test() ->
+    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
+    {ok, Msg} = dev_lbry_commitment:transaction_message(Raw),
     [Commitment] = maps:values(maps:get(<<"commitments">>, Msg)),
-    ?assertEqual(<<"channel">>, maps:get(<<"evidence">>, Commitment)),
     ?assertEqual({ok, true}, verify(Msg, Commitment, #{})),
-    OtherKey =
-        hb_util:to_hex(
-            ar_wallet:compress_ecdsa_pubkey(
-                element(1, crypto:generate_key(ecdh, secp256k1, <<2:256>>))
-            )
-        ),
-    Tampered = Msg#{ <<"public-key">> => OtherKey },
-    ?assertEqual({ok, false}, verify(Tampered, Commitment, #{})).
-
-stream_verify_test() ->
-    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
-    {ok, Msg} = dev_lbry_commitment:stream_claim_message(Raw, 0),
-    Commitments = maps:values(maps:get(<<"commitments">>, Msg)),
-    ?assertEqual(2, length(Commitments)),
-    lists:foreach(
-        fun(Commitment) ->
-            ?assertEqual({ok, true}, verify(Msg, Commitment, #{}))
-        end,
-        Commitments
-    ),
-    [StreamCommitment] =
-        [
-            Commitment
-         ||
-            Commitment <- Commitments,
-            maps:get(<<"evidence">>, Commitment) == <<"stream">>
-        ],
-    Tampered = Msg#{
-        <<"sd-hash">> => hb_util:to_hex(crypto:hash(sha384, <<"other">>))
-    },
-    ?assertEqual({ok, false}, verify(Tampered, StreamCommitment, #{})).
-
-attestation_verify_test() ->
-    {Compressed, _} = sample_channel_keys(),
-    {ok, ChannelMsg} =
-        dev_lbry_commitment:channel_output_message(
-            channel_claim_tx(Compressed),
-            0
-        ),
-    StreamMsg = signed_stream_claim_for_channel(ChannelMsg, <<1:256>>),
-    {ok, Committed} =
-        dev_lbry_commitment:with_attestation_commitment(StreamMsg, ChannelMsg),
-    [Attestation] =
-        [
-            Commitment
-         ||
-            Commitment <- maps:values(maps:get(<<"commitments">>, Committed)),
-            maps:get(<<"evidence">>, Commitment) == <<"attestation">>
-        ],
-    ?assertEqual({ok, true}, verify(Committed, Attestation, #{})),
-    OtherKey =
-        hb_util:to_hex(
-            ar_wallet:compress_ecdsa_pubkey(
-                element(1, crypto:generate_key(ecdh, secp256k1, <<2:256>>))
-            )
-        ),
-    Tampered = Attestation#{ <<"channel-public-key">> => OtherKey },
-    ?assertEqual({ok, false}, verify(Committed, Tampered, #{})).
-
-evidence_relabel_fails_closed_test() ->
-    % A commitment's `evidence' field selects its verification recipe; a
-    % relabeled kind must dispatch to a recipe that fails closed, never one
-    % that accepts.
-    Bytes = <<"encrypted blob bytes">>,
-    Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
-    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
-    {ok, TxMsg} = dev_lbry_commitment:transaction_message(Raw),
-    {ok, ClaimMsg} = dev_lbry_commitment:claim_output_message(Raw, 0),
-    {Compressed, _} = sample_channel_keys(),
-    {ok, ChannelMsg} =
-        dev_lbry_commitment:channel_output_message(
-            channel_claim_tx(Compressed),
-            0
-        ),
-    DescriptorRaw = hb_json:encode(sample_descriptor_json()),
-    {ok, DescriptorMsg} =
-        dev_lbry_commitment:descriptor_message(
-            DescriptorRaw,
-            dev_lbry_stream_descriptor:descriptor_hash(DescriptorRaw)
-        ),
-    Cases = [
-        {dev_lbry_commitment:blob_message(Hash, Bytes), <<"claim">>},
-        {TxMsg, <<"blob">>},
-        {ClaimMsg, <<"blob">>},
-        {ChannelMsg, <<"claim">>},
-        {DescriptorMsg, <<"blob">>}
-    ],
-    lists:foreach(
-        fun({Msg, Wrong}) ->
-            [Commitment] = maps:values(maps:get(<<"commitments">>, Msg)),
-            Relabeled = Msg#{
-                <<"commitments">> =>
-                    maps:map(
-                        fun(_ID, C) -> C#{ <<"evidence">> => Wrong } end,
-                        maps:get(<<"commitments">>, Msg)
-                    )
-            },
-            ?assertEqual(
-                {ok, false},
-                verify(Relabeled, Commitment#{ <<"evidence">> => Wrong }, #{})
-            ),
-            ?assertEqual(
-                {ok, false},
-                verify(Msg, Commitment#{ <<"evidence">> => <<"mystery">> }, #{})
-            ),
-            ?assertEqual(
-                {ok, false},
-                verify(Msg, maps:remove(<<"evidence">>, Commitment), #{})
-            )
-        end,
-        Cases
-    ).
-
-commit_rederives_native_commitments_test() ->
-    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
-    Bytes = <<"encrypted blob bytes">>,
-    Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
-    DescriptorRaw = hb_json:encode(sample_descriptor_json()),
-    SDHash = dev_lbry_stream_descriptor:descriptor_hash(DescriptorRaw),
-    Cases = [
-        {#{ <<"raw-transaction">> => Raw, <<"nout">> => 0 }, <<"claim">>},
-        {#{ <<"raw-transaction">> => Raw, <<"nout">> => <<"0">> }, <<"stream">>},
-        {#{ <<"data">> => Bytes, <<"blob-hash">> => Hash }, <<"blob">>},
-        {
-            #{ <<"raw">> => DescriptorRaw, <<"sd-hash">> => SDHash },
-            <<"descriptor">>
-        },
-        {#{ <<"raw">> => Raw }, <<"transaction">>}
-    ],
-    lists:foreach(
-        fun({Msg, Evidence}) ->
-            {ok, Rebuilt} = commit(Msg, #{ <<"evidence">> => Evidence }, #{}),
-            Commitments = maps:values(maps:get(<<"commitments">>, Rebuilt)),
-            ?assert(
-                lists:any(
-                    fun(Commitment) ->
-                        maps:get(<<"evidence">>, Commitment) == Evidence
-                    end,
-                    Commitments
-                )
-            ),
-            lists:foreach(
-                fun(Commitment) ->
-                    ?assertEqual({ok, true}, verify(Rebuilt, Commitment, #{}))
-                end,
-                Commitments
-            )
-        end,
-        Cases
-    ),
     ?assertEqual(
-        {error, missing_raw_transaction},
-        commit(#{ <<"nout">> => 0 }, #{ <<"evidence">> => <<"claim">> }, #{})
-    ),
+        {ok, false},
+        verify(Msg, Commitment#{ <<"evidence">> => <<"claim">> }, #{})),
     ?assertEqual(
-        {error, unsupported_evidence},
-        commit(#{}, #{ <<"evidence">> => <<"attestation">> }, #{})
-    ),
-    ?assertEqual({error, unsupported_evidence}, commit(#{}, #{}, #{})).
-
-transaction_codec_roundtrip_test() ->
-    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
-    {ok, TABM} = from(Raw, #{ <<"evidence">> => <<"transaction">> }, #{}),
-    ?assertEqual({ok, Raw}, to(TABM, #{ <<"format">> => <<"raw">> }, #{})),
+        {ok, false},
+        verify(Msg, Commitment#{ <<"evidence">> => <<"mystery">> }, #{})),
     ?assertEqual(
-        {ok, hb_util:to_hex(Raw)},
-        to(TABM, #{ <<"format">> => <<"hex">> }, #{})
-    ),
-    {ok, FromHex} =
-        from(
-            hb_util:to_hex(Raw),
-            #{ <<"evidence">> => <<"transaction">>, <<"encoding">> => <<"hex">> },
-            #{}
-        ),
-    ?assertEqual(
-        maps:get(<<"txid">>, TABM),
-        maps:get(<<"txid">>, FromHex)
-    ),
-    % Hex input without an `encoding' hint is auto-detected.
-    {ok, AutoHex} = from(hb_util:to_hex(Raw), #{ <<"evidence">> => <<"transaction">> }, #{}),
-    ?assertEqual(maps:get(<<"txid">>, TABM), maps:get(<<"txid">>, AutoHex)).
-
-blob_codec_roundtrip_test() ->
-    Bytes = <<"encrypted blob payload">>,
-    Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
-    Req = #{ <<"evidence">> => <<"blob">>, <<"blob-hash">> => Hash },
-    {ok, TABM} = from(Bytes, Req, #{}),
-    ?assertEqual(Hash, maps:get(<<"blob-hash">>, TABM)),
-    ?assertEqual(
-        {ok, Bytes},
-        to(TABM, Req#{ <<"format">> => <<"raw">> }, #{})
-    ),
-    WrongHash = dev_lbry_stream_descriptor:blob_hash(<<"other payload">>),
-    ?assertMatch(
-        {error, {hash_mismatch, _, _}},
-        from(Bytes, Req#{ <<"blob-hash">> => WrongHash }, #{})
-    ),
-    ?assertEqual({error, missing_blob_hash}, from(Bytes, #{ <<"evidence">> => <<"blob">> }, #{})).
-
-descriptor_codec_roundtrip_test() ->
-    Raw = hb_json:encode(sample_descriptor_json()),
-    SDHash = dev_lbry_stream_descriptor:descriptor_hash(Raw),
-    Req = #{ <<"evidence">> => <<"descriptor">>, <<"sd-hash">> => SDHash },
-    {ok, TABM} = from(Raw, Req, #{}),
-    ?assertEqual(SDHash, maps:get(<<"sd-hash">>, TABM)),
-    ?assertEqual({ok, Raw}, to(TABM, Req#{ <<"format">> => <<"raw">> }, #{})).
-
-claim_codec_roundtrip_test() ->
-    ChannelHash = <<1:160>>,
-    Signature = <<2:512>>,
-    Message = <<"claim protobuf">>,
-    Raw = <<1, ChannelHash/binary, Signature/binary, Message/binary>>,
-    {ok, TABM} = from(Raw, #{ <<"evidence">> => <<"claim">> }, #{}),
-    {ok, Structured} = to(TABM, #{}, #{}),
-    ?assertEqual(true, maps:get(<<"signed">>, Structured)),
-    ?assertEqual({ok, Raw}, to(TABM, #{ <<"format">> => <<"raw">> }, #{})),
-    ?assertEqual(
-        {ok, hb_util:to_hex(Raw)},
-        to(TABM, #{ <<"format">> => <<"hex">> }, #{})
-    ),
-    {ok, FromHex} =
-        from(
-            hb_util:to_hex(Raw),
-            #{ <<"evidence">> => <<"claim">>, <<"encoding">> => <<"hex">> },
-            #{}
-        ),
-    ?assertEqual({ok, Raw}, to(FromHex, #{ <<"format">> => <<"raw">> }, #{})).
-
-to_hint_and_content_type_test() ->
-    ?assertEqual({ok, #{ <<"bundle">> => true }}, to_hint(#{}, #{}, #{})),
-    ?assertEqual({ok, <<"application/vnd.lbry">>}, content_type(#{})).
-
-%%% Test fixtures
-
-sample_channel_keys() ->
-    {Uncompressed, _} = crypto:generate_key(ecdh, secp256k1, <<1:256>>),
-    {ar_wallet:compress_ecdsa_pubkey(Uncompressed), Uncompressed}.
-
-sample_descriptor_json() ->
-    Key = <<0:128>>,
-    IV = <<1:128>>,
-    Cipher = crypto:crypto_one_time(aes_128_cbc, Key, IV, <<2:128>>, true),
-    #{
-        <<"stream_type">> => <<"lbryfile">>,
-        <<"stream_name">> => hb_util:to_hex(<<"sample.mp4">>),
-        <<"key">> => hb_util:to_hex(Key),
-        <<"suggested_file_name">> => hb_util:to_hex(<<"sample.mp4">>),
-        <<"stream_hash">> => dev_lbry_stream_descriptor:blob_hash(<<"stream">>),
-        <<"blobs">> => [
-            #{
-                <<"length">> => byte_size(Cipher),
-                <<"blob_num">> => 0,
-                <<"iv">> => hb_util:to_hex(IV),
-                <<"blob_hash">> => dev_lbry_stream_descriptor:blob_hash(Cipher)
-            },
-            #{
-                <<"length">> => 0,
-                <<"blob_num">> => 1,
-                <<"iv">> => hb_util:to_hex(<<0:128>>)
-            }
-        ]
-    }.
-
-channel_claim_tx(StoredKey) ->
-    Claim = <<0, (proto_field(2, proto_field(1, StoredKey)))/binary>>,
-    create_claim_tx(<<"@channel">>, Claim).
-
-signed_stream_claim_for_channel(ChannelMsg, PrivKey) ->
-    SDHash = crypto:hash(sha384, <<"signed stream">>),
-    StreamProto = proto_field(1, proto_field(1, proto_field(6, SDHash))),
-    ChannelHash = reverse(binary:decode_hex(maps:get(<<"claim-id">>, ChannelMsg))),
-    Digest =
-        crypto:hash(
-            sha256,
-            <<0:256, 0:32/little, ChannelHash/binary, StreamProto/binary>>
-        ),
-    Signature =
-        der_to_compact(
-            crypto:sign(ecdsa, sha256, {digest, Digest}, [PrivKey, secp256k1])
-        ),
-    Envelope = <<1, ChannelHash/binary, Signature/binary, StreamProto/binary>>,
-    {ok, StreamMsg} =
-        dev_lbry_commitment:stream_claim_message(
-            create_claim_tx(<<"video">>, Envelope),
-            0
-        ),
-    StreamMsg.
-
-create_claim_tx(Name, Claim) ->
-    Script = <<
-        16#b5,
-        (script_push(Name))/binary,
-        (script_push(Claim))/binary,
-        16#6d, 16#75
-    >>,
-    tx_with_script(Script).
-
-tx_with_script(Script) ->
-    <<1:32/little-signed,
-        1,
-        0:256,
-        0:32/little,
-        0,
-        16#ffffffff:32/little,
-        1,
-        0:64/little,
-        (byte_size(Script)),
-        Script/binary,
-        0:32/little>>.
-
-proto_field(Number, Value) ->
-    Key = (Number bsl 3) bor 2,
-    <<(proto_varint(Key))/binary,
-        (proto_varint(byte_size(Value)))/binary,
-        Value/binary>>.
-
-proto_varint(Value) when Value < 16#80 ->
-    <<Value>>;
-proto_varint(Value) ->
-    <<((Value band 16#7f) bor 16#80), (proto_varint(Value bsr 7))/binary>>.
-
-script_push(Value) when byte_size(Value) < 16#4c ->
-    <<(byte_size(Value)), Value/binary>>;
-script_push(Value) when byte_size(Value) =< 16#ff ->
-    <<16#4c, (byte_size(Value)), Value/binary>>.
-
-der_to_compact(
-    <<16#30, _TotalLen, 16#02, RLen, R0:RLen/binary, 16#02, SLen, S0:SLen/binary>>
-) ->
-    <<(fixed_int(R0))/binary, (fixed_int(S0))/binary>>.
-
-fixed_int(Int) ->
-    Trimmed = trim_zeroes(Int),
-    Padding = 32 - byte_size(Trimmed),
-    <<0:(Padding * 8), Trimmed/binary>>.
-
-trim_zeroes(<<0, Rest/binary>> = Int) when byte_size(Int) > 32 ->
-    trim_zeroes(Rest);
-trim_zeroes(Int) ->
-    Int.
+        {ok, false},
+        verify(Msg, maps:remove(<<"evidence">>, Commitment), #{})).
 
 -endif.

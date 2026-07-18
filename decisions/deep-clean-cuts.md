@@ -38,6 +38,27 @@ serving is.
    from the vendored eight-device world.
 4. `dev_lbry_ancestry:verify_spend/3` un-exported (internal only).
 
+## Second pass (audit-driven)
+
+5. **`dev_lbry` reduced to a verification device** (921 → ~290 lines).
+   The codec + commit surface (`from/3`, `to/3`, `commit/3` and their
+   `commit_*`/`from_*`/`to_*`/`raw`/`hex_to_binary` helpers) was
+   unreachable: nothing calls `hb_message:convert`/`commit` on
+   `lbry@1.0`; stores build evidence through `dev_lbry_commitment`'s
+   constructors directly, and the only dispatched entrypoint is
+   `verify/3`. Per the milestone-1 brief ("verify ... commit is less
+   important"), the device is now a pure verifier: `verify/3`,
+   `to_hint/3`, `content_type/1`. The per-kind `dev_lbry` verify tests
+   were redundant with `dev_lbry_commitment`'s 18 dispatch tests (which
+   exercise `hb_message:verify` → `dev_lbry:verify` end-to-end for every
+   kind); replaced with one compact dispatch/fail-closed test, and the
+   ~110 lines of duplicated real-crypto fixtures deleted with them.
+
+   **Gotcha the audit missed:** `to_hint/3` is NOT dead. `hb_message`'s
+   `add_bundle_hint` calls it on the commitment device while converting
+   a message to TABM for verification, so removing it broke every
+   nested-structure verify (claim/stream/attestation). Kept.
+
 ## Why not more
 
 Store behaviour callbacks flagged by xref as unused exports are dynamic
