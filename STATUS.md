@@ -3,6 +3,36 @@
 Status log for the overnight port. Newest entries first. Decisions with
 rationale live in `decisions/`.
 
+## 2026-07-18 (early morning) — end-to-end proof
+
+- **Full watch page rendered in a real browser from a stock-surface
+  HyperBEAM node**: static SPA served at `GET /<ManifestID>` (hash
+  routing; sanitized chunk names), claim + channel + stream evidence
+  read via `GET /~cache@1.0/read?read=odysee/...&accept-bundle=true`,
+  title/channel/thumbnail/date rendered from the decoded `value`,
+  video frame decoding from `odysee/media/stream-id/<outpoint>`.
+  Responses carry the `lbry@1.0` commitments in RFC-9421
+  `signature`/`signature-input` headers, plus the node's RSA HTTPSig.
+- Evidence encoding hardened for the wire: message-embedded raw bytes
+  (`claim`, `raw-transaction`, transaction `raw`, ancestry entries)
+  now travel as lowercase hex — the httpsig codec headers raw short
+  values, which browsers reject. All 104 device tests + 70 eunit tests
+  green after the change.
+- Peer serving proven: a second stock-config node (fs cache +
+  `hb_store_remote_node` -> seed) served the manifest and assets it did
+  not have, fetched trustlessly from its peer.
+- Auth: `POST /id?!=true` with the stock pipeline returns the
+  hook-committed request ID (per-user wallet). Remaining gap for
+  user-upload persistence documented in `patches/README.md` §4.
+- Media: correct full-object serving; browser-grade seeking blocked on
+  HTTP-layer Range support (`patches/README.md` §5). Local caching of
+  decrypted media is an open performance follow-up (first fetch of a
+  63MB stream took ~29s, re-fetched per read).
+- Frontend follow-ups: comment-signature verification is currently
+  fail-open client-side (tagged `unverified`) pending a browser
+  verification path; homepage rails come back 400 for claims the SDK
+  locator cannot resolve (graceful, but worth classifying).
+
 ## 2026-07-17 (evening)
 
 - Devices/stores ported and green: single `lbry@1.0` commitment+codec
