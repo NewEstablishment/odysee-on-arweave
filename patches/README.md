@@ -1,73 +1,22 @@
 # Proposed upstream HyperBEAM changes
 
-Changes this project would benefit from in `permaweb/hyperbeam` `edge`.
-Neither is required to run: the system works on stock nodes today. Each
-belongs in its own upstream PR with its own justification; nothing in
-this repository depends on them landing.
+Nothing in this repository depends on these landing; the system runs on
+stock nodes today. Any proposal beyond this list must take the form of a
+terse (<= 20 lines, test + fix) branch on a HyperBEAM worktree, and only
+for defects that are demonstrably HyperBEAM's, not this application's.
 
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
 Extend `?IS_ID` to accept 40-character (20-byte hex) LBRY claim IDs, so
 bare `GET /<claim-id>` resolves as a single-ID store read. Applies
 cleanly to current `edge` (`git apply --check` verified). Without it,
-claim reads use the namespaced form
-`GET /~cache@1.0/read?read=odysee/claim-id/<id>`, which works on stock
-nodes unmodified.
+claim reads use `GET /~cache@1.0/read?read=odysee/claim-id/<id>`, which
+works on stock nodes unmodified.
 
-## 2. Flat store-path fallback (described proposal)
+## 2. RFC-7233 Range support for binary responses (described)
 
-`flat-store-path-fallback.reference.erl` is the reference
-implementation (from the earlier vendored tree, where it proved out):
-when a multi-segment, fully device-free resolution terminates in
-`{error, not_found}`, retry the joined path as a single flat store read
-(`hb_cache:read(#{ <<"read">> => <<"p1/p2/...">> })`). This makes every
-store namespace directly addressable as `GET /odysee/claim/<uri>` etc.,
-rather than only through `~cache@1.0/read`. The guard is conservative:
-every step must be a plain pathed map with no `device` key, so no
-device resolution semantics change. Needs re-basing onto the current
-`edge` resolver's terminal handling.
-
-## 3. Link-ID vs write-ID divergence for committer-less commitments
-(described proposal)
-
-For a nested committed message, `hb_link:normalize` creates the link
-under `hb_message:id(Child, all)` computed over the full child, while
-`hb_cache:write` registers the IDs of the child's *committed view*
-(`with_only_committed` narrowing). For httpsig-signed children the two
-agree (the all-commitments ID accumulates commitment keys, invariant
-under narrowing), but for a child whose commitments carry no
-`committer`, `id(_, all)` maps to `committers => all`, which selects
-zero commitments and silently recalculates an unsigned ID over whatever
-keys are present — including uncommitted derived keys — so the link
-dangles and any HTTP encode of the parent 500s. This repository routes
-around it by only embedding children in committed-view form
-(`dev_lbry_commitment:with_attestation_commitment/2`); upstream, the
-two paths should derive the same ID for every commitment shape.
-
-## 4. Persist auth-hook-committed requests (described proposal)
-
-`store-all-signed` persists signed inbound messages at HTTP decode
-time, which runs before the request hooks — so a request that only
-becomes signed via `~auth-hook@1.0`'s `?!=true` flow is never
-persisted, and `~cache@1.0/write` gates on the static `cache_writers`
-allowlist, which cannot enumerate the hook's dynamically-derived
-per-user wallets. Re-checking the `store-all-signed` condition after
-the request-hook pipeline (or an opt-in `store-hook-signed` node
-option) would let any stock node accept user uploads as signed cache
-messages with zero custom devices: POST with `?!=true`, hook signs
-with the user's node-hosted wallet, message persists, `~query@1.0`
-discovers it, and peers replicate it through remote-node stores.
-
-## 5. RFC-7233 Range support for binary responses (described proposal)
-
-The HTTP layer ignores `Range` request headers, and store reads reached
-through `~cache@1.0/read` never see them, so any large binary served
-from a node (video, audio, large files) arrives as a full-body 200.
-Browsers treat rangeless media as unseekable and throttle/resume long
-downloads with `Range` requests they expect the server to honor. Native
-slicing of binary response bodies in `hb_http:encode_reply` (bytes
-ranges over the encoded body, 206/`Content-Range`/`Accept-Ranges`)
-would give every HyperBEAM-served media file browser-grade seeking with
-no application code. Until then this repository serves full media
-objects (correct but unseekable), and the prior demo's approach —
-proxy-side range slicing — is deliberately not reproduced.
+The HTTP layer ignores `Range` request headers, so large binaries
+(video, audio) always arrive as full-body 200s; browsers treat such
+media as unseekable. Native byte-range slicing in `hb_http:encode_reply`
+(206/`Content-Range`/`Accept-Ranges`) would give every HyperBEAM-served
+binary browser-grade seeking with no application code.
