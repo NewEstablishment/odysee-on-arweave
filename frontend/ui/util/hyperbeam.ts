@@ -2418,10 +2418,23 @@ async function parseStoreResponse(response: Response): Promise<any> {
   };
 }
 
+// Browsers decode response headers as latin-1, but flat store messages
+// carry UTF-8 field values in headers; reinterpret when the bytes are
+// valid UTF-8.
+function decodeHeaderUtf8(value: string): string {
+  if (!/[\x80-\xff]/.test(value)) return value;
+  try {
+    const bytes = Uint8Array.from(value, (char) => char.charCodeAt(0) & 0xff);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return value;
+  }
+}
+
 function responseHeadersObject(response: Response): Record<string, any> {
   const headers: Record<string, any> = {};
   response.headers.forEach((value, key) => {
-    headers[key] = value;
+    headers[key] = decodeHeaderUtf8(value);
   });
   const types = parseAoTypesValue(headers['ao-types']);
   for (const [key, type] of Object.entries(types)) {
@@ -2685,7 +2698,8 @@ function immutableRouteIdFromUri(uri: string): string | null {
   }
 
   const outpoint = modifier.match(/^out_([0-9a-f]{64})_([0-9]+)$/i);
-  return outpoint ? `${outpoint[1]}:${outpoint[2]}` : null;
+  if (outpoint) return `${outpoint[1]}:${outpoint[2]}`;
+  return isStandaloneImmutableId(modifier) ? String(modifier) : null;
 }
 
 function isRouteClaimModifier(claimId: string) {
