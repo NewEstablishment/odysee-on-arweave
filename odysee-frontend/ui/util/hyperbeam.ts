@@ -116,15 +116,8 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
         } catch (_e) {}
       }
 
-      const storeClaim = await fetchCachedStoreJsonOrNull(uriStorePath('odysee/claim', uri))
-        .then(responsePayload)
-        .catch(() => null);
-      const storeEntry = claimFromUriKeyedResult(storeClaim, uri);
-      if (storeEntry) {
-        const claim = sdkClaimFromHyperbeam(storeEntry);
-        if (claim && claim.claim_id) return [uri, await immutableClaimForResolvedUri(uri, claim)];
-      }
-
+      // Sam's ruling (2026-07-17): name-to-claim resolution must be a device,
+      // not a store read — a uri is not a verifiable content-derived ID.
       const getResponse = await fetchCachedStoreJsonOrNull(
         `${CLAIM_DEVICE}/resolve?url=${encodeURIComponent(uri)}`
       ).catch(() => null);
@@ -2186,12 +2179,6 @@ function fetchCachedStoreJsonOrNull(path: string): Promise<any | null> {
 
 function storePath(prefix: string, value: string): string {
   return `${prefix}/${encodeURIComponent(value)}`;
-}
-
-// The node's path parser drops `#` fragments even when percent-encoded, so
-// lbry uris travel in their equivalent colon form.
-function uriStorePath(prefix: string, uri: string): string {
-  return storePath(prefix, String(uri).replace(/#/g, ':'));
 }
 
 function claimFromUriKeyedResult(result: any, uri: string): any | null {
