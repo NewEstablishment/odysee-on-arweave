@@ -1403,7 +1403,20 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   const outpoint = nativeUpload ? null : claimOutpoint(txid, nout);
   const hyperbeam = value(claim, 'hyperbeam') || {};
   const mediaId = value(hyperbeam, 'media_id', 'media-id', 'mediaId') || value(claim, 'claim_id', 'claim-id');
-  const valueType = value(claim, 'value_type', 'value-type') || claim.value_type;
+  const name = value(claim, 'name', 'claim-name') || claim.name;
+  const device = value(claim, 'device');
+  const valueType =
+    value(claim, 'value_type', 'value-type') ||
+    claim.value_type ||
+    (device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' ? 'channel' : undefined);
+  const canonicalUrl =
+    value(claim, 'canonical_url', 'canonical-url') ||
+    claim.canonical_url ||
+    (name && claimId ? claimUrl(String(name), String(claimId)) : undefined);
+  const permanentUrl =
+    value(claim, 'permanent_url', 'permanent-url') ||
+    claim.permanent_url ||
+    (name && claimId ? claimUrl(String(name), String(claimId)) : undefined);
   const meta = normalizeHyperbeamClaimMeta(value(claim, 'meta'));
 
   return {
@@ -1429,19 +1442,15 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
             value(claim, 'claim-output-store-path', 'claim-proof-store-path') || `odysee/claim-output/${txid}/${nout}`,
         }
       : {}),
-    name: value(claim, 'name', 'claim-name') || claim.name,
+    name,
     ...(nativeUpload
       ? {
           streaming_url: `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(claimId)}`,
           download_url: `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(claimId)}`,
         }
       : {}),
-    canonical_url: nativeUpload
-      ? uriWithClaimId(value(claim, 'canonical_url', 'canonical-url') || claim.canonical_url, claimId)
-      : value(claim, 'canonical_url', 'canonical-url') || claim.canonical_url,
-    permanent_url: nativeUpload
-      ? uriWithClaimId(value(claim, 'permanent_url', 'permanent-url') || claim.permanent_url, claimId)
-      : value(claim, 'permanent_url', 'permanent-url') || claim.permanent_url,
+    canonical_url: nativeUpload ? uriWithClaimId(canonicalUrl, claimId) : canonicalUrl,
+    permanent_url: nativeUpload ? uriWithClaimId(permanentUrl, claimId) : permanentUrl,
     short_url: nativeUpload
       ? uriWithClaimId(value(claim, 'short_url', 'short-url') || claim.short_url, claimId)
       : value(claim, 'short_url', 'short-url') || claim.short_url,
@@ -1895,12 +1904,11 @@ function immutableClaimFromHyperbeam(
       ? `${hyperbeamBaseUrl()}/${encodeDataPath(storeId)}`
       : '';
   const claimMediaUrl =
-    name && isClaimId(sourceClaimId)
+    allowHyperbeamCompatibilityReads() && name && isClaimId(sourceClaimId)
       ? `${hyperbeamBaseUrl()}/${STREAM_DEVICE}/media?claim-name=${encodeURIComponent(name)}&claim-id=${encodeURIComponent(String(sourceClaimId))}`
       : '';
   const mediaUrl =
     explicitMediaUrl ||
-    claimMediaUrl ||
     hyperbeamMediaUrlFromPayload({
       ...payload,
       sd_hash: sdHash,
@@ -1908,7 +1916,8 @@ function immutableClaimFromHyperbeam(
       media_type: mediaType,
       'media-type': mediaType,
     }) ||
-    directMediaUrl;
+    directMediaUrl ||
+    claimMediaUrl;
   const canonicalUrl =
     value(claim, 'canonical_url', 'canonical-url') ||
     value(payload, 'canonical_url', 'canonical-url') ||
@@ -2454,7 +2463,6 @@ function claimIdFromChannelUri(uri: string): string | null {
 function hyperbeamMediaUrlFromPayload(payload: any): string {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl || !payload) return '';
-  if (!allowHyperbeamCompatibilityReads()) return '';
 
   const txid = value(payload, 'txid');
   const nout = value(payload, 'nout');
@@ -2462,6 +2470,8 @@ function hyperbeamMediaUrlFromPayload(payload: any): string {
   if (outpoint) {
     return `${baseUrl}/${STREAM_DEVICE}/media?id=${encodeURIComponent(String(outpoint))}`;
   }
+
+  if (!allowHyperbeamCompatibilityReads()) return '';
 
   const claimId = value(payload, 'claim_id', 'claim-id');
   if (claimId) {

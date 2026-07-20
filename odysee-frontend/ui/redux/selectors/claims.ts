@@ -825,9 +825,11 @@ export const selectChannelForClaimUri = createCachedSelector(
 
     if (canonicalUrl) {
       return includePrefix ? canonicalUrl : canonicalUrl.slice('lbry://'.length);
-    } else {
+    } else if (permanentUrl) {
       return includePrefix ? permanentUrl : permanentUrl.slice('lbry://'.length);
     }
+
+    return null;
   }
 )((state, uri, includePrefix) => `${String(uri)}:${String(includePrefix)}`);
 export const selectChannelNameForClaimUri = (state: State, uri: string) => {
@@ -847,9 +849,11 @@ export const makeSelectChannelForClaimUri = (uri: string, includePrefix: boolean
 
     if (canonicalUrl) {
       return includePrefix ? canonicalUrl : canonicalUrl.slice('lbry://'.length);
-    } else {
+    } else if (permanentUrl) {
       return includePrefix ? permanentUrl : permanentUrl.slice('lbry://'.length);
     }
+
+    return null;
   });
 export const makeSelectChannelPermUrlForClaimUri = (uri: string, includePrefix: boolean = false) =>
   createSelector(makeSelectClaimForUri(uri), (claim: Claim | null | undefined) => {
