@@ -2195,20 +2195,9 @@ function claimFromUriKeyedResult(result: any, uri: string): any | null {
 
 function isCompatibilityStorePath(path: string): boolean {
   return [
-    'odysee/claim/',
     'odysee/claim-id/',
-    'odysee/stream/',
-    'odysee/stream-id/',
-    'odysee/channel/',
-    'odysee/channel-id/',
     'odysee/comment/',
     'odysee/comment-id/',
-    'odysee/comment-reaction/',
-    'odysee/file-view-count/',
-    'odysee/file-reaction/',
-    'odysee/subscription-count/',
-    'odysee/media/stream/',
-    'odysee/media/stream-id/',
   ].some((prefix) => path.startsWith(prefix));
 }
 

@@ -89,10 +89,6 @@ read(StoreOpts, Req = #{ <<"read">> := Key }, NodeOpts) ->
             end
     end.
 
-read_live(<<"odysee/media/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
-    media_from_stream_path(<<"odysee/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
-read_live(<<"odysee/media/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
-    media_from_stream_path(<<"odysee/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
 read_live(<<"odysee/media/sd-hash/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
     media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
 read_live(<<"odysee/media/descriptor/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
@@ -100,22 +96,12 @@ read_live(<<"odysee/media/descriptor/", SDHash/binary>>, Req, StoreOpts, NodeOpt
 read_live(Path, _Req, StoreOpts, NodeOpts) ->
     read_live(Path, StoreOpts, NodeOpts).
 
-read_live(<<"odysee/claim/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, URI} ?= decode_component(Encoded),
-        {ok, Resolved} ?=
-            hb_ao:raw(
-                <<"odysee-claim@1.0">>,
-                <<"resolve">>,
-                #{},
-                #{ <<"urls">> => [URI] },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        {ok, Claim} ?= claim_from_resolve(Resolved, URI, NodeOpts),
-        commit_result(Claim, <<"claim">>, NodeOpts)
-    else
-        Error -> Error
-    end;
+%% Name-to-claim resolution is deliberately NOT a store read: a uri is not a
+%% content-derived ID, so the response cannot be verified against the request
+%% (Sam, 2026-07-17). Resolve names via `~odysee-claim@1.0/resolve' instead.
+%% The claim-id branch below is transitional: a claim id is a mutable pointer
+%% served through its warmed reference slot until listings return immutable
+%% outpoint ids directly.
 read_live(<<"odysee/claim-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, ClaimID} ?= decode_component(Encoded),
@@ -129,79 +115,6 @@ read_live(<<"odysee/claim-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
             ),
         {ok, Claim} ?= claim_from_search(Search, ClaimID, NodeOpts),
         commit_result(Claim, <<"claim">>, NodeOpts)
-    else
-        Error -> Error
-    end;
-read_live(<<"odysee/stream/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, URI} ?= decode_component(Encoded),
-        {ok, Stream} ?=
-            hb_ao:raw(
-                <<"odysee-stream@1.0">>,
-                <<"stream">>,
-                #{},
-                #{ <<"url">> => URI },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        commit_result(Stream, <<"stream">>, NodeOpts)
-    else
-        Error -> Error
-    end;
-read_live(<<"odysee/stream-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, ClaimID} ?= decode_component(Encoded),
-        {ok, Search} ?=
-            hb_ao:raw(
-                <<"odysee-claim@1.0">>,
-                <<"search">>,
-                #{},
-                #{
-                    <<"claim_ids">> => [ClaimID],
-                    <<"claim_type">> => <<"stream">>,
-                    <<"page_size">> => 1
-                },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        {ok, Claim} ?= claim_from_search(Search, ClaimID, NodeOpts),
-        {ok, Stream} ?=
-            hb_ao:raw(
-                <<"odysee-stream@1.0">>,
-                <<"stream">>,
-                Claim,
-                #{},
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        commit_result(Stream, <<"stream">>, NodeOpts)
-    else
-        Error -> Error
-    end;
-read_live(<<"odysee/channel-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts);
-read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, ChannelID} ?= decode_component(Encoded),
-        {ok, Search} ?=
-            hb_ao:raw(
-                <<"odysee-claim@1.0">>,
-                <<"search">>,
-                #{},
-                #{
-                    <<"claim_ids">> => [ChannelID],
-                    <<"claim_type">> => <<"channel">>,
-                    <<"page_size">> => 1
-                },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        {ok, Claim} ?= claim_from_search(Search, ChannelID, NodeOpts),
-        {ok, Channel} ?=
-            hb_ao:raw(
-                <<"odysee-channel@1.0">>,
-                <<"channel">>,
-                #{},
-                #{ <<"claim">> => Claim },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        commit_result(Channel, <<"channel">>, NodeOpts)
     else
         Error -> Error
     end;
@@ -268,77 +181,19 @@ read_live(<<"odysee/comment/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, CommentID} ?= decode_component(Encoded),
         {ok, Comment} ?=
-            hb_ao:raw(
-                <<"odysee-comment@1.0">>,
-                <<"by-id">>,
-                #{},
-                #{ <<"comment-id">> => CommentID },
-                store_node_opts(StoreOpts, NodeOpts)
+            hb_store_odysee_comment:read(
+                StoreOpts,
+                #{ <<"read">> => CommentID },
+                NodeOpts
             ),
         commit_result(Comment, <<"comment">>, NodeOpts)
     else
         Error -> Error
     end;
-read_live(<<"odysee/comment-reaction/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, CommentID} ?= decode_component(Encoded),
-        {ok, Reaction} ?=
-            hb_ao:raw(
-                <<"odysee-reaction@1.0">>,
-                <<"list">>,
-                #{},
-                #{ <<"comment-ids">> => CommentID },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        commit_result(enrich_surface(<<"odysee/comment-reaction/", CommentID/binary>>, <<"comment-reaction">>, Reaction), <<"comment-reaction">>, NodeOpts)
-    else
-        Error -> Error
-    end;
-read_live(<<"odysee/file-view-count/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, ClaimID} ?= decode_component(Encoded),
-        {ok, Counts} ?=
-            hb_ao:raw(
-                <<"odysee-file@1.0">>,
-                <<"view-count">>,
-                #{},
-                #{ <<"claim-id">> => ClaimID },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        commit_result(enrich_surface(<<"odysee/file-view-count/", ClaimID/binary>>, <<"file-view-count">>, Counts), <<"file-view-count">>, NodeOpts)
-    else
-        Error -> Error
-    end;
-read_live(<<"odysee/file-reaction/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, ClaimID} ?= decode_component(Encoded),
-        {ok, Reaction} ?=
-            hb_ao:raw(
-                <<"odysee-file-reaction@1.0">>,
-                <<"list">>,
-                #{},
-                #{ <<"claim-ids">> => ClaimID },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        commit_result(enrich_surface(<<"odysee/file-reaction/", ClaimID/binary>>, <<"file-reaction">>, Reaction), <<"file-reaction">>, NodeOpts)
-    else
-        Error -> Error
-    end;
-read_live(<<"odysee/subscription-count/", Encoded/binary>>, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, ClaimID} ?= decode_component(Encoded),
-        {ok, Counts} ?=
-            hb_ao:raw(
-                <<"odysee-account@1.0">>,
-                <<"sub-count">>,
-                #{},
-                #{ <<"claim-id">> => ClaimID },
-                store_node_opts(StoreOpts, NodeOpts)
-            ),
-        commit_result(enrich_surface(<<"odysee/subscription-count/", ClaimID/binary>>, <<"subscription-count">>, Counts), <<"subscription-count">>, NodeOpts)
-    else
-        Error -> Error
-    end;
+%% Volatile counts and reactions are computations, not verifiable ID reads:
+%% they live on their devices (`~odysee-file@1.0/view-count',
+%% `~odysee-file-reaction@1.0/list', `~odysee-account@1.0/sub-count',
+%% `~odysee-reaction@1.0/list'), never behind store keys.
 read_live(<<"odysee/blob-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     read_live(<<"odysee/blob/", Encoded/binary>>, StoreOpts, NodeOpts);
 read_live(<<"odysee/blob/", Encoded/binary>>, StoreOpts, NodeOpts) ->
@@ -487,43 +342,6 @@ read_verified_claim_proof(TxID, NOut, StoreOpts, NodeOpts) ->
             ),
         ok ?= require_valid_proof(Proof, NodeOpts),
         commit_result(Proof, <<"claim-proof">>, NodeOpts)
-    end.
-
-media_from_stream_path(Path, Req, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, Stream} ?= read(StoreOpts, #{ <<"read">> => Path }, NodeOpts),
-        {ok, Source} ?= stream_media_source(Stream, NodeOpts),
-        media_response(Source, Req, store_node_opts(StoreOpts, NodeOpts))
-    end.
-
-stream_media_source(Stream, Opts) ->
-    maybe
-        SDHash = first_present([<<"sd-hash">>, <<"sd_hash">>], Stream, Opts),
-        true ?= is_binary(SDHash),
-        Source0 = #{
-            <<"sd-hash">> => SDHash,
-            <<"byte-size">> =>
-                integer_or_undefined(
-                    first_present(
-                        [
-                            <<"source-size">>,
-                            <<"source_size">>,
-                            <<"byte-size">>,
-                            <<"media-size">>
-                        ],
-                        Stream,
-                        Opts
-                    )
-                ),
-            <<"content-type">> =>
-                first_present([<<"media-type">>, <<"media_type">>, <<"content-type">>], Stream, Opts),
-            <<"claim-id">> => first_present([<<"claim-id">>, <<"claim_id">>], Stream, Opts),
-            <<"filename">> => first_present([<<"source-name">>, <<"source_name">>, <<"filename">>], Stream, Opts)
-        },
-        {ok, maps:filter(fun(_Key, Value) -> present_optional(Value) end, Source0)}
-    else
-        false -> {error, missing_sd_hash};
-        not_found -> {error, missing_sd_hash}
     end.
 
 media_response(Source, Req, Opts) ->
@@ -872,26 +690,6 @@ source_message(<<"transaction">>, Msg) ->
 source_message(_Type, Msg) ->
     Msg.
 
-enrich_surface(<<"odysee/comment-reaction/", CommentID/binary>> = Path, <<"comment-reaction">>, Msg) ->
-    Msg#{
-        <<"comment-id">> => CommentID,
-        <<"comment-reaction-store-path">> => Path
-    };
-enrich_surface(<<"odysee/file-view-count/", ClaimID/binary>> = Path, <<"file-view-count">>, Msg) ->
-    Msg#{
-        <<"claim-id">> => ClaimID,
-        <<"file-view-count-store-path">> => Path
-    };
-enrich_surface(<<"odysee/file-reaction/", ClaimID/binary>> = Path, <<"file-reaction">>, Msg) ->
-    Msg#{
-        <<"claim-id">> => ClaimID,
-        <<"file-reaction-store-path">> => Path
-    };
-enrich_surface(<<"odysee/subscription-count/", ClaimID/binary>> = Path, <<"subscription-count">>, Msg) ->
-    Msg#{
-        <<"claim-id">> => ClaimID,
-        <<"subscription-count-store-path">> => Path
-    };
 enrich_surface(_Path, _Type, Msg) ->
     Msg.
 
@@ -905,18 +703,8 @@ has_commitment_device(Msg, Device, Opts) ->
         maps:values(Commitments)
     ).
 
-infer_type(<<"odysee/claim/", _/binary>>, _Msg, _Opts) ->
-    <<"claim">>;
 infer_type(<<"odysee/claim-id/", _/binary>>, _Msg, _Opts) ->
     <<"claim">>;
-infer_type(<<"odysee/stream/", _/binary>>, _Msg, _Opts) ->
-    <<"stream">>;
-infer_type(<<"odysee/stream-id/", _/binary>>, _Msg, _Opts) ->
-    <<"stream">>;
-infer_type(<<"odysee/channel-id/", _/binary>>, _Msg, _Opts) ->
-    <<"channel">>;
-infer_type(<<"odysee/channel/", _/binary>>, _Msg, _Opts) ->
-    <<"channel">>;
 infer_type(<<"odysee/claim-proof/", _/binary>>, _Msg, _Opts) ->
     <<"claim-proof">>;
 infer_type(<<"odysee/claim-output/", _/binary>>, _Msg, _Opts) ->
@@ -935,14 +723,6 @@ infer_type(<<"odysee/comment-id/", _/binary>>, _Msg, _Opts) ->
     <<"comment">>;
 infer_type(<<"odysee/comment/", _/binary>>, _Msg, _Opts) ->
     <<"comment">>;
-infer_type(<<"odysee/comment-reaction/", _/binary>>, _Msg, _Opts) ->
-    <<"comment-reaction">>;
-infer_type(<<"odysee/file-view-count/", _/binary>>, _Msg, _Opts) ->
-    <<"file-view-count">>;
-infer_type(<<"odysee/file-reaction/", _/binary>>, _Msg, _Opts) ->
-    <<"file-reaction">>;
-infer_type(<<"odysee/subscription-count/", _/binary>>, _Msg, _Opts) ->
-    <<"subscription-count">>;
 infer_type(<<"odysee/blob-id/", _/binary>>, _Msg, _Opts) ->
     <<"blob">>;
 infer_type(<<"odysee/blob/", _/binary>>, _Msg, _Opts) ->
@@ -969,29 +749,6 @@ infer_type(_Path, Msg, Opts) when is_map(Msg) ->
     end;
 infer_type(_Path, _Msg, _Opts) ->
     <<"source">>.
-
-%% @doc Extract the single claim message from a `resolve' response. The
-%% urls-list resolve path returns a `result' map keyed by the (normalized)
-%% uri, so match the requested uri exactly and fall back to the only entry;
-%% a bare claim message passes through unchanged.
-claim_from_resolve(Resolved, URI, Opts) ->
-    case first_found([<<"result">>], Resolved, not_found, Opts) of
-        Result when is_map(Result) ->
-            case hb_maps:get(URI, Result, not_found, Opts) of
-                Claim when is_map(Claim) ->
-                    {ok, Claim};
-                _ ->
-                    case hb_maps:values(Result, Opts) of
-                        [Claim] when is_map(Claim) -> {ok, Claim};
-                        _ -> {error, claim_not_found}
-                    end
-            end;
-        _ ->
-            case first_found([<<"claim-id">>, <<"claim_id">>], Resolved, not_found, Opts) of
-                not_found -> {error, claim_not_found};
-                _ -> {ok, Resolved}
-            end
-    end.
 
 claim_from_search(Search, ClaimID, Opts) ->
     Claims = first_found([<<"claims">>, <<"items">>], Search, [], Opts),
