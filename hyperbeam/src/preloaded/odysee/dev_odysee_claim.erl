@@ -4,7 +4,7 @@
 %%% while preserving the raw JSON response for audit/debugging.
 -module(dev_odysee_claim).
 -implements(<<"odysee-claim@1.0">>).
--export([info/1, resolve/3, search/3, transaction/3, page/3, comments/3, videos/3]).
+-export([info/1, resolve/3, get_id/3, search/3, transaction/3, page/3, comments/3, videos/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -15,7 +15,7 @@
 info(_Opts) ->
     #{
         exports => [
-            <<"resolve">>, <<"search">>, <<"transaction">>,
+            <<"resolve">>, <<"get-id">>, <<"search">>, <<"transaction">>,
             <<"page">>, <<"comments">>, <<"videos">>
         ]
     }.
@@ -60,6 +60,30 @@ resolve_by_uri_or_claim(Base, Req, Opts) ->
             Error ->
                 Error
     end.
+
+get_id(Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, Resolved} ?= resolve(Base, Req, Opts),
+            {ok, ClaimMsg} ?= resolved_claim_message(Resolved, Base, Req, Opts),
+            {ok, ClaimID} ?=
+                required_first_in(
+                    [<<"claim-id">>, <<"claim_id">>],
+                    [ClaimMsg, hb_maps:get(<<"claim">>, ClaimMsg, #{}, Opts)],
+                    Opts
+                ),
+            {ok, ID} ?= immutable_claim_id(ClaimMsg, Opts),
+            Result = #{
+                <<"device">> => ?DEVICE,
+                <<"view">> => <<"claim-id">>,
+                <<"id">> => ID,
+                <<"claim-id">> => ClaimID
+            },
+            {ok, Result#{ <<"content-type">> => <<"application/json">>, <<"body">> => hb_json:encode(Result) }}
+        else
+            Error -> Error
+        end
+    end).
 
 %% @doc Search claims using the SDK proxy `claim_search' method.
 search(Base, Req, Opts) ->
@@ -172,7 +196,7 @@ page(Base, Req, Opts) ->
             Doc0 = #{
                 <<"view">> => <<"page">>,
                 <<"claim-id">> => ClaimID,
-                <<"claim">> => section_message(ClaimMsg, Opts)
+                <<"claim">> => claim_page_section(ClaimMsg, Opts)
             },
             Optional = [
                 {<<"channel">>, Channel},
@@ -312,21 +336,26 @@ claim_message(Base, Req, Opts) ->
         true ->
             {ok, Base};
         false ->
-            case
-                first_found(
-                    [
-                        {Req, <<"claim-id">>},
-                        {Req, <<"claim_id">>},
-                        {Base, <<"claim-id">>},
-                        {Base, <<"claim_id">>}
-                    ],
-                    Opts
-                )
-            of
-                ClaimID when is_binary(ClaimID) ->
-                    fetch_claim_message(ClaimID, Opts);
+            case immutable_base_claim_message(Base, Opts) of
+                {ok, _} = Claim ->
+                    Claim;
                 _ ->
-                    {error, claim_not_found}
+                    case
+                        first_found(
+                            [
+                                {Req, <<"claim-id">>},
+                                {Req, <<"claim_id">>},
+                                {Base, <<"claim-id">>},
+                                {Base, <<"claim_id">>}
+                            ],
+                            Opts
+                        )
+                    of
+                        ClaimID when is_binary(ClaimID) ->
+                            fetch_claim_message(ClaimID, Opts);
+                        _ ->
+                            {error, claim_not_found}
+                    end
             end
     end.
 
@@ -353,6 +382,49 @@ fetch_claim_message(ClaimID, Opts) ->
     else
         Error -> Error
     end.
+
+immutable_base_claim_message(Base, Opts) when is_map(Base) ->
+    case {
+        first_value([<<"txid">>], Base, Opts),
+        first_value([<<"nout">>], Base, Opts),
+        first_value([<<"claim">>, <<"claim-envelope">>, <<"body">>, <<"value">>], Base, Opts)
+    } of
+        {TxID, NOut, Evidence}
+                when is_binary(TxID), Evidence =/= not_found,
+                     is_integer(NOut) orelse is_binary(NOut) ->
+            maybe
+                {ok, Stream} ?=
+                    hb_ao:raw(
+                        <<"odysee-stream@1.0">>,
+                        <<"from-claim">>,
+                        Base,
+                        #{},
+                        Opts
+                    ),
+                ClaimMsg = first_value([<<"claim-message">>], Stream, Opts),
+                true ?= is_claim_message(ClaimMsg, Opts),
+                {ok, ClaimMsg}
+            else
+                _ -> {error, claim_not_found}
+            end;
+        _ ->
+            {error, claim_not_found}
+    end;
+immutable_base_claim_message(_Base, _Opts) ->
+    {error, claim_not_found}.
+
+claim_page_section(ClaimMsg, Opts) ->
+    Loaded = hb_cache:ensure_all_loaded(ClaimMsg, Opts),
+    Optional = [
+        {<<"claim-id">>, first_value([<<"claim-id">>, <<"claim_id">>], Loaded, Opts)},
+        {<<"claim-name">>, first_value([<<"claim-name">>, <<"claim_name">>, <<"name">>], Loaded, Opts)},
+        {<<"value">>, first_value([<<"value">>], Loaded, Opts)},
+        {<<"value-type">>, first_value([<<"value-type">>, <<"value_type">>], Loaded, Opts)},
+        {<<"canonical-url">>, first_value([<<"canonical-url">>, <<"canonical_url">>], Loaded, Opts)},
+        {<<"txid">>, first_value([<<"txid">>], Loaded, Opts)},
+        {<<"nout">>, first_value([<<"nout">>], Loaded, Opts)}
+    ],
+    lists:foldl(fun put_if_found_pair/2, #{}, Optional).
 
 comment_page_defaults(Req, Opts) ->
     Params = #{
@@ -1152,7 +1224,23 @@ claim_ids(Base, Req, Opts) ->
         _ ->
             case first_value([<<"claim_ids">>, <<"claim-ids">>], Base, Opts) of
                 ClaimIDs when is_list(ClaimIDs) -> normalize_claim_ids(ClaimIDs);
-                _ -> not_found
+                _ ->
+                    case
+                        first_found(
+                            [
+                                {Req, <<"claim-id">>},
+                                {Req, <<"claim_id">>},
+                                {Base, <<"claim-id">>},
+                                {Base, <<"claim_id">>}
+                            ],
+                            Opts
+                        )
+                    of
+                        ClaimID when is_binary(ClaimID), ClaimID =/= <<>> ->
+                            {ok, [ClaimID]};
+                        _ ->
+                            not_found
+                    end
             end
     end.
 
@@ -1184,6 +1272,117 @@ required_first(Keys, Map, Opts) ->
         not_found -> {error, {missing, hd(Keys)}};
         Value -> {ok, Value}
     end.
+
+required_first_in(Keys, Maps, Opts) ->
+    case first_in(Keys, Maps, Opts) of
+        not_found -> {error, {missing, hd(Keys)}};
+        Value -> {ok, Value}
+    end.
+
+first_in([], _Maps, _Opts) ->
+    not_found;
+first_in([Key | Rest], Maps, Opts) ->
+    case first_found([{Map, Key} || Map <- Maps], Opts) of
+        not_found -> first_in(Rest, Maps, Opts);
+        Value -> Value
+    end.
+
+resolved_claim_message(Resolved, Base, Req, Opts) ->
+    case claim_message_candidate(Resolved, Base, Req, Opts) of
+        Claim when is_map(Claim) -> {ok, Claim};
+        _ -> {error, claim_not_found}
+    end.
+
+claim_message_candidate(Resolved, Base, Req, Opts) ->
+    case first_value([<<"claim-id">>, <<"claim_id">>], Resolved, Opts) of
+        ClaimID when is_binary(ClaimID) ->
+            Resolved;
+        _ ->
+            case first_value([<<"claims">>, <<"items">>], Resolved, Opts) of
+                Claims when is_list(Claims) ->
+                    select_requested_claim(Claims, Base, Req, Opts);
+                _ ->
+                    claim_from_resolved_result(Resolved, Base, Req, Opts)
+            end
+    end.
+
+claim_from_resolved_result(Resolved, Base, Req, Opts) ->
+    case first_value([<<"result">>], Resolved, Opts) of
+        Result when is_map(Result) ->
+            case claim_uri(Base, Req, Opts) of
+                {ok, URI} ->
+                    case hb_maps:get(URI, Result, not_found, Opts) of
+                        Claim when is_map(Claim) -> Claim;
+                        _ -> only_map_value(Result)
+                    end;
+                _ ->
+                    only_map_value(Result)
+            end;
+        _ ->
+            not_found
+    end.
+
+only_map_value(Map) ->
+    case [Value || Value <- maps:values(Map), is_map(Value)] of
+        [Value] -> Value;
+        _ -> not_found
+    end.
+
+select_requested_claim(Claims, Base, Req, Opts) ->
+    Requested =
+        first_found(
+            [
+                {Req, <<"claim-id">>},
+                {Req, <<"claim_id">>},
+                {Base, <<"claim-id">>},
+                {Base, <<"claim_id">>}
+            ],
+            Opts
+        ),
+    case [
+        Claim
+    ||
+        Claim <- Claims,
+        is_map(Claim),
+        Requested =:= not_found
+            orelse first_value([<<"claim-id">>, <<"claim_id">>], Claim, Opts) =:= Requested
+    ] of
+        [Claim | _] -> Claim;
+        [] -> not_found
+    end.
+
+immutable_claim_id(ClaimMsg, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, ClaimMsg, #{}, Opts),
+    TxID = first_in([<<"txid">>], [ClaimMsg, Claim], Opts),
+    NOut = first_in([<<"nout">>, <<"n-out">>], [ClaimMsg, Claim], Opts),
+    case {normalize_txid(TxID), normalize_nout(NOut)} of
+        {{ok, NormalizedTxID}, {ok, NormalizedNOut}} ->
+            {ok, <<NormalizedTxID/binary, ":", NormalizedNOut/binary>>};
+        _ ->
+            {error, immutable_claim_id_not_found}
+    end.
+
+normalize_txid(TxID) when is_binary(TxID), byte_size(TxID) =:= 64 ->
+    try binary:decode_hex(TxID) of
+        Decoded when byte_size(Decoded) =:= 32 -> {ok, hb_util:to_lower(TxID)};
+        _ -> error
+    catch
+        _:_ -> error
+    end;
+normalize_txid(_TxID) ->
+    error.
+
+normalize_nout(NOut) when is_integer(NOut), NOut >= 0 ->
+    {ok, integer_to_binary(NOut)};
+normalize_nout(NOut) when is_binary(NOut), byte_size(NOut) > 0 ->
+    try binary_to_integer(NOut) of
+        Value when Value >= 0 -> {ok, integer_to_binary(Value)};
+        _ -> error
+    catch
+        _:_ -> error
+    end;
+normalize_nout(_NOut) ->
+    error.
 
 first_value([], _Map, _Opts) ->
     not_found;
@@ -1227,6 +1426,22 @@ resolve_fixture_claim_test() ->
         hb_maps:get(<<"claim-id">>, Msg, #{})
     ),
     ?assertEqual(Claim, hb_json:decode(hb_maps:get(<<"body">>, Msg, #{}))).
+
+get_id_returns_the_claim_outpoint_test() ->
+    TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
+    Claim = (target_claim())#{ <<"txid">> => TxID, <<"nout">> => 2 },
+    {ok, Msg} = get_id(#{}, #{ <<"claim">> => Claim }, #{}),
+    ?assertEqual(<<TxID/binary, ":2">>, hb_maps:get(<<"id">>, Msg, #{})),
+    ?assertEqual(
+        <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+        hb_maps:get(<<"claim-id">>, Msg, #{})
+    ).
+
+get_id_rejects_a_claim_without_an_outpoint_test() ->
+    ?assertEqual(
+        {error, immutable_claim_id_not_found},
+        get_id(#{}, #{ <<"claim">> => target_claim() }, #{})
+    ).
 
 resolve_proxy_result_test() ->
     URI = <<"lbry://@veritasium#f/why-is-it-so-easy-to-disrupt-gps#3">>,

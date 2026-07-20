@@ -107,14 +107,8 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
       const immutableClaim = await fetchHyperbeamImmutableResolve(uri).catch(() => null);
       if (immutableClaim) return [uri, immutableClaim];
 
-      const claimId = fullClaimIdFromUri(uri);
-      if (claimId) {
-        try {
-          const result = messagePayload(await fetchCacheJson(cacheReadPath(`odysee/claim-id/${claimId}`), true));
-          const claim = sdkClaimFromHyperbeam(cacheReadClaim(result), claimId);
-          if (claim) return [uri, await immutableClaimForResolvedUri(uri, claim)];
-        } catch (_e) {}
-      }
+      const locatedClaim = await fetchHyperbeamLocatedClaim(uri).catch(() => null);
+      if (locatedClaim) return [uri, locatedClaim];
 
       // Sam's ruling (2026-07-17): name-to-claim resolution must be a device,
       // not a store read — a uri is not a verifiable content-derived ID.
@@ -223,19 +217,7 @@ async function commentListFromGetPath(params: CommentListParams): Promise<Commen
     }
   }
 
-  const query = new URLSearchParams();
-  query.set('page', String(params.page || 1));
-  query.set('page-size', String(params.page_size || 50));
-  if ((params as any).parent_id) query.set('parent-id', String((params as any).parent_id));
-  if ((params as any).top_level !== undefined) query.set('top-level', String(Boolean((params as any).top_level)));
-  if ((params as any).sort_by !== undefined && (params as any).sort_by !== null) {
-    query.set('sort-by', String((params as any).sort_by));
-  }
-  if ((params as any).channel_id) query.set('channel-id', String((params as any).channel_id));
-  if ((params as any).channel_name) query.set('channel-name', String((params as any).channel_name));
-
-  const response = await fetchStoreJsonOrNull(`${encodeURIComponent(claimId)}/comments?${query.toString()}`);
-  return commentListResponse(messagePayload(response), params);
+  return null;
 }
 
 function commentListResponse(result: any, params: CommentListParams): CommentListResponse | null {
@@ -269,9 +251,16 @@ export function fetchHyperbeamClaimPage(claimId: string, options: ClaimPageOptio
   const cached = deviceReadCache.get(key);
   if (cached && cached.expiresAt > now) return cached.promise;
 
-  const promise = fetchStoreJsonOrNull(
-    `${encodeURIComponent(claimId)}/page${queryString ? `?${queryString}` : ''}`
-  )
+  const promise = fetchHyperbeamClaimStoreId({ claim_id: claimId })
+    .then((id) =>
+      id
+        ? fetchStoreJsonOrNull(
+            `${encodeDataPath(id)}/${CLAIM_DEVICE}/page?claim-id=${encodeURIComponent(claimId)}${
+              queryString ? `&${queryString}` : ''
+            }`
+          )
+        : null
+    )
     .then((response) => {
       const page = messagePayload(response);
       return page && value(page, 'claim-id', 'claim_id') ? page : null;
@@ -466,9 +455,6 @@ export async function fetchHyperbeamSubCount(claimIdCsv: string): Promise<Array<
 }
 
 export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
-  const channelListing = await channelListingFromGetPath(params).catch(() => null);
-  if (channelListing) return channelListing;
-
   try {
     const response = await fetchDeviceJson(`${SEARCH_DEVICE}/query`, params);
     const result = sdkSearchFromHyperbeam(responsePayload(response));
@@ -485,52 +471,6 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     void error;
     return null;
   }
-}
-
-// Listing filters apply server-side so returned pages stay full and the
-// downstream lastPageReached math holds; other filters keep the query device.
-async function channelListingFromGetPath(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
-  const p: any = params;
-  const channelIds = stringList(p.channel_ids);
-  const orderBy = stringList(p.order_by);
-  const claimTypes = stringList(p.claim_type);
-  const hasFilters = Boolean(
-    p.text ||
-      p.claim_ids ||
-      p.any_tags?.length ||
-      p.all_tags?.length ||
-      p.not_channel_ids?.length ||
-      p.has_no_source ||
-      p.stream_types?.length ||
-      p.duration ||
-      p.content_aspect_ratio
-  );
-  const plainOrder = !orderBy.length || (orderBy.length === 1 && orderBy[0] === 'release_time');
-  const plainTypes = !claimTypes.length || claimTypes.every((type) => type === 'stream' || type === 'repost');
-
-  if (channelIds.length !== 1 || !LBRY_CLAIM_ID_RE.test(channelIds[0]) || hasFilters || !plainOrder || !plainTypes) {
-    return null;
-  }
-
-  const query = new URLSearchParams();
-  query.set('page', String(p.page || 1));
-  query.set('page-size', String(p.page_size || 20));
-  const notTags = stringList(p.not_tags);
-  if (notTags.length) query.set('not-tags', notTags.join(','));
-  if (typeof p.release_time === 'string' && p.release_time) query.set('release-time', p.release_time);
-  if (p.exclude_shorts) {
-    query.set('exclude-shorts', 'true');
-    if (p.exclude_shorts_duration_lte) {
-      query.set('exclude-shorts-duration-lte', String(p.exclude_shorts_duration_lte));
-    }
-    if (p.exclude_shorts_aspect_ratio_lte) {
-      query.set('exclude-shorts-aspect-ratio-lte', String(p.exclude_shorts_aspect_ratio_lte));
-    }
-  }
-
-  const response = await fetchStoreJsonOrNull(`${encodeURIComponent(channelIds[0])}/videos?${query.toString()}`);
-  const result = sdkSearchFromHyperbeam(messagePayload(response));
-  return Array.isArray(result?.items) ? result : null;
 }
 
 async function hydrateNativeSearchItems(items: Array<any>): Promise<Array<any>> {
@@ -606,13 +546,15 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
   if (!baseUrl) return [];
 
   try {
-    const url = `${baseUrl}/${encodeURIComponent(claimId)}`;
+    const storeId = isOutpointId(claimId) ? claimId : await fetchHyperbeamClaimStoreId({ claim_id: claimId });
+    if (!storeId) return [];
+    const url = `${baseUrl}/${encodeDataPath(storeId)}`;
     const requestHeaders = {
       accept: 'application/json',
       'accept-bundle': 'true',
     };
     const callId = `immutable-read-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const immutablePath = `/${claimId}`;
+    const immutablePath = `/${storeId}`;
     pushHyperbeamDebug(
       'request',
       {
@@ -638,7 +580,7 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
     });
     const json = await response.json().catch(() => null);
     const claimPayload = messagePayload(json);
-    const expandedClaim = await expandHyperbeamImmutableClaim(baseUrl, claimId, cacheReadClaim(claimPayload));
+    const expandedClaim = await expandHyperbeamImmutableClaim(baseUrl, storeId, cacheReadClaim(claimPayload));
     pushHyperbeamDebug(
       'response',
       {
@@ -862,30 +804,20 @@ function debugResponseHeaders(response: Response) {
 
 export async function fetchHyperbeamResolveClaimIds(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   const claimIds = stringList((params as any).claim_ids || (params as any).claimIds);
+  const legacyIds = claimIds.filter((claimId) => LBRY_CLAIM_ID_RE.test(claimId));
   const uploadIds = claimIds.filter((claimId) => !LBRY_CLAIM_ID_RE.test(claimId));
+  const legacyItems = (await Promise.all(legacyIds.map((claimId) => fetchHyperbeamImmutableClaim(claimId)))).flat();
   const uploadItems = uploadIds.length ? await fetchHyperbeamUploadClaimsForIds(uploadIds) : [];
-  let result: any = null;
-
-  try {
-    const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, params);
-    result = sdkSearchFromHyperbeam(responsePayload(response));
-  } catch (_e) {
-    result = null;
-  }
-
-  const items = Array.isArray(result?.items) ? result.items : [];
-  const existingIds = new Set(items.map((claim) => claim?.claim_id).filter(Boolean));
-  const mergedItems = [...uploadItems.filter((claim) => !existingIds.has(claim.claim_id)), ...items];
-
-  if (!mergedItems.length && !Array.isArray(result?.items)) return null;
+  const existingIds = new Set(legacyItems.map((claim) => claim?.claim_id).filter(Boolean));
+  const mergedItems = [...uploadItems.filter((claim) => !existingIds.has(claim.claim_id)), ...legacyItems];
+  if (!mergedItems.length) return null;
 
   return {
-    ...result,
     items: mergedItems,
-    page: result?.page || 1,
-    page_size: result?.page_size || mergedItems.length,
-    total_items: Math.max(result?.total_items || 0, mergedItems.length),
-    total_pages: Math.max(result?.total_pages || 0, mergedItems.length ? 1 : 0),
+    page: 1,
+    page_size: mergedItems.length,
+    total_items: mergedItems.length,
+    total_pages: 1,
   };
 }
 
@@ -1226,64 +1158,6 @@ function hyperbeamBaseUrl(): string {
 
 function buildDeviceUrl(baseUrl: string, path: string): string {
   return `${baseUrl}/${path}`;
-}
-
-function buildCacheUrl(baseUrl: string, path: string): string {
-  if (path.startsWith('/')) return `${baseUrl}${path}`;
-  return `${baseUrl}/~cache@1.0/${path}`;
-}
-
-function fetchCacheJson(path: string, acceptBundle: boolean = false): Promise<any | null> {
-  const key = `cache:${path}:${String(acceptBundle)}`;
-  const now = Date.now();
-  const cached = deviceReadCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
-
-  const promise = fetchCacheJsonUncached(path, acceptBundle).catch((error) => {
-    const failed = Promise.reject(error);
-    failed.catch(() => {});
-    deviceReadCache.set(key, { expiresAt: Date.now() + HYPERBEAM_FAILED_READ_CACHE_MS, promise: failed });
-    throw error;
-  });
-  deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
-  return promise;
-}
-
-async function fetchCacheJsonUncached(path: string, acceptBundle: boolean): Promise<any | null> {
-  const baseUrl = hyperbeamBaseUrl();
-  if (!baseUrl) {
-    if (isHyperbeamEnabled()) throw new Error('HyperBEAM node is not configured');
-    return null;
-  }
-
-  const response = await fetch(buildCacheUrl(baseUrl, path), {
-    method: 'GET',
-    credentials: hyperbeamFetchCredentials(baseUrl),
-    headers: {
-      Accept: 'application/json',
-      ...(acceptBundle ? { 'Accept-Bundle': 'true' } : {}),
-    },
-    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
-    return null;
-  }
-
-  return await response.json();
-}
-
-function cacheReadPath(id: string): string {
-  return `read?read=${encodeURIComponent(String(id).replace(/^\/+/, ''))}`;
-}
-
-function cacheListPath(path: string, params: Record<string, any> = {}): string {
-  const urlParams = new URLSearchParams({ list: String(path).replace(/^\//, '') });
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') urlParams.set(key, String(value));
-  });
-  return `list?${urlParams.toString()}`;
 }
 
 function hyperbeamFetchCredentials(baseUrl: string): RequestCredentials {
@@ -1719,6 +1593,43 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
   return !name || claim.name === name ? claim : null;
 }
 
+async function fetchHyperbeamLocatedClaim(uri: string): Promise<any | null> {
+  const claimId = fullClaimIdFromUri(uri);
+  const storeId = await fetchHyperbeamClaimStoreId(claimId ? { claim_id: claimId } : { uri });
+  if (!storeId) return null;
+
+  const result = await fetchCachedImmutableJsonOrNull(storeId);
+  const decodedClaim = decodeClaimMetadata(storePayload(result));
+  const signingChannel = decodedClaim?.signedChannelId
+    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId).catch(() => null)
+    : null;
+  let name: string | undefined;
+  try {
+    const parsed = parseURI(uri);
+    name = parsed.streamName || parsed.claimName;
+  } catch {}
+  const claim = immutableClaimFromHyperbeam(result, storeId, signingChannel, decodedClaim, name);
+  if (!claim) return null;
+
+  return claimId && claim.claim_id !== claimId
+    ? {
+        ...claim,
+        claim_id: claimId,
+        hyperbeam: compactParams({
+          ...claim.hyperbeam,
+          'source-claim-id': claimId,
+        }),
+      }
+    : claim;
+}
+
+async function fetchHyperbeamClaimStoreId(params: Record<string, any>): Promise<string | null> {
+  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/get-id`, params);
+  const result = responsePayload(response);
+  const id = value(result, 'id', 'immutable-id', 'immutable_id', 'outpoint');
+  return isOutpointId(id) ? String(id) : null;
+}
+
 async function fetchHyperbeamUploadResolve(uri: string): Promise<any | null> {
   let parsed;
   try {
@@ -1750,9 +1661,8 @@ async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[s
   });
   const storeEntries = await Promise.all(
     Array.from(uriByClaimId.entries()).map(async ([claimId, uri]): Promise<[string, any] | null> => {
-      const storeClaim = await fetchCachedStoreJsonOrNull(storePath('odysee/claim-id', claimId)).then(responsePayload);
-      const claim = storeClaim ? sdkClaimFromHyperbeam(storeClaim) : null;
-      return claim ? [uri, await immutableClaimForResolvedUri(uri, claim)] : null;
+      const claim = await fetchHyperbeamLocatedClaim(uri).catch(() => null);
+      return claim ? [uri, claim] : null;
     })
   );
   const resolvedEntries = storeEntries.filter(Boolean);
@@ -2177,10 +2087,6 @@ function fetchCachedStoreJsonOrNull(path: string): Promise<any | null> {
   return promise;
 }
 
-function storePath(prefix: string, value: string): string {
-  return `${prefix}/${encodeURIComponent(value)}`;
-}
-
 function claimFromUriKeyedResult(result: any, uri: string): any | null {
   if (!result || typeof result !== 'object') return null;
   if (value(result, 'claim_id', 'claim-id')) return result;
@@ -2194,11 +2100,7 @@ function claimFromUriKeyedResult(result: any, uri: string): any | null {
 }
 
 function isCompatibilityStorePath(path: string): boolean {
-  return [
-    'odysee/claim-id/',
-    'odysee/comment/',
-    'odysee/comment-id/',
-  ].some((prefix) => path.startsWith(prefix));
+  return ['odysee/claim-id/', 'odysee/comment/', 'odysee/comment-id/'].some((prefix) => path.startsWith(prefix));
 }
 
 function encodeDataPath(id: string): string {
@@ -2599,7 +2501,9 @@ function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> 
   const promise = (
     isOutpointId(id) || isStandaloneImmutableId(id)
       ? fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false)
-      : fetchStoreJsonOrNull(storePath('odysee/claim-id', id))
+      : fetchHyperbeamClaimStoreId({ claim_id: id }).then((storeId) =>
+          storeId ? fetchStoreJsonOrNull(`${encodeDataPath(storeId)}?accept-bundle=true`, false) : null
+        )
   ).catch((error) => {
     deviceReadCache.delete(key);
     throw error;
