@@ -142,41 +142,48 @@ match(UserSpec, _Base, Req, Opts) ->
     ?event({matching, {spec, FilteredSpec}, {return, ReturnType}}),
     case hb_cache:match(FilteredSpec, Opts) of
         {ok, RawMatches} ->
-            Matches = dedupe_query_matches(RawMatches, Opts),
-            case ReturnType of
-                <<"count">> ->
-                    ?event({matched, {paths, Matches}}),
-                    {ok, length(Matches)};
-                <<"paths">> ->
-                    ?event({matched, {paths, Matches}}),
-                    {ok, Matches};
-                <<"messages">> ->
-                    ?event({matched, {paths, Matches}}),
-                    Messages =
-                        lists:map(
-                            fun(Path) ->
-                                hb_util:ok(hb_cache:read(Path, Opts))
-                            end,
-                            Matches
-                        ),
-                    ?event({matched, {messages, Messages}}),
-                    {ok, Messages};
-                <<"first-path">> ->
-                    ?event({matched, {paths, Matches}}),
-                    {ok, hd(Matches)};
-                <<"first">> ->
-                    ?event({matched, {paths, Matches}}),
-                    {ok, hb_util:ok(hb_cache:read(hd(Matches), Opts))};
-                <<"first-message">> ->
-                    ?event({matched, {paths, Matches}}),
-                    {ok, hb_util:ok(hb_cache:read(hd(Matches), Opts))};
-                <<"boolean">> ->
-                    ?event({matched, {paths, Matches}}),
-                    {ok, length(Matches) > 0}
-            end;
-        not_found when ReturnType == <<"boolean">> ->
-            {ok, false};
+            return_matches(
+                dedupe_query_matches(RawMatches, Opts),
+                ReturnType,
+                Opts
+            );
         not_found ->
+            return_matches([], ReturnType, Opts);
+        {error, not_found} ->
+            return_matches([], ReturnType, Opts);
+        Error ->
+            Error
+    end.
+
+return_matches(Matches, ReturnType, Opts) ->
+    ?event({matched, {paths, Matches}}),
+    case {ReturnType, Matches} of
+        {<<"count">>, _} ->
+            {ok, length(Matches)};
+        {<<"paths">>, _} ->
+            {ok, Matches};
+        {<<"messages">>, _} ->
+            Messages =
+                lists:map(
+                    fun(Path) ->
+                        hb_util:ok(hb_cache:read(Path, Opts))
+                    end,
+                    Matches
+                ),
+            ?event({matched, {messages, Messages}}),
+            {ok, Messages};
+        {<<"boolean">>, _} ->
+            {ok, Matches =/= []};
+        {<<"first-path">>, [Path | _]} ->
+            {ok, Path};
+        {<<"first">>, [Path | _]} ->
+            hb_cache:read(Path, Opts);
+        {<<"first-message">>, [Path | _]} ->
+            hb_cache:read(Path, Opts);
+        {First, []}
+                when First == <<"first-path">>;
+                     First == <<"first">>;
+                     First == <<"first-message">> ->
             {error, not_found}
     end.
 
@@ -366,3 +373,187 @@ http_test() ->
         ),
     ?assertEqual(<<"binary-value">>, hb_maps:get(<<"basic">>, Msg, Opts)),
     ok.
+
+empty_results_test() ->
+    with_query_store(
+        <<"empty-results">>,
+        fun(Opts) ->
+            BaseReq = #{
+                <<"only">> => [<<"phase-4-probe">>],
+                <<"phase-4-probe">> => <<"missing">>
+            },
+            ?assertEqual(
+                {ok, []},
+                only(#{}, BaseReq#{ <<"return">> => <<"paths">> }, Opts)
+            ),
+            ?assertEqual(
+                {ok, []},
+                only(#{}, BaseReq#{ <<"return">> => <<"messages">> }, Opts)
+            ),
+            ?assertEqual(
+                {ok, 0},
+                only(#{}, BaseReq#{ <<"return">> => <<"count">> }, Opts)
+            ),
+            ?assertEqual(
+                {ok, false},
+                only(#{}, BaseReq#{ <<"return">> => <<"boolean">> }, Opts)
+            ),
+            lists:foreach(
+                fun(ReturnType) ->
+                    ?assertEqual(
+                        {error, not_found},
+                        only(
+                            #{},
+                            BaseReq#{ <<"return">> => ReturnType },
+                            Opts
+                        )
+                    )
+                end,
+                [<<"first-path">>, <<"first">>, <<"first-message">>]
+            )
+        end
+    ).
+
+signed_post_query_hydration_test() ->
+    with_query_store(
+        <<"signed-post-query">>,
+        fun(Opts) ->
+            Auth = <<"Basic ", (base64:encode(<<"phase4:test">>))/binary>>,
+            Node =
+                hb_http_server:start_node(
+                    Opts#{
+                        <<"store-all-signed">> => true,
+                        <<"on">> => #{
+                            <<"request">> => #{
+                                <<"device">> => <<"auth-hook@1.0">>,
+                                <<"path">> => <<"request">>,
+                                <<"when">> => #{ <<"keys">> => [<<"!">>] },
+                                <<"secret-provider">> => #{
+                                    <<"device">> => <<"http-auth@1.0">>,
+                                    <<"access-control">> => #{
+                                        <<"device">> => <<"http-auth@1.0">>
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ),
+            Fields = #{
+                <<"schema">> => <<"phase-4-query@1.0">>,
+                <<"type">> => <<"generic-record">>,
+                <<"phase-4-probe">> => <<"signed-post-query">>,
+                <<"value">> => <<"stable">>
+            },
+            WriteReq =
+                Fields#{
+                    <<"path">> => <<"/id?!=true">>,
+                    <<"authorization">> => Auth,
+                    <<"accept">> => <<"application/json">>,
+                    <<"accept-bundle">> => false
+                },
+            {ok, FirstResponse} = hb_http:post(Node, WriteReq, #{}),
+            FirstID = explicit_response_id(FirstResponse),
+            {ok, SecondResponse} = hb_http:post(Node, WriteReq, #{}),
+            ?assertEqual(FirstID, explicit_response_id(SecondResponse)),
+            QueryReq =
+                Fields#{
+                    <<"only">> => maps:keys(Fields),
+                    <<"return">> => <<"paths">>
+                },
+            ?assertEqual({ok, [FirstID]}, only(#{}, QueryReq, Opts)),
+            {ok, Stored} = hb_cache:read(FirstID, Opts),
+            Loaded = hb_cache:ensure_all_loaded(Stored, Opts),
+            lists:foreach(
+                fun({Key, Value}) ->
+                    ?assertEqual(Value, hb_maps:get(Key, Loaded, Opts))
+                end,
+                maps:to_list(Fields)
+            ),
+            WithCommitments = hb_cache:read_all_commitments(Stored, Opts),
+            ?assertNotEqual([], hb_message:signers(WithCommitments, Opts)),
+            [Store] = hb_opts:get(store, [], Opts),
+            ok = hb_store:stop(Store),
+            ok = hb_store:start(Store),
+            ?assertEqual({ok, [FirstID]}, only(#{}, QueryReq, Opts)),
+            {ok, Restarted} = hb_cache:read(FirstID, Opts),
+            ?assertEqual(
+                <<"stable">>,
+                hb_maps:get(
+                    <<"value">>,
+                    hb_cache:ensure_all_loaded(Restarted, Opts),
+                    Opts
+                )
+            )
+        end
+    ).
+
+dedupe_preserves_first_path_order_test() ->
+    with_query_store(
+        <<"dedupe-order">>,
+        fun(Opts) ->
+            First = hb_message:commit(#{ <<"record">> => <<"first">> }, Opts),
+            Second = hb_message:commit(#{ <<"record">> => <<"second">> }, Opts),
+            {ok, FirstCanonical} = hb_cache:write(First, Opts),
+            {ok, SecondCanonical} = hb_cache:write(Second, Opts),
+            FirstAlias = hb_message:id(First, signed, Opts),
+            SecondAlias = hb_message:id(Second, signed, Opts),
+            ?assertNotEqual(FirstCanonical, FirstAlias),
+            ?assertNotEqual(SecondCanonical, SecondAlias),
+            ?assertEqual(
+                [FirstAlias, SecondCanonical],
+                dedupe_query_matches(
+                    [FirstAlias, FirstCanonical, SecondCanonical, SecondAlias],
+                    Opts
+                )
+            )
+        end
+    ).
+
+with_query_store(Tag, Test) ->
+    Store = hb_test_utils:test_store(hb_store_lmdb, Tag),
+    ok = hb_store:start(Store),
+    Opts = #{
+        <<"store">> => [Store],
+        <<"match-index">> => [Store],
+        <<"priv-wallet">> => ar_wallet:new()
+    },
+    try Test(Opts)
+    after
+        hb_store:stop(Store),
+        hb_store:reset(Store)
+    end.
+
+explicit_response_id(Response) when is_binary(Response) ->
+    case normalize_response_id(Response) of
+        {ok, ID} -> ID;
+        error ->
+            try explicit_response_id(hb_json:decode(Response))
+            catch _:_ -> erlang:error({missing_explicit_write_id, Response})
+            end
+    end;
+explicit_response_id(Response) when is_map(Response) ->
+    Candidates =
+        [
+            hb_maps:get(Key, Response, not_found, #{})
+        ||
+            Key <- [<<"id">>, <<"path">>, <<"read-path">>, <<"body">>]
+        ],
+    case lists:filtermap(
+        fun(Candidate) ->
+            case normalize_response_id(Candidate) of
+                {ok, ID} -> {true, ID};
+                error -> false
+            end
+        end,
+        Candidates
+    ) of
+        [ID | _] -> ID;
+        [] -> erlang:error({missing_explicit_write_id, Response})
+    end.
+
+normalize_response_id(<<"/", ID/binary>>) when ?IS_ID(ID) ->
+    {ok, ID};
+normalize_response_id(ID) when ?IS_ID(ID) ->
+    {ok, ID};
+normalize_response_id(_Candidate) ->
+    error.

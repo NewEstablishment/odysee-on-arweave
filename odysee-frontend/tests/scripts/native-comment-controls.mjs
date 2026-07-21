@@ -5,6 +5,7 @@ import {
   legacyBlockControlsToImport,
   latestNativeCommentControls,
   nativeCommentControlSignatureData,
+  normalizeNativeCommentControl,
   projectNativeCommentControlState,
 } from '../../ui/util/nativeCommentControls.ts';
 
@@ -39,6 +40,11 @@ const normalized = {
   signature_scope: 'native-comment-control-v1',
 };
 assert.equal(nativeCommentControlSignatureData(raw), nativeCommentControlSignatureData(normalized));
+assert.equal(
+  nativeCommentControlSignatureData(raw),
+  nativeCommentControlSignatureData({ ...raw, target: undefined, 'target-id': raw.target })
+);
+assert.equal(normalizeNativeCommentControl({ ...raw, target: undefined, 'target-id': raw.target }).target, raw.target);
 assert.notEqual(
   nativeCommentControlSignatureData(raw),
   nativeCommentControlSignatureData({ ...raw, action: 'unpinned' })

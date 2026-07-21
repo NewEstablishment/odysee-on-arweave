@@ -1,6 +1,7 @@
 const { HYPERBEAM_ALLOW_COMPATIBILITY_READS, ODYSEE_HYPERBEAM_NODE_API } = require('../../config.cjs');
 
 const HYPERBEAM_NODE_TIMEOUT_MS = 15000;
+const SEARCH_HYDRATION_CONCURRENCY = 8;
 const HYPERBEAM_MODE_STORAGE_KEY = 'odysee-hyperbeam-mode';
 const HYPERBEAM_DEVICE_CLAIM = '~odysee-claim@1.0';
 const HYPERBEAM_DEVICE_STREAM = '~odysee-stream@1.0';
@@ -715,6 +716,13 @@ function claimUrl(name, claimId) {
   return `lbry://${name}${suffix}`;
 }
 
+function uriWithClaimId(uri, claimId) {
+  if (!uri || !claimId) return uri;
+  const text = String(uri);
+  const hashIndex = text.lastIndexOf('#');
+  return hashIndex === -1 ? `${text}#${claimId}` : `${text.slice(0, hashIndex)}#${claimId}`;
+}
+
 function isOutpointId(id) {
   return /^[0-9a-f]{64}:[0-9]+$/i.test(String(id || ''));
 }
@@ -913,7 +921,15 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
     typeof txid === 'string' && (typeof nout === 'number' || typeof nout === 'string') ? `${txid}:${nout}` : null;
   const storeId = immutableId || outpoint || value(payload, 'id') || sourceClaimId;
   if (!storeId) return null;
-  const frontendClaimId = sourceClaimId || String(storeId);
+  const nativeUpload =
+    !immutableOutpoint &&
+    Boolean(
+      isObject(value(claim, 'hyperbeam')) ||
+      isObject(value(payload, 'hyperbeam')) ||
+      value(claim, 'hyperbeam+link', 'hyperbeam-link') ||
+      value(payload, 'hyperbeam+link', 'hyperbeam-link')
+    );
+  const frontendClaimId = nativeUpload ? String(storeId) : sourceClaimId || String(storeId);
   const routeClaimId = webSafeImmutableId(storeId);
 
   const rawName =
@@ -960,14 +976,16 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
       'media-type': mediaType,
     }) ||
     directMediaUrl;
-  const canonicalUrl =
+  const canonicalUrl0 =
     value(claim, 'canonical_url', 'canonical-url') ||
     value(payload, 'canonical_url', 'canonical-url') ||
     claimUrl(name, routeClaimId);
-  const permanentUrl =
+  const permanentUrl0 =
     value(claim, 'permanent_url', 'permanent-url') ||
     value(payload, 'permanent_url', 'permanent-url') ||
     claimUrl(name, routeClaimId);
+  const canonicalUrl = nativeUpload ? uriWithClaimId(canonicalUrl0, routeClaimId) : canonicalUrl0;
+  const permanentUrl = nativeUpload ? uriWithClaimId(permanentUrl0, routeClaimId) : permanentUrl0;
   const valueType =
     value(claim, 'value_type', 'value-type') ||
     value(payload, 'value_type', 'value-type') ||
@@ -981,7 +999,9 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
     name,
     canonical_url: canonicalUrl,
     permanent_url: permanentUrl,
-    short_url: value(claim, 'short_url', 'short-url') || permanentUrl,
+    short_url: nativeUpload
+      ? uriWithClaimId(value(claim, 'short_url', 'short-url') || permanentUrl, routeClaimId)
+      : value(claim, 'short_url', 'short-url') || permanentUrl,
     value_type: valueType,
     timestamp: value(claim, 'timestamp') || value(payload, 'timestamp', 'release_time', 'release-time'),
     confirmations: Number(value(claim, 'confirmations') || 1),
@@ -1174,11 +1194,33 @@ async function hyperbeamNodeSearch(params, extraHeaders) {
       extraHeaders
     );
     const search = sdkSearchFromHyperbeam(result);
-    return Array.isArray(search && search.items) ? search : null;
+    if (!Array.isArray(search && search.items)) return null;
+
+    const items = (
+      await mapWithConcurrency(search.items, SEARCH_HYDRATION_CONCURRENCY, async (item) => {
+        if (typeof item !== 'string') return item;
+        const stored = storeResponsePayload(await hyperbeamNodeFetchImmutableJson(item));
+        return immutableClaimFromHyperbeam(stored, item);
+      })
+    ).filter(Boolean);
+    return { ...search, items };
   } catch (e) {
     void e;
     return null;
   }
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(items.length, Math.max(1, concurrency)) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 async function hyperbeamNodeChannelClaimSearch(params, extraHeaders) {

@@ -8,6 +8,8 @@
 -export([commitment_id/1, commitment/5, with_commitment/6]).
 -export([content_digest_sha384/1]).
 -export([native_id/2, native_id_bytes/1, native_id_fields/2, outpoint_bytes/2]).
+-export([evidence_encode/1, evidence_decode/1, to_unified/1]).
+-export([unified_verification_input/3]).
 -export([blob_message/2, transaction_message/1, descriptor_message/2]).
 -export([claim_output_message/2, claim_output_message/3]).
 -export([channel_output_message/2, channel_output_message/3]).
@@ -80,9 +82,13 @@ native_id(Commitment, Opts) ->
 
 %% @doc Decode a hex native identifier into normalized hex and raw bytes.
 native_id_bytes(Hex) when is_binary(Hex) ->
-    Normalized = hb_util:to_lower(Hex),
-    try binary:decode_hex(Normalized) of
-        Bytes -> {ok, Normalized, Bytes}
+    try hb_util:to_lower(Hex) of
+        Normalized ->
+            try binary:decode_hex(Normalized) of
+                Bytes -> {ok, Normalized, Bytes}
+            catch
+                _:_ -> {error, invalid_native_id}
+            end
     catch
         _:_ -> {error, invalid_native_id}
     end;
@@ -119,6 +125,376 @@ native_signature_encode(Bytes) ->
 
 native_signature_decode(Encoded) ->
     base64:decode(Encoded, #{mode => urlsafe, padding => false}).
+
+evidence_encode(Bytes) when is_binary(Bytes) ->
+    hb_util:encode(Bytes).
+
+evidence_decode(Encoded) when is_binary(Encoded) ->
+    try hb_util:decode(Encoded) of
+        Bytes ->
+            case hb_util:encode(Bytes) of
+                Encoded -> {ok, Bytes};
+                _ -> {error, invalid_evidence_bytes}
+            end
+    catch
+        _:_ -> {error, invalid_evidence_bytes}
+    end;
+evidence_decode(_) ->
+    {error, missing_evidence_bytes}.
+
+to_unified(Msg) when is_map(Msg) ->
+    Commitments = maps:get(<<"commitments">>, Msg, #{}),
+    case unified_commitments(Commitments) of
+        {ok, Unified, Kinds, legacy} ->
+            encode_unified_message(
+                Msg#{ <<"commitments">> => Unified },
+                lists:usort(Kinds)
+            );
+        {ok, _Unified, _Kinds, unified} ->
+            {ok, Msg};
+        {ok, _Unified, _Kinds, none} ->
+            {error, no_lbry_commitments};
+        {error, _} = Error ->
+            Error
+    end;
+to_unified(_) ->
+    {error, invalid_evidence_message}.
+
+unified_verification_input(Base0, Req0, Opts) ->
+    Base = hb_cache:ensure_all_loaded(Base0, Opts),
+    Req = hb_cache:ensure_all_loaded(Req0, Opts),
+    maybe
+        <<"lbry@1.0">> ?=
+            hb_maps:get(<<"commitment-device">>, Req, undefined, Opts),
+        Evidence = hb_maps:get(<<"evidence">>, Req, undefined, Opts),
+        LegacyDevice ?= evidence_device(Evidence),
+        {ok, LegacyBase} ?= legacy_unified_message(Base, Opts),
+        {ok,
+            LegacyBase,
+            (maps:remove(<<"evidence">>, Req))#{
+                <<"commitment-device">> => LegacyDevice
+            },
+            Evidence}
+    else
+        undefined -> {error, missing_evidence};
+        {error, _} = Error -> Error;
+        _ -> {error, invalid_unified_commitment}
+    end.
+
+unified_commitments(Commitments) when is_map(Commitments) ->
+    maps:fold(
+        fun(ID, Commitment0, Acc) ->
+            unify_commitment(ID, Commitment0, Acc)
+        end,
+        {ok, #{}, [], none},
+        Commitments
+    );
+unified_commitments(_) ->
+    {error, invalid_commitments}.
+
+unify_commitment(_ID, _Commitment, {error, _} = Error) ->
+    Error;
+unify_commitment(ID, Commitment0, {ok, Acc, Kinds, Format}) ->
+    Commitment = hb_cache:ensure_all_loaded(Commitment0, #{}),
+    Device = maps:get(<<"commitment-device">>, Commitment, undefined),
+    case {Device, legacy_device_evidence(Device)} of
+        {<<"lbry@1.0">>, _} ->
+            Evidence = maps:get(<<"evidence">>, Commitment, undefined),
+            case evidence_device(Evidence) of
+                undefined -> {error, {invalid_evidence, Evidence}};
+                _ ->
+                    case merge_unified_format(Format, unified) of
+                        {ok, NextFormat} ->
+                            {ok, Acc#{ ID => Commitment }, [Evidence | Kinds], NextFormat};
+                        Error -> Error
+                    end
+            end;
+        {_, undefined} ->
+            {ok, Acc#{ ID => Commitment }, Kinds, Format};
+        {_, Evidence} ->
+            case merge_unified_format(Format, legacy) of
+                {ok, NextFormat} ->
+                    Unified = Commitment#{
+                        <<"commitment-device">> => <<"lbry@1.0">>,
+                        <<"evidence">> => Evidence
+                    },
+                    {ok, Acc#{ ID => Unified }, [Evidence | Kinds], NextFormat};
+                Error -> Error
+            end
+    end.
+
+merge_unified_format(none, Format) -> {ok, Format};
+merge_unified_format(Format, Format) -> {ok, Format};
+merge_unified_format(_, _) -> {error, mixed_commitment_formats}.
+
+encode_unified_message(Msg0, Kinds) ->
+    maybe
+        {ok, Msg1} ?= encode_transaction_evidence(Msg0, Kinds),
+        {ok, Msg2} ?= encode_claim_evidence(Msg1, Kinds),
+        encode_channel_evidence(Msg2)
+    end.
+
+encode_transaction_evidence(Msg, Kinds) ->
+    case lists:member(<<"transaction">>, Kinds) of
+        false -> {ok, Msg};
+        true -> encode_binary_field(Msg, <<"raw">>)
+    end.
+
+encode_claim_evidence(Msg, Kinds) ->
+    case lists:any(fun is_claim_evidence/1, Kinds) of
+        false -> {ok, Msg};
+        true ->
+            maybe
+                {ok, Msg1} ?= encode_binary_field(Msg, <<"claim">>),
+                {ok, Msg2} ?= encode_binary_field(Msg1, <<"raw-transaction">>),
+                encode_ancestry(Msg2)
+            end
+    end.
+
+encode_binary_field(Msg, Key) ->
+    case maps:get(Key, Msg, undefined) of
+        Value when is_binary(Value) -> {ok, Msg#{ Key => evidence_encode(Value) }};
+        _ -> {error, {missing_binary_evidence, Key}}
+    end.
+
+encode_ancestry(Msg) ->
+    case maps:get(<<"claim-ancestry">>, Msg, undefined) of
+        undefined -> {ok, Msg};
+        Entries when is_list(Entries) ->
+            case encode_ancestry_entries(Entries, []) of
+                {ok, Encoded} -> {ok, Msg#{ <<"claim-ancestry">> => Encoded }};
+                Error -> Error
+            end;
+        _ -> {error, invalid_ancestry}
+    end.
+
+encode_ancestry_entries([], Acc) ->
+    {ok, lists:reverse(Acc)};
+encode_ancestry_entries([Entry | Rest], Acc) when is_map(Entry) ->
+    case maps:get(<<"raw-transaction">>, Entry, undefined) of
+        Raw when is_binary(Raw) ->
+            case encode_input_parents(maps:get(<<"input-parents">>, Entry, undefined)) of
+                {ok, undefined} ->
+                    encode_ancestry_entries(
+                        Rest,
+                        [Entry#{ <<"raw-transaction">> => evidence_encode(Raw) } | Acc]
+                    );
+                {ok, Parents} ->
+                    encode_ancestry_entries(
+                        Rest,
+                        [Entry#{
+                            <<"raw-transaction">> => evidence_encode(Raw),
+                            <<"input-parents">> => Parents
+                        } | Acc]
+                    );
+                Error -> Error
+            end;
+        _ -> {error, invalid_ancestry}
+    end;
+encode_ancestry_entries(_, _) ->
+    {error, invalid_ancestry}.
+
+encode_input_parents(undefined) -> {ok, undefined};
+encode_input_parents(Parents) when is_list(Parents) ->
+    case lists:all(fun is_binary/1, Parents) of
+        true -> {ok, [evidence_encode(Parent) || Parent <- Parents]};
+        false -> {error, invalid_ancestry}
+    end;
+encode_input_parents(_) -> {error, invalid_ancestry}.
+
+encode_channel_evidence(Msg) ->
+    case maps:get(<<"channel-evidence">>, Msg, undefined) of
+        undefined -> {ok, Msg};
+        Channel when is_map(Channel) ->
+            case to_unified(Channel) of
+                {ok, Unified} -> {ok, Msg#{ <<"channel-evidence">> => Unified }};
+                Error -> Error
+            end;
+        _ -> {error, invalid_channel_evidence}
+    end.
+
+legacy_unified_message(Msg0, Opts) when is_map(Msg0) ->
+    Commitments0 =
+        hb_cache:ensure_all_loaded(
+            hb_maps:get(<<"commitments">>, Msg0, #{}, Opts),
+            Opts
+        ),
+    Kinds = unified_evidence_kinds(Commitments0),
+    maybe
+        {ok, Msg1} ?= decode_unified_message(Msg0, Kinds, Opts),
+        {ok, Commitments} ?= legacy_commitments(Commitments0),
+        {ok, Msg1#{ <<"commitments">> => Commitments }}
+    end;
+legacy_unified_message(_, _) ->
+    {error, invalid_evidence_message}.
+
+decode_unified_message(Msg0, Kinds, Opts) ->
+    maybe
+        {ok, Msg1} ?= decode_transaction_evidence(Msg0, Kinds),
+        {ok, Msg2} ?= decode_claim_evidence(Msg1, Kinds, Opts),
+        decode_channel_evidence(Msg2, Opts)
+    end.
+
+decode_transaction_evidence(Msg, Kinds) ->
+    case lists:member(<<"transaction">>, Kinds) of
+        false -> {ok, Msg};
+        true -> decode_binary_field(Msg, <<"raw">>)
+    end.
+
+decode_claim_evidence(Msg, Kinds, Opts) ->
+    case lists:any(fun is_claim_evidence/1, Kinds) of
+        false -> {ok, Msg};
+        true ->
+            maybe
+                {ok, Msg1} ?= decode_binary_field(Msg, <<"claim">>),
+                {ok, Msg2} ?= decode_binary_field(Msg1, <<"raw-transaction">>),
+                decode_ancestry(Msg2, Opts)
+            end
+    end.
+
+decode_binary_field(Msg, Key) ->
+    case evidence_decode(maps:get(Key, Msg, undefined)) of
+        {ok, Value} -> {ok, Msg#{ Key => Value }};
+        Error -> Error
+    end.
+
+decode_ancestry(Msg, Opts) ->
+    case hb_maps:get(<<"claim-ancestry">>, Msg, undefined, Opts) of
+        undefined -> {ok, Msg};
+        Entries0 ->
+            case ordered_message_list(Entries0, Opts) of
+                {ok, Entries} ->
+                    case decode_ancestry_entries(Entries, Opts, []) of
+                        {ok, Decoded} ->
+                            {ok, Msg#{ <<"claim-ancestry">> => Decoded }};
+                        Error -> Error
+                    end;
+                Error -> Error
+            end
+    end.
+
+decode_ancestry_entries([], _Opts, Acc) ->
+    {ok, lists:reverse(Acc)};
+decode_ancestry_entries([Entry0 | Rest], Opts, Acc) when is_map(Entry0) ->
+    Entry = hb_cache:ensure_all_loaded(Entry0, Opts),
+    case evidence_decode(maps:get(<<"raw-transaction">>, Entry, undefined)) of
+        {ok, Raw} ->
+            case decode_input_parents(maps:get(<<"input-parents">>, Entry, undefined), Opts) of
+                {ok, undefined} ->
+                    decode_ancestry_entries(
+                        Rest,
+                        Opts,
+                        [Entry#{ <<"raw-transaction">> => Raw } | Acc]
+                    );
+                {ok, Parents} ->
+                    decode_ancestry_entries(
+                        Rest,
+                        Opts,
+                        [Entry#{
+                            <<"raw-transaction">> => Raw,
+                            <<"input-parents">> => Parents
+                        } | Acc]
+                    );
+                Error -> Error
+            end;
+        Error -> Error
+    end;
+decode_ancestry_entries(_, _Opts, _Acc) ->
+    {error, invalid_ancestry}.
+
+decode_input_parents(undefined, _Opts) -> {ok, undefined};
+decode_input_parents(Parents0, Opts) ->
+    case ordered_message_list(Parents0, Opts) of
+        {ok, Parents} -> decode_evidence_list(Parents, []);
+        Error -> Error
+    end.
+
+decode_evidence_list([], Acc) -> {ok, lists:reverse(Acc)};
+decode_evidence_list([Encoded | Rest], Acc) ->
+    case evidence_decode(Encoded) of
+        {ok, Raw} -> decode_evidence_list(Rest, [Raw | Acc]);
+        Error -> Error
+    end.
+
+ordered_message_list(Value, _Opts) when is_list(Value) -> {ok, Value};
+ordered_message_list(Value0, Opts) when is_map(Value0) ->
+    Value = hb_cache:ensure_all_loaded(Value0, Opts),
+    try hb_util:message_to_ordered_list(maps:without([<<"ao-types">>], Value), Opts) of
+        List when is_list(List) -> {ok, List};
+        _ -> {error, invalid_evidence_list}
+    catch
+        _:_ -> {error, invalid_evidence_list}
+    end;
+ordered_message_list(_, _) -> {error, invalid_evidence_list}.
+
+decode_channel_evidence(Msg, Opts) ->
+    case hb_maps:get(<<"channel-evidence">>, Msg, undefined, Opts) of
+        undefined -> {ok, Msg};
+        Channel0 ->
+            Channel = hb_cache:ensure_all_loaded(Channel0, Opts),
+            case legacy_unified_message(Channel, Opts) of
+                {ok, Legacy} -> {ok, Msg#{ <<"channel-evidence">> => Legacy }};
+                Error -> Error
+            end
+    end.
+
+legacy_commitments(Commitments) ->
+    maps:fold(
+        fun(ID, Commitment, {ok, Acc}) ->
+            case maps:get(<<"commitment-device">>, Commitment, undefined) of
+                <<"lbry@1.0">> ->
+                    Evidence = maps:get(<<"evidence">>, Commitment, undefined),
+                    case evidence_device(Evidence) of
+                        undefined -> {error, {invalid_evidence, Evidence}};
+                        Device ->
+                            Legacy = (maps:remove(<<"evidence">>, Commitment))#{
+                                <<"commitment-device">> => Device
+                            },
+                            {ok, Acc#{ ID => Legacy }}
+                    end;
+                _ ->
+                    {ok, Acc#{ ID => Commitment }}
+            end;
+        (_ID, _Commitment, Error) ->
+            Error
+        end,
+        {ok, #{}},
+        Commitments
+    ).
+
+unified_evidence_kinds(Commitments) ->
+    lists:usort([
+        Evidence
+     ||
+        Commitment <- maps:values(Commitments),
+        maps:get(<<"commitment-device">>, Commitment, undefined) =:= <<"lbry@1.0">>,
+        Evidence <- [maps:get(<<"evidence">>, Commitment, undefined)],
+        evidence_device(Evidence) =/= undefined
+    ]).
+
+is_claim_evidence(<<"claim">>) -> true;
+is_claim_evidence(<<"channel">>) -> true;
+is_claim_evidence(<<"stream">>) -> true;
+is_claim_evidence(<<"attestation">>) -> true;
+is_claim_evidence(_) -> false.
+
+legacy_device_evidence(<<"lbry-blob@1.0">>) -> <<"blob">>;
+legacy_device_evidence(<<"lbry-stream-descriptor@1.0">>) -> <<"descriptor">>;
+legacy_device_evidence(<<"lbry-transaction@1.0">>) -> <<"transaction">>;
+legacy_device_evidence(<<"lbry-claim@1.0">>) -> <<"claim">>;
+legacy_device_evidence(<<"lbry-channel@1.0">>) -> <<"channel">>;
+legacy_device_evidence(<<"lbry-stream@1.0">>) -> <<"stream">>;
+legacy_device_evidence(<<"lbry-channel-attestation@1.0">>) -> <<"attestation">>;
+legacy_device_evidence(_) -> undefined.
+
+evidence_device(<<"blob">>) -> <<"lbry-blob@1.0">>;
+evidence_device(<<"descriptor">>) -> <<"lbry-stream-descriptor@1.0">>;
+evidence_device(<<"transaction">>) -> <<"lbry-transaction@1.0">>;
+evidence_device(<<"claim">>) -> <<"lbry-claim@1.0">>;
+evidence_device(<<"channel">>) -> <<"lbry-channel@1.0">>;
+evidence_device(<<"stream">>) -> <<"lbry-stream@1.0">>;
+evidence_device(<<"attestation">>) -> <<"lbry-channel-attestation@1.0">>;
+evidence_device(_) -> undefined.
 
 %% @doc Build the canonical blob message for verified encrypted blob bytes.
 %% The caller must have verified that `SHA-384(Bytes)' matches `HexHash'.
@@ -947,7 +1323,10 @@ verify_remote_read(Key, Msg, Opts) ->
 narrow_devices(Devices, Opts) ->
     case hb_maps:get(<<"verify-remote-devices">>, Opts, undefined, Opts) of
         Allowed when is_list(Allowed) ->
-            [Device || Device <- Devices, lists:member(Device, Allowed)];
+            case lists:member(<<"lbry@1.0">>, Allowed) of
+                true -> Devices;
+                false -> [Device || Device <- Devices, lists:member(Device, Allowed)]
+            end;
         _ ->
             Devices
     end.
@@ -1011,10 +1390,7 @@ require_native_commitments(Devices, NativeIDHex, Key, Msg0, Opts) when is_map(Ms
             Commitment
          ||
             Commitment <- maps:values(LbryCommitments),
-            lists:member(
-                maps:get(<<"commitment-device">>, Commitment, undefined),
-                Devices
-            ),
+            remote_commitment_allowed(Commitment, Devices),
             commitment_bound_to_key(Commitment, NativeIDHex)
         ],
     maybe
@@ -1070,7 +1446,7 @@ ensure_blob_content_digest(Msg, Commitments, Opts) ->
 has_commitment_device(Commitments, Device) ->
     lists:any(
         fun(Commitment) ->
-            maps:get(<<"commitment-device">>, Commitment, undefined) =:= Device
+            commitment_legacy_device(Commitment) =:= Device
         end,
         maps:values(Commitments)
     ).
@@ -1096,7 +1472,7 @@ canonical_committed_keys(Msg, Commitments) ->
     Lists =
         [
             device_committed_list(
-                maps:get(<<"commitment-device">>, Commitment, undefined),
+                commitment_legacy_device(Commitment),
                 Ancestry,
                 Msg
             )
@@ -1174,8 +1550,20 @@ claim_output_committed_list(Msg) ->
     ],
     lists:sort([Key || Key <- Candidates, maps:is_key(Key, Msg)]).
 
+lbry_commitment(#{ <<"commitment-device">> := <<"lbry@1.0">> }) -> true;
 lbry_commitment(#{ <<"commitment-device">> := <<"lbry-", _/binary>> }) -> true;
 lbry_commitment(_) -> false.
+
+remote_commitment_allowed(Commitment, Devices) ->
+    lists:member(commitment_legacy_device(Commitment), Devices).
+
+commitment_legacy_device(Commitment) ->
+    case maps:get(<<"commitment-device">>, Commitment, undefined) of
+        <<"lbry@1.0">> ->
+            evidence_device(maps:get(<<"evidence">>, Commitment, undefined));
+        Device ->
+            Device
+    end.
 
 commitment_bound_to_key(Commitment, NativeIDHex) ->
     native_id_matches(Commitment, NativeIDHex)
@@ -2108,6 +2496,52 @@ attestation_commitment_rejects_tampered_channel_params_test() ->
             #{ <<"commitment-ids">> => [AttID] },
             #{}
         )
+    ).
+
+canonical_evidence_bytes_test() ->
+    Raw = <<0, 1, 2, 16#ff>>,
+    Encoded = evidence_encode(Raw),
+    ?assertEqual({ok, Raw}, evidence_decode(Encoded)),
+    ?assertMatch({error, _}, evidence_decode(<<Encoded/binary, "=">>)),
+    ?assertMatch({error, _}, evidence_decode(<<"***">>)).
+
+invalid_utf8_native_id_fails_closed_test() ->
+    ?assertEqual({error, invalid_native_id}, native_id_bytes(<<16#ff>>)).
+
+unified_transaction_conversion_test() ->
+    Raw = tx_with_script(<<>>),
+    {ok, Legacy} = transaction_message(Raw),
+    {ok, Unified} = to_unified(Legacy),
+    [Commitment] = maps:values(maps:get(<<"commitments">>, Unified)),
+    ?assertEqual(<<"lbry@1.0">>, maps:get(<<"commitment-device">>, Commitment)),
+    ?assertEqual(<<"transaction">>, maps:get(<<"evidence">>, Commitment)),
+    ?assertEqual(evidence_encode(Raw), maps:get(<<"raw">>, Unified)),
+    {ok, Decoded, LegacyCommitment, <<"transaction">>} =
+        unified_verification_input(Unified, Commitment, #{}),
+    ?assertEqual(Raw, maps:get(<<"raw">>, Decoded)),
+    ?assertEqual(
+        <<"lbry-transaction@1.0">>,
+        maps:get(<<"commitment-device">>, LegacyCommitment)
+    ).
+
+unified_stream_conversion_test() ->
+    SDHash = crypto:hash(sha384, <<"unified stream">>),
+    Claim = <<0, (proto_field(1, proto_field(1, proto_field(6, SDHash))))/binary>>,
+    Raw = create_claim_tx(<<"stream">>, Claim),
+    {ok, Legacy} = stream_claim_message(Raw, 0),
+    {ok, Unified} = to_unified(Legacy),
+    Commitments = maps:values(maps:get(<<"commitments">>, Unified)),
+    ?assertEqual(
+        [<<"claim">>, <<"stream">>],
+        lists:sort([maps:get(<<"evidence">>, C) || C <- Commitments])
+    ),
+    lists:foreach(
+        fun(Commitment) ->
+            {ok, Decoded, _LegacyCommitment, _Evidence} =
+                unified_verification_input(Unified, Commitment, #{}),
+            ?assertEqual(Raw, maps:get(<<"raw-transaction">>, Decoded))
+        end,
+        Commitments
     ).
 
 sample_channel_keys() ->
