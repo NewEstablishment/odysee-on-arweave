@@ -4,7 +4,7 @@
 %%% while preserving the raw JSON response for audit/debugging.
 -module(dev_odysee_claim).
 -implements(<<"odysee-claim@1.0">>).
--export([info/1, resolve/3, search/3, transaction/3]).
+-export([info/1, resolve/3, get_id/3, search/3, transaction/3, page/3, comments/3, videos/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -13,7 +13,12 @@
 
 %% @doc Return the public device API.
 info(_Opts) ->
-    #{ exports => [<<"resolve">>, <<"search">>, <<"transaction">>] }.
+    #{
+        exports => [
+            <<"resolve">>, <<"get-id">>, <<"search">>, <<"transaction">>,
+            <<"page">>, <<"comments">>, <<"videos">>
+        ]
+    }.
 
 %% @doc Resolve and normalize an Odysee/LBRY claim.
 resolve(Base, Req, Opts) ->
@@ -56,6 +61,30 @@ resolve_by_uri_or_claim(Base, Req, Opts) ->
                 Error
     end.
 
+get_id(Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, Resolved} ?= resolve(Base, Req, Opts),
+            {ok, ClaimMsg} ?= resolved_claim_message(Resolved, Base, Req, Opts),
+            {ok, ClaimID} ?=
+                required_first_in(
+                    [<<"claim-id">>, <<"claim_id">>],
+                    [ClaimMsg, hb_maps:get(<<"claim">>, ClaimMsg, #{}, Opts)],
+                    Opts
+                ),
+            {ok, ID} ?= immutable_claim_id(ClaimMsg, Opts),
+            Result = #{
+                <<"device">> => ?DEVICE,
+                <<"view">> => <<"claim-id">>,
+                <<"id">> => ID,
+                <<"claim-id">> => ClaimID
+            },
+            {ok, Result#{ <<"content-type">> => <<"application/json">>, <<"body">> => hb_json:encode(Result) }}
+        else
+            Error -> Error
+        end
+    end).
+
 %% @doc Search claims using the SDK proxy `claim_search' method.
 search(Base, Req, Opts) ->
     safe(fun() ->
@@ -78,6 +107,399 @@ transaction(Base, Req, Opts) ->
             Error -> Error
         end
     end).
+
+%% @doc Compose the full watch-page metadata for a claim as one message:
+%% the claim itself, its channel, the comment list, related channel uploads,
+%% and view/reaction/subscriber counts. Sections are fetched live; a failing
+%% section is omitted rather than failing the page. `GET /<claim-id>/page'.
+page(Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, ClaimMsg} ?= claim_message(Base, Req, Opts),
+            {ok, ClaimID} ?= required_first([<<"claim-id">>, <<"claim_id">>], ClaimMsg, Opts),
+            Claim = first_value([<<"claim">>], ClaimMsg, Opts),
+            Channel =
+                optional_section(fun() ->
+                    hb_ao:raw(
+                        <<"odysee-channel@1.0">>,
+                        <<"channel">>,
+                        #{ <<"claim">> => Claim },
+                        #{},
+                        Opts
+                    )
+                end),
+            ChannelID = section_first([<<"claim-id">>, <<"claim_id">>], Channel, Opts),
+            ChannelName = section_first([<<"name">>, <<"claim-name">>], Channel, Opts),
+            Comments =
+                optional_section(fun() ->
+                    hb_ao:raw(
+                        <<"odysee-comment@1.0">>,
+                        <<"list">>,
+                        #{},
+                        lists:foldl(
+                            fun put_if_found_pair/2,
+                            (comment_page_defaults(Req, Opts))#{
+                                <<"claim-id">> => ClaimID
+                            },
+                            [
+                                {<<"channel-id">>, ChannelID},
+                                {<<"channel-name">>, ChannelName}
+                            ]
+                        ),
+                        Opts
+                    )
+                end),
+            Related =
+                case ChannelID of
+                    NotFound when NotFound =:= not_found; NotFound =:= undefined ->
+                        not_found;
+                    _ ->
+                        optional_section(fun() ->
+                            channel_uploads_search(ChannelID, 1, 16, Opts)
+                        end)
+                end,
+            ViewCount =
+                optional_section(fun() ->
+                    hb_ao:raw(
+                        <<"odysee-file@1.0">>,
+                        <<"view-count">>,
+                        #{},
+                        #{ <<"claim-id">> => ClaimID },
+                        Opts
+                    )
+                end),
+            Reactions =
+                optional_section(fun() ->
+                    hb_ao:raw(
+                        <<"odysee-file-reaction@1.0">>,
+                        <<"list">>,
+                        #{},
+                        #{ <<"claim_ids">> => [ClaimID] },
+                        Opts
+                    )
+                end),
+            SubCount =
+                case ChannelID of
+                    NoChannel when NoChannel =:= not_found; NoChannel =:= undefined ->
+                        not_found;
+                    _ ->
+                        optional_section(fun() ->
+                            hb_ao:raw(
+                                <<"odysee-account@1.0">>,
+                                <<"sub-count">>,
+                                #{},
+                                #{ <<"claim-id">> => ChannelID },
+                                Opts
+                            )
+                        end)
+                end,
+            Doc0 = #{
+                <<"view">> => <<"page">>,
+                <<"claim-id">> => ClaimID,
+                <<"claim">> => claim_page_section(ClaimMsg, Opts)
+            },
+            Optional = [
+                {<<"channel">>, Channel},
+                {<<"comments">>, Comments},
+                {<<"related">>, Related},
+                {<<"view-count">>, ViewCount},
+                {<<"reactions">>, Reactions},
+                {<<"sub-count">>, SubCount}
+            ],
+            PageDoc = lists:foldl(fun put_if_found_pair/2, Doc0, Optional),
+            % Encode the composition as a JSON body: nested sections would
+            % otherwise be flattened to `<key>+link' references on the wire,
+            % defeating the single-request page read.
+            ok_message((page_body(PageDoc))#{
+                <<"device">> => ?DEVICE,
+                <<"view">> => <<"page">>,
+                <<"claim-id">> => ClaimID,
+                % Comments/counts are volatile; do not persist the composition.
+                <<"cache-control">> => [<<"no-store">>, <<"no-cache">>]
+            })
+        else
+            Error -> Error
+        end
+    end).
+
+%% @doc Read the comment list for the base claim over the GET path:
+%% `GET /<claim-id>/comments?page=1&page-size=50&sort-by=3'. Query-string
+%% parameters arrive as binaries, so the known numeric/boolean parameters
+%% are coerced before delegating to the comment device.
+comments(Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, ClaimMsg} ?= claim_message(Base, Req, Opts),
+            {ok, ClaimID} ?=
+                required_first([<<"claim-id">>, <<"claim_id">>], ClaimMsg, Opts),
+            ParentID = first_value([<<"parent-id">>, <<"parent_id">>], Req, Opts),
+            Params0 = #{
+                <<"claim-id">> => ClaimID,
+                <<"page">> => int_param([<<"page">>], Req, 1, Opts),
+                <<"page-size">> =>
+                    int_param([<<"page-size">>, <<"page_size">>], Req, 50, Opts),
+                <<"top-level">> =>
+                    bool_param(
+                        [<<"top-level">>, <<"top_level">>],
+                        Req,
+                        ParentID =:= not_found,
+                        Opts
+                    )
+            },
+            Optional = [
+                {<<"parent-id">>, ParentID},
+                {<<"sort-by">>, int_or_not_found([<<"sort-by">>, <<"sort_by">>], Req, Opts)},
+                {<<"channel-id">>,
+                    first_value([<<"channel-id">>, <<"channel_id">>], Req, Opts)},
+                {<<"channel-name">>,
+                    first_value([<<"channel-name">>, <<"channel_name">>], Req, Opts)}
+            ],
+            Params = lists:foldl(fun put_if_found_pair/2, Params0, Optional),
+            hb_ao:raw(<<"odysee-comment@1.0">>, <<"list">>, #{}, Params, Opts)
+        else
+            Error -> Error
+        end
+    end).
+
+%% @doc List a channel's uploads (newest first) over the GET path:
+%% `GET /<channel-claim-id>/videos?page=1&page-size=20'. Listing filters
+%% (not-tags, release-time, exclude-shorts) are forwarded to claim_search
+%% so returned pages stay full and pagination math holds downstream.
+videos(Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, ClaimMsg} ?= claim_message(Base, Req, Opts),
+            {ok, ChannelID} ?=
+                required_first([<<"claim-id">>, <<"claim_id">>], ClaimMsg, Opts),
+            Page = int_param([<<"page">>], Req, 1, Opts),
+            PageSize = int_param([<<"page-size">>, <<"page_size">>], Req, 20, Opts),
+            channel_uploads_search(ChannelID, Page, PageSize, videos_filters(Req, Opts), Opts)
+        else
+            Error -> Error
+        end
+    end).
+
+videos_filters(Req, Opts) ->
+    Optional = [
+        {<<"not_tags">>, list_param([<<"not-tags">>, <<"not_tags">>], Req, Opts)},
+        {<<"release_time">>,
+            first_value([<<"release-time">>, <<"release_time">>], Req, Opts)},
+        {<<"exclude_shorts">>,
+            case bool_param([<<"exclude-shorts">>, <<"exclude_shorts">>], Req, false, Opts) of
+                true -> true;
+                false -> not_found
+            end},
+        {<<"exclude_shorts_duration_lte">>,
+            int_or_not_found(
+                [<<"exclude-shorts-duration-lte">>, <<"exclude_shorts_duration_lte">>],
+                Req,
+                Opts
+            )},
+        {<<"exclude_shorts_aspect_ratio_lte">>,
+            first_value(
+                [<<"exclude-shorts-aspect-ratio-lte">>, <<"exclude_shorts_aspect_ratio_lte">>],
+                Req,
+                Opts
+            )}
+    ],
+    lists:foldl(fun put_if_found_pair/2, #{}, Optional).
+
+list_param(Keys, Msg, Opts) ->
+    case first_value(Keys, Msg, Opts) of
+        List when is_list(List) -> List;
+        Bin when is_binary(Bin), Bin =/= <<>> -> binary:split(Bin, <<",">>, [global, trim_all]);
+        _ -> not_found
+    end.
+
+channel_uploads_search(ChannelID, Page, PageSize, Opts) ->
+    channel_uploads_search(ChannelID, Page, PageSize, #{}, Opts).
+channel_uploads_search(ChannelID, Page, PageSize, Filters, Opts) ->
+    hb_ao:raw(
+        ?DEVICE,
+        <<"search">>,
+        #{},
+        Filters#{
+            <<"channel_ids">> => [ChannelID],
+            <<"claim_type">> => [<<"stream">>, <<"repost">>],
+            <<"order_by">> => [<<"release_time">>],
+            <<"page">> => Page,
+            <<"page_size">> => PageSize
+        },
+        Opts
+    ).
+
+%% @doc Locate the claim message a page-style key operates on: the base
+%% message itself when it already is a claim message (the `GET /<claim-id>'
+%% surface), else a claim id supplied by the request.
+claim_message(Base, Req, Opts) ->
+    case is_claim_message(Base, Opts) of
+        true ->
+            {ok, Base};
+        false ->
+            case immutable_base_claim_message(Base, Opts) of
+                {ok, _} = Claim ->
+                    Claim;
+                _ ->
+                    case
+                        first_found(
+                            [
+                                {Req, <<"claim-id">>},
+                                {Req, <<"claim_id">>},
+                                {Base, <<"claim-id">>},
+                                {Base, <<"claim_id">>}
+                            ],
+                            Opts
+                        )
+                    of
+                        ClaimID when is_binary(ClaimID) ->
+                            fetch_claim_message(ClaimID, Opts);
+                        _ ->
+                            {error, claim_not_found}
+                    end
+            end
+    end.
+
+is_claim_message(Msg, Opts) when is_map(Msg) ->
+    first_value([<<"claim-id">>, <<"claim_id">>], Msg, Opts) =/= not_found
+        andalso first_value([<<"claim">>], Msg, Opts) =/= not_found;
+is_claim_message(_Msg, _Opts) ->
+    false.
+
+fetch_claim_message(ClaimID, Opts) ->
+    maybe
+        {ok, Search} ?=
+            hb_ao:raw(
+                ?DEVICE,
+                <<"search">>,
+                #{},
+                #{ <<"claim_ids">> => [ClaimID], <<"page_size">> => 1 },
+                Opts
+            ),
+        case first_value([<<"claims">>], Search, Opts) of
+            [ClaimMsg | _] when is_map(ClaimMsg) -> {ok, ClaimMsg};
+            _ -> {error, claim_not_found}
+        end
+    else
+        Error -> Error
+    end.
+
+immutable_base_claim_message(Base, Opts) when is_map(Base) ->
+    case {
+        first_value([<<"txid">>], Base, Opts),
+        first_value([<<"nout">>], Base, Opts),
+        first_value([<<"claim">>, <<"claim-envelope">>, <<"body">>, <<"value">>], Base, Opts)
+    } of
+        {TxID, NOut, Evidence}
+                when is_binary(TxID), Evidence =/= not_found,
+                     is_integer(NOut) orelse is_binary(NOut) ->
+            maybe
+                {ok, Stream} ?=
+                    hb_ao:raw(
+                        <<"odysee-stream@1.0">>,
+                        <<"from-claim">>,
+                        Base,
+                        #{},
+                        Opts
+                    ),
+                ClaimMsg = first_value([<<"claim-message">>], Stream, Opts),
+                true ?= is_claim_message(ClaimMsg, Opts),
+                {ok, ClaimMsg}
+            else
+                _ -> {error, claim_not_found}
+            end;
+        _ ->
+            {error, claim_not_found}
+    end;
+immutable_base_claim_message(_Base, _Opts) ->
+    {error, claim_not_found}.
+
+claim_page_section(ClaimMsg, Opts) ->
+    Loaded = hb_cache:ensure_all_loaded(ClaimMsg, Opts),
+    Optional = [
+        {<<"claim-id">>, first_value([<<"claim-id">>, <<"claim_id">>], Loaded, Opts)},
+        {<<"claim-name">>, first_value([<<"claim-name">>, <<"claim_name">>, <<"name">>], Loaded, Opts)},
+        {<<"value">>, first_value([<<"value">>], Loaded, Opts)},
+        {<<"value-type">>, first_value([<<"value-type">>, <<"value_type">>], Loaded, Opts)},
+        {<<"canonical-url">>, first_value([<<"canonical-url">>, <<"canonical_url">>], Loaded, Opts)},
+        {<<"txid">>, first_value([<<"txid">>], Loaded, Opts)},
+        {<<"nout">>, first_value([<<"nout">>], Loaded, Opts)}
+    ],
+    lists:foldl(fun put_if_found_pair/2, #{}, Optional).
+
+comment_page_defaults(Req, Opts) ->
+    Params = #{
+        <<"page">> => int_param([<<"comments-page">>, <<"page">>], Req, 1, Opts),
+        <<"page-size">> =>
+            int_param([<<"comments-page-size">>, <<"page-size">>], Req, 50, Opts),
+        <<"top-level">> => true
+    },
+    put_if_found(
+        <<"sort-by">>,
+        int_or_not_found([<<"comments-sort-by">>, <<"sort-by">>], Req, Opts),
+        Params
+    ).
+
+int_param(Keys, Msg, Default, Opts) ->
+    case first_value(Keys, Msg, Opts) of
+        Int when is_integer(Int) -> Int;
+        Bin when is_binary(Bin) ->
+            try binary_to_integer(Bin) catch _:_ -> Default end;
+        _ -> Default
+    end.
+
+int_or_not_found(Keys, Msg, Opts) ->
+    int_param(Keys, Msg, not_found, Opts).
+
+bool_param(Keys, Msg, Default, Opts) ->
+    case first_value(Keys, Msg, Opts) of
+        Bool when is_boolean(Bool) -> Bool;
+        <<"true">> -> true;
+        <<"false">> -> false;
+        _ -> Default
+    end.
+
+page_body(PageDoc) ->
+    try
+        #{
+            <<"content-type">> => <<"application/json">>,
+            <<"body">> => hb_json:encode(PageDoc)
+        }
+    catch
+        % Non-encodable payloads fall back to the raw map; nested sections
+        % then arrive as `+link' references instead of inline JSON.
+        _:_ -> PageDoc
+    end.
+
+%% @doc Run a page section fetch, tolerating failure: an errored or crashed
+%% section resolves to `not_found' and is omitted from the composed page.
+optional_section(Fun) ->
+    optional_section(Fun, #{}).
+optional_section(Fun, Opts) ->
+    try Fun() of
+        {ok, Msg} when is_map(Msg) -> section_message(Msg, Opts);
+        _ -> not_found
+    catch
+        _:_ -> not_found
+    end.
+
+%% @doc Strip audit/raw payload baggage from a section message so the
+%% composed page stays lean; the raw bodies remain fetchable per-device.
+%% Lazily-linked values are loaded so the section can be JSON-encoded.
+section_message(Msg, Opts) when is_map(Msg) ->
+    Loaded =
+        try hb_cache:ensure_all_loaded(Msg, Opts) of
+            LoadedMsg when is_map(LoadedMsg) -> LoadedMsg;
+            _ -> Msg
+        catch
+            _:_ -> Msg
+        end,
+    hb_private:reset(maps:without([<<"body">>, <<"commitments">>], Loaded));
+section_message(Msg, _Opts) ->
+    Msg.
+
+section_first(_Keys, not_found, _Opts) -> not_found;
+section_first(Keys, Msg, Opts) when is_map(Msg) -> first_value(Keys, Msg, Opts);
+section_first(_Keys, _Msg, _Opts) -> not_found.
 
 safe(Fun) ->
     try Fun() of
@@ -815,7 +1237,23 @@ claim_ids(Base, Req, Opts) ->
         _ ->
             case first_value([<<"claim_ids">>, <<"claim-ids">>], Base, Opts) of
                 ClaimIDs when is_list(ClaimIDs) -> normalize_claim_ids(ClaimIDs);
-                _ -> not_found
+                _ ->
+                    case
+                        first_found(
+                            [
+                                {Req, <<"claim-id">>},
+                                {Req, <<"claim_id">>},
+                                {Base, <<"claim-id">>},
+                                {Base, <<"claim_id">>}
+                            ],
+                            Opts
+                        )
+                    of
+                        ClaimID when is_binary(ClaimID), ClaimID =/= <<>> ->
+                            {ok, [ClaimID]};
+                        _ ->
+                            not_found
+                    end
             end
     end.
 
@@ -847,6 +1285,117 @@ required_first(Keys, Map, Opts) ->
         not_found -> {error, {missing, hd(Keys)}};
         Value -> {ok, Value}
     end.
+
+required_first_in(Keys, Maps, Opts) ->
+    case first_in(Keys, Maps, Opts) of
+        not_found -> {error, {missing, hd(Keys)}};
+        Value -> {ok, Value}
+    end.
+
+first_in([], _Maps, _Opts) ->
+    not_found;
+first_in([Key | Rest], Maps, Opts) ->
+    case first_found([{Map, Key} || Map <- Maps], Opts) of
+        not_found -> first_in(Rest, Maps, Opts);
+        Value -> Value
+    end.
+
+resolved_claim_message(Resolved, Base, Req, Opts) ->
+    case claim_message_candidate(Resolved, Base, Req, Opts) of
+        Claim when is_map(Claim) -> {ok, Claim};
+        _ -> {error, claim_not_found}
+    end.
+
+claim_message_candidate(Resolved, Base, Req, Opts) ->
+    case first_value([<<"claim-id">>, <<"claim_id">>], Resolved, Opts) of
+        ClaimID when is_binary(ClaimID) ->
+            Resolved;
+        _ ->
+            case first_value([<<"claims">>, <<"items">>], Resolved, Opts) of
+                Claims when is_list(Claims) ->
+                    select_requested_claim(Claims, Base, Req, Opts);
+                _ ->
+                    claim_from_resolved_result(Resolved, Base, Req, Opts)
+            end
+    end.
+
+claim_from_resolved_result(Resolved, Base, Req, Opts) ->
+    case first_value([<<"result">>], Resolved, Opts) of
+        Result when is_map(Result) ->
+            case claim_uri(Base, Req, Opts) of
+                {ok, URI} ->
+                    case hb_maps:get(URI, Result, not_found, Opts) of
+                        Claim when is_map(Claim) -> Claim;
+                        _ -> only_map_value(Result)
+                    end;
+                _ ->
+                    only_map_value(Result)
+            end;
+        _ ->
+            not_found
+    end.
+
+only_map_value(Map) ->
+    case [Value || Value <- maps:values(Map), is_map(Value)] of
+        [Value] -> Value;
+        _ -> not_found
+    end.
+
+select_requested_claim(Claims, Base, Req, Opts) ->
+    Requested =
+        first_found(
+            [
+                {Req, <<"claim-id">>},
+                {Req, <<"claim_id">>},
+                {Base, <<"claim-id">>},
+                {Base, <<"claim_id">>}
+            ],
+            Opts
+        ),
+    case [
+        Claim
+    ||
+        Claim <- Claims,
+        is_map(Claim),
+        Requested =:= not_found
+            orelse first_value([<<"claim-id">>, <<"claim_id">>], Claim, Opts) =:= Requested
+    ] of
+        [Claim | _] -> Claim;
+        [] -> not_found
+    end.
+
+immutable_claim_id(ClaimMsg, Opts) ->
+    Claim = hb_maps:get(<<"claim">>, ClaimMsg, #{}, Opts),
+    TxID = first_in([<<"txid">>], [ClaimMsg, Claim], Opts),
+    NOut = first_in([<<"nout">>, <<"n-out">>], [ClaimMsg, Claim], Opts),
+    case {normalize_txid(TxID), normalize_nout(NOut)} of
+        {{ok, NormalizedTxID}, {ok, NormalizedNOut}} ->
+            {ok, <<NormalizedTxID/binary, ":", NormalizedNOut/binary>>};
+        _ ->
+            {error, immutable_claim_id_not_found}
+    end.
+
+normalize_txid(TxID) when is_binary(TxID), byte_size(TxID) =:= 64 ->
+    try binary:decode_hex(TxID) of
+        Decoded when byte_size(Decoded) =:= 32 -> {ok, hb_util:to_lower(TxID)};
+        _ -> error
+    catch
+        _:_ -> error
+    end;
+normalize_txid(_TxID) ->
+    error.
+
+normalize_nout(NOut) when is_integer(NOut), NOut >= 0 ->
+    {ok, integer_to_binary(NOut)};
+normalize_nout(NOut) when is_binary(NOut), byte_size(NOut) > 0 ->
+    try binary_to_integer(NOut) of
+        Value when Value >= 0 -> {ok, integer_to_binary(Value)};
+        _ -> error
+    catch
+        _:_ -> error
+    end;
+normalize_nout(_NOut) ->
+    error.
 
 first_value([], _Map, _Opts) ->
     not_found;
@@ -890,6 +1439,22 @@ resolve_fixture_claim_test() ->
         hb_maps:get(<<"claim-id">>, Msg, #{})
     ),
     ?assertEqual(Claim, hb_json:decode(hb_maps:get(<<"body">>, Msg, #{}))).
+
+get_id_returns_the_claim_outpoint_test() ->
+    TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
+    Claim = (target_claim())#{ <<"txid">> => TxID, <<"nout">> => 2 },
+    {ok, Msg} = get_id(#{}, #{ <<"claim">> => Claim }, #{}),
+    ?assertEqual(<<TxID/binary, ":2">>, hb_maps:get(<<"id">>, Msg, #{})),
+    ?assertEqual(
+        <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+        hb_maps:get(<<"claim-id">>, Msg, #{})
+    ).
+
+get_id_rejects_a_claim_without_an_outpoint_test() ->
+    ?assertEqual(
+        {error, immutable_claim_id_not_found},
+        get_id(#{}, #{ <<"claim">> => target_claim() }, #{})
+    ).
 
 resolve_proxy_result_test() ->
     URI = <<"lbry://@veritasium#f/why-is-it-so-easy-to-disrupt-gps#3">>,

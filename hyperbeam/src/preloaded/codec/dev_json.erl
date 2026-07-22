@@ -12,7 +12,7 @@ content_type(_) -> {ok, <<"application/json">>}.
 
 %% @doc Encode a message to a JSON string, using JSON-native typing.
 to(Msg, _Req, _Opts) when is_binary(Msg) ->
-    {ok, hb_util:bin(json:encode(Msg))};
+    {ok, hb_util:bin(json:encode(json_safe(Msg)))};
 to(Msg, Req, Opts) ->
     ConvOpts = Opts#{ <<"hashpath">> => ignore },
     % The input to this function will be a TABM message, so we:
@@ -42,10 +42,42 @@ to(Msg, Req, Opts) ->
             },
             ConvOpts
         ),
-    {ok, hb_json:encode(JSONStructured)}.
+    {ok, hb_json:encode(json_safe(JSONStructured))}.
+
+%% @doc JSON has no binary type: a binary that is not valid UTF-8 (raw
+%% transaction bytes, protobuf envelopes, digests) cannot be emitted by the
+%% JSON encoder. Present such values as base64url strings instead. This is a
+%% view-layer conversion only: the canonical, verifiable encoding of a
+%% message remains `httpsig@1.0'.
+json_safe(Map) when is_map(Map) ->
+    maps:map(fun(_Key, Value) -> json_safe(Value) end, Map);
+json_safe(List) when is_list(List) ->
+    [json_safe(Value) || Value <- List];
+json_safe(Bin) when is_binary(Bin) ->
+    case unicode:characters_to_binary(Bin, utf8, utf8) of
+        Bin -> Bin;
+        _ -> #{
+            <<"$ao-type">> => <<"binary">>,
+            <<"base64url">> => hb_util:encode(Bin)
+        }
+    end;
+json_safe(Value) ->
+    Value.
+
+json_restore(#{ <<"$ao-type">> := <<"binary">>, <<"base64url">> := Encoded } = Value)
+        when map_size(Value) =:= 2, is_binary(Encoded) ->
+    try hb_util:decode(Encoded)
+    catch _:_ -> Value
+    end;
+json_restore(Map) when is_map(Map) ->
+    maps:map(fun(_Key, Value) -> json_restore(Value) end, Map);
+json_restore(List) when is_list(List) ->
+    [json_restore(Value) || Value <- List];
+json_restore(Value) ->
+    Value.
 
 %% @doc Decode a JSON string to a message.
-from(Map, _Req, _Opts) when is_map(Map) -> {ok, Map};
+from(Map, _Req, _Opts) when is_map(Map) -> {ok, json_restore(Map)};
 from(JSON, Req, Opts) ->
     ConvOpts = Opts#{ <<"hashpath">> => ignore },
     % The JSON string will be a partially-TABM encoded message: Rich number
@@ -55,7 +87,7 @@ from(JSON, Req, Opts) ->
     % results are fully normalized.
     Structured =
         hb_message:convert(
-            json:decode(JSON),
+            json_restore(json:decode(JSON)),
             <<"structured@1.0">>,
             tabm,
             ConvOpts
@@ -138,6 +170,35 @@ serialize(Base, Msg, Opts) ->
     }.
 
 %%% Tests
+
+raw_binary_values_encode_as_base64url_test() ->
+    RawBytes = <<0, 179, 255, 16, 42>>,
+    Msg = #{
+        <<"device">> => <<"lbry-claim@1.0">>,
+        <<"raw-transaction">> => RawBytes,
+        <<"nested">> => #{ <<"envelope">> => RawBytes },
+        <<"list">> => [RawBytes, <<"plain utf8">>]
+    },
+    {ok, JSON} = to(Msg, #{}, #{}),
+    Decoded = json:decode(JSON),
+    Encoded = #{
+        <<"$ao-type">> => <<"binary">>,
+        <<"base64url">> => hb_util:encode(RawBytes)
+    },
+    Leaves = json_leaves(Decoded),
+    ?assertEqual(Encoded, maps:get(<<"raw-transaction">>, Decoded)),
+    ?assertNot(lists:member(RawBytes, Leaves)),
+    {ok, Restored} = from(JSON, #{}, #{}),
+    ?assertEqual(RawBytes, maps:get(<<"raw-transaction">>, Restored)),
+    {ok, RestoredMap} = from(Decoded, #{}, #{}),
+    ?assertEqual(RawBytes, maps:get(<<"raw-transaction">>, RestoredMap)).
+
+json_leaves(Map) when is_map(Map) ->
+    lists:append([json_leaves(Value) || Value <- maps:values(Map)]);
+json_leaves(List) when is_list(List) ->
+    lists:append([json_leaves(Value) || Value <- List]);
+json_leaves(Value) ->
+    [Value].
 
 decode_with_atom_test() ->
     JSON =

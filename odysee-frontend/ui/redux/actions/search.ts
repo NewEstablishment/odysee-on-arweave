@@ -23,6 +23,7 @@ import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
 import { fetchHyperbeamSearch } from 'util/hyperbeam';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const isDev = process.env.NODE_ENV !== 'production';
 // ****************************************************************************
 // FYP
@@ -168,7 +169,7 @@ const processHyperbeamSearchResults = (results: Array<any>) => {
   const claimIds = [];
   results.forEach((item) => {
     if (!item) return;
-    const claimId = item.claim_id || item['claim-id'];
+    const claimId = item.claim_id || item['claim-id'] || item.claimId;
     if (claimId) claimIds.push(claimId);
 
     const name = item.name || item.claim_name || item['claim-name'];
@@ -210,11 +211,13 @@ const hitIds = (item: any) =>
     item?.['doc-id'],
     item?.claim_id,
     item?.['claim-id'],
+    item?.claimId,
     item?.legacy_outpoint,
     item?.['legacy-outpoint'],
   ].filter(Boolean);
 
-const claimSearchUri = (claim: any) => claim?.canonical_url || claim?.permanent_url || claim?.short_url;
+const claimSearchUri = (claim: any) =>
+  hyperbeamImmutableUriFromClaim(claim) || claim?.canonical_url || claim?.permanent_url || claim?.short_url;
 
 const claimResolvePayload = (claim: any) => {
   if (!claim) return null;
@@ -233,6 +236,8 @@ const hyperbeamStoreSearchResolution = (results: Array<any>, claims: Array<any>)
     [
       claim?.claim_id,
       claim?.immutable_id,
+      claim?.hyperbeam?.immutable_id,
+      claim?.hyperbeam?.['immutable-id'],
       claim?.outpoint,
       claim?.txid && claim?.nout !== undefined ? `${claim.txid}:${claim.nout}` : null,
     ]
@@ -276,7 +281,7 @@ const orderedHyperbeamSearchUris = (
     const claim = resolved && (resolved.stream || resolved.channel || resolved.collection || resolved);
     if (!claim || !claim.claim_id) return;
 
-    const uri = claim.canonical_url || claim.permanent_url || claim.short_url;
+    const uri = claimSearchUri(claim);
     if (uri) urisByClaimId[claim.claim_id] = uri;
   });
 
@@ -286,7 +291,7 @@ const orderedHyperbeamSearchUris = (
     const storeUri = hitIds(item)
       .map((id) => storeUrisById[id])
       .find(Boolean);
-    const claimId = item.claim_id || item['claim-id'];
+    const claimId = item.claim_id || item['claim-id'] || item.claimId;
     const uri = claimId && urisByClaimId[claimId];
     const fallbackUri = fallbackUris[index];
     const resultUri = storeUri || uri || fallbackUri;
@@ -390,21 +395,24 @@ export const doSearch =
       fetchLighthouseResults()
         .then(({ result, poweredBy, uuid, uris }) => {
           if (isSearchingRecommendations) {
-            // Temporarily resolve using `claim_search` until the SDK bug is fixed.
-            const claimIds = result.map((x) => x.claimId);
-            dispatch(doResolveClaimIds(claimIds)).finally(() => {
-              dispatch({
-                type: ACTIONS.SEARCH_SUCCESS,
-                data: {
-                  query: queryWithOptions,
-                  from: from,
-                  size: size,
-                  uris,
-                  poweredBy,
-                  uuid,
-                },
-              });
-            });
+            const claimIds = Array.from(new Set<string>(result.map((x) => x.claimId).filter(Boolean)));
+            const resolveTimeout = new Promise((resolve) => setTimeout(resolve, 2000));
+            Promise.race([dispatch(doResolveClaimIds(claimIds)).catch(() => undefined), resolveTimeout]).then(
+              (resolveInfo) => {
+                const resolvedUris = orderedHyperbeamSearchUris(result, resolveInfo, uris);
+                dispatch({
+                  type: ACTIONS.SEARCH_SUCCESS,
+                  data: {
+                    query: queryWithOptions,
+                    from: from,
+                    size: size,
+                    uris: resolvedUris,
+                    poweredBy,
+                    uuid,
+                  },
+                });
+              }
+            );
             return;
           }
 

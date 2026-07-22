@@ -161,15 +161,23 @@ claim_message_from_native(Read, Opts) ->
     end.
 
 native_claim_message(Read, Opts) ->
-    case hb_maps:get(<<"claim-envelope">>, Read, not_found, Opts) of
-        Envelope when is_map(Envelope) ->
-            case hb_maps:get(<<"message">>, Envelope, not_found, Opts) of
-                Message when is_binary(Message) -> Message;
-                _ ->
-                    not_found
-            end;
+    case hb_maps:get(<<"claim">>, Read, not_found, Opts) of
+        ClaimBytes when is_binary(ClaimBytes) -> claim_envelope_message(ClaimBytes, Opts);
         _ ->
-            not_found
+            case hb_maps:get(<<"claim-envelope">>, Read, not_found, Opts) of
+                Envelope when is_map(Envelope) ->
+                    case hb_maps:get(<<"message">>, Envelope, not_found, Opts) of
+                        Message when is_binary(Message) -> Message;
+                        _ -> not_found
+                    end;
+                _ -> not_found
+            end
+    end.
+
+claim_envelope_message(ClaimBytes, Opts) ->
+    case hb_lbry_tx:parse_claim_envelope(ClaimBytes) of
+        {ok, Envelope} -> hb_maps:get(<<"message">>, Envelope, not_found, Opts);
+        _ -> not_found
     end.
 
 claim_message_from_native_stream(Read, Message, Opts) ->
@@ -1742,6 +1750,16 @@ stream_from_native_claim_output_message_test() ->
     ?assertEqual(native_source_hash(), hb_maps:get(<<"source-hash">>, Stream, #{})),
     ?assertEqual(63022475, hb_maps:get(<<"source-size">>, Stream, #{})),
     ?assertEqual(native_outpoint(), hb_maps:get(<<"outpoint">>, Body, #{})).
+
+stream_from_remote_native_claim_output_message_test() ->
+    ClaimBytes = <<1, 0:160, 0:512, (native_claim_message())/binary>>,
+    Read = (maps:remove(<<"claim-envelope">>, native_claim_output_read()))#{
+        <<"claim">> => ClaimBytes
+    },
+    {ok, ClaimMsg} = claim_message_from_read(Read, #{}),
+    Stream = derive_stream(ClaimMsg, #{}, #{}, #{}),
+    ?assertEqual(<<"video/mp4">>, hb_maps:get(<<"media-type">>, Stream, #{})),
+    ?assertEqual(native_sd_hash(), hb_maps:get(<<"sd-hash">>, Stream, #{})).
 
 playback_redirect_test() ->
     {ok, Redirect} =

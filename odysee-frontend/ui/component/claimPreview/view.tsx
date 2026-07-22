@@ -67,6 +67,7 @@ import { selectIsActiveLivestreamForUri } from 'redux/selectors/livestream';
 import { selectLanguage, selectShowMatureContent, selectClientSetting } from 'redux/selectors/settings';
 import { makeSelectHasVisitedUri } from 'redux/selectors/content';
 import { doClearContentHistoryUri, doPlayNextUri } from 'redux/actions/content';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const AbandonedChannelPreview = lazyImport(
   () =>
     import(
@@ -267,7 +268,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   const navigateUrl =
     isCollection && listId && defaultCollectionAction === COLLECTIONS_CONSTS.DEFAULT_ACTION_VIEW
       ? `/$/${PAGES.PLAYLIST}/${listId}`
-      : formatLbryUrlForWeb((claim && claim.canonical_url) || uri || '/');
+      : formatLbryUrlForWeb(hyperbeamImmutableUriFromClaim(claim) || claim?.canonical_url || uri || '/');
   let navigateSearch = new URLSearchParams();
 
   if (!isCollection && listId) {
@@ -289,7 +290,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
 
     dispatch(
       doPlayNextUri({
-        uri: claim.canonical_url || uri,
+        uri: hyperbeamImmutableUriFromClaim(claim) || claim.canonical_url || uri,
         collectionId: listId,
         navigateInline: !disableClickNavigation,
       })

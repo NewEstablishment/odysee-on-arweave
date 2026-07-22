@@ -52,8 +52,15 @@ export function isHyperbeamUploadClaim(claim: Claim | null | undefined) {
 
   const hyperbeam = (claim as any).hyperbeam;
   const uploadDevice = String(hyperbeam?.upload_device || hyperbeam?.['upload-device'] || '');
-  const uploadId = hyperbeam?.upload_id || hyperbeam?.uploadId || hyperbeam?.immutable_id || hyperbeam?.immutableId;
-  const immutableId = (claim as any).immutable_id || (claim as any).immutableId || (claim as any).outpoint;
+  const uploadId = hyperbeam?.upload_id || hyperbeam?.uploadId;
+  // Legacy claims warmed into the hyperbeam store carry an outpoint
+  // immutable id but keep their 40-hex claim id.
+  const immutableId =
+    (claim as any).immutable_id ||
+    (claim as any).immutableId ||
+    (claim as any).outpoint ||
+    hyperbeam?.immutable_id ||
+    hyperbeam?.immutableId;
   const claimId = (claim as any).claim_id || (claim as any)['claim-id'];
 
   return Boolean(
@@ -62,6 +69,7 @@ export function isHyperbeamUploadClaim(claim: Claim | null | undefined) {
     uploadDevice.replace(/^~/, '') === 'odysee-upload@1.0' ||
     (immutableId &&
       !isLegacyOutpoint(immutableId) &&
+      !isLegacyClaimId(immutableId) &&
       (!claimId || claimId === immutableId || !isLegacyClaimId(claimId)))
   );
 }

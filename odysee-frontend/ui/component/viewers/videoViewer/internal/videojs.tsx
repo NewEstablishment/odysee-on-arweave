@@ -1176,6 +1176,7 @@ function VideoJsInner(props: Props) {
             ref={setVideoRef}
             src={playbackSource.src}
             poster={isAudio ? poster : ''}
+            preload="metadata"
             playsInline
             disablePictureInPicture={embeddedPlayback || undefined}
             crossOrigin="anonymous"

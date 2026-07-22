@@ -27,10 +27,12 @@ import {
   type NativeCommentControl,
 } from 'util/nativeCommentControls';
 import { getAuthToken } from 'util/saved-passwords';
+import { hyperbeamImmutableIdFromUri, hyperbeamImmutableUri, hyperbeamImmutableWebPath } from 'util/hyperbeam-route';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
 const HYPERBEAM_FAILED_READ_CACHE_MS = 10 * 1000;
+const LBRY_CLAIM_ID_RE = /^[0-9a-f]{40}$/i;
 const NATIVE_COMMENT_QUERY_CACHE_MS = HYPERBEAM_READ_CACHE_MS;
 const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
@@ -124,24 +126,17 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const urls = urlsFromResolveParams(params);
   if (!urls.length) return null;
 
-  // Immutable-id routes (out_<txid>_<nout> / 43-char ids) resolve through the
-  // per-uri chain (bare store GET first); channel claim-id uris batch through
-  // the store claim-id path; the rest keep master's batched device resolve,
-  // falling back to the per-uri chain for anything the batch does not return.
+  // Immutable-id routes (out_<txid>_<nout> / 43-char ids) and every other uri
+  // shape resolve through the per-uri chain (store GET first, wrapper-store
+  // law); channel claim-id uris batch through the store claim-id path.
   const immutableUris = urls.filter((uri) => immutableRouteIdFromUri(uri));
   const mutableUris = urls.filter((uri) => !immutableRouteIdFromUri(uri));
   const { channelUris, resolveUris: plainUris } = splitClaimIdChannelUris(mutableUris);
   const channelEntries =
     channelUris.length > 1 ? await fetchClaimIdChannelEntries(channelUris) : await fetchResolveEntries(channelUris);
-  const { batchedUris, resolveUris } = splitBatchedResolveUris(plainUris);
-  const batchedResults = batchedUris.length
-    ? await fetchBatchedResolveEntries(batchedUris).catch(() => batchedUris.map((uri): [string, any] => [uri, null]))
-    : [];
-  const batchedEntries = batchedResults.filter(([, claim]) => claim);
-  const unresolvedBatchedUris = batchedResults.filter(([, claim]) => !claim).map(([uri]) => uri);
-  const resolveEntries = await fetchResolveEntries([...immutableUris, ...resolveUris, ...unresolvedBatchedUris]);
+  const resolveEntries = await fetchResolveEntries([...immutableUris, ...plainUris]);
 
-  return Object.fromEntries([...channelEntries, ...batchedEntries, ...resolveEntries].filter(([, claim]) => claim));
+  return Object.fromEntries([...channelEntries, ...resolveEntries].filter(([, claim]) => claim));
 }
 
 async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
@@ -150,36 +145,26 @@ async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, 
       const immutableClaim = await fetchHyperbeamImmutableResolve(uri).catch(() => null);
       if (immutableClaim) return [uri, immutableClaim];
 
-      const storeResult = await fetchCachedStoreJsonOrNull(storePath('odysee/claim', uri))
-        .then(responsePayload)
-        .catch(() => null);
-      const storeClaim = sdkClaimFromHyperbeam(storeResult?.[uri] || storeResult);
-      if (value(storeClaim, 'claim_id', 'claim-id')) return [uri, storeClaim];
+      const locatedClaim = await fetchHyperbeamLocatedClaim(uri).catch(() => null);
+      if (locatedClaim) return [uri, locatedClaim];
 
-      const claimId = claimIdFromUri(uri);
-      if (claimId) {
-        try {
-          const result = responsePayload(await fetchCacheJson(cacheReadPath(claimId)));
-          const claim = sdkClaimFromHyperbeam(cacheReadClaim(result), claimId);
-          if (claim) return [uri, claim];
-        } catch (_e) {}
-      }
+      // Sam's ruling (2026-07-17): name-to-claim resolution must be a device,
+      // not a store read — a uri is not a verifiable content-derived ID.
+      const getResponse = await fetchCachedStoreJsonOrNull(
+        `${CLAIM_DEVICE}/resolve?url=${encodeURIComponent(uri)}`
+      ).catch(() => null);
+      const getEntry = claimFromUriKeyedResult(responsePayload(getResponse), uri);
+      const getClaim = getEntry && sdkClaimFromHyperbeam(getEntry);
+      if (getClaim && getClaim.claim_id) return [uri, await immutableClaimForResolvedUri(uri, getClaim)];
 
       const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { uri }).catch(() => null);
-      const result = responsePayload(response);
-      const claim = sdkClaimFromHyperbeam(result?.[uri] || result);
-      if (claim) return [uri, claim];
+      const deviceEntry = claimFromUriKeyedResult(responsePayload(response), uri);
+      const claim = deviceEntry && sdkClaimFromHyperbeam(deviceEntry);
+      if (claim && claim.claim_id) return [uri, await immutableClaimForResolvedUri(uri, claim)];
 
       return [uri, await fetchHyperbeamUploadResolve(uri).catch(() => null)];
     })
   );
-}
-
-async function fetchBatchedResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
-  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { urls });
-  const result = responsePayload(response);
-
-  return urls.map((uri): [string, any] => [uri, sdkClaimFromHyperbeam(result?.[uri] || result)]);
 }
 
 export async function fetchHyperbeamGet(params: any): Promise<any | null> {
@@ -254,6 +239,70 @@ export async function fetchHyperbeamCommentList(params: CommentListParams): Prom
   }
 
   return mergeCommentSources(params, native, legacy);
+}
+
+type ClaimPageOptions = { commentsPageSize?: number; commentsSortBy?: number };
+
+export function fetchHyperbeamClaimPage(claimId: string, options: ClaimPageOptions = {}): Promise<any | null> {
+  if (!LBRY_CLAIM_ID_RE.test(String(claimId || ''))) return Promise.resolve(null);
+
+  const query = new URLSearchParams();
+  if (options.commentsPageSize) query.set('comments-page-size', String(options.commentsPageSize));
+  if (options.commentsSortBy !== undefined && options.commentsSortBy !== null) {
+    query.set('comments-sort-by', String(options.commentsSortBy));
+  }
+  const queryString = query.toString();
+  const key = `${claimPageCachePrefix(claimId)}${queryString}`;
+  const now = Date.now();
+  const cached = deviceReadCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+
+  const promise = fetchHyperbeamClaimStoreId({ claim_id: claimId })
+    .then((id) =>
+      id
+        ? fetchStoreJsonOrNull(
+            `${encodeDataPath(id)}/${CLAIM_DEVICE}/page?claim-id=${encodeURIComponent(claimId)}${
+              queryString ? `&${queryString}` : ''
+            }`
+          )
+        : null
+    )
+    .then((response) => {
+      const page = messagePayload(response);
+      return page && value(page, 'claim-id', 'claim_id') ? page : null;
+    })
+    .catch((error) => {
+      deviceReadCache.delete(key);
+      throw error;
+    });
+  deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
+  return promise;
+}
+
+function claimPageCachePrefix(claimId: string): string {
+  return `claim-page:${String(claimId || '').toLowerCase()}:`;
+}
+
+export function invalidateHyperbeamClaimPage(claimId: string | null | undefined) {
+  if (!claimId) return;
+  const prefix = claimPageCachePrefix(String(claimId));
+  Array.from(deviceReadCache.keys()).forEach((key) => {
+    if (key.startsWith(prefix)) deviceReadCache.delete(key);
+  });
+}
+
+// Never initiates a page fetch of its own.
+async function cachedClaimPageSection(claimId: string, sectionKey: string): Promise<any | null> {
+  const prefix = claimPageCachePrefix(claimId);
+  const now = Date.now();
+
+  for (const [key, cached] of deviceReadCache.entries()) {
+    if (!key.startsWith(prefix) || cached.expiresAt <= now) continue;
+    const page = await cached.promise.catch(() => null);
+    const section = page && value(page, sectionKey);
+    if (section) return section;
+  }
+  return null;
 }
 
 export async function fetchHyperbeamCommentById(params: CommentByIdParams): Promise<CommentByIdResponse | null> {
@@ -399,7 +448,46 @@ function nativeCommentMatchesSelectors(comment: any, selectors: Record<string, a
   return Object.entries(selectors).every(([key, expected]) => fields[key] === expected);
 }
 
+// The composed page section is only served when its page-size matches the
+// request; a node composing with other parameters falls through to /comments.
+async function legacyCommentSourceFromGetPath(params: CommentListParams): Promise<CommentSource | null> {
+  const claimId = String((params as any).claim_id || '');
+  if (!LBRY_CLAIM_ID_RE.test(claimId) || (params as any).is_protected) return null;
+
+  const sortBy = (params as any).sort_by;
+  const isDefaultTopLevel =
+    (params.page || 1) === 1 &&
+    !(params as any).parent_id &&
+    (params as any).top_level !== false &&
+    sortBy !== undefined &&
+    sortBy !== null;
+  if (!isDefaultTopLevel) return null;
+
+  const page = await fetchHyperbeamClaimPage(claimId, {
+    commentsPageSize: params.page_size,
+    commentsSortBy: sortBy,
+  }).catch(() => null);
+  const section = page && value(page, 'comments');
+  if (!section) return null;
+  const sectionPageSize = toNumber(value(section, 'page-size', 'page_size'), 0);
+  if (params.page_size && sectionPageSize !== params.page_size) return null;
+
+  const comments = section.comments || section.items;
+  if (!Array.isArray(comments)) return null;
+
+  const totalItems = toNumber(value(section, 'total-items', 'total_items'), comments.length);
+  return {
+    items: comments.map(commentFromHyperbeam),
+    totalItems,
+    totalFilteredItems: toNumber(value(section, 'total-filtered-items', 'total_filtered_items'), totalItems),
+    hasHiddenComments: Boolean(value(section, 'has-hidden-comments', 'has_hidden_comments')),
+  };
+}
+
 async function fetchLegacyCommentSource(params: CommentListParams): Promise<CommentSource | null> {
+  const getPathSource = await legacyCommentSourceFromGetPath(params).catch(() => null);
+  if (getPathSource) return getPathSource;
+
   const page = positiveInteger(params.page, 1);
   const pageSize = positiveInteger(params.page_size, 10);
   const response = await fetchDeviceJson(`${COMMENT_DEVICE}/list`, {
@@ -1519,6 +1607,17 @@ function mergeReactionMaps(left: any, right: any): Record<string, any> {
 }
 
 export async function fetchHyperbeamFileReactionList(params: { claim_ids: string }): Promise<any | null> {
+  const claimIds = String(params.claim_ids || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  if (claimIds.length === 1) {
+    const section = await cachedClaimPageSection(claimIds[0], 'reactions');
+    const fromPage = section && reactionListFromHyperbeam(section);
+    if (fromPage) return fromPage;
+  }
+
   const response = await fetchDeviceJson(`${FILE_REACTION_DEVICE}/list`, params);
   return reactionListFromHyperbeam(responsePayload(response));
 }
@@ -1530,6 +1629,12 @@ export async function fetchHyperbeamViewCount(claimIdCsv: string): Promise<Array
     .filter(Boolean);
 
   if (claimIds.some((id) => !/^[0-9a-f]{40}$/i.test(id))) return null;
+
+  if (claimIds.length === 1) {
+    const section = await cachedClaimPageSection(claimIds[0], 'view-count');
+    const fromPage = section && (countArray(section, 'view-counts') || countArray(section, 'counts'));
+    if (Array.isArray(fromPage)) return fromPage;
+  }
 
   const response = await fetchDeviceJson(`${FILE_DEVICE}/view-count`, {
     claim_id: claimIdCsv,
@@ -1758,12 +1863,15 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
   if (!baseUrl) return [];
 
   try {
-    const url = `${baseUrl}/${encodeURIComponent(claimId)}`;
+    const storeId = isOutpointId(claimId) ? claimId : await fetchHyperbeamClaimStoreId({ claim_id: claimId });
+    if (!storeId) return [];
+    const url = `${baseUrl}/${encodeDataPath(storeId)}`;
     const requestHeaders = {
       accept: 'application/json',
+      'accept-bundle': 'true',
     };
     const callId = `immutable-read-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const immutablePath = `/${claimId}`;
+    const immutablePath = `/${storeId}`;
     pushHyperbeamDebug(
       'request',
       {
@@ -1788,8 +1896,8 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
     const json = await response.json().catch(() => null);
-    const claimPayload = responsePayload(json);
-    const expandedClaim = await expandHyperbeamImmutableClaim(baseUrl, claimId, cacheReadClaim(claimPayload));
+    const claimPayload = messagePayload(json);
+    const expandedClaim = await expandHyperbeamImmutableClaim(baseUrl, storeId, cacheReadClaim(claimPayload));
     pushHyperbeamDebug(
       'response',
       {
@@ -2020,29 +2128,20 @@ function debugResponseHeaders(response: Response) {
 
 export async function fetchHyperbeamResolveClaimIds(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   const claimIds = stringList((params as any).claim_ids || (params as any).claimIds);
-  const uploadItems = claimIds.length ? await fetchHyperbeamUploadClaimsForIds(claimIds) : [];
-  let result: any = null;
-
-  try {
-    const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, params);
-    result = sdkSearchFromHyperbeam(responsePayload(response));
-  } catch (_e) {
-    result = null;
-  }
-
-  const items = Array.isArray(result?.items) ? result.items : [];
-  const existingIds = new Set(items.map((claim) => claim?.claim_id).filter(Boolean));
-  const mergedItems = [...uploadItems.filter((claim) => !existingIds.has(claim.claim_id)), ...items];
-
-  if (!mergedItems.length && !Array.isArray(result?.items)) return null;
+  const legacyIds = claimIds.filter((claimId) => LBRY_CLAIM_ID_RE.test(claimId));
+  const uploadIds = claimIds.filter((claimId) => !LBRY_CLAIM_ID_RE.test(claimId));
+  const legacyItems = (await Promise.all(legacyIds.map((claimId) => fetchHyperbeamImmutableClaim(claimId)))).flat();
+  const uploadItems = uploadIds.length ? await fetchHyperbeamUploadClaimsForIds(uploadIds) : [];
+  const existingIds = new Set(legacyItems.map((claim) => claim?.claim_id).filter(Boolean));
+  const mergedItems = [...uploadItems.filter((claim) => !existingIds.has(claim.claim_id)), ...legacyItems];
+  if (!mergedItems.length) return null;
 
   return {
-    ...result,
     items: mergedItems,
-    page: result?.page || 1,
-    page_size: result?.page_size || mergedItems.length,
-    total_items: Math.max(result?.total_items || 0, mergedItems.length),
-    total_pages: Math.max(result?.total_pages || 0, mergedItems.length ? 1 : 0),
+    page: 1,
+    page_size: mergedItems.length,
+    total_items: mergedItems.length,
+    total_pages: 1,
   };
 }
 
@@ -2059,7 +2158,14 @@ export async function fetchHyperbeamVerifyClaimSignature(
 export async function fetchHyperbeamChannel(claim: Claim | null | undefined): Promise<HyperbeamChannel | null> {
   if (!claim || isHyperbeamUploadClaim(claim)) return null;
 
-  const result = await fetchDeviceJson(`${CHANNEL_DEVICE}/channel`, { channel: claim.signing_channel || claim });
+  // The single `GET /<id>` resolve already carries the full signing channel;
+  // normalizing it locally saves a channel-device round trip.
+  const signingChannel: any = claim.signing_channel;
+  if (signingChannel && signingChannel.claim_id && signingChannel.value) {
+    return channelFromHyperbeam(signingChannel);
+  }
+
+  const result = await fetchDeviceJson(`${CHANNEL_DEVICE}/channel`, { channel: signingChannel || claim });
   return result ? channelFromHyperbeam(result) : null;
 }
 
@@ -2069,7 +2175,11 @@ export async function fetchHyperbeamStreamVerification(
 ): Promise<any | null> {
   if (!claim || isHyperbeamUploadClaim(claim)) return null;
 
-  const result = await fetchDeviceJson(`${STREAM_DEVICE}/verified-stream`, compactParams({ claim, url: uri }));
+  const immutableId = immutableReadIdFromClaim(claim);
+  const result = await fetchDeviceJson(
+    `${STREAM_DEVICE}/verified-stream`,
+    immutableId ? { id: immutableId } : compactParams({ claim, url: uri })
+  );
   return responsePayload(result);
 }
 
@@ -2370,45 +2480,6 @@ function buildDeviceUrl(baseUrl: string, path: string): string {
   return `${baseUrl}/${path}`;
 }
 
-function buildCacheUrl(baseUrl: string, path: string): string {
-  if (path.startsWith('/')) return `${baseUrl}${path}`;
-  return `${baseUrl}/~cache@1.0/${path}`;
-}
-
-async function fetchCacheJson(path: string): Promise<any | null> {
-  const baseUrl = hyperbeamBaseUrl();
-  if (!baseUrl) throw new Error('HyperBEAM node is not configured');
-
-  const response = await fetch(buildCacheUrl(baseUrl, path), {
-    method: 'GET',
-    credentials: hyperbeamFetchCredentials(baseUrl),
-    headers: { Accept: 'application/json' },
-    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
-  }
-
-  return await response.json();
-}
-
-function cacheReadPath(id: string): string {
-  return `/${String(id)
-    .replace(/^\/+/, '')
-    .split('/')
-    .map((part) => encodeURIComponent(part))
-    .join('/')}`;
-}
-
-function cacheListPath(path: string, params: Record<string, any> = {}): string {
-  const urlParams = new URLSearchParams({ list: String(path).replace(/^\//, '') });
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') urlParams.set(key, String(value));
-  });
-  return `list?${urlParams.toString()}`;
-}
-
 function hyperbeamFetchCredentials(baseUrl: string): RequestCredentials {
   if (typeof window === 'undefined') return 'include';
 
@@ -2534,6 +2605,20 @@ function responsePayload(response: any): any {
   return payload;
 }
 
+function messagePayload(response: any): any {
+  if (!response) return null;
+  if (
+    isObject(response) &&
+    (value(response, 'device') ||
+      value(response, 'claim-id', 'claim_id') ||
+      value(response, 'claim+link', 'claim-link') ||
+      value(response, 'value+link', 'value-link'))
+  ) {
+    return response;
+  }
+  return responsePayload(response);
+}
+
 function countArray(source: any, countKey: string): Array<number> | null {
   if (Array.isArray(source)) return source;
   if (typeof source === 'number') return [source];
@@ -2574,14 +2659,9 @@ function urlsFromResolveParams(params: any): Array<string> {
   return source ? [source] : [];
 }
 
-function splitBatchedResolveUris(urls: Array<string>): { batchedUris: Array<string>; resolveUris: Array<string> } {
-  return urls.reduce(
-    (groups, uri) => {
-      groups[claimIdFromUri(uri) ? 'batchedUris' : 'resolveUris'].push(uri);
-      return groups;
-    },
-    { batchedUris: [], resolveUris: [] } as { batchedUris: Array<string>; resolveUris: Array<string> }
-  );
+function fullClaimIdFromUri(uri: string): string | null {
+  const claimId = claimIdFromUri(uri);
+  return claimId && LBRY_CLAIM_ID_RE.test(claimId) ? claimId : null;
 }
 
 function claimIdFromUri(uri: string): string | null {
@@ -2594,6 +2674,72 @@ function claimIdFromUri(uri: string): string | null {
   }
 }
 
+async function immutableClaimForResolvedUri(uri: string, claim: any): Promise<any> {
+  const immutableId = immutableReadIdFromClaim(claim);
+  if (!immutableId || !isOutpointId(immutableId)) return claim;
+
+  const result = await fetchCachedImmutableJsonOrNull(immutableId).catch(() => null);
+  const payload = storePayload(result);
+  if (!payload) return claim;
+
+  const decodedClaim = decodeClaimMetadata(payload);
+  let name: string | undefined;
+  try {
+    const parsed = parseURI(uri);
+    name = parsed.streamName || parsed.claimName;
+  } catch {}
+
+  const immutableClaim = immutableClaimFromHyperbeam(result, immutableId, claim.signing_channel, decodedClaim, name);
+  if (!immutableClaim) return claim;
+
+  // The immutable claim may only know the outpoint id (store message keys can
+  // be CORS-hidden header fields in the browser).
+  const resolvedClaimId = String(claim.claim_id || '');
+  const legacyIdentity = LBRY_CLAIM_ID_RE.test(resolvedClaimId)
+    ? {
+        claim_id: resolvedClaimId,
+        canonical_url: claim.canonical_url || immutableClaim.canonical_url,
+        permanent_url: claim.permanent_url || immutableClaim.permanent_url,
+        short_url: claim.short_url || immutableClaim.short_url,
+        hyperbeam: compactParams({
+          ...immutableClaim.hyperbeam,
+          'source-claim-id': value(immutableClaim.hyperbeam, 'source-claim-id') || resolvedClaimId,
+        }),
+      }
+    : {};
+
+  return {
+    ...claim,
+    ...immutableClaim,
+    ...legacyIdentity,
+    signing_channel: immutableClaim.signing_channel || claim.signing_channel,
+    // The immutable reconstruction fabricates fallbacks (title=claim-name,
+    // empty meta) that must not shadow the resolved values.
+    value: {
+      ...immutableClaim.value,
+      ...compactParams(claim.value || {}),
+      source: {
+        ...immutableClaim.value?.source,
+        ...compactParams(claim.value?.source || {}),
+      },
+    },
+    meta: {
+      ...immutableClaim.meta,
+      ...compactParams(claim.meta || {}),
+    },
+  };
+}
+
+function immutableReadIdFromClaim(claim: any): string | null {
+  const explicit =
+    value(claim, 'outpoint', 'immutable_id', 'immutable-id') || value(claim?.hyperbeam, 'immutable_id', 'immutable-id');
+  if (explicit && (isOutpointId(explicit) || isStandaloneImmutableId(explicit))) return String(explicit);
+
+  const txid = value(claim, 'txid');
+  const nout = value(claim, 'nout');
+  return typeof txid === 'string' && (typeof nout === 'number' || typeof nout === 'string') ? `${txid}:${nout}` : null;
+}
+
 function uriWithClaimId(uri: any, claimId: any): string | null {
   if (!uri || !claimId) return null;
   const text = String(uri);
@@ -2603,8 +2749,10 @@ function uriWithClaimId(uri: any, claimId: any): string | null {
 
 function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   if (!result) return null;
-  const nestedClaim = isObject(result.claim) ? result.claim : null;
-  const claim = responsePayload(nestedClaim || result);
+  // `result.claim` may hold raw protobuf bytes rather than an SDK claim map.
+  const nestedClaim = messagePayload(result.claim);
+  const claim =
+    isObject(nestedClaim) && value(nestedClaim, 'claim_id', 'claim-id') ? nestedClaim : messagePayload(result);
   const nativeUpload = Boolean(
     value(claim, 'hyperbeam') ||
     value(claim, 'hyperbeam+link', 'hyperbeam-link') ||
@@ -2617,7 +2765,20 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   const outpoint = nativeUpload ? null : claimOutpoint(txid, nout);
   const hyperbeam = value(claim, 'hyperbeam') || {};
   const mediaId = value(hyperbeam, 'media_id', 'media-id', 'mediaId') || value(claim, 'claim_id', 'claim-id');
-  const valueType = value(claim, 'value_type', 'value-type') || claim.value_type;
+  const name = value(claim, 'name', 'claim-name') || claim.name;
+  const device = value(claim, 'device');
+  const valueType =
+    value(claim, 'value_type', 'value-type') ||
+    claim.value_type ||
+    (device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' ? 'channel' : undefined);
+  const canonicalUrl =
+    value(claim, 'canonical_url', 'canonical-url') ||
+    claim.canonical_url ||
+    (name && claimId ? claimUrl(String(name), String(claimId)) : undefined);
+  const permanentUrl =
+    value(claim, 'permanent_url', 'permanent-url') ||
+    claim.permanent_url ||
+    (name && claimId ? claimUrl(String(name), String(claimId)) : undefined);
   const meta = normalizeHyperbeamClaimMeta(value(claim, 'meta'));
 
   return {
@@ -2643,19 +2804,15 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
             value(claim, 'claim-output-store-path', 'claim-proof-store-path') || `odysee/claim-output/${txid}/${nout}`,
         }
       : {}),
-    name: value(claim, 'name', 'claim-name') || claim.name,
+    name,
     ...(nativeUpload
       ? {
           streaming_url: `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(claimId)}`,
           download_url: `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(claimId)}`,
         }
       : {}),
-    canonical_url: nativeUpload
-      ? uriWithClaimId(value(claim, 'canonical_url', 'canonical-url') || claim.canonical_url, claimId)
-      : value(claim, 'canonical_url', 'canonical-url') || claim.canonical_url,
-    permanent_url: nativeUpload
-      ? uriWithClaimId(value(claim, 'permanent_url', 'permanent-url') || claim.permanent_url, claimId)
-      : value(claim, 'permanent_url', 'permanent-url') || claim.permanent_url,
+    canonical_url: nativeUpload ? uriWithClaimId(canonicalUrl, claimId) : canonicalUrl,
+    permanent_url: nativeUpload ? uriWithClaimId(permanentUrl, claimId) : permanentUrl,
     short_url: nativeUpload
       ? uriWithClaimId(value(claim, 'short_url', 'short-url') || claim.short_url, claimId)
       : value(claim, 'short_url', 'short-url') || claim.short_url,
@@ -2804,19 +2961,49 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
   const immutableId = immutableRouteIdFromUri(uri);
   if (!immutableId) return null;
 
-  const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
+  const result = await fetchCachedImmutableJsonOrNull(immutableId);
   const decodedClaim = decodeClaimMetadata(storePayload(result));
   const signingChannel = decodedClaim?.signedChannelId
-    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
-        .then(responsePayload)
-        .catch(() => null)
+    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId).catch(() => null)
     : null;
-  const parsed = parseURI(uri);
-  const name = parsed.streamName || parsed.claimName;
-  const claim = immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name);
+  return immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim);
+}
+
+async function fetchHyperbeamLocatedClaim(uri: string): Promise<any | null> {
+  const claimId = fullClaimIdFromUri(uri);
+  const storeId = await fetchHyperbeamClaimStoreId(claimId ? { claim_id: claimId } : { uri });
+  if (!storeId) return null;
+
+  const result = await fetchCachedImmutableJsonOrNull(storeId);
+  const decodedClaim = decodeClaimMetadata(storePayload(result));
+  const signingChannel = decodedClaim?.signedChannelId
+    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId).catch(() => null)
+    : null;
+  let name: string | undefined;
+  try {
+    const parsed = parseURI(uri);
+    name = parsed.streamName || parsed.claimName;
+  } catch {}
+  const claim = immutableClaimFromHyperbeam(result, storeId, signingChannel, decodedClaim, name);
   if (!claim) return null;
 
-  return !name || claim.name === name ? claim : null;
+  return claimId && claim.claim_id !== claimId
+    ? {
+        ...claim,
+        claim_id: claimId,
+        hyperbeam: compactParams({
+          ...claim.hyperbeam,
+          'source-claim-id': claimId,
+        }),
+      }
+    : claim;
+}
+
+async function fetchHyperbeamClaimStoreId(params: Record<string, any>): Promise<string | null> {
+  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/get-id`, params);
+  const result = responsePayload(response);
+  const id = value(result, 'id', 'immutable-id', 'immutable_id', 'outpoint');
+  return isOutpointId(id) ? String(id) : null;
 }
 
 async function fetchHyperbeamUploadResolve(uri: string): Promise<any | null> {
@@ -2848,20 +3035,37 @@ async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[s
     const claimId = claimIdFromChannelUri(uri);
     if (claimId) uriByClaimId.set(claimId.toLowerCase(), uri);
   });
-  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, {
-    claim_ids: Array.from(uriByClaimId.keys()),
+  const storeEntries = await Promise.all(
+    Array.from(uriByClaimId.entries()).map(async ([claimId, uri]): Promise<[string, any] | null> => {
+      const claim = await fetchHyperbeamLocatedClaim(uri).catch(() => null);
+      return claim ? [uri, claim] : null;
+    })
+  );
+  const resolvedEntries = storeEntries.filter(Boolean);
+  const resolvedUris = new Set(resolvedEntries.map(([uri]) => uri));
+  const unresolvedClaimIds = Array.from(uriByClaimId.entries())
+    .filter(([, uri]) => !resolvedUris.has(uri))
+    .map(([claimId]) => claimId);
+  if (!unresolvedClaimIds.length) return resolvedEntries;
+
+  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, {
+    claim_ids: unresolvedClaimIds,
   });
   const search = sdkSearchFromHyperbeam(responsePayload(response));
   const items = Array.isArray(search?.items) ? search.items : [];
 
-  return items
-    .map((item: any): [string, any] | null => {
-      const claim = sdkClaimFromHyperbeam(item);
-      const claimId = value(claim, 'claim_id', 'claim-id');
-      const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
-      return uri ? [uri, claim] : null;
-    })
-    .filter(Boolean) as Array<[string, any]>;
+  const fallbackEntries = (
+    await Promise.all(
+      items.map(async (item: any): Promise<[string, any] | null> => {
+        const claim = sdkClaimFromHyperbeam(item);
+        const claimId = value(claim, 'claim_id', 'claim-id');
+        const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
+        return uri ? [uri, await immutableClaimForResolvedUri(uri, claim)] : null;
+      })
+    )
+  ).filter(Boolean) as Array<[string, any]>;
+
+  return [...resolvedEntries, ...fallbackEntries];
 }
 
 export async function fetchHyperbeamUploadList(params: ClaimSearchOptions = {}): Promise<ClaimSearchResponse | null> {
@@ -2895,12 +3099,10 @@ async function fetchHyperbeamImmutableList(
   const claims = (
     await Promise.all(
       uniqueIds.map(async (id) => {
-        const result = await fetchCachedImmutableJsonOrNull(id).then(responsePayload);
+        const result = await fetchCachedImmutableJsonOrNull(id);
         const decodedClaim = decodeClaimMetadata(storePayload(result));
         const signingChannel = decodedClaim?.signedChannelId
-          ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
-              .then(responsePayload)
-              .catch(() => null)
+          ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId).catch(() => null)
           : null;
         return immutableClaimFromHyperbeam(result, id, signingChannel, decodedClaim);
       })
@@ -3017,7 +3219,8 @@ function immutableClaimFromHyperbeam(
   const decodedSource: Record<string, any> = {};
   const channelPayload = storePayload(channelResult);
   const channelClaim = sdkClaimFromHyperbeam(channelPayload) || channelPayload;
-  const claim = sdkClaimFromHyperbeam(payload) || payload;
+  const claimCandidate = sdkClaimFromHyperbeam(payload) || payload;
+  const claim = isObject(claimCandidate) ? claimCandidate : {};
   const existingValue = isObject(value(claim, 'value')) ? value(claim, 'value') : {};
   const payloadSource = isObject(value(payload, 'source')) ? value(payload, 'source') : {};
   const valueSource = isObject(value(existingValue, 'source')) ? value(existingValue, 'source') : {};
@@ -3073,7 +3276,6 @@ function immutableClaimFromHyperbeam(
       : '';
   const mediaUrl =
     explicitMediaUrl ||
-    claimMediaUrl ||
     hyperbeamMediaUrlFromPayload({
       ...payload,
       sd_hash: sdHash,
@@ -3081,7 +3283,8 @@ function immutableClaimFromHyperbeam(
       media_type: mediaType,
       'media-type': mediaType,
     }) ||
-    directMediaUrl;
+    directMediaUrl ||
+    claimMediaUrl;
   const canonicalUrl =
     value(claim, 'canonical_url', 'canonical-url') ||
     value(payload, 'canonical_url', 'canonical-url') ||
@@ -3161,6 +3364,8 @@ function immutableClaimFromHyperbeam(
       ...(isObject(value(claim, 'hyperbeam')) ? value(claim, 'hyperbeam') : {}),
       immutable_id: String(storeId),
       'immutable-id': String(storeId),
+      'immutable-uri': hyperbeamImmutableUri(String(storeId)),
+      'immutable-path': hyperbeamImmutableWebPath(String(storeId)),
       'store-path': `/${encodeDataPath(String(storeId))}`,
       'source-claim-id': sourceClaimId,
       txid,
@@ -3259,8 +3464,16 @@ function fetchCachedStoreJsonOrNull(path: string, preferJson: boolean = true): P
   return promise;
 }
 
-function storePath(prefix: string, value: string): string {
-  return `${prefix}/${encodeURIComponent(value)}`;
+function claimFromUriKeyedResult(result: any, uri: string): any | null {
+  if (!result || typeof result !== 'object') return null;
+  if (value(result, 'claim_id', 'claim-id')) return result;
+
+  const exact = result[uri] || result[String(uri).replace(/#/g, ':')];
+  if (exact && typeof exact === 'object') return exact;
+
+  const values = Object.values(result).filter((entry) => entry && typeof entry === 'object');
+  if (values.length === 1 && value(values[0], 'claim_id', 'claim-id')) return values[0];
+  return null;
 }
 
 function encodeDataPath(id: string): string {
@@ -3468,7 +3681,7 @@ function latin1ToHex(value: string): string {
 }
 
 function storePayload(result: any): any {
-  const payload = responsePayload(result);
+  const payload = messagePayload(result);
   if (!payload) return null;
   if (typeof payload === 'string') return { body: payload };
 
@@ -3525,6 +3738,23 @@ function claimEnvelope(bytes: Uint8Array): { message: Uint8Array; signedChannelI
 }
 
 function hexToBytes(value: any): Uint8Array | null {
+  if (
+    isObject(value) &&
+    value['$ao-type'] === 'binary' &&
+    typeof value.base64url === 'string' &&
+    typeof atob === 'function'
+  ) {
+    try {
+      const base64 = value.base64url
+        .replace(/-/g, '+')
+        .replace(/_/g, '/')
+        .padEnd(Math.ceil(value.base64url.length / 4) * 4, '=');
+      const decoded = atob(base64);
+      return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+    } catch {
+      return null;
+    }
+  }
   if (typeof value !== 'string' || value.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(value)) return null;
   const bytes = new Uint8Array(value.length / 2);
   for (let index = 0; index < bytes.length; index += 1) {
@@ -3588,6 +3818,9 @@ function webSafeImmutableId(id: any): string {
 }
 
 function immutableRouteIdFromUri(uri: string): string | null {
+  const immutableId = hyperbeamImmutableIdFromUri(uri);
+  if (immutableId) return immutableId;
+
   let parsed;
   try {
     parsed = parseURI(uri);
@@ -3692,10 +3925,9 @@ function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> 
   const promise = (
     isOutpointId(id) || isStandaloneImmutableId(id)
       ? fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false)
-      : fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { claim_ids: [id] }).then((response) => {
-          const result = sdkSearchFromHyperbeam(responsePayload(response));
-          return Array.isArray(result?.items) ? result.items[0] || null : null;
-        })
+      : fetchHyperbeamClaimStoreId({ claim_id: id }).then((storeId) =>
+          storeId ? fetchStoreJsonOrNull(`${encodeDataPath(storeId)}?accept-bundle=true`, false) : null
+        )
   ).catch((error) => {
     deviceReadCache.delete(key);
     throw error;
