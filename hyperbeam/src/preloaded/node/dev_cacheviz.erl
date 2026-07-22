@@ -43,7 +43,10 @@ json(Base, Req, Opts) ->
                         all;
                     _ ->
                         ?event({writing_base_for_rendering, Base}),
-                        {ok, Path} = hb_cache:write(Base, Opts),
+                        {ok, Path} = hb_cache:write(
+                            Base,
+                            Opts#{ <<"match-index">> => false }
+                        ),
                         ?event({wrote_message, Path}),
                         ID = hb_message:id(Base, all, Opts),
                         ?event({generated_id, ID}),

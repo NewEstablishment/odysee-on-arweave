@@ -276,7 +276,7 @@ export default function HyperbeamDebugConsole() {
         width: open ? 'auto' : 'auto',
         maxWidth: open ? '100vw' : 'calc(100vw - 24px)',
         maxHeight: maximized ? '100vh' : '58vh',
-        height: maximized ? '100vh' : undefined,
+        height: maximized ? '100vh' : open ? '58vh' : undefined,
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
@@ -991,7 +991,7 @@ function ArchitecturePanel({
         : activeTraceNativeUpload
           ? architectureTracePath(displayGraph, deviceRows, activeTrace, architectureRects)
           : null;
-  const graphHeight = maximized ? 560 : 540;
+  const graphHeight = architectureGraphHeight(architectureRects);
   const hasGraphFocus = Boolean(selectedEvent || activeTrace);
   const showStaticBackendEdges = !selectedPath;
   const nodeActive = (node: string, fallback: boolean) => (selectedPath ? selectedPath.nodes.has(node) : fallback);
@@ -1020,6 +1020,8 @@ function ArchitecturePanel({
       <div
         style={{
           display: 'grid',
+          gridTemplateRows: 'auto minmax(0, 1fr)',
+          flex: '1 1 auto',
           gap: 8,
           minWidth: 0,
           width: '100%',
@@ -1076,18 +1078,18 @@ function ArchitecturePanel({
         <div
           style={{
             position: 'relative',
-            width: `${zoom * 100}%`,
-            aspectRatio: `${layout.viewWidth} / ${graphHeight}`,
+            minWidth: 0,
+            minHeight: 0,
+            overflow: 'auto',
           }}
         >
           <svg
+            data-architecture-graph
             viewBox={`0 0 ${layout.viewWidth} ${graphHeight}`}
+            preserveAspectRatio="xMidYMid meet"
             style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              width: '100%',
-              height: '100%',
+              width: `${zoom * 100}%`,
+              height: `${zoom * 100}%`,
               maxWidth: 'none',
               display: 'block',
             }}
@@ -1603,6 +1605,10 @@ function architectureNodeRects(
   });
 
   return rects;
+}
+
+function architectureGraphHeight(rects: ArchitectureRects) {
+  return Math.max(...Object.values(rects).map((rect) => rect.y + rect.h)) + 24;
 }
 
 function architectureRectCenter(rect: ArchitectureRect): ArchitecturePoint {
@@ -2132,6 +2138,7 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     if (path.includes('/$/api/') || authEvent) counters.ssrEvents += 1;
     if (
       path.includes('~cache@1.0') ||
+      storeBackend === 'cache@1.0' ||
       deviceLayer === 'store' ||
       nativeSource === 'store' ||
       isDirectImmutableStorePath(path)
@@ -2210,6 +2217,7 @@ function storeBackendName(data: Record<string, any>, path: string, device: strin
   const nativeSource = String(data.nativeSource || '');
 
   if (mediaRange) return 'hb_store_lbry_blob';
+  if (device === '~query@1.0' || path.includes('/~query@1.0/')) return 'cache@1.0';
   if (path.includes('~cache@1.0') || nativeSource === 'cache') return 'cache@1.0';
   if (path.includes('~arweave') || device.includes('arweave') || sourceLayer.includes('arweave')) return '';
   if (nativeSource === 'upload-index' || path.includes('/hyperbeam-upload/v1/list')) return '';

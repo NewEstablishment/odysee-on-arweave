@@ -22,7 +22,7 @@ import { SEARCH_OPTIONS } from 'constants/search';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
-import { fetchHyperbeamClaimsByIds, fetchHyperbeamSearch } from 'util/hyperbeam';
+import { fetchHyperbeamSearch } from 'util/hyperbeam';
 import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const isDev = process.env.NODE_ENV !== 'production';
@@ -168,13 +168,10 @@ const processLighthouseResults = (results: Array<any>) => {
 const processHyperbeamSearchResults = (results: Array<any>) => {
   const uris = [];
   const claimIds = [];
-  const immutableIds = [];
   results.forEach((item) => {
     if (!item) return;
     const claimId = item.claim_id || item['claim-id'] || item.claimId;
     if (claimId) claimIds.push(claimId);
-    const immutableId = item.immutable_id || item['immutable-id'] || item.doc_id || item['doc-id'];
-    if (immutableId) immutableIds.push(immutableId);
 
     const name = item.name || item.claim_name || item['claim-name'];
     const canonicalUrl = item.canonical_url || item['canonical-url'] || item.permanent_url || item['permanent-url'];
@@ -204,7 +201,7 @@ const processHyperbeamSearchResults = (results: Array<any>) => {
       uris.push(canonicalUrl);
     }
   });
-  return { uris, claimIds, immutableIds };
+  return { uris, claimIds };
 };
 
 const hitIds = (item: any) =>
@@ -430,13 +427,10 @@ export const doSearch =
 
     if (hyperbeamSearchEnabled) {
       fetchHyperbeamSearch(hyperbeamSearchParams(query, searchOptions))
-        .then(async (data) => {
+        .then((data) => {
           if (!data || !Array.isArray(data.items)) throw new Error('HyperBEAM search returned no items array');
-          const { uris, claimIds, immutableIds } = processHyperbeamSearchResults(data.items);
-          const storeClaims = immutableIds.length
-            ? await fetchHyperbeamClaimsByIds(Array.from(new Set(immutableIds)))
-            : [];
-          const storeResolution = hyperbeamStoreSearchResolution(data.items, storeClaims);
+          const { uris, claimIds } = processHyperbeamSearchResults(data.items);
+          const storeResolution = hyperbeamStoreSearchResolution(data.items, data.items);
           if (Object.keys(storeResolution.resolveInfo).length) {
             dispatch({
               type: ACTIONS.RESOLVE_URIS_SUCCESS,

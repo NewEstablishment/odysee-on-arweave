@@ -1,12 +1,14 @@
 -module(dev_odysee_upload).
 -implements(<<"odysee-upload@1.0">>).
--export([info/1, submit/3, upload/3, write/3, chunk/3, finalize/3, index/3, update/3, delete/3, record/3, media/3, list/3]).
+-export([info/1, submit/3, upload/3, write/3, chunk/3, finalize/3, index/3, update/3, delete/3, record/3, media/3, list/3, reconcile/3, reindex/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -define(DEVICE, <<"odysee-upload@1.0">>).
 -define(DEFAULT_MAX_BYTES, 104857600).
 -define(CHUNKED_MANIFEST_KIND, <<"odysee-hyperbeam-chunked-upload">>).
+-define(SEARCH_PENDING_PATH, <<"odysee/upload/search-pending.json">>).
+-define(DEFAULT_SEARCH_RECONCILE_LIMIT, 20).
 
 info(_Opts) ->
     #{
@@ -21,7 +23,9 @@ info(_Opts) ->
             <<"delete">>,
             <<"record">>,
             <<"media">>,
-            <<"list">>
+            <<"list">>,
+            <<"reconcile">>,
+            <<"reindex">>
         ]
     }.
 
@@ -193,6 +197,56 @@ list(Base, Req, Opts) ->
             end)
     end.
 
+%% @doc Replay a bounded batch of durable search operations that could not be
+%% applied while the derivative search backend was unavailable.
+reconcile(Base, Req, Opts) ->
+    safe(fun() ->
+        Limit = min(
+            1000,
+            max(1, integer_param(Base, Req, <<"limit">>, ?DEFAULT_SEARCH_RECONCILE_LIMIT, Opts))
+        ),
+        Entries = lists:sublist(lists:sort(maps:to_list(read_search_pending(Opts))), Limit),
+        {Reconciled, Failed} = reconcile_search_entries(Entries, Opts),
+        search_maintenance_response(#{
+            <<"reconciled">> => Reconciled,
+            <<"failed">> => Failed,
+            <<"pending">> => map_size(read_search_pending(Opts))
+        })
+    end).
+
+%% @doc Rebuild a bounded window of native upload documents from the durable
+%% global upload list. Callers advance `offset' until `next-offset' is absent.
+reindex(Base, Req, Opts) ->
+    case is_node_operator(Base, Req, Opts) of
+        false ->
+            {ok, #{<<"status">> => 403, <<"message">> => <<"Unauthorized.">>}};
+        true ->
+            safe(fun() ->
+                Offset = max(0, integer_param(Base, Req, <<"offset">>, 0, Opts)),
+                Limit = min(1000, max(1, integer_param(Base, Req, <<"limit">>, 100, Opts))),
+                IDs = upload_list_ids(#{}, Opts),
+                Window = slice_items(IDs, Offset, Limit),
+                {Indexed, Failed} = reindex_search_records(Window, Opts),
+                NextOffset =
+                    case Offset + length(Window) < length(IDs) of
+                        true -> Offset + length(Window);
+                        false -> not_found
+                    end,
+                search_maintenance_response(
+                    put_optional(
+                        {<<"next-offset">>, NextOffset},
+                        #{
+                            <<"indexed">> => Indexed,
+                            <<"failed">> => Failed,
+                            <<"processed">> => length(Window),
+                            <<"offset">> => Offset,
+                            <<"total">> => length(IDs)
+                        }
+                    )
+                )
+            end)
+    end.
+
 media(Base, Req, Opts) ->
     case method(Req, Opts) of
         <<"options">> ->
@@ -240,6 +294,26 @@ authenticated_owner(_Base, Req, Opts) ->
                     <<"body">> => <<"Invalid request signature.">>
                 }}
             end
+    end.
+
+is_node_operator(Base, Req, Opts) ->
+    Subject =
+        case hb_message:signers(Req, Opts) of
+            [] ->
+                case hb_message:signers(Base, Opts) of
+                    [] -> Req;
+                    _ -> Base
+                end;
+            _ ->
+                Req
+        end,
+    case hb_ao:resolve(
+        #{<<"device">> => <<"meta@1.0">>},
+        #{<<"path">> => <<"is-operator">>, <<"body">> => Subject},
+        Opts#{<<"hashpath">> => ignore}
+    ) of
+        {ok, Result} -> Result;
+        _ -> false
     end.
 
 token_owner(Req, Opts) ->
@@ -783,33 +857,212 @@ write_indexes(Record, Opts) ->
             end
     end.
 
-%% Meilisearch wiring: mirror the upload record into the search index on
-%% index/update and remove it on delete. Best-effort — search availability must
-%% never fail the upload flow itself.
+%% Meilisearch is derivative state, so backend availability must not fail an
+%% upload. Failed operations are retained in the primary store and replayed by
+%% `reconcile/3'.
 index_search_record(Record, Opts) ->
-    try
-        Claim = search_claim(Record, Opts),
-        % Cross-device call via the registry: Forge renames device modules to
-        % content-hashed names, so `dev_odysee_search' is not callable directly.
-        case hb_ao:raw(<<"odysee-search@1.0">>, <<"index">>, #{}, #{ <<"document">> => search_document(Claim, Opts) }, Opts) of
-            {ok, _} -> ok;
-            _ -> ok
-        end
-    catch
-        _:_ -> ok
+    Event = index_search_event(Record, Opts),
+    case perform_index_search_record(Record, Opts) of
+        ok ->
+            best_effort_clear_search_pending(Event, Opts);
+        Error ->
+            ?event(warning, {odysee_upload_search_index_deferred, {result, Error}}),
+            best_effort_queue_search_pending(Event, Opts)
     end.
 
 delete_search_record(Record, Opts) ->
+    Event = delete_search_event(Record, Opts),
+    case perform_delete_search_record(Event, Opts) of
+        ok ->
+            best_effort_clear_search_pending(Event, Opts);
+        Error ->
+            ?event(warning, {odysee_upload_search_delete_deferred, {result, Error}}),
+            best_effort_queue_search_pending(Event, Opts)
+    end.
+
+perform_index_search_record(Record, Opts) ->
     try
         Claim = search_claim(Record, Opts),
-        ClaimID = hb_maps:get(<<"claim_id">>, Claim, <<>>, Opts),
-        case hb_ao:raw(<<"odysee-search@1.0">>, <<"delete">>, #{}, #{ <<"ids">> => search_document_ids(ClaimID, Record, Claim, Opts) }, Opts) of
-            {ok, _} -> ok;
-            _ -> ok
-        end
+        search_device_result(
+            hb_ao:raw(
+                <<"odysee-search@1.0">>,
+                <<"index">>,
+                #{},
+                #{ <<"document">> => search_document(Record, Claim, Opts) },
+                Opts
+            ),
+            Opts
+        )
     catch
-        _:_ -> ok
+        Class:Reason -> {error, {Class, Reason}}
     end.
+
+perform_delete_search_record(Event, Opts) ->
+    IDs = hb_maps:get(<<"ids">>, Event, [], Opts),
+    try
+        search_device_result(
+            hb_ao:raw(
+                <<"odysee-search@1.0">>,
+                <<"delete">>,
+                #{},
+                #{ <<"ids">> => IDs },
+                Opts
+            ),
+            Opts
+        )
+    catch
+        Class:Reason -> {error, {Class, Reason}}
+    end.
+
+search_device_result({ok, Result}, Opts) when is_map(Result) ->
+    Status = integer_value(hb_maps:get(<<"status">>, Result, 200, Opts), 500),
+    case Status >= 200 andalso Status < 300 andalso hb_maps:get(<<"error">>, Result, not_found, Opts) =:= not_found of
+        true -> ok;
+        false -> {error, {search_device_status, Status, hb_maps:get(<<"error">>, Result, Result, Opts)}}
+    end;
+search_device_result({ok, _Result}, _Opts) ->
+    ok;
+search_device_result(Error, _Opts) ->
+    Error.
+
+index_search_event(Record, Opts) ->
+    #{
+        <<"operation">> => <<"index">>,
+        <<"record-id">> => record_search_id(Record, Opts)
+    }.
+
+delete_search_event(Record, Opts) ->
+    Claim = search_claim(Record, Opts),
+    ClaimID = hb_maps:get(<<"claim_id">>, Claim, <<>>, Opts),
+    #{
+        <<"operation">> => <<"delete">>,
+        <<"record-id">> => record_search_id(Record, Opts),
+        <<"ids">> => search_document_ids(ClaimID, Record, Claim, Opts)
+    }.
+
+search_pending_key(Event, Opts) ->
+    Operation = hb_maps:get(<<"operation">>, Event, <<"unknown">>, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Event, <<>>, Opts),
+    <<Operation/binary, ":", (hb_util:encode(hb_crypto:sha256(RecordID)))/binary>>.
+
+best_effort_queue_search_pending(Event, Opts) ->
+    case update_search_pending(
+        fun(Pending) -> Pending#{ search_pending_key(Event, Opts) => Event } end,
+        Opts
+    ) of
+        ok -> ok;
+        Error ->
+            ?event(error, {odysee_upload_search_pending_write_failed, {result, Error}}),
+            ok
+    end.
+
+best_effort_clear_search_pending(Event, Opts) ->
+    case update_search_pending(
+        fun(Pending) -> maps:remove(search_pending_key(Event, Opts), Pending) end,
+        Opts
+    ) of
+        ok -> ok;
+        Error ->
+            ?event(warning, {odysee_upload_search_pending_clear_failed, {result, Error}}),
+            ok
+    end.
+
+update_search_pending(Update, Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case Store of
+        [] -> {error, no_store};
+        _ ->
+            global:trans(
+                {{?MODULE, ?SEARCH_PENDING_PATH}, self()},
+                fun() ->
+                    Current = read_search_pending(Opts),
+                    Pending = Update(Current),
+                    case Pending =:= Current of
+                        true -> ok;
+                        false ->
+                            hb_store:write(
+                                Store,
+                                #{ ?SEARCH_PENDING_PATH => hb_json:encode(Pending) },
+                                Opts
+                            )
+                    end
+                end
+            )
+    end.
+
+read_search_pending(Opts) ->
+    Store = hb_opts:get(store, [], Opts),
+    case hb_store:read(Store, ?SEARCH_PENDING_PATH, maps:without([<<"store">>, store], Opts)) of
+        {ok, Raw} -> decode_search_pending(Raw);
+        Raw when is_binary(Raw) -> decode_search_pending(Raw);
+        _ -> #{}
+    end.
+
+decode_search_pending(Raw) when is_binary(Raw) ->
+    try hb_json:decode(Raw) of
+        Pending when is_map(Pending) -> Pending;
+        _ -> #{}
+    catch
+        _:_ -> #{}
+    end;
+decode_search_pending(_Raw) ->
+    #{}.
+
+reconcile_search_entries(Entries, Opts) ->
+    lists:foldl(
+        fun({Key, Event}, {Reconciled, Failed}) ->
+            Result = reconcile_search_event(Event, Opts),
+            case Result of
+                ok ->
+                    _ = update_search_pending(fun(Pending) -> maps:remove(Key, Pending) end, Opts),
+                    {Reconciled + 1, Failed};
+                _ ->
+                    {Reconciled, Failed + 1}
+            end
+        end,
+        {0, 0},
+        Entries
+    ).
+
+reconcile_search_event(Event, Opts) ->
+    case hb_maps:get(<<"operation">>, Event, not_found, Opts) of
+        <<"index">> ->
+            RecordID = hb_maps:get(<<"record-id">>, Event, not_found, Opts),
+            case hb_cache:read(RecordID, Opts) of
+                {ok, Record0} when is_map(Record0) ->
+                    Record = enrich_record(RecordID, hb_cache:ensure_all_loaded(Record0, Opts), Opts),
+                    perform_index_search_record(Record, Opts);
+                Error ->
+                    Error
+            end;
+        <<"delete">> ->
+            perform_delete_search_record(Event, Opts);
+        Other ->
+            {error, {invalid_search_pending_operation, Other}}
+    end.
+
+reindex_search_records(RecordIDs, Opts) ->
+    lists:foldl(
+        fun(RecordID, {Indexed, Failed}) ->
+            case hb_cache:read(RecordID, Opts) of
+                {ok, Record0} when is_map(Record0) ->
+                    Record = enrich_record(RecordID, hb_cache:ensure_all_loaded(Record0, Opts), Opts),
+                    Event = index_search_event(Record, Opts),
+                    case perform_index_search_record(Record, Opts) of
+                        ok ->
+                            best_effort_clear_search_pending(Event, Opts),
+                            {Indexed + 1, Failed};
+                        _ ->
+                            best_effort_queue_search_pending(Event, Opts),
+                            {Indexed, Failed + 1}
+                    end;
+                _ ->
+                    {Indexed, Failed + 1}
+            end
+        end,
+        {0, 0},
+        RecordIDs
+    ).
 
 %% The search document is built from the record's claim; fall back to the
 %% record ids when the claim carries no `claim_id' of its own.
@@ -821,10 +1074,16 @@ search_claim(Record, Opts) ->
         end,
     case hb_maps:get(<<"claim_id">>, Claim, not_found, Opts) of
         ID when is_binary(ID), ID =/= <<>> -> Claim;
-        _ -> Claim#{ <<"claim_id">> => record_search_id(Record, Opts) }
+        _ -> Claim#{ <<"claim_id">> => record_data_id(Record, Opts) }
     end.
 
 record_search_id(Record, Opts) ->
+    value_or(
+        first_field([<<"record-id">>, <<"id">>, <<"data-id">>], Record, Opts),
+        <<>>
+    ).
+
+record_data_id(Record, Opts) ->
     value_or(
         first_field([<<"data-id">>, <<"record-id">>, <<"id">>], Record, Opts),
         <<>>
@@ -846,8 +1105,10 @@ search_document_ids(ClaimID, Record, Claim, Opts) ->
             ],
     lists:usort([hb_util:bin(ID) || ID <- IDs, is_binary(ID), ID =/= <<>>]).
 
-search_document(Claim, Opts) ->
-    ClaimID = hb_maps:get(<<"claim_id">>, Claim, <<>>, Opts),
+search_document(Record, Claim, Opts) ->
+    RecordID = record_search_id(Record, Opts),
+    DataID = value_or(hb_maps:get(<<"data-id">>, Record, not_found, Opts), <<>>),
+    ClaimID = value_or(hb_maps:get(<<"claim_id">>, Claim, not_found, Opts), DataID),
     Value = hb_maps:get(<<"value">>, Claim, #{}, Opts),
     Source = map_value(Value, <<"source">>, #{}, Opts),
     SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
@@ -877,8 +1138,10 @@ search_document(Claim, Opts) ->
     #{
         <<"doc_id">> => ClaimID,
         <<"claim_id">> => ClaimID,
-        <<"immutable_id">> => hb_maps:get(<<"immutable_id">>, Claim, ClaimID, Opts),
-        <<"txid">> => hb_maps:get(<<"txid">>, Claim, ClaimID, Opts),
+        <<"immutable_id">> => RecordID,
+        <<"record_id">> => RecordID,
+        <<"data_id">> => DataID,
+        <<"txid">> => hb_maps:get(<<"txid">>, Claim, DataID, Opts),
         <<"name">> => Name,
         <<"canonical_url">> => hb_maps:get(<<"canonical_url">>, Claim, <<>>, Opts),
         <<"permanent_url">> => hb_maps:get(<<"permanent_url">>, Claim, <<>>, Opts),
@@ -1282,9 +1545,12 @@ claim_time(Claim, Opts) ->
 
 page_items(Items, Page, PageSize) ->
     Offset = (Page - 1) * PageSize,
+    slice_items(Items, Offset, PageSize).
+
+slice_items(Items, Offset, Limit) ->
     case Offset >= length(Items) of
         true -> [];
-        false -> lists:sublist(lists:nthtail(Offset, Items), PageSize)
+        false -> lists:sublist(lists:nthtail(Offset, Items), Limit)
     end.
 
 list_response(Items, Total, Page, PageSize) ->
@@ -1308,6 +1574,15 @@ list_response(Items, Total, Page, PageSize) ->
         <<"total_pages">> => TotalPages
     },
     Msg#{ <<"body">> => hb_json:encode(Msg) }.
+
+search_maintenance_response(Result) ->
+    Msg = (cors_headers())#{
+        <<"device">> => ?DEVICE,
+        <<"status">> => 200,
+        <<"content-type">> => <<"application/json">>,
+        <<"result">> => Result
+    },
+    {ok, Msg#{ <<"body">> => hb_json:encode(Msg) }}.
 
 ceil_div(0, _Denom) ->
     0;
@@ -2033,6 +2308,110 @@ upload_index_prefers_payload_media_type_over_transport_content_type_test() ->
     ?assertEqual(<<"video/quicktime">>, hb_maps:get(<<"content-type">>, Record, Opts)),
     ?assertEqual(<<"video/quicktime">>, hb_maps:get(<<"media_type">>, Source, Opts)),
     ?assertEqual(<<"/", DataID/binary>>, hb_maps:get(<<"media-path">>, Body, Opts)).
+
+search_document_uses_record_id_as_immutable_locator_test() ->
+    RecordID = <<"record-id">>,
+    DataID = <<"media-data-id">>,
+    Claim = #{
+        <<"claim_id">> => DataID,
+        <<"name">> => <<"native-upload">>,
+        <<"value_type">> => <<"stream">>,
+        <<"value">> => #{
+            <<"title">> => <<"Native upload">>,
+            <<"source">> => #{<<"media_type">> => <<"video/mp4">>}
+        }
+    },
+    Record = #{
+        <<"record-id">> => RecordID,
+        <<"data-id">> => DataID,
+        <<"claim">> => Claim
+    },
+    Document = search_document(Record, Claim, #{}),
+    ?assertEqual(DataID, maps:get(<<"doc_id">>, Document)),
+    ?assertEqual(RecordID, maps:get(<<"immutable_id">>, Document)),
+    ?assertEqual(DataID, maps:get(<<"claim_id">>, Document)),
+    ?assertEqual(RecordID, maps:get(<<"record_id">>, Document)),
+    ?assertEqual(DataID, maps:get(<<"data_id">>, Document)),
+    ?assertEqual(DataID, maps:get(<<"txid">>, Document)),
+    ?assert(claim_ids_match(Claim, #{<<"claim_ids">> => [DataID]}, #{})),
+    ?assert(lists:member(RecordID, search_document_ids(DataID, Record, Claim, #{}))),
+    ?assert(lists:member(DataID, search_document_ids(DataID, Record, Claim, #{}))).
+
+search_device_result_rejects_error_responses_test() ->
+    ?assertEqual(
+        {error, {search_device_status, 503, #{ <<"reason">> => <<"terminating">> }}},
+        search_device_result(
+            {ok, #{
+                <<"status">> => 503,
+                <<"error">> => #{ <<"reason">> => <<"terminating">> }
+            }},
+            #{}
+        )
+    ),
+    ?assertEqual(ok, search_device_result({ok, #{ <<"status">> => 202 }}, #{})).
+
+search_pending_state_roundtrip_test() ->
+    Opts = test_opts(),
+    Event = #{
+        <<"operation">> => <<"index">>,
+        <<"record-id">> => <<"pending-record-id">>
+    },
+    Key = search_pending_key(Event, Opts),
+    ?assertEqual(
+        ok,
+        update_search_pending(fun(Pending) -> Pending#{ Key => Event } end, Opts)
+    ),
+    ?assertEqual(Event, maps:get(Key, read_search_pending(Opts))),
+    ?assertEqual(
+        ok,
+        update_search_pending(fun(Pending) -> maps:remove(Key, Pending) end, Opts)
+    ),
+    ?assertEqual(#{}, read_search_pending(Opts)).
+
+search_pending_concurrent_updates_are_serialized_test() ->
+    Opts = test_opts(),
+    Parent = self(),
+    Refs = [
+        begin
+            Ref = make_ref(),
+            spawn(fun() ->
+                Event = #{
+                    <<"operation">> => <<"index">>,
+                    <<"record-id">> => <<"concurrent-", (integer_to_binary(Index))/binary>>
+                },
+                Result = update_search_pending(
+                    fun(Pending) -> Pending#{ search_pending_key(Event, Opts) => Event } end,
+                    Opts
+                ),
+                Parent ! {Ref, Result}
+            end),
+            Ref
+        end
+     || Index <- lists:seq(1, 12)
+    ],
+    lists:foreach(
+        fun(Ref) ->
+            receive
+                {Ref, Result} -> ?assertEqual(ok, Result)
+            after 5000 ->
+                ?assert(false)
+            end
+        end,
+        Refs
+    ),
+    ?assertEqual(12, map_size(read_search_pending(Opts))).
+
+reindex_operator_gate_rejects_unsigned_on_claimed_node_test() ->
+    Operator = ar_wallet:new(),
+    Opts =
+        (test_opts())#{
+            <<"priv-wallet">> => Operator,
+            <<"operator">> => hb_util:human_id(ar_wallet:to_address(Operator))
+        },
+    ?assertMatch(
+        {ok, #{<<"status">> := 403}},
+        reindex(#{}, #{<<"limit">> => 1}, Opts)
+    ).
 
 upload_owner_is_stable_across_signing_wallets_with_same_token_test() ->
     Opts = test_opts(),

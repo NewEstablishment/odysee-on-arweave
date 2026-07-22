@@ -26,7 +26,9 @@
     "dev:ssr": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development node scripts/dev-web-server.mjs",
     "dev:ssr:usagi-local": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development USE_LOCAL_USAGI=true node scripts/dev-web-server.mjs",
     "build": "vp build",
+    "build:manifest": "cross-env NODE_ENV=production HYPERBEAM_STATIC_MANIFEST=true vp build && node build/check-static-manifest.mjs",
     "build:usagi-local": "cross-env USE_LOCAL_USAGI=true vp build",
+    "publish:manifest": "pnpm run build:manifest && node build/static-manifest.mjs",
     "preview": "vp preview",
     "check": "cross-env NODE_OPTIONS=--experimental-strip-types vp check",
     "check:fix": "cross-env NODE_OPTIONS=--experimental-strip-types vp check --fix",
@@ -50,7 +52,11 @@
     "test:e2e:codegen": "playwright codegen http://localhost:1337",
     "test:e2e:smoke": "playwright test --project=chromium tests/specs/smoke",
     "test:e2e:auth": "playwright test --project=chromium:auth tests/specs/authenticated",
-    "test:hyperbeam-upload-smoke": "node tests/scripts/hyperbeam-upload-smoke.mjs"
+    "test:hyperbeam-upload-smoke": "node tests/scripts/hyperbeam-upload-smoke.mjs",
+    "test:hyperbeam-query-comment-smoke": "node --experimental-strip-types tests/scripts/hyperbeam-query-comment-smoke.mjs",
+    "test:native-comment-revisions": "node --experimental-strip-types tests/scripts/native-comment-revisions.mjs",
+    "test:native-comment-controls": "node --experimental-strip-types tests/scripts/native-comment-controls.mjs",
+    "test:static-manifest": "node --test build/static-manifest.test.mjs"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.2",

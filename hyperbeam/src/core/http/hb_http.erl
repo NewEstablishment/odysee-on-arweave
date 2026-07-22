@@ -1148,7 +1148,10 @@ httpsig_to_tabm_singleton(PrimMsg, Req, Body, Opts) ->
             case Signers =/= [] andalso hb_opts:get(store_all_signed, false, Opts) of
                 true ->
                     ?event(http_verify, {storing_signed_from_wire, Decoded}),
-                    {ok, _} = hb_cache:write(Decoded, Opts);
+                    {ok, _} = hb_cache:write(
+                        Decoded,
+                        signed_wire_store_opts(Req, Opts)
+                    );
                 false ->
                     do_nothing
             end,
@@ -1161,6 +1164,12 @@ httpsig_to_tabm_singleton(PrimMsg, Req, Body, Opts) ->
                 }
             ),
             throw({invalid_commitments, Decoded})
+    end.
+
+signed_wire_store_opts(Req, Opts) ->
+    case cowboy_req:path(Req) of
+        <<"/id">> -> Opts;
+        _ -> Opts#{ <<"match-index">> => false }
     end.
 
 %% @doc Add the method and path to a message, if they are not already present.
@@ -1446,6 +1455,23 @@ cors_credentials_get_test() ->
         <<"true">>,
         hb_ao:get(<<"access-control-allow-credentials">>, Res, LocalOpts)
     ).
+
+cors_credentials_exposes_message_headers_test() ->
+    Origin = <<"http://localhost:9090">>,
+    Headers = add_cors_headers(
+        #{
+            <<"schema">> => <<"odysee-comment@1.0">>,
+            <<"type">> => <<"comment">>,
+            <<"comment">> => <<"visible in browsers">>
+        },
+        <<>>,
+        Origin,
+        #{}
+    ),
+    Exposed = maps:get(<<"access-control-expose-headers">>, Headers),
+    ?assertNotEqual(nomatch, binary:match(Exposed, <<"schema">>)),
+    ?assertNotEqual(nomatch, binary:match(Exposed, <<"type">>)),
+    ?assertNotEqual(nomatch, binary:match(Exposed, <<"comment">>)).
 
 ans104_wasm_test() ->
     ServerStore = [hb_test_utils:test_store()],

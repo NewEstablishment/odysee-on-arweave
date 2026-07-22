@@ -35,9 +35,9 @@ const RSS_MEDIA_AUTH_DEFAULT_TTL_SECONDS = 600;
 const RSS_MEDIA_AUTH_MAX_TTL_SECONDS = 600;
 const AUTH_TOKEN_COOKIE = 'auth_token';
 const HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
-const HYPERBEAM_UPLOAD_PATH = '/id?!=true';
-const HYPERBEAM_UPLOAD_CHUNK_PATH = '/id?!=true';
-const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/id?!=true';
+const HYPERBEAM_UPLOAD_PATH = '/id?!=true&committers=all';
+const HYPERBEAM_UPLOAD_CHUNK_PATH = '/id?!=true&committers=all';
+const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/id?!=true&committers=all';
 const HYPERBEAM_UPLOAD_INDEX_PATH = '/~odysee-upload@1.0/index?!=true';
 const HYPERBEAM_UPLOAD_LIST_PATH = '/~odysee-upload@1.0/list';
 const HYPERBEAM_UPLOAD_DELETE_PATH = '/~odysee-upload@1.0/delete?!=true';
@@ -160,18 +160,25 @@ async function postHyperbeamUpload(ctx) {
     return;
   }
 
-  const cookieHeader = ctx.get('cookie');
-  const authToken = ctx.cookies.get(AUTH_TOKEN_COOKIE) || getCookieValue(cookieHeader, AUTH_TOKEN_COOKIE);
-
-  const response = await postStream(`${nodeUrl}${HYPERBEAM_UPLOAD_PATH}`, ctx.req, {
-    'content-type': ctx.get('content-type') || 'application/octet-stream',
-    ...(ctx.get('content-length') ? { 'content-length': ctx.get('content-length') } : {}),
+  const authToken = getRequestAuthToken(ctx);
+  const contentType = ctx.get('content-type') || 'application/octet-stream';
+  const authHeaders = {
     ...(authToken ? { 'x-odysee-auth-token': authToken } : {}),
-  });
+    accept: ctx.get('accept') || 'application/json',
+    'accept-bundle': ctx.get('accept-bundle') || 'false',
+  };
+  const response = contentType.includes('application/json')
+    ? await postJson(`${nodeUrl}${HYPERBEAM_UPLOAD_PATH}`, await readJsonBody(ctx), authHeaders)
+    : await postStream(`${nodeUrl}${HYPERBEAM_UPLOAD_PATH}`, ctx.req, {
+        'content-type': contentType,
+        ...(ctx.get('content-length') ? { 'content-length': ctx.get('content-length') } : {}),
+        ...authHeaders,
+      });
 
   ctx.status = response.statusCode;
   ctx.set('Cache-Control', 'no-store');
   copyHeader(ctx, response.headers, 'content-type');
+  copyHeader(ctx, response.headers, 'message-id');
   copyHeader(ctx, response.headers, 'id');
   copyHeader(ctx, response.headers, 'path');
   copyHeader(ctx, response.headers, 'read-path');
@@ -248,6 +255,7 @@ async function postHyperbeamLargeUpload(ctx) {
   ctx.status = finalizeResponse.statusCode;
   ctx.set('Cache-Control', 'no-store');
   copyHeader(ctx, finalizeResponse.headers, 'content-type');
+  copyHeader(ctx, finalizeResponse.headers, 'message-id');
   copyHeader(ctx, finalizeResponse.headers, 'id');
   copyHeader(ctx, finalizeResponse.headers, 'path');
   copyHeader(ctx, finalizeResponse.headers, 'read-path');
@@ -888,7 +896,8 @@ function parseJsonBuffer(body) {
 
 function storeIdFromResponse(response, json) {
   const value =
-    (json && (json.id || json.path || json['read-path'] || json.read_path || json.body)) ||
+    (json && (json['message-id'] || json.id || json.path || json['read-path'] || json.read_path || json.body)) ||
+    response.headers['message-id'] ||
     response.headers.id ||
     response.headers.path ||
     response.headers['read-path'] ||

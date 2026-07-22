@@ -711,6 +711,45 @@ function uiModuleResolverPlugin() {
 
 const isProduction = process.env.NODE_ENV === 'production';
 const isServeCommand = process.argv.some((arg) => arg === 'dev' || arg === 'serve');
+const isStaticManifestBuild = process.env.HYPERBEAM_STATIC_MANIFEST === 'true';
+
+function staticManifestBootstrapPlugin() {
+  return {
+    name: 'static-manifest-bootstrap',
+    apply: 'build' as const,
+    transformIndexHtml: {
+      order: 'pre' as const,
+      handler(html: string) {
+        if (!isStaticManifestBuild) return html;
+
+        const bootstrap = `<script>
+(function(){var m=location.pathname.match(/^[/][A-Za-z0-9_-]{43}(?=[/]|$)/);var p=m?m[0]:'';window.__ODYSEE_MANIFEST_PREFIX__=p;if(!p)return;var b=document.createElement('base');b.href=p+'/';document.head.appendChild(b);var r=location.pathname.slice(p.length);if(r&&r!=='/'&&!location.hash)history.replaceState(null,'',p+'#'+r+location.search)})();
+</script>`;
+        return html.replace('<head>', `<head>\n    ${bootstrap}`);
+      },
+    },
+  };
+}
+
+function legacyDetectorScript(legacyFilename: string, manifestAware: boolean) {
+  const source = manifestAware
+    ? `((location.pathname.match(/^\\/[A-Za-z0-9_-]{43}(?=\\/|$)/)||[''])[0])+'/${legacyFilename}'`
+    : `'/${legacyFilename}'`;
+
+  return `<script>
+(function(){try{if(location.search.indexOf('legacy=1')!==-1)throw 1;eval("class C{#x=1;static s=2}let a=1;a??=2;a&&=1;a||=0;a?.toString();[1].at(0);structuredClone(a);Object.hasOwn({},'x')")}catch(e){
+if(typeof Object.hasOwn!=='function')Object.hasOwn=function(o,k){return Object.prototype.hasOwnProperty.call(o,k)};
+if(typeof Array.prototype.at!=='function')Array.prototype.at=function(i){var l=this.length;i=i<0?l+i:i;return i<0||i>=l?undefined:this[i]};
+if(typeof String.prototype.at!=='function')String.prototype.at=function(i){var l=this.length;i=i<0?l+i:i;return i<0||i>=l?undefined:this[i]};
+if(typeof String.prototype.replaceAll!=='function')String.prototype.replaceAll=function(s,r){return this.split(s).join(r)};
+if(typeof structuredClone!=='function')window.structuredClone=function(o){return JSON.parse(JSON.stringify(o))};
+if(typeof ResizeObserver==='undefined')window.ResizeObserver=function(cb){var t=[];var l=function(){cb(t.map(function(x){return{target:x,contentRect:x.getBoundingClientRect(),borderBoxSize:[],contentBoxSize:[],devicePixelContentBoxSize:[]}}))};this.observe=function(x){if(t.indexOf(x)<0){t.push(x);if(t.length===1)window.addEventListener('resize',l)}};this.unobserve=function(x){var i=t.indexOf(x);if(i>=0)t.splice(i,1);if(t.length===0)window.removeEventListener('resize',l)};this.disconnect=function(){t=[];window.removeEventListener('resize',l)}};
+if(navigator.mediaSession&&navigator.mediaSession.setActionHandler){var _msSet=navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);navigator.mediaSession.setActionHandler=function(a,h){try{return _msSet(a,h)}catch(e){return null}};}
+var els=document.querySelectorAll('script[type=module],link[rel=modulepreload]');
+for(var i=0;i<els.length;i++)els[i].parentNode.removeChild(els[i]);
+var s=document.createElement('script');s.src=${source};document.head.appendChild(s)}})();
+</script>`;
+}
 
 // Post-build plugin: generates a single transpiled legacy bundle for browsers that don't support ES modules.
 // Modern browsers load the normal `<script type="module">` chunks. Old browsers (pre-2021) ignore those
@@ -767,19 +806,7 @@ function legacyFallbackPlugin() {
           return;
         }
 
-        const detectorScript = `<script>
-(function(){try{if(location.search.indexOf('legacy=1')!==-1)throw 1;eval("class C{#x=1;static s=2}let a=1;a??=2;a&&=1;a||=0;a?.toString();[1].at(0);structuredClone(a);Object.hasOwn({},'x')")}catch(e){
-if(typeof Object.hasOwn!=='function')Object.hasOwn=function(o,k){return Object.prototype.hasOwnProperty.call(o,k)};
-if(typeof Array.prototype.at!=='function')Array.prototype.at=function(i){var l=this.length;i=i<0?l+i:i;return i<0||i>=l?undefined:this[i]};
-if(typeof String.prototype.at!=='function')String.prototype.at=function(i){var l=this.length;i=i<0?l+i:i;return i<0||i>=l?undefined:this[i]};
-if(typeof String.prototype.replaceAll!=='function')String.prototype.replaceAll=function(s,r){return this.split(s).join(r)};
-if(typeof structuredClone!=='function')window.structuredClone=function(o){return JSON.parse(JSON.stringify(o))};
-if(typeof ResizeObserver==='undefined')window.ResizeObserver=function(cb){var t=[];var l=function(){cb(t.map(function(x){return{target:x,contentRect:x.getBoundingClientRect(),borderBoxSize:[],contentBoxSize:[],devicePixelContentBoxSize:[]}}))};this.observe=function(x){if(t.indexOf(x)<0){t.push(x);if(t.length===1)window.addEventListener('resize',l)}};this.unobserve=function(x){var i=t.indexOf(x);if(i>=0)t.splice(i,1);if(t.length===0)window.removeEventListener('resize',l)};this.disconnect=function(){t=[];window.removeEventListener('resize',l)}};
-if(navigator.mediaSession&&navigator.mediaSession.setActionHandler){var _msSet=navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);navigator.mediaSession.setActionHandler=function(a,h){try{return _msSet(a,h)}catch(e){return null}};}
-var els=document.querySelectorAll('script[type=module],link[rel=modulepreload]');
-for(var i=0;i<els.length;i++)els[i].parentNode.removeChild(els[i]);
-var s=document.createElement('script');s.src='/${legacyFilename}';document.head.appendChild(s)}})();
-</script>`;
+        const detectorScript = legacyDetectorScript(legacyFilename, isStaticManifestBuild);
 
         const htmlWithoutOldDetector = stripLegacyFallbackDetectors(html);
         const updatedHtml = htmlWithoutOldDetector.replace('<head>', `<head>\n    ${detectorScript}`);
@@ -789,7 +816,8 @@ var s=document.createElement('script');s.src='/${legacyFilename}';document.head.
         if (fs.existsSync(templateHtml)) {
           const tmpl = fs.readFileSync(templateHtml, 'utf8');
           const tmplWithoutOldDetector = stripLegacyFallbackDetectors(tmpl);
-          const updatedTmpl = tmplWithoutOldDetector.replace('<head>', `<head>\n    ${detectorScript}`);
+          const templateDetectorScript = legacyDetectorScript(legacyFilename, false);
+          const updatedTmpl = tmplWithoutOldDetector.replace('<head>', `<head>\n    ${templateDetectorScript}`);
           fs.writeFileSync(templateHtml, updatedTmpl, 'utf8');
         }
 
@@ -838,8 +866,11 @@ function ssrTemplatePlugin() {
 
         if (assetTags.length === 0) return;
 
+        const serverAssetTags = assetTags.map((tag) =>
+          tag.replace(/(src|href)="\.?\/?(assets\/[^"]+)"/, '$1="/public/$2"')
+        );
         const cleanTemplate = stripInjectedAssetTags(template);
-        const injected = cleanTemplate.replace('</head>', `    ${assetTags.join('\n    ')}\n  </head>`);
+        const injected = cleanTemplate.replace('</head>', `    ${serverAssetTags.join('\n    ')}\n  </head>`);
         fs.writeFileSync(templateHtml, injected, 'utf8');
       },
     },
@@ -851,6 +882,10 @@ function stripInjectedAssetTags(html: string) {
     /\s*(?:<script\b[^>]*\bsrc="\/public\/assets\/[^"]+\.js"[^>]*><\/script>|<link\b[^>]*\bhref="\/public\/assets\/[^"]+\.(?:css|js)"[^>]*>)/g,
     ''
   );
+}
+
+function sanitizeEmittedName(name: string) {
+  return name.replace(/[^A-Za-z0-9_.-]/g, '_');
 }
 
 const codeSplittingGroups = [
@@ -919,7 +954,7 @@ const codeSplittingGroups = [
 export default defineConfig({
   root: __dirname,
   publicDir: 'static',
-  base: isServeCommand ? '/' : '/public/',
+  base: isServeCommand ? '/' : isStaticManifestBuild ? './' : '/public/',
 
   define: {
     ...buildEnvDefines(),
@@ -999,6 +1034,7 @@ export default defineConfig({
     devHyperbeamAuthRoutesPlugin(),
     providePlugin(),
     mediabunnyPausePatchPlugin(),
+    staticManifestBootstrapPlugin(),
     // React Scan is opt-in in dev. Always injecting it proved too expensive on some heavy claim pages.
     // Set REACT_SCAN=1 when you explicitly want the overlay/instrumentation.
     {
@@ -1149,6 +1185,17 @@ export default defineConfig({
     rolldownOptions: {
       input: path.resolve(__dirname, 'index.html'),
       output: {
+        ...(isStaticManifestBuild
+          ? {
+              entryFileNames: (chunk) => `assets/${sanitizeEmittedName(chunk.name)}-[hash].js`,
+              chunkFileNames: (chunk) => `assets/${sanitizeEmittedName(chunk.name)}-[hash].js`,
+              assetFileNames: (asset) => {
+                const name = asset.names?.[0] || asset.name || 'asset';
+                const ext = path.extname(name);
+                return `assets/${sanitizeEmittedName(name.slice(0, name.length - ext.length))}-[hash]${ext}`;
+              },
+            }
+          : {}),
         codeSplitting: {
           minSize: 20_000,
           groups: codeSplittingGroups,

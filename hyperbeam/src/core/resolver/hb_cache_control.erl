@@ -132,17 +132,18 @@ async_writer() ->
 
 %% @doc Internal function to write a compute result to the cache.
 perform_cache_write(Base, Req, Res, Opts) ->
-    hb_cache:write(Base, Opts),
-    hb_cache:write(Req, Opts),
+    CacheOpts = Opts#{ <<"match-index">> => false },
+    hb_cache:write(Base, CacheOpts),
+    hb_cache:write(Req, CacheOpts),
     case Res of
         <<_/binary>> ->
             hb_cache:write_binary(
                 hb_path:hashpath(Base, Req, Opts),
                 Res,
-                Opts
+                CacheOpts
             );
         Map when is_map(Map) ->
-            hb_cache:write(Res, Opts);
+            hb_cache:write(Res, CacheOpts);
         _ ->
             ?event({cannot_write_result, Res}),
             skip_caching

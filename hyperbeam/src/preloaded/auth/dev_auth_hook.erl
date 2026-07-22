@@ -434,11 +434,17 @@ store_signed([Msg | Rest], Opts) when is_map(Msg) ->
         [] ->
             store_signed(Rest, Opts);
         _ ->
-            {ok, _} = hb_cache:write(Msg, Opts),
+            {ok, _} = hb_cache:write(Msg, signed_store_opts(Msg, Opts)),
             store_signed(Rest, Opts)
     end;
 store_signed([_ | Rest], Opts) ->
     store_signed(Rest, Opts).
+
+signed_store_opts(Msg, Opts) ->
+    case hb_maps:get(<<"path">>, Msg, not_found, Opts) of
+        <<"id">> -> Opts;
+        _ -> Opts#{ <<"match-index">> => false }
+    end.
 
 %% @doc Finalize the response by adding authentication state
 finalize(KeyProvider, SignedReq, MessageSequence, Opts) ->

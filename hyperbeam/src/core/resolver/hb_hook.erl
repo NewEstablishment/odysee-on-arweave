@@ -136,6 +136,21 @@ execute_handler(
         Req,
         Opts#{ <<"on">> => maps:remove(<<"step">>, On) }
     );
+execute_handler(
+    <<"write">>,
+    Handler,
+    Req,
+    Opts = #{ <<"on">> := On = #{ <<"write">> := _ } }
+) ->
+    % A write hook may itself resolve or persist messages. Remove only the
+    % active hook from nested options so those writes cannot recursively fire
+    % the same handler.
+    execute_handler(
+        <<"write">>,
+        Handler,
+        Req,
+        Opts#{ <<"on">> => maps:remove(<<"write">>, On) }
+    );
 execute_handler(HookName, Handler, Req, Opts) ->
     try
         % Resolve the handler message, setting the path to the handler name if

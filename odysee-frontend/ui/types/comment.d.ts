@@ -10,7 +10,8 @@ type CommentCreateParams = {
   claim_id: string;
   channel_id: string;
   channel_name: string;
-  body: string;
+  body?: string;
+  comment?: string;
   parent_id?: string;
   signature: string;
   signing_ts: string;
@@ -18,6 +19,11 @@ type CommentCreateParams = {
   payment_intent_id?: string;
   environment?: string;
   sticker?: boolean;
+  mentioned_channels?: Array<any>;
+  amount?: number;
+  support_tx_id?: string;
+  is_protected?: boolean;
+  dry_run?: boolean;
   [key: string]: any;
 };
 
@@ -28,9 +34,10 @@ type CommentCreateResponse = {
 
 type CommentEditParams = {
   comment_id: string;
-  body: string;
-  channel_id: string;
-  channel_name: string;
+  body?: string;
+  comment?: string;
+  channel_id?: string;
+  channel_name?: string;
   signature: string;
   signing_ts: string;
 };
@@ -45,6 +52,8 @@ type CommentAbandonParams = {
   creator_channel_name?: string;
   channel_id?: string;
   channel_name?: string;
+  mod_channel_id?: string;
+  mod_channel_name?: string;
   signature?: string;
   signing_ts?: string;
 };
@@ -65,6 +74,7 @@ type CommentListParams = {
   is_channel_signature_valid?: boolean;
   hidden?: boolean;
   visible?: boolean;
+  author_claim_id?: string;
   [key: string]: any;
 };
 
@@ -99,7 +109,7 @@ type CommentPinParams = {
 };
 
 type CommentPinResponse = {
-  items: Array<any>;
+  items: any;
 };
 
 type CommentSubmitParams = CommentCreateParams;
@@ -121,6 +131,7 @@ type ReactionReactParams = {
   channel_name: string;
   signature: string;
   signing_ts: string;
+  remove?: boolean;
 };
 
 type ReactionListResponse = {
@@ -133,10 +144,12 @@ type ReactionReactResponse = {
 };
 
 type ModerationBlockParams = {
-  blocked_channel_id: string;
-  blocked_channel_name: string;
-  channel_id: string;
-  channel_name: string;
+  blocked_channel_id?: string;
+  blocked_channel_name?: string;
+  un_blocked_channel_id?: string;
+  un_blocked_channel_name?: string;
+  channel_id?: string;
+  channel_name?: string;
   signature: string;
   signing_ts: string;
   time_out?: number;
@@ -145,6 +158,9 @@ type ModerationBlockParams = {
   mod_channel_name?: string;
   creator_channel_id?: string;
   creator_channel_name?: string;
+  offending_comment_id?: string;
+  block_all?: boolean;
+  global_un_block?: boolean;
 };
 
 type ModerationAddDelegateParams = {
@@ -196,8 +212,10 @@ type BlockWordParams = {
 };
 
 type BlockedListArgs = {
-  channel_id: string;
-  channel_name: string;
+  channel_id?: string;
+  channel_name?: string;
+  mod_channel_id?: string;
+  mod_channel_name?: string;
   signature: string;
   signing_ts: string;
 };

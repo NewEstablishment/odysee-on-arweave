@@ -31,7 +31,7 @@ import {
 import { makeSelectNotificationForCommentId } from 'redux/selectors/notifications';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { toHex } from 'util/hex';
-import { getChannelFromClaim, isHyperbeamUploadClaim } from 'util/claim';
+import { getChannelFromClaim } from 'util/claim';
 import { invalidateHyperbeamClaimPage } from 'util/hyperbeam';
 import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
@@ -42,28 +42,6 @@ const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
 const COMMENTRON_FAILED_TO_FETCH = 'Failed to fetch (comments.odysee.tv)';
 const PROMISE_FULFILLED = 'fulfilled';
 const MENTION_REGEX = /(?:^| |\n)@[^\s=&#$@%?:;/"<>%{}|^~[]*(?::[\w]+)?/gm;
-
-function dispatchEmptyCommentList(
-  dispatch: Dispatch,
-  claimId: string,
-  uri: string,
-  parentId: string | null | undefined,
-  page: number
-) {
-  return dispatch({
-    type: ACTIONS.COMMENT_LIST_COMPLETED,
-    data: {
-      comments: [],
-      parentId,
-      totalItems: 0,
-      totalFilteredItems: 0,
-      totalPages: 0,
-      claimId,
-      uri,
-      page,
-    },
-  });
-}
 
 export function doCommentList(
   uri: string,
@@ -92,10 +70,6 @@ export function doCommentList(
         parentId,
       },
     });
-
-    if (isHyperbeamUploadClaim(claim)) {
-      return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
-    }
 
     const activeChannelClaim = selectActiveChannelClaim(state);
     const activeChannelId = activeChannelClaim?.claim_id;
@@ -187,10 +161,6 @@ export function doCommentList(
       })
       .catch((error) => {
         const { message } = error;
-
-        if (isHyperbeamUploadClaim(claim)) {
-          return dispatchEmptyCommentList(dispatch, claimId, uri, parentId, page);
-        }
 
         switch (message) {
           case 'comments are disabled by the creator':
@@ -1169,6 +1139,8 @@ export function doCommentAbandon(
       comment_id: commentId,
       creator_channel_id: creatorClaim ? creatorClaim.claim_id : undefined,
       creator_channel_name: creatorClaim ? creatorClaim.name : undefined,
+      channel_id: deleterClaim?.claim_id,
+      channel_name: deleterClaim?.name,
       ...commentIdSignature,
       mod_channel_id: deleterClaim && deleterIsModOrAdmin ? deleterClaim.claim_id : undefined,
       mod_channel_name: deleterClaim && deleterIsModOrAdmin ? deleterClaim.name : undefined,
@@ -1247,9 +1219,11 @@ export function doCommentUpdate(comment_id: string, comment: string) {
       return Comments.comment_edit({
         comment_id: comment_id,
         comment: comment,
+        channel_id: activeChannelClaim.claim_id,
+        channel_name: activeChannelClaim.name,
         signature: signedComment.signature,
         signing_ts: signedComment.signing_ts,
-      } as unknown as CommentEditParams)
+      })
         .then((result: CommentEditResponse) => {
           if (result != null) {
             invalidateHyperbeamClaimPage(result.claim_id);
@@ -1720,7 +1694,7 @@ async function allSettledSequential(items, fn) {
   return results;
 }
 
-export function doFetchModBlockedList() {
+export function doFetchModBlockedList(nativeSync: boolean = true) {
   return async (dispatch: Dispatch, getState: GetState) => {
     const LOOP_CHUNK_SIZE = 100;
 
@@ -1755,6 +1729,7 @@ export function doFetchModBlockedList() {
               mod_channel_name: signatureData.name,
               signature: signatureData.signature,
               signing_ts: signatureData.signing_ts,
+              native_sync: nativeSync,
             } as unknown as BlockedListArgs)
         )
           .then(async (res) => {
