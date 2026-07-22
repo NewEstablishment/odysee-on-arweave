@@ -109,7 +109,8 @@ ranking, moderation, or API semantics.
 | `odysee-frontend/AGENTS.md` | Maintained browser/SSR routing and hydration contracts. |
 | `scripts/import-chainquery-meili.mjs` | Resumable Chainquery-to-Meilisearch importer and index rebuild tool. |
 | `scripts/import-chainquery-meili.test.mjs` | Importer normalization, filtering, checkpoint, and rebuild tests. |
-| `references/lighthouse/` | Optional read-only checkout of [OdyseeTeam/lighthouse](https://github.com/OdyseeTeam/lighthouse), retained only to compare legacy search schema, filters, and ranking. It is not runtime code. |
+| `../lighthouse/` | Optional sibling checkout of [OdyseeTeam/lighthouse](https://github.com/OdyseeTeam/lighthouse), used only to compare legacy search schema, filters, and ranking. It is not runtime code. |
+| `../meilisearch/` | Sibling Meilisearch source checkout used to build the local search backend. It is not part of this monorepo. |
 | `AGENTS.md` | Monorepo-wide engineering and documentation rules. |
 
 The component `AGENTS.md` files are the concise maintained references. This
