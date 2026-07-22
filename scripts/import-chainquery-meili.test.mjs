@@ -171,6 +171,7 @@ test('normalized documents retain immutable ids and use the hashed primary key',
   });
   assert.equal(doc.doc_id, 'transaction:0');
   assert.equal(doc.immutable_id, 'transaction:0');
+  assert.equal(doc.id, 'transaction:0');
   assert.equal(doc.search_id, searchId('transaction:0'));
   assert.equal(doc.media_type, 'video');
 });
@@ -186,6 +187,7 @@ test('preserved native documents migrate to hashed keys and record locators', ()
   assert.equal(migrated.doc_id, 'media-id');
   assert.equal(migrated.claim_id, 'media-id');
   assert.equal(migrated.immutable_id, 'record-id');
+  assert.equal(migrated.id, 'record-id');
   assert.equal(migrated.search_id, searchId('media-id'));
 });
 

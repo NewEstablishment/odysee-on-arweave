@@ -6,9 +6,11 @@ const HYPERBEAM_DEVICE_CLAIM = '~odysee-claim@1.0';
 const HYPERBEAM_DEVICE_STREAM = '~odysee-stream@1.0';
 const HYPERBEAM_DEVICE_UPLOAD = '~odysee-upload@1.0';
 const HYPERBEAM_DEVICE_ACCOUNT = '~odysee-account@1.0';
-const HYPERBEAM_DEVICE_SEARCH = '~odysee-search@1.0';
+const HYPERBEAM_DEVICE_SEARCH = '~search@1.0';
+const HYPERBEAM_DEVICE_CACHE = '~cache@1.0';
 const HYPERBEAM_DEVICES = new Set([
   HYPERBEAM_DEVICE_ACCOUNT,
+  HYPERBEAM_DEVICE_CACHE,
   HYPERBEAM_DEVICE_CLAIM,
   HYPERBEAM_DEVICE_SEARCH,
   HYPERBEAM_DEVICE_STREAM,
@@ -610,13 +612,38 @@ function sdkClaimFromHyperbeam(result) {
 
 function sdkSearchFromHyperbeam(result) {
   if (!result) return null;
-  const sdkResult = result.result && Array.isArray(result.result.items) ? result.result : result;
+  const sdkResult =
+    result.result && (Array.isArray(result.result.items) || Array.isArray(result.result.ids))
+      ? result.result
+      : result;
+  const items = Array.isArray(sdkResult.items)
+    ? sdkResult.items
+    : Array.isArray(sdkResult.ids)
+      ? sdkResult.ids
+      : undefined;
+  const pageSize = sdkResult.page_size ?? sdkResult['page-size'] ?? sdkResult.limit ?? result.page_size ?? result['page-size'];
+  const offset = Number(sdkResult.offset ?? result.offset ?? 0);
+  const totalItems =
+    sdkResult.total_items ??
+    sdkResult['total-items'] ??
+    sdkResult.total ??
+    result.total_items ??
+    result['total-items'] ??
+    result.total ??
+    (items ? items.length : 0);
 
   return {
     ...sdkResult,
-    page_size: sdkResult.page_size || sdkResult['page-size'] || result.page_size || result['page-size'],
-    total_items: sdkResult.total_items || sdkResult['total-items'] || result.total_items || result['total-items'],
-    total_pages: sdkResult.total_pages || sdkResult['total-pages'] || result.total_pages || result['total-pages'],
+    items,
+    page: sdkResult.page ?? (pageSize ? Math.floor(offset / pageSize) + 1 : 1),
+    page_size: pageSize,
+    total_items: totalItems,
+    total_pages:
+      sdkResult.total_pages ??
+      sdkResult['total-pages'] ??
+      result.total_pages ??
+      result['total-pages'] ??
+      totalPages(Number(totalItems), Number(pageSize || 20)),
   };
 }
 
@@ -1134,10 +1161,11 @@ function hyperbeamMediaUrlFromPayload(payload) {
 
 async function hyperbeamNodeSearch(params, extraHeaders) {
   try {
-    const result = await hyperbeamNodeFetchJson(
-      hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_SEARCH, 'query', params || {}),
+    const response = await hyperbeamNodeFetchJson(
+      hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_SEARCH, 'query', genericSearchRequest(params || {})),
       extraHeaders
     );
+    const result = await resolveLinkedSearchIds(response, extraHeaders);
     const search = sdkSearchFromHyperbeam(result);
     if (!Array.isArray(search && search.items)) return null;
 
@@ -1153,6 +1181,116 @@ async function hyperbeamNodeSearch(params, extraHeaders) {
     void e;
     return null;
   }
+}
+
+async function resolveLinkedSearchIds(result, extraHeaders) {
+  if (!result || Array.isArray(result.ids)) return result;
+  const link = value(result, 'ids+link', 'ids-link');
+  if (typeof link !== 'string' || !link) return result;
+
+  const linked = await hyperbeamNodeFetchJson(
+    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CACHE, 'read', { read: link }),
+    extraHeaders
+  );
+  const ids = indexedValues(linked);
+  return ids.length ? { ...result, ids } : result;
+}
+
+function indexedValues(source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return [];
+  return Object.keys(source)
+    .filter((key) => /^[1-9]\d*$/.test(key))
+    .sort((left, right) => Number(left) - Number(right))
+    .map((key) => source[key]);
+}
+
+function genericSearchRequest(params) {
+  const size = Math.max(1, Math.min(100, numericValue(value(params, 'limit', 'size', 'page_size', 'page-size'), 20)));
+  const page = Math.max(1, numericValue(value(params, 'page'), 1));
+  const offset = Math.max(0, numericValue(value(params, 'offset', 'from'), (page - 1) * size));
+  const filters = ['state = "active"', 'is_public = 1', 'bid_state != "Expired"', 'bid_state != "Spent"'];
+  const claimTypes = [
+    ...new Set(
+      paramValues(params, 'claim_type', 'claim-type', 'claimType').flatMap((type) => {
+        if (type === 'file') return ['stream'];
+        if (type === 'file,channel') return ['stream', 'channel'];
+        return [type];
+      })
+    ),
+  ].filter(Boolean);
+
+  if (claimTypes.length === 1) filters.push(`claim_type = ${JSON.stringify(claimTypes[0])}`);
+  if (claimTypes.length > 1) {
+    filters.push(`claim_type IN [${claimTypes.map((type) => JSON.stringify(type)).join(', ')}]`);
+  }
+
+  const mediaTypes = ['audio', 'video', 'image', 'text', 'application'].filter((type) => searchFlag(value(params, type)));
+  if (claimTypes.length === 1 && claimTypes[0] === 'stream' && mediaTypes.length === 1) {
+    filters.push(`media_type = ${JSON.stringify(mediaTypes[0])}`);
+  } else if (claimTypes.length === 1 && claimTypes[0] === 'stream' && mediaTypes.length > 1) {
+    filters.push(`media_type IN [${mediaTypes.map((type) => JSON.stringify(type)).join(', ')}]`);
+  }
+
+  if (!searchFlag(value(params, 'nsfw'))) filters.push('nsfw = 0');
+  if (searchFlag(value(params, 'free_only', 'free-only'))) filters.push('fee = 0');
+
+  const languages = paramValues(params, 'language');
+  if (languages.length === 1) filters.push(`language = ${JSON.stringify(languages[0])}`);
+  if (languages.length > 1) {
+    filters.push(`language IN [${languages.map((language) => JSON.stringify(language)).join(', ')}]`);
+  }
+
+  const minDuration = finiteNumber(value(params, 'min_duration', 'min-duration'));
+  const maxDuration = finiteNumber(value(params, 'max_duration', 'max-duration'));
+  if (minDuration !== null) filters.push(`duration >= ${minDuration}`);
+  if (maxDuration !== null) filters.push(`duration <= ${maxDuration}`);
+
+  const timeFloor = searchTimeFloor(String(value(params, 'time_filter', 'time-filter') || ''));
+  if (timeFloor) filters.push(`release_time >= ${timeFloor}`);
+
+  return compactParams({
+    q: String(value(params, 'q', 's', 'query') || ''),
+    limit: size,
+    offset,
+    filter: filters.join(' AND '),
+    sort: genericSearchSort(value(params, 'sort', 'sort_by', 'sort-by', 'order_by', 'order-by')),
+  });
+}
+
+function genericSearchSort(raw) {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (!first) return undefined;
+  const field = String(first);
+  if (field.startsWith('^')) return [`${field.slice(1)}:asc`];
+  if (field.startsWith('-')) return [`${field.slice(1)}:desc`];
+  return [`${field}:desc`];
+}
+
+function searchFlag(raw) {
+  return raw === true || raw === 1 || raw === '1' || raw === 'true';
+}
+
+function finiteNumber(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function numericValue(raw, fallback) {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function searchTimeFloor(filter) {
+  const ages = {
+    lasthour: 60 * 60,
+    today: 24 * 60 * 60,
+    thisweek: 7 * 24 * 60 * 60,
+    thismonth: 31 * 24 * 60 * 60,
+    thisyear: 366 * 24 * 60 * 60,
+  };
+  const age = ages[filter];
+  return age ? Math.floor(Date.now() / 1000) - age : null;
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {

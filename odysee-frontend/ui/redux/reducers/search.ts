@@ -37,6 +37,7 @@ const defaultState = {
   resultsByQuery: {},
   hasReachedMaxResultsLength: {},
   searching: false,
+  activeRequestIdsByQuery: {},
   results: [],
   mentionQuery: '',
   personalRecommendations: {
@@ -47,13 +48,23 @@ const defaultState = {
 };
 export default handleActions(
   {
-    [ACTIONS.SEARCH_START]: (state: SearchState): SearchState => ({
-      ...state,
-      searching: true,
-    }),
+    [ACTIONS.SEARCH_START]: (state: SearchState, action: any): SearchState => {
+      const normalizedQuery = createNormalizedSearchKey(action.data?.query || '');
+      return {
+        ...state,
+        searching: true,
+        activeRequestIdsByQuery: {
+          ...state.activeRequestIdsByQuery,
+          [normalizedQuery]: action.data?.requestId || null,
+        },
+      };
+    },
     [ACTIONS.SEARCH_SUCCESS]: (state: SearchState, action: SearchSuccess): SearchState => {
-      const { query, uris, from, size, poweredBy: recsys, uuid } = action.data;
+      const { query, uris, from, size, poweredBy: recsys, uuid, requestId } = action.data;
       const normalizedQuery = createNormalizedSearchKey(query);
+      const activeRequestIdsByQuery = state.activeRequestIdsByQuery || {};
+      if (requestId && activeRequestIdsByQuery[normalizedQuery] !== requestId) return state;
+      const { [normalizedQuery]: _completedRequest, ...remainingRequests } = activeRequestIdsByQuery;
       const urisForQuery = state.resultsByQuery[normalizedQuery] && state.resultsByQuery[normalizedQuery]['uris'];
       let newUris = uris;
 
@@ -70,7 +81,8 @@ export default handleActions(
       };
       return {
         ...state,
-        searching: false,
+        searching: Object.keys(remainingRequests).length > 0,
+        activeRequestIdsByQuery: remainingRequests,
         resultsByQuery: Object.assign({}, state.resultsByQuery, {
           [normalizedQuery]: results,
         }),
@@ -79,10 +91,17 @@ export default handleActions(
         }),
       };
     },
-    [ACTIONS.SEARCH_FAIL]: (state: SearchState): SearchState => ({
-      ...state,
-      searching: false,
-    }),
+    [ACTIONS.SEARCH_FAIL]: (state: SearchState, action: any): SearchState => {
+      const normalizedQuery = createNormalizedSearchKey(action.data?.query || '');
+      const activeRequestIdsByQuery = state.activeRequestIdsByQuery || {};
+      if (action.data?.requestId && activeRequestIdsByQuery[normalizedQuery] !== action.data.requestId) return state;
+      const { [normalizedQuery]: _failedRequest, ...remainingRequests } = activeRequestIdsByQuery;
+      return {
+        ...state,
+        searching: Object.keys(remainingRequests).length > 0,
+        activeRequestIdsByQuery: remainingRequests,
+      };
+    },
     [ACTIONS.UPDATE_SEARCH_OPTIONS]: (state: SearchState, action: UpdateSearchOptions): SearchState => {
       const { options: oldOptions } = state;
       const newOptions = action.data;

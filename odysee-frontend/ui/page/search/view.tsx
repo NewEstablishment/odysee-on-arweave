@@ -7,7 +7,7 @@ import SearchOptions from 'component/searchOptions';
 import SearchTopClaim from 'component/searchTopClaim';
 import { formatLbryUrlForWeb } from 'util/url';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { SEARCH_PAGE_SIZE } from 'constants/search';
+import { SEARCH_OPTIONS, SEARCH_PAGE_SIZE } from 'constants/search';
 import * as SETTINGS from 'constants/settings';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doSearch } from 'redux/actions/search';
@@ -28,6 +28,7 @@ export default function SearchPage() {
   const { search: routerSearch } = useLocation();
   const languageSetting = useAppSelector(selectLanguage);
   const searchInLanguage = useAppSelector((state) => selectClientSetting(state, SETTINGS.SEARCH_IN_LANGUAGE));
+  const hideShorts = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_SHORTS));
   const baseSearchOptions = useAppSelector(selectSearchOptions);
   const isSearching = useAppSelector(selectIsSearching);
 
@@ -42,6 +43,9 @@ export default function SearchPage() {
     ...baseSearchOptions,
     isBackgroundSearch: false,
     nsfw: showMature,
+    [SEARCH_OPTIONS.EXCLUDE_SHORTS]: hideShorts,
+    [SEARCH_OPTIONS.EXCLUDE_SHORTS_ASPECT_RATIO_LTE]: SETTINGS.SHORTS_ASPECT_RATIO_LTE,
+    [SEARCH_OPTIONS.EXCLUDE_SHORTS_DURATION_LTE]: SETTINGS.SHORTS_DURATION_LTE,
     ...(searchInLanguage
       ? {
           language: languageSetting,

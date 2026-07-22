@@ -1,6 +1,5 @@
 import { SEARCH_OPTIONS } from 'constants/search';
 import * as SETTINGS from 'constants/settings';
-import { selectClientSetting } from 'redux/selectors/settings';
 const DEFAULT_SEARCH_RESULT_FROM = 0;
 const DEFAULT_SEARCH_SIZE = 20;
 type QueryParamOptionValue = string | number | boolean | undefined | null;
@@ -144,13 +143,7 @@ export const getSearchQueryString = (query: string, options: SearchQueryOptions 
     content_aspect_ratio,
     content_aspect_ratio_or_missing,
   } = options;
-  const { store } = window;
-  let hideShorts = false;
-
-  if (store) {
-    const state = store.getState();
-    hideShorts = selectClientSetting(state, SETTINGS.HIDE_SHORTS);
-  }
+  const hideShorts = Boolean(options[SEARCH_OPTIONS.EXCLUDE_SHORTS]);
 
   if (related_to) {
     additionalOptions[SEARCH_OPTIONS.RELATED_TO] = related_to;
@@ -190,9 +183,11 @@ export const getSearchQueryString = (query: string, options: SearchQueryOptions 
   }
 
   if (hideShorts) {
-    additionalOptions[SEARCH_OPTIONS.EXCLUDE_SHORTS] = hideShorts;
-    additionalOptions[SEARCH_OPTIONS.EXCLUDE_SHORTS_ASPECT_RATIO_LTE] = SETTINGS.SHORTS_ASPECT_RATIO_LTE;
-    additionalOptions[SEARCH_OPTIONS.EXCLUDE_SHORTS_DURATION_LTE] = SETTINGS.SHORTS_DURATION_LTE;
+    additionalOptions[SEARCH_OPTIONS.EXCLUDE_SHORTS] = true;
+    additionalOptions[SEARCH_OPTIONS.EXCLUDE_SHORTS_ASPECT_RATIO_LTE] =
+      options[SEARCH_OPTIONS.EXCLUDE_SHORTS_ASPECT_RATIO_LTE] ?? SETTINGS.SHORTS_ASPECT_RATIO_LTE;
+    additionalOptions[SEARCH_OPTIONS.EXCLUDE_SHORTS_DURATION_LTE] =
+      options[SEARCH_OPTIONS.EXCLUDE_SHORTS_DURATION_LTE] ?? SETTINGS.SHORTS_DURATION_LTE;
   }
 
   if (additionalOptions) {

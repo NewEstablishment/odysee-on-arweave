@@ -77,7 +77,6 @@ The common codec operations are `from`, `to`, `to-hint`, and `verify`. `lbry-cla
 - `owned-reference@1.0`: owner-gated mutable pointers above immutable objects.
 - `odysee-reference@1.0`: operator-gated compatibility references above immutable objects.
 - `odysee-policy@1.0`: signed policy evaluation and enforcement for delivery/playback decisions.
-- `odysee-search@1.0`: current Odysee claim-search compatibility backed by Meilisearch, with explicit query/index/delete/status/schema operations.
 - `odysee-stream@1.0`: stream normalization, playback, verified-stream construction, and ranged media resolution, including immutable claim-output input.
 - `odysee-stream-descriptor@1.0`: descriptor fetch/decode/verification, reconstruction, and media-range orchestration over LBRY stores.
 - `odysee-upload@1.0`: authenticated chunked uploads, manifests, ownership, indexing, listing, reconciliation, updates, deletes, and native media records.
@@ -90,7 +89,9 @@ The removed `odysee@1.0` catch-all SDK proxy must not be recreated. New product 
 
 ## Search
 
-Fuzzy Odysee claim search currently uses `odysee-search@1.0` with Meilisearch. Legacy Chainquery rows and native upload records are normalized into the same index. Documents use immutable `search_id`/`doc_id` values, while claim IDs remain compatibility metadata. Query responses expose ordered immutable IDs; callers hydrate through stores.
+Fuzzy Odysee claim search uses the unchanged generic `search@1.0` device directly. Legacy Chainquery rows and native upload records are normalized and submitted through `search@1.0/write` into the configured `hyperbeam_messages` index. Documents carry searchable, filterable, and ranking fields plus an immutable `id`; `search@1.0/query` returns only ordered immutable IDs for callers to hydrate through stores.
+
+Do not add Odysee-specific operations to `search@1.0`. Product request mapping and result hydration belong at the frontend integration boundary, while index settings are node deployment configuration. Odysee upload indexing invokes only the public generic `write` operation.
 
 Meilisearch is an index, not the source of truth. Chainquery remains the legacy corpus source, and native HyperBEAM messages remain authoritative for native records. Index writes, deletes, and reconciliation must not mutate source objects.
 

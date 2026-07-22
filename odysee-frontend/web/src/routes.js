@@ -35,6 +35,11 @@ const RSS_MEDIA_AUTH_DEFAULT_TTL_SECONDS = 600;
 const RSS_MEDIA_AUTH_MAX_TTL_SECONDS = 600;
 const AUTH_TOKEN_COOKIE = 'auth_token';
 const HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
+const HYPERBEAM_PUBLIC_DEVICE_PREFIX = '/$/api/hyperbeam-public-device/v1';
+const HYPERBEAM_PUBLIC_STORE_BATCH_PATH = '/$/api/hyperbeam-public-store/v1/read-batch';
+const HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
+const HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY = 12;
+const HYPERBEAM_PUBLIC_STORE_READ_TIMEOUT_MS = 15000;
 const HYPERBEAM_UPLOAD_PATH = '/id?!=true&committers=all';
 const HYPERBEAM_UPLOAD_CHUNK_PATH = '/id?!=true&committers=all';
 const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/id?!=true&committers=all';
@@ -84,6 +89,7 @@ const HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
   '/~odysee-file-reaction@1.0/list',
   '/~odysee-account@1.0/sub-count',
 ]);
+const HYPERBEAM_PUBLIC_DEVICE_PATHS = new Set(['/~search@1.0/query', '/~cache@1.0/read', '/~odysee-claim@1.0/search']);
 
 function getCookieValue(cookieHeader, name) {
   if (!cookieHeader) return null;
@@ -149,6 +155,105 @@ async function postHyperbeamAuthDevice(ctx) {
   ctx.set('Cache-Control', 'no-store');
   ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
   ctx.body = response.body;
+}
+
+async function postHyperbeamPublicDevice(ctx) {
+  const devicePath = `/${ctx.params.device}/${ctx.params.method}`;
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl || !HYPERBEAM_PUBLIC_DEVICE_PATHS.has(devicePath)) {
+    ctx.status = 404;
+    ctx.body = { error: 'unsupported hyperbeam public device path' };
+    return;
+  }
+
+  const response = await postJson(`${nodeUrl}${devicePath}`, await readJsonBody(ctx), {
+    accept: 'application/json',
+    'accept-bundle': 'false',
+  });
+
+  ctx.status = response.statusCode;
+  ctx.set('Cache-Control', 'no-store');
+  ['content-type', 'device', 'signature-input', 'signature', 'id', 'message-id', 'codec-device'].forEach((header) =>
+    copyHeader(ctx, response.headers, header)
+  );
+  ctx.body = response.body;
+}
+
+async function postHyperbeamPublicStoreBatch(ctx) {
+  const nodeUrl = hyperbeamNodeUrl();
+
+  if (!nodeUrl) {
+    ctx.status = 404;
+    ctx.body = { error: 'hyperbeam node unavailable' };
+    return;
+  }
+
+  const body = await readJsonBody(ctx);
+  const requestedIds = Array.isArray(body.ids) ? body.ids : [];
+  const ids = Array.from(new Set(requestedIds.map((id) => String(id || '').trim()).filter(Boolean)));
+
+  if (!ids.length || ids.length > HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT || ids.some((id) => !isPublicStoreId(id))) {
+    ctx.status = 400;
+    ctx.body = { error: 'invalid hyperbeam store batch' };
+    return;
+  }
+
+  const startedAt = Date.now();
+  const entries = await mapConcurrent(ids, HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY, async (id) => {
+    const itemStartedAt = Date.now();
+
+    try {
+      const response = await getBuffer(
+        `${nodeUrl}/${encodeURIComponent(id)}?accept-bundle=true`,
+        { accept: 'application/json' },
+        HYPERBEAM_PUBLIC_STORE_READ_TIMEOUT_MS
+      );
+      const parsed = parseJsonBuffer(response.body);
+      const ok = response.statusCode >= 200 && response.statusCode < 300 && parsed && typeof parsed === 'object';
+      return {
+        id,
+        status: response.statusCode,
+        elapsed_ms: Date.now() - itemStartedAt,
+        result: ok ? { ...response.headers, ...parsed } : null,
+        error: ok ? null : parsed || response.body.toString('utf8').slice(0, 500),
+      };
+    } catch (error) {
+      return {
+        id,
+        status: 502,
+        elapsed_ms: Date.now() - itemStartedAt,
+        result: null,
+        error: String(error && error.message ? error.message : error),
+      };
+    }
+  });
+
+  ctx.status = 200;
+  ctx.set('Cache-Control', 'no-store');
+  ctx.body = {
+    results: Object.fromEntries(entries.filter((entry) => entry.result).map((entry) => [entry.id, entry.result])),
+    errors: Object.fromEntries(entries.filter((entry) => !entry.result).map((entry) => [entry.id, entry.error])),
+    timings: entries.map(({ id, status, elapsed_ms }) => ({ id, status, elapsed_ms })),
+    elapsed_ms: Date.now() - startedAt,
+  };
+}
+
+function isPublicStoreId(id) {
+  return /^[0-9a-f]{64}:\d+$/i.test(id) || /^[A-Za-z0-9_-]{43}$/.test(id);
+}
+
+async function mapConcurrent(items, concurrency, mapper) {
+  const results = Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(items.length, Math.max(1, concurrency)) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 async function postHyperbeamUpload(ctx) {
@@ -1005,7 +1110,7 @@ function postBuffer(url, body, extraHeaders = {}) {
   });
 }
 
-function getBuffer(url, extraHeaders = {}) {
+function getBuffer(url, extraHeaders = {}, timeoutMs = 0) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const client = target.protocol === 'https:' ? https : http;
@@ -1032,6 +1137,7 @@ function getBuffer(url, extraHeaders = {}) {
       }
     );
     req.on('error', reject);
+    if (timeoutMs > 0) req.setTimeout(timeoutMs, () => req.destroy(new Error(`GET timed out after ${timeoutMs}ms`)));
     req.end();
   });
 }
@@ -1295,6 +1401,8 @@ router.get(`/$/api/auth-token/v1/get`, async (ctx) => {
   };
 });
 router.post(`${HYPERBEAM_AUTH_DEVICE_PREFIX}/:device/:method`, postHyperbeamAuthDevice);
+router.post(`${HYPERBEAM_PUBLIC_DEVICE_PREFIX}/:device/:method`, postHyperbeamPublicDevice);
+router.post(HYPERBEAM_PUBLIC_STORE_BATCH_PATH, postHyperbeamPublicStoreBatch);
 router.post(`/$/api/hyperbeam-upload/v1/write`, postHyperbeamUpload);
 router.post(`/$/api/hyperbeam-upload/v1/large`, postHyperbeamLargeUpload);
 router.post(`/$/api/hyperbeam-upload/v1/index`, postHyperbeamUploadIndex);

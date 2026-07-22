@@ -152,7 +152,7 @@ special cases to them.
 | Device | Operations used here | Role |
 | --- | --- | --- |
 | `query@1.0` | `only`, `all`, `base`, `graphql` | Exact message discovery across supported stores. Match keys are selected with `only`; results can be paths, messages, counts, first matches, or booleans. Native comments and controls use it to discover immutable message IDs. |
-| `search@1.0` | `query`, `write` | Generic full-text indexing for arbitrary HyperBEAM messages through `hb_search`. Its schema and backend come from node/base configuration, and queries retrieve only `id`. This is distinct from Odysee claim search. |
+| `search@1.0` | `query`, `write` | Generic full-text indexing for arbitrary HyperBEAM messages through `hb_search`. Its schema and backend come from node/base configuration, and queries retrieve only ordered immutable `id` values. Odysee claim search uses this unchanged device directly. |
 | `cache@1.0` | `read`, `write`, related cache operations | Signed cache access. Trusted writes require an authorized signer in the node's `cache_writers` list. Thumbnail storage uses this device. |
 | `auth-hook@1.0` | request hook/generator flow | Extracts credentials, invokes a configured secret provider, signs the request, and removes private carriers before public persistence. |
 | `message@1.0` and `/id` | inherited message operations | Normalize a message and derive/store its immutable ID. Native writes use this path instead of an Odysee-specific persistence endpoint. |
@@ -176,7 +176,6 @@ under `hyperbeam/src/preloaded/odysee/` unless noted otherwise.
 | `owned-reference@1.0` | `point`, `current`, `resolve` | Owner-gated mutable pointer above immutable objects. Ownership is tied to authenticated authority rather than arbitrary first-writer state. Source: `src/preloaded/odysee/dev_odysee_owned_reference.erl`. |
 | `odysee-reference@1.0` | `point`, `current`, `resolve` | Operator-gated mutable reference used for compatibility and controlled pointer updates. |
 | `odysee-policy@1.0` | `evaluate`, `enforce` | Evaluates signed policy rules against request/message fields and can reject disallowed playback or delivery. |
-| `odysee-search@1.0` | `query`, `index`, `delete`, `status`, `schema` | Odysee claim-search adapter backed by Meilisearch. It normalizes legacy and native records, preserves ranking/filter semantics, and returns ordered immutable locators. |
 | `odysee-stream@1.0` | `stream`, `from-claim`, `playback`, `media`, `verified-stream` | Resolves stream metadata, immutable claim outputs, descriptors, ranged media, and playback URLs. It prefers verifiable LBRY evidence and exposes source/verification headers when a compatibility player proxy is used. |
 | `odysee-stream-descriptor@1.0` | `decode`, `fetch`, `verify`, `reconstruct`, `media` | Product-facing descriptor orchestration: fetches and verifies descriptor data, reconstructs streams, and serves ranges through LBRY stores/codecs. |
 | `odysee-upload@1.0` | `submit`, `upload`, `write`, `chunk`, `finalize`, `index`, `update`, `delete`, `record`, `media`, `list`, `reconcile`, `reindex` | Authenticated native uploads, chunk manifests, ownership records, metadata revisions, listing, deletion state, media access, and search-index reconciliation. |
@@ -293,22 +292,27 @@ the weaker boundary visible; the frontend does not silently invent verification.
 
 ### Search
 
-Three search surfaces serve different purposes:
+Two search surfaces serve different purposes:
 
 | Surface | Use |
 | --- | --- |
 | `query@1.0` | Exact structured discovery in HyperBEAM stores, such as comments and control messages. |
-| `search@1.0` | Generic full-text discovery for arbitrary HyperBEAM messages. |
-| `odysee-search@1.0` | Current Odysee claim search with Lighthouse-compatible filters/ranking over a Meilisearch index. |
+| `search@1.0` | Generic full-text discovery for arbitrary HyperBEAM messages and the sole Odysee fuzzy-search path. |
 
-The Odysee index combines normalized Chainquery rows and native upload records.
-Meilisearch returns ordered immutable `doc_id`/`search_id` locators; the frontend
-hydrates each locator through stores and preserves result order. Search documents
-may contain display metadata for ranking/debugging, but they are not authoritative
-claim objects.
+Odysee fuzzy search calls the unchanged `search@1.0` device directly. The node's
+generic search configuration points it at the `hyperbeam_messages` index. The
+index contains normalized fields needed for lexical matching, filtering, and
+ranking, while each document's `id` is the immutable locator returned to the
+caller.
+
+The generic index combines normalized Chainquery rows and native upload records.
+Search responses contain ordered immutable locators; the
+frontend hydrates each locator through stores and preserves result order. Search
+documents may contain display metadata for ranking/debugging, but they are not
+authoritative claim objects.
 
 Filters such as claim type, media type, NSFW state, visibility, upload date, and
-sort mode must reach `odysee-search@1.0`. Reimplementing them as unrelated
+sort mode must reach `search@1.0`. Reimplementing them as unrelated
 post-filtering in React changes pagination and ranking.
 
 ### Comments, Revisions, and Moderation
@@ -423,9 +427,11 @@ device/store:
 
 | Option | Purpose |
 | --- | --- |
-| `odysee-search-backend-url` | Meilisearch base URL; default `http://127.0.0.1:7700`. |
-| `odysee-search-api-key` | Meilisearch API key when the backend requires one. |
-| `odysee-search-*-timeout` / reconciliation options | Search request, task polling, and native-index reconciliation tuning. |
+| `search-backend-url` | Generic search backend URL; default `http://127.0.0.1:7700`. |
+| `search-api-key` | Generic search backend API key when required. |
+| `search-index` | Generic index name; this project uses `hyperbeam_messages`. |
+| `search-schema` | Fields accepted by generic `search@1.0/write`; `all` indexes every safe primitive field. |
+| `search-*-timeout`, batching, and retry options | Generic search request, task polling, batching, and retry tuning. |
 | `odysee-account-api` | Account identity endpoint used by `odysee-auth@1.0`. |
 | `odysee-session-accounts` | Offline/local token-to-account mapping for tests or isolated operation. |
 | `odysee-api-url` | Odysee API compatibility origin for account/count/reaction adapters. |
@@ -436,9 +442,10 @@ device/store:
 | `cache_writers` | Addresses allowed to perform trusted signed cache writes. |
 | `store` | Ordered local, remote, Arweave, and Odysee/LBRY store stack. |
 
-The Odysee claim-search index defaults to `odysee_claims`. Generic
-`search@1.0` uses its own `search-*` backend/index/schema options and must not be
-configured as though it were the Odysee-specific adapter.
+`odysee_claims` is the local staging index populated from the Chainquery slice.
+`scripts/replay-meili-to-hyperbeam-search.mjs` submits those documents through
+`search@1.0/write` into `hyperbeam_messages`; production ingestion follows the
+same device boundary rather than making the staging index a runtime dependency.
 
 ## Local Development
 
@@ -615,8 +622,7 @@ The development request console shows:
 
 Known graph nodes remain visible when inactive and are dimmed. Device counts and
 edges must come from observed events, not inferred page content. Generic
-`~query@1.0` and `~search@1.0` are separated from Odysee/LBRY product devices;
-`~odysee-search@1.0` is not the same node as generic `~search@1.0`.
+`~query@1.0` and `~search@1.0` are separated from Odysee/LBRY product devices.
 
 Useful process/listener checks:
 

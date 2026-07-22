@@ -8,7 +8,6 @@ const HYPERBEAM_DEVICES = new Set([
   '~odysee-reaction@1.0',
   '~query@1.0',
   '~search@1.0',
-  '~odysee-search@1.0',
   '~odysee-stream@1.0',
   '~odysee-upload@1.0',
 ]);

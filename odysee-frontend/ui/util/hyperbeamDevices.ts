@@ -13,7 +13,6 @@ export const HYPERBEAM_DEVICE = {
   reaction: '~odysee-reaction@1.0',
   query: '~query@1.0',
   search: '~search@1.0',
-  odyseeSearch: '~odysee-search@1.0',
   stream: '~odysee-stream@1.0',
   streamDescriptor: '~odysee-stream-descriptor@1.0',
   subscription: '~odysee-account@1.0',

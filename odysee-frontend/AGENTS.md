@@ -40,13 +40,12 @@ The `Comments` facade in `ui/comments.ts` always calls HyperBEAM helpers. It mus
 
 ## Search
 
-There are three distinct surfaces:
+There are two distinct surfaces:
 
 - `~query@1.0`: exact local message discovery, currently used by native comments and controls.
-- `~search@1.0`: generic HyperBEAM full-text search primitive.
-- `~odysee-search@1.0`: current Odysee claim-search compatibility backed by Meilisearch and legacy/native index reconciliation.
+- `~search@1.0`: generic HyperBEAM full-text search primitive and the sole fuzzy-search path used by Odysee.
 
-Normal Odysee search uses `~odysee-search@1.0`, receives ordered immutable IDs, hydrates them through stores, and preserves the search order. Filters, sort, upload date, claim type, and media type must reach the search device rather than being reapplied as unrelated browser-only filtering.
+Normal Odysee search uses `~search@1.0`, receives ordered immutable IDs, hydrates them through stores, and preserves the search order. Filters, sort, upload date, claim type, and media type must reach the search device rather than being reapplied as unrelated browser-only filtering.
 
 ## Debug Console
 
@@ -54,7 +53,7 @@ The console reports the single HyperBEAM request path. Its graph always shows kn
 
 - Odysee product devices are one group.
 - Generic HyperBEAM-provided `~query@1.0` and `~search@1.0` are visibly separated from product devices.
-- `~odysee-search@1.0` remains distinct from generic `~search@1.0`.
+- Search evidence draws `~search@1.0 -> Search index` only when an actual generic search request is observed.
 - Edges are derived from observed request/store/backend relationships and connect actual node bounds.
 - Legacy Odysee API, Chainquery, Blobcache, Meilisearch, cache/store, and media nodes represent real backing components only.
 - The minimized header contains only `Odysee request log`.

@@ -20,7 +20,7 @@ type TraceStep = {
 };
 
 const AUTH_TRACE_TARGET = 'auth:~odysee-account@1.0/preference-get:enable-sync';
-const SEARCH_TRACE_TARGET = 'search:~odysee-search@1.0/query';
+const SEARCH_TRACE_TARGET = 'search:~search@1.0/query';
 
 export type TraceFocus = {
   kind: 'auth' | 'claim' | 'search';
@@ -431,9 +431,9 @@ function authTraceFocus(status: TraceStatus): TraceFocus {
 function searchTraceFocus(status: TraceStatus): TraceFocus {
   return {
     kind: 'search',
-    label: `search ~odysee-search@1.0/query · ${status}`,
+    label: `search ~search@1.0/query · ${status}`,
     target: SEARCH_TRACE_TARGET,
-    devicePath: '/~odysee-search@1.0/query',
+    devicePath: '/~search@1.0/query',
     requestKey: 'search:',
   };
 }
@@ -1663,10 +1663,10 @@ function searchTraceSteps(
       label: 'Select HyperBEAM search request',
       kind: 'input',
       status: 'ok',
-      detail: '~odysee-search@1.0/query',
+      detail: '~search@1.0/query',
       response: sanitizeHyperbeamDebugValue({
         target: SEARCH_TRACE_TARGET,
-        devicePath: '/~odysee-search@1.0/query',
+        devicePath: '/~search@1.0/query',
       }),
     },
     {
@@ -1709,9 +1709,9 @@ function isSearchDeviceEventData(data: Record<string, any>) {
   const responseDevice = normalizeDeviceName(data.responseDevice);
   const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '');
   return (
-    device === '~odysee-search@1.0' ||
-    responseDevice === '~odysee-search@1.0' ||
-    path.includes('/~odysee-search@1.0/query')
+    device === '~search@1.0' ||
+    responseDevice === '~search@1.0' ||
+    path.includes('/~search@1.0/query')
   );
 }
 

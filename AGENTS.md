@@ -172,11 +172,10 @@ without being replaced by mutable compatibility keys.
 Keep these surfaces distinct:
 
 - `query@1.0`: generic exact structured discovery over stored messages.
-- `search@1.0`: generic full-text discovery for arbitrary HyperBEAM messages.
-- `odysee-search@1.0`: Odysee claim search backed by Meilisearch, including
-  Lighthouse-compatible ranking, filters, and legacy/native reconciliation.
+- `search@1.0`: generic full-text discovery for arbitrary HyperBEAM messages and
+  the only fuzzy-search device used by Odysee.
 
-Odysee search filters and sort options must reach `odysee-search@1.0`; browser
+Odysee search filters and sort options must reach `search@1.0`; browser
 post-filtering breaks ranking and pagination. Search responses expose ordered
 immutable locators, and hydration happens afterward. Indexing or deleting a
 Meilisearch document must not mutate the underlying object.

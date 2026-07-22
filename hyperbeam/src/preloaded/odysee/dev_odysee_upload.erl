@@ -883,12 +883,16 @@ delete_search_record(Record, Opts) ->
 perform_index_search_record(Record, Opts) ->
     try
         Claim = search_claim(Record, Opts),
+        Document = search_document(Record, Claim, Opts),
         search_device_result(
             hb_ao:raw(
-                <<"odysee-search@1.0">>,
-                <<"index">>,
+                <<"search@1.0">>,
+                <<"write">>,
                 #{},
-                #{ <<"document">> => search_document(Record, Claim, Opts) },
+                #{
+                    <<"body">> => Document,
+                    <<"id">> => record_search_id(Record, Opts)
+                },
                 Opts
             ),
             Opts
@@ -898,14 +902,22 @@ perform_index_search_record(Record, Opts) ->
     end.
 
 perform_delete_search_record(Event, Opts) ->
-    IDs = hb_maps:get(<<"ids">>, Event, [], Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Event, <<>>, Opts),
     try
         search_device_result(
             hb_ao:raw(
-                <<"odysee-search@1.0">>,
-                <<"delete">>,
+                <<"search@1.0">>,
+                <<"write">>,
                 #{},
-                #{ <<"ids">> => IDs },
+                #{
+                    <<"id">> => RecordID,
+                    <<"body">> => #{
+                        <<"state">> => <<"deleted">>,
+                        <<"is_public">> => 0,
+                        <<"source_system">> => <<"hyperbeam-native">>,
+                        <<"search_rank">> => 0
+                    }
+                },
                 Opts
             ),
             Opts
@@ -932,12 +944,9 @@ index_search_event(Record, Opts) ->
     }.
 
 delete_search_event(Record, Opts) ->
-    Claim = search_claim(Record, Opts),
-    ClaimID = hb_maps:get(<<"claim_id">>, Claim, <<>>, Opts),
     #{
         <<"operation">> => <<"delete">>,
-        <<"record-id">> => record_search_id(Record, Opts),
-        <<"ids">> => search_document_ids(ClaimID, Record, Claim, Opts)
+        <<"record-id">> => record_search_id(Record, Opts)
     }.
 
 search_pending_key(Event, Opts) ->
@@ -1089,22 +1098,6 @@ record_data_id(Record, Opts) ->
         <<>>
     ).
 
-search_document_ids(ClaimID, Record, Claim, Opts) ->
-    Hyperbeam = map_value(Claim, <<"hyperbeam">>, #{}, Opts),
-    IDs =
-        [ClaimID] ++
-            [
-                hb_maps:get(<<"record-id">>, Record, not_found, Opts),
-                hb_maps:get(<<"data-id">>, Record, not_found, Opts),
-                hb_maps:get(<<"doc_id">>, Claim, not_found, Opts),
-                hb_maps:get(<<"doc-id">>, Claim, not_found, Opts),
-                hb_maps:get(<<"immutable_id">>, Claim, not_found, Opts),
-                hb_maps:get(<<"immutable-id">>, Claim, not_found, Opts),
-                map_value(Hyperbeam, <<"record-id">>, not_found, Opts),
-                map_value(Hyperbeam, <<"data-id">>, not_found, Opts)
-            ],
-    lists:usort([hb_util:bin(ID) || ID <- IDs, is_binary(ID), ID =/= <<>>]).
-
 search_document(Record, Claim, Opts) ->
     RecordID = record_search_id(Record, Opts),
     DataID = value_or(hb_maps:get(<<"data-id">>, Record, not_found, Opts), <<>>),
@@ -1122,20 +1115,25 @@ search_document(Record, Claim, Opts) ->
     IsChannel = truthy_int(ClaimType =:= <<"channel">>),
     EffectiveAmount = number_value(hb_maps:get(<<"effective_amount">>, Claim, 0, Opts), 0),
     CertificateAmount = number_value(map_value(SigningChannel, <<"effective_amount">>, 1, Opts), 1),
+    ViewCount = number_value(first_field([<<"view_count">>, <<"view_cnt">>], Claim, Opts), 0),
+    SubCount = number_value(first_field([<<"sub_count">>, <<"sub_cnt">>], SigningChannel, Opts), 0),
+    ClaimCount = number_value(first_field([<<"claim_count">>, <<"claim_cnt">>], SigningChannel, Opts), 0),
+    Tags = list_value(map_value(Value, <<"tags">>, [], Opts)),
     RecencyRank = recency_rank(Timestamp),
     Rank = search_rank(#{
         is_controlling => 0,
         has_thumbnail => HasThumbnail,
         effective_amount => EffectiveAmount,
         certificate_amount => CertificateAmount,
-        view_count => 0,
-        sub_count => 0,
-        claim_count => 0,
+        view_count => ViewCount,
+        sub_count => SubCount,
+        claim_count => ClaimCount,
         is_channel => IsChannel,
         duration => number_value(map_value(Source, <<"duration">>, 0, Opts), 0),
         recency_rank => RecencyRank
     }),
     #{
+        <<"id">> => RecordID,
         <<"doc_id">> => ClaimID,
         <<"claim_id">> => ClaimID,
         <<"immutable_id">> => RecordID,
@@ -1153,11 +1151,13 @@ search_document(Record, Claim, Opts) ->
         <<"description">> => map_value(Value, <<"description">>, <<>>, Opts),
         <<"channel_name">> => map_value(SigningChannel, <<"name">>, <<>>, Opts),
         <<"channel_claim_id">> => channel_id_from_claim(Claim, Opts),
+        <<"state">> => <<"active">>,
         <<"bid_state">> => <<"Active">>,
         <<"claim_type">> => ClaimType,
         <<"content_type">> => ContentType,
         <<"media_type">> => media_type(ContentType),
-        <<"tags">> => map_value(Value, <<"tags">>, [], Opts),
+        <<"tags">> => Tags,
+        <<"tags_text">> => binary:join([hb_util:bin(Tag) || Tag <- Tags], <<" ">>),
         <<"language">> => first_list_value(map_value(Value, <<"languages">>, [], Opts), <<"">>),
         <<"nsfw">> => 0,
         <<"thumbnail_url">> => ThumbnailURL,
@@ -1166,12 +1166,12 @@ search_document(Record, Claim, Opts) ->
         <<"transaction_time">> => Timestamp,
         <<"duration">> => map_value(Source, <<"duration">>, 0, Opts),
         <<"fee">> => map_value(Value, <<"fee">>, 0, Opts),
-        <<"view_count">> => 0,
-        <<"view_cnt">> => 0,
-        <<"sub_cnt">> => 0,
-        <<"claim_count">> => 0,
-        <<"claim_cnt">> => 0,
-        <<"channel_claim_count">> => 0,
+        <<"view_count">> => ViewCount,
+        <<"view_cnt">> => ViewCount,
+        <<"sub_cnt">> => SubCount,
+        <<"claim_count">> => ClaimCount,
+        <<"claim_cnt">> => ClaimCount,
+        <<"channel_claim_count">> => ClaimCount,
         <<"effective_amount">> => EffectiveAmount,
         <<"certificate_amount">> => CertificateAmount,
         <<"is_channel">> => IsChannel,
@@ -1206,26 +1206,18 @@ search_rank(Values) ->
     SubCount = maps:get(sub_count, Values, 0),
     ClaimCount = maps:get(claim_count, Values, 0),
     IsChannel = maps:get(is_channel, Values, 0),
-    Duration = maps:get(duration, Values, 0),
     RecencyRank = maps:get(recency_rank, Values, 0),
-    SupportRank =
-        math:log(max(1, min(EffectiveAmount, 100000000)) * 21 + 1) * 2 +
-        math:log(max(1, min(CertificateAmount, 100000000)) * 21 + 1) * 2,
-    Rank =
-        RecencyRank * 20 +
-        IsControlling * 25 +
-        HasThumbnail * 20 +
-        SupportRank +
-        math:log(max(1, ViewCount) + 1) * 2 +
-        math:log(max(1, SubCount) + 1) * 3 +
-        channel_claim_count_boost(IsChannel, ClaimCount),
-    case Duration > 0 andalso Duration < 120 of
-        true -> Rank * 0.5;
-        false -> Rank
-    end.
+    (max(0, min(60, RecencyRank)) / 60) * 12 +
+        bounded_log_rank(ViewCount, 100000000, 8) +
+        bounded_log_rank(SubCount, 10000000, 6) +
+        bounded_log_rank(EffectiveAmount + CertificateAmount, 100000000, 2) +
+        bounded_log_rank(ClaimCount, 100000, 0.5) +
+        IsControlling +
+        HasThumbnail * 0.5 +
+        IsChannel * 0.25.
 
-channel_claim_count_boost(1, ClaimCount) when ClaimCount > 10 -> 10;
-channel_claim_count_boost(_IsChannel, _ClaimCount) -> 0.
+bounded_log_rank(Value, Cap, Weight) ->
+    math:log(max(0, min(Value, Cap)) + 1) / math:log(Cap + 1) * Weight.
 
 recency_rank(Timestamp) ->
     Now = erlang:system_time(second),
@@ -2333,9 +2325,9 @@ search_document_uses_record_id_as_immutable_locator_test() ->
     ?assertEqual(RecordID, maps:get(<<"record_id">>, Document)),
     ?assertEqual(DataID, maps:get(<<"data_id">>, Document)),
     ?assertEqual(DataID, maps:get(<<"txid">>, Document)),
+    ?assertEqual(<<"active">>, maps:get(<<"state">>, Document)),
     ?assert(claim_ids_match(Claim, #{<<"claim_ids">> => [DataID]}, #{})),
-    ?assert(lists:member(RecordID, search_document_ids(DataID, Record, Claim, #{}))),
-    ?assert(lists:member(DataID, search_document_ids(DataID, Record, Claim, #{}))).
+    ?assert(maps:get(<<"search_rank">>, Document) >= 0).
 
 search_device_result_rejects_error_responses_test() ->
     ?assertEqual(

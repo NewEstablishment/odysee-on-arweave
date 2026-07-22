@@ -15,8 +15,8 @@ const DEFAULTS = {
   index: process.env.MEILI_INDEX || 'odysee_claims',
 };
 
-const CHECKPOINT_VERSION = 2;
-const ID_SCHEMA_VERSION = 'sha256-b64u-v1';
+const CHECKPOINT_VERSION = 3;
+const ID_SCHEMA_VERSION = 'sha256-b64u-locator-v2';
 const MODIFIED_SCAN_STRATEGY = 'lighthouse-id-window-v1';
 
 async function main(argv = process.argv.slice(2)) {
@@ -552,6 +552,7 @@ function normalizeDoc(doc) {
   const recencyRank = recencyScore(releaseTimestamp(doc));
   return {
     ...doc,
+    id: docId,
     search_id: searchId(docId),
     tags,
     media_type: mediaType(doc.content_type),
@@ -583,10 +584,12 @@ function normalizeDoc(doc) {
 function normalizeNativeDoc(doc) {
   const docId = String(doc.doc_id || doc.claim_id || doc.data_id || doc.immutable_id || '');
   const recordId = String(doc.record_id || '');
+  const immutableId = String(recordId || doc.immutable_id || docId);
   return {
     ...doc,
     ...(docId ? { doc_id: docId, search_id: searchId(docId) } : {}),
     ...(recordId ? { immutable_id: recordId } : {}),
+    ...(immutableId ? { id: immutableId } : {}),
   };
 }
 
@@ -740,7 +743,7 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
       'transaction_time',
       'duration',
     ],
-    rankingRules: ['words', 'typo', 'proximity', 'attribute', 'sort', 'exactness'],
+    rankingRules: ['words', 'typo', 'proximity', 'attribute', 'exactness', 'sort'],
   };
   const task = await meiliFetch(`${meiliUrl}/indexes/${encodeURIComponent(index)}/settings`, {
     method: 'PATCH',

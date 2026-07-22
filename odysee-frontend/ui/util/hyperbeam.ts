@@ -37,8 +37,18 @@ const NATIVE_COMMENT_QUERY_CACHE_MS = HYPERBEAM_READ_CACHE_MS;
 const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const CLAIM_ID_BATCH_SIZE = 50;
-const SEARCH_HYDRATION_CONCURRENCY = 8;
+const SEARCH_HYDRATION_CONCURRENCY = 4;
+const SEARCH_HYDRATION_ATTEMPTS = 2;
+const SEARCH_HYDRATION_RETRY_MS = 150;
+const SEARCH_REQUEST_ATTEMPTS = 3;
+const SEARCH_REQUEST_RETRY_MS = 250;
+const SEARCH_REQUEST_TIMEOUT_MS = 5000;
+const HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
+const HYPERBEAM_STORE_LINK_DEPTH = 3;
+const HYPERBEAM_EAGER_STORE_LINK_FIELDS = new Set(['value', 'thumbnail']);
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
+const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
+const HYPERBEAM_PUBLIC_STORE_BATCH_PROXY = '/$/api/hyperbeam-public-store/v1/read-batch';
 const CLAIM_DEVICE = '~odysee-claim@1.0';
 const ACCOUNT_DEVICE = '~odysee-account@1.0';
 const COMMENT_DEVICE = '~odysee-comment@1.0';
@@ -48,7 +58,7 @@ const FILE_REACTION_DEVICE = '~odysee-file-reaction@1.0';
 const SUBSCRIPTION_DEVICE = ACCOUNT_DEVICE;
 const CHANNEL_DEVICE = '~odysee-channel@1.0';
 const STREAM_DEVICE = '~odysee-stream@1.0';
-const SEARCH_DEVICE = '~odysee-search@1.0';
+const SEARCH_DEVICE = '~search@1.0';
 const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
 const UPLOAD_DEVICE = '~odysee-upload@1.0';
@@ -135,9 +145,12 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const { channelUris, resolveUris: plainUris } = splitClaimIdChannelUris(mutableUris);
   const channelEntries =
     channelUris.length > 1 ? await fetchClaimIdChannelEntries(channelUris) : await fetchResolveEntries(channelUris);
-  const resolveEntries = await fetchResolveEntries([...immutableUris, ...plainUris]);
+  const immutableEntries = await fetchImmutableResolveEntries(immutableUris);
+  const resolvedImmutableUris = new Set(immutableEntries.filter(([, claim]) => claim).map(([uri]) => uri));
+  const unresolvedImmutableUris = immutableUris.filter((uri) => !resolvedImmutableUris.has(uri));
+  const resolveEntries = await fetchResolveEntries([...unresolvedImmutableUris, ...plainUris]);
 
-  return Object.fromEntries([...channelEntries, ...resolveEntries].filter(([, claim]) => claim));
+  return Object.fromEntries([...channelEntries, ...immutableEntries, ...resolveEntries].filter(([, claim]) => claim));
 }
 
 async function fetchResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
@@ -1661,15 +1674,19 @@ export async function fetchHyperbeamSubCount(claimIdCsv: string): Promise<Array<
 
 export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   let result: any = null;
+  let searchError: unknown = null;
+  const targetedSearch = isTargetedClaimSearch(params);
 
   try {
-    const response = await fetchDeviceJson(`${SEARCH_DEVICE}/query`, params);
-    result = sdkSearchFromHyperbeam(responsePayload(response));
-  } catch (_error) {
-    result = null;
+    result = await fetchHyperbeamSearchIds(params);
+  } catch (error) {
+    searchError = error;
   }
 
   if (!Array.isArray(result?.items)) {
+    if (!targetedSearch) {
+      throw searchError || new Error('HyperBEAM search returned no items array');
+    }
     const [claimResult, uploadResult] = await Promise.all([
       fetchDeviceJson(`${CLAIM_DEVICE}/search`, params)
         .then(responsePayload)
@@ -1688,6 +1705,137 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     ...result,
     items: resolvedItems,
   };
+}
+
+export async function fetchHyperbeamSearchIds(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < SEARCH_REQUEST_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetchPublicProxiedDeviceJson(
+        `${SEARCH_DEVICE}/query`,
+        genericSearchRequest(params),
+        SEARCH_REQUEST_TIMEOUT_MS
+      );
+      const result = sdkSearchFromHyperbeam(
+        await resolveLinkedSearchIds(responsePayload(response), SEARCH_REQUEST_TIMEOUT_MS)
+      );
+      if (Array.isArray(result?.items)) return result;
+      throw new Error('HyperBEAM search returned no items array');
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < SEARCH_REQUEST_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, SEARCH_REQUEST_RETRY_MS * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError || new Error('HyperBEAM search failed');
+}
+
+async function resolveLinkedSearchIds(result: any, timeoutMs = HYPERBEAM_TIMEOUT_MS): Promise<any> {
+  if (!result || Array.isArray(result.ids)) return result;
+  const link = value(result, 'ids+link', 'ids-link');
+  if (typeof link !== 'string' || !link) return result;
+
+  const linked = responsePayload(await fetchPublicProxiedDeviceJson(`${CACHE_DEVICE}/read`, { read: link }, timeoutMs));
+  const ids = indexedValues(linked);
+  return ids.length ? { ...result, ids } : result;
+}
+
+function indexedValues(source: any): Array<any> {
+  if (!isObject(source)) return [];
+  return Object.keys(source)
+    .filter((key) => /^[1-9]\d*$/.test(key))
+    .sort((left, right) => Number(left) - Number(right))
+    .map((key) => source[key]);
+}
+
+function genericSearchRequest(params: ClaimSearchOptions): Record<string, any> {
+  const size = Math.max(1, Math.min(100, toNumber(value(params, 'limit', 'size', 'page_size', 'page-size'), 20)));
+  const explicitOffset = value(params, 'offset', 'from');
+  const page = Math.max(1, toNumber(value(params, 'page'), 1));
+  const offset = Math.max(0, toNumber(explicitOffset, (page - 1) * size));
+  const filters = ['state = "active"', 'is_public = 1', 'bid_state != "Expired"', 'bid_state != "Spent"'];
+  const claimTypes = [
+    ...new Set(
+      paramValues(params, 'claim_type', 'claim-type', 'claimType').flatMap((type) => {
+        if (type === 'file') return ['stream'];
+        if (type === 'file,channel') return ['stream', 'channel'];
+        return [type];
+      })
+    ),
+  ].filter(Boolean);
+  if (claimTypes.length === 1) filters.push(`claim_type = ${JSON.stringify(claimTypes[0])}`);
+  if (claimTypes.length > 1) {
+    filters.push(`claim_type IN [${claimTypes.map((type) => JSON.stringify(type)).join(', ')}]`);
+  }
+
+  const mediaTypes = ['audio', 'video', 'image', 'text', 'application'].filter((type) =>
+    searchFlag(value(params, type))
+  );
+  if (claimTypes.length === 1 && claimTypes[0] === 'stream' && mediaTypes.length === 1) {
+    filters.push(`media_type = ${JSON.stringify(mediaTypes[0])}`);
+  } else if (claimTypes.length === 1 && claimTypes[0] === 'stream' && mediaTypes.length > 1) {
+    filters.push(`media_type IN [${mediaTypes.map((type) => JSON.stringify(type)).join(', ')}]`);
+  }
+
+  if (!searchFlag(value(params, 'nsfw'))) filters.push('nsfw = 0');
+  if (searchFlag(value(params, 'free_only', 'free-only'))) filters.push('fee = 0');
+
+  const languages = paramValues(params, 'language');
+  if (languages.length === 1) filters.push(`language = ${JSON.stringify(languages[0])}`);
+  if (languages.length > 1) {
+    filters.push(`language IN [${languages.map((language) => JSON.stringify(language)).join(', ')}]`);
+  }
+
+  const minDuration = finiteSearchNumber(value(params, 'min_duration', 'min-duration'));
+  const maxDuration = finiteSearchNumber(value(params, 'max_duration', 'max-duration'));
+  if (minDuration !== null) filters.push(`duration >= ${minDuration}`);
+  if (maxDuration !== null) filters.push(`duration <= ${maxDuration}`);
+
+  const timeFloor = searchTimeFloor(String(value(params, 'time_filter', 'time-filter') || ''));
+  if (timeFloor) filters.push(`release_time >= ${timeFloor}`);
+
+  const sort = genericSearchSort(value(params, 'sort', 'sort_by', 'sort-by', 'order_by', 'order-by'));
+  return compactParams({
+    q: String(value(params, 'q', 's', 'query') || ''),
+    limit: size,
+    offset,
+    filter: filters.join(' AND '),
+    sort,
+  });
+}
+
+function genericSearchSort(raw: any): Array<string> | undefined {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (!first) return undefined;
+  const field = String(first);
+  if (field.startsWith('^')) return [`${field.slice(1)}:asc`];
+  if (field.startsWith('-')) return [`${field.slice(1)}:desc`];
+  return [`${field}:desc`];
+}
+
+function searchFlag(raw: any): boolean {
+  return raw === true || raw === 1 || raw === '1' || raw === 'true';
+}
+
+function finiteSearchNumber(raw: any): number | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function searchTimeFloor(filter: string): number | null {
+  const ages: Record<string, number> = {
+    lasthour: 60 * 60,
+    today: 24 * 60 * 60,
+    thisweek: 7 * 24 * 60 * 60,
+    thismonth: 31 * 24 * 60 * 60,
+    thisyear: 366 * 24 * 60 * 60,
+  };
+  const age = ages[filter];
+  return age ? Math.floor(Date.now() / 1000) - age : null;
 }
 
 function isTargetedClaimSearch(params: ClaimSearchOptions): boolean {
@@ -1759,24 +1907,52 @@ async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
   const ids = items.map(searchHitId).filter(Boolean).map(String);
   if (!ids.length) return items;
 
-  const claims = (
-    await mapWithConcurrency([...new Set(ids)], SEARCH_HYDRATION_CONCURRENCY, (id) => fetchHyperbeamImmutableClaim(id))
-  ).flat();
+  const uniqueIds = [...new Set(ids)];
   const claimsById: Record<string, any> = {};
-  claims.forEach((claim) => {
-    searchClaimIds(claim).forEach((id) => {
+
+  await mapWithConcurrency(uniqueIds, SEARCH_HYDRATION_CONCURRENCY, async (id) => {
+    const claims = await fetchCachedHyperbeamImmutableClaim(id);
+    const claim = claims[0];
+    if (claim) {
       claimsById[id] = claim;
-    });
+      searchClaimIds(claim).forEach((claimId) => {
+        claimsById[claimId] = claim;
+      });
+    }
+    return claims;
   });
 
   return items.flatMap((item) => {
     const id = String(searchHitId(item) || '');
     const claim = claimsById[id];
     if (claim) return [claim];
-    // Compatibility responses may already contain a full SDK claim. Plain
-    // search IDs, however, must never be presented as product objects.
     return item && typeof item === 'object' ? [item] : [];
   });
+}
+
+function fetchCachedHyperbeamImmutableClaim(claimId: string): Promise<Array<Claim>> {
+  const key = `search-hydration:${claimId}`;
+  const now = Date.now();
+  const cached = deviceReadCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+
+  const promise = fetchHyperbeamImmutableClaimWithRetry(claimId).then((claims) => {
+    if (!claims.length) deviceReadCache.delete(key);
+    return claims;
+  });
+  deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
+  return promise;
+}
+
+async function fetchHyperbeamImmutableClaimWithRetry(claimId: string): Promise<Array<Claim>> {
+  for (let attempt = 0; attempt < SEARCH_HYDRATION_ATTEMPTS; attempt += 1) {
+    const claims = await fetchHyperbeamImmutableClaim(claimId);
+    if (claims.length) return claims;
+    if (attempt + 1 < SEARCH_HYDRATION_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, SEARCH_HYDRATION_RETRY_MS));
+    }
+  }
+  return [];
 }
 
 function searchHitId(item: any) {
@@ -1785,14 +1961,16 @@ function searchHitId(item: any) {
     item,
     'immutable_id',
     'immutable-id',
+    'record_id',
+    'record-id',
     'legacy_outpoint',
     'legacy-outpoint',
+    'outpoint',
     'doc_id',
     'doc-id',
     'claim_id',
     'claim-id',
-    'search_id',
-    'search-id'
+    'id'
   );
 }
 
@@ -1822,7 +2000,10 @@ function searchClaimIds(claim: any): Array<string> {
     value(claim, 'immutable_id', 'immutable-id'),
     value(claim, 'outpoint'),
     txid !== undefined && nout !== undefined ? `${txid}:${nout}` : null,
-    value(hyperbeam, 'upload_id', 'upload-id', 'record_id', 'record-id', 'data_id', 'data-id'),
+    value(hyperbeam, 'immutable_id', 'immutable-id'),
+    value(hyperbeam, 'record_id', 'record-id'),
+    value(hyperbeam, 'upload_id', 'upload-id'),
+    value(hyperbeam, 'data_id', 'data-id'),
   ]
     .filter(Boolean)
     .map(String);
@@ -1864,7 +2045,10 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
   if (!baseUrl) return [];
 
   try {
-    const storeId = isOutpointId(claimId) ? claimId : await fetchHyperbeamClaimStoreId({ claim_id: claimId });
+    const storeId =
+      isOutpointId(claimId) || isStandaloneImmutableId(claimId)
+        ? claimId
+        : await fetchHyperbeamClaimStoreId({ claim_id: claimId });
     if (!storeId) return [];
     const url = `${baseUrl}/${encodeDataPath(storeId)}`;
     const requestHeaders = {
@@ -1932,7 +2116,7 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
           .then(responsePayload)
           .catch(() => null)
       : null;
-    const claim = immutableClaimFromHyperbeam(sourceClaim, claimId, signingChannel, decodedClaim);
+    const claim = immutableClaimFromHyperbeam(sourceClaim, storeId, signingChannel, decodedClaim);
     return claim?.claim_id ? [claim] : [];
   } catch {
     return [];
@@ -2184,7 +2368,11 @@ export async function fetchHyperbeamStreamVerification(
   return responsePayload(result);
 }
 
-async function fetchDeviceJson(path: string, body: Record<string, any>): Promise<any | null> {
+async function fetchDeviceJson(
+  path: string,
+  body: Record<string, any>,
+  timeoutMs = HYPERBEAM_TIMEOUT_MS
+): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) throw new Error('HyperBEAM node is not configured');
 
@@ -2206,11 +2394,12 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
       method: 'POST',
       credentials: hyperbeamFetchCredentials(baseUrl),
       headers: {
+        Accept: 'application/json',
         'Content-Type': 'application/json',
         ...authTokenHeader(authToken),
       },
       body: JSON.stringify(params),
-      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+      signal: timeoutSignal(timeoutMs),
     });
 
     if (!response.ok) {
@@ -2220,6 +2409,103 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
   } catch (error) {
     throw hyperbeamDeviceFetchError(path, error);
   }
+}
+
+async function fetchPublicProxiedDeviceJson(
+  path: string,
+  body: Record<string, any>,
+  timeoutMs: number
+): Promise<any | null> {
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const devicePath = `/${path}`;
+  const device = path.split('/')[0];
+  const url = `${HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE}/${path}`;
+  const requestKey = `${path}:${stableJson(body).slice(0, 180)}`;
+
+  pushHyperbeamDebug(
+    'request',
+    {
+      method: 'POST',
+      devicePath,
+      device,
+      deviceLayer: 'native-device',
+      sourceLayer: 'native-device',
+      requestKey,
+      requestBody: body,
+      url,
+    },
+    'info'
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: timeoutSignal(timeoutMs),
+    });
+  } catch (error) {
+    pushHyperbeamDebug(
+      'request failed',
+      {
+        method: 'POST',
+        devicePath,
+        device,
+        deviceLayer: 'native-device',
+        sourceLayer: 'native-device',
+        requestKey,
+        url,
+        elapsedMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt),
+        error: String(error?.message || error),
+      },
+      'error'
+    );
+    throw hyperbeamDeviceFetchError(path, error);
+  }
+
+  const responseText = await response.text();
+  const responseBody = parseJsonString(responseText);
+  const elapsedMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
+
+  pushHyperbeamDebug(
+    'response',
+    {
+      status: response.status,
+      ok: response.ok,
+      devicePath,
+      device,
+      deviceLayer: 'native-device',
+      sourceLayer: 'native-device',
+      requestKey,
+      url,
+      elapsedMs,
+      contentType: response.headers.get('content-type') || '',
+      response: responseBody || undefined,
+    },
+    response.ok ? 'ok' : 'error'
+  );
+
+  if (!response.ok) throw hyperbeamDeviceError(path, response.status);
+  return responseBody;
+}
+
+function fetchCachedPublicProxiedDeviceJson(path: string, body: Record<string, any>): Promise<any | null> {
+  const key = `public-proxy:${path}:${stableJson(stripPrivateParams(compactParams(body)))}`;
+  const now = Date.now();
+  const cached = deviceReadCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+
+  const promise = fetchPublicProxiedDeviceJson(path, body, HYPERBEAM_TIMEOUT_MS).catch((error) => {
+    deviceReadCache.delete(key);
+    throw error;
+  });
+  deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
+  return promise;
 }
 
 async function fetchAuthDeviceJson(
@@ -2863,13 +3149,32 @@ function cacheReadClaim(result: any): any {
 
 function sdkSearchFromHyperbeam(result: any): any {
   if (!result) return null;
-  const sdkResult = result.result && Array.isArray(result.result.items) ? result.result : result;
+  const sdkResult =
+    result.result && (Array.isArray(result.result.items) || Array.isArray(result.result.ids)) ? result.result : result;
+  const items = Array.isArray(sdkResult.items)
+    ? sdkResult.items
+    : Array.isArray(sdkResult.ids)
+      ? sdkResult.ids
+      : undefined;
+  const pageSize =
+    value(sdkResult, 'page_size', 'page-size', 'limit') ?? value(result, 'page_size', 'page-size', 'limit');
+  const offset = toNumber(value(sdkResult, 'offset') ?? value(result, 'offset'), 0);
+  const totalItems =
+    value(sdkResult, 'total_items', 'total-items', 'total') ??
+    value(result, 'total_items', 'total-items', 'total') ??
+    items?.length ??
+    0;
 
   return {
     ...sdkResult,
-    page_size: value(sdkResult, 'page_size', 'page-size') || value(result, 'page_size', 'page-size'),
-    total_items: value(sdkResult, 'total_items', 'total-items') || value(result, 'total_items', 'total-items'),
-    total_pages: value(sdkResult, 'total_pages', 'total-pages') || value(result, 'total_pages', 'total-pages'),
+    items,
+    page: value(sdkResult, 'page') ?? (pageSize ? Math.floor(offset / pageSize) + 1 : 1),
+    page_size: pageSize,
+    total_items: totalItems,
+    total_pages:
+      value(sdkResult, 'total_pages', 'total-pages') ??
+      value(result, 'total_pages', 'total-pages') ??
+      totalPages(toNumber(totalItems, items?.length || 0), pageSize || 20),
   };
 }
 
@@ -2968,6 +3273,99 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
     ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId).catch(() => null)
     : null;
   return immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim);
+}
+
+async function fetchImmutableResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
+  const immutableIds = urls.map(immutableRouteIdFromUri).filter((id): id is string => Boolean(id));
+  const batchResults = await fetchImmutableBatchJsonOrNull(immutableIds).catch(() => new Map<string, any>());
+  const loaded = await Promise.all(
+    urls.map(async (uri) => {
+      const immutableId = immutableRouteIdFromUri(uri);
+      if (!immutableId) return { uri, immutableId: null, result: null, decodedClaim: null };
+
+      const result =
+        batchResults.get(immutableId) || (await fetchCachedImmutableJsonOrNull(immutableId).catch(() => null));
+      return {
+        uri,
+        immutableId,
+        result,
+        decodedClaim: decodeClaimMetadata(storePayload(result)),
+      };
+    })
+  );
+  const channelIds = Array.from(
+    new Set(loaded.map(({ decodedClaim }) => decodedClaim?.signedChannelId).filter((id): id is string => Boolean(id)))
+  );
+  const channelsById = await fetchImmutableSigningChannels(channelIds);
+
+  return loaded.map(({ uri, immutableId, result, decodedClaim }) => [
+    uri,
+    immutableId && result
+      ? immutableClaimFromHyperbeam(
+          result,
+          immutableId,
+          decodedClaim?.signedChannelId ? channelsById.get(decodedClaim.signedChannelId.toLowerCase()) : null,
+          decodedClaim
+        )
+      : null,
+  ]);
+}
+
+async function fetchImmutableSigningChannels(channelIds: Array<string>): Promise<Map<string, any>> {
+  const channelsById = new Map<string, any>();
+  if (!channelIds.length) return channelsById;
+
+  const response = await fetchCachedPublicProxiedDeviceJson(`${CLAIM_DEVICE}/search`, {
+    claim_ids: channelIds,
+    page_size: channelIds.length,
+  }).catch(() => null);
+  const search = sdkSearchFromHyperbeam(responsePayload(response));
+  const items = Array.isArray(search?.items) ? search.items : [];
+  const storeIdByChannelId = new Map<string, string>();
+
+  items.forEach((item: any) => {
+    const claim = sdkClaimFromHyperbeam(item);
+    const claimId = value(claim, 'claim_id', 'claim-id');
+    if (!claimId) return;
+
+    const channelId = String(claimId).toLowerCase();
+    if (value(claim, 'value_type', 'value-type') === 'channel' && isObject(value(claim, 'value'))) {
+      channelsById.set(channelId, claim);
+      deviceReadCache.set(`immutable-channel:${channelId}`, {
+        expiresAt: Date.now() + HYPERBEAM_READ_CACHE_MS,
+        promise: Promise.resolve(claim),
+      });
+      return;
+    }
+
+    const storeId = immutableReadIdFromClaim(claim);
+    if (storeId) storeIdByChannelId.set(channelId, storeId);
+  });
+
+  const storeResults = await fetchImmutableBatchJsonOrNull(Array.from(new Set(storeIdByChannelId.values()))).catch(
+    () => new Map<string, any>()
+  );
+
+  storeIdByChannelId.forEach((storeId, channelId) => {
+    const result = storeResults.get(storeId);
+    if (result) {
+      channelsById.set(channelId, result);
+      deviceReadCache.set(`immutable-channel:${channelId}`, {
+        expiresAt: Date.now() + HYPERBEAM_READ_CACHE_MS,
+        promise: Promise.resolve(result),
+      });
+    }
+  });
+
+  const unresolvedChannelIds = channelIds.filter((channelId) => !channelsById.has(channelId.toLowerCase()));
+  await Promise.all(
+    unresolvedChannelIds.map(async (channelId) => {
+      const result = await fetchCachedImmutableChannelJsonOrNull(channelId).catch(() => null);
+      if (result) channelsById.set(channelId.toLowerCase(), result);
+    })
+  );
+
+  return channelsById;
 }
 
 async function fetchHyperbeamLocatedClaim(uri: string): Promise<any | null> {
@@ -3147,6 +3545,129 @@ function fetchCachedImmutableJsonOrNull(id: string): Promise<any | null> {
   });
   deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
   return promise;
+}
+
+async function fetchImmutableBatchJsonOrNull(ids: Array<string>): Promise<Map<string, any>> {
+  const uniqueIds = Array.from(new Set(ids.filter((id) => isOutpointId(id) || isStandaloneImmutableId(id))));
+  const results = new Map<string, any>();
+  const uncachedIds: Array<string> = [];
+
+  await Promise.all(
+    uniqueIds.map(async (id) => {
+      const cached = deviceReadCache.get(`immutable:${id}`);
+      if (cached && cached.expiresAt > Date.now()) {
+        const result = await cached.promise.catch(() => null);
+        if (result) {
+          results.set(id, result);
+        } else {
+          deviceReadCache.delete(`immutable:${id}`);
+          uncachedIds.push(id);
+        }
+      } else {
+        uncachedIds.push(id);
+      }
+    })
+  );
+
+  if (uncachedIds.length) {
+    const batchResults = await fetchPublicStoreBatchResults(uncachedIds);
+    batchResults.forEach((result, id) => results.set(id, result));
+  }
+
+  const expandedResults = await expandHyperbeamStoreLinks(results);
+  const expiresAt = Date.now() + HYPERBEAM_READ_CACHE_MS;
+  expandedResults.forEach((result, id) => {
+    deviceReadCache.set(`immutable:${id}`, { expiresAt, promise: Promise.resolve(result) });
+  });
+  return expandedResults;
+}
+
+async function fetchPublicStoreBatchResults(ids: Array<string>): Promise<Map<string, any>> {
+  const uniqueIds = Array.from(new Set(ids.filter(isPublicStoreBatchId)));
+  const chunks: Array<Array<string>> = [];
+  for (let index = 0; index < uniqueIds.length; index += HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT) {
+    chunks.push(uniqueIds.slice(index, index + HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT));
+  }
+
+  const payloads = await Promise.all(
+    chunks.map(async (chunk) => {
+      const response = await fetch(HYPERBEAM_PUBLIC_STORE_BATCH_PROXY, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ ids: chunk }),
+        signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`HyperBEAM store batch failed with ${response.status}`);
+      return response.json();
+    })
+  );
+
+  const results = new Map<string, any>();
+  payloads.forEach((payload) => {
+    const batchResults = isObject(payload?.results) ? payload.results : {};
+    Object.entries(batchResults).forEach(([id, result]) => {
+      if (result) results.set(id, result);
+    });
+  });
+  return results;
+}
+
+async function expandHyperbeamStoreLinks(results: Map<string, any>): Promise<Map<string, any>> {
+  for (let depth = 0; depth < HYPERBEAM_STORE_LINK_DEPTH; depth += 1) {
+    const references: Array<{ owner: Record<string, any>; field: string; id: string }> = [];
+    const seen = new WeakSet<object>();
+    results.forEach((result) => collectHyperbeamStoreLinks(result, references, seen));
+    if (!references.length) break;
+
+    const linkedResults = await fetchPublicStoreBatchResults(references.map(({ id }) => id)).catch(
+      () => new Map<string, any>()
+    );
+    if (!linkedResults.size) break;
+    references.forEach(({ owner, field, id }) => {
+      const linked = linkedResults.get(id);
+      if (linked) owner[field] = linked;
+    });
+  }
+  return results;
+}
+
+function collectHyperbeamStoreLinks(
+  source: any,
+  references: Array<{ owner: Record<string, any>; field: string; id: string }>,
+  seen: WeakSet<object>
+) {
+  if (!source || typeof source !== 'object' || seen.has(source)) return;
+  seen.add(source);
+
+  if (Array.isArray(source)) {
+    source.forEach((item) => collectHyperbeamStoreLinks(item, references, seen));
+    return;
+  }
+
+  Object.entries(source).forEach(([key, entry]) => {
+    const field = linkedStoreField(key);
+    if (field && source[field] === undefined && isPublicStoreBatchId(entry)) {
+      references.push({ owner: source, field, id: entry });
+      return;
+    }
+    collectHyperbeamStoreLinks(entry, references, seen);
+  });
+}
+
+function linkedStoreField(key: string): string | null {
+  if (key.endsWith('+link') || key.endsWith('-link')) {
+    const field = key.slice(0, -5);
+    return HYPERBEAM_EAGER_STORE_LINK_FIELDS.has(field) ? field : null;
+  }
+  return null;
+}
+
+function isPublicStoreBatchId(id: any): id is string {
+  return typeof id === 'string' && (isOutpointId(id) || /^[A-Za-z0-9_-]{43}$/.test(id));
 }
 
 function uploadClaimFromHyperbeam(item: any): any {
