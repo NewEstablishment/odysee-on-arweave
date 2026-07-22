@@ -41,6 +41,11 @@ import { selectSettingsForChannelId } from 'redux/selectors/comments';
 import { doFetchItemsInCollection } from 'redux/actions/collections';
 import { PREFERENCE_EMBED } from 'constants/tags';
 import withResolvedClaimRender from 'hocs/withResolvedClaimRender';
+import {
+  hyperbeamImmutableIdFromClaim,
+  hyperbeamImmutableWebPath,
+  isHyperbeamImmutableWebPath,
+} from 'util/hyperbeam-route';
 const ChannelPage = lazyImport(
   () =>
     import(
@@ -72,6 +77,7 @@ const ClaimPageComponent = (props: Props) => {
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const channelClaimId = getChannelIdFromClaim(claim);
   const { canonical_url: canonicalUrl, claim_id: claimId } = claim || {};
+  const immutablePath = hyperbeamImmutableWebPath(hyperbeamImmutableIdFromClaim(claim));
   const collectionId =
     urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID) ||
     (claim && claim.value_type === 'collection' && claim.claim_id) ||
@@ -169,8 +175,12 @@ const ClaimPageComponent = (props: Props) => {
     }
   }, [canonicalUrl, dispatch, latestClaimUrl, latestContentPath]);
   useEffect(() => {
-    // Preserve /$/embed/... URLs; do not rewrite to canonical when embedded
-    if (isEmbed) return;
+    if (!isEmbed && claim?.value_type !== 'channel' && immutablePath && !isHyperbeamImmutableWebPath(pathname)) {
+      navigate(`${immutablePath}${search}${hash}`, { replace: true });
+    }
+  }, [claim?.value_type, hash, immutablePath, isEmbed, navigate, pathname, search]);
+  useEffect(() => {
+    if (isEmbed || isHyperbeamImmutableWebPath(pathname)) return;
 
     if (canonicalUrl) {
       const statePos =

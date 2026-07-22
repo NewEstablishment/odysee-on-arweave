@@ -5,6 +5,7 @@ import ShortUrl from 'services/shortUrl';
 import * as PAGES from '../constants/pages';
 import { parseURI, buildURI } from '../util/lbryURI';
 import * as COLLECTIONS_CONSTS from '../constants/collections';
+import { hyperbeamImmutableIdFromUri, hyperbeamImmutableWebPath } from './hyperbeam-route';
 
 function encodeWithSpecialCharEncode(string: string): string {
   // encodeURIComponent doesn't encode `'` and others
@@ -14,6 +15,9 @@ function encodeWithSpecialCharEncode(string: string): string {
 
 export const formatLbryUrlForWeb = (uri: string): string => {
   if (!uri) return uri;
+  const immutablePath = hyperbeamImmutableWebPath(hyperbeamImmutableIdFromUri(uri));
+  if (immutablePath) return immutablePath;
+
   let newUrl = uri.replace('lbry://', '/').replace(/#/g, ':');
 
   if (newUrl.startsWith('/?')) {

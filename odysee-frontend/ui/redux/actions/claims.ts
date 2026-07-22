@@ -39,6 +39,7 @@ import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { fetchHyperbeamResolveClaimIds, fetchHyperbeamUploadList } from 'util/hyperbeam';
 import { canDeleteThroughHyperbeam, deleteThroughHyperbeam } from 'services/hyperbeamUpload';
 import { getAuthToken } from 'util/saved-passwords';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 let onChannelConfirmCallback;
 let checkPendingInterval;
 
@@ -532,7 +533,7 @@ export function doResolveClaimIds(claimIds: Array<string>, returnCachedClaims: b
       const claim = claimsById[claimId];
 
       if (returnCachedClaims && claim && claim.canonical_url) {
-        cachedClaims[claim.canonical_url] = {
+        cachedClaims[hyperbeamImmutableUriFromClaim(claim) || claim.canonical_url] = {
           stream: claim,
         };
         return false;
@@ -635,6 +636,7 @@ async function fetchHyperbeamClaimIdChunk(dispatch: Dispatch, claimIds: Array<st
     const urls = [];
     data.items.forEach((claim: Claim) => {
       const claimUrl = claim.canonical_url || claim.permanent_url || claim.short_url || claim.claim_id;
+      const immutableUri = hyperbeamImmutableUriFromClaim(claim);
       const claimIdUrl = buildURI(
         claim.value_type === 'channel'
           ? { channelName: claim.name, channelClaimId: claim.claim_id }
@@ -647,7 +649,8 @@ async function fetchHyperbeamClaimIdChunk(dispatch: Dispatch, claimIds: Array<st
           : { stream: claim };
       resolveInfo[claimUrl] = resolvedClaim;
       resolveInfo[claimIdUrl] = resolvedClaim;
-      urls.push(claimUrl);
+      if (immutableUri) resolveInfo[immutableUri] = resolvedClaim;
+      urls.push(immutableUri || claimUrl);
     });
 
     const costInfos = (

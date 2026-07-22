@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Navigate, NavigationType, Route, Routes, useLocation, useNavigationType } from 'react-router-dom';
+import { Navigate, NavigationType, Route, Routes, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import * as PAGES from 'constants/pages';
 import * as SETTINGS from 'constants/settings';
 import { PAGE_TITLE } from 'constants/pageTitles';
@@ -24,6 +24,7 @@ import { doSetHasNavigated, doSetActiveChannel } from 'redux/actions/app';
 import { doUserSetReferrerForUri } from 'redux/actions/user';
 import { selectHasUnclaimedRefereeReward } from 'redux/selectors/rewards';
 import { selectUnseenNotificationCount } from 'redux/selectors/notifications';
+import { HYPERBEAM_IMMUTABLE_WEB_PREFIX, hyperbeamImmutableUri } from 'util/hyperbeam-route';
 const PLAYLIST_PATH = getPathForPage(PAGES.PLAYLIST);
 const Code2257Page = lazyImport(
   () =>
@@ -581,6 +582,12 @@ function AutoplayClearWrapper({ uri }: { uri: string }) {
   return <ClaimPage uri={uri} />;
 }
 
+function ImmutableClaimRoute() {
+  const { immutableId } = useParams();
+  const uri = hyperbeamImmutableUri(immutableId);
+  return uri ? <AutoplayClearWrapper uri={uri} /> : <FourOhFourPage />;
+}
+
 function PrivateRoute(props: PrivateRouteProps) {
   const location = useLocation();
   const { component: Component, isAuthenticated, ...rest } = props;
@@ -1012,6 +1019,7 @@ function AppRouter(props: Props) {
           path={`/$/${PAGES.LIVE_NOW}/:channelName`}
           element={renderLegacyPage(ClaimPage, { uri, liveContentPath: true })}
         />
+        <Route path={`${HYPERBEAM_IMMUTABLE_WEB_PREFIX}:immutableId`} element={<ImmutableClaimRoute />} />
 
         {homepageData === undefined ? (
           <Route

@@ -7,6 +7,7 @@ import { allowHyperbeamCompatibilityReads, isHyperbeamEnabled } from 'util/hyper
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { parseURI } from 'util/lbryURI';
 import { getAuthToken } from 'util/saved-passwords';
+import { hyperbeamImmutableIdFromUri, hyperbeamImmutableUri, hyperbeamImmutableWebPath } from 'util/hyperbeam-route';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
@@ -1594,12 +1595,7 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
   const signingChannel = decodedClaim?.signedChannelId
     ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId).catch(() => null)
     : null;
-  const parsed = parseURI(uri);
-  const name = parsed.streamName || parsed.claimName;
-  const claim = immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name);
-  if (!claim) return null;
-
-  return !name || claim.name === name ? claim : null;
+  return immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim);
 }
 
 async function fetchHyperbeamLocatedClaim(uri: string): Promise<any | null> {
@@ -1997,6 +1993,8 @@ function immutableClaimFromHyperbeam(
       ...(isObject(value(claim, 'hyperbeam')) ? value(claim, 'hyperbeam') : {}),
       immutable_id: String(storeId),
       'immutable-id': String(storeId),
+      'immutable-uri': hyperbeamImmutableUri(String(storeId)),
+      'immutable-path': hyperbeamImmutableWebPath(String(storeId)),
       'store-path': `/${encodeDataPath(String(storeId))}`,
       'source-claim-id': sourceClaimId,
       txid,
@@ -2406,6 +2404,9 @@ function webSafeImmutableId(id: any): string {
 }
 
 function immutableRouteIdFromUri(uri: string): string | null {
+  const immutableId = hyperbeamImmutableIdFromUri(uri);
+  if (immutableId) return immutableId;
+
   let parsed;
   try {
     parsed = parseURI(uri);
