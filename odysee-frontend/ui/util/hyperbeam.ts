@@ -4,7 +4,6 @@ import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import Lbry from 'lbry';
 import { Lbryio } from 'lbryinc';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
-import { allowHyperbeamCompatibilityReads, isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
@@ -118,6 +117,7 @@ const AUTH_REQUIRED_DEVICE_PATHS = new Set([
   `${COMMENT_DEVICE}/moderation-remove-delegate`,
   `${COMMENT_DEVICE}/moderation-list-delegates`,
   `${COMMENT_DEVICE}/moderation-am-i`,
+  `${COMMENT_DEVICE}/super-list`,
 ]);
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
@@ -199,7 +199,7 @@ export async function fetchHyperbeamGet(params: any): Promise<any | null> {
 
   const response = await fetchDeviceJson(
     `${STREAM_DEVICE}/playback`,
-    uri ? { uri, mode: 'hyperbeam', media_base_url: hyperbeamBaseUrl() } : { id }
+    uri ? { uri, media_base_url: hyperbeamBaseUrl() } : { id }
   );
   return playbackPayloadFromHyperbeam(responsePayload(response));
 }
@@ -274,6 +274,10 @@ export async function fetchHyperbeamCommentById(params: CommentByIdParams): Prom
     items: [commentFromHyperbeam(item)],
     ancestors: Array.isArray(result.ancestors) ? result.ancestors.map(commentFromHyperbeam) : [],
   };
+}
+
+export async function fetchHyperbeamCommentSuperList(params: SuperListParams): Promise<SuperListResponse | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/super-list`, params);
 }
 
 export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): Promise<CommentCreateResponse | null> {
@@ -1812,7 +1816,14 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
     );
     if (!response.ok || !json) return [];
 
-    const claim = sdkClaimFromHyperbeam(expandedClaim || cacheReadClaim(claimPayload), claimId);
+    const sourceClaim = expandedClaim || cacheReadClaim(claimPayload);
+    const decodedClaim = decodeClaimMetadata(storePayload(sourceClaim));
+    const signingChannel = decodedClaim?.signedChannelId
+      ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
+          .then(responsePayload)
+          .catch(() => null)
+      : null;
+    const claim = immutableClaimFromHyperbeam(sourceClaim, claimId, signingChannel, decodedClaim);
     return claim?.claim_id ? [claim] : [];
   } catch {
     return [];
@@ -2064,10 +2075,7 @@ export async function fetchHyperbeamStreamVerification(
 
 async function fetchDeviceJson(path: string, body: Record<string, any>): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
-  if (!baseUrl) {
-    if (isHyperbeamEnabled()) throw new Error('HyperBEAM node is not configured');
-    return null;
-  }
+  if (!baseUrl) throw new Error('HyperBEAM node is not configured');
 
   try {
     if (AUTH_REQUIRED_DEVICE_PATHS.has(path)) {
@@ -2095,13 +2103,11 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
     });
 
     if (!response.ok) {
-      if (isHyperbeamEnabled()) throw hyperbeamDeviceError(path, response.status);
-      return null;
+      throw hyperbeamDeviceError(path, response.status);
     }
     return await response.json();
   } catch (error) {
-    if (isHyperbeamEnabled()) throw hyperbeamDeviceFetchError(path, error);
-    return null;
+    throw hyperbeamDeviceFetchError(path, error);
   }
 }
 
@@ -2143,8 +2149,7 @@ async function fetchAuthDeviceJson(
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
   } catch (error) {
-    if (isHyperbeamEnabled()) throw hyperbeamDeviceFetchError(path, error);
-    return null;
+    throw hyperbeamDeviceFetchError(path, error);
   }
   const elapsedMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
   const responseText = await response.text();
@@ -2169,8 +2174,7 @@ async function fetchAuthDeviceJson(
   );
 
   if (!response.ok) {
-    if (isHyperbeamEnabled()) throw hyperbeamDeviceError(path, response.status);
-    return null;
+    throw hyperbeamDeviceError(path, response.status);
   }
 
   return parseJsonString(responseText);
@@ -2373,10 +2377,7 @@ function buildCacheUrl(baseUrl: string, path: string): string {
 
 async function fetchCacheJson(path: string): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
-  if (!baseUrl) {
-    if (isHyperbeamEnabled()) throw new Error('HyperBEAM node is not configured');
-    return null;
-  }
+  if (!baseUrl) throw new Error('HyperBEAM node is not configured');
 
   const response = await fetch(buildCacheUrl(baseUrl, path), {
     method: 'GET',
@@ -2386,8 +2387,7 @@ async function fetchCacheJson(path: string): Promise<any | null> {
   });
 
   if (!response.ok) {
-    if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
-    return null;
+    throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
   }
 
   return await response.json();
@@ -2603,7 +2603,8 @@ function uriWithClaimId(uri: any, claimId: any): string | null {
 
 function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   if (!result) return null;
-  const claim = responsePayload(result.claim || result);
+  const nestedClaim = isObject(result.claim) ? result.claim : null;
+  const claim = responsePayload(nestedClaim || result);
   const nativeUpload = Boolean(
     value(claim, 'hyperbeam') ||
     value(claim, 'hyperbeam+link', 'hyperbeam-link') ||
@@ -3231,7 +3232,6 @@ function totalPages(totalItems: number, pageSize: number) {
 async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) return null;
-  if (!allowHyperbeamCompatibilityReads() && isCompatibilityStorePath(path)) return null;
 
   try {
     const response = await fetch(buildDeviceUrl(baseUrl, path), {
@@ -3261,25 +3261,6 @@ function fetchCachedStoreJsonOrNull(path: string, preferJson: boolean = true): P
 
 function storePath(prefix: string, value: string): string {
   return `${prefix}/${encodeURIComponent(value)}`;
-}
-
-function isCompatibilityStorePath(path: string): boolean {
-  return [
-    'odysee/claim/',
-    'odysee/claim-id/',
-    'odysee/stream/',
-    'odysee/stream-id/',
-    'odysee/channel/',
-    'odysee/channel-id/',
-    'odysee/comment/',
-    'odysee/comment-id/',
-    'odysee/comment-reaction/',
-    'odysee/file-view-count/',
-    'odysee/file-reaction/',
-    'odysee/subscription-count/',
-    'odysee/media/stream/',
-    'odysee/media/stream-id/',
-  ].some((prefix) => path.startsWith(prefix));
 }
 
 function encodeDataPath(id: string): string {
@@ -3504,11 +3485,25 @@ function storePayload(result: any): any {
 
 function decodeClaimMetadata(payload: any): DecodedClaimMetadata | null {
   const claimHex = value(payload, 'claim', 'claim-value-hex', 'claim_value_hex');
-  const bytes = hexToBytes(claimHex);
+  const bytes = encodedClaimBytes(claimHex);
   if (!bytes) return null;
 
   try {
     return { signedChannelId: claimEnvelope(bytes).signedChannelId };
+  } catch {
+    return null;
+  }
+}
+
+function encodedClaimBytes(value: any): Uint8Array | null {
+  const hex = hexToBytes(value);
+  if (hex) return hex;
+  if (typeof value !== 'string' || !/^[0-9a-z_-]+$/i.test(value)) return null;
+
+  try {
+    const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='));
+    return Uint8Array.from(decoded, (char) => char.charCodeAt(0));
   } catch {
     return null;
   }
@@ -3651,7 +3646,6 @@ function claimIdFromChannelUri(uri: string): string | null {
 function hyperbeamMediaUrlFromPayload(payload: any): string {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl || !payload) return '';
-  if (!allowHyperbeamCompatibilityReads()) return '';
 
   const txid = value(payload, 'txid');
   const nout = value(payload, 'nout');
@@ -3698,7 +3692,10 @@ function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> 
   const promise = (
     isOutpointId(id) || isStandaloneImmutableId(id)
       ? fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false)
-      : fetchStoreJsonOrNull(storePath('odysee/claim-id', id))
+      : fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { claim_ids: [id] }).then((response) => {
+          const result = sdkSearchFromHyperbeam(responsePayload(response));
+          return Array.isArray(result?.items) ? result.items[0] || null : null;
+        })
   ).catch((error) => {
     deviceReadCache.delete(key);
     throw error;

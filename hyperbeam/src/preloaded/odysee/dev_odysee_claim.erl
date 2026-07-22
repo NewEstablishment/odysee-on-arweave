@@ -636,14 +636,15 @@ normalize_claim(Claim, Raw, Opts) ->
     end.
 
 normalize_search_result(Result, Raw, Opts) ->
-    Items = search_items(Result, Opts),
+    Items = [with_immutable_id(Item, Opts) || Item <- search_items(Result, Opts)],
     Claims = normalize_search_claims(Items, Raw, Opts),
     ClaimIDs = [hb_maps:get(<<"claim-id">>, Claim, Opts) || Claim <- Claims],
+    NormalizedResult = Result#{ <<"items">> => Items },
     Msg0 = #{
         <<"device">> => ?DEVICE,
         <<"content-type">> => <<"application/json">>,
         <<"body">> => Raw,
-        <<"result">> => Result,
+        <<"result">> => NormalizedResult,
         <<"items">> => Items,
         <<"claims">> => Claims,
         <<"claim-ids">> => ClaimIDs
@@ -704,6 +705,18 @@ search_items(Result, Opts) when is_map(Result) ->
     end;
 search_items(_Result, _Opts) ->
     [].
+
+with_immutable_id(Claim, Opts) when is_map(Claim) ->
+    case {first_value([<<"txid">>], Claim, Opts), first_value([<<"nout">>], Claim, Opts)} of
+        {TxID, NOut} when is_binary(TxID), is_integer(NOut), NOut >= 0 ->
+            Claim#{ <<"immutable_id">> => <<TxID/binary, ":", (integer_to_binary(NOut))/binary>> };
+        {TxID, NOut} when is_binary(TxID), is_binary(NOut), NOut =/= <<>> ->
+            Claim#{ <<"immutable_id">> => <<TxID/binary, ":", NOut/binary>> };
+        _ ->
+            Claim
+    end;
+with_immutable_id(Claim, _Opts) ->
+    Claim.
 
 normalize_search_claims(Items, Raw, Opts) ->
     lists:filtermap(
@@ -972,6 +985,17 @@ search_accepts_supplied_result_test() ->
     {ok, Msg} = search(#{}, #{ <<"result">> => Result }, #{}),
     ?assertEqual(2, hb_maps:get(<<"page">>, Msg, #{})),
     ?assertEqual(1, length(hb_maps:get(<<"claims">>, Msg, #{}))).
+
+search_adds_immutable_outpoint_test() ->
+    TxID = <<"4bf53de1ef6237336665bd82d92655ed899baf878f61e2a9755d0512189cd9f7">>,
+    Claim = (target_claim())#{ <<"txid">> => TxID, <<"nout">> => 2 },
+    Result = #{ <<"items">> => [Claim] },
+    {ok, Msg} = search(#{}, #{ <<"result">> => Result }, #{}),
+    [Item] = hb_maps:get(<<"items">>, Msg, #{}),
+    ?assertEqual(<<TxID/binary, ":2">>, hb_maps:get(<<"immutable_id">>, Item, #{})),
+    NormalizedResult = hb_maps:get(<<"result">>, Msg, #{}),
+    [ResultItem] = hb_maps:get(<<"items">>, NormalizedResult, #{}),
+    ?assertEqual(<<TxID/binary, ":2">>, hb_maps:get(<<"immutable_id">>, ResultItem, #{})).
 
 transaction_accepts_supplied_result_test() ->
     Result = #{

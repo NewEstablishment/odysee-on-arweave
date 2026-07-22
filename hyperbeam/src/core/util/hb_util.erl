@@ -306,7 +306,7 @@ encode(_) ->
 %% @doc Decode a URL safe base64 binary or iolist into a binary. Uses the
 %% checked decoder: the unchecked variant corrupts certain valid inputs (e.g.
 %% native commitment IDs and ecdsa-secp256k1 owner/signature fields), breaking
-%% commitment verification on round-trip. See aidocs/bhavya-port-validation.md.
+%% commitment verification on round-trip.
 decode(Bin) when is_binary(Bin) ->
     b64veryfast:decode64_url(Bin);
 decode(List) when is_list(List) ->

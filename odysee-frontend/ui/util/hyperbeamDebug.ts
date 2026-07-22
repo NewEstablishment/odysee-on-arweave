@@ -1,10 +1,5 @@
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
-import {
-  getHyperbeamMode,
-  HYPERBEAM_MODES,
-  isHyperbeamPublicReadDevice,
-  shouldAllowOriginalNetworkFallback,
-} from 'util/hyperbeamMode';
+import { isHyperbeamPublicReadDevice } from 'util/hyperbeamRouting';
 
 export type HyperbeamDebugLevel = 'info' | 'ok' | 'warn' | 'error';
 
@@ -98,9 +93,8 @@ export function installHyperbeamFetchDebug() {
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
-    const mode = getHyperbeamMode();
     const isHyperbeam = Boolean(url && url.startsWith(nodeBase));
-    const shouldLog = isHyperbeam || (shouldAllowOriginalNetworkFallback() && isOriginalModeFetch(url));
+    const shouldLog = isHyperbeam;
     const startedAt = performance.now();
     const pageContext = pageContextSummary();
     const requestKey = requestBodyKey(url, init);
@@ -295,19 +289,6 @@ function resourceEventKind(initiatorType: string) {
 function hyperbeamFallbackLayer(url: string) {
   void url;
   return undefined;
-}
-
-function isOriginalModeFetch(url: string) {
-  if (!url) return false;
-
-  try {
-    const parsed = new URL(url, window.location.origin);
-    const path = parsed.pathname;
-    if (path.startsWith('/public/') || path.startsWith('/static/') || path === '/favicon.ico') return false;
-    return true;
-  } catch {
-    return true;
-  }
 }
 
 function requestUrl(input: RequestInfo | URL) {

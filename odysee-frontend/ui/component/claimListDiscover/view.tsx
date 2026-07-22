@@ -38,7 +38,6 @@ import { selectFollowedTags } from 'redux/selectors/tags';
 import { selectMutedAndBlockedChannelIds } from 'redux/selectors/blocked';
 import { doFetchOdyseeMembershipForChannelIds as doFetchOdyseeMembershipForChannelIdsAction } from 'redux/actions/memberships';
 import { selectClientSetting, selectShowMatureContent, selectLanguage } from 'redux/selectors/settings';
-import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 
 function resolveHideMembersOnly(global: any, override: any) {
   return override === undefined || override === null ? global : override;
@@ -604,7 +603,6 @@ function ClaimListDiscover(props: Props) {
   const optionsStringForEffect = JSON.stringify(options);
   const hyperbeamRefreshKeysRef = React.useRef<Set<string>>(new Set());
   const shouldRefreshEmptyHyperbeamChannelSearch =
-    isHyperbeamEnabled() &&
     Boolean(channelIdsParam?.length) &&
     effectivePage === 1 &&
     Array.isArray(claimSearchResult) &&

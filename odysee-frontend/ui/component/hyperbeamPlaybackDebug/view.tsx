@@ -405,9 +405,7 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
       explanation: __(
         'The video player calls the HyperBEAM playback route. That route resolves the public stream and returns the media URL the native browser video element can consume.'
       ),
-      catchText: __(
-        'This catches frontend fallback to the original Odysee path when the debug route is expected to go through HyperBEAM.'
-      ),
+      catchText: __('This catches playback requests that fail to enter the HyperBEAM route.'),
       proofRows: [
         [__('request'), safePath(playbackRequestUrl)],
         [__('media url'), mediaPath],

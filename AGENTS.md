@@ -1,5 +1,11 @@
 # AGENTS.md
 
 - Remember never to add comments to the code unless absolutely necessary. Good code comments itself.
-- When writing plans and docs, unless otherwise stated, write to the `aidocs/` subdirectory.
-- When writing plans in `aidocs/`, unless stated otherwise, limit the amount of code to the minimum. Explain in detail what needs to be done, not code to copy and paste.
+
+## Documentation
+
+- `hyperbeam/AGENTS.md` and `odysee-frontend/AGENTS.md` are the maintained component documentation. Update the relevant file when architecture, contracts, operational commands, validation, or known limitations change.
+- Put detailed local plans, meeting-derived memory, investigation notes, and session handoffs in the ignored `aidocs-local/` directory.
+- Do not recreate the retired `aidocs/` directory.
+- Plans should explain decisions, constraints, acceptance criteria, and verification in detail while keeping copied code to a minimum.
+- Do not preserve stale branch histories or completed migration checklists as current guidance. Keep durable decisions and the present implementation state.

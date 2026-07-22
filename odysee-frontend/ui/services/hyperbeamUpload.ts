@@ -8,7 +8,6 @@ import {
   SCHEDULED_TAGS,
   VISIBILITY_TAGS,
 } from 'constants/tags';
-import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 const METADATA_KEYS = [
@@ -35,7 +34,6 @@ export function canPublishThroughHyperbeam(
   publishType?: PublishType
 ): filePath is Blob {
   return Boolean(
-    isHyperbeamFullMode() &&
     hyperbeamNodeBase() &&
     publishType === 'file' &&
     isBlob(filePath) &&
@@ -49,13 +47,11 @@ export function canPublishThroughHyperbeam(
 }
 
 export function canUpdateThroughHyperbeam(claim: any, publishPayload: PublishParams) {
-  return Boolean(
-    isHyperbeamFullMode() && hyperbeamNodeBase() && hasValue(publishPayload.claim_id) && hyperbeamClaimRecordId(claim)
-  );
+  return Boolean(hyperbeamNodeBase() && hasValue(publishPayload.claim_id) && hyperbeamClaimRecordId(claim));
 }
 
 export function canDeleteThroughHyperbeam(claim: any) {
-  return Boolean(isHyperbeamFullMode() && hyperbeamNodeBase() && hyperbeamClaimRecordId(claim));
+  return Boolean(hyperbeamNodeBase() && hyperbeamClaimRecordId(claim));
 }
 
 export async function updateThroughHyperbeam(

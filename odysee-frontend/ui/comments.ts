@@ -1,4 +1,3 @@
-import { COMMENT_SERVER_API } from 'config';
 import {
   fetchHyperbeamCommentAbandon,
   fetchHyperbeamCommentById,
@@ -6,6 +5,7 @@ import {
   fetchHyperbeamCommentEdit,
   fetchHyperbeamCommentList,
   fetchHyperbeamCommentPin,
+  fetchHyperbeamCommentSuperList,
   fetchHyperbeamModerationAddDelegate,
   fetchHyperbeamModerationAmI,
   fetchHyperbeamModerationBlock,
@@ -23,12 +23,10 @@ import {
   fetchHyperbeamSettingUpdate,
   fetchHyperbeamVerifyClaimSignature,
 } from 'util/hyperbeam';
-import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 
-function hyperbeamOrLegacy<T>(hyperbeam: Promise<T | null>, legacy: () => Promise<T>, label: string): Promise<T> {
-  if (!isHyperbeamEnabled()) return legacy();
+function hyperbeamOnly<T>(hyperbeam: Promise<T | null>, label: string): Promise<T> {
   return hyperbeam.then((result) => {
-    if (result) return result;
+    if (result !== null && result !== undefined) return result;
     throw new Error(`HyperBEAM ${label} unavailable`);
   });
 }
@@ -45,11 +43,7 @@ function commentList(params: CommentListParams): Promise<CommentListResponse> {
   if (existing) return existing;
 
   let request: Promise<CommentListResponse>;
-  request = hyperbeamOrLegacy(
-    fetchHyperbeamCommentList(params),
-    () => fetchCommentsApi('comment.List', params),
-    'comment list'
-  ).finally(() => {
+  request = hyperbeamOnly(fetchHyperbeamCommentList(params), 'comment list').finally(() => {
     if (commentListInFlight.get(key) === request) commentListInFlight.delete(key);
   });
   commentListInFlight.set(key, request);
@@ -58,61 +52,30 @@ function commentList(params: CommentListParams): Promise<CommentListResponse> {
 
 // prettier-ignore
 const Comments = {
-  url: COMMENT_SERVER_API,
-  enabled: Boolean(COMMENT_SERVER_API),
-  moderation_block: (params: ModerationBlockParams) => hyperbeamOrLegacy(fetchHyperbeamModerationBlock(params), () => fetchCommentsApi('moderation.Block', params), 'moderation block'),
-  moderation_unblock: (params: ModerationBlockParams) => hyperbeamOrLegacy(fetchHyperbeamModerationUnblock(params), () => fetchCommentsApi('moderation.UnBlock', params), 'moderation unblock'),
-  moderation_block_list: (params: BlockedListArgs) => hyperbeamOrLegacy(fetchHyperbeamModerationBlockList(params), () => fetchCommentsApi('moderation.BlockedList', params), 'moderation blocked list'),
-  moderation_add_delegate: (params: ModerationAddDelegateParams) => hyperbeamOrLegacy(fetchHyperbeamModerationAddDelegate(params), () => fetchCommentsApi('moderation.AddDelegate', params), 'moderation add delegate'),
-  moderation_remove_delegate: (params: ModerationRemoveDelegateParams) => hyperbeamOrLegacy(fetchHyperbeamModerationRemoveDelegate(params), () => fetchCommentsApi('moderation.RemoveDelegate', params), 'moderation remove delegate'),
-  moderation_list_delegates: (params: ModerationListDelegatesParams) => hyperbeamOrLegacy(fetchHyperbeamModerationListDelegates(params), () => fetchCommentsApi('moderation.ListDelegates', params), 'moderation list delegates'),
-  moderation_am_i: (params: ModerationAmIParams) => hyperbeamOrLegacy(fetchHyperbeamModerationAmI(params), () => fetchCommentsApi('moderation.AmI', params), 'moderation am i'),
+  moderation_block: (params: ModerationBlockParams) => hyperbeamOnly(fetchHyperbeamModerationBlock(params), 'moderation block'),
+  moderation_unblock: (params: ModerationBlockParams) => hyperbeamOnly(fetchHyperbeamModerationUnblock(params), 'moderation unblock'),
+  moderation_block_list: (params: BlockedListArgs) => hyperbeamOnly(fetchHyperbeamModerationBlockList(params), 'moderation blocked list'),
+  moderation_add_delegate: (params: ModerationAddDelegateParams) => hyperbeamOnly(fetchHyperbeamModerationAddDelegate(params), 'moderation add delegate'),
+  moderation_remove_delegate: (params: ModerationRemoveDelegateParams) => hyperbeamOnly(fetchHyperbeamModerationRemoveDelegate(params), 'moderation remove delegate'),
+  moderation_list_delegates: (params: ModerationListDelegatesParams) => hyperbeamOnly(fetchHyperbeamModerationListDelegates(params), 'moderation list delegates'),
+  moderation_am_i: (params: ModerationAmIParams) => hyperbeamOnly(fetchHyperbeamModerationAmI(params), 'moderation am i'),
   comment_list: commentList,
-  comment_abandon: (params: CommentAbandonParams) => hyperbeamOrLegacy(fetchHyperbeamCommentAbandon(params), () => fetchCommentsApi('comment.Abandon', params), 'comment abandon'),
-  comment_create: (params: CommentCreateParams) => hyperbeamOrLegacy(fetchHyperbeamCommentCreate(params), () => fetchCommentsApi('comment.Create', params), 'comment create'),
-  comment_by_id: (params: CommentByIdParams) => hyperbeamOrLegacy(fetchHyperbeamCommentById(params), () => fetchCommentsApi('comment.ByID', params), 'comment lookup'),
-  comment_pin: (params: CommentPinParams) => hyperbeamOrLegacy(fetchHyperbeamCommentPin(params), () => fetchCommentsApi('comment.Pin', params), 'comment pin'),
-  comment_edit: (params: CommentEditParams) => hyperbeamOrLegacy(fetchHyperbeamCommentEdit(params), () => fetchCommentsApi('comment.Edit', params), 'comment edit'),
-  reaction_list: (params: ReactionListParams) => hyperbeamOrLegacy(fetchHyperbeamReactionList(params), () => fetchCommentsApi('reaction.List', params), 'reaction list'),
-  reaction_react: (params: ReactionReactParams) => hyperbeamOrLegacy(fetchHyperbeamReactionReact(params), () => fetchCommentsApi('reaction.React', params), 'reaction react'),
-  setting_list: (params: SettingsParams) => hyperbeamOrLegacy(fetchHyperbeamSettingList(params), () => fetchCommentsApi('setting.List', params), 'setting list'),
-  setting_block_word: (params: BlockWordParams) => hyperbeamOrLegacy(fetchHyperbeamSettingBlockWord(params), () => fetchCommentsApi('setting.BlockWord', params), 'setting block word'),
-  setting_unblock_word: (params: BlockWordParams) => hyperbeamOrLegacy(fetchHyperbeamSettingUnblockWord(params), () => fetchCommentsApi('setting.UnBlockWord', params), 'setting unblock word'),
-  setting_list_blocked_words: (params: SettingsParams) => hyperbeamOrLegacy(fetchHyperbeamSettingListBlockedWords(params), () => fetchCommentsApi('setting.ListBlockedWords', params), 'setting list blocked words'),
-  setting_update: (params: UpdateSettingsParams) => hyperbeamOrLegacy(fetchHyperbeamSettingUpdate(params), () => fetchCommentsApi('setting.Update', params), 'setting update'),
-  setting_get: (params: SettingsParams) => hyperbeamOrLegacy(fetchHyperbeamSettingGet(params), () => fetchCommentsApi('setting.Get', params), 'setting get'),
-  super_list: (params: SuperListParams) => fetchCommentsApi('comment.SuperChatList', params),
+  comment_abandon: (params: CommentAbandonParams) => hyperbeamOnly(fetchHyperbeamCommentAbandon(params), 'comment abandon'),
+  comment_create: (params: CommentCreateParams) => hyperbeamOnly(fetchHyperbeamCommentCreate(params), 'comment create'),
+  comment_by_id: (params: CommentByIdParams) => hyperbeamOnly(fetchHyperbeamCommentById(params), 'comment lookup'),
+  comment_pin: (params: CommentPinParams) => hyperbeamOnly(fetchHyperbeamCommentPin(params), 'comment pin'),
+  comment_edit: (params: CommentEditParams) => hyperbeamOnly(fetchHyperbeamCommentEdit(params), 'comment edit'),
+  reaction_list: (params: ReactionListParams) => hyperbeamOnly(fetchHyperbeamReactionList(params), 'reaction list'),
+  reaction_react: (params: ReactionReactParams) => hyperbeamOnly(fetchHyperbeamReactionReact(params), 'reaction react'),
+  setting_list: (params: SettingsParams) => hyperbeamOnly(fetchHyperbeamSettingList(params), 'setting list'),
+  setting_block_word: (params: BlockWordParams) => hyperbeamOnly(fetchHyperbeamSettingBlockWord(params), 'setting block word'),
+  setting_unblock_word: (params: BlockWordParams) => hyperbeamOnly(fetchHyperbeamSettingUnblockWord(params), 'setting unblock word'),
+  setting_list_blocked_words: (params: SettingsParams) => hyperbeamOnly(fetchHyperbeamSettingListBlockedWords(params), 'setting list blocked words'),
+  setting_update: (params: UpdateSettingsParams) => hyperbeamOnly(fetchHyperbeamSettingUpdate(params), 'setting update'),
+  setting_get: (params: SettingsParams) => hyperbeamOnly(fetchHyperbeamSettingGet(params), 'setting get'),
+  super_list: (params: SuperListParams) => hyperbeamOnly(fetchHyperbeamCommentSuperList(params), 'super chat list'),
   verify_claim_signature: (params: VerifyClaimSignatureParams) =>
-    hyperbeamOrLegacy(fetchHyperbeamVerifyClaimSignature(params), () => fetchCommentsApi('verify.ClaimSignature', params), 'claim signature verification'),
+    hyperbeamOnly(fetchHyperbeamVerifyClaimSignature(params), 'claim signature verification'),
 };
-
-function fetchCommentsApi(method: string, params: {}) {
-  if (!Comments.enabled) {
-    return Promise.reject('Comments are not currently enabled.'); // eslint-disable-line
-  }
-
-  const url = `${Comments.url}?m=${method}`;
-  const options = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method,
-      params,
-    }),
-  };
-  return fetch(url, options)
-    .then((res) => res.json())
-    .then((res) => {
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
-
-      return res.result;
-    });
-}
 
 export default Comments;

@@ -35,7 +35,6 @@ import {
 import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
-import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { fetchHyperbeamResolveClaimIds, fetchHyperbeamUploadList } from 'util/hyperbeam';
 import { canDeleteThroughHyperbeam, deleteThroughHyperbeam } from 'services/hyperbeamUpload';
 import { getAuthToken } from 'util/saved-passwords';
@@ -545,24 +544,7 @@ export function doResolveClaimIds(claimIds: Array<string>, returnCachedClaims: b
       return Promise.resolve(cachedClaims);
     }
 
-    if (isHyperbeamEnabled()) {
-      return scheduleHyperbeamClaimIdResolve(dispatch, idsToResolve, cachedClaims, options);
-    }
-
-    return dispatch(
-      doClaimSearch(
-        {
-          ...options,
-          claim_ids: idsToResolve,
-          page: 1,
-          page_size: Math.min(idsToResolve.length, 50),
-          no_totals: true,
-        },
-        {
-          useAutoPagination: idsToResolve.length > 50,
-        }
-      )
-    ).then((response: ClaimSearchResponse) => ({ ...response, ...cachedClaims }));
+    return scheduleHyperbeamClaimIdResolve(dispatch, idsToResolve, cachedClaims, options);
   };
 }
 

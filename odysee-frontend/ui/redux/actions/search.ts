@@ -23,7 +23,6 @@ import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
 import { fetchHyperbeamSearch } from 'util/hyperbeam';
-import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 const isDev = process.env.NODE_ENV !== 'production';
 // ****************************************************************************
 // FYP
@@ -350,7 +349,7 @@ export const doSearch =
     const queryWithOptions = getSearchQueryString(query, searchOptions);
     const size = searchOptions.size;
     const from = searchOptions.from;
-    const hyperbeamSearchEnabled = isHyperbeamEnabled() && !searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
+    const hyperbeamSearchEnabled = !searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
     // If we have already searched for something, we don't need to do anything
     const urisForQuery = makeSelectSearchUrisForQuery(queryWithOptions)(state);
 

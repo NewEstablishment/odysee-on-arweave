@@ -1,5 +1,5 @@
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
-import { isHyperbeamDeviceEnabled, isHyperbeamFullMode } from 'util/hyperbeamMode';
+import { isHyperbeamDeviceEnabled } from 'util/hyperbeamRouting';
 import { getAuthToken } from 'util/saved-passwords';
 
 export const HYPERBEAM_DEVICE = {
@@ -12,7 +12,8 @@ export const HYPERBEAM_DEVICE = {
   fileReaction: '~odysee-file-reaction@1.0',
   reaction: '~odysee-reaction@1.0',
   query: '~query@1.0',
-  search: '~odysee-search@1.0',
+  search: '~search@1.0',
+  odyseeSearch: '~odysee-search@1.0',
   stream: '~odysee-stream@1.0',
   streamDescriptor: '~odysee-stream-descriptor@1.0',
   subscription: '~odysee-account@1.0',
@@ -151,7 +152,7 @@ const HYPERBEAM_ROUTED_METHODS = new Set([
 ]);
 
 export function isHyperbeamMethodEnabled(method: string) {
-  return isHyperbeamFullMode() && HYPERBEAM_ROUTED_METHODS.has(method);
+  return HYPERBEAM_ROUTED_METHODS.has(method);
 }
 
 export function hyperbeamMethodDevice(method: string) {

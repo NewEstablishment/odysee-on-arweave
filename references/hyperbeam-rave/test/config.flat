@@ -1,3 +1,0 @@
-port: 1234
-node_host: https://ao.computer
-await-inprogress: false

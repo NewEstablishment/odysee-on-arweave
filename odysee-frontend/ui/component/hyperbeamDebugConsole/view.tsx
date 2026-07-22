@@ -8,7 +8,6 @@ import {
   type HyperbeamDebugEvent,
 } from 'util/hyperbeamDebug';
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
-import { getHyperbeamMode, HYPERBEAM_MODES, setHyperbeamMode, type HyperbeamMode } from 'util/hyperbeamMode';
 import ClaimTrace, { type TraceFocus } from './claimTrace';
 
 const MAX_EVENTS = 1200;
@@ -33,14 +32,17 @@ const CATEGORY_FILTER_KEYS = FILTERS.map((filter) => filter.key).filter(
   (key) => key !== 'all' && key !== 'other'
 ) as Array<FilterKey>;
 const MODELED_GRAPH_DEVICES = new Set(['~cache@1.0']);
-const GRAPH_DEVICE_ROWS = [
+const GRAPH_NATIVE_DEVICES = new Set<string>(['~search@1.0', '~query@1.0']);
+const GRAPH_PRODUCT_DEVICE_ROWS = [
   '~odysee-comment@1.0',
   '~odysee-claim@1.0',
   '~odysee-account@1.0',
-  '~odysee-search@1.0',
   '~odysee-stream@1.0',
   '~odysee-upload@1.0',
+  '~odysee-search@1.0',
 ] as const;
+const GRAPH_NATIVE_DEVICE_ROWS = ['~query@1.0', '~search@1.0'] as const;
+const GRAPH_DEVICE_ROWS = [...GRAPH_PRODUCT_DEVICE_ROWS, ...GRAPH_NATIVE_DEVICE_ROWS] as const;
 const GRAPH_STORE_ROWS = ['cache@1.0', 'hb_store_odysee', 'hb_store_lbry_blob'] as const;
 const GRAPH_LEGACY_ROWS = ['Odysee API', 'Chainquery', 'Blobcache'] as const;
 const ARCH_NODE_MIN_W = 150;
@@ -83,7 +85,6 @@ const DEFAULT_VISIBLE_SEGMENTS: Record<SegmentKey, boolean> = {
 export default function HyperbeamDebugConsole() {
   const [open, setOpen] = React.useState(() => readStoredBoolean(CONSOLE_OPEN_STORAGE_KEY, false));
   const [maximized, setMaximized] = React.useState(() => readStoredBoolean(CONSOLE_MAXIMIZED_STORAGE_KEY, false));
-  const [mode, setMode] = React.useState<HyperbeamMode>(() => getHyperbeamMode());
   const [visibleSegments, setVisibleSegments] = React.useState<Record<SegmentKey, boolean>>(() => readStoredSegments());
   const [maximizedSegment, setMaximizedSegment] = React.useState<SegmentKey | null>(null);
   const [events, setEvents] = React.useState<Array<HyperbeamDebugEvent>>([]);
@@ -150,7 +151,6 @@ export default function HyperbeamDebugConsole() {
     }
   }, [events, selectedEventIndex]);
 
-  const last = events[events.length - 1];
   const requestEventCount = React.useMemo(() => events.filter((event) => event.label === 'request').length, [events]);
   const filterCounts = React.useMemo(() => countFilters(events), [events]);
   const traceMatchedEvents = activeTrace
@@ -239,10 +239,9 @@ export default function HyperbeamDebugConsole() {
     const text = JSON.stringify(
       {
         type: 'odysee_request_events',
-        node: mode === HYPERBEAM_MODES.original ? undefined : String(ODYSEE_HYPERBEAM_NODE_API).replace(/\/+$/, ''),
-        mode,
+        node: String(ODYSEE_HYPERBEAM_NODE_API).replace(/\/+$/, ''),
         generatedAt: new Date().toISOString(),
-        events: relevantEvents(events, mode),
+        events: relevantEvents(events),
       },
       null,
       2
@@ -255,14 +254,6 @@ export default function HyperbeamDebugConsole() {
       })
       .catch(() => setCopiedRelevant(false));
   };
-  const onModeChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const nextMode = event.currentTarget.value as HyperbeamMode;
-    setMode(nextMode);
-    setHyperbeamMode(nextMode);
-    setEvents([]);
-    window.location.reload();
-  };
-
   return (
     <div
       data-hyperbeam-debug-console
@@ -320,7 +311,6 @@ export default function HyperbeamDebugConsole() {
           }}
         >
           Odysee request log
-          {!open && last ? ` · ${last.label} · ${last.level}` : ''}
         </button>
         {open && (
           <div style={{ display: 'flex', gap: 4, flex: '0 0 auto' }}>
@@ -335,26 +325,6 @@ export default function HyperbeamDebugConsole() {
             </SegmentToggle>
           </div>
         )}
-        <select
-          value={mode}
-          onClick={(event) => event.stopPropagation()}
-          onChange={onModeChange}
-          title="Select request wiring mode"
-          style={{
-            width: 88,
-            height: 18,
-            border: '1px solid rgba(255,255,255,0.28)',
-            borderRadius: 4,
-            padding: '0 2px',
-            background: 'rgba(12,10,12,0.96)',
-            color: '#f9fafb',
-            fontSize: 10,
-            lineHeight: 1,
-          }}
-        >
-          <option value={HYPERBEAM_MODES.original}>Legacy</option>
-          <option value={HYPERBEAM_MODES.hyperbeam}>HyperBEAM</option>
-        </select>
         <button
           type="button"
           onClick={(event) => {
@@ -388,7 +358,7 @@ export default function HyperbeamDebugConsole() {
         <>
           <div style={{ padding: '8px 9px 0' }}>
             <div style={{ overflowWrap: 'anywhere', marginBottom: 8, color: 'rgba(255,255,255,0.72)' }}>
-              {modeEndpointLabel(mode)}
+              {String(ODYSEE_HYPERBEAM_NODE_API).replace(/\/+$/, '')}
             </div>
           </div>
           <div
@@ -417,7 +387,6 @@ export default function HyperbeamDebugConsole() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '10px 9px 8px' }}>
                     {FILTERS.map((filter) => {
                       const active = filter.key === 'all' ? activeFilters.size === 0 : activeFilters.has(filter.key);
-                      const disabled = filterDisabledInMode(filter.key, mode);
                       const focusedCount = focusedFilterCounts[filter.key] || 0;
                       const globalCount = filterCounts[filter.key] || 0;
                       const traceActive = Boolean(activeTrace && focusedCount > 0);
@@ -425,37 +394,21 @@ export default function HyperbeamDebugConsole() {
                         <button
                           key={filter.key}
                           type="button"
-                          disabled={disabled}
-                          onClick={() => !disabled && toggleFilter(filter.key)}
-                          title={
-                            disabled
-                              ? `${filter.label} disabled in ${modeLabel(mode)}`
-                              : active
-                                ? `Remove ${filter.label} filter`
-                                : `Filter ${filter.label}`
-                          }
+                          onClick={() => toggleFilter(filter.key)}
+                          title={active ? `Remove ${filter.label} filter` : `Filter ${filter.label}`}
                           style={{
-                            border: `1px solid ${
-                              disabled
-                                ? 'rgba(255,255,255,0.12)'
-                                : active || traceActive
-                                  ? filter.color
-                                  : 'rgba(255,255,255,0.22)'
-                            }`,
+                            border: `1px solid ${active || traceActive ? filter.color : 'rgba(255,255,255,0.22)'}`,
                             borderRadius: 4,
                             padding: '1px 6px',
-                            background: disabled
-                              ? 'rgba(255,255,255,0.025)'
-                              : active
-                                ? 'rgba(255,255,255,0.12)'
-                                : traceActive
-                                  ? traceFilterBackground(filter.color)
-                                  : 'rgba(255,255,255,0.05)',
-                            color: disabled ? 'rgba(255,255,255,0.28)' : filter.color,
-                            cursor: disabled ? 'default' : 'pointer',
+                            background: active
+                              ? 'rgba(255,255,255,0.12)'
+                              : traceActive
+                                ? traceFilterBackground(filter.color)
+                                : 'rgba(255,255,255,0.05)',
+                            color: filter.color,
+                            cursor: 'pointer',
                             font: 'inherit',
                             fontWeight: traceActive ? 700 : 400,
-                            textDecoration: disabled ? 'line-through' : 'none',
                           }}
                         >
                           {filter.label} {activeTrace ? focusedCount : globalCount}
@@ -573,7 +526,7 @@ export default function HyperbeamDebugConsole() {
                       )}
                     </div>
                     {events.length === 0 && (
-                      <div style={{ color: 'rgba(255,255,255,0.62)' }}>waiting for {modeWaitLabel(mode)} calls</div>
+                      <div style={{ color: 'rgba(255,255,255,0.62)' }}>waiting for HyperBEAM calls</div>
                     )}
                     {events.length !== 0 && requestFilteredEvents.length === 0 && (
                       <div style={{ color: 'rgba(255,255,255,0.62)' }}>
@@ -642,9 +595,9 @@ export default function HyperbeamDebugConsole() {
                             >
                               {event.time}
                             </strong>{' '}
-                            {event.label} {eventSummary(event, mode)}
+                            {event.label} {eventSummary(event)}
                           </button>
-                          {isExpanded && <RequestDetail event={event} eventIndex={index} events={events} mode={mode} />}
+                          {isExpanded && <RequestDetail event={event} eventIndex={index} events={events} />}
                         </div>
                       );
                     })}
@@ -655,7 +608,6 @@ export default function HyperbeamDebugConsole() {
             {displayedSegments.graph && (
               <ArchitecturePanel
                 events={events}
-                mode={mode}
                 activeSegmentCount={activeSegmentCount}
                 activeTrace={activeTrace}
                 selectedEvent={selectedEvent}
@@ -675,18 +627,16 @@ function RequestDetail({
   event,
   eventIndex,
   events,
-  mode,
 }: {
   event: HyperbeamDebugEvent;
   eventIndex: number;
   events: Array<HyperbeamDebugEvent>;
-  mode: HyperbeamMode;
 }) {
   const data = mergedRequestDetailData(event, eventIndex, events);
   const responsePeer = findRequestLifecyclePeer(event, eventIndex, events);
   const responseMissingText =
     event.label === 'request' && !responsePeer ? 'no matching response event captured yet' : undefined;
-  const route = routeSummary(data, mode);
+  const route = routeSummary(data);
   const statusColor = isFailedEvent(event) ? '#ff4d7d' : data.status ? '#22c55e' : 'rgba(255,255,255,0.72)';
   const timing = pruneEmpty({
     elapsedMs: data.elapsedMs,
@@ -884,7 +834,6 @@ function FullscreenIcon({ exit }: { exit: boolean }) {
 
 function ArchitecturePanel({
   events,
-  mode,
   activeSegmentCount,
   activeTrace,
   selectedEvent,
@@ -893,7 +842,6 @@ function ArchitecturePanel({
   onToggleMaximize,
 }: {
   events: Array<HyperbeamDebugEvent>;
-  mode: HyperbeamMode;
   activeSegmentCount: number;
   activeTrace: TraceFocus | null;
   selectedEvent: HyperbeamDebugEvent | null;
@@ -903,7 +851,7 @@ function ArchitecturePanel({
 }) {
   const [zoom, setZoom] = React.useState(1);
   const graphEvents = events.filter((event) => !isDebugTraceProbe(event.data || {}));
-  const graph = architectureGraph(graphEvents, mode);
+  const graph = architectureGraph(graphEvents);
   const selectedGraphEvents =
     selectedEvent && selectedEventIndex !== null
       ? lifecycleEventsForSelection(selectedEvent, selectedEventIndex, events)
@@ -930,14 +878,14 @@ function ArchitecturePanel({
       ? selectedGraphEvents
       : activeTraceGraphEvents;
   const displayGraph = selectedShouldYieldToMedia
-    ? architectureGraph(activeTraceGraphEvents, mode)
+    ? architectureGraph(activeTraceGraphEvents)
     : selectedGraphEvents.length
-      ? architectureGraph(selectedGraphEvents, mode)
+      ? architectureGraph(selectedGraphEvents)
       : activeTrace
-        ? architectureGraph(activeTraceGraphEvents, mode)
+        ? architectureGraph(activeTraceGraphEvents)
         : graph;
   const selectedRoute = selectedEvent
-    ? routeSummary(mergedRequestDetailData(selectedEvent, selectedEventIndex || 0, events), mode)
+    ? routeSummary(mergedRequestDetailData(selectedEvent, selectedEventIndex || 0, events))
     : null;
   const isAuthTraceFocus = Boolean(!selectedEvent && activeTrace?.kind === 'auth');
   const hasSsr = displayGraph.ssrEvents > 0;
@@ -953,9 +901,13 @@ function ArchitecturePanel({
   const showLegacyPath = showClaimPath && displayGraph.legacyEvents > 0;
   const showMediaPath = showClaimPath && displayGraph.rangeEvents > 0;
   const deviceRows: Array<string> = [
-    ...GRAPH_DEVICE_ROWS,
+    ...GRAPH_PRODUCT_DEVICE_ROWS,
     ...displayGraph.deviceNames.filter((device) => !GRAPH_DEVICE_ROWS.includes(device as any)),
+    ...GRAPH_NATIVE_DEVICE_ROWS,
   ];
+  const activeMeiliDevices = deviceRows.filter(
+    (device) => isSearchGraphDevice(device) && Number(displayGraph.devices[device] || 0) > 0
+  );
   const visibleStoreRows = GRAPH_STORE_ROWS.map(
     (store) => [store, Number(displayGraph.storeBackends[store] || 0)] as [string, number]
   ).concat(Object.entries(displayGraph.storeBackends).filter(([store]) => !GRAPH_STORE_ROWS.includes(store as any)));
@@ -976,18 +928,11 @@ function ArchitecturePanel({
   );
   const activeTraceNativeUpload = isNativeUploadTraceFocus(activeTrace);
   const selectedPath = selectedShouldYieldToMedia
-    ? architectureSelectedPath(
-        graphFocusEvents,
-        deviceRows,
-        latestTraceMediaEventIndex,
-        events,
-        mode,
-        architectureRects
-      )
+    ? architectureSelectedPath(graphFocusEvents, deviceRows, latestTraceMediaEventIndex, events, architectureRects)
     : selectedGraphEvents.length
-      ? architectureSelectedPath(selectedGraphEvents, deviceRows, selectedEventIndex, events, mode, architectureRects)
+      ? architectureSelectedPath(selectedGraphEvents, deviceRows, selectedEventIndex, events, architectureRects)
       : activeTraceGraphEvents.length
-        ? architectureSelectedPath(activeTraceGraphEvents, deviceRows, null, events, mode, architectureRects)
+        ? architectureSelectedPath(activeTraceGraphEvents, deviceRows, null, events, architectureRects)
         : activeTraceNativeUpload
           ? architectureTracePath(displayGraph, deviceRows, activeTrace, architectureRects)
           : null;
@@ -1261,13 +1206,16 @@ function ArchitecturePanel({
               ))}
             {showStaticBackendEdges && showMeiliPath && (
               <>
-                <ArchitectureNodeEdge
-                  rects={architectureRects}
-                  from="device:~odysee-search@1.0"
-                  to="meilisearch"
-                  active={showMeiliPath}
-                  color={SEARCH_COLOR}
-                />
+                {activeMeiliDevices.map((device) => (
+                  <ArchitectureNodeEdge
+                    key={`search-backend-${device}`}
+                    rects={architectureRects}
+                    from={`device:${device}`}
+                    to="meilisearch"
+                    active
+                    color={SEARCH_COLOR}
+                  />
+                ))}
                 <ArchitectureNodeEdge
                   rects={architectureRects}
                   from="meilisearch"
@@ -1538,8 +1486,10 @@ function ArchitectureNode({
   );
 }
 
-function architectureDeviceY(index: number) {
-  return 24 + index * 66;
+function architectureDeviceY(index: number, deviceRows: Array<string>) {
+  const nativeGroupStart = deviceRows.findIndex((device) => GRAPH_NATIVE_DEVICES.has(device));
+  const groupGap = nativeGroupStart >= 0 && index >= nativeGroupStart ? 12 : 0;
+  return 24 + index * 66 + groupGap;
 }
 
 function storeRowY(index: number) {
@@ -1592,7 +1542,7 @@ function architectureNodeRects(
   deviceRows.forEach((device, index) => {
     rects[`device:${device}`] = {
       x: layout.deviceX,
-      y: architectureDeviceY(index),
+      y: architectureDeviceY(index, deviceRows),
       w: widths.device,
       h: ARCH_MEDIUM_NODE_H,
     };
@@ -1750,7 +1700,6 @@ function architectureSelectedPath(
   deviceRows: Array<string>,
   selectedEventIndex: number | null,
   allEvents: Array<HyperbeamDebugEvent>,
-  mode: HyperbeamMode,
   rects: ArchitectureRects
 ) {
   const nodes = new Set<string>(['ui']);
@@ -1781,7 +1730,7 @@ function architectureSelectedPath(
   const isSsr = path.includes('/$/api/');
   const frontend = isSsr || isAuth ? 'ssr' : 'sdk';
   const mediaRange = isMediaRangeEvent(selectedData, path, selectedDevice);
-  const isSearch = selectedDevice === '~odysee-search@1.0' || path.includes('/~odysee-search@1.0/query');
+  const isSearch = isSearchGraphDevice(selectedDevice) || isSearchGraphPath(path);
   const searchUsesMeili = isSearch && searchUsesMeilisearch(selectedData);
   const hasRequest = selectedEvents.some((event) => event.label === 'request' || event.label === 'request failed');
   const hasResponse = selectedEvents.some(isResponseLikeEvent);
@@ -1794,16 +1743,14 @@ function architectureSelectedPath(
   const selectedFailed = selectedEvents.some(isFailedEvent);
   const legacyBackend = legacyBackendName(selectedData, selectedDevices, mediaRange) || (isLegacy ? 'Odysee API' : '');
   const backendFlows: Array<{ color: string; label: string; node: string; viaStore?: boolean }> = [];
-  const sourceNode =
-    selectedDeviceNode ||
-    (isAuth ? 'auth' : mode !== HYPERBEAM_MODES.original && !isUploadRead ? 'hyperbeam' : frontend);
+  const sourceNode = selectedDeviceNode || (isAuth ? 'auth' : !isUploadRead ? 'hyperbeam' : frontend);
   const addFlow = (from: string, to: string, color: string, label: string, via?: Array<ArchitecturePoint>) => {
     const points = architectureConnect(rects, from, to, via);
     if (points) flows.push({ color, label, points });
   };
 
   nodes.add(frontend);
-  if (mode !== HYPERBEAM_MODES.original && !isUploadRead) nodes.add('hyperbeam');
+  if (!isUploadRead) nodes.add('hyperbeam');
   if (isAuth) nodes.add('auth');
   if (selectedDeviceNode) nodes.add(selectedDeviceNode);
 
@@ -1820,7 +1767,7 @@ function architectureSelectedPath(
     const eventMediaRange = isMediaRangeEvent(data, eventPath, eventDevice);
     const eventStoreBackend = storeBackendName(data, eventPath, eventDevice, eventMediaRange);
     const eventLegacyBackend = legacyBackendName(data, eventDevices, eventMediaRange);
-    const eventSearch = eventDevice === '~odysee-search@1.0' || eventPath.includes('/~odysee-search@1.0/query');
+    const eventSearch = isSearchGraphDevice(eventDevice) || isSearchGraphPath(eventPath);
 
     if (eventMediaRange) {
       addBackendFlow({ color: MEDIA_COLOR, label: 'media bytes', node: 'media', viaStore: true });
@@ -1883,7 +1830,7 @@ function architectureSelectedPath(
     if (isAuth) {
       addFlow(frontend, 'auth', requestColor, requestLabel);
       if (selectedDeviceNode) addFlow('auth', selectedDeviceNode, requestColor, requestLabel);
-    } else if (mode !== HYPERBEAM_MODES.original && !isUploadRead) {
+    } else if (!isUploadRead) {
       addFlow(frontend, 'hyperbeam', requestColor, requestLabel);
       if (selectedDeviceNode) addFlow('hyperbeam', selectedDeviceNode, requestColor, requestLabel);
     }
@@ -1913,13 +1860,12 @@ function architectureSelectedPath(
     } else if (responseStart !== sourceNode) {
       addFlow(responseStart, sourceNode, responseColor, responseLabel);
     }
-    if (selectedDeviceNode && !isAuth && mode !== HYPERBEAM_MODES.original && !isUploadRead) {
+    if (selectedDeviceNode && !isAuth && !isUploadRead) {
       addFlow(selectedDeviceNode, 'hyperbeam', responseColor, responseLabel);
     }
     if (isAuth && selectedDeviceNode) addFlow(selectedDeviceNode, 'auth', responseColor, responseLabel);
     if (isAuth) addFlow('auth', 'ssr', responseColor, responseLabel);
-    else if (mode !== HYPERBEAM_MODES.original && !isUploadRead)
-      addFlow('hyperbeam', frontend, responseColor, responseLabel);
+    else if (!isUploadRead) addFlow('hyperbeam', frontend, responseColor, responseLabel);
     addFlow(frontend, 'ui', responseColor, responseLabel);
   }
 
@@ -2064,9 +2010,8 @@ function traceFilterBackground(color: string) {
   }
 }
 
-function routeSummary(data: any, mode: HyperbeamMode) {
+function routeSummary(data: any) {
   return pruneEmpty({
-    mode,
     pagePath: data.pagePath,
     method: data.method,
     url: data.url,
@@ -2088,7 +2033,7 @@ function routeSummary(data: any, mode: HyperbeamMode) {
   });
 }
 
-function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMode) {
+function architectureGraph(events: Array<HyperbeamDebugEvent>) {
   const devices: Record<string, number> = {};
   const storeBackends: Record<string, number> = {};
   const legacyBackends: Record<string, number> = {};
@@ -2125,11 +2070,7 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     const storeBackend = storeBackendName(data, path, device, mediaRange);
     const legacyBackend = legacyBackendName(data, eventDevices, mediaRange);
 
-    if (
-      !mediaRange &&
-      mode !== HYPERBEAM_MODES.original &&
-      (url.includes('127.0.0.1') || url.includes('localhost') || device)
-    ) {
+    if (!mediaRange && (url.includes('127.0.0.1') || url.includes('localhost') || device)) {
       counters.hyperbeamEvents += 1;
     }
     if (authEvent) counters.authEvents += 1;
@@ -2145,7 +2086,7 @@ function architectureGraph(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMo
     ) {
       counters.cacheEvents += 1;
     }
-    if (device === '~odysee-search@1.0' || path.includes('/~odysee-search@1.0/query')) {
+    if (isSearchGraphDevice(device) || isSearchGraphPath(path)) {
       counters.searchEvents += 1;
       if (searchUsesMeilisearch(data)) counters.meilisearchEvents += 1;
     }
@@ -2422,14 +2363,13 @@ function mergeEvents(current: Array<HyperbeamDebugEvent>, incoming: Array<Hyperb
   return next;
 }
 
-function eventSummary(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
+function eventSummary(event: HyperbeamDebugEvent) {
   const data = event.data || {};
   const path =
     data.sourceLayer === 'browser-resource'
       ? data.urlParts?.path || data.devicePath || data.nativePath
       : data.nativePath || data.devicePath;
   const bits = uniqueSummaryBits([
-    mode,
     data.authRequired ? '🔒' : undefined,
     data.repeatCount ? `x${data.repeatCount}` : undefined,
     data.method,
@@ -2456,36 +2396,6 @@ function uniqueSummaryBits(bits: Array<string | number | undefined | null | fals
     seen.add(value);
     return true;
   }) as Array<string>;
-}
-
-function modeLabel(mode: HyperbeamMode) {
-  switch (mode) {
-    case HYPERBEAM_MODES.original:
-      return 'Legacy wiring';
-    case HYPERBEAM_MODES.hyperbeam:
-      return 'HyperBEAM';
-    default:
-      return mode;
-  }
-}
-
-function modeEndpointLabel(mode: HyperbeamMode) {
-  if (mode === HYPERBEAM_MODES.original) return `${modeLabel(mode)} · normal Odysee/API calls`;
-  return String(ODYSEE_HYPERBEAM_NODE_API).replace(/\/+$/, '');
-}
-
-function modeWaitLabel(mode: HyperbeamMode) {
-  return mode === HYPERBEAM_MODES.original ? 'Legacy' : 'HyperBEAM';
-}
-
-function filterDisabledInMode(filter: FilterKey, mode: HyperbeamMode) {
-  if (filter === 'all' || filter === 'other') return false;
-
-  if (mode === HYPERBEAM_MODES.original) {
-    return filter !== 'get' && filter !== 'failed' && filter !== 'original';
-  }
-
-  return false;
 }
 
 function emptyFilterCounts(): Record<FilterKey, number> {
@@ -2588,17 +2498,26 @@ function isSearchDeviceEventData(data: Record<string, any>) {
   const device = normalizeGraphDevice(data.device);
   const responseDevice = normalizeGraphDevice(data.responseDevice);
   const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '');
-  return (
-    device === '~odysee-search@1.0' ||
-    responseDevice === '~odysee-search@1.0' ||
-    path.includes('/~odysee-search@1.0/query')
-  );
+  return isSearchGraphDevice(device) || isSearchGraphDevice(responseDevice) || isSearchGraphPath(path);
 }
 
 function searchUsesMeilisearch(data: Record<string, any>) {
   if (!isSearchDeviceEventData(data)) return false;
 
+  const device = normalizeGraphDevice(data.device);
+  const responseDevice = normalizeGraphDevice(data.responseDevice);
+  const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '');
+  if (device === '~search@1.0' || responseDevice === '~search@1.0' || path.includes('/~search@1.0/')) return true;
+
   return searchBackend(data) === 'meilisearch';
+}
+
+function isSearchGraphDevice(device: string) {
+  return device === '~search@1.0' || device === '~odysee-search@1.0';
+}
+
+function isSearchGraphPath(path: string) {
+  return path.includes('/~search@1.0/') || path.includes('/~odysee-search@1.0/query');
 }
 
 function searchBackend(data: Record<string, any>) {
@@ -2758,7 +2677,7 @@ function eventKey(event: HyperbeamDebugEvent) {
   });
 }
 
-function relevantEvents(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMode) {
+function relevantEvents(events: Array<HyperbeamDebugEvent>) {
   const relevantIndexes = new Set<number>();
 
   events.forEach((event, index) => {
@@ -2772,7 +2691,7 @@ function relevantEvents(events: Array<HyperbeamDebugEvent>, mode: HyperbeamMode)
   return events
     .filter((_event, index) => relevantIndexes.has(index))
     .slice(-MAX_RELEVANT_EVENTS)
-    .map((event) => compactEvent(event, mode));
+    .map(compactEvent);
 }
 
 function isRelevant(event: HyperbeamDebugEvent) {
@@ -2796,11 +2715,10 @@ function isRelevant(event: HyperbeamDebugEvent) {
   );
 }
 
-function compactEvent(event: HyperbeamDebugEvent, mode: HyperbeamMode) {
+function compactEvent(event: HyperbeamDebugEvent) {
   const data = event.data || {};
   const body = data.body;
   return pruneEmpty({
-    mode,
     time: event.time,
     firstSeen: data.firstSeen,
     lastSeen: data.lastSeen,

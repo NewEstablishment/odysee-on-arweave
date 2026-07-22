@@ -1,17 +1,7 @@
-import { IMG_CDN_PUBLISH_URL } from 'constants/cdn_urls';
-import { isHyperbeamFullMode } from 'util/hyperbeamMode';
-
 const HYPERBEAM_THUMBNAIL_UPLOAD_URL = '/$/api/hyperbeam-thumbnail/v1/upload';
 
 export default function uploadThumbnail(data: FormData): Promise<any> {
-  if (isHyperbeamFullMode()) return uploadHyperbeamThumbnail(data);
-
-  return fetch(IMG_CDN_PUBLISH_URL, {
-    method: 'POST',
-    body: data,
-  })
-    .then((res) => res.text())
-    .then(parseUploadResponse);
+  return uploadHyperbeamThumbnail(data);
 }
 
 function parseUploadResponse(text: string) {
@@ -49,11 +39,11 @@ async function uploadHyperbeamThumbnail(data: FormData): Promise<any> {
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || '');
+    reader.addEventListener('load', () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
       resolve(result.includes(',') ? result.split(',').pop() || '' : result);
-    };
-    reader.onerror = () => reject(reader.error || new Error('Unable to read thumbnail.'));
+    });
+    reader.addEventListener('error', () => reject(reader.error || new Error('Unable to read thumbnail.')));
     reader.readAsDataURL(blob);
   });
 }
