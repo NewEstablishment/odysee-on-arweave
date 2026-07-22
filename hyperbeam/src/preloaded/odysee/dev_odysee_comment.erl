@@ -8,6 +8,7 @@
 -export([
     info/1,
     list/3,
+    super_list/3,
     by_id/3,
     create/3,
     edit/3,
@@ -42,6 +43,7 @@ info(_Opts) ->
     #{
         exports => [
             <<"list">>,
+            <<"super-list">>,
             <<"by-id">>,
             <<"create">>,
             <<"edit">>,
@@ -77,6 +79,8 @@ list(Base, Req, Opts) ->
             Error -> Error
         end
     end).
+
+super_list(Base, Req, Opts) -> commentron(<<"comment.SuperChatList">>, Base, Req, Opts).
 
 %% @doc Return a normalized `comment.ByID' response.
 by_id(Base, Req, Opts) ->

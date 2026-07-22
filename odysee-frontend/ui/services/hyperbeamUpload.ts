@@ -8,7 +8,6 @@ import {
   SCHEDULED_TAGS,
   VISIBILITY_TAGS,
 } from 'constants/tags';
-import { isHyperbeamFullMode } from 'util/hyperbeamMode';
 import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 const METADATA_KEYS = [
@@ -35,7 +34,6 @@ export function canPublishThroughHyperbeam(
   publishType?: PublishType
 ): filePath is Blob {
   return Boolean(
-    isHyperbeamFullMode() &&
     hyperbeamNodeBase() &&
     publishType === 'file' &&
     isBlob(filePath) &&
@@ -49,13 +47,11 @@ export function canPublishThroughHyperbeam(
 }
 
 export function canUpdateThroughHyperbeam(claim: any, publishPayload: PublishParams) {
-  return Boolean(
-    isHyperbeamFullMode() && hyperbeamNodeBase() && hasValue(publishPayload.claim_id) && hyperbeamClaimRecordId(claim)
-  );
+  return Boolean(hyperbeamNodeBase() && hasValue(publishPayload.claim_id) && hyperbeamClaimRecordId(claim));
 }
 
 export function canDeleteThroughHyperbeam(claim: any) {
-  return Boolean(isHyperbeamFullMode() && hyperbeamNodeBase() && hyperbeamClaimRecordId(claim));
+  return Boolean(hyperbeamNodeBase() && hyperbeamClaimRecordId(claim));
 }
 
 export async function updateThroughHyperbeam(
@@ -178,7 +174,7 @@ async function genericStoreWriteResponse(file: Blob) {
   const base = hyperbeamNodeBase();
   if (!base) return null;
 
-  return fetch(`${base}/id?!=true`, {
+  return fetch(`${base}/id?!=true&committers=all`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -341,13 +337,14 @@ function uploadRecordId(json: any, claim: any) {
 }
 
 function storeWriteId(json: any) {
-  const path = json?.path || json?.id || json?.['read-path'] || json?.read_path || json?.url || json?.body;
+  const path =
+    json?.['message-id'] || json?.path || json?.id || json?.['read-path'] || json?.read_path || json?.url || json?.body;
   return typeof path === 'string' ? path.replace(/^\//, '') : '';
 }
 
 async function responseJsonWithHeaders(response: Response) {
   const json = await responseJson(response);
-  const headers = ['id', 'path', 'read-path', 'url'].reduce<Record<string, string>>((acc, name) => {
+  const headers = ['message-id', 'id', 'path', 'read-path', 'url'].reduce<Record<string, string>>((acc, name) => {
     const value = response.headers.get(name);
     if (value) acc[name] = value;
     return acc;

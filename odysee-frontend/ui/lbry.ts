@@ -9,7 +9,6 @@ import {
   fetchHyperbeamResolveClaimIds,
   fetchHyperbeamSearch,
 } from 'util/hyperbeam';
-import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 import { ODYSEE_HYPERBEAM_NODE_API, PROXY_URL_NO_CF } from 'config';
 
 import 'proxy-polyfill';
@@ -357,8 +356,6 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
     if (startupResult) return startupResult;
   }
 
-  if (!isHyperbeamEnabled()) return null;
-
   const localResult = hyperbeamLocalSdkResult(method, params);
   if (localResult) return localResult;
   if (LEGACY_ONLY_SDK_METHODS.has(method)) return null;
@@ -382,7 +379,7 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
         requireHyperbeamResult(method)
       );
     default:
-      return Promise.reject(new Error(`HyperBEAM mode does not support SDK method ${method}`));
+      return Promise.reject(new Error(`HyperBEAM does not support SDK method ${method}`));
   }
 }
 

@@ -1,8 +1,8 @@
 %%% @doc LBRY header-commitment primitives: SHA256d hashing, the Merkle Mountain
 %%% Range (MMR) over block hashes, and the Electrum transaction-merkle fold.
 %%%
-%%% The MMR is the 32-byte commitment from which Odysee header trust bootstraps
-%%% (see `aidocs/003_header_commitment_design.md'). Leaves are block hashes
+%%% The MMR is the 32-byte commitment from which Odysee header trust bootstraps.
+%%% Leaves are block hashes
 %%% (`sha256d(header)'), interior nodes are `sha256d(L || R)', peaks are bagged
 %%% right-to-left, and a chunk is the height-10 perfect subtree over exactly
 %%% 1024 block hashes. These constructions are byte-validated against mainnet.
@@ -76,8 +76,7 @@ find_peak(Height, [Size | Rest], Start) ->
 %%% --------------------------------------------------------------------------
 
 %% @doc Append one leaf hash to a peaks list of `{Height, Hash}' (strictly
-%% decreasing height), merging equal-height peaks. Matches the Python reference
-%% (`aidocs/007_roll_forward_headers.py').
+%% decreasing height), merging equal-height peaks.
 mmr_append(Peaks, LeafHash) ->
     mmr_append(lists:reverse(Peaks), LeafHash, 0).
 
@@ -142,7 +141,6 @@ verify_membership(LeafHash, Height, {Siblings, OtherPeaks, PeakIndex}, N, Root) 
 %% list of `{Height, Hash}' peaks of the size-from MMR (the consistency proof);
 %% `DeltaLeaves' are the (independently validated) new leaf hashes appended.
 %% Binds the old root, appends the delta, and confirms the new root.
-%% Per `aidocs/007_roll_forward_headers.py'. Returns a boolean.
 verify_consistency(FromRoot, OldPeaks, DeltaLeaves, ToRoot) ->
     case bag_peaks([P || {_H, P} <- OldPeaks]) =:= FromRoot of
         false -> false;

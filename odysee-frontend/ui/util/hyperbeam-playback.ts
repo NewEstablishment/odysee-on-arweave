@@ -10,7 +10,6 @@ export function buildHyperbeamPlaybackUrl(uri: string): string {
   try {
     const url = new URL(playbackUrl);
     url.searchParams.set('url', uri);
-    url.searchParams.set('mode', 'hyperbeam');
     if (!url.searchParams.has('media-base-url')) {
       url.searchParams.set('media-base-url', url.origin);
     }
@@ -34,12 +33,7 @@ export async function fetchHyperbeamPlaybackUrl(uri: string): Promise<string> {
   const requestUrl = buildHyperbeamPlaybackUrl(uri);
   if (!requestUrl) return '';
 
-  const playbackUrl = await fetchPlaybackUrl(requestUrl);
-  if (!playbackUrl) {
-    // eslint-disable-next-line no-console
-    console.warn(`[hyperbeam] playback resolution failed for ${uri}; falling back to legacy CDN (node: ${requestUrl})`);
-  }
-  return playbackUrl;
+  return fetchPlaybackUrl(requestUrl);
 }
 
 async function fetchPlaybackUrl(requestUrl: string): Promise<string> {
@@ -51,8 +45,7 @@ async function fetchPlaybackUrl(requestUrl: string): Promise<string> {
 
     // The stream device returns a ready-to-use node media URL; prefer it over
     // anything we could reconstruct locally.
-    const direct =
-      payload.streaming_url || payload['streaming-url'] || payload.download_url || payload['download-url'];
+    const direct = payload.streaming_url || payload['streaming-url'] || payload.download_url || payload['download-url'];
     if (typeof direct === 'string' && direct) return direct;
 
     return hyperbeamMediaUrlFromPayload(payload);

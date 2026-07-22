@@ -1,5 +1,5 @@
 %%% @doc The `lbry-header@1.0' codec: verifies LBRY block-header commitments
-%%% against the MMR header commitment (see `aidocs/003_header_commitment_design.md').
+%%% against the configured MMR header commitment.
 %%%
 %%% `verify/3' dispatches on the request's `type' key over the TRUSTLESS
 %%% commitment classes:
@@ -11,7 +11,7 @@
 %%%                       root (the snapshot pinned in node opts).
 %%%   `mmr-consistency' - bag the old peaks to the old root, append the provided
 %%%                       (independently validated) delta leaves, and re-bag to
-%%%                       the new root (per `aidocs/007_roll_forward_headers.py').
+%%%                       the new root.
 %%%
 %%% The TEE/snp-anchored commitment classes (`tee-tail', `mmr-genesis') are
 %%% deliberately not implemented here: they require an attestation device that

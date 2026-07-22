@@ -215,7 +215,9 @@ Content APIs (`/$/api/content/v1|get`):
 ## 6.4 SDK Proxy Client Behavior (`ui/lbry.js`)
 
 Base behavior:
-- Calls `${PROXY_URL}?m=<method>` (JSON-RPC 2.0).
+- Content, account, comment, search, playback, and upload methods are routed through the configured HyperBEAM node.
+- Local wallet/daemon-only methods retain the SDK proxy until an equivalent HyperBEAM contract exists.
+- There is no browser-selectable legacy request mode or direct original-network fallback for routed product reads.
 
 Caching optimization:
 - For `resolve` and `claim_search`, auth header is stripped when auth-only options are absent.
@@ -250,12 +252,11 @@ Upload details:
 
 ## 6.6 Comments and Moderation
 
-Comments client (`ui/comments.js`) calls Commentron using:
-- Base: `COMMENT_SERVER_API` (default `https://comments.odysee.tv/api/v2`)
-- Method URL shape: `POST ${COMMENT_SERVER_API}?m=<service.Method>`
-- JSON-RPC body shape:
-  - `{"jsonrpc":"2.0","id":1,"method":"comment.List","params":{...}}`
-  - Method value in body is canonical; `?m=` mirrors method name used by client routing/logging patterns.
+Comments client (`ui/comments.ts`) calls HyperBEAM only:
+- Native comments and controls are discovered through `~query@1.0/only`, then hydrated by immutable ID.
+- Historical Commentron reads and compatibility operations are routed through `~odysee-comment@1.0`.
+- The browser does not call Commentron directly.
+- Product logic merges native and historical results after hydration.
 
 Commentron route/version surface (`commentron/server/server.go`):
 - `/api` and `/api/v1`: legacy/v1 comment service (`comment.*`, `server.*`).
@@ -433,10 +434,9 @@ From `flow-typed/livestream.js`:
 ## 6.10 Playback URL Logic
 
 From `web/src/fetchStreamUrl.js`:
-- Preferred: SDK `get` result `streaming_url`.
-- Direct fallback pattern:
-  - `${PLAYER_SERVER}/api/v3/streams/free/{name}/{claim_id}`
-  - when source info exists, include `/{sd_hash_prefix}.{ext}` suffix.
+- Playback resolution goes through `~odysee-stream@1.0/playback`.
+- Media URLs prefer immutable `txid:nout` identifiers when present.
+- There is no direct SDK/player fallback in this helper.
 
 ## 6.11 Redux State Shape
 
@@ -461,7 +461,6 @@ Operational note:
 From `.env.defaults`:
 - `LBRY_WEB_API=https://api.na-backend.odysee.com`
 - `LBRY_API_URL=https://api.odysee.com`
-- `COMMENT_SERVER_API=https://comments.odysee.tv/api/v2`
 - `LIVESTREAM_SERVER_API=https://api.odysee.live`
 - `SEARCH_SERVER_API=https://lighthouse.odysee.tv/search`
 - `SEARCH_SERVER_API_ALT=https://recsys.odysee.tv/search`

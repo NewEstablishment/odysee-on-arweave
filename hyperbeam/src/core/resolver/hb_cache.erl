@@ -270,11 +270,13 @@ write(RawMsg, Opts) when is_map(RawMsg) ->
     TABM = hb_message:convert(Msg, tabm, <<"structured@1.0">>, Opts),
     ?event_debug(debug_cache, {writing_full_message, {msg, TABM}}),
     try
-        do_write_message(
-            TABM,
-            hb_opts:get(store, no_viable_store, Opts),
-            Opts
-        )
+        WriteResult =
+            do_write_message(
+                TABM,
+                hb_opts:get(store, no_viable_store, Opts),
+                Opts
+            ),
+        run_write_hook(WriteResult, TABM, Opts)
     catch
         Type:Reason:Stacktrace ->
             ?event(error,
@@ -291,6 +293,32 @@ write(List, Opts) when is_list(List) ->
     write(hb_message:convert(List, tabm, <<"structured@1.0">>, Opts), Opts);
 write(Bin, Opts) when is_binary(Bin) ->
     do_write_message(Bin, hb_opts:get(store, no_viable_store, Opts), Opts).
+
+%% @doc Notify configured handlers after a complete top-level message write.
+%% The cache write has already succeeded, so an indexing or observability hook
+%% cannot retroactively fail it. Handlers receive the committed message and the
+%% exact cache-readable ID returned to the caller.
+run_write_hook({ok, ID} = WriteResult, Msg, Opts) ->
+    HookReq = #{ <<"body">> => Msg, <<"id">> => ID },
+    HookResult =
+        try hb_hook:on(<<"write">>, HookReq, Opts)
+        catch
+            Class:Reason:Stacktrace ->
+                {error, {write_hook_exception, Class, Reason, Stacktrace}}
+        end,
+    case HookResult of
+        {ok, _} ->
+            WriteResult;
+        HookError ->
+            ?event(
+                warning,
+                {cache_write_hook_error, {id, ID}, {result, HookError}},
+                Opts
+            ),
+            WriteResult
+    end;
+run_write_hook(WriteResult, _Msg, _Opts) ->
+    WriteResult.
 
 do_write_message(Bin, Store, Opts) when is_binary(Bin) ->
     % Write the binary in the store at its calculated content-hash.
@@ -1327,6 +1355,65 @@ write_with_only_read_only_store_test() ->
     Opts = #{ <<"store">> => [ReadOnlyStore] },
     ?assertMatch({ok, _}, write(<<"some-binary-payload">>, Opts)),
     ?assertMatch({ok, _}, write(#{ <<"hello">> => <<"world">> }, Opts)).
+
+write_hook_receives_committed_message_and_id_test() ->
+    Parent = self(),
+    Store = hb_test_utils:test_store(),
+    Handler = #{
+        <<"device">> => #{
+            write =>
+                fun(_Base, Req, HandlerOpts) ->
+                    Parent ! {
+                        write_hook,
+                        maps:get(<<"id">>, Req),
+                        maps:get(<<"body">>, Req),
+                        hb_hook:find(<<"write">>, HandlerOpts)
+                    },
+                    {ok, Req}
+                end
+        }
+    },
+    Opts = #{
+        <<"store">> => Store,
+        <<"on">> => #{ <<"write">> => Handler }
+    },
+    Msg = #{ <<"schema">> => <<"example@1.0">>, <<"title">> => <<"Indexed">> },
+    {ok, ID} = write(Msg, Opts),
+    receive
+        {write_hook, ID, HookMsg, []} ->
+            ?assertEqual(<<"Indexed">>, maps:get(<<"title">>, HookMsg))
+    after 1000 ->
+        ?assert(false)
+    end,
+    ?assertMatch({ok, _}, read(ID, Opts)).
+
+write_hook_failure_does_not_rollback_cache_test() ->
+    Store = hb_test_utils:test_store(),
+    Handler = #{
+        <<"device">> => #{
+            write => fun(_Base, _Req, _Opts) -> {error, index_unavailable} end
+        }
+    },
+    Opts = #{
+        <<"store">> => Store,
+        <<"on">> => #{ <<"write">> => Handler }
+    },
+    {ok, ID} = write(#{ <<"title">> => <<"Still stored">> }, Opts),
+    ?assertMatch({ok, _}, read(ID, Opts)).
+
+write_hook_exception_does_not_rollback_cache_test() ->
+    Store = hb_test_utils:test_store(),
+    Handler = #{
+        <<"device">> => #{
+            write => fun(_Base, _Req, _Opts) -> error(index_crashed) end
+        }
+    },
+    Opts = #{
+        <<"store">> => Store,
+        <<"on">> => #{ <<"write">> => Handler }
+    },
+    {ok, ID} = write(#{ <<"title">> => <<"Still stored after crash">> }, Opts),
+    ?assertMatch({ok, _}, read(ID, Opts)).
 
 %% @doc Run a specific test with a given store module.
 run_test() ->

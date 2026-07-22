@@ -4,7 +4,7 @@ import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import Lbry from 'lbry';
 import { Lbryio } from 'lbryinc';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
-import { allowHyperbeamCompatibilityReads, isHyperbeamEnabled } from 'util/hyperbeamMode';
+import { isServedFromManifest } from 'util/manifest-prefix';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
 import { toHex } from 'util/hex';
@@ -34,6 +34,7 @@ const HYPERBEAM_FAILED_READ_CACHE_MS = 10 * 1000;
 const NATIVE_COMMENT_QUERY_CACHE_MS = HYPERBEAM_READ_CACHE_MS;
 const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
+const SEARCH_HYDRATION_CONCURRENCY = 8;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const CLAIM_DEVICE = '~odysee-claim@1.0';
 const ACCOUNT_DEVICE = '~odysee-account@1.0';
@@ -116,6 +117,7 @@ const AUTH_REQUIRED_DEVICE_PATHS = new Set([
   `${COMMENT_DEVICE}/moderation-remove-delegate`,
   `${COMMENT_DEVICE}/moderation-list-delegates`,
   `${COMMENT_DEVICE}/moderation-am-i`,
+  `${COMMENT_DEVICE}/super-list`,
 ]);
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
@@ -197,7 +199,7 @@ export async function fetchHyperbeamGet(params: any): Promise<any | null> {
 
   const response = await fetchDeviceJson(
     `${STREAM_DEVICE}/playback`,
-    uri ? { uri, mode: 'hyperbeam', media_base_url: hyperbeamBaseUrl() } : { id }
+    uri ? { uri, media_base_url: hyperbeamBaseUrl() } : { id }
   );
   return playbackPayloadFromHyperbeam(responsePayload(response));
 }
@@ -272,6 +274,10 @@ export async function fetchHyperbeamCommentById(params: CommentByIdParams): Prom
     items: [commentFromHyperbeam(item)],
     ancestors: Array.isArray(result.ancestors) ? result.ancestors.map(commentFromHyperbeam) : [],
   };
+}
+
+export async function fetchHyperbeamCommentSuperList(params: SuperListParams): Promise<SuperListResponse | null> {
+  return fetchHyperbeamCommentron(`${COMMENT_DEVICE}/super-list`, params);
 }
 
 export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): Promise<CommentCreateResponse | null> {
@@ -1087,8 +1093,8 @@ function queryPayload(response: any): any {
 function nativeWriteId(result: any): string {
   const payload = responsePayload(result);
   const id =
-    value(result, 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
-    value(payload, 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
+    value(result, 'message-id', 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
+    value(payload, 'message-id', 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
     (typeof payload === 'string' ? payload : '');
   return typeof id === 'string' ? id.replace(/^\/+/, '') : '';
 }
@@ -1097,7 +1103,7 @@ function responseJsonWithHeaders(response: Response): Promise<any> {
   return response.text().then((text) => {
     const parsed = parseDeviceJson(text);
     const result = isObject(parsed) ? parsed : { body: parsed };
-    ['id', 'path', 'read-path', 'url'].forEach((name) => {
+    ['message-id', 'id', 'path', 'read-path', 'url'].forEach((name) => {
       const header = response.headers.get(name);
       if (header) result[name] = header;
     });
@@ -1571,7 +1577,7 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   const items = result?.items;
   if (!Array.isArray(items)) return null;
 
-  const resolvedItems = await hydrateNativeSearchItems(items);
+  const resolvedItems = await hydrateSearchItems(items);
   return {
     ...result,
     items: resolvedItems,
@@ -1619,8 +1625,9 @@ function mergeClaimSearchResults(
 
 function claimSearchIdentity(claim: any): string {
   return String(
-    value(claim, 'claim_id', 'claim-id') ||
+    value(claim, 'immutable_id', 'immutable-id', 'outpoint') ||
       value(claim?.hyperbeam, 'immutable_id', 'immutable-id', 'record_id', 'record-id') ||
+      value(claim, 'claim_id', 'claim-id') ||
       ''
   );
 }
@@ -1642,45 +1649,77 @@ function claimReleaseTime(claim: any): number {
   );
 }
 
-async function hydrateNativeSearchItems(items: Array<any>): Promise<Array<any>> {
-  const nativeIds = items.filter(isNativeSearchHit).map(searchHitId).filter(Boolean).map(String);
-  if (!nativeIds.length) return items;
+async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
+  const ids = items.map(searchHitId).filter(Boolean).map(String);
+  if (!ids.length) return items;
 
-  const nativeClaims = await fetchHyperbeamUploadClaimsForIds([...new Set(nativeIds)]);
-  if (!nativeClaims.length) return items;
-
-  const nativeById: Record<string, any> = {};
-  nativeClaims.forEach((claim) => {
-    if (claim?.claim_id) nativeById[claim.claim_id] = claim;
+  const claims = (
+    await mapWithConcurrency([...new Set(ids)], SEARCH_HYDRATION_CONCURRENCY, (id) => fetchHyperbeamImmutableClaim(id))
+  ).flat();
+  const claimsById: Record<string, any> = {};
+  claims.forEach((claim) => {
+    searchClaimIds(claim).forEach((id) => {
+      claimsById[id] = claim;
+    });
   });
 
-  return items.map((item) => {
+  return items.flatMap((item) => {
     const id = String(searchHitId(item) || '');
-    return nativeById[id] || item;
+    const claim = claimsById[id];
+    if (claim) return [claim];
+    // Compatibility responses may already contain a full SDK claim. Plain
+    // search IDs, however, must never be presented as product objects.
+    return item && typeof item === 'object' ? [item] : [];
   });
 }
 
 function searchHitId(item: any) {
+  if (typeof item === 'string') return item;
   return value(
     item,
-    'claim_id',
-    'claim-id',
     'immutable_id',
     'immutable-id',
+    'legacy_outpoint',
+    'legacy-outpoint',
     'doc_id',
     'doc-id',
+    'claim_id',
+    'claim-id',
     'search_id',
     'search-id'
   );
 }
 
-function isNativeSearchHit(item: any): boolean {
-  return Boolean(
-    item &&
-    (value(item, 'source_system', 'source-system') === 'hyperbeam-native' ||
-      value(item, 'hyperbeam') ||
-      value(item, 'hyperbeam_upload', 'hyperbeam-upload'))
-  );
+async function mapWithConcurrency<T, R>(
+  items: Array<T>,
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<Array<R>> {
+  const results = Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(items.length, Math.max(1, concurrency)) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function searchClaimIds(claim: any): Array<string> {
+  const txid = value(claim, 'txid', 'tx-id');
+  const nout = value(claim, 'nout', 'n-out');
+  const hyperbeam = value(claim, 'hyperbeam') || {};
+  return [
+    value(claim, 'claim_id', 'claim-id'),
+    value(claim, 'immutable_id', 'immutable-id'),
+    value(claim, 'outpoint'),
+    txid !== undefined && nout !== undefined ? `${txid}:${nout}` : null,
+    value(hyperbeam, 'upload_id', 'upload-id', 'record_id', 'record-id', 'data_id', 'data-id'),
+  ]
+    .filter(Boolean)
+    .map(String);
 }
 
 export async function fetchHyperbeamClaimsByIds(ids: Array<string>): Promise<Array<Claim>> {
@@ -1693,7 +1732,9 @@ export async function fetchHyperbeamClaimsByIds(ids: Array<string>): Promise<Arr
   const unresolvedIds = requestedIds.filter((id) => !resolvedIds.has(id));
   if (!unresolvedIds.length) return uploadClaims;
 
-  const directClaims = (await Promise.all(unresolvedIds.map((id) => fetchHyperbeamImmutableClaim(id)))).flat();
+  const directClaims = (
+    await mapWithConcurrency(unresolvedIds, SEARCH_HYDRATION_CONCURRENCY, (id) => fetchHyperbeamImmutableClaim(id))
+  ).flat();
   return [...uploadClaims, ...directClaims];
 }
 
@@ -1706,7 +1747,9 @@ async function fetchHyperbeamUploadClaimsForIds(claimIds: Array<string>): Promis
   const unresolvedIds = ids.filter((id) => !resolvedIds.has(id));
   if (!unresolvedIds.length) return indexedClaims;
 
-  const directClaims = await Promise.all(unresolvedIds.map((id) => fetchHyperbeamImmutableClaim(id)));
+  const directClaims = await mapWithConcurrency(unresolvedIds, SEARCH_HYDRATION_CONCURRENCY, (id) =>
+    fetchHyperbeamImmutableClaim(id)
+  );
   return [...indexedClaims, ...directClaims.flat()];
 }
 
@@ -1773,7 +1816,14 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
     );
     if (!response.ok || !json) return [];
 
-    const claim = sdkClaimFromHyperbeam(expandedClaim || cacheReadClaim(claimPayload), claimId);
+    const sourceClaim = expandedClaim || cacheReadClaim(claimPayload);
+    const decodedClaim = decodeClaimMetadata(storePayload(sourceClaim));
+    const signingChannel = decodedClaim?.signedChannelId
+      ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
+          .then(responsePayload)
+          .catch(() => null)
+      : null;
+    const claim = immutableClaimFromHyperbeam(sourceClaim, claimId, signingChannel, decodedClaim);
     return claim?.claim_id ? [claim] : [];
   } catch {
     return [];
@@ -2025,10 +2075,7 @@ export async function fetchHyperbeamStreamVerification(
 
 async function fetchDeviceJson(path: string, body: Record<string, any>): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
-  if (!baseUrl) {
-    if (isHyperbeamEnabled()) throw new Error('HyperBEAM node is not configured');
-    return null;
-  }
+  if (!baseUrl) throw new Error('HyperBEAM node is not configured');
 
   try {
     if (AUTH_REQUIRED_DEVICE_PATHS.has(path)) {
@@ -2056,13 +2103,11 @@ async function fetchDeviceJson(path: string, body: Record<string, any>): Promise
     });
 
     if (!response.ok) {
-      if (isHyperbeamEnabled()) throw hyperbeamDeviceError(path, response.status);
-      return null;
+      throw hyperbeamDeviceError(path, response.status);
     }
     return await response.json();
   } catch (error) {
-    if (isHyperbeamEnabled()) throw hyperbeamDeviceFetchError(path, error);
-    return null;
+    throw hyperbeamDeviceFetchError(path, error);
   }
 }
 
@@ -2104,8 +2149,7 @@ async function fetchAuthDeviceJson(
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
   } catch (error) {
-    if (isHyperbeamEnabled()) throw hyperbeamDeviceFetchError(path, error);
-    return null;
+    throw hyperbeamDeviceFetchError(path, error);
   }
   const elapsedMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
   const responseText = await response.text();
@@ -2130,8 +2174,7 @@ async function fetchAuthDeviceJson(
   );
 
   if (!response.ok) {
-    if (isHyperbeamEnabled()) throw hyperbeamDeviceError(path, response.status);
-    return null;
+    throw hyperbeamDeviceError(path, response.status);
   }
 
   return parseJsonString(responseText);
@@ -2317,7 +2360,10 @@ function fetchCachedDeviceJson(path: string, body: Record<string, any>): Promise
 }
 
 function hyperbeamBaseUrl(): string {
-  return String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  const configured = String(HYPERBEAM_BASE_URL || '').replace(/\/+$/, '');
+  if (configured) return configured;
+  if (isServedFromManifest()) return window.location.origin;
+  return String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
 }
 
 function buildDeviceUrl(baseUrl: string, path: string): string {
@@ -2331,10 +2377,7 @@ function buildCacheUrl(baseUrl: string, path: string): string {
 
 async function fetchCacheJson(path: string): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
-  if (!baseUrl) {
-    if (isHyperbeamEnabled()) throw new Error('HyperBEAM node is not configured');
-    return null;
-  }
+  if (!baseUrl) throw new Error('HyperBEAM node is not configured');
 
   const response = await fetch(buildCacheUrl(baseUrl, path), {
     method: 'GET',
@@ -2344,8 +2387,7 @@ async function fetchCacheJson(path: string): Promise<any | null> {
   });
 
   if (!response.ok) {
-    if (isHyperbeamEnabled()) throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
-    return null;
+    throw new Error(`HyperBEAM ${path} failed with ${response.status}`);
   }
 
   return await response.json();
@@ -2561,7 +2603,8 @@ function uriWithClaimId(uri: any, claimId: any): string | null {
 
 function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   if (!result) return null;
-  const claim = responsePayload(result.claim || result);
+  const nestedClaim = isObject(result.claim) ? result.claim : null;
+  const claim = responsePayload(nestedClaim || result);
   const nativeUpload = Boolean(
     value(claim, 'hyperbeam') ||
     value(claim, 'hyperbeam+link', 'hyperbeam-link') ||
@@ -3189,7 +3232,6 @@ function totalPages(totalItems: number, pageSize: number) {
 async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): Promise<any | null> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) return null;
-  if (!allowHyperbeamCompatibilityReads() && isCompatibilityStorePath(path)) return null;
 
   try {
     const response = await fetch(buildDeviceUrl(baseUrl, path), {
@@ -3219,25 +3261,6 @@ function fetchCachedStoreJsonOrNull(path: string, preferJson: boolean = true): P
 
 function storePath(prefix: string, value: string): string {
   return `${prefix}/${encodeURIComponent(value)}`;
-}
-
-function isCompatibilityStorePath(path: string): boolean {
-  return [
-    'odysee/claim/',
-    'odysee/claim-id/',
-    'odysee/stream/',
-    'odysee/stream-id/',
-    'odysee/channel/',
-    'odysee/channel-id/',
-    'odysee/comment/',
-    'odysee/comment-id/',
-    'odysee/comment-reaction/',
-    'odysee/file-view-count/',
-    'odysee/file-reaction/',
-    'odysee/subscription-count/',
-    'odysee/media/stream/',
-    'odysee/media/stream-id/',
-  ].some((prefix) => path.startsWith(prefix));
 }
 
 function encodeDataPath(id: string): string {
@@ -3296,13 +3319,26 @@ async function parseStoreResponse(response: Response): Promise<any> {
 function responseHeadersObject(response: Response): Record<string, any> {
   const headers: Record<string, any> = {};
   response.headers.forEach((value, key) => {
-    headers[key] = value;
+    headers[key] = decodeHeaderUtf8(value);
   });
   const types = parseAoTypesValue(headers['ao-types']);
   for (const [key, type] of Object.entries(types)) {
     if (key !== '.' && headers[key] !== undefined) headers[key] = decodeAoTypedValue(type, headers[key]);
   }
   return headers;
+}
+
+// Fetch exposes response headers as Latin-1. Flat store messages can carry
+// UTF-8 field bytes in those headers, so recover valid UTF-8 without changing
+// ordinary ASCII or malformed values.
+function decodeHeaderUtf8(value: string): string {
+  if (!/[\x80-\xff]/.test(value)) return value;
+  try {
+    const bytes = Uint8Array.from(value, (char) => char.charCodeAt(0) & 0xff);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return value;
+  }
 }
 
 function parseMultipartBytes(body: Uint8Array, contentType: string): Record<string, any> {
@@ -3449,11 +3485,25 @@ function storePayload(result: any): any {
 
 function decodeClaimMetadata(payload: any): DecodedClaimMetadata | null {
   const claimHex = value(payload, 'claim', 'claim-value-hex', 'claim_value_hex');
-  const bytes = hexToBytes(claimHex);
+  const bytes = encodedClaimBytes(claimHex);
   if (!bytes) return null;
 
   try {
     return { signedChannelId: claimEnvelope(bytes).signedChannelId };
+  } catch {
+    return null;
+  }
+}
+
+function encodedClaimBytes(value: any): Uint8Array | null {
+  const hex = hexToBytes(value);
+  if (hex) return hex;
+  if (typeof value !== 'string' || !/^[0-9a-z_-]+$/i.test(value)) return null;
+
+  try {
+    const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='));
+    return Uint8Array.from(decoded, (char) => char.charCodeAt(0));
   } catch {
     return null;
   }
@@ -3552,7 +3602,8 @@ function immutableRouteIdFromUri(uri: string): string | null {
   }
 
   const outpoint = modifier.match(/^out_([0-9a-f]{64})_([0-9]+)$/i);
-  return outpoint ? `${outpoint[1]}:${outpoint[2]}` : null;
+  if (outpoint) return `${outpoint[1]}:${outpoint[2]}`;
+  return isStandaloneImmutableId(modifier) ? String(modifier) : null;
 }
 
 function isRouteClaimModifier(claimId: string) {
@@ -3595,7 +3646,6 @@ function claimIdFromChannelUri(uri: string): string | null {
 function hyperbeamMediaUrlFromPayload(payload: any): string {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl || !payload) return '';
-  if (!allowHyperbeamCompatibilityReads()) return '';
 
   const txid = value(payload, 'txid');
   const nout = value(payload, 'nout');
@@ -3642,7 +3692,10 @@ function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> 
   const promise = (
     isOutpointId(id) || isStandaloneImmutableId(id)
       ? fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false)
-      : fetchStoreJsonOrNull(storePath('odysee/claim-id', id))
+      : fetchCachedDeviceJson(`${CLAIM_DEVICE}/resolve`, { claim_ids: [id] }).then((response) => {
+          const result = sdkSearchFromHyperbeam(responsePayload(response));
+          return Array.isArray(result?.items) ? result.items[0] || null : null;
+        })
   ).catch((error) => {
     deviceReadCache.delete(key);
     throw error;

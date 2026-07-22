@@ -4,7 +4,6 @@ import * as REACTION_TYPES from 'constants/reactions';
 import { selectMyReactionForUri } from 'redux/selectors/reactions';
 import { makeSelectClaimForUri } from 'redux/selectors/claims';
 import { fetchHyperbeamFileReactionList } from 'util/hyperbeam';
-import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 const LEGACY_CLAIM_ID_RE = /^[0-9a-f]{40}$/i;
 
 function emptyReactions(claimId: string) {
@@ -43,17 +42,10 @@ export const doFetchReactions = (claimId: string) => (dispatch: Dispatch) => {
   const params = {
     claim_ids: claimId,
   };
-  return Promise.resolve()
-    .then(() => {
-      if (!isHyperbeamEnabled()) return null;
-      return fetchHyperbeamFileReactionList(params).then((result) => {
-        if (result) return result;
-        throw new Error('HyperBEAM file reaction list unavailable');
-      });
-    })
+  return fetchHyperbeamFileReactionList(params)
     .then((result) => {
-      if (result || isHyperbeamEnabled()) return result;
-      return Lbryio.call('reaction', 'list', params, 'post');
+      if (result) return result;
+      throw new Error('HyperBEAM file reaction list unavailable');
     })
     .then((reactions: Array<number>) => {
       dispatch({

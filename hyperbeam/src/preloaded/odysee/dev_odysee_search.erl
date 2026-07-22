@@ -8,18 +8,26 @@
 -define(DEVICE, <<"odysee-search@1.0">>).
 -define(DEFAULT_BACKEND_URL, <<"http://127.0.0.1:7700">>).
 -define(DEFAULT_INDEX, <<"odysee_claims">>).
+-define(RECONCILE_SCHEDULE_KEY, {?MODULE, native_search_reconcile_scheduled_at}).
+-define(RECONCILE_WORKER, dev_odysee_search_reconcile_worker).
 
 info(_Opts) ->
     #{ exports => [<<"query">>, <<"index">>, <<"delete">>, <<"status">>, <<"schema">>] }.
 
 query(Base, Req, Opts) ->
     safe(fun() ->
+        _ = schedule_pending_native_search_reconcile(Opts),
         Params = params(Base, Req, Opts),
         Search = meili_search_body(Params, Opts),
         maybe
             {ok, Raw} ?= meili_post(index_path(Params, Opts, <<"/search">>), Search, Base, Req, Opts),
             {ok, Decoded} ?= try_decode_json(Raw),
-            Result = maybe_merge_legacy_claim_search(normalize_search_response(Decoded, Params, Opts), Params, Opts),
+            Internal = maybe_merge_legacy_claim_search(
+                normalize_search_response(Decoded, Params, Opts),
+                Params,
+                Opts
+            ),
+            Result = id_only_search_response(Internal, Opts),
             ok_json(Result#{ <<"request">> => Search })
         else
             Error -> device_error(Error)
@@ -30,16 +38,16 @@ index(Base, Req, Opts) ->
     safe(fun() ->
         Params = params(Base, Req, Opts),
         Docs = documents(Params, Opts),
+        ok = cleanup_legacy_document_ids(Docs, Params, Base, Req, Opts),
         maybe
-            {ok, Raw} ?= meili_post(
+            {ok, Task} ?= meili_post_task(
                 index_path(Params, Opts, <<"/documents?primaryKey=search_id">>),
                 Docs,
                 Base,
                 Req,
                 Opts
             ),
-            {ok, Decoded} ?= try_decode_json(Raw),
-            ok_json(#{ <<"task">> => Decoded, <<"documents">> => document_count(Docs) })
+            ok_json(#{ <<"task">> => Task, <<"documents">> => document_count(Docs) })
         else
             Error -> device_error(Error)
         end
@@ -49,26 +57,16 @@ delete(Base, Req, Opts) ->
     safe(fun() ->
         Params = params(Base, Req, Opts),
         case ids(Params, Opts) of
-            [ID] ->
-                SearchID = search_id(ID),
+            IDs when is_list(IDs), length(IDs) > 0 ->
                 maybe
-                    {ok, Raw} ?= meili_delete(index_path(Params, Opts, <<"/documents/", SearchID/binary>>), Base, Req, Opts),
-                    {ok, Decoded} ?= try_decode_json(Raw),
-                    ok_json(#{ <<"task">> => Decoded, <<"deleted">> => [ID] })
-                else
-                    Error -> device_error(Error)
-                end;
-            IDs when is_list(IDs), length(IDs) > 1 ->
-                maybe
-                    {ok, Raw} ?= meili_post(
+                    {ok, Task} ?= meili_post_task(
                         index_path(Params, Opts, <<"/documents/delete-batch">>),
-                        [search_id(ID) || ID <- IDs],
+                        search_ids(IDs),
                         Base,
                         Req,
                         Opts
                     ),
-                    {ok, Decoded} ?= try_decode_json(Raw),
-                    ok_json(#{ <<"task">> => Decoded, <<"deleted">> => IDs })
+                    ok_json(#{ <<"task">> => Task, <<"deleted">> => IDs })
                 else
                     Error -> device_error(Error)
                 end;
@@ -154,6 +152,69 @@ normalize_search_response(Msg, Params, Opts) when is_map(Msg) ->
     };
 normalize_search_response(Other, _Params, _Opts) ->
     #{ <<"device">> => ?DEVICE, <<"backend">> => <<"meilisearch">>, <<"raw">> => Other }.
+
+%% Search establishes order and returns locators. Product data is loaded from
+%% the immutable stores by the caller; backend documents never cross this
+%% boundary as claim objects.
+id_only_search_response(Result, Opts) when is_map(Result) ->
+    Hits = list_or_empty(hb_maps:get(<<"items">>, Result, [], Opts)),
+    IDs = immutable_ids_from_hits(Hits, Opts),
+    maps:without(
+        [<<"raw">>, <<"claim-ids">>],
+        Result#{
+            <<"items">> => IDs,
+            <<"ids">> => IDs,
+            <<"total-items">> => max(
+                length(IDs),
+                value_or(hb_maps:get(<<"total-items">>, Result, not_found, Opts), length(IDs))
+            )
+        }
+    );
+id_only_search_response(Other, _Opts) ->
+    Other.
+
+immutable_ids_from_hits(Hits, Opts) when is_list(Hits) ->
+    lists:filtermap(
+        fun(Hit) ->
+            case immutable_search_id(Hit, Opts) of
+                not_found -> false;
+                ID -> {true, ID}
+            end
+        end,
+        Hits
+    );
+immutable_ids_from_hits(_Hits, _Opts) ->
+    [].
+
+immutable_search_id(Hit, Opts) when is_map(Hit) ->
+    case first_value(
+        [
+            <<"immutable_id">>,
+            <<"immutable-id">>,
+            <<"legacy_outpoint">>,
+            <<"legacy-outpoint">>,
+            <<"doc_id">>,
+            <<"doc-id">>
+        ],
+        Hit,
+        Opts
+    ) of
+        ID when is_binary(ID), ID =/= <<>> -> ID;
+        _ -> native_claim_id(Hit, Opts)
+    end;
+immutable_search_id(ID, _Opts) when is_binary(ID), ID =/= <<>> ->
+    ID;
+immutable_search_id(_Hit, _Opts) ->
+    not_found.
+
+native_claim_id(Hit, Opts) ->
+    case {
+        native_hit(Hit, Opts),
+        first_value([<<"claim_id">>, <<"claim-id">>], Hit, Opts)
+    } of
+        {true, ID} when is_binary(ID), ID =/= <<>> -> ID;
+        _ -> not_found
+    end.
 
 maybe_merge_legacy_claim_search(Result, Params, Opts) ->
     case first_value([<<"channel_ids">>, <<"channel-ids">>, <<"channel_id">>, <<"channel-id">>], Params, Opts) of
@@ -316,20 +377,89 @@ filter_stale_native_hits(Hits, _Opts) ->
     Hits.
 
 native_upload_ids(Opts) ->
-    case hb_store:read(hb_opts:get(store, [], Opts), <<"odysee/upload-index/global/state.json">>, Opts) of
-        {ok, Bin} when is_binary(Bin) ->
-            try
-                State = hb_json:decode(Bin),
-                Uploads = hb_maps:get(<<"uploads">>, State, #{}, Opts),
-                case is_map(Uploads) of
-                    true -> sets:from_list([hb_util:bin(ID) || ID <- maps:keys(Uploads)], [{version, 2}]);
-                    false -> all
-                end
-            catch
-                _:_ -> all
-            end;
+    Store = hb_opts:get(store, [], Opts),
+    case hb_store:read(Store, native_upload_list_path(), maps:without([<<"store">>, store], Opts)) of
+        {ok, Bin} when is_binary(Bin) -> native_upload_ids_from_json(Bin);
+        Bin when is_binary(Bin) -> native_upload_ids_from_json(Bin);
         _ ->
             all
+    end.
+
+native_upload_ids_from_json(Bin) ->
+    try hb_json:decode(Bin) of
+        IDs when is_list(IDs) ->
+            sets:from_list([hb_util:bin(ID) || ID <- IDs, is_binary(ID), ID =/= <<>>], [{version, 2}]);
+        #{ <<"ids">> := IDs } when is_list(IDs) ->
+            sets:from_list([hb_util:bin(ID) || ID <- IDs, is_binary(ID), ID =/= <<>>], [{version, 2}]);
+        _ ->
+            all
+    catch
+        _:_ -> all
+    end.
+
+native_upload_list_path() ->
+    <<"odysee/upload/list/all/", (hb_util:encode(hb_crypto:sha256(<<"all">>)))/binary>>.
+
+reconcile_pending_native_search(Opts) ->
+    try
+        case hb_ao:raw(
+            <<"odysee-upload@1.0">>,
+            <<"reconcile">>,
+            #{},
+            #{ <<"limit">> => hb_opts:get(<<"odysee-search-reconcile-limit">>, 20, Opts) },
+            Opts
+        ) of
+            {ok, _} -> ok;
+            Error -> Error
+        end
+    catch
+        Class:Reason -> {error, {Class, Reason}}
+    end.
+
+%% Search availability should help drain derivative indexing failures, but a
+%% public query must not synchronously replay the queue or start one replay per
+%% concurrent request. Schedule at most one node-local replay per interval and
+%% keep it off the query latency path.
+schedule_pending_native_search_reconcile(Opts) ->
+    Interval = clamp_int(
+        hb_opts:get(<<"odysee-search-reconcile-interval-ms">>, 5000, Opts),
+        5000,
+        1000,
+        300000
+    ),
+    global:trans(
+        {{?MODULE, native_search_reconcile_scheduler}, self()},
+        fun() ->
+            Now = erlang:monotonic_time(millisecond),
+            Last = persistent_term:get(?RECONCILE_SCHEDULE_KEY, Now - Interval),
+            case Now - Last >= Interval andalso whereis(?RECONCILE_WORKER) =:= undefined of
+                true ->
+                    start_pending_native_search_reconcile(Now, Opts);
+                false ->
+                    ok
+            end
+        end,
+        [node()]
+    ).
+
+start_pending_native_search_reconcile(Now, Opts) ->
+    Worker = spawn(fun() ->
+        receive
+            {reconcile, WorkerOpts} ->
+                _ = reconcile_pending_native_search(WorkerOpts),
+                ok;
+            stop ->
+                ok
+        end
+    end),
+    case catch register(?RECONCILE_WORKER, Worker) of
+        true ->
+            persistent_term:put(?RECONCILE_SCHEDULE_KEY, Now),
+            Worker ! {reconcile, Opts},
+            ok;
+        _ ->
+            Worker ! stop,
+            ok
     end.
 
 native_hit(Hit, Opts) when is_map(Hit) ->
@@ -351,8 +481,68 @@ meili_get(Path, Base, Req, Opts) ->
 meili_post(Path, Body, Base, Req, Opts) ->
     meili_request(<<"POST">>, Path, hb_json:encode(Body), Base, Req, Opts).
 
-meili_delete(Path, Base, Req, Opts) ->
-    meili_request(<<"DELETE">>, Path, <<>>, Base, Req, Opts).
+meili_post_task(Path, Body, Base, Req, Opts) ->
+    maybe
+        {ok, Raw} ?= meili_post(Path, Body, Base, Req, Opts),
+        {ok, Submitted} ?= try_decode_json(Raw),
+        TaskUID ?= meili_task_uid(Submitted),
+        wait_for_meili_task(TaskUID, erlang:monotonic_time(millisecond), Base, Req, Opts)
+    else
+        not_found -> {error, invalid_meilisearch_task};
+        Error -> Error
+    end.
+
+wait_for_meili_task(TaskUID, StartedAt, Base, Req, Opts) ->
+    Timeout = clamp_int(
+        hb_opts:get(<<"odysee-search-task-timeout">>, 10000, Opts),
+        10000,
+        1,
+        300000
+    ),
+    case erlang:monotonic_time(millisecond) - StartedAt > Timeout of
+        true ->
+            {error, {meilisearch_task_timeout, TaskUID}};
+        false ->
+            maybe
+                {ok, Raw} ?= meili_get(<<"/tasks/", (integer_to_binary(TaskUID))/binary>>, Base, Req, Opts),
+                {ok, Task} ?= try_decode_json(Raw),
+                wait_for_meili_task_status(TaskUID, StartedAt, Task, Base, Req, Opts)
+            else
+                Error -> Error
+            end
+    end.
+
+wait_for_meili_task_status(_TaskUID, _StartedAt, Task, _Base, _Req, _Opts)
+        when is_map(Task), map_get(<<"status">>, Task) =:= <<"succeeded">> ->
+    {ok, Task};
+wait_for_meili_task_status(TaskUID, StartedAt, Task, Base, Req, Opts) when is_map(Task) ->
+    case hb_maps:get(<<"status">>, Task, not_found, Opts) of
+        <<"enqueued">> -> wait_for_meili_task_after_delay(TaskUID, StartedAt, Base, Req, Opts);
+        <<"processing">> -> wait_for_meili_task_after_delay(TaskUID, StartedAt, Base, Req, Opts);
+        <<"failed">> -> {error, {meilisearch_task_failed, TaskUID, hb_maps:get(<<"error">>, Task, Task, Opts)}};
+        <<"canceled">> -> {error, {meilisearch_task_canceled, TaskUID, hb_maps:get(<<"error">>, Task, Task, Opts)}};
+        _ -> {error, {invalid_meilisearch_task, Task}}
+    end;
+wait_for_meili_task_status(_TaskUID, _StartedAt, Task, _Base, _Req, _Opts) ->
+    {error, {invalid_meilisearch_task, Task}}.
+
+wait_for_meili_task_after_delay(TaskUID, StartedAt, Base, Req, Opts) ->
+    Delay = clamp_int(
+        hb_opts:get(<<"odysee-search-task-poll-ms">>, 100, Opts),
+        100,
+        1,
+        10000
+    ),
+    timer:sleep(Delay),
+    wait_for_meili_task(TaskUID, StartedAt, Base, Req, Opts).
+
+meili_task_uid(Task) when is_map(Task) ->
+    case maps:get(<<"taskUid">>, Task, maps:get(<<"uid">>, Task, not_found)) of
+        UID when is_integer(UID), UID >= 0 -> UID;
+        _ -> not_found
+    end;
+meili_task_uid(_Task) ->
+    not_found.
 
 meili_request(Method, Path, Body, Base, Req, Opts) ->
     application:ensure_all_started(inets),
@@ -382,8 +572,7 @@ meili_request(Method, Path, Body, Base, Req, Opts) ->
     end.
 
 method_atom(<<"GET">>) -> get;
-method_atom(<<"POST">>) -> post;
-method_atom(<<"DELETE">>) -> delete.
+method_atom(<<"POST">>) -> post.
 
 backend_url(Base, Req, Opts) ->
     trim_trailing_slash(
@@ -774,6 +963,9 @@ normalize_document(Other, _Opts) ->
     erlang:error({error, {invalid_document, Other}}).
 
 search_id(ID) ->
+    hb_util:encode(crypto:hash(sha256, hb_util:bin(ID))).
+
+legacy_search_id(ID) ->
     << <<(search_id_char(Char))>> || <<Char>> <= hb_util:bin(ID) >>.
 
 search_id_char(Char) when Char >= $a, Char =< $z -> Char;
@@ -782,6 +974,39 @@ search_id_char(Char) when Char >= $0, Char =< $9 -> Char;
 search_id_char($_) -> $_;
 search_id_char($-) -> $-;
 search_id_char(_) -> $_.
+
+search_ids(IDs) ->
+    lists:usort(
+        lists:flatmap(
+            fun(ID) -> [search_id(ID), legacy_search_id(ID)] end,
+            IDs
+        )
+    ).
+
+cleanup_legacy_document_ids(Docs, Params, Base, Req, Opts) ->
+    IDs = lists:usort([
+        legacy_search_id(ID)
+     || Doc <- Docs,
+        ID <- [first_value([<<"doc_id">>, <<"doc-id">>], Doc, Opts)],
+        ID =/= not_found
+    ]),
+    case IDs of
+        [] ->
+            ok;
+        _ ->
+            case meili_post_task(
+                index_path(Params, Opts, <<"/documents/delete-batch">>),
+                IDs,
+                Base,
+                Req,
+                Opts
+            ) of
+                {ok, _} -> ok;
+                Error ->
+                    ?event(warning, {odysee_search_legacy_id_cleanup_failed, {result, Error}}),
+                    ok
+            end
+    end.
 
 ids(Params, Opts) ->
     case first_value([<<"ids">>, <<"doc_ids">>, <<"doc-ids">>], Params, Opts) of
@@ -1051,7 +1276,7 @@ meili_search_body_test() ->
     ?assertEqual(<<"space cats">>, maps:get(<<"q">>, Body)),
     ?assertEqual(10, maps:get(<<"limit">>, Body)),
     ?assertEqual(10, maps:get(<<"offset">>, Body)),
-    ?assertEqual([<<"release_time:asc">>, <<"effective_amount:desc">>], maps:get(<<"sort">>, Body)),
+    ?assertEqual([<<"release_time:desc">>, <<"effective_amount:desc">>], maps:get(<<"sort">>, Body)),
     ?assertMatch(#{ <<"filter">> := _ }, Body),
     Filter = maps:get(<<"filter">>, Body),
     ?assertNotEqual(nomatch, binary:match(Filter, <<"claim_type = \"stream\"">>)),
@@ -1103,9 +1328,65 @@ normalize_search_response_test() ->
     ?assertEqual([<<"abc">>], maps:get(<<"claim-ids">>, Result)),
     ?assertEqual(1, maps:get(<<"total-items">>, Result)).
 
+id_only_search_response_test() ->
+    LegacyID = <<"4bf53de1ef6237336665bd82d92655ed899baf878f61e2a9755d0512189cd9f7:0">>,
+    NativeClaimID = <<"-tMJ3RquAH-t4dg00tp0iQIcPNe0GOiB1UN22a4HNZA">>,
+    NativeRecordID = <<"record-id-for-native-upload">>,
+    Internal = #{
+        <<"device">> => ?DEVICE,
+        <<"backend">> => <<"meilisearch">>,
+        <<"items">> => [
+            #{
+                <<"claim_id">> => <<"561e81203abc61676daf5d360295c9a8a0bdb373">>,
+                <<"immutable_id">> => LegacyID,
+                <<"title">> => <<"legacy title must not escape">>
+            },
+            #{
+                <<"claim_id">> => NativeClaimID,
+                <<"doc_id">> => NativeClaimID,
+                <<"immutable_id">> => NativeRecordID,
+                <<"source_system">> => <<"hyperbeam-native">>,
+                <<"title">> => <<"native title must not escape">>
+            }
+        ],
+        <<"claim-ids">> => [<<"mutable">>],
+        <<"raw">> => #{ <<"hits">> => [#{ <<"title">> => <<"private backend document">> }] },
+        <<"total-items">> => 2
+    },
+    Result = id_only_search_response(Internal, #{}),
+    ?assertEqual([LegacyID, NativeRecordID], maps:get(<<"items">>, Result)),
+    ?assertEqual([LegacyID, NativeRecordID], maps:get(<<"ids">>, Result)),
+    ?assertEqual(false, maps:is_key(<<"raw">>, Result)),
+    ?assertEqual(false, maps:is_key(<<"claim-ids">>, Result)).
+
 index_name_ignores_ui_index_param_test() ->
     ?assertEqual(?DEFAULT_INDEX, index_name(#{ <<"index">> => 0 }, #{})),
     ?assertEqual(<<"alternate">>, index_name(#{ <<"search-index">> => <<"alternate">> }, #{})).
 
 search_id_test() ->
-    ?assertEqual(<<"abc-XYZ_123_0">>, search_id(<<"abc-XYZ_123:0">>)).
+    ID = <<"abc-XYZ_123:0">>,
+    ?assertEqual(hb_util:encode(crypto:hash(sha256, ID)), search_id(ID)),
+    ?assertEqual(<<"abc-XYZ_123_0">>, legacy_search_id(ID)).
+
+search_ids_are_collision_safe_and_delete_legacy_keys_test() ->
+    First = <<"abc:def">>,
+    Second = <<"abc_def">>,
+    ?assertNotEqual(search_id(First), search_id(Second)),
+    ?assertEqual(legacy_search_id(First), legacy_search_id(Second)),
+    DeleteIDs = search_ids([First, Second]),
+    ?assert(lists:member(search_id(First), DeleteIDs)),
+    ?assert(lists:member(search_id(Second), DeleteIDs)),
+    ?assert(lists:member(legacy_search_id(First), DeleteIDs)).
+
+meilisearch_task_uid_test() ->
+    ?assertEqual(7, meili_task_uid(#{ <<"taskUid">> => 7 })),
+    ?assertEqual(8, meili_task_uid(#{ <<"uid">> => 8 })),
+    ?assertEqual(not_found, meili_task_uid(#{ <<"taskUid">> => <<"7">> })).
+
+native_upload_ids_use_durable_global_list_test() ->
+    UploadIDs = native_upload_ids_from_json(
+        hb_json:encode([<<"record-a">>, <<"record-b">>])
+    ),
+    ?assert(sets:is_element(<<"record-a">>, UploadIDs)),
+    ?assert(sets:is_element(<<"record-b">>, UploadIDs)),
+    ?assertNot(sets:is_element(<<"deleted-record">>, UploadIDs)).

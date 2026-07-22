@@ -8,8 +8,6 @@ const {
   URL: SITE_URL,
 } = require('../../config.cjs');
 
-const { lbryProxy: Lbry } = require('../lbry');
-
 const { buildURI } = require('./lbryURI');
 
 const HYPERBEAM_TIMEOUT_MS = 5000;
@@ -40,18 +38,7 @@ async function fetchStreamUrl(claimName, claimId) {
     streamClaimId: claimId,
   });
 
-  const hyperbeamStreamUrl = await fetchHyperbeamStreamUrl(uri);
-  if (hyperbeamStreamUrl) {
-    return hyperbeamStreamUrl;
-  }
-
-  return await Lbry.get({
-    uri,
-  })
-    .then(({ streaming_url }) => streaming_url)
-    .catch((error) => {
-      return '';
-    });
+  return fetchHyperbeamStreamUrl(uri);
 }
 
 async function fetchHyperbeamStreamUrl(uri) {
@@ -60,11 +47,7 @@ async function fetchHyperbeamStreamUrl(uri) {
     return '';
   }
 
-  const streamUrl = await fetchHyperbeamPlaybackPayloadUrl(requestUrl);
-  if (!streamUrl) {
-    console.warn(`[hyperbeam] playback resolution failed for ${uri}; falling back to legacy CDN (node: ${requestUrl})`);
-  }
-  return streamUrl;
+  return fetchHyperbeamPlaybackPayloadUrl(requestUrl);
 }
 
 async function fetchHyperbeamPlaybackPayloadUrl(requestUrl) {
@@ -99,7 +82,6 @@ function buildHyperbeamPlaybackUrl(uri) {
   try {
     const url = new URL(playbackUrl);
     url.searchParams.set('url', uri);
-    url.searchParams.set('mode', 'hyperbeam');
     if (!url.searchParams.has('media-base-url')) {
       url.searchParams.set('media-base-url', url.origin);
     }

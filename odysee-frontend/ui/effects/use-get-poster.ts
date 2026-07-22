@@ -1,7 +1,9 @@
 import React from 'react';
 import { THUMBNAIL_WIDTH_POSTER, THUMBNAIL_HEIGHT_POSTER } from 'config';
 import { getThumbnailCdnUrl } from 'util/thumbnail';
-const FileRenderPlaceholder = '/img/fileRenderPlaceholder.png';
+import { manifestAssetPath } from 'util/manifest-prefix';
+
+const FileRenderPlaceholder = manifestAssetPath('/img/fileRenderPlaceholder.png');
 export default function useGetPoster(claimThumbnail: string | null | undefined, isShorts?: boolean) {
   const [thumbnail, setThumbnail] = React.useState(() => {
     if (claimThumbnail) {

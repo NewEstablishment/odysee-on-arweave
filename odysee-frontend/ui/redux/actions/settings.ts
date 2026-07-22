@@ -15,6 +15,7 @@ import { selectPrefsReady } from 'redux/selectors/sync';
 import { Lbryio } from 'lbryinc';
 import { getDefaultLanguage } from 'util/default-languages';
 import { postProcessHomepageDb, updateHomepageDb } from 'util/homepages';
+import { isServedFromManifest } from 'util/manifest-prefix';
 import { LocalStorage } from 'util/storage';
 
 import { URL_DEV } from 'config';
@@ -388,6 +389,13 @@ export function doOpenAnnouncements() {
 }
 export function doFetchHomepages(hp?: string) {
   return (dispatch: Dispatch) => {
+    if (isServedFromManifest()) {
+      dispatch({
+        type: ACTIONS.FETCH_HOMEPAGES_FAILED,
+      });
+      return;
+    }
+
     const param = hp ? `?hp=${hp}` : '';
     return fetch(`/$/api/content/v2/get${param}`)
       .then((response) => response.json())

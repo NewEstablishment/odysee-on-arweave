@@ -118,10 +118,8 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
       );
       const initialNout = firstString(pick(verification, 'nout'), claim?.nout, claim?.meta?.nout);
 
-      const claimUrl =
-        baseUrl && claimId ? buildDeviceUrl(baseUrl, '~odysee-claim@1.0/resolve', { claim_id: claimId }) : '';
-      const channelClaimUrl =
-        baseUrl && channelId ? buildDeviceUrl(baseUrl, '~odysee-claim@1.0/resolve', { claim_id: channelId }) : '';
+      const claimUrl = baseUrl && claimId ? storeReadUrl(baseUrl, 'odysee/claim-id', claimId) : '';
+      const channelClaimUrl = baseUrl && channelId ? storeReadUrl(baseUrl, 'odysee/channel', channelId) : '';
 
       const [claimRequest, playbackRequest, channelClaim] = await Promise.all([
         claimUrl ? fetchDebugRequest('LOCATOR', claimUrl) : Promise.resolve(undefined),
@@ -156,7 +154,10 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
       const playback = playbackRequest?.body || {};
       const mediaUrl = firstString(
         pick(playback, 'download_url', 'download-url', 'streaming_url', 'streaming-url'),
-        pick(nextState.verification, 'download-url', 'download_url')
+        pick(nextState.verification, 'download-url', 'download_url'),
+        baseUrl && txid && nout !== undefined && nout !== ''
+          ? storeReadUrl(baseUrl, 'odysee/media/stream-id', `${txid}:${nout}`)
+          : ''
       );
       nextState.mediaUrl = mediaUrl;
 
@@ -404,9 +405,7 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
       explanation: __(
         'The video player calls the HyperBEAM playback route. That route resolves the public stream and returns the media URL the native browser video element can consume.'
       ),
-      catchText: __(
-        'This catches frontend fallback to the original Odysee path when the debug route is expected to go through HyperBEAM.'
-      ),
+      catchText: __('This catches playback requests that fail to enter the HyperBEAM route.'),
       proofRows: [
         [__('request'), safePath(playbackRequestUrl)],
         [__('media url'), mediaPath],
@@ -737,10 +736,8 @@ function hyperbeamBaseUrl(playbackRequestUrl: string): string {
   }
 }
 
-function buildDeviceUrl(baseUrl: string, path: string, params: Record<string, string>): string {
-  const url = new URL(`${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`);
-  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
-  return url.toString();
+function storeReadUrl(baseUrl: string, prefix: string, value: string): string {
+  return `${baseUrl.replace(/\/$/, '')}/${prefix}/${encodeURIComponent(value)}`;
 }
 
 function compactRequests(requests: Array<DebugRequest | undefined>): DebugRequest[] {

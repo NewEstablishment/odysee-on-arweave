@@ -1,5 +1,5 @@
 import { Lbryio } from 'lbryinc';
-import { selectChannelClaimIdForUri, selectChannelNameForUri } from 'redux/selectors/claims';
+import { selectChannelClaimIdForUri } from 'redux/selectors/claims';
 import { bufferToHex } from 'util/uint8array-to-hex';
 import {
   selectAccountCheckIsFetchingForId,
@@ -14,57 +14,19 @@ import * as MODALS from 'constants/modal_types';
 import { doOpenModal } from 'redux/actions/app';
 import { getStripeEnvironment } from 'util/stripe';
 import { fetchHyperbeamAccountApi } from 'util/hyperbeam';
-import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 const stripeEnvironment = getStripeEnvironment();
 export const doTipAccountCheckForUri = (uri: string) => async (dispatch: Dispatch, getState: GetState) => {
   const state = getState();
   const channelClaimId = selectChannelClaimIdForUri(state, uri);
-  const channelName = selectChannelNameForUri(state, uri);
   const isFetching = channelClaimId && selectAccountCheckIsFetchingForId(state, channelClaimId);
   if (isFetching) return;
-  if (isHyperbeamEnabled()) {
-    dispatch({
-      type: ACTIONS.SET_CAN_RECEIVE_FIAT_TIPS,
-      data: {
-        accountCheckResponse: undefined,
-        claimId: channelClaimId,
-      },
-    });
-    return;
-  }
   dispatch({
-    type: ACTIONS.CHECK_CAN_RECEIVE_FIAT_TIPS_STARTED,
-    data: channelClaimId,
-  });
-  return await Lbryio.call(
-    'account',
-    'check',
-    {
-      channel_claim_id: channelClaimId,
-      channel_name: channelName,
-      environment: stripeEnvironment,
-      v2: true,
+    type: ACTIONS.SET_CAN_RECEIVE_FIAT_TIPS,
+    data: {
+      accountCheckResponse: undefined,
+      claimId: channelClaimId,
     },
-    'post'
-  )
-    .then((accountCheckResponse) =>
-      dispatch({
-        type: ACTIONS.SET_CAN_RECEIVE_FIAT_TIPS,
-        data: {
-          accountCheckResponse,
-          claimId: channelClaimId,
-        },
-      })
-    )
-    .catch(() =>
-      dispatch({
-        type: ACTIONS.SET_CAN_RECEIVE_FIAT_TIPS,
-        data: {
-          accountCheckResponse: undefined,
-          claimId: channelClaimId,
-        },
-      })
-    );
+  });
 };
 export const doTipAccountStatus = () => async (dispatch: Dispatch, getState: GetState) => {
   const state = getState();
@@ -73,20 +35,10 @@ export const doTipAccountStatus = () => async (dispatch: Dispatch, getState: Get
   dispatch({
     type: ACTIONS.STRIPE_ACCOUNT_STATUS_START,
   });
-  const accountStatusRequest = isHyperbeamEnabled()
-    ? fetchHyperbeamAccountApi('account-status', {
-        environment: stripeEnvironment,
-        v2: true,
-      })
-    : Lbryio.call(
-        'account',
-        'status',
-        {
-          environment: stripeEnvironment,
-          v2: true,
-        },
-        'post'
-      );
+  const accountStatusRequest = fetchHyperbeamAccountApi('account-status', {
+    environment: stripeEnvironment,
+    v2: true,
+  });
   return await accountStatusRequest
     .then((accountStatusResponse: StripeAccountStatus | AccountStatus) => {
       dispatch({

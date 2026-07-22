@@ -1,1 +1,0 @@
--sname ${HB_ERL_SNAME:-"hb"}
