@@ -62,7 +62,6 @@ import { Provider } from 'react-redux';
 import { doDaemonReady, doOpenModal, doHideModal, doToggle3PAnalytics, doMinVersionSubscribe } from 'redux/actions/app';
 import Lbry, { apiCall } from 'lbry';
 import { setSearchApi } from 'redux/actions/search';
-import { doResolveSubscriptions } from 'redux/actions/subscriptions';
 import {
   doFetchLanguage,
   doFetchDevStrings,
@@ -291,7 +290,6 @@ function AppWrapper() {
         app.store.dispatch(doBlackListedDataSubscribe());
         app.store.dispatch(doFilteredDataSubscribe());
         app.store.dispatch(doFetchUserLocale());
-        app.store.dispatch(doResolveSubscriptions());
         analytics.event.startup(Date.now());
       });
       const cancelIdle = scheduleWhenIdle(() => {

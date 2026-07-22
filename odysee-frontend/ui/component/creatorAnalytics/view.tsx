@@ -21,6 +21,7 @@ import {
   selectSupportersAmountForChannelId,
 } from 'redux/selectors/memberships';
 import { selectModerationBlockList } from 'redux/selectors/comments';
+import { doSyncCommentModerationData } from 'redux/actions/comments';
 import { doFetchViewCount } from 'lbryinc';
 import { selectViewCount } from 'lbryinc';
 import './style.scss';
@@ -112,6 +113,10 @@ export default function CreatorAnalytics(props: Props) {
     if (!claimId) return;
     dispatch(doFetchClaimListMine(1, 99999, true, ['stream'], true, [claimId]));
   }, [claimId, dispatch]);
+
+  React.useEffect(() => {
+    dispatch(doSyncCommentModerationData());
+  }, [dispatch]);
 
   React.useEffect(() => {
     if (!claimId || !claimsById) return;

@@ -18,7 +18,7 @@ import Tooltip from 'component/common/tooltip';
 import { lazyImport } from 'util/lazyImport';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClaimForUri, selectMyChannelClaims } from 'redux/selectors/claims';
-import { doCommentList, doHyperChatList } from 'redux/actions/comments';
+import { doCommentList, doHyperChatList, doSyncCommentModerationData } from 'redux/actions/comments';
 import {
   selectTopLevelCommentsForUri,
   selectHyperChatsForUri,
@@ -154,6 +154,12 @@ export default function ChatLayout(props: Props) {
       dispatch(doFetchChannelMembershipsForChannelIds(channelId, commenterClaimIds));
     } // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId, commenterClaimIds && commenterClaimIds.length, dispatch]);
+  const hasMyChannels = Boolean(myChannelClaims && myChannelClaims.length);
+  React.useEffect(() => {
+    if (hasMyChannels) {
+      dispatch(doSyncCommentModerationData());
+    }
+  }, [dispatch, hasMyChannels]);
   React.useEffect(() => {
     if (myChannelClaims !== undefined) {
       dispatch(doListAllMyMembershipTiers());

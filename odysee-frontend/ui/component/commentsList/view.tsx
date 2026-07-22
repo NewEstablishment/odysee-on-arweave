@@ -25,6 +25,7 @@ import {
   selectClaimForUri,
   selectClaimIsMine,
   selectFetchingMyChannels,
+  selectHasChannels,
   selectScheduledStateForUri,
   selectProtectedContentTagForUri,
 } from 'redux/selectors/claims';
@@ -43,7 +44,13 @@ import {
   selectCommentForCommentId,
   selectCommentAncestorsForId,
 } from 'redux/selectors/comments';
-import { doCommentReset, doCommentList, doCommentById, doCommentReactList } from 'redux/actions/comments';
+import {
+  doCommentReset,
+  doCommentList,
+  doCommentById,
+  doCommentReactList,
+  doSyncCommentModerationData,
+} from 'redux/actions/comments';
 import { doPopOutInlinePlayer } from 'redux/actions/content';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { getChannelIdFromClaim } from 'util/claim';
@@ -161,6 +168,12 @@ export default function CommentList(props: Props) {
   const commenterClaimIds = React.useMemo(() => {
     return Array.from(new Set(topLevelComments.map((comment) => comment.channel_id).filter(Boolean))) as Array<string>;
   }, [topLevelComments]);
+  const hasMyChannels = useAppSelector(selectHasChannels);
+  React.useEffect(() => {
+    if (hasMyChannels) {
+      dispatch(doSyncCommentModerationData());
+    }
+  }, [dispatch, hasMyChannels]);
   React.useEffect(() => {
     if (commenterClaimIds.length > 0 && channelId) {
       dispatch(doFetchOdyseeMembershipForChannelIds(commenterClaimIds));

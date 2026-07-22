@@ -78,11 +78,6 @@ import {
   doChangeMute,
 } from 'redux/actions/app';
 import { selectError } from 'redux/selectors/notifications';
-import {
-  doFetchModBlockedList,
-  doFetchCommentModAmIList,
-  doCommentModListDelegatesForMyChannels,
-} from 'redux/actions/comments';
 const DebugLog = lazyImport(
   () =>
     import(
@@ -503,16 +498,9 @@ function App() {
     if (hasNoChannels) {
       dispatch(doSetIncognito(true));
     }
-
-    if (hasMyChannels) {
-      const backgroundSyncTimer = setTimeout(async () => {
-        await dispatch(doFetchModBlockedList(false));
-        await dispatch(doFetchCommentModAmIList());
-        await dispatch(doCommentModListDelegatesForMyChannels());
-      }, 2500);
-
-      return () => clearTimeout(backgroundSyncTimer);
-    } // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Moderation data (block lists, am-i, delegates) now syncs lazily from
+    // comment/moderation surfaces via doSyncCommentModerationData.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, hasMyChannels, hasNoChannels]);
   useEffect(() => {
     if (embedPath) return;

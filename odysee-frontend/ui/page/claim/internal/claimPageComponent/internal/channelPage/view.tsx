@@ -52,6 +52,7 @@ import { doFetchSubCount, selectSubCountForUri, selectBanStateForUri } from 'lbr
 import { selectYoutubeChannels, selectUser } from 'redux/selectors/user';
 import { selectIsSubscribedForUri } from 'redux/selectors/subscriptions';
 import { selectModerationBlockList } from 'redux/selectors/comments';
+import { doSyncCommentModerationData } from 'redux/actions/comments';
 import { selectMutedChannels } from 'redux/selectors/blocked';
 import { doOpenModal } from 'redux/actions/app';
 import { selectLanguage, selectClientSetting } from 'redux/selectors/settings';
@@ -160,6 +161,9 @@ function ChannelPage(props: Props) {
   React.useEffect(() => {
     setDisplayView(currentView);
   }, [currentView]);
+  React.useEffect(() => {
+    dispatch(doSyncCommentModerationData());
+  }, [dispatch]);
   React.useEffect(() => {
     const image = new Image();
 

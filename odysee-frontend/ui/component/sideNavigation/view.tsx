@@ -28,7 +28,7 @@ import {
   selectSubscriptionUris,
   selectSubscriptions,
 } from 'redux/selectors/subscriptions';
-import { doClearClaimSearch } from 'redux/actions/claims';
+import { doClearClaimSearch, doResolveUris } from 'redux/actions/claims';
 import { doClearPurchasedUriSuccess } from 'redux/actions/file';
 import { selectFollowedTags } from 'redux/selectors/tags';
 import { selectUserVerifiedEmail, selectUser, hasLegacyOdyseePremium } from 'redux/selectors/user';
@@ -94,6 +94,13 @@ function doGetDisplayedSubs(filter: string) {
       } else {
         filteredSubs = lastActiveSubs?.length > 0 ? lastActiveSubs : subs.slice(0, SIDEBAR_SUBS_DISPLAYED);
       }
+    }
+
+    // Subscriptions are no longer resolved wholesale at app boot; batch-resolve
+    // just the handful shown in the sidebar so titles and thumbnails render.
+    const unresolvedUris = filteredSubs.map((sub) => sub?.uri).filter((uri) => uri && !claimsByUriLocal[uri]);
+    if (unresolvedUris.length) {
+      dispatch(doResolveUris(unresolvedUris, true));
     }
 
     return filteredSubs;

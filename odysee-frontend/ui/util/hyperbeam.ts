@@ -36,6 +36,7 @@ const LBRY_CLAIM_ID_RE = /^[0-9a-f]{40}$/i;
 const NATIVE_COMMENT_QUERY_CACHE_MS = HYPERBEAM_READ_CACHE_MS;
 const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
+const CLAIM_ID_BATCH_SIZE = 50;
 const SEARCH_HYDRATION_CONCURRENCY = 8;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const CLAIM_DEVICE = '~odysee-claim@1.0';
@@ -3035,37 +3036,48 @@ async function fetchClaimIdChannelEntries(urls: Array<string>): Promise<Array<[s
     const claimId = claimIdFromChannelUri(uri);
     if (claimId) uriByClaimId.set(claimId.toLowerCase(), uri);
   });
-  const storeEntries = await Promise.all(
-    Array.from(uriByClaimId.entries()).map(async ([claimId, uri]): Promise<[string, any] | null> => {
-      const claim = await fetchHyperbeamLocatedClaim(uri).catch(() => null);
-      return claim ? [uri, claim] : null;
+
+  // Batch-first: one search call per chunk instead of a device-path chain per
+  // uri. Channels never navigate by immutable uri, so they skip the per-claim
+  // immutable store read entirely.
+  const entriesByUri = new Map<string, any>();
+  const claimIds = Array.from(uriByClaimId.keys());
+  await Promise.all(
+    chunkIds(claimIds, CLAIM_ID_BATCH_SIZE).map(async (chunk) => {
+      const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, { claim_ids: chunk }).catch(() => null);
+      const search = sdkSearchFromHyperbeam(responsePayload(response));
+      const items = Array.isArray(search?.items) ? search.items : [];
+      await Promise.all(
+        items.map(async (item: any) => {
+          const claim = sdkClaimFromHyperbeam(item);
+          const claimId = value(claim, 'claim_id', 'claim-id');
+          const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
+          if (!uri) return;
+          entriesByUri.set(
+            uri,
+            claim.value_type === 'channel' ? claim : await immutableClaimForResolvedUri(uri, claim)
+          );
+        })
+      );
     })
   );
-  const resolvedEntries = storeEntries.filter(Boolean);
-  const resolvedUris = new Set(resolvedEntries.map(([uri]) => uri));
-  const unresolvedClaimIds = Array.from(uriByClaimId.entries())
-    .filter(([, uri]) => !resolvedUris.has(uri))
-    .map(([claimId]) => claimId);
-  if (!unresolvedClaimIds.length) return resolvedEntries;
 
-  const response = await fetchCachedDeviceJson(`${CLAIM_DEVICE}/search`, {
-    claim_ids: unresolvedClaimIds,
-  });
-  const search = sdkSearchFromHyperbeam(responsePayload(response));
-  const items = Array.isArray(search?.items) ? search.items : [];
+  // Per-uri device-path resolution only for ids the batch could not return.
+  const missingUris = Array.from(uriByClaimId.values()).filter((uri) => !entriesByUri.has(uri));
+  await Promise.all(
+    missingUris.map(async (uri) => {
+      const claim = await fetchHyperbeamLocatedClaim(uri).catch(() => null);
+      if (claim) entriesByUri.set(uri, claim);
+    })
+  );
 
-  const fallbackEntries = (
-    await Promise.all(
-      items.map(async (item: any): Promise<[string, any] | null> => {
-        const claim = sdkClaimFromHyperbeam(item);
-        const claimId = value(claim, 'claim_id', 'claim-id');
-        const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
-        return uri ? [uri, await immutableClaimForResolvedUri(uri, claim)] : null;
-      })
-    )
-  ).filter(Boolean) as Array<[string, any]>;
+  return Array.from(entriesByUri.entries());
+}
 
-  return [...resolvedEntries, ...fallbackEntries];
+function chunkIds(ids: Array<string>, size: number): Array<Array<string>> {
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += size) chunks.push(ids.slice(i, i + size));
+  return chunks;
 }
 
 export async function fetchHyperbeamUploadList(params: ClaimSearchOptions = {}): Promise<ClaimSearchResponse | null> {

@@ -1694,6 +1694,24 @@ async function allSettledSequential(items, fn) {
   return results;
 }
 
+// Moderation data (block lists, am-i, delegates) is only needed on surfaces
+// that render comments or moderation UI, so it syncs lazily from those mounts
+// (once per session) instead of on every app boot.
+let moderationDataSynced = false;
+export function doSyncCommentModerationData() {
+  return async (dispatch: Dispatch, getState: GetState) => {
+    if (moderationDataSynced) return;
+
+    const myChannels = selectMyChannelClaims(getState()) as Claim[] | null;
+    if (!myChannels || myChannels.length === 0) return;
+
+    moderationDataSynced = true;
+    await dispatch(doFetchModBlockedList(false));
+    await dispatch(doFetchCommentModAmIList());
+    await dispatch(doCommentModListDelegatesForMyChannels());
+  };
+}
+
 export function doFetchModBlockedList(nativeSync: boolean = true) {
   return async (dispatch: Dispatch, getState: GetState) => {
     const LOOP_CHUNK_SIZE = 100;
