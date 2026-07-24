@@ -38,8 +38,6 @@ const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const CLAIM_ID_BATCH_SIZE = 50;
 const SEARCH_HYDRATION_CONCURRENCY = 4;
-const SEARCH_HYDRATION_ATTEMPTS = 2;
-const SEARCH_HYDRATION_RETRY_MS = 150;
 const SEARCH_REQUEST_ATTEMPTS = 3;
 const SEARCH_REQUEST_RETRY_MS = 250;
 const SEARCH_REQUEST_TIMEOUT_MS = 5000;
@@ -1909,17 +1907,28 @@ async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
 
   const uniqueIds = [...new Set(ids)];
   const claimsById: Record<string, any> = {};
+  const batchResults = await fetchImmutableBatchJsonOrNull(uniqueIds).catch(() => new Map<string, any>());
+  const loaded = uniqueIds
+    .map((id) => {
+      const result = batchResults.get(id);
+      return result ? { id, result, decodedClaim: decodeClaimMetadata(storePayload(result)) } : null;
+    })
+    .filter(Boolean);
+  const channelIds = Array.from(
+    new Set(loaded.map(({ decodedClaim }) => decodedClaim?.signedChannelId).filter((id): id is string => Boolean(id)))
+  );
+  const channelsById = await fetchImmutableSigningChannels(channelIds);
 
-  await mapWithConcurrency(uniqueIds, SEARCH_HYDRATION_CONCURRENCY, async (id) => {
-    const claims = await fetchCachedHyperbeamImmutableClaim(id);
-    const claim = claims[0];
-    if (claim) {
-      claimsById[id] = claim;
-      searchClaimIds(claim).forEach((claimId) => {
-        claimsById[claimId] = claim;
-      });
-    }
-    return claims;
+  loaded.forEach(({ id, result, decodedClaim }) => {
+    const signingChannel = decodedClaim?.signedChannelId
+      ? channelsById.get(decodedClaim.signedChannelId.toLowerCase())
+      : null;
+    const claim = immutableClaimFromHyperbeam(result, id, signingChannel, decodedClaim);
+    if (!claim) return;
+    claimsById[id] = claim;
+    searchClaimIds(claim).forEach((claimId) => {
+      claimsById[claimId] = claim;
+    });
   });
 
   return items.flatMap((item) => {
@@ -1928,31 +1937,6 @@ async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
     if (claim) return [claim];
     return item && typeof item === 'object' ? [item] : [];
   });
-}
-
-function fetchCachedHyperbeamImmutableClaim(claimId: string): Promise<Array<Claim>> {
-  const key = `search-hydration:${claimId}`;
-  const now = Date.now();
-  const cached = deviceReadCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
-
-  const promise = fetchHyperbeamImmutableClaimWithRetry(claimId).then((claims) => {
-    if (!claims.length) deviceReadCache.delete(key);
-    return claims;
-  });
-  deviceReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
-  return promise;
-}
-
-async function fetchHyperbeamImmutableClaimWithRetry(claimId: string): Promise<Array<Claim>> {
-  for (let attempt = 0; attempt < SEARCH_HYDRATION_ATTEMPTS; attempt += 1) {
-    const claims = await fetchHyperbeamImmutableClaim(claimId);
-    if (claims.length) return claims;
-    if (attempt + 1 < SEARCH_HYDRATION_ATTEMPTS) {
-      await new Promise((resolve) => setTimeout(resolve, SEARCH_HYDRATION_RETRY_MS));
-    }
-  }
-  return [];
 }
 
 function searchHitId(item: any) {

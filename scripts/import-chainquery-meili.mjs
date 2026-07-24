@@ -546,7 +546,7 @@ function normalizeDoc(doc) {
   const channelClaimCount = numberValue(doc.channel_claim_count);
   const thumbnailUrl = String(doc.thumbnail_url || '');
   const isChannel = claimType === 'channel' ? 1 : 0;
-  const hasThumbnail = thumbnailUrl ? 1 : 0;
+  const hasThumbnail = validThumbnailUrl(thumbnailUrl) ? 1 : 0;
   const hasChannel = doc.channel_claim_id || doc.channel_name ? 1 : 0;
   const isControlling = String(doc.bid_state || '') === 'Controlling' ? 1 : 0;
   const recencyRank = recencyScore(releaseTimestamp(doc));
@@ -631,6 +631,18 @@ async function replaceLegacyDocuments(meiliUrl, index, normalized, active, waitT
 function numberValue(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function validThumbnailUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname.toLowerCase();
+    if (!hostname || hostname === 'localhost') return false;
+    return hostname.includes('.') || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(':');
+  } catch {
+    return false;
+  }
 }
 
 function searchRank({
@@ -1125,6 +1137,7 @@ export {
   validateCheckpoint,
   validateRebuildRequest,
   validateTaskWaiting,
+  validThumbnailUrl,
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -20,6 +20,7 @@ import {
   validateCheckpoint,
   validateRebuildRequest,
   validateTaskWaiting,
+  validThumbnailUrl,
 } from './import-chainquery-meili.mjs';
 
 test('search ids are deterministic and collision-safe', () => {
@@ -174,6 +175,30 @@ test('normalized documents retain immutable ids and use the hashed primary key',
   assert.equal(doc.id, 'transaction:0');
   assert.equal(doc.search_id, searchId('transaction:0'));
   assert.equal(doc.media_type, 'video');
+});
+
+test('thumbnail ranking accepts usable HTTP URLs and rejects placeholder strings', () => {
+  for (const url of [
+    'https://thumbs.odycdn.com/thumb.webp',
+    'http://images.example.org/path/image.jpg',
+    'http://192.0.2.10/thumb.jpg',
+    'http://[2001:db8::1]/thumb.jpg',
+  ]) {
+    assert.equal(validThumbnailUrl(url), true, url);
+    assert.equal(normalizeDoc({ doc_id: url, thumbnail_url: url }).has_thumbnail, 1, url);
+  }
+
+  for (const value of [
+    '',
+    'test',
+    'jajaja',
+    'htt://anonymous/image',
+    'http://realstate/realstate',
+    'http://localhost/thumb.jpg',
+  ]) {
+    assert.equal(validThumbnailUrl(value), false, value);
+    assert.equal(normalizeDoc({ doc_id: value || 'empty', thumbnail_url: value }).has_thumbnail, 0, value);
+  }
 });
 
 test('preserved native documents migrate to hashed keys and record locators', () => {
