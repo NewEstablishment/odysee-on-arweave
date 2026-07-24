@@ -201,6 +201,25 @@ test('thumbnail ranking accepts usable HTTP URLs and rejects placeholder strings
   }
 });
 
+test('release-time quality distinguishes dated documents from fallback timestamps', () => {
+  assert.equal(
+    normalizeDoc({
+      doc_id: 'dated:0',
+      release_time: 1700000000,
+      transaction_time: 1600000000,
+    }).has_release_time,
+    1
+  );
+  assert.equal(
+    normalizeDoc({
+      doc_id: 'undated:0',
+      transaction_time: 1600000000,
+      created_at: 1600000000,
+    }).has_release_time,
+    0
+  );
+});
+
 test('preserved native documents migrate to hashed keys and record locators', () => {
   const migrated = normalizeNativeDoc({
     source_system: 'hyperbeam-native',

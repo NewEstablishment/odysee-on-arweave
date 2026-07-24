@@ -1911,19 +1911,50 @@ async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
   const loaded = uniqueIds
     .map((id) => {
       const result = batchResults.get(id);
-      return result ? { id, result, decodedClaim: decodeClaimMetadata(storePayload(result)) } : null;
+      const decodedClaim = result ? decodeClaimMetadata(storePayload(result)) : null;
+      const claim = result ? immutableClaimFromHyperbeam(result, id, null, decodedClaim) : null;
+      return result && claim ? { id, result, decodedClaim, claim } : null;
     })
     .filter(Boolean);
+  const claimIds = Array.from(
+    new Set(loaded.map(({ claim }) => value(claim, 'claim_id', 'claim-id')).filter(isClaimId))
+  );
+  const enrichmentResponse = claimIds.length
+    ? await fetchCachedPublicProxiedDeviceJson(`${CLAIM_DEVICE}/search`, {
+        claim_ids: claimIds,
+        page_size: claimIds.length,
+      }).catch(() => null)
+    : null;
+  const enrichmentItems = sdkSearchFromHyperbeam(responsePayload(enrichmentResponse))?.items;
+  const enrichmentsByClaimId = new Map<string, any>();
+  if (Array.isArray(enrichmentItems)) {
+    enrichmentItems.forEach((item) => {
+      const claim = sdkClaimFromHyperbeam(item) || item;
+      const claimId = value(claim, 'claim_id', 'claim-id');
+      if (isClaimId(claimId)) enrichmentsByClaimId.set(claimId.toLowerCase(), claim);
+    });
+  }
   const channelIds = Array.from(
-    new Set(loaded.map(({ decodedClaim }) => decodedClaim?.signedChannelId).filter((id): id is string => Boolean(id)))
+    new Set(
+      loaded
+        .filter(({ claim }) => {
+          const claimId = value(claim, 'claim_id', 'claim-id');
+          return !isClaimId(claimId) || !value(enrichmentsByClaimId.get(claimId.toLowerCase()), 'signing_channel');
+        })
+        .map(({ decodedClaim }) => decodedClaim?.signedChannelId)
+        .filter((id): id is string => Boolean(id))
+    )
   );
   const channelsById = await fetchImmutableSigningChannels(channelIds);
 
-  loaded.forEach(({ id, result, decodedClaim }) => {
-    const signingChannel = decodedClaim?.signedChannelId
-      ? channelsById.get(decodedClaim.signedChannelId.toLowerCase())
-      : null;
-    const claim = immutableClaimFromHyperbeam(result, id, signingChannel, decodedClaim);
+  loaded.forEach(({ id, result, decodedClaim, claim: baseClaim }) => {
+    const claimId = value(baseClaim, 'claim_id', 'claim-id');
+    const enrichment = isClaimId(claimId) ? enrichmentsByClaimId.get(claimId.toLowerCase()) : null;
+    const signingChannel =
+      value(enrichment, 'signing_channel') ||
+      (decodedClaim?.signedChannelId ? channelsById.get(decodedClaim.signedChannelId.toLowerCase()) : null);
+    const immutableClaim = immutableClaimFromHyperbeam(result, id, signingChannel, decodedClaim);
+    const claim = immutableClaim ? mergeSearchClaimEnrichment(immutableClaim, enrichment) : null;
     if (!claim) return;
     claimsById[id] = claim;
     searchClaimIds(claim).forEach((claimId) => {
@@ -1937,6 +1968,30 @@ async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
     if (claim) return [claim];
     return item && typeof item === 'object' ? [item] : [];
   });
+}
+
+function mergeSearchClaimEnrichment(immutableClaim: any, enrichment: any): any {
+  if (!enrichment || typeof enrichment !== 'object') return immutableClaim;
+
+  return {
+    ...enrichment,
+    ...immutableClaim,
+    timestamp: value(enrichment, 'timestamp') || value(immutableClaim, 'timestamp'),
+    meta: value(enrichment, 'meta') || value(immutableClaim, 'meta'),
+    signing_channel: value(enrichment, 'signing_channel') || value(immutableClaim, 'signing_channel'),
+    is_channel_signature_valid:
+      value(enrichment, 'is_channel_signature_valid', 'is-channel-signature-valid') ??
+      value(immutableClaim, 'is_channel_signature_valid', 'is-channel-signature-valid'),
+    value: {
+      ...(isObject(value(immutableClaim, 'value')) ? value(immutableClaim, 'value') : {}),
+      ...(isObject(value(enrichment, 'value')) ? value(enrichment, 'value') : {}),
+      source: {
+        ...(isObject(value(immutableClaim?.value, 'source')) ? value(immutableClaim.value, 'source') : {}),
+        ...(isObject(value(enrichment?.value, 'source')) ? value(enrichment.value, 'source') : {}),
+      },
+    },
+    hyperbeam: immutableClaim.hyperbeam,
+  };
 }
 
 function searchHitId(item: any) {

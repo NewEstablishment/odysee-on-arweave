@@ -548,6 +548,7 @@ function normalizeDoc(doc) {
   const isChannel = claimType === 'channel' ? 1 : 0;
   const hasThumbnail = validThumbnailUrl(thumbnailUrl) ? 1 : 0;
   const hasChannel = doc.channel_claim_id || doc.channel_name ? 1 : 0;
+  const hasReleaseTime = numberValue(doc.release_time) > 0 ? 1 : 0;
   const isControlling = String(doc.bid_state || '') === 'Controlling' ? 1 : 0;
   const recencyRank = recencyScore(releaseTimestamp(doc));
   return {
@@ -564,6 +565,7 @@ function normalizeDoc(doc) {
     is_channel: isChannel,
     has_thumbnail: hasThumbnail,
     has_channel: hasChannel,
+    has_release_time: hasReleaseTime,
     is_controlling: isControlling,
     recency_rank: recencyRank,
     search_rank: searchRank({
@@ -732,6 +734,7 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
       'is_channel',
       'has_thumbnail',
       'has_channel',
+      'has_release_time',
       'is_controlling',
       'recency_rank',
       'source_system',
@@ -740,6 +743,8 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
       'is_channel',
       'search_rank',
       'has_thumbnail',
+      'has_release_time',
+      'has_channel',
       'is_controlling',
       'recency_rank',
       'effective_amount',
@@ -755,7 +760,18 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
       'transaction_time',
       'duration',
     ],
-    rankingRules: ['words', 'typo', 'proximity', 'attribute', 'exactness', 'sort'],
+    rankingRules: [
+      'words',
+      'has_thumbnail:desc',
+      'has_release_time:desc',
+      'has_channel:desc',
+      'typo',
+      'proximity',
+      'attribute',
+      'exactness',
+      'sort',
+      'search_rank:desc',
+    ],
   };
   const task = await meiliFetch(`${meiliUrl}/indexes/${encodeURIComponent(index)}/settings`, {
     method: 'PATCH',
