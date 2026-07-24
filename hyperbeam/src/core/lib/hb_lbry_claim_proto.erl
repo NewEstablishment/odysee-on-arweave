@@ -16,11 +16,58 @@ decode_metadata(Message) when is_binary(Message) ->
         _ ->
             case length_field(Message, 2) of
                 {ok, Channel} -> {ok, channel_value(Message, Channel)};
-                _ -> not_found
+                _ -> decode_legacy_metadata(Message)
             end
     end;
 decode_metadata(_) ->
     not_found.
+
+decode_legacy_metadata(Claim) ->
+    maybe
+        1 ?= varint_field(Claim, 2),
+        {ok, Stream} ?= length_field(Claim, 3),
+        {ok, Metadata} ?= length_field(Stream, 2),
+        {ok, Source} ?= length_field(Stream, 3),
+        {ok, legacy_stream_value(Metadata, Source)}
+    else
+        _ -> not_found
+    end.
+
+legacy_stream_value(Metadata, Source) ->
+    MediaType = string_field(Source, 4),
+    Tags =
+        case varint_field(Metadata, 7) of
+            1 -> [<<"mature">>];
+            _ -> []
+        end,
+    put_if_present(#{
+        <<"title">> => string_field(Metadata, 3),
+        <<"description">> => string_field(Metadata, 4),
+        <<"author">> => string_field(Metadata, 5),
+        <<"thumbnail">> => legacy_thumbnail_value(string_field(Metadata, 9)),
+        <<"tags">> => Tags,
+        <<"languages">> => legacy_languages(varint_field(Metadata, 2)),
+        <<"license">> => string_field(Metadata, 6),
+        <<"license_url">> => string_field(Metadata, 11),
+        <<"stream_type">> => stream_type(MediaType),
+        <<"source">> => legacy_source_value(Source, MediaType)
+    }).
+
+legacy_source_value(Source, MediaType) ->
+    put_if_present(#{
+        <<"media_type">> => MediaType,
+        <<"sd_hash">> => hex_field(Source, 3)
+    }).
+
+legacy_thumbnail_value(not_found) ->
+    not_found;
+legacy_thumbnail_value(Url) ->
+    #{ <<"url">> => Url }.
+
+legacy_languages(1) ->
+    [<<"en">>];
+legacy_languages(_) ->
+    [].
 
 stream_value(Claim, Stream) ->
     Source = optional_field(Stream, 1),
@@ -95,7 +142,7 @@ video_value(Video) ->
 audio_value(not_found) ->
     not_found;
 audio_value(Audio) ->
-    put_if_present(#{ <<"duration">> => varint_field(Audio, 2) }).
+    put_if_present(#{ <<"duration">> => varint_field(Audio, 1) }).
 
 thumbnail_value(not_found) ->
     not_found;
@@ -180,10 +227,30 @@ read_field(Message) ->
     end.
 
 stream_sd_hash(Message) when is_binary(Message) ->
+    case stream_sd_hash_v2(Message) of
+        {ok, _SDHash} = OK -> OK;
+        V2Error ->
+            case varint_field(Message, 2) of
+                1 -> stream_sd_hash_v1(Message);
+                _ -> V2Error
+            end
+    end.
+
+stream_sd_hash_v2(Message) ->
     maybe
         {ok, Stream} ?= length_field(Message, 1),
         {ok, Source} ?= length_field(Stream, 1),
         {ok, SDHash} ?= length_field(Source, 6),
+        ok ?= valid_hash(SDHash),
+        {ok, hb_util:to_hex(SDHash)}
+    end.
+
+stream_sd_hash_v1(Message) ->
+    maybe
+        1 ?= varint_field(Message, 2),
+        {ok, Stream} ?= length_field(Message, 3),
+        {ok, Source} ?= length_field(Stream, 3),
+        {ok, SDHash} ?= length_field(Source, 3),
         ok ?= valid_hash(SDHash),
         {ok, hb_util:to_hex(SDHash)}
     end.
@@ -193,10 +260,20 @@ stream_sd_hash(Message) when is_binary(Message) ->
 %% legacy channels store DER/SPKI-wrapped keys, which the caller must
 %% normalize before use.
 channel_public_key(Message) when is_binary(Message) ->
-    maybe
-        {ok, Channel} ?= length_field(Message, 2),
-        {ok, PublicKey} ?= length_field(Channel, 1),
-        {ok, PublicKey}
+    case length_field(Message, 2) of
+        {ok, Channel} ->
+            length_field(Channel, 1);
+        V2Error ->
+            case varint_field(Message, 2) of
+                2 ->
+                    maybe
+                        {ok, Certificate} ?= length_field(Message, 4),
+                        {ok, PublicKey} ?= length_field(Certificate, 4),
+                        {ok, PublicKey}
+                    end;
+                _ ->
+                    V2Error
+            end
     end.
 
 length_field(Message, FieldNum) ->
@@ -366,6 +443,71 @@ decode_metadata_without_stream_or_channel_returns_not_found_test() ->
     Repost = field(1, <<1:160>>),
     Claim = field(4, Repost),
     ?assertEqual(not_found, decode_metadata(Claim)).
+
+decode_legacy_metadata_extracts_native_value_shape_test() ->
+    SDHash = <<2:384>>,
+    Metadata =
+        <<
+            (varint_field_bin(1, 4))/binary,
+            (varint_field_bin(2, 1))/binary,
+            (field(3, <<"Legacy test title">>))/binary,
+            (field(4, <<"legacy description">>))/binary,
+            (field(5, <<"legacy author">>))/binary,
+            (field(6, <<"Public Domain">>))/binary,
+            (varint_field_bin(7, 1))/binary,
+            (field(9, <<"https://example.com/legacy.png">>))/binary,
+            (field(11, <<"https://example.com/license">>))/binary
+        >>,
+    Source =
+        <<
+            (varint_field_bin(1, 1))/binary,
+            (varint_field_bin(2, 1))/binary,
+            (field(3, SDHash))/binary,
+            (field(4, <<"video/mp4">>))/binary
+        >>,
+    Stream =
+        <<
+            (varint_field_bin(1, 1))/binary,
+            (field(2, Metadata))/binary,
+            (field(3, Source))/binary
+        >>,
+    Claim =
+        <<
+            (varint_field_bin(1, 1))/binary,
+            (varint_field_bin(2, 1))/binary,
+            (field(3, Stream))/binary
+        >>,
+    {ok, Value} = decode_metadata(Claim),
+    ?assertEqual(<<"Legacy test title">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(<<"legacy description">>, maps:get(<<"description">>, Value)),
+    ?assertEqual(<<"legacy author">>, maps:get(<<"author">>, Value)),
+    ?assertEqual([<<"mature">>], maps:get(<<"tags">>, Value)),
+    ?assertEqual([<<"en">>], maps:get(<<"languages">>, Value)),
+    ?assertEqual(
+        #{ <<"url">> => <<"https://example.com/legacy.png">> },
+        maps:get(<<"thumbnail">>, Value)
+    ),
+    ?assertEqual(<<"video">>, maps:get(<<"stream_type">>, Value)),
+    SourceValue = maps:get(<<"source">>, Value),
+    ?assertEqual(<<"video/mp4">>, maps:get(<<"media_type">>, SourceValue)),
+    ?assertEqual(hb_util:to_hex(SDHash), maps:get(<<"sd_hash">>, SourceValue)),
+    ?assertEqual({ok, hb_util:to_hex(SDHash)}, stream_sd_hash(Claim)).
+
+channel_public_key_from_legacy_channel_claim_test() ->
+    PublicKey = <<3, 1:256>>,
+    Certificate =
+        <<
+            (varint_field_bin(1, 1))/binary,
+            (varint_field_bin(2, 3))/binary,
+            (field(4, PublicKey))/binary
+        >>,
+    Claim =
+        <<
+            (varint_field_bin(1, 1))/binary,
+            (varint_field_bin(2, 2))/binary,
+            (field(4, Certificate))/binary
+        >>,
+    ?assertEqual({ok, PublicKey}, channel_public_key(Claim)).
 
 varint_field_bin(Number, Value) ->
     Key = Number bsl 3,

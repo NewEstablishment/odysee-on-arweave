@@ -311,6 +311,14 @@ frontend hydrates each locator through stores and preserves result order. Search
 documents may contain display metadata for ranking/debugging, but they are not
 authoritative claim objects.
 
+Search ranking first maximizes matched query words. Within equal word coverage,
+documents with thumbnails form the preferred tier, keeping thumbnail-less
+records out of early result pages when enough complete matches exist. Textual
+relevance then ranks `title`, `tags_text`, and `description` in that order.
+Recency, bounded view count, and bounded channel subscriber count break
+remaining ties; having a channel adds only a small bonus so anonymous content
+is not excluded.
+
 Filters such as claim type, media type, NSFW state, visibility, upload date, and
 sort mode must reach `search@1.0`. Reimplementing them as unrelated
 post-filtering in React changes pagination and ranking.
@@ -446,6 +454,17 @@ device/store:
 `scripts/replay-meili-to-hyperbeam-search.mjs` submits those documents through
 `search@1.0/write` into `hyperbeam_messages`; production ingestion follows the
 same device boundary rather than making the staging index a runtime dependency.
+For trusted maintenance of an already-populated target after a ranking/schema
+change, `--direct-target` uses Meilisearch's bulk document API with the same
+normalization and stable primary-key derivation. It bypasses only the node HTTP
+rate limiter and is not a runtime ingestion or query path.
+
+Replay validates each immutable locator against HyperBEAM before indexing it.
+The hydrated claim identity and searchable title (or claim name when no title
+exists) must match the source document, so stale cache representations and
+codec regressions fail the import instead of producing misleading search
+results. `--skip-hydration-check` exists only for isolated diagnostics and must
+not be used for a deployed index.
 
 ## Local Development
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const DEFAULTS = {
@@ -11,15 +12,12 @@ const DEFAULTS = {
   batchSize: 250,
   concurrency: 8,
   waitTimeoutMs: 120000,
+  directTarget: false,
+  verifyHydration: true,
 };
 
 const SEARCHABLE_ATTRIBUTES = [
   'title',
-  'name',
-  'source_name',
-  'channel_name',
-  'searchable_name',
-  'stripped_name',
   'tags_text',
   'description',
 ];
@@ -48,6 +46,7 @@ const FILTERABLE_ATTRIBUTES = [
 ];
 
 const SORTABLE_ATTRIBUTES = [
+  'has_thumbnail',
   'search_rank',
   'release_time',
   'created_at',
@@ -57,6 +56,7 @@ const SORTABLE_ATTRIBUTES = [
 
 const RANKING_RULES = [
   'words',
+  'has_thumbnail:desc',
   'typo',
   'proximity',
   'attribute',
@@ -77,7 +77,13 @@ function parseArgs(argv) {
     else if (arg === '--batch-size') options.batchSize = positiveInteger(value, arg);
     else if (arg === '--concurrency') options.concurrency = positiveInteger(value, arg);
     else if (arg === '--wait-timeout-ms') options.waitTimeoutMs = positiveInteger(value, arg);
-    else if (arg === '--dry-run') {
+    else if (arg === '--direct-target') {
+      options.directTarget = true;
+      continue;
+    } else if (arg === '--skip-hydration-check') {
+      options.verifyHydration = false;
+      continue;
+    } else if (arg === '--dry-run') {
       options.dryRun = true;
       continue;
     } else {
@@ -119,6 +125,7 @@ function indexableMessage(document) {
           : 1,
     tags_text: tags.join(' '),
     search_rank: rankingScore(document),
+    search_rank_version: 3,
   };
 }
 
@@ -127,25 +134,11 @@ function rankingScore(document, nowSeconds = Math.floor(Date.now() / 1000)) {
     document.release_time ?? document.created_at ?? document.transaction_time ?? document.modified_at
   );
   const ageDays = timestamp > 0 ? Math.max(0, (nowSeconds - timestamp) / 86400) : Number.POSITIVE_INFINITY;
-  const recency = 12 * Math.exp(-ageDays / 365);
-  const views = boundedLogRank(document.view_count ?? document.view_cnt, 100_000_000, 8);
-  const subscribers = boundedLogRank(document.sub_cnt ?? document.sub_count, 10_000_000, 6);
-  const support = boundedLogRank(
-    numberValue(document.effective_amount) + numberValue(document.certificate_amount),
-    100_000_000,
-    2
-  );
-  const channelDepth = boundedLogRank(document.channel_claim_count ?? document.claim_count ?? document.claim_cnt, 100_000, 0.5);
-  return (
-    recency +
-    views +
-    subscribers +
-    support +
-    channelDepth +
-    (truthyNumber(document.is_controlling) ? 1 : 0) +
-    (truthyNumber(document.has_thumbnail) ? 0.5 : 0) +
-    (truthyNumber(document.is_channel) ? 0.25 : 0)
-  );
+  const recency = 10 * Math.exp((-Math.LN2 * ageDays) / 365);
+  const views = boundedLogRank(document.view_count ?? document.view_cnt, 100_000_000, 6);
+  const subscribers = boundedLogRank(document.sub_cnt ?? document.sub_count, 10_000_000, 4);
+  const channel = numberValue(document.has_channel) > 0 ? 0.5 : 0;
+  return recency + views + subscribers + channel;
 }
 
 function boundedLogRank(value, cap, weight) {
@@ -155,10 +148,6 @@ function boundedLogRank(value, cap, weight) {
 function numberValue(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function truthyNumber(value) {
-  return value === true || value === 1 || value === '1';
 }
 
 function searchIndexSettings() {
@@ -213,6 +202,128 @@ async function writeDocument(hyperbeamUrl, document, fetchImpl = fetch) {
     await sleep(delay);
   }
   throw new Error(`search@1.0/write exhausted retries for ${id}`);
+}
+
+function searchDocument(document) {
+  const id = sourceDocumentId(document);
+  if (!id) throw new Error('Source document is missing an immutable ID');
+  return {
+    ...indexableMessage(document),
+    id,
+    search_id: createHash('sha256').update(id).digest('base64url'),
+  };
+}
+
+async function writeDocumentsDirect(options, documents, fetchImpl = fetch) {
+  if (!documents.length) return;
+  const response = await fetchImpl(
+    `${trimSlash(options.sourceUrl)}/indexes/${encodeURIComponent(options.targetIndex)}/documents?primaryKey=search_id`,
+    {
+      method: 'POST',
+      headers: jsonHeaders(options.meiliKey),
+      body: JSON.stringify(documents.map(searchDocument)),
+    }
+  );
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`Meilisearch bulk replay failed with ${response.status}: ${JSON.stringify(body)}`);
+  }
+  if (Number.isInteger(body?.taskUid)) await waitForMeiliTask(options, body.taskUid, fetchImpl);
+}
+
+function firstValue(object, keys) {
+  if (!object || typeof object !== 'object') return undefined;
+  for (const key of keys) {
+    if (object[key] !== undefined && object[key] !== null) return object[key];
+  }
+  return undefined;
+}
+
+function normalizedText(value) {
+  return typeof value === 'string' ? value.trim().normalize('NFKC') : '';
+}
+
+function hydratedClaimFields(message) {
+  const value = firstValue(message, ['value']) || {};
+  return {
+    title: normalizedText(firstValue(value, ['title']) ?? firstValue(message, ['title'])),
+    name: normalizedText(
+      firstValue(message, ['claim-name', 'claim_name', 'name']) ??
+        firstValue(value, ['name'])
+    ),
+    claimId: normalizedText(firstValue(message, ['claim-id', 'claim_id'])),
+    immutableId: normalizedText(firstValue(message, ['immutable-id', 'immutable_id'])),
+    txid: normalizedText(firstValue(message, ['txid', 'tx-id'])),
+    nout: firstValue(message, ['nout', 'n-out']),
+  };
+}
+
+function verifyHydratedDocument(document, message) {
+  const expectedId = sourceDocumentId(document);
+  const expectedTitle = normalizedText(document.title);
+  const expectedName = normalizedText(document.name ?? document.source_name);
+  const expectedClaimId = normalizedText(document.claim_id);
+  const actual = hydratedClaimFields(message);
+  const derivedId =
+    actual.txid && actual.nout !== undefined ? `${actual.txid}:${String(actual.nout)}` : '';
+
+  if (!message || typeof message !== 'object') {
+    throw new Error(`Immutable hydration returned no object for ${expectedId}`);
+  }
+  if (actual.immutableId && actual.immutableId !== expectedId) {
+    throw new Error(
+      `Immutable hydration changed locator ${expectedId} to ${actual.immutableId}`
+    );
+  }
+  if (derivedId && derivedId !== expectedId) {
+    throw new Error(`Immutable hydration changed outpoint ${expectedId} to ${derivedId}`);
+  }
+  if (expectedClaimId && actual.claimId && actual.claimId !== expectedClaimId) {
+    throw new Error(
+      `Immutable hydration changed claim ${expectedClaimId} to ${actual.claimId} for ${expectedId}`
+    );
+  }
+  if (expectedTitle && actual.title !== expectedTitle) {
+    throw new Error(
+      `Immutable hydration title mismatch for ${expectedId}: expected ${JSON.stringify(expectedTitle)}, got ${JSON.stringify(actual.title)}`
+    );
+  }
+  if (!expectedTitle && expectedName && actual.name !== expectedName) {
+    throw new Error(
+      `Immutable hydration name mismatch for ${expectedId}: expected ${JSON.stringify(expectedName)}, got ${JSON.stringify(actual.name)}`
+    );
+  }
+  return expectedId;
+}
+
+async function fetchHydratedDocument(options, document, fetchImpl = fetch) {
+  const id = sourceDocumentId(document);
+  if (!id) throw new Error('Source document is missing an immutable ID');
+  const url = `${trimSlash(options.hyperbeamUrl)}/${encodeURIComponent(id)}`;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const response = await fetchImpl(url, {
+      headers: { accept: 'application/json' },
+    });
+    const body = await response.json().catch(() => null);
+    if (response.ok) return verifyHydratedDocument(document, body);
+    if (![429, 502, 503, 504].includes(response.status) || attempt === 7) {
+      throw new Error(
+        `Immutable hydration failed for ${id} with ${response.status}: ${JSON.stringify(body)}`
+      );
+    }
+    const retryAfter = Number(response.headers.get('retry-after'));
+    const delay =
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 250 * 2 ** attempt;
+    await sleep(delay);
+  }
+  throw new Error(`Immutable hydration exhausted retries for ${id}`);
+}
+
+async function verifyHydrationBatch(options, documents, fetchImpl = fetch) {
+  if (options.verifyHydration === false || !documents.length) return;
+  await mapWithConcurrency(documents, options.concurrency, (document) =>
+    fetchHydratedDocument(options, document, fetchImpl)
+  );
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {
@@ -276,7 +387,7 @@ async function waitForDocumentCount(options, expected) {
   while (Date.now() - started <= options.waitTimeoutMs) {
     const stats = await indexStats(options.sourceUrl, options.targetIndex, options.meiliKey);
     const fields = stats.fieldDistribution || {};
-    const fullyRewritten = ['state', 'is_public', 'search_rank'].every(
+    const fullyRewritten = ['state', 'is_public', 'search_rank', 'search_rank_version'].every(
       (field) => Number(fields[field] || 0) >= expected
     );
     if (!stats.isIndexing && Number(stats.numberOfDocuments) >= expected && fullyRewritten) {
@@ -316,9 +427,14 @@ async function replay(options) {
     if (documents.length < options.batchSize) break;
   }
   if (!options.dryRun && preservedNativeDocuments.length) {
-    await mapWithConcurrency(preservedNativeDocuments, options.concurrency, (document) =>
-      writeDocument(options.hyperbeamUrl, document)
-    );
+    await verifyHydrationBatch(options, preservedNativeDocuments);
+    if (options.directTarget) {
+      await writeDocumentsDirect(options, preservedNativeDocuments);
+    } else {
+      await mapWithConcurrency(preservedNativeDocuments, options.concurrency, (document) =>
+        writeDocument(options.hyperbeamUrl, document)
+      );
+    }
   }
   let offset = 0;
   let written = 0;
@@ -337,7 +453,14 @@ async function replay(options) {
       if (id) expectedIds.add(id);
     });
     if (!options.dryRun) {
-      await mapWithConcurrency(documents, options.concurrency, (document) => writeDocument(options.hyperbeamUrl, document));
+      await verifyHydrationBatch(options, documents);
+      if (options.directTarget) {
+        await writeDocumentsDirect(options, documents);
+      } else {
+        await mapWithConcurrency(documents, options.concurrency, (document) =>
+          writeDocument(options.hyperbeamUrl, document)
+        );
+      }
     }
     written += documents.length;
     offset += documents.length;
@@ -387,14 +510,20 @@ async function main() {
 
 export {
   configureIndex,
+  fetchHydratedDocument,
+  hydratedClaimFields,
   indexableMessage,
   mapWithConcurrency,
   parseArgs,
   rankingScore,
   replay,
+  searchDocument,
   searchIndexSettings,
   sourceDocumentId,
+  verifyHydratedDocument,
+  verifyHydrationBatch,
   writeDocument,
+  writeDocumentsDirect,
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

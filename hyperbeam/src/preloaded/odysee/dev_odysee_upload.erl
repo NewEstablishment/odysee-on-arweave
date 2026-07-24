@@ -1121,16 +1121,10 @@ search_document(Record, Claim, Opts) ->
     Tags = list_value(map_value(Value, <<"tags">>, [], Opts)),
     RecencyRank = recency_rank(Timestamp),
     Rank = search_rank(#{
-        is_controlling => 0,
-        has_thumbnail => HasThumbnail,
-        effective_amount => EffectiveAmount,
-        certificate_amount => CertificateAmount,
+        has_channel => HasChannel,
         view_count => ViewCount,
         sub_count => SubCount,
-        claim_count => ClaimCount,
-        is_channel => IsChannel,
-        duration => number_value(map_value(Source, <<"duration">>, 0, Opts), 0),
-        recency_rank => RecencyRank
+        timestamp => Timestamp
     }),
     #{
         <<"id">> => RecordID,
@@ -1180,6 +1174,7 @@ search_document(Record, Claim, Opts) ->
         <<"is_controlling">> => 0,
         <<"recency_rank">> => RecencyRank,
         <<"search_rank">> => Rank,
+        <<"search_rank_version">> => 3,
         <<"source_system">> => <<"hyperbeam-native">>
     }.
 
@@ -1198,23 +1193,28 @@ number_value(Value, Default) when is_binary(Value) ->
 number_value(_Value, Default) -> Default.
 
 search_rank(Values) ->
-    IsControlling = maps:get(is_controlling, Values, 0),
-    HasThumbnail = maps:get(has_thumbnail, Values, 0),
-    EffectiveAmount = maps:get(effective_amount, Values, 0),
-    CertificateAmount = maps:get(certificate_amount, Values, 1),
+    search_rank(Values, erlang:system_time(second)).
+
+search_rank(Values, Now) ->
+    Timestamp = maps:get(timestamp, Values, 0),
+    HasChannel = maps:get(has_channel, Values, 0),
     ViewCount = maps:get(view_count, Values, 0),
     SubCount = maps:get(sub_count, Values, 0),
-    ClaimCount = maps:get(claim_count, Values, 0),
-    IsChannel = maps:get(is_channel, Values, 0),
-    RecencyRank = maps:get(recency_rank, Values, 0),
-    (max(0, min(60, RecencyRank)) / 60) * 12 +
-        bounded_log_rank(ViewCount, 100000000, 8) +
-        bounded_log_rank(SubCount, 10000000, 6) +
-        bounded_log_rank(EffectiveAmount + CertificateAmount, 100000000, 2) +
-        bounded_log_rank(ClaimCount, 100000, 0.5) +
-        IsControlling +
-        HasThumbnail * 0.5 +
-        IsChannel * 0.25.
+    Recency =
+        case Timestamp > 0 of
+            true ->
+                AgeDays = max(0, (Now - Timestamp) / 86400),
+                10 * math:pow(0.5, AgeDays / 365);
+            false ->
+                0
+        end,
+    Recency +
+        bounded_log_rank(ViewCount, 100000000, 6) +
+        bounded_log_rank(SubCount, 10000000, 4) +
+        case HasChannel > 0 of
+            true -> 0.5;
+            false -> 0
+        end.
 
 bounded_log_rank(Value, Cap, Weight) ->
     math:log(max(0, min(Value, Cap)) + 1) / math:log(Cap + 1) * Weight.
@@ -2328,6 +2328,32 @@ search_document_uses_record_id_as_immutable_locator_test() ->
     ?assertEqual(<<"active">>, maps:get(<<"state">>, Document)),
     ?assert(claim_ids_match(Claim, #{<<"claim_ids">> => [DataID]}, #{})),
     ?assert(maps:get(<<"search_rank">>, Document) >= 0).
+
+search_rank_balances_recency_views_and_subscribers_test() ->
+    Now = 2000000000,
+    Fresh = search_rank(#{timestamp => Now}, Now),
+    FreshWithChannel = search_rank(#{timestamp => Now, has_channel => 1}, Now),
+    OneYearOld = search_rank(#{timestamp => Now - 365 * 86400}, Now),
+    OldPopular = search_rank(
+        #{
+            timestamp => Now - 10 * 365 * 86400,
+            view_count => 100000000
+        },
+        Now
+    ),
+    Maximum = search_rank(
+        #{
+            timestamp => Now,
+            view_count => 1000000000,
+            sub_count => 1000000000
+        },
+        Now
+    ),
+    ?assertEqual(10.0, Fresh),
+    ?assertEqual(10.5, FreshWithChannel),
+    ?assertEqual(5.0, OneYearOld),
+    ?assert(Fresh > OldPopular),
+    ?assert(Maximum =< 20.5).
 
 search_device_result_rejects_error_responses_test() ->
     ?assertEqual(

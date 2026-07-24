@@ -91,9 +91,21 @@ The removed `odysee@1.0` catch-all SDK proxy must not be recreated. New product 
 
 Fuzzy Odysee claim search uses the unchanged generic `search@1.0` device directly. Legacy Chainquery rows and native upload records are normalized and submitted through `search@1.0/write` into the configured `hyperbeam_messages` index. Documents carry searchable, filterable, and ranking fields plus an immutable `id`; `search@1.0/query` returns only ordered immutable IDs for callers to hydrate through stores.
 
+The deployment index settings require matched words first, strongly prefer
+thumbnail-bearing documents within equal word coverage, and rank textual fields
+as title, tags, then description. Recency, bounded views, bounded channel
+subscribers, and a small channel-presence bonus are tie-breakers. These are
+index/deployment settings and normalized document fields, not Odysee behavior
+added to `search@1.0`.
+
 Do not add Odysee-specific operations to `search@1.0`. Product request mapping and result hydration belong at the frontend integration boundary, while index settings are node deployment configuration. Odysee upload indexing invokes only the public generic `write` operation.
 
 Meilisearch is an index, not the source of truth. Chainquery remains the legacy corpus source, and native HyperBEAM messages remain authoritative for native records. Index writes, deletes, and reconciliation must not mutate source objects.
+
+Corpus replay must validate every immutable locator through HyperBEAM before
+publishing its search document. Identity and searchable metadata mismatches are
+deployment failures; never populate a deployed index from rows whose immutable
+objects cannot be hydrated to the same claim.
 
 ## Native Comments And Controls
 
