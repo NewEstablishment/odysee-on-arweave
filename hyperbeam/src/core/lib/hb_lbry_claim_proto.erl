@@ -2,19 +2,22 @@
 -export([stream_sd_hash/1, channel_public_key/1, decode_metadata/1]).
 -include_lib("eunit/include/eunit.hrl").
 
-%% @doc Decode a stream claim protobuf message into a native, Odysee-shaped
-%% `value' map (title/description/thumbnail/tags/source/video/...), matching the
-%% shape produced for HyperBEAM-native uploads. This lets the client parse
-%% legacy and native content through one identical codepath. Returns
-%% `{ok, Value}' for a stream claim, or `not_found' for messages without a
-%% stream body (e.g. channel claims). Field numbers mirror the LBRY claim
-%% protobuf schema.
+%% @doc Decode a stream or channel claim protobuf message into a native,
+%% Odysee-shaped `value' map (title/description/thumbnail/tags/source/video/
+%% cover/...), matching the shape produced for HyperBEAM-native uploads. This
+%% lets the client parse legacy and native content through one identical
+%% codepath. Returns `{ok, Value}' for a stream or channel claim, or
+%% `not_found' for messages without either body (e.g. repost claims). Field
+%% numbers mirror the LBRY claim protobuf schema.
 decode_metadata(Message) when is_binary(Message) ->
     case length_field(Message, 1) of
         {ok, Stream} ->
             {ok, stream_value(Message, Stream)};
         _ ->
-            not_found
+            case length_field(Message, 2) of
+                {ok, Channel} -> {ok, channel_value(Message, Channel)};
+                _ -> not_found
+            end
     end;
 decode_metadata(_) ->
     not_found.
@@ -43,6 +46,22 @@ base_stream_value(Claim, Stream, Source, MediaType) ->
         <<"stream_type">> => stream_type(MediaType),
         <<"source">> => source_value(Source, MediaType)
     }.
+
+%% Channel claims share the claim-level title/description/thumbnail/tags
+%% fields with streams; the channel body contributes email, website_url and
+%% cover. The raw protobuf public key is deliberately not emitted here: it is
+%% DER/SPKI-wrapped for legacy channels, and the normalized key is carried in
+%% the channel evidence message's committed top-level `public-key' instead.
+channel_value(Claim, Channel) ->
+    put_if_present(#{
+        <<"title">> => string_field(Claim, 8),
+        <<"description">> => string_field(Claim, 9),
+        <<"thumbnail">> => thumbnail_value(optional_field(Claim, 10)),
+        <<"tags">> => string_fields(Claim, 11),
+        <<"email">> => string_field(Channel, 2),
+        <<"website_url">> => string_field(Channel, 3),
+        <<"cover">> => thumbnail_value(optional_field(Channel, 4))
+    }).
 
 source_value(not_found, _MediaType) ->
     not_found;
@@ -310,9 +329,42 @@ decode_metadata_extracts_native_value_shape_test() ->
     ?assertEqual(1920, maps:get(<<"width">>, VideoValue)),
     ?assertEqual(42, maps:get(<<"duration">>, VideoValue)).
 
-decode_metadata_without_stream_returns_not_found_test() ->
+decode_metadata_extracts_channel_value_test() ->
+    Cover = field(5, <<"https://example.com/banner.png">>),
+    Channel =
+        <<
+            (field(1, <<2, 1:256>>))/binary,
+            (field(2, <<"hi@example.com">>))/binary,
+            (field(3, <<"https://example.com">>))/binary,
+            (field(4, Cover))/binary
+        >>,
+    Thumbnail = field(5, <<"https://example.com/avatar.png">>),
+    Claim =
+        <<
+            (field(2, Channel))/binary,
+            (field(8, <<"Veritasium">>))/binary,
+            (field(9, <<"An element of truth.">>))/binary,
+            (field(10, Thumbnail))/binary,
+            (field(11, <<"science">>))/binary
+        >>,
+    {ok, Value} = decode_metadata(Claim),
+    ?assertEqual(<<"Veritasium">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(<<"An element of truth.">>, maps:get(<<"description">>, Value)),
+    ?assertEqual(#{ <<"url">> => <<"https://example.com/avatar.png">> }, maps:get(<<"thumbnail">>, Value)),
+    ?assertEqual(#{ <<"url">> => <<"https://example.com/banner.png">> }, maps:get(<<"cover">>, Value)),
+    ?assertEqual([<<"science">>], maps:get(<<"tags">>, Value)),
+    ?assertEqual(<<"hi@example.com">>, maps:get(<<"email">>, Value)),
+    ?assertEqual(<<"https://example.com">>, maps:get(<<"website_url">>, Value)),
+    ?assertNot(maps:is_key(<<"public_key">>, Value)).
+
+decode_metadata_channel_without_metadata_returns_empty_value_test() ->
     Channel = field(1, <<2, 1:256>>),
     Claim = field(2, Channel),
+    ?assertEqual({ok, #{}}, decode_metadata(Claim)).
+
+decode_metadata_without_stream_or_channel_returns_not_found_test() ->
+    Repost = field(1, <<1:160>>),
+    Claim = field(4, Repost),
     ?assertEqual(not_found, decode_metadata(Claim)).
 
 varint_field_bin(Number, Value) ->

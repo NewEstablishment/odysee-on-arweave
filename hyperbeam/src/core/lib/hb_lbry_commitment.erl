@@ -706,6 +706,16 @@ channel_output_message(Raw, Nout, Ancestry) ->
         ClaimOp = maps:get(<<"claim-op">>, ClaimMsg),
         Type = claim_commitment_type(ClaimMsg),
         TxIDHex = maps:get(<<"txid">>, ClaimMsg),
+        % `value' is decoded and committed by claim_output_message above;
+        % carry it into the channel commitment's committed set so it survives
+        % caching. It must stay exactly as decoded from the envelope --
+        % `verify_committed_value' re-derives and compares it -- so the
+        % normalized public key lives only in the top-level `public-key'.
+        ValueKeys =
+            case maps:is_key(<<"value">>, ClaimMsg) of
+                true -> [<<"value">>];
+                false -> []
+            end,
         Msg = (maps:remove(<<"commitments">>, ClaimMsg))#{
             <<"device">> => <<"lbry-channel@1.0">>,
             <<"channel-id">> => ClaimID,
@@ -719,7 +729,7 @@ channel_output_message(Raw, Nout, Ancestry) ->
                 {<<"outpoint">>, outpoint_bytes(TxIDHex, Nout)},
                 lists:sort(
                     claim_committed_list(Ancestry) ++
-                        [<<"channel-id">>, <<"public-key">>]
+                        [<<"channel-id">>, <<"public-key">>] ++ ValueKeys
                 ),
                 #{
                     <<"claim-id">> => ClaimID,
@@ -2203,6 +2213,52 @@ channel_output_message_normalizes_public_key_test() ->
             )
         end,
         [Compressed, Uncompressed, SPKIUncompressed]
+    ).
+
+channel_output_message_carries_decoded_value_test() ->
+    {Compressed, _} = sample_channel_keys(),
+    Claim =
+        <<
+            0,
+            (proto_field(2, proto_field(1, Compressed)))/binary,
+            (proto_field(8, <<"Veritasium">>))/binary,
+            (proto_field(9, <<"An element of truth.">>))/binary,
+            (proto_field(10, proto_field(5, <<"https://thumbs/avatar.png">>)))/binary
+        >>,
+    Raw = create_claim_tx(<<"@channel">>, Claim),
+    {ok, Msg} = channel_output_message(Raw, 0),
+    Value = maps:get(<<"value">>, Msg),
+    ?assertEqual(<<"Veritasium">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(<<"An element of truth.">>, maps:get(<<"description">>, Value)),
+    ?assertEqual(
+        #{ <<"url">> => <<"https://thumbs/avatar.png">> },
+        maps:get(<<"thumbnail">>, Value)
+    ),
+    ?assertEqual(
+        true,
+        hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
+    ),
+    % `value' must be in the committed set, so cache-write narrowing
+    % (`with_only_committed') does not strip it from the channel evidence.
+    {ok, Committed} = hb_message:with_only_committed(Msg, #{}),
+    ?assertMatch(#{ <<"value">> := _ }, Committed).
+
+channel_output_message_rejects_tampered_value_test() ->
+    {Compressed, _} = sample_channel_keys(),
+    Claim =
+        <<
+            0,
+            (proto_field(2, proto_field(1, Compressed)))/binary,
+            (proto_field(8, <<"Veritasium">>))/binary
+        >>,
+    Raw = create_claim_tx(<<"@channel">>, Claim),
+    {ok, Msg} = channel_output_message(Raw, 0),
+    Tampered = Msg#{
+        <<"value">> => (maps:get(<<"value">>, Msg))#{ <<"title">> => <<"Forged">> }
+    },
+    ?assertEqual(
+        false,
+        hb_message:verify(Tampered, #{ <<"commitment-ids">> => <<"all">> }, #{})
     ).
 
 channel_output_message_rejects_tampered_public_key_test() ->
