@@ -1,10 +1,9 @@
 import React, { useEffect } from 'react';
 import Lbry from 'lbry';
-import { parseURI, isNameValid } from 'util/lbryURI';
+import { parseURI } from 'util/lbryURI';
 import ClaimList from 'component/claimList';
 import Page from 'component/page';
 import SearchOptions from 'component/searchOptions';
-import SearchTopClaim from 'component/searchTopClaim';
 import { formatLbryUrlForWeb } from 'util/url';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { SEARCH_OPTIONS, SEARCH_PAGE_SIZE } from 'constants/search';
@@ -59,26 +58,6 @@ export default function SearchPage() {
 
   const [from, setFrom] = React.useState(0);
   const [currentUrlQuery, setCurrentUrlQuery] = React.useState(urlQuery);
-  const modifiedUrlQuery = urlQuery && urlQuery.trim().replace(/\s+/g, '').replace(/:/g, '#');
-  const uriFromQuery = `lbry://${modifiedUrlQuery}`;
-  let streamName;
-  let channelName;
-  let isValid = true;
-
-  try {
-    ({ streamName, channelName } = parseURI(uriFromQuery));
-
-    if (
-      (!streamName && !channelName) ||
-      (streamName && !isNameValid(streamName)) ||
-      (channelName && !isNameValid(channelName))
-    ) {
-      isValid = false;
-    }
-  } catch (e) {
-    isValid = false;
-  }
-
   let claimId;
 
   // Navigate directly to a claim if a claim_id is pasted into the search bar
@@ -123,7 +102,6 @@ export default function SearchPage() {
   return (
     <Page className="searchPage-wrapper">
       <section className="search">
-        {urlQuery && isValid && <SearchTopClaim query={modifiedUrlQuery} isSearching={isSearching} />}
         <ClaimList
           uris={uris || []}
           loading={isSearching}

@@ -6,6 +6,7 @@ import {
   chainquerySql,
   checkpointScope,
   checkpointState,
+  enrichEngagement,
   generationDocument,
   initialCursor,
   legacyClaimFilter,
@@ -15,8 +16,10 @@ import {
   normalizeNativeDoc,
   rebuildCutoverAction,
   replaceNativeDocuments,
+  recencyScore,
   scanMode,
   searchId,
+  searchRank,
   validateCheckpoint,
   validateRebuildRequest,
   validateTaskWaiting,
@@ -218,6 +221,80 @@ test('release-time quality distinguishes dated documents from fallback timestamp
     }).has_release_time,
     0
   );
+});
+
+test('ranking balances recency with bounded views and channel subscribers', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const freshLowEngagement = searchRank({
+    viewCount: 2,
+    subCount: 0,
+    hasChannel: 0,
+    recencyRank: recencyScore(now - 30 * 86400),
+  });
+  const oldLowEngagement = searchRank({
+    viewCount: 2,
+    subCount: 0,
+    hasChannel: 1,
+    recencyRank: recencyScore(now - 9 * 365 * 86400),
+  });
+  const oldHighEngagement = searchRank({
+    viewCount: 100000000,
+    subCount: 10000000,
+    hasChannel: 1,
+    recencyRank: recencyScore(now - 9 * 365 * 86400),
+  });
+
+  assert.ok(freshLowEngagement > oldLowEngagement);
+  assert.ok(oldHighEngagement > freshLowEngagement);
+});
+
+test('engagement enrichment batches view and channel subscriber counts into ranking documents', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    const params = new URLSearchParams(String(init.body));
+    requests.push({ url: String(url), params });
+    const data = String(url).endsWith('/file/view_count')
+      ? [12, 3]
+      : {
+          aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: 45,
+        };
+    return new Response(JSON.stringify({ success: true, error: null, data }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    const documents = [
+      normalizeDoc({
+        doc_id: 'tx:0',
+        claim_id: '1111111111111111111111111111111111111111',
+        channel_claim_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        claim_type: 'stream',
+        release_time: Math.floor(Date.now() / 1000),
+      }),
+      normalizeDoc({
+        doc_id: 'tx:1',
+        claim_id: '2222222222222222222222222222222222222222',
+        channel_claim_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        claim_type: 'stream',
+        release_time: Math.floor(Date.now() / 1000),
+      }),
+    ];
+    const enriched = await enrichEngagement(documents, 'https://api.example.test', 'request-token');
+
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].params.get('auth_token'), 'request-token');
+    assert.equal(enriched[0].view_cnt, 12);
+    assert.equal(enriched[1].view_cnt, 3);
+    assert.equal(enriched[0].sub_cnt, 45);
+    assert.equal(enriched[1].sub_cnt, 45);
+    assert.equal(enriched[0].engagement_rank_version, 1);
+    assert.ok(enriched[0].search_rank > documents[0].search_rank);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('preserved native documents migrate to hashed keys and record locators', () => {

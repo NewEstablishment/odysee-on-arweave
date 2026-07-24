@@ -38,8 +38,14 @@ const HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
 const HYPERBEAM_PUBLIC_DEVICE_PREFIX = '/$/api/hyperbeam-public-device/v1';
 const HYPERBEAM_PUBLIC_STORE_BATCH_PATH = '/$/api/hyperbeam-public-store/v1/read-batch';
 const HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
-const HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY = 12;
+const HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY = 24;
 const HYPERBEAM_PUBLIC_STORE_READ_TIMEOUT_MS = 15000;
+const HYPERBEAM_PUBLIC_STORE_CACHE_TTL_MS = 30 * 60 * 1000;
+const HYPERBEAM_PUBLIC_STORE_CACHE_LIMIT = 10000;
+const HYPERBEAM_PUBLIC_STORE_LINK_DEPTH = 3;
+const HYPERBEAM_PUBLIC_STORE_LINK_FIELDS = new Set(['value', 'thumbnail']);
+const hyperbeamPublicStoreCache = new Map();
+const hyperbeamPublicStoreReads = new Map();
 const HYPERBEAM_UPLOAD_PATH = '/id?!=true&committers=all';
 const HYPERBEAM_UPLOAD_CHUNK_PATH = '/id?!=true&committers=all';
 const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/id?!=true&committers=all';
@@ -200,9 +206,41 @@ async function postHyperbeamPublicStoreBatch(ctx) {
   }
 
   const startedAt = Date.now();
-  const entries = await mapConcurrent(ids, HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY, async (id) => {
-    const itemStartedAt = Date.now();
+  const entries = await readHyperbeamPublicStoreEntries(nodeUrl, ids);
+  const results = new Map(entries.filter((entry) => entry.result).map((entry) => [entry.id, entry.result]));
+  const expansionTimings = await expandHyperbeamPublicStoreLinks(nodeUrl, results);
 
+  ctx.status = 200;
+  ctx.set('Cache-Control', 'no-store');
+  ctx.body = {
+    results: Object.fromEntries(results),
+    errors: Object.fromEntries(entries.filter((entry) => !entry.result).map((entry) => [entry.id, entry.error])),
+    timings: entries.map(({ id, status, elapsed_ms }) => ({ id, status, elapsed_ms })),
+    expansion_timings: expansionTimings,
+    elapsed_ms: Date.now() - startedAt,
+  };
+}
+
+async function readHyperbeamPublicStoreEntries(nodeUrl, ids) {
+  return mapConcurrent(ids, HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY, (id) =>
+    readHyperbeamPublicStoreEntry(nodeUrl, id)
+  );
+}
+
+async function readHyperbeamPublicStoreEntry(nodeUrl, id) {
+  const cacheKey = `${nodeUrl}|${id}`;
+  const now = Date.now();
+  const cached = hyperbeamPublicStoreCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return { id, status: 200, elapsed_ms: 0, result: cached.result, error: null, cached: true };
+  }
+  if (cached) hyperbeamPublicStoreCache.delete(cacheKey);
+
+  const pending = hyperbeamPublicStoreReads.get(cacheKey);
+  if (pending) return pending;
+
+  const read = (async () => {
+    const itemStartedAt = Date.now();
     try {
       const response = await getBuffer(
         `${nodeUrl}/${encodeURIComponent(id)}?accept-bundle=true`,
@@ -211,12 +249,15 @@ async function postHyperbeamPublicStoreBatch(ctx) {
       );
       const parsed = parseJsonBuffer(response.body);
       const ok = response.statusCode >= 200 && response.statusCode < 300 && parsed && typeof parsed === 'object';
+      const result = ok ? { ...response.headers, ...parsed } : null;
+      if (result) cacheHyperbeamPublicStoreResult(cacheKey, result);
       return {
         id,
         status: response.statusCode,
         elapsed_ms: Date.now() - itemStartedAt,
-        result: ok ? { ...response.headers, ...parsed } : null,
+        result,
         error: ok ? null : parsed || response.body.toString('utf8').slice(0, 500),
+        cached: false,
       };
     } catch (error) {
       return {
@@ -225,18 +266,77 @@ async function postHyperbeamPublicStoreBatch(ctx) {
         elapsed_ms: Date.now() - itemStartedAt,
         result: null,
         error: String(error && error.message ? error.message : error),
+        cached: false,
       };
+    } finally {
+      hyperbeamPublicStoreReads.delete(cacheKey);
     }
-  });
+  })();
 
-  ctx.status = 200;
-  ctx.set('Cache-Control', 'no-store');
-  ctx.body = {
-    results: Object.fromEntries(entries.filter((entry) => entry.result).map((entry) => [entry.id, entry.result])),
-    errors: Object.fromEntries(entries.filter((entry) => !entry.result).map((entry) => [entry.id, entry.error])),
-    timings: entries.map(({ id, status, elapsed_ms }) => ({ id, status, elapsed_ms })),
-    elapsed_ms: Date.now() - startedAt,
-  };
+  hyperbeamPublicStoreReads.set(cacheKey, read);
+  return read;
+}
+
+function cacheHyperbeamPublicStoreResult(cacheKey, result) {
+  hyperbeamPublicStoreCache.delete(cacheKey);
+  hyperbeamPublicStoreCache.set(cacheKey, {
+    expiresAt: Date.now() + HYPERBEAM_PUBLIC_STORE_CACHE_TTL_MS,
+    result,
+  });
+  while (hyperbeamPublicStoreCache.size > HYPERBEAM_PUBLIC_STORE_CACHE_LIMIT) {
+    hyperbeamPublicStoreCache.delete(hyperbeamPublicStoreCache.keys().next().value);
+  }
+}
+
+async function expandHyperbeamPublicStoreLinks(nodeUrl, results) {
+  const timings = [];
+  for (let depth = 0; depth < HYPERBEAM_PUBLIC_STORE_LINK_DEPTH; depth += 1) {
+    const references = [];
+    const seen = new WeakSet();
+    results.forEach((result) => collectHyperbeamPublicStoreLinks(result, references, seen));
+    if (!references.length) break;
+
+    const linkedIds = Array.from(new Set(references.map(({ id }) => id)));
+    const entries = await readHyperbeamPublicStoreEntries(nodeUrl, linkedIds);
+    const linkedResults = new Map(entries.filter((entry) => entry.result).map((entry) => [entry.id, entry.result]));
+    references.forEach(({ owner, field, id }) => {
+      const linked = linkedResults.get(id);
+      if (linked) owner[field] = linked;
+    });
+    timings.push({
+      depth,
+      count: linkedIds.length,
+      elapsed_ms: Math.max(0, ...entries.map((entry) => entry.elapsed_ms)),
+      cached: entries.filter((entry) => entry.cached).length,
+    });
+    if (!linkedResults.size) break;
+  }
+  return timings;
+}
+
+function collectHyperbeamPublicStoreLinks(source, references, seen) {
+  if (!source || typeof source !== 'object' || seen.has(source)) return;
+  seen.add(source);
+
+  if (Array.isArray(source)) {
+    source.forEach((item) => collectHyperbeamPublicStoreLinks(item, references, seen));
+    return;
+  }
+
+  Object.entries(source).forEach(([key, entry]) => {
+    const field = hyperbeamPublicStoreLinkedField(key);
+    if (field && source[field] === undefined && isPublicStoreId(entry)) {
+      references.push({ owner: source, field, id: entry });
+      return;
+    }
+    collectHyperbeamPublicStoreLinks(entry, references, seen);
+  });
+}
+
+function hyperbeamPublicStoreLinkedField(key) {
+  if (!key.endsWith('+link') && !key.endsWith('-link')) return null;
+  const field = key.slice(0, -5);
+  return HYPERBEAM_PUBLIC_STORE_LINK_FIELDS.has(field) ? field : null;
 }
 
 function isPublicStoreId(id) {

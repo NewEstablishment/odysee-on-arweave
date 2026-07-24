@@ -552,6 +552,29 @@ export MEILI_INDEX=odysee_claims
 Use `MEILI_MASTER_KEY` or `ODYSEE_SEARCH_API_KEY` when Meilisearch requires a key.
 Never commit database or search credentials.
 
+Chainquery does not contain view or channel-subscriber counts. For ranking
+imports, provide a request-only Odysee API token and enable the explicit
+engagement enrichment pass:
+
+```bash
+export ODYSEE_API_AUTH_TOKEN='...'
+```
+
+The importer fetches view and subscriber counts in the same 1,000-item batches
+used by Lighthouse, incorporates them into `search_rank`, and never stores the
+token in a document or checkpoint.
+
+Refresh engagement values on documents already present in an index without
+rescanning Chainquery:
+
+```bash
+node scripts/import-chainquery-meili.mjs \
+  --index hyperbeam_messages \
+  --setup-settings \
+  --refresh-engagement \
+  --batch-size 1000
+```
+
 Inspect a small slice without writing:
 
 ```bash
@@ -563,6 +586,7 @@ Create/configure the index and import a resumable slice:
 ```bash
 node scripts/import-chainquery-meili.mjs \
   --setup-settings \
+  --enrich-engagement \
   --limit 10000 \
   --batch-size 1000 \
   --checkpoint-file /tmp/odysee-search-import.json

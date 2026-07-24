@@ -13,6 +13,8 @@ const DEFAULTS = {
   meiliUrl: process.env.MEILI_URL || process.env.ODYSEE_SEARCH_BACKEND_URL || 'http://127.0.0.1:7700',
   meiliKey: process.env.MEILI_MASTER_KEY || process.env.ODYSEE_SEARCH_API_KEY || '',
   index: process.env.MEILI_INDEX || 'odysee_claims',
+  odyseeApiUrl: process.env.ODYSEE_API_URL || 'https://api.odysee.com',
+  odyseeApiToken: process.env.ODYSEE_API_AUTH_TOKEN || '',
 };
 
 const CHECKPOINT_VERSION = 3;
@@ -28,6 +30,8 @@ async function main(argv = process.argv.slice(2)) {
   const batchSize = Math.max(1, intArg(args['batch-size'], Math.min(limit, 1000)));
   const dryRun = Boolean(args['dry-run']);
   const setupSettings = Boolean(args['setup-settings']);
+  const enrichEngagementCounts = Boolean(args['enrich-engagement']);
+  const refreshEngagementCounts = Boolean(args['refresh-engagement']);
   const noWait = Boolean(args['no-wait']);
   const waitForTasks = !noWait;
   const waitTimeoutMs = intArg(args['wait-timeout-ms'], Number(process.env.MEILI_WAIT_TIMEOUT_MS || 60000));
@@ -41,6 +45,8 @@ async function main(argv = process.argv.slice(2)) {
   const targetIndex = String(args.index || DEFAULTS.index);
   const stagingIndex = String(args['staging-index'] || `${targetIndex}__rebuild`);
   const index = rebuildIndex ? stagingIndex : targetIndex;
+  const odyseeApiUrl = String(args['odysee-api-url'] || DEFAULTS.odyseeApiUrl).replace(/\/+$/, '');
+  const odyseeApiToken = stringArg(args['odysee-api-token'], DEFAULTS.odyseeApiToken);
   const scope = checkpointScope({
     mode,
     targetIndex,
@@ -51,6 +57,26 @@ async function main(argv = process.argv.slice(2)) {
   const generation = String(checkpoint.generation || randomUUID());
   let cursor = initialCursor(mode, checkpoint, args, modifiedSince);
 
+  if ((enrichEngagementCounts || refreshEngagementCounts) && !odyseeApiToken) {
+    fail(
+      'Set ODYSEE_API_AUTH_TOKEN or --odysee-api-token when using engagement enrichment.'
+    );
+  }
+  if (refreshEngagementCounts) {
+    if (setupSettings) {
+      await configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs);
+    }
+    const refreshed = await refreshIndexEngagement({
+      apiUrl: odyseeApiUrl,
+      authToken: odyseeApiToken,
+      batchSize,
+      index,
+      meiliUrl,
+      waitTimeoutMs,
+    });
+    process.stdout.write(JSON.stringify({ refreshed, index }) + '\n');
+    return;
+  }
   if (!DEFAULTS.chainqueryPass && !process.env.MYSQL_PWD) {
     fail('Set CHAINQUERY_PASS or MYSQL_PWD before importing.');
   }
@@ -123,7 +149,10 @@ async function main(argv = process.argv.slice(2)) {
     }
 
     cursor = nextCursor(mode, rows, cursor);
-    const normalized = rows.map(normalizeDoc).filter((doc) => doc.doc_id);
+    const baseDocuments = rows.map(normalizeDoc).filter((doc) => doc.doc_id);
+    const normalized = enrichEngagementCounts
+      ? await enrichEngagement(baseDocuments, odyseeApiUrl, odyseeApiToken)
+      : baseDocuments;
     const docs = normalized.filter(activeLegacyDocument);
     if (dryRun) {
       process.stdout.write(
@@ -538,8 +567,6 @@ function normalizeDoc(doc) {
 
   const docId = String(doc.doc_id || '');
   const claimType = String(doc.claim_type || '');
-  const effectiveAmount = numberValue(doc.effective_amount);
-  const certificateAmount = numberValue(doc.certificate_amount, 1);
   const viewCount = numberValue(doc.view_cnt || doc.view_count);
   const subCount = numberValue(doc.sub_cnt);
   const claimCount = numberValue(doc.claim_count || doc.claim_cnt);
@@ -551,7 +578,7 @@ function normalizeDoc(doc) {
   const hasReleaseTime = numberValue(doc.release_time) > 0 ? 1 : 0;
   const isControlling = String(doc.bid_state || '') === 'Controlling' ? 1 : 0;
   const recencyRank = recencyScore(releaseTimestamp(doc));
-  return {
+  return refreshSearchRank({
     ...doc,
     id: docId,
     search_id: searchId(docId),
@@ -568,19 +595,86 @@ function normalizeDoc(doc) {
     has_release_time: hasReleaseTime,
     is_controlling: isControlling,
     recency_rank: recencyRank,
+  });
+}
+
+function refreshSearchRank(doc) {
+  return {
+    ...doc,
     search_rank: searchRank({
-      isControlling,
-      hasThumbnail,
-      effectiveAmount,
-      certificateAmount,
-      viewCount,
-      subCount,
-      claimCount: claimCount || channelClaimCount,
-      isChannel,
-      duration: numberValue(doc.duration),
-      recencyRank,
+      viewCount: numberValue(doc.view_cnt || doc.view_count),
+      subCount: numberValue(doc.sub_cnt),
+      hasChannel: numberValue(doc.has_channel),
+      recencyRank: numberValue(doc.recency_rank),
     }),
   };
+}
+
+async function enrichEngagement(documents, apiUrl, authToken) {
+  if (!documents.length) return documents;
+  const viewDocuments = documents.filter((doc) => /^[0-9a-f]{40}$/i.test(String(doc.claim_id || '')));
+  const channelIds = [
+    ...new Set(
+      documents
+        .map((doc) => (doc.claim_type === 'channel' ? doc.claim_id : doc.channel_claim_id))
+        .filter((id) => /^[0-9a-f]{40}$/i.test(String(id || '')))
+        .map(String)
+    ),
+  ];
+  const [viewCounts, subscriptionCounts] = await Promise.all([
+    viewDocuments.length
+      ? odyseeApiPost(apiUrl, '/file/view_count', authToken, {
+          claim_id: viewDocuments.map((doc) => doc.claim_id).join(','),
+        })
+      : [],
+    channelIds.length
+      ? odyseeApiPost(apiUrl, '/subscription/sub_count', authToken, {
+          claim_id: channelIds.join(','),
+          is_map: 'true',
+        })
+      : {},
+  ]);
+  if (!Array.isArray(viewCounts) || viewCounts.length !== viewDocuments.length) {
+    throw new Error(
+      `Odysee view-count response length ${Array.isArray(viewCounts) ? viewCounts.length : 'invalid'} did not match ${viewDocuments.length}`
+    );
+  }
+  if (!subscriptionCounts || typeof subscriptionCounts !== 'object' || Array.isArray(subscriptionCounts)) {
+    throw new Error('Odysee subscription-count response was not a map');
+  }
+
+  const viewsByClaimId = new Map(
+    viewDocuments.map((doc, index) => [String(doc.claim_id), numberValue(viewCounts[index])])
+  );
+  return documents.map((doc) => {
+    const channelId = String(doc.claim_type === 'channel' ? doc.claim_id || '' : doc.channel_claim_id || '');
+    const viewCount = viewsByClaimId.get(String(doc.claim_id || '')) || 0;
+    const subCount = numberValue(subscriptionCounts[channelId]);
+    return refreshSearchRank({
+      ...doc,
+      view_cnt: viewCount,
+      view_count: viewCount,
+      sub_cnt: subCount,
+      engagement_rank_version: 1,
+    });
+  });
+}
+
+async function odyseeApiPost(apiUrl, path, authToken, values) {
+  const body = new URLSearchParams({ auth_token: authToken, ...values });
+  const response = await fetch(`${apiUrl}${path}`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Odysee API ${path} returned ${response.status}: ${text}`);
+  const payload = text ? JSON.parse(text) : null;
+  if (!payload?.success) throw new Error(`Odysee API ${path} failed: ${payload?.error || 'unknown error'}`);
+  return payload.data;
 }
 
 function normalizeNativeDoc(doc) {
@@ -648,29 +742,22 @@ function validThumbnailUrl(value) {
 }
 
 function searchRank({
-  isControlling,
-  hasThumbnail,
-  effectiveAmount,
-  certificateAmount,
   viewCount,
   subCount,
-  claimCount,
-  isChannel,
-  duration,
+  hasChannel,
   recencyRank,
 }) {
-  const supportRank =
-    Math.log1p(Math.max(1, Math.min(effectiveAmount, 100000000)) * 21) * 2 +
-    Math.log1p(Math.max(1, Math.min(certificateAmount, 100000000)) * 21) * 2;
-  const rank =
-    recencyRank * 20 +
-    isControlling * 25 +
-    hasThumbnail * 20 +
-    supportRank +
-    Math.log1p(Math.max(1, viewCount)) * 2 +
-    Math.log1p(Math.max(1, subCount)) * 3 +
-    (isChannel && claimCount > 10 ? 10 : 0);
-  return duration > 0 && duration < 120 ? rank * 0.5 : rank;
+  return (
+    recencyRank +
+    boundedLogRank(viewCount, 100000000, 6) +
+    boundedLogRank(subCount, 10000000, 4) +
+    (hasChannel ? 0.5 : 0)
+  );
+}
+
+function boundedLogRank(value, cap, weight) {
+  const bounded = Math.max(0, Math.min(numberValue(value), cap));
+  return (Math.log1p(bounded) / Math.log1p(cap)) * weight;
 }
 
 function releaseTimestamp(doc) {
@@ -680,12 +767,7 @@ function releaseTimestamp(doc) {
 function recencyScore(timestamp) {
   if (!timestamp) return 0;
   const ageDays = Math.max(0, (Date.now() / 1000 - timestamp) / 86400);
-  if (ageDays <= 7) return 60;
-  if (ageDays <= 30) return 45;
-  if (ageDays <= 90) return 30;
-  if (ageDays <= 365) return 18;
-  if (ageDays <= 3650) return Math.max(0, 12 - ((ageDays - 365) / 365));
-  return 0;
+  return 10 * Math.pow(0.5, ageDays / 365);
 }
 
 function searchId(value) {
@@ -705,7 +787,16 @@ function mediaType(contentType) {
 
 async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
   const settings = {
-    searchableAttributes: ['title', 'name', 'source_name', 'channel_name', 'searchable_name', 'stripped_name', 'tags', 'description'],
+    searchableAttributes: [
+      'title',
+      'tags',
+      'name',
+      'source_name',
+      'searchable_name',
+      'stripped_name',
+      'channel_name',
+      'description',
+    ],
     filterableAttributes: [
       'search_id',
       'doc_id',
@@ -738,6 +829,8 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
       'is_controlling',
       'recency_rank',
       'source_system',
+      'state',
+      'is_public',
     ],
     sortableAttributes: [
       'is_channel',
@@ -764,13 +857,12 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
       'words',
       'has_thumbnail:desc',
       'has_release_time:desc',
-      'has_channel:desc',
       'typo',
       'proximity',
       'attribute',
+      'search_rank:desc',
       'exactness',
       'sort',
-      'search_rank:desc',
     ],
   };
   const task = await meiliFetch(`${meiliUrl}/indexes/${encodeURIComponent(index)}/settings`, {
@@ -816,6 +908,37 @@ async function postDocuments(meiliUrl, index, docs, waitForTasks, waitTimeoutMs)
     body: JSON.stringify(docs),
   });
   await maybeWaitForTask(meiliUrl, task, waitForTasks, waitTimeoutMs);
+}
+
+async function refreshIndexEngagement({
+  apiUrl,
+  authToken,
+  batchSize,
+  index,
+  meiliUrl,
+  waitTimeoutMs,
+}) {
+  const filter = 'source_system = "legacy-chainquery"';
+  let offset = 0;
+  let refreshed = 0;
+  while (true) {
+    const page = await meiliFetch(
+      `${meiliUrl}/indexes/${encodeURIComponent(index)}/documents/fetch`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ filter, offset, limit: batchSize }),
+      }
+    );
+    const documents = Array.isArray(page?.results) ? page.results : [];
+    if (!documents.length) break;
+    const enriched = await enrichEngagement(documents, apiUrl, authToken);
+    await postDocuments(meiliUrl, index, enriched, true, waitTimeoutMs);
+    refreshed += enriched.length;
+    offset += documents.length;
+    process.stderr.write(`refreshed-engagement=${refreshed}\n`);
+    if (documents.length < batchSize) break;
+  }
+  return refreshed;
 }
 
 async function replaceNativeDocuments(
@@ -1139,6 +1262,7 @@ export {
   chainquerySql,
   checkpointScope,
   checkpointState,
+  enrichEngagement,
   generationDocument,
   initialCursor,
   legacyClaimFilter,
@@ -1148,8 +1272,10 @@ export {
   normalizeNativeDoc,
   rebuildCutoverAction,
   replaceNativeDocuments,
+  recencyScore,
   scanMode,
   searchId,
+  searchRank,
   validateCheckpoint,
   validateRebuildRequest,
   validateTaskWaiting,

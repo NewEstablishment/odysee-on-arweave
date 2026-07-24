@@ -46,6 +46,10 @@ There are two distinct surfaces:
 - `~search@1.0`: generic HyperBEAM full-text search primitive and the sole fuzzy-search path used by Odysee.
 
 Normal Odysee search uses `~search@1.0`, receives ordered immutable IDs, hydrates them through stores, and preserves the search order. Filters, sort, upload date, claim type, and media type must reach the search device rather than being reapplied as unrelated browser-only filtering.
+The SSR public-store batch hydrator reads result IDs concurrently, expands the
+required immutable `value` and `thumbnail` links server-side, and keeps a
+bounded cache of successful immutable reads. Do not move this product hydration
+work into the generic search device.
 
 ## Debug Console
 
