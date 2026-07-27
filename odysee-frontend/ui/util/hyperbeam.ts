@@ -1722,6 +1722,10 @@ export async function fetchHyperbeamSearchIds(params: ClaimSearchOptions): Promi
       throw new Error('HyperBEAM search returned no items array');
     } catch (error) {
       lastError = error;
+      // A 4xx is deterministic (unsupported path, bad query) -- retrying just
+      // multiplies dead requests on every list mount.
+      const status = (error as any)?.status;
+      if (typeof status === 'number' && status >= 400 && status < 500) break;
       if (attempt + 1 < SEARCH_REQUEST_ATTEMPTS) {
         await new Promise((resolve) => setTimeout(resolve, SEARCH_REQUEST_RETRY_MS * (attempt + 1)));
       }
@@ -2623,7 +2627,9 @@ function requestKeyForAuthDevice(path: string, body: Record<string, any>) {
 
 function hyperbeamDeviceError(path: string, status: number) {
   if (isCommentronDevicePath(path) && status >= 500) return new TypeError(COMMENTRON_FAILURE);
-  return new Error(`HyperBEAM ${path} failed with ${status}`);
+  const error: any = new Error(`HyperBEAM ${path} failed with ${status}`);
+  error.status = status;
+  return error;
 }
 
 function hyperbeamDeviceFetchError(path: string, error: any) {

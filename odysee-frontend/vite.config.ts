@@ -26,6 +26,13 @@ const useCustomHomepages = process.env.CUSTOM_HOMEPAGE === 'true' && fs.existsSy
 const useCustomMemes = process.env.CUSTOM_HOMEPAGE === 'true' && fs.existsSync(CUSTOM_MEMES_ROOT);
 const DEV_AUTH_TOKEN_COOKIE = 'auth_token';
 const DEV_HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
+// Mirrors HYPERBEAM_PUBLIC_DEVICE_PATHS in web/src/routes.js -- keep in sync.
+const DEV_HYPERBEAM_PUBLIC_DEVICE_PREFIX = '/$/api/hyperbeam-public-device/v1';
+const DEV_HYPERBEAM_PUBLIC_DEVICE_PATHS = new Set([
+  '/~search@1.0/query',
+  '/~cache@1.0/read',
+  '/~odysee-claim@1.0/search',
+]);
 const DEV_HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
   '/~odysee-account@1.0/preference-get',
   '/~odysee-account@1.0/preference-set',
@@ -305,7 +312,7 @@ function cookieValue(cookieHeader: string, name: string) {
   return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
 }
 
-function postDevHyperbeamJson(url: string, body: Record<string, any>) {
+function postDevHyperbeamJson(url: string, body: Record<string, any>, headers: Record<string, string> = {}) {
   return new Promise<{ statusCode: number; contentType: string; body: Buffer }>((resolve, reject) => {
     const target = new URL(url);
     const payload = Buffer.from(JSON.stringify(body));
@@ -317,6 +324,7 @@ function postDevHyperbeamJson(url: string, body: Record<string, any>) {
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': payload.length,
+          ...headers,
         },
       },
       (response) => {
@@ -360,6 +368,42 @@ function devHyperbeamAuthRoutesPlugin() {
               cookie_names: cookieNames,
             })
           );
+          return;
+        }
+
+        if (requestUrl.pathname.startsWith(DEV_HYPERBEAM_PUBLIC_DEVICE_PREFIX) && req.method === 'POST') {
+          const devicePath = requestUrl.pathname.slice(DEV_HYPERBEAM_PUBLIC_DEVICE_PREFIX.length);
+          const nodeUrl = String(
+            process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || ''
+          ).replace(/\/+$/, '');
+
+          if (!nodeUrl || !DEV_HYPERBEAM_PUBLIC_DEVICE_PATHS.has(devicePath)) {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'unsupported hyperbeam public device path' }));
+            return;
+          }
+
+          try {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const rawBody = Buffer.concat(chunks).toString('utf8');
+            const requestBody = rawBody ? JSON.parse(rawBody) : {};
+            const response = await postDevHyperbeamJson(`${nodeUrl}${devicePath}`, requestBody, {
+              accept: 'application/json',
+              'accept-bundle': 'false',
+            });
+            res.statusCode = response.statusCode;
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Content-Type', response.contentType);
+            res.end(response.body);
+          } catch (error) {
+            res.statusCode = 502;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({ error: error instanceof Error ? error.message : 'hyperbeam public proxy failed' })
+            );
+          }
           return;
         }
 
