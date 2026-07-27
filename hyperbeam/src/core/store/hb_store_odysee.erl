@@ -71,30 +71,11 @@ link(_StoreOpts, _Req, _NodeOpts) ->
     {error, read_only}.
 
 read_claim_output(Outpoint, StoreOpts, NodeOpts) ->
-    read_claim_output(
-        Outpoint,
-        [
-            StoreOpts#{ <<"kind">> => <<"stream">> },
-            StoreOpts#{ <<"kind">> => <<"channel">> },
-            maps:remove(<<"kind">>, StoreOpts)
-        ],
-        NodeOpts,
-        {error, not_found}
-    ).
-
-read_claim_output(_Outpoint, [], _NodeOpts, LastError) ->
-    LastError;
-read_claim_output(Outpoint, [StoreOpts | Rest], NodeOpts, _LastError) ->
-    case hb_store_lbry_claim_output:read(
-        StoreOpts,
+    hb_store_lbry_claim_output:read(
+        StoreOpts#{ <<"kind">> => <<"auto">> },
         #{ <<"read">> => Outpoint },
         NodeOpts
-    ) of
-        {ok, _} = Result ->
-            Result;
-        Error ->
-            read_claim_output(Outpoint, Rest, NodeOpts, Error)
-    end.
+    ).
 
 read_descriptor_or_blob(Hash, StoreOpts, NodeOpts) ->
     case hb_store_lbry_stream_descriptor:read(

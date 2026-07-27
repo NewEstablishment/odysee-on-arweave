@@ -7,7 +7,9 @@
 %%% carries the normalized channel public key under a `lbry-channel@1.0'
 %%% commitment instead. With `kind' set to `stream', the output must be a
 %%% stream claim and the returned message additionally carries the
-%%% descriptor `sd_hash' under a `lbry-stream@1.0' commitment.
+%%% descriptor `sd_hash' under a `lbry-stream@1.0' commitment. With `kind'
+%%% set to `auto', the richest supported form is returned: stream, then
+%%% channel, then plain claim.
 %%%
 %%% Claim-ID and name lookup is a locator concern and deliberately not part
 %%% of this store: outpoints are immutable evidence, claim IDs are not
@@ -74,9 +76,27 @@ fetch_output(StoreOpts, TxID, Nout, NodeOpts) ->
                 hb_lbry_commitment:channel_output_message(Raw, Nout, Ancestry);
             <<"stream">> ->
                 hb_lbry_commitment:stream_claim_message(Raw, Nout, Ancestry);
+            <<"auto">> ->
+                auto_output_message(Raw, Nout, Ancestry);
             _ ->
                 hb_lbry_commitment:claim_output_message(Raw, Nout, Ancestry)
         end
+    end.
+
+%% @doc Build the richest message the output supports: stream, then channel,
+%% then plain claim. Same preference order as probing the kinds separately,
+%% but the transaction fetch and ancestry walk above run only once.
+auto_output_message(Raw, Nout, Ancestry) ->
+    case hb_lbry_commitment:stream_claim_message(Raw, Nout, Ancestry) of
+        {ok, _} = Stream ->
+            Stream;
+        _ ->
+            case hb_lbry_commitment:channel_output_message(Raw, Nout, Ancestry) of
+                {ok, _} = Channel ->
+                    Channel;
+                _ ->
+                    hb_lbry_commitment:claim_output_message(Raw, Nout, Ancestry)
+            end
     end.
 
 %% @doc Build the create-ancestry proof for an update output when the
@@ -192,7 +212,7 @@ read_returns_committed_claim_output_test() ->
             read(
                 Store,
                 #{ <<"read">> => <<TxID/binary, ":0">> },
-                #{ <<"http-client">> => httpc }
+                #{ <<"http-client">> => httpc, <<"store">> => [] }
             ),
         ?assertEqual(<<"lbry-claim@1.0">>, maps:get(<<"device">>, Msg)),
         ?assertEqual(
@@ -221,7 +241,7 @@ read_rejects_non_claim_output_test() ->
             read(
                 Store,
                 #{ <<"read">> => <<TxID/binary, ":1">> },
-                #{ <<"http-client">> => httpc }
+                #{ <<"http-client">> => httpc, <<"store">> => [] }
             )
         )
     after
@@ -239,9 +259,25 @@ read_rejects_channel_kind_for_stream_claim_test() ->
             read(
                 Store,
                 #{ <<"read">> => <<TxID/binary, ":0">> },
-                #{ <<"http-client">> => httpc }
+                #{ <<"http-client">> => httpc, <<"store">> => [] }
             )
         )
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+read_auto_kind_returns_richest_form_test() ->
+    % task0 is a stream claim: `auto' must return the same message as an
+    % explicit `stream' read, from a single transaction fetch.
+    application:ensure_all_started(inets),
+    TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
+    {ok, Server, Handle} = proxy_server(hb_lbry_tx:task0_tx_hex()),
+    try
+        NodeOpts = #{ <<"http-client">> => httpc, <<"store">> => [] },
+        Req = #{ <<"read">> => <<TxID/binary, ":0">> },
+        {ok, Auto} = read((store(Server))#{ <<"kind">> => <<"auto">> }, Req, NodeOpts),
+        {ok, Stream} = read((store(Server))#{ <<"kind">> => <<"stream">> }, Req, NodeOpts),
+        ?assertEqual(Stream, Auto)
     after
         hb_mock_server:stop(Handle)
     end.
@@ -267,7 +303,7 @@ read_walks_ancestry_for_updates_test() ->
             read(
                 Store,
                 #{ <<"read">> => <<UpdateTxID/binary, ":0">> },
-                #{ <<"http-client">> => httpc }
+                #{ <<"http-client">> => httpc, <<"store">> => [] }
             ),
         ?assertEqual(ClaimID, maps:get(<<"claim-id">>, Msg)),
         ?assertEqual(
@@ -301,7 +337,7 @@ read_degrades_to_asserted_without_ancestry_test() ->
             read(
                 Store,
                 #{ <<"read">> => <<UpdateTxID/binary, ":0">> },
-                #{ <<"http-client">> => httpc }
+                #{ <<"http-client">> => httpc, <<"store">> => [] }
             ),
         ?assertEqual(<<"asserted">>, maps:get(<<"claim-proof-strength">>, Msg)),
         ?assertEqual(false, maps:is_key(<<"claim-ancestry">>, Msg)),
