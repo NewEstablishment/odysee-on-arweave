@@ -28,9 +28,17 @@ ensure_started(Opts) ->
 node_index(ID, Fields, Schema) ->
     gen_server:cast(?SERVER, {index, ID, Fields, Schema}).
 
+%% Queries run in the calling process: the server only guards the node-scoped
+%% backend configuration and batches index writes. Routing query HTTP calls
+%% through the server would serialize every concurrent search behind a single
+%% process, each holding the line for up to the backend receive timeout.
 node_query(Search, Opts) ->
     case ensure_started(Opts) of
-        ok -> gen_server:call(?SERVER, {query, Search}, query_timeout(Opts));
+        ok ->
+            case request(<<"POST">>, index_path(Opts, <<"/search">>), Search, Opts) of
+                {ok, Raw} -> decode_search_response(Raw);
+                Error -> Error
+            end;
         Error -> Error
     end.
 
@@ -63,14 +71,7 @@ handle_cast({index, ID, Fields, Schema}, State) ->
 handle_call({ensure_config, Config}, _From, State = #{config := Config}) ->
     {reply, ok, State};
 handle_call({ensure_config, _Config}, _From, State) ->
-    {reply, {error, search_configuration_mismatch}, State};
-handle_call({query, Search}, _From, State = #{opts := Opts}) ->
-    Reply =
-        case request(<<"POST">>, index_path(Opts, <<"/search">>), Search, Opts) of
-            {ok, Raw} -> decode_search_response(Raw);
-            Error -> Error
-        end,
-    {reply, Reply, State}.
+    {reply, {error, search_configuration_mismatch}, State}.
 
 handle_info({flush, Ref}, State = #{timer := {Ref, _Timer}}) ->
     {noreply, start_flush(State#{timer => undefined})};
@@ -436,9 +437,6 @@ authorization_header(Opts) ->
 
 method_atom(<<"GET">>) -> get;
 method_atom(<<"POST">>) -> post.
-
-query_timeout(Opts) ->
-    hb_opts:get(<<"search-recv-timeout">>, 2000, Opts) + 1000.
 
 positive_int(Value, _Default) when is_integer(Value), Value > 0 -> Value;
 positive_int(_Value, Default) -> Default.
