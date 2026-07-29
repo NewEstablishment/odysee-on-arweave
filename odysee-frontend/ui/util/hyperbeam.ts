@@ -1675,16 +1675,7 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   let searchError: unknown = null;
   const targetedSearch = isTargetedClaimSearch(params);
 
-  try {
-    result = await fetchHyperbeamSearchIds(params);
-  } catch (error) {
-    searchError = error;
-  }
-
-  if (!Array.isArray(result?.items)) {
-    if (!targetedSearch) {
-      throw searchError || new Error('HyperBEAM search returned no items array');
-    }
+  if (targetedSearch) {
     const [claimResult, uploadResult] = await Promise.all([
       fetchDeviceJson(`${CLAIM_DEVICE}/search`, params)
         .then(responsePayload)
@@ -1693,6 +1684,16 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
       isTargetedClaimSearch(params) ? fetchHyperbeamUploadList(params).catch(() => null) : Promise.resolve(null),
     ]);
     result = mergeClaimSearchResults(claimResult, uploadResult, params);
+  } else {
+    try {
+      result = await fetchHyperbeamSearchIds(params);
+    } catch (error) {
+      searchError = error;
+    }
+
+    if (!Array.isArray(result?.items)) {
+      throw searchError || new Error('HyperBEAM search returned no items array');
+    }
   }
 
   const items = result?.items;

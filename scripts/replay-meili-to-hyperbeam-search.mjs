@@ -10,6 +10,7 @@ const DEFAULTS = {
   hyperbeamUrl: process.env.HYPERBEAM_URL || 'http://127.0.0.1:18785',
   meiliKey: process.env.MEILI_MASTER_KEY || '',
   batchSize: 250,
+  sourceOffset: 0,
   concurrency: 8,
   waitTimeoutMs: 120000,
   directTarget: false,
@@ -18,6 +19,7 @@ const DEFAULTS = {
 
 const SEARCHABLE_ATTRIBUTES = [
   'title',
+  'name',
   'tags_text',
   'description',
 ];
@@ -43,10 +45,12 @@ const FILTERABLE_ATTRIBUTES = [
   'channel_claim_id',
   'claim_id',
   'immutable_id',
+  'search_group',
 ];
 
 const SORTABLE_ATTRIBUTES = [
   'has_thumbnail',
+  'is_channel',
   'search_rank',
   'release_time',
   'created_at',
@@ -56,11 +60,12 @@ const SORTABLE_ATTRIBUTES = [
 
 const RANKING_RULES = [
   'words',
-  'has_thumbnail:desc',
   'typo',
   'proximity',
   'attribute',
   'exactness',
+  'is_channel:desc',
+  'has_thumbnail:desc',
   'sort',
   'search_rank:desc',
 ];
@@ -75,6 +80,7 @@ function parseArgs(argv) {
     else if (arg === '--target-index') options.targetIndex = value;
     else if (arg === '--hyperbeam-url') options.hyperbeamUrl = value;
     else if (arg === '--batch-size') options.batchSize = positiveInteger(value, arg);
+    else if (arg === '--source-offset') options.sourceOffset = nonNegativeInteger(value, arg);
     else if (arg === '--concurrency') options.concurrency = positiveInteger(value, arg);
     else if (arg === '--wait-timeout-ms') options.waitTimeoutMs = positiveInteger(value, arg);
     else if (arg === '--direct-target') {
@@ -97,6 +103,14 @@ function parseArgs(argv) {
 function positiveInteger(value, option) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${option} must be a positive integer`);
+  return parsed;
+}
+
+function nonNegativeInteger(value, option) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${option} must be a non-negative integer`);
+  }
   return parsed;
 }
 
@@ -124,9 +138,19 @@ function indexableMessage(document) {
           ? 0
           : 1,
     tags_text: tags.join(' '),
+    search_group: searchGroup(document),
     search_rank: rankingScore(document),
     search_rank_version: 3,
   };
+}
+
+function searchGroup(document) {
+  const claimType = String(document.claim_type || '').toLowerCase();
+  const ownClaimId = String(document.claim_id || '').trim();
+  const channelClaimId = String(document.channel_claim_id || '').trim();
+  if (claimType === 'channel' && ownClaimId) return ownClaimId;
+  if (channelClaimId) return channelClaimId;
+  return sourceDocumentId(document);
 }
 
 function rankingScore(document, nowSeconds = Math.floor(Date.now() / 1000)) {
@@ -156,6 +180,7 @@ function searchIndexSettings() {
     filterableAttributes: FILTERABLE_ATTRIBUTES,
     sortableAttributes: SORTABLE_ATTRIBUTES,
     rankingRules: RANKING_RULES,
+    distinctAttribute: 'search_group',
   };
 }
 
@@ -387,7 +412,13 @@ async function waitForDocumentCount(options, expected) {
   while (Date.now() - started <= options.waitTimeoutMs) {
     const stats = await indexStats(options.sourceUrl, options.targetIndex, options.meiliKey);
     const fields = stats.fieldDistribution || {};
-    const fullyRewritten = ['state', 'is_public', 'search_rank', 'search_rank_version'].every(
+    const fullyRewritten = [
+      'state',
+      'is_public',
+      'search_group',
+      'search_rank',
+      'search_rank_version',
+    ].every(
       (field) => Number(fields[field] || 0) >= expected
     );
     if (!stats.isIndexing && Number(stats.numberOfDocuments) >= expected && fullyRewritten) {
@@ -403,6 +434,7 @@ async function waitForDocumentCount(options, expected) {
 
 async function replay(options) {
   if (!options.dryRun) await configureIndex(options);
+  if (options.directTarget) return replayDirect(options);
   const existingIds = await fetchAllIds(
     options.sourceUrl,
     options.targetIndex,
@@ -426,17 +458,13 @@ async function replay(options) {
     targetOffset += documents.length;
     if (documents.length < options.batchSize) break;
   }
-  if (!options.dryRun && preservedNativeDocuments.length) {
+  if (!options.dryRun && preservedNativeDocuments.length && !options.directTarget) {
     await verifyHydrationBatch(options, preservedNativeDocuments);
-    if (options.directTarget) {
-      await writeDocumentsDirect(options, preservedNativeDocuments);
-    } else {
-      await mapWithConcurrency(preservedNativeDocuments, options.concurrency, (document) =>
-        writeDocument(options.hyperbeamUrl, document)
-      );
-    }
+    await mapWithConcurrency(preservedNativeDocuments, options.concurrency, (document) =>
+      writeDocument(options.hyperbeamUrl, document)
+    );
   }
-  let offset = 0;
+  let offset = options.sourceOffset;
   let written = 0;
 
   while (true) {
@@ -487,6 +515,47 @@ async function replay(options) {
   };
 }
 
+async function replayDirect(options) {
+  const sourceStats = await indexStats(options.sourceUrl, options.sourceIndex, options.meiliKey);
+  const targetStats = await indexStats(options.sourceUrl, options.targetIndex, options.meiliKey);
+  let offset = options.sourceOffset;
+  let written = 0;
+
+  while (true) {
+    const documents = await fetchDocuments(
+      options.sourceUrl,
+      options.sourceIndex,
+      offset,
+      options.batchSize,
+      options.meiliKey
+    );
+    if (!documents.length) break;
+    if (!options.dryRun) await writeDocumentsDirect(options, documents);
+    written += documents.length;
+    offset += documents.length;
+    process.stdout.write(`\rReplayed ${written} documents`);
+    if (documents.length < options.batchSize) break;
+  }
+
+  process.stdout.write('\n');
+  if (options.dryRun) {
+    return { expected: Number(sourceStats.numberOfDocuments), written };
+  }
+  const stats = await waitForDocumentCount(
+    options,
+    Number(sourceStats.numberOfDocuments)
+  );
+  return {
+    expected: Number(sourceStats.numberOfDocuments),
+    indexed: Number(stats.numberOfDocuments),
+    preservedNative: Math.max(
+      0,
+      Number(targetStats.numberOfDocuments) - Number(sourceStats.numberOfDocuments)
+    ),
+    written,
+  };
+}
+
 function jsonHeaders(meiliKey) {
   return {
     accept: 'application/json',
@@ -518,6 +587,7 @@ export {
   rankingScore,
   replay,
   searchDocument,
+  searchGroup,
   searchIndexSettings,
   sourceDocumentId,
   verifyHydratedDocument,

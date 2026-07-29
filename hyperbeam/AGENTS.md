@@ -91,10 +91,12 @@ The removed `odysee@1.0` catch-all SDK proxy must not be recreated. New product 
 
 Fuzzy Odysee claim search uses the unchanged generic `search@1.0` device directly. Legacy Chainquery rows and native upload records are normalized and submitted through `search@1.0/write` into the configured `hyperbeam_messages` index. Documents carry searchable, filterable, and ranking fields plus an immutable `id`; `search@1.0/query` returns only ordered immutable IDs for callers to hydrate through stores.
 
-The deployment index settings require matched words first, strongly prefer
-thumbnail-bearing documents within equal word coverage, and rank textual fields
-as title, tags, then description. Recency, bounded views, bounded channel
-subscribers, and a small channel-presence bonus are tie-breakers. These are
+The deployment index settings require matched words and textual relevance
+first, with fields ordered as title, name, tags, then description. Channel
+claims, thumbnail quality, recency, bounded views, bounded channel subscribers,
+and a small channel-presence bonus are later tie-breakers. Normalized documents
+also carry a logical channel grouping key so the index returns at most one
+result per publisher; unchanneled media group by immutable ID. These are
 index/deployment settings and normalized document fields, not Odysee behavior
 added to `search@1.0`.
 

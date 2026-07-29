@@ -311,13 +311,14 @@ frontend hydrates each locator through stores and preserves result order. Search
 documents may contain display metadata for ranking/debugging, but they are not
 authoritative claim objects.
 
-Search ranking first maximizes matched query words. Within equal word coverage,
-documents with thumbnails form the preferred tier, keeping thumbnail-less
-records out of early result pages when enough complete matches exist. Textual
-relevance then ranks `title`, `tags_text`, and `description` in that order.
-Recency, bounded view count, and bounded channel subscriber count break
-remaining ties; having a channel adds only a small bonus so anonymous content
-is not excluded.
+Search ranking first maximizes matched query words and then evaluates textual
+relevance across `title`, `name`, `tags_text`, and `description`, in that order.
+Within equally relevant matches, channel claims precede media, followed by
+thumbnail quality, recency, bounded view count, and bounded channel subscriber
+count. Each document carries a `search_group`: a channel claim and its media
+share the logical channel ID, while unchanneled media use their immutable ID.
+The index returns at most one result per group so one publisher cannot fill a
+result page, while exact channel names and titles remain eligible.
 
 Filters such as claim type, media type, NSFW state, visibility, upload date, and
 sort mode must reach `search@1.0`. Reimplementing them as unrelated

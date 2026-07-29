@@ -79,13 +79,18 @@ const UpcomingClaims = (props: Props) => {
   const dispatch = useAppDispatch();
   const csByQuery = useAppSelector(selectClaimSearchByQuery) || {};
   const mutedAndBlockedChannelIds = useAppSelector(selectMutedAndBlockedChannelIds);
+  const validChannelIds = React.useMemo(() => channelIds.filter(Boolean), [channelIds]);
+  const hasRequiredChannelScope = !isChannelPage || validChannelIds.length > 0;
   const livestreamOptions = React.useMemo(
-    () => buildUpcomingOptions(mutedAndBlockedChannelIds, channelIds, true, limitClaimsPerChannel),
-    [mutedAndBlockedChannelIds, channelIds, limitClaimsPerChannel]
+    () =>
+      hasRequiredChannelScope
+        ? buildUpcomingOptions(mutedAndBlockedChannelIds, validChannelIds, true, limitClaimsPerChannel)
+        : null,
+    [mutedAndBlockedChannelIds, validChannelIds, hasRequiredChannelScope, limitClaimsPerChannel]
   );
   const scheduledOptions = React.useMemo(
-    () => buildUpcomingOptions(mutedAndBlockedChannelIds, channelIds, false),
-    [mutedAndBlockedChannelIds, channelIds]
+    () => (hasRequiredChannelScope ? buildUpcomingOptions(mutedAndBlockedChannelIds, validChannelIds, false) : null),
+    [mutedAndBlockedChannelIds, validChannelIds, hasRequiredChannelScope]
   );
   const loKey = livestreamOptions ? createNormalizedClaimSearchKey(livestreamOptions) : '';
   const soKey = scheduledOptions ? createNormalizedClaimSearchKey(scheduledOptions) : '';

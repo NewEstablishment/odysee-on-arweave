@@ -7,6 +7,7 @@ import {
   parseArgs,
   rankingScore,
   searchDocument,
+  searchGroup,
   searchIndexSettings,
   sourceDocumentId,
   verifyHydratedDocument,
@@ -25,6 +26,9 @@ test('indexableMessage normalizes generic search fields and ranking inputs', () 
       id: 'tx:0',
       search_id: 'derived',
       title: 'Title',
+      name: 'Name',
+      claim_type: 'stream',
+      channel_claim_id: 'channel',
       count: 2,
       active: true,
       tags: ['one', 'c:private'],
@@ -32,6 +36,7 @@ test('indexableMessage normalizes generic search fields and ranking inputs', () 
       release_time: 100,
     });
   assert.equal(message.title, 'Title');
+  assert.equal(message.search_group, 'channel');
   assert.equal(message.count, 2);
   assert.equal(message.active, true);
   assert.equal(message.state, 'active');
@@ -64,41 +69,62 @@ test('ranking keeps recency strongest while popularity and channel identity rema
   assert.ok(maxSignals <= 20.51);
 });
 
-test('generic index settings require word matches, strongly prefer thumbnails, then rank text fields', () => {
+test('generic index settings rank text first and diversify results by channel', () => {
   const settings = searchIndexSettings();
-  assert.deepEqual(settings.searchableAttributes, ['title', 'tags_text', 'description']);
-  assert.deepEqual(settings.rankingRules.slice(0, 6), [
+  assert.deepEqual(settings.searchableAttributes, ['title', 'name', 'tags_text', 'description']);
+  assert.deepEqual(settings.rankingRules.slice(0, 8), [
     'words',
-    'has_thumbnail:desc',
     'typo',
     'proximity',
     'attribute',
     'exactness',
+    'is_channel:desc',
+    'has_thumbnail:desc',
+    'sort',
   ]);
   assert.equal(settings.rankingRules.at(-1), 'search_rank:desc');
+  assert.equal(settings.distinctAttribute, 'search_group');
   assert.ok(settings.filterableAttributes.includes('state'));
+  assert.ok(settings.filterableAttributes.includes('search_group'));
   assert.ok(settings.sortableAttributes.includes('has_thumbnail'));
+  assert.ok(settings.sortableAttributes.includes('is_channel'));
   assert.ok(settings.sortableAttributes.includes('release_time'));
   assert.ok(!settings.searchableAttributes.includes('view_count'));
   assert.ok(!settings.searchableAttributes.includes('sub_cnt'));
+});
+
+test('searchGroup uses the logical channel and keeps unchanneled documents distinct', () => {
+  assert.equal(
+    searchGroup({ claim_type: 'channel', claim_id: 'channel', channel_claim_id: 'publisher' }),
+    'channel'
+  );
+  assert.equal(
+    searchGroup({ claim_type: 'stream', channel_claim_id: 'channel', immutable_id: 'tx:0' }),
+    'channel'
+  );
+  assert.equal(searchGroup({ claim_type: 'stream', immutable_id: 'tx:0' }), 'tx:0');
 });
 
 test('parseArgs validates numeric options and dry run', () => {
   const options = parseArgs([
     '--batch-size',
     '100',
+    '--source-offset',
+    '250',
     '--concurrency',
     '4',
     '--direct-target',
     '--dry-run',
   ]);
   assert.equal(options.batchSize, 100);
+  assert.equal(options.sourceOffset, 250);
   assert.equal(options.concurrency, 4);
   assert.equal(options.directTarget, true);
   assert.equal(options.verifyHydration, true);
   assert.equal(options.dryRun, true);
   assert.equal(parseArgs(['--skip-hydration-check']).verifyHydration, false);
   assert.throws(() => parseArgs(['--concurrency', '0']), /positive integer/);
+  assert.throws(() => parseArgs(['--source-offset', '-1']), /non-negative integer/);
 });
 
 test('searchDocument creates the same stable primary key as the generic search worker', () => {
@@ -108,6 +134,7 @@ test('searchDocument creates the same stable primary key as the generic search w
     state: 'active',
     is_public: 1,
     tags_text: '',
+    search_group: 'tx:0',
     search_rank: 0,
     search_rank_version: 3,
     id: 'tx:0',
