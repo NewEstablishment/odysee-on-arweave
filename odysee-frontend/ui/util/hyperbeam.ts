@@ -451,7 +451,9 @@ function nativeCommentMatchesSelectors(comment: any, selectors: Record<string, a
   const fields: Record<string, any> = {
     schema: comment?.schema,
     type: comment?.type,
-    target: comment?.claim_id,
+    // Comments may anchor on an immutable id (`target`) or a legacy claim
+    // id; accept whichever anchor the message actually carries.
+    target: comment?.target || comment?.claim_id,
     state: comment?.state,
     author: comment?.channel_id,
     parent: comment?.parent_id || 'root',
@@ -576,7 +578,9 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
-    target: params.claim_id,
+    // Uniform anchor: callers pass the content's immutable id as `target`
+    // when it has one; legacy videos stay anchored on the claim id.
+    target: params.target || params.claim_id,
     parent: params.parent_id || 'root',
     state: 'active',
     author: params.channel_id,
@@ -2879,6 +2883,7 @@ function commentFromHyperbeam(comment: any): any {
     state: value(comment, 'state'),
     comment: value(comment, 'comment', 'body', 'text'),
     claim_id: value(comment, 'claim-id', 'claim_id', 'target'),
+    target: value(comment, 'target'),
     parent_id: parentId === 'root' ? undefined : parentId,
     channel_id: channelId,
     channel_name: channelName,

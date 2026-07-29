@@ -8,6 +8,9 @@ type CommentId = string;
 
 type CommentCreateParams = {
   claim_id: string;
+  // Uniform match anchor (2026-07-29 direction): the content's immutable id
+  // when it has one, otherwise the claim id. Defaults to claim_id when unset.
+  target?: string;
   channel_id: string;
   channel_name: string;
   body?: string;
