@@ -208,7 +208,9 @@ native_create(Target, Base, Req, Opts) ->
             {ok, Params} ?= proxy_params(Base, Req, Opts),
             {ok, Body} ?= required_first([<<"comment">>, <<"body">>, <<"text">>], Params, Opts),
             Message = native_comment_message(Target, Body, Params),
-            {ok, CommentID} ?= hb_cache:write(Message, Opts),
+            % Commit with the node wallet so the comment id is a committed
+            % id, not an uncommitted cache hash acting as identity.
+            {ok, CommentID} ?= hb_cache:write(hb_message:commit(Message, Opts), Opts),
             Comment = native_comment_row(CommentID, Message),
             {ok, #{
                 <<"device">> => ?DEVICE,
@@ -1580,7 +1582,9 @@ native_test_opts() ->
     #{
         <<"store">> => Store,
         <<"cache-control">> => [<<"no-cache">>, <<"no-store">>],
-        <<"store-all-signed">> => false
+        <<"store-all-signed">> => false,
+        % Native comments are committed with the node wallet before caching.
+        <<"priv-wallet">> => ar_wallet:new()
     }.
 
 %% Commentron endpoint that fails fast, so list tests exercise the
