@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      name="description"
+      content="A standalone Hyperstream WebRTC viewer with live signaling diagnostics."
+    />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src http: https:; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; object-src 'none'"
+    />
+    <meta name="theme-color" content="#090b0a" />
+    <title>Hyperstream Watch</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="watch-page">
+    <div class="ambient-grid" aria-hidden="true"></div>
+
+    <header class="topbar watch-topbar">
+      <a class="brand" href="./" aria-label="Open Hyperstream broadcaster">
+        <span class="brand-mark" aria-hidden="true">H/</span>
+        <span class="brand-name">HYPERSTREAM</span>
+        <span class="brand-product">watch</span>
+      </a>
+
+      <div class="watch-session-label">
+        <span>Session</span>
+        <b id="header-session">Resolving invite</b>
+      </div>
+
+      <div class="node-state" aria-live="polite">
+        <span class="status-dot" id="node-dot"></span>
+        <span id="node-status">Connecting</span>
+      </div>
+    </header>
+
+    <main class="watch-main">
+      <section class="watch-workspace" aria-label="Hyperstream viewer">
+        <div class="watch-stage">
+          <div class="stage-heading watch-heading">
+            <div>
+              <p class="eyebrow">Independent viewer peer</p>
+              <h1>Live broadcast</h1>
+            </div>
+            <div class="stage-actions">
+              <button class="button button-quiet" id="retry-button" type="button" hidden>
+                Retry
+              </button>
+              <button class="button button-danger" id="leave-button" type="button" disabled>
+                Leave stream
+              </button>
+            </div>
+          </div>
+
+          <div class="broadcast-frame watch-frame">
+            <video id="viewer-video" autoplay playsinline muted></video>
+            <div class="standby" id="standby">
+              <span class="standby-scope" aria-hidden="true"></span>
+              <p id="standby-title">Joining Hyperstream session</p>
+              <span id="standby-detail">
+                The viewer is registering its signed peer identity and waiting for an offer.
+              </span>
+            </div>
+
+            <div class="broadcast-overlay">
+              <div class="live-label" id="live-label">
+                <span></span>
+                <b id="live-label-text">Joining</b>
+              </div>
+              <div class="timecode" id="timecode">00:00:00</div>
+            </div>
+
+            <div class="media-readout watch-readout">
+              <div>
+                <span>Inbound video</span>
+                <b id="video-readout">No frames</b>
+              </div>
+              <div>
+                <span>Peer connection</span>
+                <b id="connection-readout">New</b>
+              </div>
+              <div>
+                <span>ICE transport</span>
+                <b id="ice-readout">New</b>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="inspector watch-inspector" aria-label="Viewer diagnostics">
+          <div class="inspector-heading">
+            <p class="eyebrow">Viewer diagnostics</p>
+            <h2>Connection internals</h2>
+          </div>
+
+          <dl class="session-facts debug-facts">
+            <div>
+              <dt>Status</dt>
+              <dd id="viewer-status">Resolving</dd>
+            </div>
+            <div>
+              <dt>Node</dt>
+              <dd id="viewer-node">—</dd>
+            </div>
+            <div>
+              <dt>Session</dt>
+              <dd id="session-id">—</dd>
+            </div>
+            <div>
+              <dt>Viewer peer</dt>
+              <dd id="viewer-peer">—</dd>
+            </div>
+            <div>
+              <dt>Generation</dt>
+              <dd id="viewer-generation">0</dd>
+            </div>
+            <div>
+              <dt>Publisher</dt>
+              <dd id="publisher-peer">—</dd>
+            </div>
+            <div>
+              <dt>Connection</dt>
+              <dd id="connection-id">—</dd>
+            </div>
+            <div>
+              <dt>Cursor</dt>
+              <dd id="session-cursor">0</dd>
+            </div>
+            <div>
+              <dt>Signaling</dt>
+              <dd id="signaling-state">stable</dd>
+            </div>
+            <div>
+              <dt>ICE gathering</dt>
+              <dd id="gathering-state">new</dd>
+            </div>
+            <div>
+              <dt>Selected ICE route</dt>
+              <dd id="ice-route">pending</dd>
+            </div>
+            <div>
+              <dt>Round trip</dt>
+              <dd id="round-trip-time">0 ms</dd>
+            </div>
+          </dl>
+
+          <div class="request-metrics">
+            <div class="section-label">
+              <span>Inbound RTP</span>
+              <b id="video-dimensions">0 × 0</b>
+            </div>
+            <div class="metric-row">
+              <span>Frames decoded</span>
+              <b id="frames-decoded">0</b>
+            </div>
+            <div class="metric-row">
+              <span>Bytes received</span>
+              <b id="bytes-received">0 B</b>
+            </div>
+            <div class="metric-row">
+              <span>Packets received</span>
+              <b id="packets-received">0</b>
+            </div>
+            <div class="metric-row">
+              <span>Packets lost</span>
+              <b id="packets-lost">0</b>
+            </div>
+            <div class="metric-row">
+              <span>Jitter</span>
+              <b id="jitter">0 ms</b>
+            </div>
+          </div>
+
+          <div class="request-metrics">
+            <div class="section-label">
+              <span>Device transport</span>
+              <b>HTTPSIG · HS1</b>
+            </div>
+            <div class="metric-row">
+              <span>Device calls</span>
+              <b id="request-count">0</b>
+            </div>
+            <div class="metric-row">
+              <span>Signals accepted</span>
+              <b id="signal-count">0</b>
+            </div>
+            <div class="metric-row">
+              <span>Foreign signals</span>
+              <b id="foreign-signal-count">0</b>
+            </div>
+            <div class="metric-row">
+              <span>Cache policy</span>
+              <b id="cache-policy">Unproven</b>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="telemetry watch-telemetry" aria-labelledby="telemetry-title">
+        <div class="telemetry-heading">
+          <div>
+            <p class="eyebrow">Sanitized signaling trace</p>
+            <h2 id="telemetry-title">Viewer event stream</h2>
+          </div>
+          <div class="telemetry-note">
+            Signal kinds, peer IDs, generations, cursors, states, and sizes are visible.
+            Credentials and signal bodies are not.
+          </div>
+          <button class="text-button" id="clear-button" type="button">Clear</button>
+        </div>
+        <div class="event-log" id="event-log" role="log" aria-live="polite">
+          <div class="event-empty" id="event-empty">
+            Join, ready, offer, answer, ICE, heartbeat, and close events will appear here.
+          </div>
+        </div>
+      </section>
+
+      <section class="watch-boundary" aria-labelledby="privacy-title">
+        <p class="eyebrow">Direct P2P boundary</p>
+        <h2 id="privacy-title">ICE information is visible to the connected peer</h2>
+        <p>
+          HyperBEAM coordinates the exchange, but direct WebRTC candidates can reveal
+          broadcaster and viewer network addresses to one another. Use relay-only TURN
+          or an SFU when peer IP privacy matters.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <span>hyperstream@1.0 · viewer</span>
+      <span>join · signal · events · heartbeat · leave</span>
+    </footer>
+
+    <script type="module" src="./watch.js"></script>
+  </body>
+</html>

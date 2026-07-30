@@ -20,6 +20,7 @@ HyperBEAM implements AO-Core. Read `README.md`, `CONTRIBUTING.md`, and `docs/mis
 4. Product adapters may translate legacy APIs and data formats, but browser code must not bypass HyperBEAM to call those services directly.
 5. Private auth material is request input only. Strip tokens and cookies before public messages are signed or persisted.
 6. Search and query return IDs or paths. Hydration happens through generic ID/store reads.
+7. Live signaling is ephemeral. Never cache, index, record, or log SDP, ICE candidates, network addresses, or peer capability tokens. Durable replay records may contain only immutable media locators and bounded public metadata.
 
 ## Store And Identity Model
 
@@ -46,6 +47,54 @@ Native comments use one target-wide exact query, then perform deduplication, rev
 ### `search@1.0`
 
 `src/preloaded/query/dev_search.erl` is generic full-text discovery for HyperBEAM messages. Its write hook accepts an ID plus a message, its schema comes from node/base configuration, and queries retrieve IDs only. It uses `hb_search` and remains backend-agnostic at the device boundary.
+
+### `hyperstream@1.0`
+
+`src/preloaded/hyperstream/dev_hyperstream.erl` is a generic node-local live
+media coordinator. Its Forge package also includes
+`dev_hyperstream_coordinator.erl` and `dev_hyperstream_transport.erl`. It owns
+session and peer leases, verified-signer or capability-token authentication,
+per-peer generations, targeted opaque signaling, ordered event cursors, bounded
+source metadata, and immutable recording-manifest links. It does not parse
+WebRTC negotiation, relay media, terminate RTMP, choose a topology, or contain
+Odysee claim/channel semantics.
+
+HTTP clients obtain the node's ephemeral P-256 key through the public
+`transport-key` operation; the demo signs it. Semantic request and response
+maps then travel in operation-bound `hs1` envelopes using P-256 ECDH,
+HKDF-SHA256, and AES-256-GCM.
+Normal HyperBEAM HTTP, hook, signing, and store paths see flat ciphertext. The
+trusted node process decrypts it before device handling, so the scheme does not
+hide content from the node operator. Do not add Hyperstream-specific exceptions
+to core HTTP, hook, message, meta, logging, signing, or store behavior. A stock
+node can persist the encrypted outer requests when `store-all-signed` is true;
+use `store-all-signed=false` on a dedicated coordinator when that ciphertext
+retention is not wanted. `Cache-Control: no-store` does not replace this node
+setting.
+
+Session state and the transport key are deliberately restart-lost and require
+sticky routing. After a restart, clients fetch a new key, rejoin, and
+renegotiate. A media adapter may advertise RTMP, WHIP, HLS, SFU, or WebRTC
+endpoints in opaque metadata. Recorded media bytes are written separately
+through normal store/cache paths; `record` links immutable segment locators and
+`close` produces a replay manifest for direct ID-based hydration. Recording is
+restricted to `hyperstream-recording-signers`, falling back to `cache_writers`,
+and is bounded by per-session segment and aggregate descriptor-byte limits.
+Manifests are deterministic across retry after a store failure. Peer IDs and
+metadata are unverified application labels, and recording descriptors are
+persisted verbatim after locator validation, so adapters must keep them public
+and credential-free. Operators own retention, store capacity, and garbage
+collection.
+
+HTTP callers use POST on the literal direct device route. The demo signs every
+request and uses its browser-generated signer as the membership credential.
+Generic clients may use sealed peer or join capabilities, but capabilities must
+be delivered out of band and must never appear in URLs, logs, metadata,
+diagnostics, or durable descriptors. Non-loopback deployments require HTTPS,
+gateway body and rate limits, session affinity, and an edge policy that does not
+log bodies. The signed device and operation must match the literal HTTP route.
+The device is loaded through the standard Forge preloaded-store or trusted
+device mechanism and requires no HyperBEAM core patch.
 
 ## LBRY Devices
 
@@ -138,6 +187,7 @@ Typical focused validation:
 
 ```sh
 HOME=/tmp/odysee-hb-home rebar3 as hyperbeam compile
+HOME=/tmp/odysee-hb-home HB_PORT=0 rebar3 device test -d dev_hyperstream
 HOME=/tmp/odysee-hb-home HB_PORT=0 rebar3 device test -d dev_odysee_claim
 HOME=/tmp/odysee-hb-home HB_PORT=0 rebar3 device test -d dev_odysee_comment
 HOME=/tmp/odysee-hb-home HB_PORT=0 rebar3 device test -d dev_odysee_stream
@@ -151,6 +201,7 @@ The two-node source/cache demo remains available at `scripts/odysee-two-node-dem
 - The Neo integration established the unified LBRY commitment and store-first legacy source path while retaining richer master-side auth, comments, uploads, search, playback, and diagnostics.
 - Browser-selectable legacy wiring has been removed. Legacy systems are backend sources behind devices/stores only.
 - Generic `query@1.0` and `search@1.0` remain upstream-style reusable primitives.
+- `hyperstream@1.0` coordinates one node's live sessions; its `hs1` envelope is node-terminated transport sealing, not end-to-end secrecy from the node operator. Multi-node ownership, shared signaling state, TURN/SFU provisioning, RTMP termination, transcoding, automatic media segmentation, and replay rendering remain deployment/adapter responsibilities.
 - Odysee fuzzy search still depends on Meilisearch and a populated legacy/native index.
 - Historical comments and several account/moderation operations still require Commentron through `odysee-comment@1.0`.
 - Full mutable-name/claim migration to owned references is not complete.
