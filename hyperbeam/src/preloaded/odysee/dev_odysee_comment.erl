@@ -79,23 +79,39 @@ list(Base, Req, Opts) ->
         Native = native_comments_for_request(Base, Req, Opts),
         case list_result(Base, Req, Opts) of
             {ok, Result, Raw} ->
-                normalize_list(merge_native_items(Native, Result, Opts), Raw, Opts);
+                Merged = merge_native_items(Native, Result, Opts),
+                normalize_list(Merged, merged_raw_body(Native, Merged, Raw), Opts);
             _Error when Native =/= [] ->
-                normalize_list(
-                    #{
-                        <<"items">> => Native,
-                        <<"total_items">> => length(Native),
-                        <<"total_filtered_items">> => length(Native),
-                        <<"page">> => 1,
-                        <<"total_pages">> => 1
-                    },
-                    <<"{}">>,
-                    Opts
-                );
+                Merged = #{
+                    <<"items">> => Native,
+                    <<"total_items">> => length(Native),
+                    <<"total_filtered_items">> => length(Native),
+                    <<"page">> => 1,
+                    <<"total_pages">> => 1
+                },
+                normalize_list(Merged, merged_raw_body(Native, Merged, <<"{}">>), Opts);
             Error ->
                 Error
         end
     end).
+
+%% The HTTP layer serves the message's `body', so merged native comments
+%% must be re-encoded into it -- otherwise browser callers reading the raw
+%% Commentron payload never see them.
+merged_raw_body([], _Merged, Raw) ->
+    Raw;
+merged_raw_body(_Native, Merged, Raw) ->
+    Envelope =
+        case try_decode_json(Raw) of
+            {ok, Decoded} when is_map(Decoded) ->
+                case maps:is_key(<<"result">>, Decoded) of
+                    true -> Decoded#{ <<"result">> => Merged };
+                    false -> #{ <<"jsonrpc">> => <<"2.0">>, <<"result">> => Merged }
+                end;
+            _ ->
+                #{ <<"jsonrpc">> => <<"2.0">>, <<"result">> => Merged }
+        end,
+    hb_json:encode(Envelope).
 
 super_list(Base, Req, Opts) -> commentron(<<"comment.SuperChatList">>, Base, Req, Opts).
 
@@ -106,7 +122,14 @@ by_id(Base, Req, Opts) ->
     safe(fun() ->
         case native_comment_by_id(Base, Req, Opts) of
             {ok, Comment} ->
-                normalize_single_comment(Comment, hb_json:encode(Comment), Opts);
+                normalize_single_comment(
+                    Comment,
+                    hb_json:encode(#{
+                        <<"jsonrpc">> => <<"2.0">>,
+                        <<"result">> => #{ <<"item">> => Comment, <<"ancestors">> => [] }
+                    }),
+                    Opts
+                );
             not_found ->
                 maybe
                     {ok, Result, Raw} ?= by_id_result(Base, Req, Opts),
@@ -218,7 +241,9 @@ native_create(Target, Base, Req, Opts) ->
                 <<"method">> => <<"comment.Create">>,
                 <<"native">> => true,
                 <<"comment-id">> => CommentID,
-                <<"body">> => hb_json:encode(Comment),
+                % Commentron-shaped envelope: the HTTP layer serves `body'.
+                <<"body">> =>
+                    hb_json:encode(#{ <<"jsonrpc">> => <<"2.0">>, <<"result">> => Comment }),
                 <<"result">> => Comment
             }}
         else
@@ -1625,6 +1650,11 @@ native_create_list_and_by_id_roundtrip_test() ->
     {ok, ByTarget} =
         list(#{}, #{ <<"target">> => Target, <<"comment-url">> => ?DEAD_COMMENTRON }, Opts),
     ?assertEqual([CommentID], hb_maps:get(<<"comment-ids">>, ByTarget, Opts)),
+    % ...and in the raw `body' payload, which is what the HTTP layer serves.
+    BodyEnvelope = hb_json:decode(hb_maps:get(<<"body">>, ByTarget, Opts)),
+    BodyItems = maps:get(<<"items">>, maps:get(<<"result">>, BodyEnvelope)),
+    ?assertEqual(1, length(BodyItems)),
+    ?assertEqual(<<"hello native">>, maps:get(<<"comment">>, hd(BodyItems))),
     % ...and when listing by the legacy claim id it was also anchored to.
     {ok, ByClaim} =
         list(#{}, #{ <<"claim-id">> => ClaimID, <<"comment-url">> => ?DEAD_COMMENTRON }, Opts),
