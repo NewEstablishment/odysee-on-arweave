@@ -32,7 +32,7 @@ import { makeSelectNotificationForCommentId } from 'redux/selectors/notification
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { toHex } from 'util/hex';
 import { getChannelFromClaim } from 'util/claim';
-import { invalidateHyperbeamClaimPage } from 'util/hyperbeam';
+import { commentAnchorForClaim, invalidateHyperbeamClaimPage } from 'util/hyperbeam';
 import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
@@ -109,6 +109,9 @@ export function doCommentList(
     return Comments.comment_list({
       page,
       claim_id: claimId,
+      // The loading switch: comments are looked up by the claim id when the
+      // resolved claim carries a legacy one, else by its immutable id.
+      target: commentAnchorForClaim(claim),
       page_size: pageSize,
       parent_id: parentId,
       top_level: !parentId,
@@ -976,6 +979,9 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
     return Comments.comment_create({
       comment: comment,
       claim_id: claim_id,
+      // New comments anchor on the uniform target: the immutable id for
+      // native content, the claim id for legacy videos.
+      target: commentAnchorForClaim(claim),
       channel_id: activeChannelClaim.claim_id,
       channel_name: activeChannelClaim.name,
       parent_id: parent_id,

@@ -67,6 +67,9 @@ type CommentAbandonResponse = {
 
 type CommentListParams = {
   claim_id?: string;
+  // Uniform match anchor: the claim id for legacy content, the immutable id
+  // for native content. Falls back to claim_id when unset.
+  target?: string;
   page?: number;
   page_size?: number;
   parent_id?: string;
