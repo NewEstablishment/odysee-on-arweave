@@ -143,7 +143,10 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const { channelUris, resolveUris: plainUris } = splitClaimIdChannelUris(mutableUris);
   const channelEntries =
     channelUris.length > 1 ? await fetchClaimIdChannelEntries(channelUris) : await fetchResolveEntries(channelUris);
-  const immutableEntries = await fetchImmutableResolveEntries(immutableUris);
+  const immutableEntries = await fetchImmutableResolveEntries(
+    immutableUris,
+    isObject(params?.immutable_signing_channel_ids) ? params.immutable_signing_channel_ids : {}
+  );
   const resolvedImmutableUris = new Set(immutableEntries.filter(([, claim]) => claim).map(([uri]) => uri));
   const unresolvedImmutableUris = immutableUris.filter((uri) => !resolvedImmutableUris.has(uri));
   const resolveEntries = await fetchResolveEntries([...unresolvedImmutableUris, ...plainUris]);
@@ -1721,7 +1724,7 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   const items = result?.items;
   if (!Array.isArray(items)) return null;
 
-  const resolvedItems = await hydrateSearchItems(items);
+  const resolvedItems = await hydrateSearchItems(items, targetedSearch ? items : undefined);
   return {
     ...result,
     items: resolvedItems,
@@ -1928,7 +1931,7 @@ function claimReleaseTime(claim: any): number {
   );
 }
 
-async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
+async function hydrateSearchItems(items: Array<any>, knownEnrichments?: Array<any>): Promise<Array<any>> {
   const ids = items.map(searchHitId).filter(Boolean).map(String);
   if (!ids.length) return items;
 
@@ -1946,13 +1949,14 @@ async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
   const claimIds = Array.from(
     new Set(loaded.map(({ claim }) => value(claim, 'claim_id', 'claim-id')).filter(isClaimId))
   );
-  const enrichmentResponse = claimIds.length
-    ? await fetchCachedPublicProxiedDeviceJson(`${CLAIM_DEVICE}/search`, {
-        claim_ids: claimIds,
-        page_size: claimIds.length,
-      }).catch(() => null)
-    : null;
-  const enrichmentItems = sdkSearchFromHyperbeam(responsePayload(enrichmentResponse))?.items;
+  const enrichmentResponse =
+    !knownEnrichments && claimIds.length
+      ? await fetchCachedPublicProxiedDeviceJson(`${CLAIM_DEVICE}/search`, {
+          claim_ids: claimIds,
+          page_size: claimIds.length,
+        }).catch(() => null)
+      : null;
+  const enrichmentItems = knownEnrichments || sdkSearchFromHyperbeam(responsePayload(enrichmentResponse))?.items;
   const enrichmentsByClaimId = new Map<string, any>();
   if (Array.isArray(enrichmentItems)) {
     enrichmentItems.forEach((item) => {
@@ -1961,25 +1965,10 @@ async function hydrateSearchItems(items: Array<any>): Promise<Array<any>> {
       if (isClaimId(claimId)) enrichmentsByClaimId.set(claimId.toLowerCase(), claim);
     });
   }
-  const channelIds = Array.from(
-    new Set(
-      loaded
-        .filter(({ claim }) => {
-          const claimId = value(claim, 'claim_id', 'claim-id');
-          return !isClaimId(claimId) || !value(enrichmentsByClaimId.get(claimId.toLowerCase()), 'signing_channel');
-        })
-        .map(({ decodedClaim }) => decodedClaim?.signedChannelId)
-        .filter((id): id is string => Boolean(id))
-    )
-  );
-  const channelsById = await fetchImmutableSigningChannels(channelIds);
-
   loaded.forEach(({ id, result, decodedClaim, claim: baseClaim }) => {
     const claimId = value(baseClaim, 'claim_id', 'claim-id');
     const enrichment = isClaimId(claimId) ? enrichmentsByClaimId.get(claimId.toLowerCase()) : null;
-    const signingChannel =
-      value(enrichment, 'signing_channel') ||
-      (decodedClaim?.signedChannelId ? channelsById.get(decodedClaim.signedChannelId.toLowerCase()) : null);
+    const signingChannel = value(enrichment, 'signing_channel');
     const immutableClaim = immutableClaimFromHyperbeam(result, id, signingChannel, decodedClaim);
     const claim = immutableClaim ? mergeSearchClaimEnrichment(immutableClaim, enrichment) : null;
     if (!claim) return;
@@ -3344,9 +3333,15 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
   return immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim);
 }
 
-async function fetchImmutableResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
+async function fetchImmutableResolveEntries(
+  urls: Array<string>,
+  signingChannelIds: Record<string, string> = {}
+): Promise<Array<[string, any]>> {
   const immutableIds = urls.map(immutableRouteIdFromUri).filter((id): id is string => Boolean(id));
-  const batchResults = await fetchImmutableBatchJsonOrNull(immutableIds).catch(() => new Map<string, any>());
+  const channelIds = immutableIds.map((id) => signingChannelIds[id]).filter((id): id is string => Boolean(id));
+  const batchResults = await fetchImmutableBatchJsonOrNull([...immutableIds, ...channelIds]).catch(
+    () => new Map<string, any>()
+  );
   return Promise.all(
     urls.map(async (uri): Promise<[string, any]> => {
       const immutableId = immutableRouteIdFromUri(uri);
@@ -3355,7 +3350,9 @@ async function fetchImmutableResolveEntries(urls: Array<string>): Promise<Array<
       const result =
         batchResults.get(immutableId) || (await fetchCachedImmutableJsonOrNull(immutableId).catch(() => null));
       const decodedClaim = decodeClaimMetadata(storePayload(result));
-      return [uri, result ? immutableClaimFromHyperbeam(result, immutableId, null, decodedClaim) : null];
+      const channelId = signingChannelIds[immutableId];
+      const signingChannel = channelId ? batchResults.get(channelId) : null;
+      return [uri, result ? immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim) : null];
     })
   );
 }

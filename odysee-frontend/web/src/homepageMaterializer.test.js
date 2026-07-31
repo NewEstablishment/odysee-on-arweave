@@ -102,11 +102,13 @@ test('materialization returns ordered immutable IDs only after warming every sel
   });
 
   assert.deepEqual(result.en.categories.featured.immutableIds, ['first:0', 'second:0', 'pinned:0']);
+  assert.deepEqual(result.en.categories.featured.immutableSigningChannelIds, {
+    'first:0': 'channel:0',
+    'second:0': 'channel:0',
+    'pinned:0': 'channel:0',
+  });
   assert.deepEqual(result.en.categories.featured.immutableChannelIds, ['source-channel:0']);
-  assert.deepEqual(
-    new Set(warmed),
-    new Set(['first:0', 'second:0', 'pinned:0', 'channel:0'])
-  );
+  assert.deepEqual(new Set(warmed), new Set(['first:0', 'second:0', 'pinned:0', 'channel:0']));
   assert.equal(searches.length, 3);
   assert.equal(source.en.categories.featured.immutableIds, undefined);
   assert.equal(source.en.categories.featured.immutableChannelIds, undefined);
@@ -141,8 +143,7 @@ test('materialization records source channels that cannot be converted to immuta
   };
 
   const result = await materializeHomepageData(source, {
-    search: async (params) =>
-      params.claim_ids ? { items: [] } : { items: [{ immutable_id: 'media:0' }] },
+    search: async (params) => (params.claim_ids ? { items: [] } : { items: [{ immutable_id: 'media:0' }] }),
     warm: async () => true,
   });
 

@@ -31,6 +31,7 @@ export type HomepageCat = {
   hideByDefault?: boolean;
   immutableIds?: Array<string>;
   immutableChannelIds?: Array<string>;
+  immutableSigningChannelIds?: Record<string, string>;
   unresolvedChannelIds?: Array<string>;
 };
 
@@ -148,6 +149,7 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
     pinnedUrls: cat.pinnedUrls,
     pinnedClaimIds: cat.pinnedClaimIds,
     uris: (cat.immutableIds || []).map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri)),
+    immutableSigningChannelIds: cat.immutableSigningChannelIds,
     hideByDefault: cat.hideByDefault,
     hideSort: cat.hideSort,
     options: {

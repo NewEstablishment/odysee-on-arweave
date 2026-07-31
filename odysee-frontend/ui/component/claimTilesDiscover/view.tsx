@@ -50,6 +50,7 @@ type Props = {
     onlyPinForOrder?: string;
   };
   uris?: Array<string>;
+  immutableSigningChannelIds?: Record<string, string>;
   injectedItem?: ListInjectedItem;
   showNoSourceClaims?: boolean;
   renderProperties?: (arg0: Claim) => React.ReactNode | null | undefined;
@@ -259,6 +260,7 @@ function ClaimTilesDiscover(props: Props) {
     loading,
     sectionTitle,
     uris: explicitUris,
+    immutableSigningChannelIds,
   } = props;
   const dispatch = useAppDispatch();
   // -- redux selectors --
@@ -305,7 +307,8 @@ function ClaimTilesDiscover(props: Props) {
     [dispatch]
   );
   const doResolveUris = React.useCallback(
-    (uris: Array<string>, returnCached: boolean) => dispatch(doResolveUrisAction(uris, returnCached)),
+    (uris: Array<string>, returnCached: boolean, resolveReposts: boolean = true, additionalOptions: any = {}) =>
+      dispatch(doResolveUrisAction(uris, returnCached, resolveReposts, additionalOptions)),
     [dispatch]
   );
   const listRef = React.useRef();
@@ -374,9 +377,11 @@ function ClaimTilesDiscover(props: Props) {
   }, [usesExplicitUris, channelIds, doFetchOdyseeMembershipForChannelIds]);
   React.useEffect(() => {
     if (usesExplicitUris && explicitUris.length) {
-      doResolveUris(explicitUris, true);
+      doResolveUris(explicitUris, true, true, {
+        immutable_signing_channel_ids: immutableSigningChannelIds,
+      });
     }
-  }, [usesExplicitUris, explicitUris, doResolveUris]);
+  }, [usesExplicitUris, explicitUris, immutableSigningChannelIds, doResolveUris]);
   React.useEffect(() => {
     if (shouldPerformSearch) {
       const searchOptions = JSON.parse(optionsStringified);

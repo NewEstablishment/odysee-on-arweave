@@ -1298,10 +1298,15 @@ export function doClaimSearch(
       const fiatClaimIds = [];
       let collectionResolveInfo;
       data.items.some((stream: Claim, index: number) => {
-        resolveInfo[stream.canonical_url] = {
+        const resultUri =
+          stream.value_type === 'channel'
+            ? stream.canonical_url
+            : hyperbeamImmutableUriFromClaim(stream) || stream.canonical_url;
+        if (!resultUri) return false;
+        resolveInfo[resultUri] = {
           stream,
         };
-        urls.push(stream.canonical_url);
+        urls.push(resultUri);
         if (!isHyperbeamUploadClaim(stream)) claimIds.push(stream.claim_id);
 
         if (stream.value_type !== 'channel' && stream.value_type !== 'collection') {
@@ -1314,7 +1319,7 @@ export function doClaimSearch(
 
         if (stream.value_type === 'collection') {
           if (!collectionResolveInfo) collectionResolveInfo = {};
-          collectionResolveInfo[stream.canonical_url] = {
+          collectionResolveInfo[resultUri] = {
             stream,
           };
         }

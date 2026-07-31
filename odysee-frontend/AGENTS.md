@@ -63,10 +63,13 @@ provenance and future native-discovery input; it is not reread in full on every
 refresh. The materializer atomically publishes a persistent snapshot only after
 every visible media object and its resolved signing channel are cached.
 
-The homepage API returns the channel provenance plus ordered media
-`immutableIds`. `buildHomepage.ts` converts the media IDs to immutable URIs,
-and `ClaimTilesDiscover` batch-hydrates those URIs
-without issuing browser claim searches or resolving mutable pins. Keep
+The homepage API returns channel provenance, ordered media `immutableIds`, and
+the immutable signing-channel ID associated with each media ID.
+`buildHomepage.ts` converts media IDs to immutable URIs, and
+`ClaimTilesDiscover` batch-hydrates media and signing channels without issuing
+browser claim searches or resolving mutable pins. Homepage tiles must navigate
+to `/$/id/<immutable-id>`; a legacy canonical URI is display metadata, not the
+navigation identity. Keep
 `CUSTOM_HOMEPAGE_SNAPSHOT_FILE` outside the deployment checkout and use
 `pnpm run homepage:materialize` to force a complete prewarm.
 Media hydration must reach Redux as soon as the immutable batch read succeeds.

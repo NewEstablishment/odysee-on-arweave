@@ -16,6 +16,7 @@ import FileViewCountInline from 'component/fileViewCountInline';
 import useGetThumbnail from 'effects/use-get-thumbnail';
 import { isClaimAllowedForCollection } from 'util/collections';
 import { formatLbryUrlForWeb, generateListSearchUrlParams } from 'util/url';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 import { formatClaimPreviewTitle } from 'util/formatAriaLabel';
 import PreviewOverlayProperties from 'component/previewOverlayProperties';
 import FileHideRecommendation from 'component/fileHideRecommendation';
@@ -129,7 +130,7 @@ function ClaimPreviewTile(props: Props) {
   const navigateUrl =
     isCollection && defaultCollectionAction === COLLECTIONS.DEFAULT_ACTION_VIEW
       ? `/$/${PAGES.PLAYLIST}/${listId}`
-      : formatLbryUrlForWeb(canonicalUrl || uri || '/') +
+      : formatLbryUrlForWeb(hyperbeamImmutableUriFromClaim(claim) || uri || canonicalUrl || '/') +
         (listId ? generateListSearchUrlParams(listId) : '') +
         (claim && isClaimShort(claim) && !disableShortsView ? '?view=shorts' : '') +
         (fypId ? `${claim && isClaimShort(claim) ? '&' : '?'}${FYP_ID}=${fypId}` : '') +

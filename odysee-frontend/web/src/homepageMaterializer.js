@@ -103,12 +103,7 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
   const selections = await mapWithConcurrency(jobs, QUERY_CONCURRENCY, async (job) => {
     const pageSize = positiveInteger(job.category.pageSize, DEFAULT_PAGE_SIZE);
     const [dynamicResult, pinnedResult] = await Promise.all([
-      searchWithRetry(
-        search,
-        categorySearchParams(job.category, nowSeconds),
-        searchRetries,
-        searchRetryDelayMs
-      ),
+      searchWithRetry(search, categorySearchParams(job.category, nowSeconds), searchRetries, searchRetryDelayMs),
       stringList(job.category.pinnedClaimIds).length
         ? searchWithRetry(
             search,
@@ -133,11 +128,17 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
     );
     const pinnedIds = stringList(job.category.pinnedClaimIds).map((claimId) => pinnedByClaimId.get(claimId));
     const channelClaimIds = [...dynamicItems, ...pinnedItems].map(signingChannelId).filter(Boolean);
+    const signingChannelByMediaId = new Map(
+      [...dynamicItems, ...pinnedItems]
+        .map((item) => [immutableId(item), signingChannelId(item)])
+        .filter(([mediaId, channelClaimId]) => mediaId && channelClaimId)
+    );
 
     return {
       ...job,
       selectedIds: mergePinnedIds(dynamicIds, pinnedIds, pageSize),
       channelClaimIds,
+      signingChannelByMediaId,
     };
   });
 
@@ -145,9 +146,7 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
   const sourceChannelClaimIds = Array.from(
     new Set(selections.flatMap((selection) => stringList(selection.category.channelIds)))
   );
-  const selectedChannelClaimIds = Array.from(
-    new Set(selections.flatMap((selection) => selection.channelClaimIds))
-  );
+  const selectedChannelClaimIds = Array.from(new Set(selections.flatMap((selection) => selection.channelClaimIds)));
   const channelClaimIds = Array.from(new Set([...sourceChannelClaimIds, ...selectedChannelClaimIds]));
   const channelResults = await mapWithConcurrency(
     chunk(channelClaimIds, RESOLVE_BATCH_SIZE),
@@ -193,9 +192,14 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
   }
   const materialized = structuredClone(homepageData || {});
 
-  selections.forEach(({ locale, categoryId, selectedIds: ids }) => {
+  selections.forEach(({ locale, categoryId, selectedIds: ids, signingChannelByMediaId }) => {
     const sourceChannelIds = stringList(materialized[locale].categories[categoryId].channelIds);
     materialized[locale].categories[categoryId].immutableIds = ids;
+    materialized[locale].categories[categoryId].immutableSigningChannelIds = Object.fromEntries(
+      ids
+        .map((mediaId) => [mediaId, channelIdsByClaimId.get(signingChannelByMediaId.get(mediaId))])
+        .filter(([, channelId]) => channelId)
+    );
     materialized[locale].categories[categoryId].immutableChannelIds = sourceChannelIds
       .map((claimId) => channelIdsByClaimId.get(claimId))
       .filter(Boolean);
