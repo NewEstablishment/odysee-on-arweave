@@ -231,8 +231,11 @@ native_create(Target, Base, Req, Opts) ->
             {ok, Params} ?= proxy_params(Base, Req, Opts),
             {ok, Body} ?= required_first([<<"comment">>, <<"body">>, <<"text">>], Params, Opts),
             Message = native_comment_message(Target, Body, Params),
-            % Commit with the node wallet so the comment id is a committed
-            % id, not an uncommitted cache hash acting as identity.
+            % Commit with the node wallet so the stored comment carries a node
+            % commitment and is verifiable by its committed id. `hb_cache:write'
+            % returns the *uncommitted* content id (committed ids are linked to
+            % it), so the comment id handed out is content-addressed; the
+            % channel signature carried in the message is the authorship proof.
             {ok, CommentID} ?= hb_cache:write(hb_message:commit(Message, Opts), Opts),
             Comment = native_comment_row(CommentID, Message),
             {ok, #{
