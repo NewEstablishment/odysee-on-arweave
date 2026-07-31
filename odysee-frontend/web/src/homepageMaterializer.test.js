@@ -63,8 +63,13 @@ test('materialization returns ordered immutable IDs only after warming every sel
         ],
       };
     }
-    if (params.claim_ids?.[0] === 'channel-claim') {
-      return { items: [{ claim_id: 'channel-claim', immutable_id: 'channel:0' }] };
+    if (params.claim_ids) {
+      return {
+        items: params.claim_ids.map((claimId) => ({
+          claim_id: claimId,
+          immutable_id: claimId === 'channel-claim' ? 'channel:0' : 'source-channel:0',
+        })),
+      };
     }
     return {
       items: [
@@ -81,6 +86,7 @@ test('materialization returns ordered immutable IDs only after warming every sel
           label: 'Featured',
           pageSize: 3,
           pinnedClaimIds: ['pinned-claim'],
+          channelIds: ['source-channel'],
         },
       },
     },
@@ -96,9 +102,14 @@ test('materialization returns ordered immutable IDs only after warming every sel
   });
 
   assert.deepEqual(result.en.categories.featured.immutableIds, ['first:0', 'second:0', 'pinned:0']);
-  assert.deepEqual(new Set(warmed), new Set(['first:0', 'second:0', 'pinned:0', 'channel:0']));
+  assert.deepEqual(result.en.categories.featured.immutableChannelIds, ['source-channel:0']);
+  assert.deepEqual(
+    new Set(warmed),
+    new Set(['first:0', 'second:0', 'pinned:0', 'channel:0'])
+  );
   assert.equal(searches.length, 3);
   assert.equal(source.en.categories.featured.immutableIds, undefined);
+  assert.equal(source.en.categories.featured.immutableChannelIds, undefined);
 });
 
 test('materialization rejects an incomplete HyperBEAM cache warm', async () => {
@@ -114,9 +125,55 @@ test('materialization rejects an incomplete HyperBEAM cache warm', async () => {
     materializeHomepageData(source, {
       search: async () => ({ items: [{ immutable_id: 'missing:0' }] }),
       warm: async () => false,
+      warmRetries: 0,
     }),
-    /Failed to cache 1 homepage claims/
+    /Failed to cache 1 homepage objects/
   );
+});
+
+test('materialization records source channels that cannot be converted to immutable IDs', async () => {
+  const source = {
+    en: {
+      categories: {
+        featured: { label: 'Featured', channelIds: ['missing-channel'], pageSize: 1 },
+      },
+    },
+  };
+
+  const result = await materializeHomepageData(source, {
+    search: async (params) =>
+      params.claim_ids ? { items: [] } : { items: [{ immutable_id: 'media:0' }] },
+    warm: async () => true,
+  });
+
+  assert.deepEqual(result.en.categories.featured.immutableChannelIds, []);
+  assert.deepEqual(result.en.categories.featured.unresolvedChannelIds, ['missing-channel']);
+});
+
+test('materialization retries a transient source search failure', async () => {
+  let calls = 0;
+  const result = await materializeHomepageData(
+    {
+      en: {
+        categories: {
+          featured: { label: 'Featured', pageSize: 1 },
+        },
+      },
+    },
+    {
+      search: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('temporary timeout');
+        return { items: [{ immutable_id: 'media:0' }] };
+      },
+      searchRetries: 1,
+      searchRetryDelayMs: 0,
+      warm: async () => true,
+    }
+  );
+
+  assert.equal(calls, 2);
+  assert.deepEqual(result.en.categories.featured.immutableIds, ['media:0']);
 });
 
 test('mergePinnedIds preserves the configured row size and pin position', () => {

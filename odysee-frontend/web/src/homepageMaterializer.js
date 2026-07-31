@@ -7,6 +7,10 @@ const DEFAULT_PAGE_SIZE = 8;
 const DEFAULT_MAX_AGE_MS = 15 * 60 * 1000;
 const QUERY_CONCURRENCY = 6;
 const WARM_CONCURRENCY = 24;
+const CHANNEL_WARM_CONCURRENCY = 6;
+const WARM_RETRIES = 3;
+const SEARCH_RETRIES = 3;
+const RESOLVE_BATCH_SIZE = 24;
 
 function homepageSnapshotPath(sourceDir) {
   return process.env.CUSTOM_HOMEPAGE_SNAPSHOT_FILE || path.resolve(sourceDir, '..', 'materialized-homepages-v2.json');
@@ -83,6 +87,8 @@ function mergePinnedIds(ids, pinnedIds, pageSize) {
 async function materializeHomepageData(homepageData, dependencies = {}) {
   const search = dependencies.search || hyperbeamNodeSourceClaimSearch;
   const warm = dependencies.warm || hyperbeamNodeWarmImmutableClaim;
+  const searchRetries = dependencies.searchRetries ?? SEARCH_RETRIES;
+  const searchRetryDelayMs = dependencies.searchRetryDelayMs ?? 200;
   const nowSeconds = dependencies.nowSeconds || Math.floor(Date.now() / 1000);
   const locales = Object.entries(homepageData || {});
   const jobs = locales.flatMap(([locale, homepage]) =>
@@ -97,14 +103,24 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
   const selections = await mapWithConcurrency(jobs, QUERY_CONCURRENCY, async (job) => {
     const pageSize = positiveInteger(job.category.pageSize, DEFAULT_PAGE_SIZE);
     const [dynamicResult, pinnedResult] = await Promise.all([
-      search(categorySearchParams(job.category, nowSeconds)),
+      searchWithRetry(
+        search,
+        categorySearchParams(job.category, nowSeconds),
+        searchRetries,
+        searchRetryDelayMs
+      ),
       stringList(job.category.pinnedClaimIds).length
-        ? search({
-            claim_ids: stringList(job.category.pinnedClaimIds),
-            page: 1,
-            page_size: stringList(job.category.pinnedClaimIds).length,
-            no_totals: true,
-          })
+        ? searchWithRetry(
+            search,
+            {
+              claim_ids: stringList(job.category.pinnedClaimIds),
+              page: 1,
+              page_size: stringList(job.category.pinnedClaimIds).length,
+              no_totals: true,
+            },
+            searchRetries,
+            searchRetryDelayMs
+          )
         : Promise.resolve(null),
     ]);
     const dynamicItems = Array.isArray(dynamicResult?.items) ? dynamicResult.items : [];
@@ -126,30 +142,66 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
   });
 
   const selectedIds = Array.from(new Set(selections.flatMap((selection) => selection.selectedIds)));
-  const channelClaimIds = Array.from(new Set(selections.flatMap((selection) => selection.channelClaimIds)));
-  const channelResult = channelClaimIds.length
-    ? await search({
-        claim_ids: channelClaimIds,
-        page: 1,
-        page_size: channelClaimIds.length,
-        no_totals: true,
-      })
-    : null;
-  const channelIds = (Array.isArray(channelResult?.items) ? channelResult.items : []).map(immutableId).filter(Boolean);
-  const warmIds = Array.from(new Set([...selectedIds, ...channelIds]));
-  const warmResults = await mapWithConcurrency(warmIds, WARM_CONCURRENCY, async (id) => [
-    id,
-    await warm(id).catch(() => false),
-  ]);
+  const sourceChannelClaimIds = Array.from(
+    new Set(selections.flatMap((selection) => stringList(selection.category.channelIds)))
+  );
+  const selectedChannelClaimIds = Array.from(
+    new Set(selections.flatMap((selection) => selection.channelClaimIds))
+  );
+  const channelClaimIds = Array.from(new Set([...sourceChannelClaimIds, ...selectedChannelClaimIds]));
+  const channelResults = await mapWithConcurrency(
+    chunk(channelClaimIds, RESOLVE_BATCH_SIZE),
+    QUERY_CONCURRENCY,
+    (claimIds) =>
+      searchWithRetry(
+        search,
+        {
+          claim_ids: claimIds,
+          page: 1,
+          page_size: claimIds.length,
+          no_totals: true,
+        },
+        searchRetries,
+        searchRetryDelayMs
+      )
+  );
+  const channelItems = channelResults.flatMap((result) => (Array.isArray(result?.items) ? result.items : []));
+  const channelIdsByClaimId = new Map(
+    channelItems
+      .map((item) => [String(item.claim_id || item['claim-id'] || ''), immutableId(item)])
+      .filter(([claimId, id]) => claimId && id)
+  );
+  const selectedChannelIds = selectedChannelClaimIds.map((claimId) => channelIdsByClaimId.get(claimId)).filter(Boolean);
+  const selectedIdSet = new Set(selectedIds);
+  const channelWarmIds = selectedChannelIds.filter((id) => !selectedIdSet.has(id));
+  const warmRetries = dependencies.warmRetries ?? WARM_RETRIES;
+  const warmRetryDelayMs = dependencies.warmRetryDelayMs ?? 100;
+  const mediaWarmResults = await warmObjects(selectedIds, WARM_CONCURRENCY, warm, warmRetries, warmRetryDelayMs);
+  const channelWarmResults = await warmObjects(
+    channelWarmIds,
+    CHANNEL_WARM_CONCURRENCY,
+    warm,
+    warmRetries,
+    warmRetryDelayMs
+  );
+  const warmResults = [...mediaWarmResults, ...channelWarmResults];
+  const warmIds = [...selectedIds, ...channelWarmIds];
   const warmed = new Set(warmResults.filter(([, ok]) => ok).map(([id]) => id));
-  const failedIds = selectedIds.filter((id) => !warmed.has(id));
+  const failedIds = warmIds.filter((id) => !warmed.has(id));
   if (failedIds.length) {
-    throw new Error(`Failed to cache ${failedIds.length} homepage claims in HyperBEAM`);
+    throw new Error(`Failed to cache ${failedIds.length} homepage objects in HyperBEAM`);
   }
   const materialized = structuredClone(homepageData || {});
 
   selections.forEach(({ locale, categoryId, selectedIds: ids }) => {
+    const sourceChannelIds = stringList(materialized[locale].categories[categoryId].channelIds);
     materialized[locale].categories[categoryId].immutableIds = ids;
+    materialized[locale].categories[categoryId].immutableChannelIds = sourceChannelIds
+      .map((claimId) => channelIdsByClaimId.get(claimId))
+      .filter(Boolean);
+    materialized[locale].categories[categoryId].unresolvedChannelIds = sourceChannelIds.filter(
+      (claimId) => !channelIdsByClaimId.has(claimId)
+    );
   });
 
   return materialized;
@@ -206,6 +258,43 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   });
   await Promise.all(workers);
   return results;
+}
+
+function warmObjects(ids, concurrency, warm, retries, retryDelayMs) {
+  return mapWithConcurrency(ids, concurrency, async (id) => {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      if (await warm(id).catch(() => false)) return [id, true];
+      if (attempt < retries && retryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+      }
+    }
+    return [id, false];
+  });
+}
+
+async function searchWithRetry(search, params, retries, retryDelayMs) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const result = await search(params);
+      if (result) return result;
+      lastError = new Error('Homepage source search returned no result');
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < retries && retryDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
+function chunk(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 module.exports = {

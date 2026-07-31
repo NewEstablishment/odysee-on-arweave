@@ -289,16 +289,21 @@ SSR server into an ordered immutable homepage snapshot:
 ```text
 homepage category rules
     -> `odysee-claim@1.0/search` source discovery
-    -> immutable HyperBEAM ID or legacy `<txid>:<nout>`
-    -> direct HyperBEAM read for every selected entry
+    -> immutable channel provenance plus ordered media IDs/outpoints
+    -> direct HyperBEAM read for selected media and their signing channels
     -> persistent materialized homepage snapshot
     -> browser batch hydration by immutable URI
 ```
 
-Publishing a new snapshot is all-or-nothing. If any selected entry cannot be
-read and cached through HyperBEAM, the existing snapshot remains active. The
-browser never repeats the category claim searches and never receives mutable
-pin IDs as its rendering source.
+Each category records resolvable source channel objects as
+`immutableChannelIds`, stale source IDs as `unresolvedChannelIds`, and rendered
+media as ordered `immutableIds`. Publishing a new snapshot is all-or-nothing
+for visible objects. If any selected media or its resolved signing channel
+cannot be read and cached through HyperBEAM, the existing snapshot remains
+active. Source channels not selected into the current rows are not reread on
+every refresh. The browser
+never repeats the category claim searches and never receives mutable pin IDs as
+its rendering source.
 
 Set `CUSTOM_HOMEPAGE_DIR` to the private checkout's `homepages/v2` directory.
 `CUSTOM_HOMEPAGE_SNAPSHOT_FILE` should point outside the deployment checkout so

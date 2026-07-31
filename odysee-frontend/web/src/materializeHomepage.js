@@ -15,7 +15,18 @@ getMaterializedHomepageData(true)
         ),
       0
     );
-    console.log(`Materialized ${entries} homepage entries across ${categories} categories`); // eslint-disable-line no-console
+    const immutableChannels = new Set();
+    const unresolvedChannels = new Set();
+    Object.values(data).forEach((homepage) =>
+      Object.values(homepage?.categories || {}).forEach((category) => {
+        (category.immutableChannelIds || []).forEach((id) => immutableChannels.add(id));
+        (category.unresolvedChannelIds || []).forEach((id) => unresolvedChannels.add(id));
+      })
+    );
+    console.log( // eslint-disable-line no-console
+      `Materialized ${entries} homepage entries across ${categories} categories; ` +
+        `${immutableChannels.size} immutable channels, ${unresolvedChannels.size} unresolved source channels`
+    );
   })
   .catch((err) => {
     console.error(err); // eslint-disable-line no-console

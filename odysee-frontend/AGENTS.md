@@ -53,14 +53,19 @@ work into the generic search device.
 
 ## Homepage
 
-The private homepage repository supplies category rules and pinned mutable
-claim IDs only. The SSR homepage materializer resolves every selected row item
-to an immutable native ID or legacy outpoint, performs a direct HyperBEAM read
-for every selected entry, and atomically publishes a persistent snapshot only
-after all selected entries are cached successfully.
+The private homepage repository supplies category rules, mutable channel IDs,
+and pinned mutable claim IDs only. The SSR homepage materializer records each
+resolvable source channel as an `immutableChannelId`, reports stale source
+channel IDs separately, resolves each selected row item to an immutable native
+ID or legacy outpoint, and performs direct HyperBEAM reads for all resolved
+signing channels and selected media. The full immutable source-channel list is
+provenance and future native-discovery input; it is not reread in full on every
+refresh. The materializer atomically publishes a persistent snapshot only after
+every visible media object and its resolved signing channel are cached.
 
-The homepage API returns ordered `immutableIds`. `buildHomepage.ts` converts
-them to immutable URIs, and `ClaimTilesDiscover` batch-hydrates those URIs
+The homepage API returns the channel provenance plus ordered media
+`immutableIds`. `buildHomepage.ts` converts the media IDs to immutable URIs,
+and `ClaimTilesDiscover` batch-hydrates those URIs
 without issuing browser claim searches or resolving mutable pins. Keep
 `CUSTOM_HOMEPAGE_SNAPSHOT_FILE` outside the deployment checkout and use
 `pnpm run homepage:materialize` to force a complete prewarm.

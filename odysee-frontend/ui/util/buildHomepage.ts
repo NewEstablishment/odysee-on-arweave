@@ -30,6 +30,8 @@ export type HomepageCat = {
   mixIn?: Array<string>;
   hideByDefault?: boolean;
   immutableIds?: Array<string>;
+  immutableChannelIds?: Array<string>;
+  unresolvedChannelIds?: Array<string>;
 };
 
 function getLimitPerChannel(size, isChannel) {
