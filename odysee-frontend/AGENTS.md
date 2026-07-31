@@ -90,6 +90,10 @@ Media hydration must reach Redux as soon as the immutable batch read succeeds.
 Signing-channel, active-livestream, or other optional enrichment must never gate
 rendering the resolved media rows. A failed immutable read must remain unresolved
 and must not fall through to mutable name or claim-ID resolution.
+Materialized homepage rows hydrate only their rendered `pageSize`. Near-viewport
+rows receive priority in a bounded queue, while off-screen rendered rows continue
+hydrating in the background and must not compete concurrently with visible media
+and signing-channel reads.
 Internal featured-banner targets are materialized and routed by immutable ID too.
 
 ## Debug Console

@@ -26,6 +26,45 @@ import { createNormalizedClaimSearchKey } from 'util/claim';
 import { CsOptHelper } from 'util/claim-search';
 import * as CS from 'constants/claim_search';
 const SHOW_TIMEOUT_MSG = false;
+const HOMEPAGE_HYDRATION_CONCURRENCY = 1;
+type HydrationJob = {
+  key: string;
+  priority: number;
+  run: () => Promise<any>;
+};
+const homepageHydrationJobs = new Map<string, HydrationJob>();
+let activeHomepageHydrations = 0;
+let homepageHydrationTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleHomepageHydration(key: string, priority: number, run: () => Promise<any>) {
+  const existing = homepageHydrationJobs.get(key);
+  if (existing) {
+    existing.priority = Math.max(existing.priority, priority);
+    return;
+  }
+
+  homepageHydrationJobs.set(key, { key, priority, run });
+  if (!homepageHydrationTimer) {
+    homepageHydrationTimer = setTimeout(runHomepageHydrationQueue, 25);
+  }
+}
+
+function runHomepageHydrationQueue() {
+  homepageHydrationTimer = undefined;
+  if (activeHomepageHydrations >= HOMEPAGE_HYDRATION_CONCURRENCY) return;
+
+  const job = Array.from(homepageHydrationJobs.values()).sort((left, right) => right.priority - left.priority)[0];
+  if (!job) return;
+
+  activeHomepageHydrations += 1;
+  Promise.resolve(job.run())
+    .catch(() => null)
+    .finally(() => {
+      activeHomepageHydrations -= 1;
+      homepageHydrationJobs.delete(job.key);
+      runHomepageHydrationQueue();
+    });
+}
 
 function urisEqual(prev: Array<string> | null | undefined, next: Array<string> | null | undefined) {
   if (!prev || !next) {
@@ -316,7 +355,13 @@ function ClaimTilesDiscover(props: Props) {
   const lastVisibleIndex = useGetLastVisibleSlot(listRef, !findLastVisibleSlot);
   const prevUris = React.useRef<string[]>();
   const usesExplicitUris = Array.isArray(explicitUris);
-  const claimSearchUris = usesExplicitUris ? explicitUris : claimSearchResults || [];
+  const [hydrationPriority, setHydrationPriority] = React.useState(usesExplicitUris ? null : 1);
+  const hydrationScheduleRef = React.useRef<{ key: string; priority: number } | undefined>(undefined);
+  const visibleExplicitUris = React.useMemo(
+    () => (usesExplicitUris ? explicitUris.slice(0, pageSize) : []),
+    [usesExplicitUris, explicitUris, pageSize]
+  );
+  const claimSearchUris = usesExplicitUris ? visibleExplicitUris : claimSearchResults || [];
   const isUnfetchedClaimSearch = !usesExplicitUris && claimSearchResults === undefined;
   const resolvedPinUris = useResolvePins({
     pins,
@@ -371,17 +416,48 @@ function ClaimTilesDiscover(props: Props) {
   // --------------------------------------------------------------------------
   // --------------------------------------------------------------------------
   React.useEffect(() => {
+    if (!usesExplicitUris) {
+      setHydrationPriority(1);
+      return;
+    }
+
+    const element = listRef.current;
+    if (!element || typeof IntersectionObserver === 'undefined') {
+      setHydrationPriority(1);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setHydrationPriority(entries.some((entry) => entry.isIntersecting) ? 1 : 0);
+      },
+      { rootMargin: '200px 0px' }
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [usesExplicitUris]);
+  React.useEffect(() => {
     if (!usesExplicitUris && channelIds) {
       doFetchOdyseeMembershipForChannelIds(channelIds);
     }
   }, [usesExplicitUris, channelIds, doFetchOdyseeMembershipForChannelIds]);
   React.useEffect(() => {
-    if (usesExplicitUris && explicitUris.length) {
-      doResolveUris(explicitUris, true, true, {
-        immutable_signing_channel_ids: immutableSigningChannelIds,
-      });
+    if (usesExplicitUris && hydrationPriority !== null && visibleExplicitUris.length) {
+      const hydrationKey = visibleExplicitUris
+        .map((uri) => `${uri}:${immutableSigningChannelIds?.[uri] || ''}`)
+        .join('|');
+      const scheduled = hydrationScheduleRef.current;
+      if (scheduled?.key === hydrationKey && scheduled.priority >= hydrationPriority) return;
+      hydrationScheduleRef.current = { key: hydrationKey, priority: hydrationPriority };
+      scheduleHomepageHydration(hydrationKey, hydrationPriority, () =>
+        Promise.resolve(
+          doResolveUris(visibleExplicitUris, true, true, {
+            immutable_signing_channel_ids: immutableSigningChannelIds,
+          })
+        )
+      );
     }
-  }, [usesExplicitUris, explicitUris, immutableSigningChannelIds, doResolveUris]);
+  }, [usesExplicitUris, hydrationPriority, visibleExplicitUris, immutableSigningChannelIds, doResolveUris]);
   React.useEffect(() => {
     if (shouldPerformSearch) {
       const searchOptions = JSON.parse(optionsStringified);
