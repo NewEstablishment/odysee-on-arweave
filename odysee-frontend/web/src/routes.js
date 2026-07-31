@@ -43,7 +43,7 @@ const HYPERBEAM_PUBLIC_STORE_READ_TIMEOUT_MS = 15000;
 const HYPERBEAM_PUBLIC_STORE_CACHE_TTL_MS = 30 * 60 * 1000;
 const HYPERBEAM_PUBLIC_STORE_CACHE_LIMIT = 10000;
 const HYPERBEAM_PUBLIC_STORE_LINK_DEPTH = 3;
-const HYPERBEAM_PUBLIC_STORE_LINK_FIELDS = new Set(['value', 'thumbnail']);
+const HYPERBEAM_PUBLIC_STORE_LINK_FIELDS = new Set(['value', 'source', 'thumbnail']);
 const hyperbeamPublicStoreCache = new Map();
 const hyperbeamPublicStoreReads = new Map();
 const HYPERBEAM_UPLOAD_PATH = '/id?!=true&committers=all';

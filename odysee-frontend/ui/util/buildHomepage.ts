@@ -344,18 +344,6 @@ export function GetLinksData(
       releaseTime: `>${getRelativeUnixTimestamp(1, 'month', 'week')}`,
     },
   };
-  const TOP_CONTENT_TODAY = {
-    title: __('Top Content from Today'),
-    link: `/$/${PAGES.DISCOVER}?${CS.ORDER_BY_KEY}=${CS.ORDER_BY_TOP}&${CS.FRESH_KEY}=${CS.FRESH_DAY}`,
-    hideSort: false,
-    options: {
-      pageSize: getPageSize(showPersonalizedChannels || showPersonalizedTags ? 4 : 8),
-      orderBy: CS.ORDER_BY_TOP,
-      claimType: ['stream'],
-      limitClaimsPerChannel: 2,
-      releaseTime: `>${getRelativeUnixTimestamp(1, 'day', 'day')}`,
-    },
-  };
   const TOP_CHANNELS = {
     title: __('Top Channels On LBRY'),
     link: `/$/${PAGES.DISCOVER}?claim_type=channel&${CS.ORDER_BY_KEY}=${CS.ORDER_BY_TOP}&${CS.FRESH_KEY}=${CS.FRESH_ALL}`,
@@ -364,16 +352,6 @@ export function GetLinksData(
       claimType: ['channel'],
     },
   };
-  const LATEST_FROM_LBRY = {
-    title: __('Latest From @lbry'),
-    link: `/@lbry:3f`,
-    options: {
-      orderBy: CS.ORDER_BY_NEW,
-      pageSize: getPageSize(4),
-      channelIds: ['3fda836a92faaceedfe398225fb9b2ee2ed1f01a'],
-    },
-  };
-
   if (isHomepage && !CUSTOM_HOMEPAGE) {
     if (followedTags) {
       const TRENDING_FOR_TAGS = {
@@ -419,8 +397,6 @@ export function GetLinksData(
       rowData.push(YOUTUBE_CREATOR_ROW);
     }
 
-    rowData.push(TOP_CONTENT_TODAY);
-    rowData.push(LATEST_FROM_LBRY);
     if (!showPersonalizedChannels) rowData.push(TOP_CHANNELS);
   }
 

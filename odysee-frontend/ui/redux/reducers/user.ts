@@ -431,6 +431,11 @@ reducers[ACTIONS.FETCH_HOMEPAGES_DONE] = (state) =>
     homepageFetched: true,
   });
 
+reducers[ACTIONS.FETCH_HOMEPAGES_FAILED] = (state) =>
+  Object.assign({}, state, {
+    homepageFetched: true,
+  });
+
 export default function userReducer(state: UserState = defaultState, action: any) {
   const handler = reducers[action.type];
   if (handler) return handler(state, action);

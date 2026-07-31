@@ -43,7 +43,7 @@ const SEARCH_REQUEST_RETRY_MS = 250;
 const SEARCH_REQUEST_TIMEOUT_MS = 5000;
 const HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
 const HYPERBEAM_STORE_LINK_DEPTH = 3;
-const HYPERBEAM_EAGER_STORE_LINK_FIELDS = new Set(['value', 'thumbnail']);
+const HYPERBEAM_EAGER_STORE_LINK_FIELDS = new Set(['value', 'source', 'thumbnail']);
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
 const HYPERBEAM_PUBLIC_STORE_BATCH_PROXY = '/$/api/hyperbeam-public-store/v1/read-batch';
@@ -3875,7 +3875,9 @@ function immutableClaimFromHyperbeam(
   const valueType =
     value(claim, 'value_type', 'value-type') ||
     value(payload, 'value_type', 'value-type') ||
-    (device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' ? 'channel' : 'stream');
+    (device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' || String(rawName || '').startsWith('@')
+      ? 'channel'
+      : 'stream');
   const sourceName =
     value(payloadSource, 'name') ||
     value(valueSource, 'name') ||

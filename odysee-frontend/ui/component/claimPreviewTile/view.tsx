@@ -151,7 +151,9 @@ function ClaimPreviewTile(props: Props) {
   const queryParams = new URLSearchParams(search);
   const signingChannel = claim && claim.signing_channel;
   const isChannel = claim && claim.value_type === 'channel';
-  const channelUri = !isChannel ? signingChannel && signingChannel.permanent_url : claim && claim.permanent_url;
+  const channelUri = !isChannel
+    ? hyperbeamImmutableUriFromClaim(signingChannel) || signingChannel?.permanent_url
+    : hyperbeamImmutableUriFromClaim(claim) || claim?.permanent_url;
   const channelTitle = signingChannel && ((signingChannel.value && signingChannel.value.title) || signingChannel.name);
   const isChannelPage = React.useContext(ChannelPageContext);
   const shouldShowViewCount = !(

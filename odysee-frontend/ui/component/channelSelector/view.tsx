@@ -19,6 +19,7 @@ import { doFetchOdyseeMembershipForChannelIds } from 'redux/actions/memberships'
 import { doSetDefaultChannel } from 'redux/actions/settings';
 import { selectDefaultChannelClaim } from 'redux/selectors/settings';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 
 type Props = {
   selectedChannelUrl?: string;
@@ -67,6 +68,7 @@ function ChannelSelector(props: Props) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const activeChannelUrl = activeChannelClaim && activeChannelClaim.permanent_url;
+  const activeChannelPageUrl = hyperbeamImmutableUriFromClaim(activeChannelClaim) || activeChannelUrl;
   const activeChannelId = activeChannelClaim && activeChannelClaim.claim_id;
   const noActiveChannel = activeChannelUrl === null;
   const pendingChannelFetch = !noActiveChannel && channelIds === undefined;
@@ -170,8 +172,8 @@ function ChannelSelector(props: Props) {
           </MenuList>
         </Menu>
       </div>
-      {isHeaderMenu && activeChannelUrl && (
-        <NavLink to={formatLbryUrlForWeb(activeChannelUrl)}>
+      {isHeaderMenu && activeChannelPageUrl && (
+        <NavLink to={formatLbryUrlForWeb(activeChannelPageUrl)}>
           <div className="header__navigationItem--channel">
             <span>↳</span>
             {__('My Channel Page')}

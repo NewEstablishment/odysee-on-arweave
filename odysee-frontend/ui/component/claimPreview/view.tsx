@@ -678,7 +678,10 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
                 {!isChannelUri && signingChannel && (
                   <div className="claim-preview__channel-staked">
                     <UriIndicator focusable={false} uri={uri} link hideAnonymous external={isEmbed}>
-                      <ChannelThumbnail uri={signingChannel.permanent_url} xsmall />
+                      <ChannelThumbnail
+                        uri={hyperbeamImmutableUriFromClaim(signingChannel) || signingChannel.permanent_url}
+                        xsmall
+                      />
                     </UriIndicator>
                   </div>
                 )}

@@ -1298,10 +1298,7 @@ export function doClaimSearch(
       const fiatClaimIds = [];
       let collectionResolveInfo;
       data.items.some((stream: Claim, index: number) => {
-        const resultUri =
-          stream.value_type === 'channel'
-            ? stream.canonical_url
-            : hyperbeamImmutableUriFromClaim(stream) || stream.canonical_url;
+        const resultUri = hyperbeamImmutableUriFromClaim(stream) || stream.canonical_url;
         if (!resultUri) return false;
         resolveInfo[resultUri] = {
           stream,

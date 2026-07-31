@@ -28,12 +28,22 @@ export function normalizeHyperbeamImmutableId(value?: string | null): string | u
 
 export function hyperbeamImmutableIdFromClaim(claim?: Claim | null): string | undefined {
   const source = claim as any;
-  return normalizeHyperbeamImmutableId(
+  const explicitId =
     source?.hyperbeam?.immutable_id ||
-      source?.hyperbeam?.['immutable-id'] ||
-      source?.immutable_id ||
-      source?.['immutable-id']
-  );
+    source?.hyperbeam?.['immutable-id'] ||
+    source?.immutable_id ||
+    source?.['immutable-id'] ||
+    source?.legacy_outpoint ||
+    source?.['legacy-outpoint'] ||
+    source?.outpoint ||
+    source?.doc_id ||
+    source?.search_id;
+  const normalizedExplicitId = normalizeHyperbeamImmutableId(explicitId);
+  if (normalizedExplicitId) return normalizedExplicitId;
+
+  const txid = String(source?.txid || source?.hyperbeam?.txid || '');
+  const nout = source?.nout ?? source?.hyperbeam?.nout;
+  return normalizeHyperbeamImmutableId(`${txid}:${nout}`);
 }
 
 export function hyperbeamImmutableUri(immutableId?: string | null): string | undefined {
@@ -45,7 +55,6 @@ export function hyperbeamImmutableUri(immutableId?: string | null): string | und
 }
 
 export function hyperbeamImmutableUriFromClaim(claim?: Claim | null): string | undefined {
-  if (claim?.value_type === 'channel') return undefined;
   return hyperbeamImmutableUri(hyperbeamImmutableIdFromClaim(claim));
 }
 
