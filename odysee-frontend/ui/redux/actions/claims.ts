@@ -1287,8 +1287,7 @@ export function doClaimSearch(
       },
     });
 
-    const success = async (data: ClaimSearchResponse) => {
-      data = await mergeHyperbeamPublishesIntoSearchResult(data, options);
+    const success = async (data: ClaimSearchResponse, mergeNativeUploads = true) => {
       const resolveInfo = {};
       const urls = [];
       const claimIds: Array<ClaimId> = [];
@@ -1395,6 +1394,14 @@ export function doClaimSearch(
 
       if (settings?.fetch?.viewCount && claimIds.length > 0) {
         dispatch(doFetchViewCount(claimIds.join(',')));
+      }
+
+      if (mergeNativeUploads) {
+        void mergeHyperbeamPublishesIntoSearchResult(data, options)
+          .then((mergedData) => {
+            if (mergedData !== data) return success(mergedData, false);
+          })
+          .catch(() => undefined);
       }
 
       return resolveInfo;

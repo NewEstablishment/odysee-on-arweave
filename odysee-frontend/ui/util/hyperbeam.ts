@@ -1724,6 +1724,13 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   const items = result?.items;
   if (!Array.isArray(items)) return null;
 
+  if (isChannelTargetedClaimSearch(params)) {
+    return {
+      ...result,
+      items,
+    };
+  }
+
   const resolvedItems = await hydrateSearchItems(items, targetedSearch ? items : undefined);
   return {
     ...result,
