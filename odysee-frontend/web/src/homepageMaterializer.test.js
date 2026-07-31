@@ -6,6 +6,7 @@ const test = require('node:test');
 
 const {
   categorySearchParams,
+  dynamicItemWithinFreshnessWindow,
   homepageClaimUri,
   materializeHomepageData,
   mergePinnedIds,
@@ -43,9 +44,35 @@ test('categorySearchParams preserves homepage selection rules', () => {
       any_languages: ['en'],
       duration: '>=60',
       exclude_shorts: true,
-      release_time: '>395200',
+      timestamp: '>395200',
+      release_time: '<1000000',
     }
   );
+});
+
+test('dynamic homepage results reject stale and impossible release times', () => {
+  const category = { claimType: ['stream'], daysOfContent: 90 };
+  const now = 1_800_000_000;
+
+  assert.equal(dynamicItemWithinFreshnessWindow({ value: { release_time: now - 60 } }, category, now), true);
+  assert.equal(dynamicItemWithinFreshnessWindow({ value: { release_time: (now - 60) * 1000 } }, category, now), true);
+  assert.equal(dynamicItemWithinFreshnessWindow({ value: { release_time: now - 91 * 86400 } }, category, now), false);
+  assert.equal(
+    dynamicItemWithinFreshnessWindow({ value: { release_time: (now + 2 * 86400) * 1000 } }, category, now),
+    false
+  );
+  assert.equal(
+    dynamicItemWithinFreshnessWindow({ value: { release_time: now - 365 * 86400 } }, { claimType: ['channel'] }, now),
+    true
+  );
+});
+
+test('channel discovery does not inherit media freshness filters', () => {
+  const params = categorySearchParams({ claimType: ['channel'], order: 'top' }, 1_000_000);
+
+  assert.equal(params.timestamp, undefined);
+  assert.equal(params.release_time, undefined);
+  assert.deepEqual(params.claim_type, ['channel']);
 });
 
 test('homepageClaimUri converts only internal claim links', () => {

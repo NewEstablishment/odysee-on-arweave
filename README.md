@@ -305,6 +305,13 @@ every refresh. The browser
 never repeats the category claim searches and never receives mutable pin IDs as
 its rendering source.
 
+Refresh the private homepage checkout before every materialization. Dynamic
+media queries use a source-timestamp lower bound and a release-time upper bound,
+then validate the configured freshness window after normalizing source
+timestamps. This prevents malformed future dates or stale results from taking
+visible slots; explicit curated pins are intentionally exempt from the dynamic
+freshness window.
+
 Set `CUSTOM_HOMEPAGE_DIR` to the private checkout's `homepages/v2` directory.
 `CUSTOM_HOMEPAGE_SNAPSHOT_FILE` must point to persistent writable storage outside
 the deployment checkout so snapshots survive releases. Production deployment

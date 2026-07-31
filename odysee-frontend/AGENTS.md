@@ -62,6 +62,10 @@ signing channels and selected media. The full immutable source-channel list is
 provenance and future native-discovery input; it is not reread in full on every
 refresh. The materializer atomically publishes a persistent snapshot only after
 every visible media object and its resolved signing channel are cached.
+Deployment must refresh the private homepage source checkout before running the
+materializer. Dynamic media discovery is bounded below by source timestamp and
+above by release time, then rejects stale or future release times locally;
+explicit curated pins retain their configured placement.
 
 The homepage API returns channel provenance, ordered media `immutableIds`, and
 the immutable signing-channel ID associated with each media ID.
@@ -94,6 +98,9 @@ Materialized homepage rows hydrate only their rendered `pageSize`. Near-viewport
 rows receive priority in a bounded queue, while off-screen rendered rows continue
 hydrating in the background and must not compete concurrently with visible media
 and signing-channel reads.
+Channel-targeted discovery, including Following, must not wait on a duplicate
+upload-list request. Historical results return through claim search; native
+uploads merge through the established Redux integration stage.
 Internal featured-banner targets are materialized and routed by immutable ID too.
 
 ## Debug Console

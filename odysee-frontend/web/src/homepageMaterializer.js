@@ -32,8 +32,10 @@ function categorySearchParams(category, nowSeconds = Math.floor(Date.now() / 100
     trending: ['trending_group', 'trending_mixed'],
   }[category.order] || ['trending_group', 'trending_mixed'];
   const pageSize = positiveInteger(category.pageSize, DEFAULT_PAGE_SIZE);
+  const earliest = nowSeconds - positiveInteger(category.daysOfContent, 30) * 24 * 60 * 60;
   const channelIds = stringList(category.channelIds);
   const claimType = stringList(category.claimType || ['stream', 'repost']);
+  const channelOnly = claimType.length === 1 && claimType[0] === 'channel';
   const channelLimit =
     category.channelLimit === 'auto'
       ? channelIds.length
@@ -53,7 +55,8 @@ function categorySearchParams(category, nowSeconds = Math.floor(Date.now() / 100
     any_languages: stringList(category.searchLanguages),
     duration: category.duration,
     exclude_shorts: category.exclude_shorts ? true : undefined,
-    release_time: `>${nowSeconds - positiveInteger(category.daysOfContent, 30) * 24 * 60 * 60}`,
+    timestamp: channelOnly ? undefined : `>${earliest}`,
+    release_time: channelOnly ? undefined : `<${nowSeconds}`,
   });
 }
 
@@ -75,6 +78,25 @@ function signingChannelId(item) {
     signingChannel?.['claim-id'] ||
     null
   );
+}
+
+function dynamicItemWithinFreshnessWindow(item, category, nowSeconds) {
+  const claimTypes = stringList(category.claimType || ['stream', 'repost']);
+  if (claimTypes.length === 1 && claimTypes[0] === 'channel') return true;
+
+  const rawReleaseTime =
+    item?.value?.release_time ||
+    item?.value?.['release-time'] ||
+    item?.release_time ||
+    item?.['release-time'] ||
+    item?.timestamp;
+  let releaseTime = Number(rawReleaseTime);
+  if (!Number.isFinite(releaseTime) || releaseTime <= 0) return true;
+  while (releaseTime > 100_000_000_000) releaseTime /= 1000;
+
+  const earliest = nowSeconds - positiveInteger(category.daysOfContent, 30) * 24 * 60 * 60;
+  const latest = nowSeconds;
+  return releaseTime > earliest && releaseTime <= latest;
 }
 
 function mergePinnedIds(ids, pinnedIds, pageSize) {
@@ -129,7 +151,9 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
           )
         : Promise.resolve(null),
     ]);
-    const dynamicItems = Array.isArray(dynamicResult?.items) ? dynamicResult.items : [];
+    const dynamicItems = Array.isArray(dynamicResult?.items)
+      ? dynamicResult.items.filter((item) => dynamicItemWithinFreshnessWindow(item, job.category, nowSeconds))
+      : [];
     const pinnedItems = Array.isArray(pinnedResult?.items) ? pinnedResult.items : [];
     const dynamicIds = dynamicItems.map(immutableId).filter(Boolean);
     const pinnedByClaimId = new Map(
@@ -393,6 +417,7 @@ function chunk(items, size) {
 
 module.exports = {
   categorySearchParams,
+  dynamicItemWithinFreshnessWindow,
   homepageSnapshotPath,
   homepageClaimUri,
   immutableId,

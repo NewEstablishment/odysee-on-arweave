@@ -1699,14 +1699,16 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   const targetedSearch = isTargetedClaimSearch(params);
 
   if (targetedSearch) {
-    const [claimResult, uploadResult] = await Promise.all([
-      fetchDeviceJson(`${CLAIM_DEVICE}/search`, params)
-        .then(responsePayload)
-        .then(sdkSearchFromHyperbeam)
-        .catch(() => null),
-      isTargetedClaimSearch(params) ? fetchHyperbeamUploadList(params).catch(() => null) : Promise.resolve(null),
-    ]);
-    result = mergeClaimSearchResults(claimResult, uploadResult, params);
+    const claimResult = await fetchDeviceJson(`${CLAIM_DEVICE}/search`, params)
+      .then(responsePayload)
+      .then(sdkSearchFromHyperbeam)
+      .catch(() => null);
+    if (isChannelTargetedClaimSearch(params)) {
+      result = claimResult;
+    } else {
+      const uploadResult = await fetchHyperbeamUploadList(params).catch(() => null);
+      result = mergeClaimSearchResults(claimResult, uploadResult, params);
+    }
   } else {
     try {
       result = await fetchHyperbeamSearchIds(params);
@@ -1871,6 +1873,10 @@ function isTargetedClaimSearch(params: ClaimSearchOptions): boolean {
     paramValues(params, 'name', 'claim-name', 'claim_name').length ||
     paramValues(params, 'uri', 'uris', 'url', 'urls').length
   );
+}
+
+function isChannelTargetedClaimSearch(params: ClaimSearchOptions): boolean {
+  return Boolean(paramValues(params, 'channel_ids', 'channel-ids', 'channel_id', 'channel-id').length);
 }
 
 function mergeClaimSearchResults(
@@ -3899,9 +3905,11 @@ function immutableClaimFromHyperbeam(
     value(decodedSource, 'name') ||
     value(payload, 'filename') ||
     (mediaType === 'video/mp4' ? `${name}.mp4` : undefined);
+  const channelClaimId = String(value(channelClaim, 'claim_id', 'claim-id') || '').toLowerCase();
+  const signedChannelId = String(claimMetadata?.signedChannelId || '').toLowerCase();
   const signingChannel =
-    channelClaim && value(channelClaim, 'claim_id', 'claim-id') === claimMetadata?.signedChannelId
-      ? channelClaim
+    channelClaim && channelClaimId && (!signedChannelId || channelClaimId === signedChannelId)
+      ? normalizeHyperbeamChannelClaim(channelClaim)
       : undefined;
 
   return compactParams({
