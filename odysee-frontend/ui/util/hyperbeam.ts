@@ -232,6 +232,21 @@ type DecodedClaimMetadata = {
   signedChannelId?: string;
 };
 
+// Uniform comment anchor (2026-07-29 direction): legacy videos anchor on
+// their claim id; native content anchors on its immutable id. Comments are
+// created against this anchor and looked up by it.
+export function commentAnchorForClaim(claim: any): string | undefined {
+  if (!claim) return undefined;
+  const claimId = String(claim.claim_id || '');
+  if (LBRY_CLAIM_ID_RE.test(claimId)) return claimId;
+  const hyperbeam = claim.hyperbeam || {};
+  return (
+    value(hyperbeam, 'immutable-id', 'immutable_id', 'record-id', 'record_id', 'data-id', 'data_id') ||
+    claimId ||
+    undefined
+  );
+}
+
 export async function fetchHyperbeamCommentList(params: CommentListParams): Promise<CommentListResponse | null> {
   const [nativeResult, legacyResult] = await Promise.allSettled([
     fetchNativeCommentSource(params),
@@ -451,7 +466,9 @@ function nativeCommentMatchesSelectors(comment: any, selectors: Record<string, a
   const fields: Record<string, any> = {
     schema: comment?.schema,
     type: comment?.type,
-    target: comment?.claim_id,
+    // Comments may anchor on an immutable id (`target`) or a legacy claim
+    // id; accept whichever anchor the message actually carries.
+    target: comment?.target || comment?.claim_id,
     state: comment?.state,
     author: comment?.channel_id,
     parent: comment?.parent_id || 'root',
@@ -548,11 +565,14 @@ function mergeCommentSources(
 }
 
 function nativeCommentSelectors(params: CommentListParams): Record<string, any> | null {
-  if (params.claim_id) {
+  // The loading switch: match on the caller's anchor -- the claim id when
+  // the resolved content carries one, otherwise its immutable id.
+  const target = (params as any).target || params.claim_id;
+  if (target) {
     return {
       schema: 'odysee-comment@1.0',
       type: 'comment',
-      target: params.claim_id,
+      target,
       state: 'active',
     };
   }
@@ -576,7 +596,9 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
-    target: params.claim_id,
+    // Uniform anchor: callers pass the content's immutable id as `target`
+    // when it has one; legacy videos stay anchored on the claim id.
+    target: params.target || params.claim_id,
     parent: params.parent_id || 'root',
     state: 'active',
     author: params.channel_id,
@@ -606,7 +628,7 @@ function nativeCommentRevisionMessage(root: any, current: any, params: CommentEd
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
-    target: root.claim_id,
+    target: root.target || root.claim_id,
     parent: root.parent_id || 'root',
     state: 'active',
     author: root.channel_id,
@@ -664,7 +686,7 @@ async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
   const comments = await fetchNativeCommentCollection({
     schema: 'odysee-comment@1.0',
     type: 'comment',
-    target: direct.claim_id,
+    target: direct.target || direct.claim_id,
     state: 'active',
   });
   return comments.find((comment) => comment.comment_id === rootId) || direct;
@@ -730,7 +752,7 @@ async function projectNativeCommentCollection(
 ): Promise<{ items: Array<any>; hasHiddenComments: boolean }> {
   const groups = new Map<string, Array<any>>();
   comments.forEach((comment) => {
-    const target = String(comment?.claim_id || '');
+    const target = String(comment?.target || comment?.claim_id || '');
     if (!target) return;
     const group = groups.get(target) || [];
     group.push(comment);
@@ -746,7 +768,7 @@ async function projectNativeCommentCollection(
 
   let hasHiddenComments = false;
   const items = comments.map((comment) => {
-    const state = states.get(String(comment?.claim_id || ''));
+    const state = states.get(String(comment?.target || comment?.claim_id || ''));
     const controls = state?.controls || new Map<string, NativeCommentControl>();
     const projection = projectNativeCommentControlState(comment, state?.owner || null, controls);
     if (projection.removed || projection.hidden || projection.blocked) hasHiddenComments = true;
@@ -1288,7 +1310,7 @@ export async function fetchHyperbeamCommentPin(params: CommentPinParams): Promis
       control: 'pin',
       action: params.remove ? 'unpinned' : 'pinned',
       authority: 'owner',
-      target: comment.claim_id,
+      target: comment.target || comment.claim_id,
       owner,
       actor: params.channel_id,
       actorName: params.channel_name,
@@ -1317,7 +1339,7 @@ export async function fetchHyperbeamCommentAbandon(
       control: 'visibility',
       action: 'hidden',
       authority,
-      target: comment.claim_id,
+      target: comment.target || comment.claim_id,
       owner,
       actor,
       actorName,
@@ -2879,6 +2901,7 @@ function commentFromHyperbeam(comment: any): any {
     state: value(comment, 'state'),
     comment: value(comment, 'comment', 'body', 'text'),
     claim_id: value(comment, 'claim-id', 'claim_id', 'target'),
+    target: value(comment, 'target'),
     parent_id: parentId === 'root' ? undefined : parentId,
     channel_id: channelId,
     channel_name: channelName,

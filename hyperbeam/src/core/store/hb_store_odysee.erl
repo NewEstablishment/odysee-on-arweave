@@ -21,10 +21,24 @@ scope(#{ <<"scope">> := Scope }) ->
 scope(_StoreOpts) ->
     scope().
 
+%% @doc Canonicalize only the explicitly `odysee/'-namespaced paths this
+%% store positively owns. Every other key resolves to itself, mirroring the
+%% local stores' identity-when-no-links contract: resolution runs once
+%% against the whole store list and the first `{ok, ...}' wins, so rewriting
+%% a bare hex key here (e.g. lowercasing a txid-shaped key) would corrupt
+%% lookups for sibling stores that own that key, and a `not_found' would
+%% abort the read before any store is tried. Bare-key classification stays a
+%% read-time concern, where each store only answers for what it can serve.
 resolve(_StoreOpts, #{ <<"resolve">> := Key }, _NodeOpts) ->
-    case classify(Key) of
-        {ok, _Type, Canonical} -> {ok, Canonical};
-        error -> {error, not_found}
+    KeyBin = strip_slash(hb_path:to_binary(Key)),
+    case KeyBin of
+        <<"odysee/", _/binary>> ->
+            case classify(KeyBin) of
+                {ok, _Type, Canonical} -> {ok, Canonical};
+                error -> {ok, KeyBin}
+            end;
+        _ ->
+            {ok, KeyBin}
     end.
 
 type(StoreOpts, #{ <<"type">> := Key }, NodeOpts) ->
@@ -182,13 +196,54 @@ valid_uint(_Bin) ->
 
 mutable_claim_id_is_not_a_store_key_test() ->
     ClaimID = <<"346c1fed0fbc2f0b3ecc8bf3915aa8aaa029c169">>,
+    % Resolution is identity (the key may belong to a sibling store), but
+    % this store still refuses to serve mutable claim-id lookups.
     ?assertEqual(
-        {error, not_found},
+        {ok, ClaimID},
         resolve(#{}, #{ <<"resolve">> => ClaimID }, #{})
     ),
     ?assertEqual(
         {error, not_found},
+        read(#{}, #{ <<"read">> => ClaimID }, #{})
+    ),
+    ?assertEqual(
+        {error, not_found},
         read(#{}, #{ <<"read">> => <<"odysee/claim-id/", ClaimID/binary>> }, #{})
+    ).
+
+resolve_never_rewrites_foreign_keys_test() ->
+    % A txid-shaped key with uppercase hex may belong to another store in
+    % the list; resolving it must not lowercase or otherwise rewrite it.
+    MixedCaseTxID = <<"51D3CD6A27420ADDB648347410233931B862AB52660C1DBA58806B5B0F38A460">>,
+    ?assertEqual(
+        {ok, MixedCaseTxID},
+        resolve(#{}, #{ <<"resolve">> => MixedCaseTxID }, #{})
+    ),
+    % Native message ids and arbitrary paths resolve to themselves rather
+    % than not_found, so a store list led by this store can still read them.
+    MsgID = <<"0NjWsJ4Y9q6FlCDBnCh-WS3DBzzw8elq-nmGN00Dik4">>,
+    ?assertEqual({ok, MsgID}, resolve(#{}, #{ <<"resolve">> => MsgID }, #{})),
+    ?assertEqual(
+        {ok, <<"messages/abc/def">>},
+        resolve(#{}, #{ <<"resolve">> => <<"messages/abc/def">> }, #{})
+    ).
+
+resolve_canonicalizes_owned_namespace_test() ->
+    TxID = <<"51D3CD6A27420ADDB648347410233931B862AB52660C1DBA58806B5B0F38A460">>,
+    Lower = hb_util:to_lower(TxID),
+    % Explicitly odysee-namespaced paths are ours to canonicalize.
+    ?assertEqual(
+        {ok, <<Lower/binary, ":0">>},
+        resolve(#{}, #{ <<"resolve">> => <<"odysee/claim-output/", TxID/binary, "/0">> }, #{})
+    ),
+    ?assertEqual(
+        {ok, Lower},
+        resolve(#{}, #{ <<"resolve">> => <<"odysee/transaction/", TxID/binary>> }, #{})
+    ),
+    % Unparseable odysee-prefixed paths fall back to identity, not failure.
+    ?assertEqual(
+        {ok, <<"odysee/claim-id/abc">>},
+        resolve(#{}, #{ <<"resolve">> => <<"odysee/claim-id/abc">> }, #{})
     ).
 
 outpoint_is_an_immutable_store_key_test() ->

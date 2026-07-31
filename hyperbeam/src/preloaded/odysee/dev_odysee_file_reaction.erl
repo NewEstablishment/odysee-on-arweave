@@ -137,14 +137,14 @@ result_from_success_map(Msg, Raw, Opts) ->
 normalize_list(Result, Raw, Opts) ->
     MyReactions = map_value([<<"my_reactions">>, <<"my-reactions">>], Result, Opts),
     OthersReactions = map_value([<<"others_reactions">>, <<"others-reactions">>], Result, Opts),
+    % Message keys are hyphenated; the snake_case shape stays in the JSON
+    % `body' and `result' (the legacy API payload the client reads).
     {ok, #{
         <<"device">> => ?DEVICE,
         <<"content-type">> => <<"application/json">>,
         <<"body">> => Raw,
         <<"result">> => Result,
-        <<"my_reactions">> => MyReactions,
         <<"my-reactions">> => MyReactions,
-        <<"others_reactions">> => OthersReactions,
         <<"others-reactions">> => OthersReactions,
         <<"claim-ids">> => reaction_claim_ids(MyReactions, OthersReactions)
     }}.
@@ -462,11 +462,11 @@ list_result_normalizes_file_reactions_test() ->
     ?assertEqual([<<"claim-1">>, <<"claim-2">>], hb_maps:get(<<"claim-ids">>, Msg, #{})),
     ?assertEqual(
         #{ <<"claim-1">> => #{ <<"like">> => 1, <<"dislike">> => 0 } },
-        hb_maps:get(<<"my_reactions">>, Msg, #{})
+        hb_maps:get(<<"my-reactions">>, Msg, #{})
     ),
     ?assertEqual(
         #{ <<"like">> => 53, <<"dislike">> => 1 },
-        hb_maps:get(<<"claim-1">>, hb_maps:get(<<"others_reactions">>, Msg, #{}), #{})
+        hb_maps:get(<<"claim-1">>, hb_maps:get(<<"others-reactions">>, Msg, #{}), #{})
     ).
 
 list_accepts_internal_api_json_test() ->
@@ -489,11 +489,11 @@ list_accepts_api_success_with_null_error_test() ->
         }
     }),
     {ok, Msg} = list(#{}, #{ <<"body">> => Raw }, #{}),
-    ?assertEqual(#{}, hb_maps:get(<<"my_reactions">>, Msg, #{})),
+    ?assertEqual(#{}, hb_maps:get(<<"my-reactions">>, Msg, #{})),
     ?assertEqual([<<"claim-1">>], hb_maps:get(<<"claim-ids">>, Msg, #{})),
     ?assertEqual(
         #{ <<"like">> => 4, <<"dislike">> => 0 },
-        hb_maps:get(<<"claim-1">>, hb_maps:get(<<"others_reactions">>, Msg, #{}), #{})
+        hb_maps:get(<<"claim-1">>, hb_maps:get(<<"others-reactions">>, Msg, #{}), #{})
     ).
 
 list_params_normalizes_aliases_and_strips_control_fields_test() ->

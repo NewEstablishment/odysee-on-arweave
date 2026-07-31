@@ -53,7 +53,7 @@ index(Base, Req, Opts) ->
                     Payload = hb_cache:ensure_all_loaded(Payload0, Opts),
                     {ok, DataID} ?= required_first([<<"data-id">>, <<"data_id">>, <<"id">>], Payload, Opts),
                     Record0 = upload_index_record(Owner, DataID, Payload, Opts),
-                    {ok, RecordID} ?= hb_cache:write(Record0, Opts),
+                    {ok, RecordID} ?= hb_cache:write(committed_record(Record0, Opts), Opts),
                     Record = enrich_record(RecordID, Record0, Opts),
                     ok ?= write_indexes(Record, Opts),
                     ok ?= index_search_record(Record, Opts),
@@ -79,9 +79,13 @@ update(Base, Req, Opts) ->
                     OldRecordID = hb_maps:get(<<"record-id">>, OldRecord, not_found, Opts),
                     Metadata = update_metadata(OldRecord, Payload, Opts),
                     Record0 = rebuild_index_record(OldRecord, Metadata, Opts),
-                    {ok, RecordID} ?= hb_cache:write(Record0, Opts),
+                    {ok, RecordID} ?= hb_cache:write(committed_record(Record0, Opts), Opts),
                     Record = enrich_record(RecordID, Record0, Opts),
                     ok ?= remove_from_list_indexes(OldRecord, OldRecordID, Opts),
+                    % Pointer aliases are messages now, so the superseded
+                    % record's aliases must be explicitly tombstoned (the old
+                    % JSON pointers were overwritten in place).
+                    ok ?= tombstone_indexes(OldRecord, Opts),
                     ok ?= write_indexes(Record, Opts),
                     ok ?= delete_search_record(OldRecord, Opts),
                     ok ?= index_search_record(Record, Opts),
@@ -131,7 +135,7 @@ submit(Base, Req, Opts) ->
                     RecordBase = upload_record(Owner, DataID, Bytes, Payload, Opts),
                     {ok, MediaBytes} ?= media_bytes(RecordBase, Bytes, Opts),
                     Record0 = RecordBase#{ <<"body">> => MediaBytes },
-                    {ok, RecordID} ?= hb_cache:write(Record0, Opts),
+                    {ok, RecordID} ?= hb_cache:write(committed_record(Record0, Opts), Opts),
                     Record = enrich_record(RecordID, Record0, Opts),
                     ok ?= write_indexes(Record, Opts),
                     {ok, response(Record, Opts)}
@@ -148,11 +152,17 @@ raw_write(Base, Req, Opts) ->
         _ ->
             safe(fun() ->
                 maybe
-                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    % The write is auth-gated, but a raw blob is
+                    % content-addressed bytes: it carries no commitment and is
+                    % bound to no owner (anyone writing the same bytes gets the
+                    % same id). Ownership is asserted later, at index/finalize,
+                    % on the committed record -- so the response must not claim
+                    % a signer here.
+                    {ok, _Owner} ?= authenticated_owner(Base, Req, Opts),
                     {ok, Bytes} ?= raw_body(Req, Opts),
                     ok ?= enforce_size(Bytes, Base, Req, Opts),
                     {ok, ID} ?= hb_cache:write(Bytes, Opts),
-                    {ok, raw_write_response(ID, Owner)}
+                    {ok, raw_write_response(ID)}
                 else
                     Error -> Error
                 end
@@ -349,7 +359,9 @@ authorization_token(Req, Opts) ->
     end.
 
 cookie_auth_token(Req, Opts) ->
-    try dev_cookie:extract(Req, #{}, Opts) of
+    % Resolve through the AO layer rather than calling the cookie device's
+    % module directly: devices are addressed by name, never by module.
+    try hb_ao:raw(<<"cookie@1.0">>, <<"extract">>, Req, #{}, Opts) of
         {ok, Cookies} ->
             case first_field(auth_token_keys(), Cookies, Opts) of
                 not_found -> not_found;
@@ -598,7 +610,10 @@ claim_summary(Name0, Title0, Metadata, DataID, Owner, ReleaseTime, MediaType0, F
         <<"type">> => <<"claim">>,
         <<"value_type">> => <<"stream">>,
         <<"confirmations">> => 0,
-        <<"is_channel_signature_valid">> => SigningChannel =/= not_found,
+        % No channel signature exists on this upload path yet, so validity is
+        % never asserted: an unproven `signing_channel' is display metadata,
+        % not a verified identity. (Channel attestation over uploads is the
+        % follow-up that would let this become a real `true'.)
         <<"txid">> => DataID,
         <<"nout">> => 0,
         <<"timestamp">> => Timestamp,
@@ -674,7 +689,10 @@ normalize_index_claim(Claim0, Owner, DataID, Name, MediaType, Filename, Size, Me
         <<"value_type">> => <<"stream">>,
         <<"confirmations">> => 1,
         <<"is_my_output">> => true,
-        <<"is_channel_signature_valid">> => SigningChannel =/= not_found,
+        % No channel signature exists on this upload path yet, so validity is
+        % never asserted: an unproven `signing_channel' is display metadata,
+        % not a verified identity. (Channel attestation over uploads is the
+        % follow-up that would let this become a real `true'.)
         <<"txid">> => DataID,
         <<"nout">> => 0,
         <<"timestamp">> => Timestamp,
@@ -725,14 +743,14 @@ normalize_index_claim(_Claim, Owner, DataID, Name, MediaType, Filename, Size, Me
 
 response(Record, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
-    RecordID = hb_maps:get(<<"record-id">>, Record, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
     Msg = (cors_headers())#{
         <<"device">> => ?DEVICE,
         <<"status">> => 200,
         <<"content-type">> => <<"application/json">>,
         <<"id">> => RecordID,
         <<"record-id">> => RecordID,
-        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, Opts),
+        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, not_found, Opts),
         <<"media-path">> => generic_read_path(RecordID),
         <<"read-path">> => generic_read_path(RecordID),
         <<"url">> => generic_read_path(RecordID),
@@ -745,13 +763,13 @@ response(Record, Opts) ->
 
 index_response(Record, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
-    DataID = hb_maps:get(<<"data-id">>, Record, Opts),
+    DataID = hb_maps:get(<<"data-id">>, Record, not_found, Opts),
     Msg = (cors_headers())#{
         <<"device">> => ?DEVICE,
         <<"status">> => 200,
         <<"content-type">> => <<"application/json">>,
-        <<"id">> => hb_maps:get(<<"record-id">>, Record, Opts),
-        <<"record-id">> => hb_maps:get(<<"record-id">>, Record, Opts),
+        <<"id">> => hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+        <<"record-id">> => hb_maps:get(<<"record-id">>, Record, not_found, Opts),
         <<"data-id">> => DataID,
         <<"media-path">> => generic_read_path(DataID),
         <<"record">> => public_record(Record, Opts),
@@ -764,7 +782,7 @@ index_response(Record, Opts) ->
 public_record(Record, Opts) ->
     hb_maps:without([<<"body">>], Record, Opts).
 
-raw_write_response(ID, Owner) ->
+raw_write_response(ID) ->
     ReadPath = <<"/", ID/binary>>,
     Body = #{
         <<"id">> => ID,
@@ -780,9 +798,14 @@ raw_write_response(ID, Owner) ->
         <<"path">> => ID,
         <<"read-path">> => ReadPath,
         <<"url">> => ReadPath,
-        <<"signers">> => [Owner],
         <<"body">> => hb_json:encode(Body)
     }.
+
+%% @doc Commit the record with the node's wallet before it is written, so
+%% the record id is a committed id -- an uncommitted cache hash must not
+%% act as claim identity.
+committed_record(Record, Opts) ->
+    hb_message:commit(Record, Opts).
 
 enrich_record(RecordID, Record0, Opts) ->
     case hb_maps:get(<<"type">>, Record0, not_found, Opts) of
@@ -843,6 +866,11 @@ enrich_index_record(RecordID, Record0, Opts) ->
         <<"claim">> => Claim
     }.
 
+%% Indexes are messages, never JSON blobs or bare-binary pointers: every
+%% membership/alias/pending fact is its own committed message, discovered
+%% through the store's match index, and the latest message per subject wins.
+%% Legacy JSON/pointer entries written by earlier builds remain readable as
+%% a fallback, but are no longer written.
 write_indexes(Record, Opts) ->
     Store = hb_opts:get(store, [], Opts),
     RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
@@ -850,12 +878,94 @@ write_indexes(Record, Opts) ->
         {[], _} -> ok;
         {_, not_found} -> ok;
         _ ->
-            Indexes = upload_indexes(Record, Opts),
-            case hb_store:write(Store, maps:from_list([{Path, RecordID} || Path <- Indexes]), Opts) of
-                ok -> write_list_indexes(Store, Record, Opts);
+            case write_pointer_messages(Record, RecordID, <<"active">>, Opts) of
+                ok -> write_list_entries(Record, RecordID, <<"active">>, Opts);
                 Error -> Error
             end
     end.
+
+write_pointer_messages(Record, RecordID, State, Opts) ->
+    lists:foldl(
+        fun({Type, Alias}, ok) ->
+            write_index_message(
+                #{
+                    <<"type">> => <<"odysee-upload-pointer">>,
+                    <<"alias-type">> => Type,
+                    <<"alias">> => Alias,
+                    <<"record-id">> => RecordID,
+                    <<"state">> => State
+                },
+                Opts
+            );
+           (_Entry, Error) -> Error
+        end,
+        ok,
+        upload_index_aliases(Record, Opts)
+    ).
+
+write_list_entries(Record, RecordID, State, Opts) ->
+    lists:foldl(
+        fun({Type, Key}, ok) ->
+            write_index_message(
+                #{
+                    <<"type">> => <<"odysee-upload-list-entry">>,
+                    <<"list">> => Type,
+                    <<"list-key">> => Key,
+                    <<"record-id">> => RecordID,
+                    <<"state">> => State
+                },
+                Opts
+            );
+           (_Entry, Error) -> Error
+        end,
+        ok,
+        upload_list_keys(Record, Opts)
+    ).
+
+write_index_message(Message, Opts) ->
+    Stamped = Message#{ <<"at">> => erlang:system_time(millisecond) },
+    case hb_cache:write(hb_message:commit(Stamped, Opts), Opts) of
+        {ok, _ID} -> ok;
+        Error -> Error
+    end.
+
+%% @doc Latest-message-wins fold over index messages matched by `Selector'.
+%% Returns record-id => state; on equal timestamps the inactive state wins,
+%% so removal is never lost to a same-millisecond append.
+index_message_states(Selector, SubjectKey, Opts) ->
+    Paths =
+        case hb_cache:match(Selector, Opts) of
+            {ok, Found} when is_list(Found) -> Found;
+            _ -> []
+        end,
+    lists:foldl(
+        fun(Path, Acc) ->
+            case hb_cache:read(Path, Opts) of
+                {ok, Msg0} when is_map(Msg0) ->
+                    Msg = hb_cache:ensure_all_loaded(Msg0, Opts),
+                    Subject = hb_maps:get(SubjectKey, Msg, not_found, Opts),
+                    State = hb_maps:get(<<"state">>, Msg, <<"active">>, Opts),
+                    At = integer_value(hb_maps:get(<<"at">>, Msg, 0, Opts), 0),
+                    Rank = {At, state_tiebreak(State)},
+                    case Subject of
+                        not_found -> Acc;
+                        _ ->
+                            case maps:get(Subject, Acc, not_found) of
+                                {PrevRank, _PrevState} when PrevRank >= Rank -> Acc;
+                                _ -> Acc#{ Subject => {Rank, State} }
+                            end
+                    end;
+                _ -> Acc
+            end
+        end,
+        #{},
+        Paths
+    ).
+
+%% Inactive states outrank active ones at the same timestamp.
+state_tiebreak(<<"active">>) -> 0;
+state_tiebreak(<<"pending">>) -> 0;
+state_tiebreak(_Inactive) -> 1.
 
 %% Meilisearch is derivative state, so backend availability must not fail an
 %% upload. Failed operations are retained in the primary store and replayed by
@@ -954,11 +1064,12 @@ search_pending_key(Event, Opts) ->
     RecordID = hb_maps:get(<<"record-id">>, Event, <<>>, Opts),
     <<Operation/binary, ":", (hb_util:encode(hb_crypto:sha256(RecordID)))/binary>>.
 
+%% Pending search operations are individual event messages: queueing and
+%% clearing are independent appends folded latest-wins at read time, so no
+%% read-modify-write cycle (and therefore no global lock) exists. The old
+%% single JSON document remains readable as a legacy fallback.
 best_effort_queue_search_pending(Event, Opts) ->
-    case update_search_pending(
-        fun(Pending) -> Pending#{ search_pending_key(Event, Opts) => Event } end,
-        Opts
-    ) of
+    case write_search_event(Event, <<"pending">>, Opts) of
         ok -> ok;
         Error ->
             ?event(error, {odysee_upload_search_pending_write_failed, {result, Error}}),
@@ -966,40 +1077,81 @@ best_effort_queue_search_pending(Event, Opts) ->
     end.
 
 best_effort_clear_search_pending(Event, Opts) ->
-    case update_search_pending(
-        fun(Pending) -> maps:remove(search_pending_key(Event, Opts), Pending) end,
-        Opts
-    ) of
+    case write_search_event(Event, <<"cleared">>, Opts) of
         ok -> ok;
         Error ->
             ?event(warning, {odysee_upload_search_pending_clear_failed, {result, Error}}),
             ok
     end.
 
-update_search_pending(Update, Opts) ->
-    Store = hb_opts:get(store, [], Opts),
-    case Store of
+write_search_event(Event, State, Opts) ->
+    case hb_opts:get(store, [], Opts) of
         [] -> {error, no_store};
         _ ->
-            global:trans(
-                {{?MODULE, ?SEARCH_PENDING_PATH}, self()},
-                fun() ->
-                    Current = read_search_pending(Opts),
-                    Pending = Update(Current),
-                    case Pending =:= Current of
-                        true -> ok;
-                        false ->
-                            hb_store:write(
-                                Store,
-                                #{ ?SEARCH_PENDING_PATH => hb_json:encode(Pending) },
-                                Opts
-                            )
-                    end
-                end
+            write_index_message(
+                #{
+                    <<"type">> => <<"odysee-upload-search-event">>,
+                    <<"event-key">> => search_pending_key(Event, Opts),
+                    <<"operation">> => hb_maps:get(<<"operation">>, Event, <<"unknown">>, Opts),
+                    <<"record-id">> => hb_maps:get(<<"record-id">>, Event, <<>>, Opts),
+                    <<"state">> => State
+                },
+                Opts
             )
     end.
 
 read_search_pending(Opts) ->
+    Events = search_event_states(Opts),
+    Pending =
+        maps:from_list(
+            [
+                {Key, Event}
+            ||
+                {Key, {_Rank, <<"pending">>, Event}} <- maps:to_list(Events)
+            ]
+        ),
+    Cleared =
+        [Key || {Key, {_Rank, State, _Event}} <- maps:to_list(Events), State =/= <<"pending">>],
+    Legacy = maps:without(Cleared, read_legacy_search_pending(Opts)),
+    maps:merge(Legacy, Pending).
+
+%% Latest event message per event-key; equal timestamps favor `cleared' so
+%% a clear is never lost to a same-millisecond queue.
+search_event_states(Opts) ->
+    Paths =
+        case hb_cache:match(#{ <<"type">> => <<"odysee-upload-search-event">> }, Opts) of
+            {ok, Found} when is_list(Found) -> Found;
+            _ -> []
+        end,
+    lists:foldl(
+        fun(Path, Acc) ->
+            case hb_cache:read(Path, Opts) of
+                {ok, Msg0} when is_map(Msg0) ->
+                    Msg = hb_cache:ensure_all_loaded(Msg0, Opts),
+                    Key = hb_maps:get(<<"event-key">>, Msg, not_found, Opts),
+                    State = hb_maps:get(<<"state">>, Msg, <<"pending">>, Opts),
+                    At = integer_value(hb_maps:get(<<"at">>, Msg, 0, Opts), 0),
+                    Rank = {At, state_tiebreak(State)},
+                    Event = #{
+                        <<"operation">> => hb_maps:get(<<"operation">>, Msg, <<"unknown">>, Opts),
+                        <<"record-id">> => hb_maps:get(<<"record-id">>, Msg, <<>>, Opts)
+                    },
+                    case Key of
+                        not_found -> Acc;
+                        _ ->
+                            case maps:get(Key, Acc, not_found) of
+                                {PrevRank, _S, _E} when PrevRank >= Rank -> Acc;
+                                _ -> Acc#{ Key => {Rank, State, Event} }
+                            end
+                    end;
+                _ -> Acc
+            end
+        end,
+        #{},
+        Paths
+    ).
+
+read_legacy_search_pending(Opts) ->
     Store = hb_opts:get(store, [], Opts),
     case hb_store:read(Store, ?SEARCH_PENDING_PATH, maps:without([<<"store">>, store], Opts)) of
         {ok, Raw} -> decode_search_pending(Raw);
@@ -1019,11 +1171,11 @@ decode_search_pending(_Raw) ->
 
 reconcile_search_entries(Entries, Opts) ->
     lists:foldl(
-        fun({Key, Event}, {Reconciled, Failed}) ->
+        fun({_Key, Event}, {Reconciled, Failed}) ->
             Result = reconcile_search_event(Event, Opts),
             case Result of
                 ok ->
-                    _ = update_search_pending(fun(Pending) -> maps:remove(Key, Pending) end, Opts),
+                    best_effort_clear_search_pending(Event, Opts),
                     {Reconciled + 1, Failed};
                 _ ->
                     {Reconciled, Failed + 1}
@@ -1119,13 +1271,16 @@ search_document(Record, Claim, Opts) ->
     SubCount = number_value(first_field([<<"sub_count">>, <<"sub_cnt">>], SigningChannel, Opts), 0),
     ClaimCount = number_value(first_field([<<"claim_count">>, <<"claim_cnt">>], SigningChannel, Opts), 0),
     Tags = list_value(map_value(Value, <<"tags">>, [], Opts)),
-    RecencyRank = recency_rank(Timestamp),
+    % Reference time is injectable via Opts (defaulting to the system clock),
+    % so ranking is testable and a node can pin it for reproducible ordering.
+    Now = now_seconds(Opts),
+    RecencyRank = recency_rank(Timestamp, Now),
     Rank = search_rank(#{
         has_channel => HasChannel,
         view_count => ViewCount,
         sub_count => SubCount,
         timestamp => Timestamp
-    }),
+    }, Now),
     #{
         <<"id">> => RecordID,
         <<"doc_id">> => ClaimID,
@@ -1151,7 +1306,9 @@ search_document(Record, Claim, Opts) ->
         <<"content_type">> => ContentType,
         <<"media_type">> => media_type(ContentType),
         <<"tags">> => Tags,
-        <<"tags_text">> => binary:join([hb_util:bin(Tag) || Tag <- Tags], <<" ">>),
+        % binary:join/2 is OTP 28+; stay compatible with OTP 27 nodes.
+        <<"tags_text">> =>
+            iolist_to_binary(lists:join(<<" ">>, [hb_util:bin(Tag) || Tag <- Tags])),
         <<"language">> => first_list_value(map_value(Value, <<"languages">>, [], Opts), <<"">>),
         <<"nsfw">> => 0,
         <<"thumbnail_url">> => ThumbnailURL,
@@ -1192,8 +1349,15 @@ number_value(Value, Default) when is_binary(Value) ->
     end;
 number_value(_Value, Default) -> Default.
 
-search_rank(Values) ->
-    search_rank(Values, erlang:system_time(second)).
+%% Reference time is read from Opts (`now`, seconds) when supplied, else the
+%% system clock. Keeps recency ranking testable and node-pinnable.
+now_seconds(Opts) ->
+    case hb_maps:get(<<"now">>, Opts, not_found, Opts) of
+        Now when is_integer(Now) -> Now;
+        Now when is_binary(Now) ->
+            try binary_to_integer(Now) catch _:_ -> erlang:system_time(second) end;
+        _ -> erlang:system_time(second)
+    end.
 
 search_rank(Values, Now) ->
     Timestamp = maps:get(timestamp, Values, 0),
@@ -1219,8 +1383,7 @@ search_rank(Values, Now) ->
 bounded_log_rank(Value, Cap, Weight) ->
     math:log(max(0, min(Value, Cap)) + 1) / math:log(Cap + 1) * Weight.
 
-recency_rank(Timestamp) ->
-    Now = erlang:system_time(second),
+recency_rank(Timestamp, Now) ->
     AgeDays = max(0, (Now - number_value(Timestamp, 0)) div 86400),
     if
         AgeDays =< 7 -> 60;
@@ -1295,7 +1458,7 @@ channel_id_from_claim(Claim, Opts) when is_map(Claim) ->
 channel_id_from_claim(_, _Opts) ->
     undefined.
 
-upload_indexes(Record, Opts) ->
+upload_index_aliases(Record, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
     RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
     DataID = hb_maps:get(<<"data-id">>, Record, not_found, Opts),
@@ -1317,7 +1480,7 @@ upload_indexes(Record, Opts) ->
             ++ [{<<"uri">>, URI} || URI <- claim_uris(Claim, Opts)],
     lists:usort(
         [
-            index_path(Type, Value)
+            {Type, Value}
         ||
             {Type, Value} <- Values,
             is_binary(Value),
@@ -1338,18 +1501,7 @@ claim_uris(Claim, Opts) ->
 index_path(Type, Value) ->
     <<"odysee/upload/", Type/binary, "/", (hb_util:encode(hb_crypto:sha256(Value)))/binary>>.
 
-write_list_indexes(Store, Record, Opts) ->
-    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
-    Paths = upload_list_indexes(Record, Opts),
-    lists:foldl(
-        fun(Path, ok) -> append_list_index(Store, Path, RecordID, Opts);
-           (_Path, Error) -> Error
-        end,
-        ok,
-        Paths
-    ).
-
-upload_list_indexes(Record, Opts) ->
+upload_list_keys(Record, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
     Owner = hb_maps:get(<<"owner">>, Record, not_found, Opts),
     SigningChannel = hb_maps:get(<<"signing_channel">>, Claim, #{}, Opts),
@@ -1361,7 +1513,7 @@ upload_list_indexes(Record, Opts) ->
     ],
     lists:usort(
         [
-            list_index_path(Type, Value)
+            {Type, Value}
         ||
             {Type, Value} <- Values,
             is_binary(Value),
@@ -1370,11 +1522,7 @@ upload_list_indexes(Record, Opts) ->
         ]
     ).
 
-append_list_index(Store, Path, RecordID, Opts) ->
-    Existing = read_list_index(Store, Path, Opts),
-    Updated = dedupe_binaries([RecordID | Existing]),
-    hb_store:write(Store, #{ Path => hb_json:encode(Updated) }, Opts).
-
+%% Legacy read-only fallback for JSON list indexes written by earlier builds.
 read_list_index(Store, Path, Opts) ->
     case hb_store:read(Store, Path, maps:without([<<"store">>, store], Opts)) of
         {ok, Raw} -> decode_list_index(Raw);
@@ -1423,14 +1571,51 @@ upload_list_ids(Params, Opts) ->
                         Opts
                     )
                 ),
-            Paths =
+            Selectors =
                 case {ChannelIDs, Owners} of
-                    {[_ | _], _} -> [list_index_path(<<"channel">>, ID) || ID <- ChannelIDs, is_binary(ID)];
-                    {_, [_ | _]} -> [list_index_path(<<"owner">>, Owner) || Owner <- Owners, is_binary(Owner)];
-                    _ -> [list_index_path(<<"all">>, <<"all">>)]
+                    {[_ | _], _} -> [{<<"channel">>, ID} || ID <- ChannelIDs, is_binary(ID)];
+                    {_, [_ | _]} -> [{<<"owner">>, Owner} || Owner <- Owners, is_binary(Owner)];
+                    _ -> [{<<"all">>, <<"all">>}]
                 end,
-            dedupe_binaries(lists:flatmap(fun(Path) -> read_list_index(Store, Path, Opts) end, Paths))
+            dedupe_binaries(
+                lists:flatmap(
+                    fun(Selector) -> list_ids_for_selector(Store, Selector, Opts) end,
+                    Selectors
+                )
+            )
     end.
+
+%% List membership is derived from list-entry messages (latest state per
+%% record wins); ids from legacy JSON indexes are appended behind them,
+%% unless a message explicitly removed them.
+list_ids_for_selector(Store, {Type, Key}, Opts) ->
+    States =
+        index_message_states(
+            #{
+                <<"type">> => <<"odysee-upload-list-entry">>,
+                <<"list">> => Type,
+                <<"list-key">> => Key
+            },
+            <<"record-id">>,
+            Opts
+        ),
+    Sorted =
+        lists:sort(
+            fun({_, {RankA, _}}, {_, {RankB, _}}) -> RankA >= RankB end,
+            maps:to_list(States)
+        ),
+    MessageIDs =
+        [
+            RecordID
+        ||
+            {RecordID, {_Rank, State}} <- Sorted,
+            is_binary(RecordID),
+            State =:= <<"active">>
+        ],
+    Removed =
+        [RecordID || {RecordID, {_Rank, State}} <- maps:to_list(States), State =/= <<"active">>],
+    LegacyIDs = read_list_index(Store, list_index_path(Type, Key), Opts),
+    MessageIDs ++ [ID || ID <- LegacyIDs, not lists:member(ID, MessageIDs), not lists:member(ID, Removed)].
 
 upload_claims_from_ids(IDs, Opts) ->
     lists:filtermap(
@@ -1554,16 +1739,15 @@ list_response(Items, Total, Page, PageSize) ->
         <<"total_items">> => Total,
         <<"total_pages">> => TotalPages
     },
+    % Pagination lives in the snake_case `result' (the legacy API payload the
+    % client reads); it is not duplicated as snake_case message-level keys.
     Msg = (cors_headers())#{
         <<"device">> => ?DEVICE,
         <<"status">> => 200,
         <<"content-type">> => <<"application/json">>,
         <<"result">> => Result,
         <<"items">> => Items,
-        <<"page">> => Page,
-        <<"page_size">> => PageSize,
-        <<"total_items">> => Total,
-        <<"total_pages">> => TotalPages
+        <<"page">> => Page
     },
     Msg#{ <<"body">> => hb_json:encode(Msg) }.
 
@@ -1629,11 +1813,45 @@ indexed_record_id(ID, Opts) ->
         no_viable_store ->
             {error, upload_record_not_found};
         _ ->
-            first_index_value(
-                Store,
-                [index_path(<<"record-id">>, ID), index_path(<<"claim-id">>, ID)],
-                Opts
-            )
+            case pointer_record_id(ID, Opts) of
+                {ok, RecordID} ->
+                    {ok, RecordID};
+                {error, _} = Error ->
+                    Error;
+                not_found ->
+                    % Legacy bare-binary pointer entries from earlier builds.
+                    first_index_value(
+                        Store,
+                        [index_path(<<"record-id">>, ID), index_path(<<"claim-id">>, ID)],
+                        Opts
+                    )
+            end
+    end.
+
+pointer_record_id(Alias, Opts) ->
+    States =
+        index_message_states(
+            #{
+                <<"type">> => <<"odysee-upload-pointer">>,
+                <<"alias">> => Alias
+            },
+            <<"record-id">>,
+            Opts
+        ),
+    Active =
+        lists:sort(
+            fun({_, {RankA, _}}, {_, {RankB, _}}) -> RankA >= RankB end,
+            [Entry || Entry = {_ID, {_Rank, State}} <- maps:to_list(States), State =:= <<"active">>]
+        ),
+    case Active of
+        [{RecordID, _} | _] -> {ok, RecordID};
+        [] ->
+            case map_size(States) of
+                0 -> not_found;
+                % Every pointer for the alias is tombstoned: the record is
+                % gone, and the legacy fallback must not resurrect it.
+                _ -> {error, upload_record_not_found}
+            end
     end.
 
 first_index_value(_Store, [], _Opts) ->
@@ -1701,34 +1919,17 @@ rebuild_index_record(OldRecord, Metadata, Opts) ->
 remove_from_list_indexes(_Record, not_found, _Opts) ->
     ok;
 remove_from_list_indexes(Record, RecordID, Opts) ->
-    Store = hb_opts:get(store, [], Opts),
-    case Store of
-        [] ->
-            ok;
-        _ ->
-            lists:foldl(
-                fun(Path, ok) ->
-                    Existing = read_list_index(Store, Path, Opts),
-                    Updated = [ID || ID <- Existing, ID =/= RecordID],
-                    hb_store:write(Store, #{ Path => hb_json:encode(Updated) }, Opts);
-                   (_Path, Error) ->
-                    Error
-                end,
-                ok,
-                upload_list_indexes(Record, Opts)
-            )
+    case hb_opts:get(store, [], Opts) of
+        [] -> ok;
+        _ -> write_list_entries(Record, RecordID, <<"removed">>, Opts)
     end.
 
 tombstone_indexes(Record, Opts) ->
-    Store = hb_opts:get(store, [], Opts),
-    case Store of
-        [] ->
-            ok;
-        _ ->
-            case upload_indexes(Record, Opts) of
-                [] -> ok;
-                Paths -> hb_store:write(Store, maps:from_list([{Path, <<>>} || Path <- Paths]), Opts)
-            end
+    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+    case {hb_opts:get(store, [], Opts), RecordID} of
+        {[], _} -> ok;
+        {_, not_found} -> ok;
+        _ -> write_pointer_messages(Record, RecordID, <<"removed">>, Opts)
     end.
 
 delete_response(RecordID, Record, Opts) ->
@@ -2268,7 +2469,11 @@ upload_response_includes_metadata_and_signature_context_test() ->
     ?assertEqual(<<"text/plain">>, hb_maps:get(<<"media_type">>, Source, Opts)),
     ?assertEqual(<<"signed-demo.txt">>, hb_maps:get(<<"name">>, Source, Opts)),
     ?assertEqual(<<"13">>, hb_maps:get(<<"size">>, Source, Opts)),
-    ?assertEqual(true, hb_maps:get(<<"is_channel_signature_valid">>, Claim, Opts)),
+    % Validity is never asserted without a real channel signature.
+    ?assertEqual(
+        not_found,
+        hb_maps:get(<<"is_channel_signature_valid">>, Claim, not_found, Opts)
+    ),
     ?assertEqual(Channel, SigningChannel).
 
 upload_index_prefers_payload_media_type_over_transport_content_type_test() ->
@@ -2375,18 +2580,14 @@ search_pending_state_roundtrip_test() ->
         <<"record-id">> => <<"pending-record-id">>
     },
     Key = search_pending_key(Event, Opts),
-    ?assertEqual(
-        ok,
-        update_search_pending(fun(Pending) -> Pending#{ Key => Event } end, Opts)
-    ),
+    ok = best_effort_queue_search_pending(Event, Opts),
     ?assertEqual(Event, maps:get(Key, read_search_pending(Opts))),
-    ?assertEqual(
-        ok,
-        update_search_pending(fun(Pending) -> maps:remove(Key, Pending) end, Opts)
-    ),
+    ok = best_effort_clear_search_pending(Event, Opts),
     ?assertEqual(#{}, read_search_pending(Opts)).
 
-search_pending_concurrent_updates_are_serialized_test() ->
+search_pending_concurrent_updates_need_no_lock_test() ->
+    % Each pending operation is its own message, so concurrent queueing has
+    % no read-modify-write cycle to serialize.
     Opts = test_opts(),
     Parent = self(),
     Refs = [
@@ -2397,11 +2598,7 @@ search_pending_concurrent_updates_are_serialized_test() ->
                     <<"operation">> => <<"index">>,
                     <<"record-id">> => <<"concurrent-", (integer_to_binary(Index))/binary>>
                 },
-                Result = update_search_pending(
-                    fun(Pending) -> Pending#{ search_pending_key(Event, Opts) => Event } end,
-                    Opts
-                ),
-                Parent ! {Ref, Result}
+                Parent ! {Ref, best_effort_queue_search_pending(Event, Opts)}
             end),
             Ref
         end
@@ -2601,18 +2798,19 @@ upload_resolves_native_claim_and_stream_media_test() ->
     {ok, Res} = submit(#{}, Req, Opts),
     RecordID = hb_maps:get(<<"record-id">>, Res, Opts),
     URI = <<"lbry://@native#channel-1/native-demo">>,
-    Store = hb_opts:get(store, no_viable_store, Opts),
-    {ok, IndexedRecordID} = hb_store:read(
-        Store,
-        index_path(<<"uri">>, URI),
-        maps:without([<<"store">>, store], Opts)
-    ),
+    % Aliases are pointer messages now, resolved through the lookup API
+    % rather than read from bare-binary index paths.
+    {ok, IndexedRecordID} = indexed_record_id(URI, Opts),
     ?assertEqual(RecordID, IndexedRecordID),
     {ok, Record0} = hb_cache:read(RecordID, Opts),
     Record = enrich_record(RecordID, hb_cache:ensure_all_loaded(Record0, Opts), Opts),
     Claim = hb_maps:get(<<"claim">>, Record, Opts),
     ?assertEqual(RecordID, hb_maps:get(<<"claim-id">>, Claim, Opts)),
-    ?assertEqual(true, hb_maps:get(<<"is_channel_signature_valid">>, Claim, Opts)),
+    % Validity is never asserted without a real channel signature.
+    ?assertEqual(
+        not_found,
+        hb_maps:get(<<"is_channel_signature_valid">>, Claim, not_found, Opts)
+    ),
     {ok, Media} = media(#{}, #{ <<"id">> => RecordID }, Opts),
     ?assertEqual(<<"native media">>, hb_maps:get(<<"body">>, Media, Opts)).
 
@@ -2830,17 +3028,17 @@ params64_req(Payload) ->
     }.
 
 test_opts() ->
-    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
-    Store = #{
-        <<"store-module">> => hb_store_fs,
-        <<"name">> => <<"_build/odysee-upload-test-", Timestamp/binary>>
-    },
+    % Match-capable store: index/list/pending discovery goes through the
+    % store's reverse-index match, which lmdb supports (fs does not).
+    Store = hb_test_utils:test_store(hb_store_lmdb),
     ok = hb_store:start(Store),
     ok = hb_store:reset(Store),
     #{
         <<"store">> => Store,
         <<"cache-control">> => [<<"no-cache">>, <<"no-store">>],
-        <<"store-all-signed">> => false
+        <<"store-all-signed">> => false,
+        % Records are committed with the node wallet before caching.
+        <<"priv-wallet">> => ar_wallet:new()
     }.
 
 -endif.

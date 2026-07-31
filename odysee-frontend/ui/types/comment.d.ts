@@ -8,6 +8,9 @@ type CommentId = string;
 
 type CommentCreateParams = {
   claim_id: string;
+  // Uniform match anchor (2026-07-29 direction): the content's immutable id
+  // when it has one, otherwise the claim id. Defaults to claim_id when unset.
+  target?: string;
   channel_id: string;
   channel_name: string;
   body?: string;
@@ -64,6 +67,9 @@ type CommentAbandonResponse = {
 
 type CommentListParams = {
   claim_id?: string;
+  // Uniform match anchor: the claim id for legacy content, the immutable id
+  // for native content. Falls back to claim_id when unset.
+  target?: string;
   page?: number;
   page_size?: number;
   parent_id?: string;

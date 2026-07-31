@@ -170,3 +170,72 @@ preference(Base, Req, Opts) ->
 
 link_path(NormKey) ->
     << ?OWNED_CACHE/binary, "/", NormKey/binary >>.
+
+-ifdef(TEST).
+
+test_opts(Tag) ->
+    #{ <<"store">> => [hb_test_utils:test_store(hb_store_fs, Tag)] }.
+
+point_req(Key, Preference) ->
+    #{
+        <<"device">> => ?OWNED_CACHE,
+        <<"key">> => Key,
+        <<"preference">> => Preference
+    }.
+
+signed_by(Wallet, Msg, Opts) ->
+    hb_message:commit(Msg, Opts#{ <<"priv-wallet">> => Wallet }).
+
+%% First verified write claims ownership and stores the preference; a
+%% subsequent write by the SAME owner updates it in place.
+owner_establishes_and_updates_slot_test() ->
+    Owner = ar_wallet:new(),
+    Opts = test_opts(<<"owned-ref-owner">>),
+    Key = <<"preferences">>,
+    First = signed_by(Owner, point_req(Key, <<"v1">>), Opts),
+    ?assertMatch({ok, #{ <<"status">> := 200 }}, point(First, #{}, Opts)),
+    {ok, Value1} = current(point_req(Key, <<>>), #{}, Opts),
+    ?assertEqual(<<"v1">>, hb_maps:get(<<"preference">>, Value1, not_found, Opts)),
+
+    Second = signed_by(Owner, point_req(Key, <<"v2">>), Opts),
+    ?assertMatch({ok, #{ <<"status">> := 200 }}, point(Second, #{}, Opts)),
+    {ok, Value2} = current(point_req(Key, <<>>), #{}, Opts),
+    ?assertEqual(<<"v2">>, hb_maps:get(<<"preference">>, Value2, not_found, Opts)).
+
+%% A different verified wallet cannot overwrite a slot another wallet owns.
+wrong_signer_cannot_overwrite_test() ->
+    Owner = ar_wallet:new(),
+    Attacker = ar_wallet:new(),
+    Opts = test_opts(<<"owned-ref-wrong-signer">>),
+    Key = <<"preferences">>,
+    ?assertMatch(
+        {ok, #{ <<"status">> := 200 }},
+        point(signed_by(Owner, point_req(Key, <<"owned">>), Opts), #{}, Opts)
+    ),
+    ?assertMatch(
+        {ok, #{ <<"status">> := 403 }},
+        point(signed_by(Attacker, point_req(Key, <<"hijacked">>), Opts), #{}, Opts)
+    ),
+    {ok, Value} = current(point_req(Key, <<>>), #{}, Opts),
+    ?assertEqual(<<"owned">>, hb_maps:get(<<"preference">>, Value, not_found, Opts)).
+
+%% An unsigned write can never take ownership.
+unsigned_write_is_rejected_test() ->
+    Opts = test_opts(<<"owned-ref-unsigned">>),
+    ?assertMatch(
+        {ok, #{ <<"status">> := 403 }},
+        point(point_req(<<"preferences">>, <<"v1">>), #{}, Opts)
+    ),
+    ?assertMatch(
+        {ok, #{ <<"status">> := 404 }},
+        current(point_req(<<"preferences">>, <<>>), #{}, Opts)
+    ).
+
+%% A key with a path separator cannot steer the link out of the namespace.
+key_with_separator_is_rejected_test() ->
+    Owner = ar_wallet:new(),
+    Opts = test_opts(<<"owned-ref-badkey">>),
+    Req = signed_by(Owner, point_req(<<"../escape">>, <<"v1">>), Opts),
+    ?assertMatch({ok, #{ <<"status">> := 400 }}, point(Req, #{}, Opts)).
+
+-endif.

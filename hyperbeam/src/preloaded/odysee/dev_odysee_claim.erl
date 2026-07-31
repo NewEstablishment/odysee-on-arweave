@@ -1060,7 +1060,7 @@ normalize_claim(Claim, Raw, Opts) ->
 normalize_search_result(Result, Raw, Opts) ->
     Items = [with_immutable_id(Item, Opts) || Item <- search_items(Result, Opts)],
     Claims = normalize_search_claims(Items, Raw, Opts),
-    ClaimIDs = [hb_maps:get(<<"claim-id">>, Claim, Opts) || Claim <- Claims],
+    ClaimIDs = [hb_maps:get(<<"claim-id">>, Claim, not_found, Opts) || Claim <- Claims],
     NormalizedResult = Result#{ <<"items">> => Items },
     Msg0 = #{
         <<"device">> => ?DEVICE,

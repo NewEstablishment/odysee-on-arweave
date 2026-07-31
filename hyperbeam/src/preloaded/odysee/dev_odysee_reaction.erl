@@ -122,14 +122,14 @@ result_from_map(_Msg, _Raw, _Opts) ->
 normalize_list(Result, Raw, Opts) ->
     MyReactions = map_value([<<"my_reactions">>, <<"my-reactions">>], Result, Opts),
     OthersReactions = map_value([<<"others_reactions">>, <<"others-reactions">>], Result, Opts),
+    % Message keys are hyphenated; the snake_case shape stays in the JSON
+    % `body' and `result' (the legacy API payload the client reads).
     {ok, #{
         <<"device">> => ?DEVICE,
         <<"content-type">> => <<"application/json">>,
         <<"body">> => Raw,
         <<"result">> => Result,
-        <<"my_reactions">> => MyReactions,
         <<"my-reactions">> => MyReactions,
-        <<"others_reactions">> => OthersReactions,
         <<"others-reactions">> => OthersReactions,
         <<"comment-ids">> => reaction_comment_ids(MyReactions, OthersReactions)
     }}.
@@ -383,11 +383,11 @@ list_result_normalizes_reactions_test() ->
     ?assertEqual([<<"c1">>, <<"c2">>], hb_maps:get(<<"comment-ids">>, Msg, #{})),
     ?assertEqual(
         #{ <<"c1">> => [<<"like">>] },
-        hb_maps:get(<<"my_reactions">>, Msg, #{})
+        hb_maps:get(<<"my-reactions">>, Msg, #{})
     ),
     ?assertEqual(
         #{ <<"like">> => 3 },
-        hb_maps:get(<<"c1">>, hb_maps:get(<<"others_reactions">>, Msg, #{}), #{})
+        hb_maps:get(<<"c1">>, hb_maps:get(<<"others-reactions">>, Msg, #{}), #{})
     ).
 
 list_accepts_raw_json_test() ->

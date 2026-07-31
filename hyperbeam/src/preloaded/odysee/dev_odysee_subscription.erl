@@ -1,12 +1,15 @@
 %%% @doc Odysee account subscription-count implementation.
 %%%
-%%% Exposed through `odysee-account@1.0'.
+%%% Fronted by `odysee-account@1.0' (which resolves to this device by name),
+%%% but registered and labeled as its own device so the module name, the
+%%% registered device name, and the `device' key on responses all agree.
 -module(dev_odysee_subscription).
+-implements(<<"odysee-subscription@1.0">>).
 -export([info/1, 'sub-count'/3, sub_count/3, normalize/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--define(DEVICE, <<"odysee-account@1.0">>).
+-define(DEVICE, <<"odysee-subscription@1.0">>).
 -define(DEFAULT_API_URL, <<"https://api.odysee.com">>).
 
 %% @doc Return the public device API.

@@ -35,7 +35,7 @@ import PublishControlTags from 'component/publish/shared/publishControlTags/view
 import PublishSummary from 'component/publish/shared/publishSummary/view';
 import PublishTagsPicker from 'component/publish/shared/publishTagsPicker/view';
 import * as ACTIONS from 'constants/action_types';
-import { doAddPipelineItem, doUpdatePipelineItem } from 'redux/actions/publishPipeline';
+import { doAddPipelineItem, doRemovePipelineItem, doUpdatePipelineItem } from 'redux/actions/publishPipeline';
 import type { PipelineStage } from 'redux/actions/publishPipeline';
 import { runConversion, runOptimization } from 'util/upload-conversion-pipeline';
 import { enqueue, promote, release, dequeue } from 'util/pipeline-queue';
@@ -320,7 +320,7 @@ function UploadForm(props: Props) {
   }, []);
 
   // -- Handlers --
-  function canUseDirectHyperbeamUpload(candidateFile: any) {
+  function isHyperbeamEligibleFile(candidateFile: any) {
     const publishPayload = resolvePublishPayload(
       publishFormValues,
       myClaimForUri,
@@ -328,12 +328,30 @@ function UploadForm(props: Props) {
       memberRestrictionStatus,
       false
     );
+    return canPublishThroughHyperbeam(candidateFile, publishPayload, PUBLISH_MODES.FILE);
+  }
+
+  // HyperBEAM is the only upload target for eligible files: an in-flight
+  // legacy early upload no longer disqualifies the direct path (it gets
+  // aborted at publish time instead), so the node stays the source of truth.
+  function canUseDirectHyperbeamUpload(candidateFile: any) {
     return (
       !pipelineInFlightRef.current &&
-      !earlyUploadPromiseRef.current &&
       candidateFile !== preparedOutputFileRef.current &&
-      canPublishThroughHyperbeam(candidateFile, publishPayload, PUBLISH_MODES.FILE)
+      isHyperbeamEligibleFile(candidateFile)
     );
+  }
+
+  function abortEarlyUpload(pipelineId: string) {
+    if (earlyUploadAbortRef.current) {
+      earlyUploadAbortRef.current();
+      earlyUploadAbortRef.current = null;
+      earlyUploadPromiseRef.current = null;
+    }
+    if ((window as any).__earlyUploadHandles?.[pipelineId]) {
+      delete (window as any).__earlyUploadHandles[pipelineId];
+    }
+    dispatch(doRemovePipelineItem(pipelineId));
   }
 
   async function handlePublish() {
@@ -359,6 +377,10 @@ function UploadForm(props: Props) {
 
     if (runPublish) {
       if (canUseDirectHyperbeamUpload(outputFile)) {
+        // Rip out the legacy side-path: if an early tus upload to legacy
+        // Odysee is in flight for this file, abandon it and publish through
+        // the HyperBEAM node only.
+        abortEarlyUpload(pipelineItemIdRef.current);
         publish(outputFile, false);
         return;
       }
@@ -718,7 +740,9 @@ function UploadForm(props: Props) {
         if (!started) {
           dispatch(doUpdatePipelineItem(itemId, { stage: 'queued' }));
         }
-      } else if (!pipelineAlreadyHandled && !earlyUploadPromiseRef.current) {
+      } else if (!pipelineAlreadyHandled && !earlyUploadPromiseRef.current && !isHyperbeamEligibleFile(filePath)) {
+        // Hyperbeam-eligible files never start the legacy early tus upload:
+        // they publish through the node directly at submit time.
         const itemId = pipelineItemIdRef.current;
         const file = filePath;
 

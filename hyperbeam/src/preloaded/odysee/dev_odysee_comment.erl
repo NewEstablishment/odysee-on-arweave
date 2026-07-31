@@ -69,32 +69,88 @@ info(_Opts) ->
         ]
     }.
 
-%% @doc Return a normalized `comment.List' response.
+%% @doc Return a normalized `comment.List' response. Native comments stored
+%% on this node (matched by their uniform `target' -- an immutable id or a
+%% claim id) are merged ahead of the Commentron rows; when Commentron cannot
+%% answer (e.g. native-only content with no claim id), the native set is the
+%% whole response.
 list(Base, Req, Opts) ->
     safe(fun() ->
-        maybe
-            {ok, Result, Raw} ?= list_result(Base, Req, Opts),
-            normalize_list(Result, Raw, Opts)
-        else
-            Error -> Error
+        Native = native_comments_for_request(Base, Req, Opts),
+        case list_result(Base, Req, Opts) of
+            {ok, Result, Raw} ->
+                Merged = merge_native_items(Native, Result, Opts),
+                normalize_list(Merged, merged_raw_body(Native, Merged, Raw), Opts);
+            _Error when Native =/= [] ->
+                Merged = #{
+                    <<"items">> => Native,
+                    <<"total_items">> => length(Native),
+                    <<"total_filtered_items">> => length(Native),
+                    <<"page">> => 1,
+                    <<"total_pages">> => 1
+                },
+                normalize_list(Merged, merged_raw_body(Native, Merged, <<"{}">>), Opts);
+            Error ->
+                Error
         end
     end).
+
+%% The HTTP layer serves the message's `body', so merged native comments
+%% must be re-encoded into it -- otherwise browser callers reading the raw
+%% Commentron payload never see them.
+merged_raw_body([], _Merged, Raw) ->
+    Raw;
+merged_raw_body(_Native, Merged, Raw) ->
+    Envelope =
+        case try_decode_json(Raw) of
+            {ok, Decoded} when is_map(Decoded) ->
+                case maps:is_key(<<"result">>, Decoded) of
+                    true -> Decoded#{ <<"result">> => Merged };
+                    false -> #{ <<"jsonrpc">> => <<"2.0">>, <<"result">> => Merged }
+                end;
+            _ ->
+                #{ <<"jsonrpc">> => <<"2.0">>, <<"result">> => Merged }
+        end,
+    hb_json:encode(Envelope).
 
 super_list(Base, Req, Opts) -> commentron(<<"comment.SuperChatList">>, Base, Req, Opts).
 
-%% @doc Return a normalized `comment.ByID' response.
+%% @doc Return a normalized `comment.ByID' response. Native comment ids are
+%% cache message ids, so they are looked up locally first; anything else
+%% falls through to Commentron.
 by_id(Base, Req, Opts) ->
     safe(fun() ->
-        maybe
-            {ok, Result, Raw} ?= by_id_result(Base, Req, Opts),
-            normalize_by_id(Result, Raw, Opts)
-        else
-            Error -> Error
+        case native_comment_by_id(Base, Req, Opts) of
+            {ok, Comment} ->
+                normalize_single_comment(
+                    Comment,
+                    hb_json:encode(#{
+                        <<"jsonrpc">> => <<"2.0">>,
+                        <<"result">> => #{ <<"item">> => Comment, <<"ancestors">> => [] }
+                    }),
+                    Opts
+                );
+            not_found ->
+                maybe
+                    {ok, Result, Raw} ?= by_id_result(Base, Req, Opts),
+                    normalize_by_id(Result, Raw, Opts)
+                else
+                    Error -> Error
+                end
         end
     end).
 
-%% @doc Proxy Commentron write and settings operations through HyperBEAM.
-create(Base, Req, Opts) -> commentron(<<"comment.Create">>, Base, Req, Opts).
+%% @doc Create a comment. Requests carrying a `target' (the uniform match
+%% field from the 2026-07-29 direction: the content's immutable id, or its
+%% claim id for legacy videos) are stored natively on this node -- the
+%% comment id IS the cache message id, so `GET /<comment-id>' returns the
+%% comment verifiably. Requests without a target keep proxying to
+%% Commentron until the client migrates.
+create(Base, Req, Opts) ->
+    case native_target(Base, Req, Opts) of
+        {ok, Target} -> native_create(Target, Base, Req, Opts);
+        not_found -> commentron(<<"comment.Create">>, Base, Req, Opts)
+    end.
 edit(Base, Req, Opts) -> commentron(<<"comment.Edit">>, Base, Req, Opts).
 pin(Base, Req, Opts) -> commentron(<<"comment.Pin">>, Base, Req, Opts).
 abandon(Base, Req, Opts) -> commentron(<<"comment.Abandon">>, Base, Req, Opts).
@@ -142,6 +198,367 @@ commentron(Method, Base, Req, Opts) ->
                 Error
         end
     end).
+
+%% --- Native comments -------------------------------------------------------
+%%
+%% Native comments are cache messages on this node. Their `target' is the
+%% uniform match field: the content's immutable id for native uploads, or
+%% the claim id for legacy videos. The comment id is the cache message id.
+
+native_target(Base, Req, Opts) ->
+    Keys = [<<"target">>, <<"target-id">>, <<"target_id">>, <<"immutable-id">>, <<"immutable_id">>],
+    Direct = first_param(Keys, Base, Req, Opts),
+    Found =
+        case Direct of
+            Value when is_binary(Value), Value =/= <<>> ->
+                Value;
+            _ ->
+                % Browser calls carry their params in a JSON body.
+                case proxy_params(Base, Req, Opts) of
+                    {ok, Params} -> first_value(Keys, Params, Opts);
+                    _ -> not_found
+                end
+        end,
+    case Found of
+        Target when is_binary(Target), Target =/= <<>> -> {ok, Target};
+        _ -> not_found
+    end.
+
+native_create(Target, Base, Req, Opts) ->
+    safe(fun() ->
+        maybe
+            {ok, _Owner} ?= native_owner(Base, Req, Opts),
+            {ok, Params} ?= proxy_params(Base, Req, Opts),
+            {ok, Body} ?= required_first([<<"comment">>, <<"body">>, <<"text">>], Params, Opts),
+            Message = native_comment_message(Target, Body, Params),
+            % Commit with the node wallet so the comment id is a committed
+            % id, not an uncommitted cache hash acting as identity.
+            {ok, CommentID} ?= hb_cache:write(hb_message:commit(Message, Opts), Opts),
+            Comment = native_comment_row(CommentID, Message),
+            {ok, #{
+                <<"device">> => ?DEVICE,
+                <<"content-type">> => <<"application/json">>,
+                <<"method">> => <<"comment.Create">>,
+                <<"native">> => true,
+                <<"comment-id">> => CommentID,
+                % Commentron-shaped envelope: the HTTP layer serves `body'.
+                <<"body">> =>
+                    hb_json:encode(#{ <<"jsonrpc">> => <<"2.0">>, <<"result">> => Comment }),
+                <<"result">> => Comment
+            }}
+        else
+            Error -> Error
+        end
+    end).
+
+%% Comment writes arrive through the same-origin auth proxy, which vouches
+%% for the session by injecting the Odysee auth token -- the same trust the
+%% Commentron proxy path runs on (`find_auth_token' is what that path uses).
+%% Identity is anchored to a digest of the token when present, or to a
+%% verified request signer otherwise; the raw token is never stored.
+native_owner(Base, Req, Opts) ->
+    Token =
+        case find_auth_token(Req, Opts) of
+            {ok, ReqToken} -> {ok, ReqToken};
+            {error, not_found} -> find_auth_token(Base, Opts)
+        end,
+    case Token of
+        {ok, Found} ->
+            {ok, hb_util:encode(hb_crypto:sha256(<<"odysee-auth:", Found/binary>>))};
+        {error, not_found} ->
+            case native_signers(Req, Opts) of
+                [Signer | _] ->
+                    case hb_message:verify(Req, signers, Opts) of
+                        true -> {ok, Signer};
+                        _ -> {error, #{ <<"status">> => 401, <<"body">> => <<"Invalid request signature.">> }}
+                    end;
+                [] ->
+                    {error, #{ <<"status">> => 401, <<"body">> => <<"Authenticated request required.">> }}
+            end
+    end.
+
+native_signers(Msg, Opts) ->
+    try lists:usort(hb_message:signers(Msg, Opts))
+    catch _:_ -> []
+    end.
+
+%% The message shape mirrors `nativeCommentMessage' in the browser client
+%% exactly (schema/type/target/parent/state selectors plus row fields), so
+%% comments written here and comments written by the client's cache-write
+%% path are one corpus, discovered through the same match index.
+native_comment_message(Target, Body, Params) ->
+    ChannelID = param_value([<<"channel_id">>, <<"channel-id">>], Params),
+    ParentID = param_value([<<"parent_id">>, <<"parent-id">>], Params),
+    Optional = [
+        {<<"author">>, ChannelID},
+        {<<"channel-id">>, ChannelID},
+        {<<"claim-id">>, param_value([<<"claim_id">>, <<"claim-id">>], Params)},
+        {<<"parent-id">>, ParentID},
+        {<<"channel-name">>, param_value([<<"channel_name">>, <<"channel-name">>], Params)},
+        {<<"channel-signature">>, param_value([<<"signature">>, <<"channel-signature">>], Params)},
+        {<<"signing-ts">>, param_value([<<"signing_ts">>, <<"signing-ts">>], Params)},
+        {<<"sticker">>, param_value([<<"sticker">>], Params)},
+        {<<"support-amount">>, param_value([<<"support_amount">>, <<"support-amount">>, <<"amount">>], Params)}
+    ],
+    lists:foldl(
+        fun put_optional/2,
+        #{
+            <<"schema">> => ?DEVICE,
+            <<"type">> => <<"comment">>,
+            <<"target">> => Target,
+            <<"parent">> => parent_or_root(ParentID),
+            <<"state">> => <<"active">>,
+            <<"comment">> => Body,
+            <<"timestamp">> => erlang:system_time(second),
+            <<"replies">> => 0,
+            <<"is-pinned">> => false
+        },
+        Optional
+    ).
+
+parent_or_root(not_found) -> <<"root">>;
+parent_or_root(ParentID) -> ParentID.
+
+param_value(Keys, Params) ->
+    case first_value(Keys, Params, #{}) of
+        Value when is_binary(Value), Value =/= <<>> -> Value;
+        _ -> not_found
+    end.
+
+%% Present a native comment message in the Commentron row shape so one
+%% normalization path serves both sources.
+native_comment_row(CommentID, Message) ->
+    Target = maps:get(<<"target">>, Message, <<>>),
+    Parent =
+        case maps:get(<<"parent-id">>, Message, not_found) of
+            not_found ->
+                case maps:get(<<"parent">>, Message, <<"root">>) of
+                    <<"root">> -> not_found;
+                    ParentID -> ParentID
+                end;
+            ParentID ->
+                ParentID
+        end,
+    Optional = [
+        {<<"parent_id">>, Parent},
+        {<<"channel_id">>, first_present([<<"channel-id">>, <<"author">>], Message)},
+        {<<"channel_name">>, maps:get(<<"channel-name">>, Message, not_found)},
+        {<<"signature">>, maps:get(<<"channel-signature">>, Message, not_found)},
+        {<<"signing_ts">>, maps:get(<<"signing-ts">>, Message, not_found)},
+        {<<"sticker">>, maps:get(<<"sticker">>, Message, not_found)},
+        {<<"support_amount">>, maps:get(<<"support-amount">>, Message, not_found)},
+        {<<"is_pinned">>, maps:get(<<"is-pinned">>, Message, not_found)},
+        {<<"replies">>, maps:get(<<"replies">>, Message, not_found)}
+    ],
+    lists:foldl(
+        fun put_optional/2,
+        #{
+            <<"comment_id">> => CommentID,
+            <<"comment">> => maps:get(<<"comment">>, Message, <<>>),
+            <<"claim_id">> => maps:get(<<"claim-id">>, Message, Target),
+            <<"target">> => Target,
+            <<"timestamp">> => integer_value_or(maps:get(<<"timestamp">>, Message, 0), 0),
+            <<"is_hidden">> => false,
+            <<"native">> => true
+        },
+        Optional
+    ).
+
+first_present([], _Message) ->
+    not_found;
+first_present([Key | Rest], Message) ->
+    case maps:get(Key, Message, not_found) of
+        not_found -> first_present(Rest, Message);
+        Value -> Value
+    end.
+
+integer_value_or(Value, _Default) when is_integer(Value) -> Value;
+integer_value_or(Value, Default) when is_binary(Value) ->
+    try binary_to_integer(Value)
+    catch _:_ -> Default
+    end;
+integer_value_or(_Value, Default) -> Default.
+
+%% Gather the native comments for a list request: match on every target
+%% form the caller supplies (explicit target/immutable id and claim id), so
+%% legacy-anchored and native-anchored comments surface together.
+native_comments_for_request(Base, Req, Opts) ->
+    Targets0 = [
+        case native_target(Base, Req, Opts) of
+            {ok, Target} -> Target;
+            not_found -> not_found
+        end,
+        case first_param([<<"claim-id">>, <<"claim_id">>], Base, Req, Opts) of
+            ClaimID when is_binary(ClaimID), ClaimID =/= <<>> -> ClaimID;
+            _ -> not_found
+        end
+    ],
+    Targets = lists:usort([Target || Target <- Targets0, Target =/= not_found]),
+    Rows =
+        lists:flatmap(
+            fun(Target) ->
+                % Native comments anchor on `target' (the uniform field), but
+                % ones targeting an immutable id also carry the legacy
+                % `claim-id' when known -- match both so legacy-keyed pages
+                % surface them too.
+                native_comment_rows(#{ <<"target">> => Target }, Opts) ++
+                    native_comment_rows(#{ <<"claim-id">> => Target }, Opts)
+            end,
+            Targets
+        ),
+    filter_native_rows(dedupe_native_rows(Rows), Base, Req, Opts).
+
+%% Discover native comments through the query device's match index -- the
+%% same selectors the browser client queries with.
+native_comment_rows(Selector, Opts) ->
+    Query =
+        Selector#{
+            <<"schema">> => ?DEVICE,
+            <<"type">> => <<"comment">>,
+            <<"state">> => <<"active">>
+        },
+    Request =
+        Query#{
+            <<"only">> => maps:keys(Query),
+            <<"return">> => <<"paths">>,
+            <<"cache-control">> => [<<"no-store">>, <<"no-cache">>]
+        },
+    Paths =
+        case catch hb_ao:raw(<<"query@1.0">>, <<"only">>, #{}, Request, Opts) of
+            {ok, Found} when is_list(Found) -> Found;
+            {ok, Found} when is_map(Found) -> indexed_paths(Found, Opts);
+            _ -> []
+        end,
+    lists:filtermap(
+        fun(Path) ->
+            ID = hb_path:to_binary(Path),
+            case native_comment_read(ID, Opts) of
+                {ok, Message} -> {true, native_comment_row(ID, Message)};
+                not_found -> false
+            end
+        end,
+        Paths
+    ).
+
+indexed_paths(Map, Opts) ->
+    Keys = lists:sort([Key || Key <- hb_maps:keys(Map, Opts), is_numeric_key(Key)]),
+    [hb_maps:get(Key, Map, <<>>, Opts) || Key <- Keys].
+
+is_numeric_key(Key) when is_integer(Key) -> true;
+is_numeric_key(Key) when is_binary(Key) ->
+    try _ = binary_to_integer(Key), true
+    catch _:_ -> false
+    end;
+is_numeric_key(_Key) -> false.
+
+native_comment_read(ID, Opts) ->
+    try hb_cache:read(ID, Opts) of
+        {ok, Msg0} when is_map(Msg0) ->
+            Msg = hb_cache:ensure_all_loaded(Msg0, Opts),
+            Schema = hb_maps:get(<<"schema">>, Msg, not_found, Opts),
+            Type = hb_maps:get(<<"type">>, Msg, not_found, Opts),
+            case {Schema, Type} of
+                {?DEVICE, <<"comment">>} -> {ok, Msg};
+                _ -> not_found
+            end;
+        _ -> not_found
+    catch _:_ ->
+        not_found
+    end.
+
+native_comment_by_id(Base, Req, Opts) ->
+    case comment_id(Base, Req, Opts) of
+        {ok, CommentID} ->
+            case native_comment_read(CommentID, Opts) of
+                {ok, Message} -> {ok, native_comment_row(CommentID, Message)};
+                not_found -> not_found
+            end;
+        _ ->
+            not_found
+    end.
+
+dedupe_native_rows(Rows) ->
+    {Deduped, _Seen} =
+        lists:foldl(
+            fun(Row, {Acc, Seen}) ->
+                ID = maps:get(<<"comment_id">>, Row, <<>>),
+                case sets:is_element(ID, Seen) of
+                    true -> {Acc, Seen};
+                    false -> {[Row | Acc], sets:add_element(ID, Seen)}
+                end
+            end,
+            {[], sets:new()},
+            Rows
+        ),
+    lists:reverse(Deduped).
+
+%% Honor the threading filters Commentron applies server-side.
+filter_native_rows(Rows, Base, Req, Opts) ->
+    ParentID =
+        case first_param([<<"parent-id">>, <<"parent_id">>], Base, Req, Opts) of
+            Parent when is_binary(Parent), Parent =/= <<>> -> Parent;
+            _ -> not_found
+        end,
+    TopLevel = truthy(first_param([<<"top-level">>, <<"top_level">>], Base, Req, Opts)),
+    lists:filter(
+        fun(Row) ->
+            RowParent = maps:get(<<"parent_id">>, Row, not_found),
+            case {ParentID, TopLevel} of
+                {not_found, true} -> RowParent =:= not_found;
+                {not_found, _} -> true;
+                {_, _} -> RowParent =:= ParentID
+            end
+        end,
+        Rows
+    ).
+
+truthy(true) -> true;
+truthy(<<"true">>) -> true;
+truthy(1) -> true;
+truthy(<<"1">>) -> true;
+truthy(_) -> false.
+
+%% Native rows are prepended (they are this node's newest state) and the
+%% totals adjusted so pagination maths stay coherent.
+merge_native_items([], Result, _Opts) ->
+    Result;
+merge_native_items(Native, Result, Opts) when is_list(Result) ->
+    merge_native_items(Native, #{ <<"items">> => Result }, Opts);
+merge_native_items(Native, Result, Opts) when is_map(Result) ->
+    Items =
+        case first_value([<<"items">>, <<"comments">>], Result, Opts) of
+            not_found -> [];
+            Existing when is_list(Existing) -> Existing;
+            Existing -> [Existing]
+        end,
+    NativeIDs = [maps:get(<<"comment_id">>, Row, <<>>) || Row <- Native],
+    Kept =
+        lists:filter(
+            fun(Item) when is_map(Item) ->
+                ID = first_value([<<"comment_id">>, <<"comment-id">>, <<"id">>], Item, Opts),
+                not lists:member(ID, NativeIDs);
+               (_Item) -> true
+            end,
+            Items
+        ),
+    Merged = Native ++ Kept,
+    Added = length(Merged) - length(Items),
+    Result#{
+        <<"items">> => Merged,
+        <<"total_items">> => bump_total(first_value([<<"total_items">>, <<"total-items">>], Result, Opts), Added),
+        <<"total_filtered_items">> =>
+            bump_total(first_value([<<"total_filtered_items">>, <<"total-filtered-items">>], Result, Opts), Added)
+    }.
+
+bump_total(not_found, Added) -> Added;
+bump_total(Total, Added) when is_integer(Total) -> Total + Added;
+bump_total(Total, Added) when is_binary(Total) ->
+    try binary_to_integer(Total) + Added
+    catch _:_ -> Added
+    end;
+bump_total(_Total, Added) -> Added.
+
+%% ---------------------------------------------------------------------------
 
 %% @doc Normalize supplied comment data without fetching.
 normalize(Base, Req, Opts) ->
@@ -337,7 +754,7 @@ normalize_list(Result, Raw, Opts) ->
             <<"content-type">> => <<"application/json">>,
             <<"body">> => Raw,
             <<"comments">> => Comments,
-            <<"comment-ids">> => [hb_maps:get(<<"comment-id">>, Comment, Opts) || Comment <- Comments]
+            <<"comment-ids">> => [hb_maps:get(<<"comment-id">>, Comment, not_found, Opts) || Comment <- Comments]
         },
         Optional = [
             {<<"total-items">>, first_value([<<"total_items">>, <<"total-items">>], Result, Opts)},
@@ -364,7 +781,7 @@ normalize_by_id(Result, Raw, Opts) when is_map(Result) ->
                     <<"content-type">> => <<"application/json">>,
                     <<"body">> => Raw,
                     <<"comment">> => Comment,
-                    <<"comment-id">> => hb_maps:get(<<"comment-id">>, Comment, Opts),
+                    <<"comment-id">> => hb_maps:get(<<"comment-id">>, Comment, not_found, Opts),
                     <<"ancestors">> => Ancestors
                 },
                 {ok, copy_comment_refs(Comment, Msg0, Opts)}
@@ -383,7 +800,7 @@ normalize_single_comment(Comment, Raw, Opts) ->
             <<"content-type">> => <<"application/json">>,
             <<"body">> => Raw,
             <<"comment">> => Norm,
-            <<"comment-id">> => hb_maps:get(<<"comment-id">>, Norm, Opts)
+            <<"comment-id">> => hb_maps:get(<<"comment-id">>, Norm, not_found, Opts)
         },
         {ok, copy_comment_refs(Norm, Msg0, Opts)}
     end.
@@ -851,8 +1268,7 @@ signature_response(IsValid) ->
     #{
         <<"device">> => ?DEVICE,
         <<"content-type">> => <<"application/json">>,
-        <<"is-valid">> => IsValid,
-        <<"is_valid">> => IsValid
+        <<"is-valid">> => IsValid
     }.
 
 api_request(Method, Params, Base, Req, Opts) ->
@@ -1066,8 +1482,7 @@ verify_signature_accepts_commentron_vector_test() ->
     {ok, Msg} = verify_signature(#{}, Vector#{
         <<"data-hex">> => <<"6e69636565">>
     }, #{}),
-    ?assertEqual(true, hb_maps:get(<<"is-valid">>, Msg, #{})),
-    ?assertEqual(true, hb_maps:get(<<"is_valid">>, Msg, #{})).
+    ?assertEqual(true, hb_maps:get(<<"is-valid">>, Msg, #{})).
 
 verify_signature_rejects_tampered_data_test() ->
     Vector = commentron_vector(),
@@ -1180,5 +1595,136 @@ reply_comment() ->
         <<"comment">> => <<"Reply.">>,
         <<"signature">> => <<"reply-signature">>
     }.
+
+native_test_opts() ->
+    % Match-capable store: native comment discovery goes through the query
+    % device's reverse-index match, which lmdb supports.
+    Store = hb_test_utils:test_store(hb_store_lmdb),
+    ok = hb_store:start(Store),
+    ok = hb_store:reset(Store),
+    #{
+        <<"store">> => Store,
+        <<"cache-control">> => [<<"no-cache">>, <<"no-store">>],
+        <<"store-all-signed">> => false,
+        % Native comments are committed with the node wallet before caching.
+        <<"priv-wallet">> => ar_wallet:new()
+    }.
+
+%% Commentron endpoint that fails fast, so list tests exercise the
+%% native-only merge branch instead of the network.
+-define(DEAD_COMMENTRON, <<"http://127.0.0.1:1/api/v2">>).
+
+native_create_requires_auth_test() ->
+    Opts = native_test_opts(),
+    ?assertMatch(
+        {error, #{ <<"status">> := 401 }},
+        create(#{}, #{ <<"target">> => <<"native-target">>, <<"comment">> => <<"hi">> }, Opts)
+    ).
+
+native_create_list_and_by_id_roundtrip_test() ->
+    Opts = native_test_opts(),
+    Target = <<"07be6a81bc3ac539284f030b2a353b64ed277ed0ea1916456293217b74460b87:0">>,
+    ClaimID = <<"50d246f7044d7ab368f300ef1d07955c0d71ceeb">>,
+    {ok, Created} =
+        create(
+            #{},
+            #{
+                <<"x-odysee-auth-token">> => <<"test-token">>,
+                <<"target">> => Target,
+                <<"claim_id">> => ClaimID,
+                <<"comment">> => <<"hello native">>,
+                <<"channel_id">> => <<"fb364ef587872515f545a5b4b3182b58073f230f">>,
+                <<"channel_name">> => <<"@veritasium">>
+            },
+            Opts
+        ),
+    ?assertEqual(true, hb_maps:get(<<"native">>, Created, Opts)),
+    Comment = hb_maps:get(<<"result">>, Created, Opts),
+    CommentID = hb_maps:get(<<"comment_id">>, Comment, Opts),
+    ?assertEqual(<<"hello native">>, hb_maps:get(<<"comment">>, Comment, Opts)),
+    ?assertEqual(Target, hb_maps:get(<<"target">>, Comment, Opts)),
+
+    % Comments surface when listing by the uniform target...
+    {ok, ByTarget} =
+        list(#{}, #{ <<"target">> => Target, <<"comment-url">> => ?DEAD_COMMENTRON }, Opts),
+    ?assertEqual([CommentID], hb_maps:get(<<"comment-ids">>, ByTarget, Opts)),
+    % ...and in the raw `body' payload, which is what the HTTP layer serves.
+    BodyEnvelope = hb_json:decode(hb_maps:get(<<"body">>, ByTarget, Opts)),
+    BodyItems = maps:get(<<"items">>, maps:get(<<"result">>, BodyEnvelope)),
+    ?assertEqual(1, length(BodyItems)),
+    ?assertEqual(<<"hello native">>, maps:get(<<"comment">>, hd(BodyItems))),
+    % ...and when listing by the legacy claim id it was also anchored to.
+    {ok, ByClaim} =
+        list(#{}, #{ <<"claim-id">> => ClaimID, <<"comment-url">> => ?DEAD_COMMENTRON }, Opts),
+    ?assertEqual([CommentID], hb_maps:get(<<"comment-ids">>, ByClaim, Opts)),
+
+    % The comment id is a message id: by-id serves it locally.
+    {ok, ByID} = by_id(#{}, #{ <<"comment_id">> => CommentID }, Opts),
+    Norm = hb_maps:get(<<"comment">>, ByID, Opts),
+    ?assertEqual(CommentID, hb_maps:get(<<"comment-id">>, Norm, Opts)),
+    ?assertEqual(<<"hello native">>, hb_maps:get(<<"comment">>, Norm, Opts)),
+    ?assertEqual(
+        <<"@veritasium">>,
+        hb_maps:get(<<"channel-name">>, Norm, Opts)
+    ).
+
+native_create_without_target_stays_on_proxy_path_test() ->
+    Opts = native_test_opts(),
+    % No target -> Commentron proxy; the dead endpoint proves no native
+    % record is created and the legacy path was chosen.
+    Result =
+        create(
+            #{},
+            #{
+                <<"x-odysee-auth-token">> => <<"test-token">>,
+                <<"claim_id">> => <<"50d246f7044d7ab368f300ef1d07955c0d71ceeb">>,
+                <<"comment">> => <<"legacy path">>,
+                <<"comment-url">> => ?DEAD_COMMENTRON
+            },
+            Opts
+        ),
+    ?assertMatch({error, _}, Result).
+
+native_list_honors_threading_filters_test() ->
+    Opts = native_test_opts(),
+    Target = <<"native-thread-target">>,
+    Authed = #{ <<"x-odysee-auth-token">> => <<"test-token">> },
+    {ok, ParentRes} =
+        create(#{}, Authed#{ <<"target">> => Target, <<"comment">> => <<"parent">> }, Opts),
+    ParentID = hb_maps:get(<<"comment-id">>, ParentRes, Opts),
+    {ok, _ReplyRes} =
+        create(
+            #{},
+            Authed#{
+                <<"target">> => Target,
+                <<"comment">> => <<"reply">>,
+                <<"parent_id">> => ParentID
+            },
+            Opts
+        ),
+    {ok, TopLevel} =
+        list(
+            #{},
+            #{
+                <<"target">> => Target,
+                <<"top-level">> => true,
+                <<"comment-url">> => ?DEAD_COMMENTRON
+            },
+            Opts
+        ),
+    ?assertEqual([ParentID], hb_maps:get(<<"comment-ids">>, TopLevel, Opts)),
+    {ok, Replies} =
+        list(
+            #{},
+            #{
+                <<"target">> => Target,
+                <<"parent-id">> => ParentID,
+                <<"comment-url">> => ?DEAD_COMMENTRON
+            },
+            Opts
+        ),
+    RepliesNorm = hb_maps:get(<<"comments">>, Replies, Opts),
+    ?assertEqual(1, length(RepliesNorm)),
+    ?assertEqual(<<"reply">>, hb_maps:get(<<"comment">>, hd(RepliesNorm), Opts)).
 
 -endif.

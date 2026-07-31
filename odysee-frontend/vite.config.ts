@@ -28,6 +28,11 @@ const DEV_AUTH_TOKEN_COOKIE = 'auth_token';
 const DEV_HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
 // Mirrors HYPERBEAM_PUBLIC_DEVICE_PATHS in web/src/routes.js -- keep in sync.
 const DEV_HYPERBEAM_PUBLIC_DEVICE_PREFIX = '/$/api/hyperbeam-public-device/v1';
+// Mirrors HYPERBEAM_PUBLIC_STORE_BATCH_PATH in web/src/routes.js. The dev
+// route serves raw per-id reads; link expansion happens client-side.
+const DEV_HYPERBEAM_PUBLIC_STORE_BATCH_PATH = '/$/api/hyperbeam-public-store/v1/read-batch';
+const DEV_HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
+const DEV_HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY = 12;
 const DEV_HYPERBEAM_PUBLIC_DEVICE_PATHS = new Set([
   '/~search@1.0/query',
   '/~cache@1.0/read',
@@ -312,6 +317,30 @@ function cookieValue(cookieHeader: string, name: string) {
   return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
 }
 
+function getDevHyperbeamJson(url: string) {
+  return new Promise<{ statusCode: number; body: Buffer }>((resolve, reject) => {
+    const target = new URL(url);
+    const request = (target.protocol === 'https:' ? https : http).request(
+      target,
+      {
+        method: 'GET',
+        insecureHTTPParser: true,
+        headers: { accept: 'application/json' },
+      },
+      (response) => {
+        const chunks: Array<Buffer> = [];
+        response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on('end', () => {
+          resolve({ statusCode: response.statusCode || 502, body: Buffer.concat(chunks) });
+        });
+      }
+    );
+    request.setTimeout(15000, () => request.destroy(new Error('HyperBEAM batch proxy timed out')));
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 function postDevHyperbeamJson(url: string, body: Record<string, any>, headers: Record<string, string> = {}) {
   return new Promise<{ statusCode: number; contentType: string; body: Buffer }>((resolve, reject) => {
     const target = new URL(url);
@@ -368,6 +397,62 @@ function devHyperbeamAuthRoutesPlugin() {
               cookie_names: cookieNames,
             })
           );
+          return;
+        }
+
+        if (requestUrl.pathname === DEV_HYPERBEAM_PUBLIC_STORE_BATCH_PATH && req.method === 'POST') {
+          const nodeUrl = String(
+            process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || ''
+          ).replace(/\/+$/, '');
+          if (!nodeUrl) {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'hyperbeam node unavailable' }));
+            return;
+          }
+
+          try {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const rawBody = Buffer.concat(chunks).toString('utf8');
+            const requestBody = rawBody ? JSON.parse(rawBody) : {};
+            const requestedIds = Array.isArray(requestBody.ids) ? requestBody.ids : [];
+            const ids = [...new Set(requestedIds.map((id) => String(id || '').trim()).filter(Boolean))].slice(
+              0,
+              DEV_HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT
+            );
+
+            const results = {};
+            let cursor = 0;
+            const workers = Array.from(
+              { length: Math.min(ids.length, DEV_HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY) },
+              async () => {
+                while (cursor < ids.length) {
+                  const id = ids[cursor++];
+                  try {
+                    const response = await getDevHyperbeamJson(
+                      `${nodeUrl}/${encodeURIComponent(id).replace(/%3A/gi, ':')}?accept-bundle=true`
+                    );
+                    if (response.statusCode >= 200 && response.statusCode < 300) {
+                      results[id] = JSON.parse(response.body.toString('utf8'));
+                    }
+                  } catch {}
+                }
+              }
+            );
+            await Promise.all(workers);
+
+            res.statusCode = 200;
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ results }));
+          } catch (error) {
+            res.statusCode = 502;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({ error: error instanceof Error ? error.message : 'hyperbeam batch proxy failed' })
+            );
+          }
           return;
         }
 
