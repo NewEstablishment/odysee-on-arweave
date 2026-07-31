@@ -3347,37 +3347,17 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
 async function fetchImmutableResolveEntries(urls: Array<string>): Promise<Array<[string, any]>> {
   const immutableIds = urls.map(immutableRouteIdFromUri).filter((id): id is string => Boolean(id));
   const batchResults = await fetchImmutableBatchJsonOrNull(immutableIds).catch(() => new Map<string, any>());
-  const loaded = await Promise.all(
-    urls.map(async (uri) => {
+  return Promise.all(
+    urls.map(async (uri): Promise<[string, any]> => {
       const immutableId = immutableRouteIdFromUri(uri);
-      if (!immutableId) return { uri, immutableId: null, result: null, decodedClaim: null };
+      if (!immutableId) return [uri, null];
 
       const result =
         batchResults.get(immutableId) || (await fetchCachedImmutableJsonOrNull(immutableId).catch(() => null));
-      return {
-        uri,
-        immutableId,
-        result,
-        decodedClaim: decodeClaimMetadata(storePayload(result)),
-      };
+      const decodedClaim = decodeClaimMetadata(storePayload(result));
+      return [uri, result ? immutableClaimFromHyperbeam(result, immutableId, null, decodedClaim) : null];
     })
   );
-  const channelIds = Array.from(
-    new Set(loaded.map(({ decodedClaim }) => decodedClaim?.signedChannelId).filter((id): id is string => Boolean(id)))
-  );
-  const channelsById = await fetchImmutableSigningChannels(channelIds);
-
-  return loaded.map(({ uri, immutableId, result, decodedClaim }) => [
-    uri,
-    immutableId && result
-      ? immutableClaimFromHyperbeam(
-          result,
-          immutableId,
-          decodedClaim?.signedChannelId ? channelsById.get(decodedClaim.signedChannelId.toLowerCase()) : null,
-          decodedClaim
-        )
-      : null,
-  ]);
 }
 
 async function fetchImmutableSigningChannels(channelIds: Array<string>): Promise<Map<string, any>> {

@@ -69,6 +69,9 @@ and `ClaimTilesDiscover` batch-hydrates those URIs
 without issuing browser claim searches or resolving mutable pins. Keep
 `CUSTOM_HOMEPAGE_SNAPSHOT_FILE` outside the deployment checkout and use
 `pnpm run homepage:materialize` to force a complete prewarm.
+Media hydration must reach Redux as soon as the immutable batch read succeeds.
+Signing-channel or other optional enrichment must never gate rendering the
+resolved media rows.
 
 ## Debug Console
 
