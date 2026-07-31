@@ -150,7 +150,7 @@ async function getMaterializedHomepageData(forceRefresh = false) {
   )
     return snapshot.data;
 
-  if (!forceRefresh && snapshot && isCurrentHomepageSnapshot(snapshot.data)) {
+  if (!forceRefresh && snapshot) {
     refreshMaterializedHomepageData(snapshotPath).catch((err) => {
       console.log('getHomepageJSON materialization:', err); // eslint-disable-line no-console
     });

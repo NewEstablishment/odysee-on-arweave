@@ -5,9 +5,9 @@ const { hyperbeamNodeSourceClaimSearch, hyperbeamNodeWarmImmutableClaim } = requ
 
 const DEFAULT_PAGE_SIZE = 8;
 const DEFAULT_MAX_AGE_MS = 15 * 60 * 1000;
-const QUERY_CONCURRENCY = 6;
-const WARM_CONCURRENCY = 24;
-const CHANNEL_WARM_CONCURRENCY = 6;
+const QUERY_CONCURRENCY = 2;
+const WARM_CONCURRENCY = 6;
+const CHANNEL_WARM_CONCURRENCY = 2;
 const WARM_RETRIES = 3;
 const SEARCH_RETRIES = 3;
 const RESOLVE_BATCH_SIZE = 24;

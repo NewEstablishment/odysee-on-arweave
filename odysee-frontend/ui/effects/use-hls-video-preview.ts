@@ -1,10 +1,10 @@
 import React from 'react';
 import Lbry from 'lbry';
 import { loadHlsConstructor, HLS_EVENT_MANIFEST_PARSED } from 'component/viewers/videoViewer/internal/hls';
-import { hyperbeamImmutableIdFromUri } from 'util/hyperbeam-route';
 
 const manifestCache = new Map<string, { manifestUrl: string; basePath: string } | null>();
 const streamingUrlCache = new Map<string, string>();
+const streamingUrlRequestCache = new Map<string, Promise<string | null>>();
 let activePreviewUri: string | null = null;
 
 function resolveStreamingUrl(streamingUrl: string | null | undefined, uri: string): Promise<string | null> {
@@ -12,9 +12,11 @@ function resolveStreamingUrl(streamingUrl: string | null | undefined, uri: strin
 
   const cached = streamingUrlCache.get(uri);
   if (cached) return Promise.resolve(cached);
-  if (hyperbeamImmutableIdFromUri(uri)) return Promise.resolve(null);
 
-  return Lbry.get({ uri })
+  const pending = streamingUrlRequestCache.get(uri);
+  if (pending) return pending;
+
+  const request = Lbry.get({ uri })
     .then((response: any) => {
       const url = response?.streaming_url;
       if (url) {
@@ -24,6 +26,8 @@ function resolveStreamingUrl(streamingUrl: string | null | undefined, uri: strin
       return null;
     })
     .catch(() => null);
+  streamingUrlRequestCache.set(uri, request);
+  return request;
 }
 
 function resolveManifestUrl(streamingUrl: string): Promise<{ manifestUrl: string; basePath: string } | null> {
