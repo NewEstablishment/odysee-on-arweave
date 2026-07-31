@@ -73,7 +73,17 @@ function injectHomepageBootstrap(fullHtml) {
     const modified = fs.statSync(snapshotPath).mtimeMs;
     if (homepageBootstrap.modified !== modified) {
       const snapshot = readHomepageSnapshot(snapshotPath);
-      const serialized = JSON.stringify(snapshot?.data || {})
+      const compactData = structuredClone(snapshot?.data || {});
+      Object.values(compactData).forEach((homepage) => {
+        Object.values(homepage?.categories || {}).forEach((category) => {
+          delete category.channelIds;
+          delete category.pinnedClaimIds;
+          delete category.pinnedUrls;
+          delete category.immutableChannelIds;
+          delete category.unresolvedChannelIds;
+        });
+      });
+      const serialized = JSON.stringify(compactData)
         .replace(/</g, '\\u003c')
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');

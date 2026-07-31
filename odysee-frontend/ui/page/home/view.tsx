@@ -333,7 +333,7 @@ function HomePage() {
                 }
           }
           forceShowReposts={id !== 'FOLLOWING'}
-          loading={id === 'FOLLOWING' ? fetchingActiveLivestreams : false}
+          loading={false}
           fetchViewCount
           sectionTitle={title}
         />

@@ -317,11 +317,11 @@ references are excluded and backfilled before publication. Web requests only rea
 the completed snapshot and never trigger a refresh. Deployment automation also
 refreshes stale snapshots periodically, without restarting the frontend, so the
 dynamic category searches continue selecting current claims between code releases.
-The SSR root response injects the last valid snapshot before the application
-bundle executes, avoiding a network-gated placeholder on reload. Immutable claim
-and channel payloads still hydrate through the normal integration path into Redux,
-with a versioned browser Cache API layer preventing repeated immutable batch reads
-across ordinary reloads.
+The SSR root response injects a compact, all-locale view of the last valid
+snapshot before the application bundle executes, avoiding a network-gated
+homepage selection on reload. It contains immutable locators rather than claim
+payloads. Claims and channels hydrate exclusively through the normal HyperBEAM
+batch-read integration path into Redux.
 
 ### Playback and Media
 

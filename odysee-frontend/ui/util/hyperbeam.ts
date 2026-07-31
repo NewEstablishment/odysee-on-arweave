@@ -82,7 +82,6 @@ const NORMALIZED_PRIVATE_PARAM_KEYS = new Set(
 );
 const SAME_ORIGIN_COOKIE_AUTH = '__same_origin_cookie_auth__';
 const deviceReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
-const IMMUTABLE_BROWSER_CACHE = 'odysee-hyperbeam-immutable-v1';
 const nativeCommentQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<any>> }>();
 const nativeCommentSignatureCache = new Map<string, Promise<boolean>>();
 const nativeCommentControlQueryCache = new Map<
@@ -148,9 +147,7 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
     immutableUris,
     isObject(params?.immutable_signing_channel_ids) ? params.immutable_signing_channel_ids : {}
   );
-  const resolvedImmutableUris = new Set(immutableEntries.filter(([, claim]) => claim).map(([uri]) => uri));
-  const unresolvedImmutableUris = immutableUris.filter((uri) => !resolvedImmutableUris.has(uri));
-  const resolveEntries = await fetchResolveEntries([...unresolvedImmutableUris, ...plainUris]);
+  const resolveEntries = await fetchResolveEntries(plainUris);
 
   return Object.fromEntries([...channelEntries, ...immutableEntries, ...resolveEntries].filter(([, claim]) => claim));
 }
@@ -3633,13 +3630,8 @@ async function fetchImmutableBatchJsonOrNull(ids: Array<string>): Promise<Map<st
     })
   );
 
-  const browserCachedResults = await readBrowserImmutableResults(uncachedIds);
-  browserCachedResults.forEach((result, id) => results.set(id, result));
-  const browserCachedIds = new Set(browserCachedResults.keys());
-  const networkIds = uncachedIds.filter((id) => !browserCachedIds.has(id));
-
-  if (networkIds.length) {
-    const batchResults = await fetchPublicStoreBatchResults(networkIds);
+  if (uncachedIds.length) {
+    const batchResults = await fetchPublicStoreBatchResults(uncachedIds);
     batchResults.forEach((result, id) => results.set(id, result));
   }
 
@@ -3648,44 +3640,7 @@ async function fetchImmutableBatchJsonOrNull(ids: Array<string>): Promise<Map<st
   expandedResults.forEach((result, id) => {
     deviceReadCache.set(`immutable:${id}`, { expiresAt, promise: Promise.resolve(result) });
   });
-  await writeBrowserImmutableResults(expandedResults);
   return expandedResults;
-}
-
-function browserImmutableCacheKey(id: string) {
-  return `${window.location.origin}/$/cache/hyperbeam-immutable/${encodeURIComponent(id)}`;
-}
-
-async function readBrowserImmutableResults(ids: Array<string>): Promise<Map<string, any>> {
-  const results = new Map<string, any>();
-  if (typeof window === 'undefined' || typeof caches === 'undefined' || !ids.length) return results;
-
-  try {
-    const cache = await caches.open(IMMUTABLE_BROWSER_CACHE);
-    await Promise.all(
-      ids.map(async (id) => {
-        const response = await cache.match(browserImmutableCacheKey(id));
-        if (response) results.set(id, await response.json());
-      })
-    );
-  } catch {}
-  return results;
-}
-
-async function writeBrowserImmutableResults(results: Map<string, any>) {
-  if (typeof window === 'undefined' || typeof caches === 'undefined' || !results.size) return;
-
-  try {
-    const cache = await caches.open(IMMUTABLE_BROWSER_CACHE);
-    await Promise.all(
-      Array.from(results, ([id, result]) =>
-        cache.put(
-          browserImmutableCacheKey(id),
-          new Response(JSON.stringify(result), { headers: { 'content-type': 'application/json' } })
-        )
-      )
-    );
-  } catch {}
 }
 
 async function fetchPublicStoreBatchResults(ids: Array<string>): Promise<Map<string, any>> {

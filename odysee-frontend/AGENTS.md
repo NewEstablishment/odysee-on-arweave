@@ -81,14 +81,15 @@ frontend. A production custom-homepage build must
 wait for materialized category data instead of briefly rendering the built-in
 personalized fallback; local development may retain that fallback when no custom
 homepage exists.
-The SSR root document injects the last valid materialized homepage before the
-application bundle runs, so a reload never waits for the homepage API before its
-first render. Public immutable store payloads are retained in a versioned browser
-Cache API store and restored into the normal in-memory/Redux hydration path after
-reload; this is a cache layer, not an alternate claim state or transport.
+The SSR root document injects a compact, all-locale locator view of the last
+valid materialized homepage before the application bundle runs, so a reload
+never waits for the homepage API before selecting the user's locale. It must not
+embed claim payloads or persist a second browser object store. Immutable objects
+hydrate through HyperBEAM batch reads into the normal in-memory/Redux path.
 Media hydration must reach Redux as soon as the immutable batch read succeeds.
-Signing-channel or other optional enrichment must never gate rendering the
-resolved media rows.
+Signing-channel, active-livestream, or other optional enrichment must never gate
+rendering the resolved media rows. A failed immutable read must remain unresolved
+and must not fall through to mutable name or claim-ID resolution.
 Internal featured-banner targets are materialized and routed by immutable ID too.
 
 ## Debug Console
