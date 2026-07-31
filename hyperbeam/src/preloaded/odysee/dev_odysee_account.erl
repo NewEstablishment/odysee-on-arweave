@@ -167,12 +167,19 @@ decode_body(Method, Body, Opts) ->
         end
     end.
 
-proxy_params(Base, Req, Opts) ->
+proxy_params(Base0, Req0, Opts) ->
+    % Resolve any linked values before filtering: raw maps:filter would pass a
+    % {link, ...} through unloaded and forward it to the upstream API as a
+    % broken value.
+    Base = hb_cache:ensure_all_loaded(Base0, Opts),
+    Req = hb_cache:ensure_all_loaded(Req0, Opts),
     BodyParams = maps:merge(body_params(Base, Opts), body_params(Req, Opts)),
     Clean = maps:merge(clean_proxy_map(Base), maps:merge(clean_proxy_map(Req), BodyParams)),
     maps:without(proxy_control_keys(), Clean).
 
-api_params(Base, Req, Opts) ->
+api_params(Base0, Req0, Opts) ->
+    Base = hb_cache:ensure_all_loaded(Base0, Opts),
+    Req = hb_cache:ensure_all_loaded(Req0, Opts),
     BodyParams = maps:merge(body_params(Base, Opts), body_params(Req, Opts)),
     Clean = maps:merge(api_clean_map(Base), maps:merge(api_clean_map(Req), BodyParams)),
     Params0 = maps:without(api_control_keys(), Clean),

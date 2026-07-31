@@ -152,11 +152,17 @@ raw_write(Base, Req, Opts) ->
         _ ->
             safe(fun() ->
                 maybe
-                    {ok, Owner} ?= authenticated_owner(Base, Req, Opts),
+                    % The write is auth-gated, but a raw blob is
+                    % content-addressed bytes: it carries no commitment and is
+                    % bound to no owner (anyone writing the same bytes gets the
+                    % same id). Ownership is asserted later, at index/finalize,
+                    % on the committed record -- so the response must not claim
+                    % a signer here.
+                    {ok, _Owner} ?= authenticated_owner(Base, Req, Opts),
                     {ok, Bytes} ?= raw_body(Req, Opts),
                     ok ?= enforce_size(Bytes, Base, Req, Opts),
                     {ok, ID} ?= hb_cache:write(Bytes, Opts),
-                    {ok, raw_write_response(ID, Owner)}
+                    {ok, raw_write_response(ID)}
                 else
                     Error -> Error
                 end
@@ -737,14 +743,14 @@ normalize_index_claim(_Claim, Owner, DataID, Name, MediaType, Filename, Size, Me
 
 response(Record, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
-    RecordID = hb_maps:get(<<"record-id">>, Record, Opts),
+    RecordID = hb_maps:get(<<"record-id">>, Record, not_found, Opts),
     Msg = (cors_headers())#{
         <<"device">> => ?DEVICE,
         <<"status">> => 200,
         <<"content-type">> => <<"application/json">>,
         <<"id">> => RecordID,
         <<"record-id">> => RecordID,
-        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, Opts),
+        <<"data-id">> => hb_maps:get(<<"data-id">>, Record, not_found, Opts),
         <<"media-path">> => generic_read_path(RecordID),
         <<"read-path">> => generic_read_path(RecordID),
         <<"url">> => generic_read_path(RecordID),
@@ -757,13 +763,13 @@ response(Record, Opts) ->
 
 index_response(Record, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Record, #{}, Opts),
-    DataID = hb_maps:get(<<"data-id">>, Record, Opts),
+    DataID = hb_maps:get(<<"data-id">>, Record, not_found, Opts),
     Msg = (cors_headers())#{
         <<"device">> => ?DEVICE,
         <<"status">> => 200,
         <<"content-type">> => <<"application/json">>,
-        <<"id">> => hb_maps:get(<<"record-id">>, Record, Opts),
-        <<"record-id">> => hb_maps:get(<<"record-id">>, Record, Opts),
+        <<"id">> => hb_maps:get(<<"record-id">>, Record, not_found, Opts),
+        <<"record-id">> => hb_maps:get(<<"record-id">>, Record, not_found, Opts),
         <<"data-id">> => DataID,
         <<"media-path">> => generic_read_path(DataID),
         <<"record">> => public_record(Record, Opts),
@@ -776,7 +782,7 @@ index_response(Record, Opts) ->
 public_record(Record, Opts) ->
     hb_maps:without([<<"body">>], Record, Opts).
 
-raw_write_response(ID, Owner) ->
+raw_write_response(ID) ->
     ReadPath = <<"/", ID/binary>>,
     Body = #{
         <<"id">> => ID,
@@ -792,7 +798,6 @@ raw_write_response(ID, Owner) ->
         <<"path">> => ID,
         <<"read-path">> => ReadPath,
         <<"url">> => ReadPath,
-        <<"signers">> => [Owner],
         <<"body">> => hb_json:encode(Body)
     }.
 
@@ -1266,13 +1271,16 @@ search_document(Record, Claim, Opts) ->
     SubCount = number_value(first_field([<<"sub_count">>, <<"sub_cnt">>], SigningChannel, Opts), 0),
     ClaimCount = number_value(first_field([<<"claim_count">>, <<"claim_cnt">>], SigningChannel, Opts), 0),
     Tags = list_value(map_value(Value, <<"tags">>, [], Opts)),
-    RecencyRank = recency_rank(Timestamp),
+    % Reference time is injectable via Opts (defaulting to the system clock),
+    % so ranking is testable and a node can pin it for reproducible ordering.
+    Now = now_seconds(Opts),
+    RecencyRank = recency_rank(Timestamp, Now),
     Rank = search_rank(#{
         has_channel => HasChannel,
         view_count => ViewCount,
         sub_count => SubCount,
         timestamp => Timestamp
-    }),
+    }, Now),
     #{
         <<"id">> => RecordID,
         <<"doc_id">> => ClaimID,
@@ -1341,8 +1349,15 @@ number_value(Value, Default) when is_binary(Value) ->
     end;
 number_value(_Value, Default) -> Default.
 
-search_rank(Values) ->
-    search_rank(Values, erlang:system_time(second)).
+%% Reference time is read from Opts (`now`, seconds) when supplied, else the
+%% system clock. Keeps recency ranking testable and node-pinnable.
+now_seconds(Opts) ->
+    case hb_maps:get(<<"now">>, Opts, not_found, Opts) of
+        Now when is_integer(Now) -> Now;
+        Now when is_binary(Now) ->
+            try binary_to_integer(Now) catch _:_ -> erlang:system_time(second) end;
+        _ -> erlang:system_time(second)
+    end.
 
 search_rank(Values, Now) ->
     Timestamp = maps:get(timestamp, Values, 0),
@@ -1368,8 +1383,7 @@ search_rank(Values, Now) ->
 bounded_log_rank(Value, Cap, Weight) ->
     math:log(max(0, min(Value, Cap)) + 1) / math:log(Cap + 1) * Weight.
 
-recency_rank(Timestamp) ->
-    Now = erlang:system_time(second),
+recency_rank(Timestamp, Now) ->
     AgeDays = max(0, (Now - number_value(Timestamp, 0)) div 86400),
     if
         AgeDays =< 7 -> 60;
@@ -1725,16 +1739,15 @@ list_response(Items, Total, Page, PageSize) ->
         <<"total_items">> => Total,
         <<"total_pages">> => TotalPages
     },
+    % Pagination lives in the snake_case `result' (the legacy API payload the
+    % client reads); it is not duplicated as snake_case message-level keys.
     Msg = (cors_headers())#{
         <<"device">> => ?DEVICE,
         <<"status">> => 200,
         <<"content-type">> => <<"application/json">>,
         <<"result">> => Result,
         <<"items">> => Items,
-        <<"page">> => Page,
-        <<"page_size">> => PageSize,
-        <<"total_items">> => Total,
-        <<"total_pages">> => TotalPages
+        <<"page">> => Page
     },
     Msg#{ <<"body">> => hb_json:encode(Msg) }.
 

@@ -100,39 +100,24 @@ verify_policy(Policy, Opts) ->
     Commitments = hb_maps:get(<<"commitments">>, Policy, #{}, Opts),
     SignedCommitmentIDs = signed_commitment_ids(Commitments),
     is_map(Commitments)
+        % At least one real (non-hmac) signature must be present...
         andalso SignedCommitmentIDs =/= []
         andalso hb_maps:get(<<"device">>, Policy, not_found, Opts) =:= ?DEVICE
-        andalso signed_commitments_verify(Policy, SignedCommitmentIDs, Commitments, Opts)
+        % ...and every commitment must cryptographically verify, via the
+        % canonical link-aware message verifier (base reconstructed from the
+        % committed set) -- not a shape check. A policy whose signature fails
+        % is rejected, so the gate dev_odysee_stream relies on cannot be forged
+        % by supplying a commitment map with the right field names.
+        andalso verify_signed(Policy, Opts)
+        % ...and `device' and `rules' must be inside the committed set, so a
+        % valid signature over unrelated keys cannot smuggle in the rules.
         andalso signed_key(<<"device">>, Policy, Opts)
         andalso signed_key(<<"rules">>, Policy, Opts).
 
-signed_commitments_verify(Policy, SignedCommitmentIDs, Commitments, Opts) ->
-    lists:any(
-        fun(ID) ->
-            Commitment = hb_maps:get(ID, Commitments, not_found, Opts),
-            verify_commitment_fields(Policy, Commitment, Opts)
-        end,
-        SignedCommitmentIDs
-    ).
-
-verify_commitment_fields(_Policy, not_found, _Opts) ->
-    false;
-verify_commitment_fields(Policy, Commitment, Opts) when is_map(Commitment) ->
-    CommittedKeys = hb_maps:get(<<"committed">>, Commitment, [], Opts),
-    Device = hb_maps:get(<<"commitment-device">>, Commitment, <<"httpsig@1.0">>, Opts),
-    Base = maps:with(CommittedKeys, Policy),
-    case hb_ao:raw(Device, <<"verify">>, Base, Commitment, Opts) of
-        {ok, true} -> true;
-        _ -> signed_commitment_shape(Commitment, Opts)
-    end;
-verify_commitment_fields(_Policy, _Commitment, _Opts) ->
-    false.
-
-signed_commitment_shape(Commitment, Opts) ->
-    hb_maps:get(<<"type">>, Commitment, not_found, Opts) =/= <<"hmac-sha256">>
-        andalso hb_maps:get(<<"committer">>, Commitment, not_found, Opts) =/= not_found
-        andalso hb_maps:get(<<"keyid">>, Commitment, not_found, Opts) =/= not_found
-        andalso hb_maps:get(<<"signature">>, Commitment, not_found, Opts) =/= not_found.
+verify_signed(Policy, Opts) ->
+    try hb_message:verify(Policy, all, Opts) =:= true
+    catch _:_ -> false
+    end.
 
 signed_commitment_ids(Commitments) when is_map(Commitments) ->
     [
@@ -521,6 +506,28 @@ evaluate_rejects_unsigned_policy_test() ->
             #{}
         )
     ).
+
+%% A forged "signed" policy -- a valid signature over one rule set, with the
+%% rules then swapped -- must be rejected, not accepted on commitment shape.
+evaluate_rejects_forged_signature_test() ->
+    Signed = signed_policy([deny_rule()]),
+    Forged = Signed#{ <<"rules">> => hb_json:encode([tampered_deny_rule()]) },
+    ?assertEqual(
+        {error, unsigned_or_invalid_policy},
+        evaluate(
+            #{ <<"claim-id">> => <<"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">> },
+            #{ <<"odysee-policy">> => Forged },
+            #{}
+        )
+    ).
+
+tampered_deny_rule() ->
+    #{
+        <<"id">> => <<"forged">>,
+        <<"action">> => <<"deny">>,
+        <<"reason">> => <<"forged">>,
+        <<"claim-id">> => <<"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">>
+    }.
 
 country_rule_requires_country_match_test() ->
     Policy =

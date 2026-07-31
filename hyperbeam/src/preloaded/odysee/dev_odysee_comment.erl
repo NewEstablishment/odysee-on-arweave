@@ -754,7 +754,7 @@ normalize_list(Result, Raw, Opts) ->
             <<"content-type">> => <<"application/json">>,
             <<"body">> => Raw,
             <<"comments">> => Comments,
-            <<"comment-ids">> => [hb_maps:get(<<"comment-id">>, Comment, Opts) || Comment <- Comments]
+            <<"comment-ids">> => [hb_maps:get(<<"comment-id">>, Comment, not_found, Opts) || Comment <- Comments]
         },
         Optional = [
             {<<"total-items">>, first_value([<<"total_items">>, <<"total-items">>], Result, Opts)},
@@ -781,7 +781,7 @@ normalize_by_id(Result, Raw, Opts) when is_map(Result) ->
                     <<"content-type">> => <<"application/json">>,
                     <<"body">> => Raw,
                     <<"comment">> => Comment,
-                    <<"comment-id">> => hb_maps:get(<<"comment-id">>, Comment, Opts),
+                    <<"comment-id">> => hb_maps:get(<<"comment-id">>, Comment, not_found, Opts),
                     <<"ancestors">> => Ancestors
                 },
                 {ok, copy_comment_refs(Comment, Msg0, Opts)}
@@ -800,7 +800,7 @@ normalize_single_comment(Comment, Raw, Opts) ->
             <<"content-type">> => <<"application/json">>,
             <<"body">> => Raw,
             <<"comment">> => Norm,
-            <<"comment-id">> => hb_maps:get(<<"comment-id">>, Norm, Opts)
+            <<"comment-id">> => hb_maps:get(<<"comment-id">>, Norm, not_found, Opts)
         },
         {ok, copy_comment_refs(Norm, Msg0, Opts)}
     end.
@@ -1268,8 +1268,7 @@ signature_response(IsValid) ->
     #{
         <<"device">> => ?DEVICE,
         <<"content-type">> => <<"application/json">>,
-        <<"is-valid">> => IsValid,
-        <<"is_valid">> => IsValid
+        <<"is-valid">> => IsValid
     }.
 
 api_request(Method, Params, Base, Req, Opts) ->
@@ -1483,8 +1482,7 @@ verify_signature_accepts_commentron_vector_test() ->
     {ok, Msg} = verify_signature(#{}, Vector#{
         <<"data-hex">> => <<"6e69636565">>
     }, #{}),
-    ?assertEqual(true, hb_maps:get(<<"is-valid">>, Msg, #{})),
-    ?assertEqual(true, hb_maps:get(<<"is_valid">>, Msg, #{})).
+    ?assertEqual(true, hb_maps:get(<<"is-valid">>, Msg, #{})).
 
 verify_signature_rejects_tampered_data_test() ->
     Vector = commentron_vector(),

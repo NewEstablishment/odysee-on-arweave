@@ -223,6 +223,8 @@ error_response({error, {missing_required, Key}}) ->
 error_response(Reason) ->
     #{<<"status">> => 500, <<"message">> => hb_util:bin(io_lib:format("~p", [Reason]))}.
 
+-ifdef(TEST).
+
 test_opts(Tag) ->
     #{<<"store">> => [hb_test_utils:test_store(hb_store_fs, Tag)]}.
 
@@ -323,3 +325,5 @@ operator_gate_rejects_unsigned_on_claimed_node_test() ->
     Signed = hb_message:commit(Unsigned, Opts),
     ?assertMatch({ok, #{<<"status">> := 200}}, hb_ao:resolve(Signed, <<"point">>, Opts)),
     ?assertEqual(<<"gated">>, current_marker(Key, Opts)).
+
+-endif.

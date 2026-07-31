@@ -32,8 +32,8 @@ decode(Base, Req, Opts) ->
             {ok, RawTx} ?= decode_hex(<<"tx-hex">>, TxHex),
             {ok, Tx} ?= parse_tx(RawTx),
             {ok, NOut} ?= nout(Base, Req, Opts),
-            {ok, Output} ?= output_at(NOut, hb_maps:get(<<"outputs">>, Tx, Opts)),
-            {ok, ClaimScript} ?= decode_claim_script(hb_maps:get(<<"script">>, Output, Opts)),
+            {ok, Output} ?= output_at(NOut, hb_maps:get(<<"outputs">>, Tx, not_found, Opts)),
+            {ok, ClaimScript} ?= decode_claim_script(hb_maps:get(<<"script">>, Output, not_found, Opts)),
             {ok, proof_message(TxHex, Tx, NOut, Output, ClaimScript)}
         else
             Error -> Error

@@ -359,7 +359,7 @@ playback_response(Stream, Base, Req, Opts) ->
     URL =
         case BytesPlayback of
             true -> media_url(Stream, Base, Req, Opts);
-            false -> hb_maps:get(<<"streaming-url">>, Stream, Opts)
+            false -> hb_maps:get(<<"streaming-url">>, Stream, not_found, Opts)
         end,
     case redirect_requested(Base, Req, Opts) of
         true ->
@@ -394,12 +394,12 @@ playback_response_with_policy(Stream, Base, Req, Opts) ->
 
 playback_payload(Stream, Opts) ->
     Pairs = [
-        {<<"streaming_url">>, hb_maps:get(<<"streaming-url">>, Stream, Opts)},
-        {<<"download_url">>, hb_maps:get(<<"download-url">>, Stream, Opts)},
-        {<<"sd_hash">>, hb_maps:get(<<"sd-hash">>, Stream, Opts)},
-        {<<"media_type">>, hb_maps:get(<<"media-type">>, Stream, Opts)},
-        {<<"claim_id">>, hb_maps:get(<<"claim-id">>, Stream, Opts)},
-        {<<"claim_name">>, hb_maps:get(<<"claim-name">>, Stream, Opts)},
+        {<<"streaming_url">>, hb_maps:get(<<"streaming-url">>, Stream, not_found, Opts)},
+        {<<"download_url">>, hb_maps:get(<<"download-url">>, Stream, not_found, Opts)},
+        {<<"sd_hash">>, hb_maps:get(<<"sd-hash">>, Stream, not_found, Opts)},
+        {<<"media_type">>, hb_maps:get(<<"media-type">>, Stream, not_found, Opts)},
+        {<<"claim_id">>, hb_maps:get(<<"claim-id">>, Stream, not_found, Opts)},
+        {<<"claim_name">>, hb_maps:get(<<"claim-name">>, Stream, not_found, Opts)},
         {<<"title">>, hb_maps:get(<<"title">>, Stream, not_found, Opts)},
         {<<"description">>, hb_maps:get(<<"description">>, Stream, not_found, Opts)},
         {<<"stream_type">>, hb_maps:get(<<"stream-type">>, Stream, not_found, Opts)},
@@ -420,8 +420,8 @@ playback_payload(Stream, Opts) ->
 
 descriptor_media_request(Stream, Base, Req, Opts) ->
     Msg0 = #{
-        <<"sd-hash">> => hb_maps:get(<<"sd-hash">>, Stream, Opts),
-        <<"media-type">> => hb_maps:get(<<"media-type">>, Stream, Opts),
+        <<"sd-hash">> => hb_maps:get(<<"sd-hash">>, Stream, not_found, Opts),
+        <<"media-type">> => hb_maps:get(<<"media-type">>, Stream, not_found, Opts),
         <<"fetch-blobs">> => true
     },
     Msg1 =
@@ -609,8 +609,8 @@ bridge_media_response(Stream, Base, Req, Opts) ->
         true ?= is_binary(SDHash),
         {ok, Start, End} ?= bridge_range(Stream, Base, Req, Opts),
         {ok, Result} ?= hb_lbry_bridge:stream_range(SDHash, Start, End, Opts),
-        Body = hb_maps:get(<<"bytes">>, Result, Opts),
-        ActualEnd = hb_maps:get(<<"end">>, Result, Opts),
+        Body = hb_maps:get(<<"bytes">>, Result, not_found, Opts),
+        ActualEnd = hb_maps:get(<<"end">>, Result, not_found, Opts),
         Total = stream_size(Stream, Opts),
         Msg0 =
             (cors_headers())#{
@@ -630,7 +630,7 @@ bridge_media_response(Stream, Base, Req, Opts) ->
                 <<"sd-hash">> => hb_util:to_lower(SDHash),
                 <<"start">> => Start,
                 <<"end">> => ActualEnd,
-                <<"requested-end">> => hb_maps:get(<<"requested-end">>, Result, Opts),
+                <<"requested-end">> => hb_maps:get(<<"requested-end">>, Result, not_found, Opts),
                 <<"body">> => Body
             },
         Msg1 = put_optional({<<"byte-size">>, Total}, Msg0),
@@ -977,7 +977,7 @@ verified_stream_response(Stream, Base, Req, Opts) ->
 
 verified_stream_message(Stream, Base, Req, Opts) ->
     Claim = hb_maps:get(<<"claim">>, Stream, #{}, Opts),
-    SDHash = hb_maps:get(<<"sd-hash">>, Stream, Opts),
+    SDHash = hb_maps:get(<<"sd-hash">>, Stream, not_found, Opts),
     Signature = signature_attestation(Claim, Opts),
     Channel = channel_attestation(Claim, Opts),
     Descriptor = descriptor_attestation(Stream, Base, Req, Opts),
@@ -991,16 +991,16 @@ verified_stream_message(Stream, Base, Req, Opts) ->
             <<"device">> => ?DEVICE,
             <<"view">> => <<"verified-stream">>,
             <<"content-type">> => <<"application/json">>,
-            <<"claim-id">> => hb_maps:get(<<"claim-id">>, Stream, Opts),
-            <<"claim-name">> => hb_maps:get(<<"claim-name">>, Stream, Opts),
+            <<"claim-id">> => hb_maps:get(<<"claim-id">>, Stream, not_found, Opts),
+            <<"claim-name">> => hb_maps:get(<<"claim-name">>, Stream, not_found, Opts),
             <<"sd-hash">> => SDHash,
             <<"valid">> => Valid,
             <<"signature-valid">> => SignatureValid,
-            <<"signature-verification">> => hb_maps:get(<<"status">>, Signature, Opts),
+            <<"signature-verification">> => hb_maps:get(<<"status">>, Signature, not_found, Opts),
             <<"channel-hash-valid">> => ChannelValid,
-            <<"channel-verification">> => hb_maps:get(<<"status">>, Channel, Opts),
+            <<"channel-verification">> => hb_maps:get(<<"status">>, Channel, not_found, Opts),
             <<"descriptor-valid">> => DescriptorValid,
-            <<"descriptor-verification">> => hb_maps:get(<<"status">>, Descriptor, Opts),
+            <<"descriptor-verification">> => hb_maps:get(<<"status">>, Descriptor, not_found, Opts),
             <<"verification-tier">> => 1,
             <<"attestation">> => #{
                 <<"signature">> => Signature,
@@ -1063,7 +1063,7 @@ channel_attestation(Claim, Opts) ->
     end.
 
 descriptor_attestation(Stream, Base, Req, Opts) ->
-    SDHash = hb_maps:get(<<"sd-hash">>, Stream, Opts),
+    SDHash = hb_maps:get(<<"sd-hash">>, Stream, not_found, Opts),
     DescReq = descriptor_attestation_request(Stream, Base, Req, Opts),
     View =
         case descriptor_bytes_present(Base, Req, Opts) of
@@ -1103,8 +1103,8 @@ descriptor_attestation(Stream, Base, Req, Opts) ->
 
 descriptor_attestation_request(Stream, Base, Req, Opts) ->
     Msg0 = #{
-        <<"sd-hash">> => hb_maps:get(<<"sd-hash">>, Stream, Opts),
-        <<"media-type">> => hb_maps:get(<<"media-type">>, Stream, Opts),
+        <<"sd-hash">> => hb_maps:get(<<"sd-hash">>, Stream, not_found, Opts),
+        <<"media-type">> => hb_maps:get(<<"media-type">>, Stream, not_found, Opts),
         <<"fetch-blobs">> => false
     },
     lists:foldl(
@@ -1292,8 +1292,8 @@ media_identity_params(Stream, Opts) ->
             [{<<"id">>, Outpoint}];
         _ ->
             [
-                {<<"claim-name">>, hb_maps:get(<<"claim-name">>, Stream, Opts)},
-                {<<"claim-id">>, hb_maps:get(<<"claim-id">>, Stream, Opts)}
+                {<<"claim-name">>, hb_maps:get(<<"claim-name">>, Stream, not_found, Opts)},
+                {<<"claim-id">>, hb_maps:get(<<"claim-id">>, Stream, not_found, Opts)}
             ]
     end.
 
