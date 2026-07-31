@@ -801,9 +801,12 @@ raw_write_response(ID) ->
         <<"body">> => hb_json:encode(Body)
     }.
 
-%% @doc Commit the record with the node's wallet before it is written, so
-%% the record id is a committed id -- an uncommitted cache hash must not
-%% act as claim identity.
+%% @doc Commit the record with the node's wallet before it is written, so the
+%% stored record carries a node commitment and is verifiable by its committed
+%% id. Note `hb_cache:write' still returns the *uncommitted* content id (the
+%% committed ids are stored as links to it), so the `record-id' handed out
+%% below is content-addressed; whether it should instead be the committed id
+%% is an open design question (see review Q4).
 committed_record(Record, Opts) ->
     hb_message:commit(Record, Opts).
 
