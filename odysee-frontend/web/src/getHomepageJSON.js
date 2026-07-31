@@ -124,6 +124,17 @@ async function refreshMaterializedHomepageData(snapshotPath) {
   return memo.materializePromise;
 }
 
+function isCurrentHomepageSnapshot(data) {
+  const categories = Object.values(data || {}).flatMap((homepage) =>
+    Object.values((homepage && homepage.categories) || {})
+  );
+  return categories.every(
+    (category) =>
+      !Array.isArray(category.immutableIds) ||
+      Object.prototype.hasOwnProperty.call(category, 'immutableSigningChannelIds')
+  );
+}
+
 async function getMaterializedHomepageData(forceRefresh = false) {
   loadHomepageData();
   if (!memo.homepageData) return {};
@@ -131,9 +142,15 @@ async function getMaterializedHomepageData(forceRefresh = false) {
   const sourceDir = getHomepageSourceDir();
   const snapshotPath = homepageSnapshotPath(sourceDir);
   const snapshot = readHomepageSnapshot(snapshotPath);
-  if (!forceRefresh && snapshot && snapshot.ageMs <= homepageSnapshotMaxAgeMs()) return snapshot.data;
+  if (
+    !forceRefresh &&
+    snapshot &&
+    isCurrentHomepageSnapshot(snapshot.data) &&
+    snapshot.ageMs <= homepageSnapshotMaxAgeMs()
+  )
+    return snapshot.data;
 
-  if (!forceRefresh && snapshot) {
+  if (!forceRefresh && snapshot && isCurrentHomepageSnapshot(snapshot.data)) {
     refreshMaterializedHomepageData(snapshotPath).catch((err) => {
       console.log('getHomepageJSON materialization:', err); // eslint-disable-line no-console
     });
