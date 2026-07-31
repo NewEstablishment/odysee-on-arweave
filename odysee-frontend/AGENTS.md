@@ -75,10 +75,17 @@ storage outside the deployment checkout. Production deployment must complete
 process continues serving the last valid snapshot while a replacement is built,
 and the materializer atomically publishes the replacement only after validation
 and cache warming succeed. Request handling only reads the published snapshot
-and must never trigger materialization. A production custom-homepage build must
+and must never trigger materialization. Production automation periodically
+refreshes stale snapshots using the same atomic promotion without restarting the
+frontend. A production custom-homepage build must
 wait for materialized category data instead of briefly rendering the built-in
 personalized fallback; local development may retain that fallback when no custom
 homepage exists.
+The SSR root document injects the last valid materialized homepage before the
+application bundle runs, so a reload never waits for the homepage API before its
+first render. Public immutable store payloads are retained in a versioned browser
+Cache API store and restored into the normal in-memory/Redux hydration path after
+reload; this is a cache layer, not an alternate claim state or transport.
 Media hydration must reach Redux as soon as the immutable batch read succeeds.
 Signing-channel or other optional enrichment must never gate rendering the
 resolved media rows.

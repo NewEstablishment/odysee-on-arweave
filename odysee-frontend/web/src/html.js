@@ -26,6 +26,8 @@ const { lbryProxy: Lbry } = require('../lbry');
 
 const { getHomepageJsonV1 } = require('./getHomepageJSON');
 
+const { homepageSnapshotPath, readHomepageSnapshot } = require('./homepageMaterializer');
+
 const { buildURI, parseURI, normalizeClaimUrl } = require('./lbryURI');
 
 const { resolveSlashUrl } = require('./resolveSlashUrl');
@@ -44,6 +46,7 @@ Lbry.setDaemonConnectionString(PROXY_URL);
 const BEGIN_STR = '<!-- VARIABLE_HEAD_BEGIN -->';
 const FINAL_STR = '<!-- VARIABLE_HEAD_END -->';
 const DOUBLE_TAB = '    ';
+let homepageBootstrap = { modified: 0, html: '' };
 
 // ****************************************************************************
 // Helpers
@@ -59,6 +62,29 @@ function insertToHead(fullHtml, htmlToInsert) {
       `${DOUBLE_TAB}` +
       `${fullHtml.slice(finalIndex + FINAL_STR.length)}`
     );
+  }
+}
+
+function injectHomepageBootstrap(fullHtml) {
+  if (process.env.CUSTOM_HOMEPAGE !== 'true') return fullHtml;
+
+  try {
+    const snapshotPath = homepageSnapshotPath();
+    const modified = fs.statSync(snapshotPath).mtimeMs;
+    if (homepageBootstrap.modified !== modified) {
+      const snapshot = readHomepageSnapshot(snapshotPath);
+      const serialized = JSON.stringify(snapshot?.data || {})
+        .replace(/</g, '\\u003c')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
+      homepageBootstrap = {
+        modified,
+        html: `<script>window.homepages=${serialized};window.__MATERIALIZED_HOMEPAGE__=true;</script>`,
+      };
+    }
+    return fullHtml.replace('</head>', `${homepageBootstrap.html}</head>`);
+  } catch {
+    return fullHtml;
   }
 }
 
@@ -589,7 +615,7 @@ async function getHtml(ctx) {
       baseUrl: ctx.origin,
       fcActionUrl: homeFcActionUrl,
     });
-    return insertToHead(html, ogMetadata);
+    return insertToHead(injectHomepageBootstrap(html), ogMetadata);
   }
 
   if (ctx?.request?.url) {

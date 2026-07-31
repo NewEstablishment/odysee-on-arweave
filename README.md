@@ -314,7 +314,14 @@ homepage:materialize` atomically publishes the replacement. Materialization fail
 the deployment if source data is empty or any final media, signing-channel, or
 internal banner object cannot be cached. Candidates with stale signing-channel
 references are excluded and backfilled before publication. Web requests only read
-the completed snapshot and never trigger a refresh.
+the completed snapshot and never trigger a refresh. Deployment automation also
+refreshes stale snapshots periodically, without restarting the frontend, so the
+dynamic category searches continue selecting current claims between code releases.
+The SSR root response injects the last valid snapshot before the application
+bundle executes, avoiding a network-gated placeholder on reload. Immutable claim
+and channel payloads still hydrate through the normal integration path into Redux,
+with a versioned browser Cache API layer preventing repeated immutable batch reads
+across ordinary reloads.
 
 ### Playback and Media
 
