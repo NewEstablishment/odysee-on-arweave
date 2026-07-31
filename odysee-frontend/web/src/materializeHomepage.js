@@ -1,3 +1,5 @@
+require('../../config.cjs');
+
 const { getMaterializedHomepageData } = require('./getHomepageJSON');
 
 getMaterializedHomepageData(true)

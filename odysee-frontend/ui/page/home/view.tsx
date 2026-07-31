@@ -14,6 +14,7 @@ import ClaimTilesDiscover from 'component/claimTilesDiscover';
 import ClaimList from 'component/claimList';
 import ClaimPreviewTile from 'component/claimPreviewTile';
 import Icon from 'component/common/icon';
+import Spinner from 'component/spinner';
 import WaitUntilOnPage from 'component/common/wait-until-on-page';
 import RecommendedPersonal from 'component/recommendedPersonal';
 import Yrbl from 'component/yrbl';
@@ -114,7 +115,8 @@ function HomePage() {
   const subscribedChannelIds = useAppSelector(selectSubscriptionIds);
   const authenticated = useAppSelector(selectUserVerifiedEmail);
   const showNsfw = useAppSelector(selectShowMatureContent);
-  const homepageData = useAppSelector(selectHomepageData) || {};
+  const selectedHomepageData = useAppSelector(selectHomepageData);
+  const homepageData = selectedHomepageData || {};
   const homepageMeme = useAppSelector(selectHomepageMeme);
   const homepageFetched = useAppSelector(selectHomepageFetched);
   const fetchingActiveLivestreams = useAppSelector(selectIsFetchingActiveLivestreams);
@@ -398,6 +400,23 @@ function HomePage() {
       );
     }
   }, [authenticated, dispatch, hasWatchLaterSection]);
+
+  const hasMaterializedHomepage = Object.values(selectedHomepageData?.categories || {}).some((category: any) =>
+    Array.isArray(category?.immutableIds)
+  );
+  const waitForMaterializedHomepage =
+    process.env.NODE_ENV === 'production' && process.env.CUSTOM_HOMEPAGE === 'true' && !hasMaterializedHomepage;
+
+  if (waitForMaterializedHomepage) {
+    return (
+      <Page className="homePage-wrapper" fullWidthPage>
+        <div className="main--empty">
+          <Spinner text={__('Loading homepage...')} />
+        </div>
+      </Page>
+    );
+  }
+
   return (
     <Page className="homePage-wrapper" fullWidthPage>
       {visibleSortedRowData.length === 0 && authenticated && homepageFetched && (

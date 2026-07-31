@@ -70,9 +70,15 @@ the immutable signing-channel ID associated with each media ID.
 browser claim searches or resolving mutable pins. Homepage tiles must navigate
 to `/$/id/<immutable-id>`; a legacy canonical URI is display metadata, not the
 navigation identity. Keep `CUSTOM_HOMEPAGE_SNAPSHOT_FILE` on persistent writable
-storage outside the deployment checkout. Production startup must complete `pnpm
-run homepage:materialize` before opening the web port; request handling only reads
-the published snapshot and must never trigger materialization.
+storage outside the deployment checkout. Production deployment must complete
+`pnpm run homepage:materialize` before restarting the web process. The existing
+process continues serving the last valid snapshot while a replacement is built,
+and the materializer atomically publishes the replacement only after validation
+and cache warming succeed. Request handling only reads the published snapshot
+and must never trigger materialization. A production custom-homepage build must
+wait for materialized category data instead of briefly rendering the built-in
+personalized fallback; local development may retain that fallback when no custom
+homepage exists.
 Media hydration must reach Redux as soon as the immutable batch read succeeds.
 Signing-channel or other optional enrichment must never gate rendering the
 resolved media rows.

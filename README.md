@@ -307,8 +307,10 @@ its rendering source.
 
 Set `CUSTOM_HOMEPAGE_DIR` to the private checkout's `homepages/v2` directory.
 `CUSTOM_HOMEPAGE_SNAPSHOT_FILE` must point to persistent writable storage outside
-the deployment checkout so snapshots survive releases. Production containers run
-`pnpm run homepage:materialize` before opening the web port. Materialization fails
+the deployment checkout so snapshots survive releases. Production deployment
+builds and validates a replacement while the current frontend continues serving
+the last valid snapshot, then restarts the frontend only after `pnpm run
+homepage:materialize` atomically publishes the replacement. Materialization fails
 the deployment if source data is empty or any final media, signing-channel, or
 internal banner object cannot be cached. Candidates with stale signing-channel
 references are excluded and backfilled before publication. Web requests only read
