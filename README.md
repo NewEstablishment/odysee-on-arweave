@@ -23,6 +23,7 @@ behind HyperBEAM devices and stores. They are not an alternate browser mode.
 - [Frontend and SSR Integration](#frontend-and-ssr-integration)
 - [Feature Flows](#feature-flows)
   - [Claim Resolution and Hydration](#claim-resolution-and-hydration)
+  - [Homepage Materialization](#homepage-materialization)
   - [Playback and Media](#playback-and-media)
   - [Search](#search)
   - [Comments, Revisions, and Moderation](#comments-revisions-and-moderation)
@@ -278,6 +279,32 @@ must not be used to bypass a device contract for network data.
 Channel and upload pages merge native and historical items, deduplicate by stable
 identity, and sort the combined result. One source must not simply be prepended to
 the other.
+
+### Homepage Materialization
+
+The private `odysee-homepages` repository is curation input, not a browser data
+source. Its category rules and pinned legacy claim IDs are materialized by the
+SSR server into an ordered immutable homepage snapshot:
+
+```text
+homepage category rules
+    -> `odysee-claim@1.0/search` source discovery
+    -> immutable HyperBEAM ID or legacy `<txid>:<nout>`
+    -> direct HyperBEAM read for every selected entry
+    -> persistent materialized homepage snapshot
+    -> browser batch hydration by immutable URI
+```
+
+Publishing a new snapshot is all-or-nothing. If any selected entry cannot be
+read and cached through HyperBEAM, the existing snapshot remains active. The
+browser never repeats the category claim searches and never receives mutable
+pin IDs as its rendering source.
+
+Set `CUSTOM_HOMEPAGE_DIR` to the private checkout's `homepages/v2` directory.
+`CUSTOM_HOMEPAGE_SNAPSHOT_FILE` should point outside the deployment checkout so
+snapshots survive releases. `CUSTOM_HOMEPAGE_SNAPSHOT_MAX_AGE_MS` controls
+background refresh age. Run `pnpm run homepage:materialize` to force a complete
+refresh and cache warm before exposing a deployment.
 
 ### Playback and Media
 

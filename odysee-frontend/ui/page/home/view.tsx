@@ -249,7 +249,7 @@ function HomePage() {
     dispatch(doOpenModal(MODALS.CUSTOMIZE_HOMEPAGE));
   }
 
-  function getRowElements(id, title, route, link, icon, help, options, index, pinUrls, pinnedClaimIds) {
+  function getRowElements(id, title, route, link, icon, help, options, index, pinUrls, pinnedClaimIds, uris) {
     if (id === 'BANNER') {
       if (index === undefined) {
         return <FeaturedBanner homepageData={homepageData} authenticated={authenticated} />;
@@ -303,14 +303,19 @@ function HomePage() {
       ) : (
         <ClaimTilesDiscover
           {...options}
+          uris={uris}
           showNoSourceClaims={ENABLE_NO_SOURCE_CLAIMS}
           hideMembersOnly={id !== 'FOLLOWING'}
           hasSource
           prefixUris={cache[id].livestreamUris}
-          pins={{
-            urls: pinUrls,
-            claimIds: pinnedClaimIds,
-          }}
+          pins={
+            uris
+              ? undefined
+              : {
+                  urls: pinUrls,
+                  claimIds: pinnedClaimIds,
+                }
+          }
           forceShowReposts={id !== 'FOLLOWING'}
           loading={id === 'FOLLOWING' ? fetchingActiveLivestreams : false}
           fetchViewCount
@@ -398,18 +403,19 @@ function HomePage() {
           {},
           undefined,
           undefined,
+          undefined,
           undefined
         )}
 
       {homepageFetched &&
         visibleSortedRowData.map(
-          ({ id, title, route, link, icon, help, pinnedUrls: pinUrls, pinnedClaimIds, options = {} }, index) => {
+          ({ id, title, route, link, icon, help, pinnedUrls: pinUrls, pinnedClaimIds, uris, options = {} }, index) => {
             // Check if there is a banner that should appear in this position
             const bannerForPosition =
               homepageCustomBanners?.find && homepageCustomBanners.find((banner) => banner.position === index);
             return (
               <React.Fragment key={`${id}-${index}`}>
-                {getRowElements(id, title, route, link, icon, help, options, index, pinUrls, pinnedClaimIds)}
+                {getRowElements(id, title, route, link, icon, help, options, index, pinUrls, pinnedClaimIds, uris)}
                 {bannerForPosition && (
                   <CustomBanner
                     key={`custom-banner-${bannerForPosition.position}`}

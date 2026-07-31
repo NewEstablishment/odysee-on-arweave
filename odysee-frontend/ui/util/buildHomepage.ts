@@ -3,6 +3,7 @@ import * as ICONS from 'constants/icons';
 import * as CS from 'constants/claim_search';
 import { toCapitalCase } from 'util/string';
 import { CUSTOM_HOMEPAGE } from 'config';
+import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
 export type HomepageCat = {
   id?: string;
   name: string;
@@ -28,6 +29,7 @@ export type HomepageCat = {
   exclude_shorts?: boolean;
   mixIn?: Array<string>;
   hideByDefault?: boolean;
+  immutableIds?: Array<string>;
 };
 
 function getLimitPerChannel(size, isChannel) {
@@ -143,6 +145,7 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
     title: cat.label,
     pinnedUrls: cat.pinnedUrls,
     pinnedClaimIds: cat.pinnedClaimIds,
+    uris: (cat.immutableIds || []).map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri)),
     hideByDefault: cat.hideByDefault,
     hideSort: cat.hideSort,
     options: {

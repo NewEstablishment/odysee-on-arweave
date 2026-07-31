@@ -1,6 +1,13 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {
+  homepageSnapshotMaxAgeMs,
+  homepageSnapshotPath,
+  materializeHomepageData,
+  readHomepageSnapshot,
+  writeHomepageSnapshot,
+} = require('./homepageMaterializer');
 
 const memo = {};
 const FORMAT = {
@@ -102,20 +109,53 @@ function loadHomepageData() {
   }
 }
 
+async function refreshMaterializedHomepageData(snapshotPath) {
+  if (!memo.materializePromise) {
+    memo.materializePromise = materializeHomepageData(memo.homepageData)
+      .then((data) => {
+        writeHomepageSnapshot(snapshotPath, data);
+        return data;
+      })
+      .finally(() => {
+        memo.materializePromise = undefined;
+      });
+  }
+
+  return memo.materializePromise;
+}
+
+async function getMaterializedHomepageData(forceRefresh = false) {
+  loadHomepageData();
+  if (!memo.homepageData) return {};
+
+  const sourceDir = getHomepageSourceDir();
+  const snapshotPath = homepageSnapshotPath(sourceDir);
+  const snapshot = readHomepageSnapshot(snapshotPath);
+  if (!forceRefresh && snapshot && snapshot.ageMs <= homepageSnapshotMaxAgeMs()) return snapshot.data;
+
+  if (!forceRefresh && snapshot) {
+    refreshMaterializedHomepageData(snapshotPath).catch((err) => {
+      console.log('getHomepageJSON materialization:', err); // eslint-disable-line no-console
+    });
+    return snapshot.data;
+  }
+
+  return refreshMaterializedHomepageData(snapshotPath);
+}
+
 // ****************************************************************************
 // v1
 // ****************************************************************************
-const getHomepageJsonV1 = () => {
-  loadHomepageData();
-
-  if (!memo.homepageData) {
+const getHomepageJsonV1 = async () => {
+  const homepageData = await getMaterializedHomepageData();
+  if (!Object.keys(homepageData).length) {
     return {};
   }
 
   const v1 = {};
-  const homepageKeys = Object.keys(memo.homepageData);
+  const homepageKeys = Object.keys(homepageData);
   homepageKeys.forEach((hp) => {
-    v1[hp] = memo.homepageData[hp].categories;
+    v1[hp] = homepageData[hp].categories;
   });
   return v1;
 };
@@ -141,28 +181,27 @@ const reformatV2Categories = (categories, format) => {
  *             empty.
  * @returns {{}}
  */
-const getHomepageJsonV2 = (format, lang) => {
-  loadHomepageData();
-
-  if (!memo.homepageData) {
+const getHomepageJsonV2 = async (format, lang) => {
+  const homepageData = await getMaterializedHomepageData();
+  if (!Object.keys(homepageData).length) {
     return {};
   }
 
   const v2 = {};
-  const homepageKeys = Object.keys(memo.homepageData);
+  const homepageKeys = Object.keys(homepageData);
   homepageKeys.forEach((hp) => {
     if (!lang || lang === hp) {
       v2[hp] = {
-        categories: reformatV2Categories(memo.homepageData[hp].categories, format),
-        portals: memo.homepageData[hp].portals,
-        featured: memo.homepageData[hp].featured,
-        meme: memo.homepageData[hp].meme,
-        meme_android: memo.homepageData[hp].meme_android,
-        meme_android_apk: memo.homepageData[hp].meme_android_apk,
-        meme_android_google: memo.homepageData[hp].meme_android_google,
-        discover: memo.homepageData[hp].discover,
-        discoverNew: memo.homepageData[hp]?.discoverNew,
-        customBanners: memo.homepageData[hp]?.customBanners,
+        categories: reformatV2Categories(homepageData[hp].categories, format),
+        portals: homepageData[hp].portals,
+        featured: homepageData[hp].featured,
+        meme: homepageData[hp].meme,
+        meme_android: homepageData[hp].meme_android,
+        meme_android_apk: homepageData[hp].meme_android_apk,
+        meme_android_google: homepageData[hp].meme_android_google,
+        discover: homepageData[hp].discover,
+        discoverNew: homepageData[hp]?.discoverNew,
+        customBanners: homepageData[hp]?.customBanners,
         announcement: memo.announcements[hp],
       };
     } else {
@@ -173,6 +212,7 @@ const getHomepageJsonV2 = (format, lang) => {
 };
 
 module.exports = {
+  getMaterializedHomepageData,
   getHomepageJsonV1,
   getHomepageJsonV2,
 };

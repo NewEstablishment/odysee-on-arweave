@@ -258,6 +258,7 @@ function ClaimTilesDiscover(props: Props) {
     channelIds,
     loading,
     sectionTitle,
+    uris: explicitUris,
   } = props;
   const dispatch = useAppDispatch();
   // -- redux selectors --
@@ -311,22 +312,27 @@ function ClaimTilesDiscover(props: Props) {
   const findLastVisibleSlot = injectedItem && injectedItem.node && injectedItem.index === undefined;
   const lastVisibleIndex = useGetLastVisibleSlot(listRef, !findLastVisibleSlot);
   const prevUris = React.useRef<string[]>();
-  const claimSearchUris = claimSearchResults || [];
-  const isUnfetchedClaimSearch = claimSearchResults === undefined;
+  const usesExplicitUris = Array.isArray(explicitUris);
+  const claimSearchUris = usesExplicitUris ? explicitUris : claimSearchResults || [];
+  const isUnfetchedClaimSearch = !usesExplicitUris && claimSearchResults === undefined;
   const resolvedPinUris = useResolvePins({
     pins,
     doResolveClaimIds,
     doResolveUris,
   });
   const uriBuffer = useRef([]);
-  const timedOut = claimSearchResults === null;
+  const timedOut = !usesExplicitUris && claimSearchResults === null;
   const shouldPerformSearch =
-    !fetchingClaimSearch && !timedOut && claimSearchUris.length === 0 && !claimSearchLastPageReached;
+    !usesExplicitUris &&
+    !fetchingClaimSearch &&
+    !timedOut &&
+    claimSearchUris.length === 0 &&
+    !claimSearchLastPageReached;
   const uris = (prefixUris || []).concat(claimSearchUris);
   if (prefixUris && prefixUris.length) uris.splice(prefixUris.length * -1, prefixUris.length);
 
   // Treat the embed homepage the same as the main homepage for pin injection.
-  if (window.location.pathname === '/' || window.location.pathname === '/$/embed/home') {
+  if (!usesExplicitUris && (window.location.pathname === '/' || window.location.pathname === '/$/embed/home')) {
     injectPinUrls(uris, pins, resolvedPinUris);
   }
 
@@ -362,10 +368,15 @@ function ClaimTilesDiscover(props: Props) {
   // --------------------------------------------------------------------------
   // --------------------------------------------------------------------------
   React.useEffect(() => {
-    if (channelIds) {
+    if (!usesExplicitUris && channelIds) {
       doFetchOdyseeMembershipForChannelIds(channelIds);
     }
-  }, [channelIds, doFetchOdyseeMembershipForChannelIds]);
+  }, [usesExplicitUris, channelIds, doFetchOdyseeMembershipForChannelIds]);
+  React.useEffect(() => {
+    if (usesExplicitUris && explicitUris.length) {
+      doResolveUris(explicitUris, true);
+    }
+  }, [usesExplicitUris, explicitUris, doResolveUris]);
   React.useEffect(() => {
     if (shouldPerformSearch) {
       const searchOptions = JSON.parse(optionsStringified);
@@ -399,7 +410,13 @@ function ClaimTilesDiscover(props: Props) {
     );
   }
 
-  if (!timedOut && finalUris && finalUris.length === 0 && !loading && claimSearchLastPageReached) {
+  if (
+    !timedOut &&
+    finalUris &&
+    finalUris.length === 0 &&
+    !loading &&
+    (usesExplicitUris || claimSearchLastPageReached)
+  ) {
     return <div className="empty empty--centered">{__('No results')}</div>;
   }
 
@@ -479,7 +496,7 @@ function areEqual(prev: Props, next: Props) {
     }
   }
 
-  const ARRAY_KEYS = ['prefixUris', 'channelIds'];
+  const ARRAY_KEYS = ['prefixUris', 'channelIds', 'uris'];
 
   for (let i = 0; i < ARRAY_KEYS.length; ++i) {
     const key = ARRAY_KEYS[i];

@@ -210,6 +210,24 @@ async function hyperbeamNodeClaimSearch(params, extraHeaders) {
   );
 }
 
+async function hyperbeamNodeSourceClaimSearch(params, extraHeaders) {
+  if (!hyperbeamNodeConfigured()) return null;
+
+  const result = await hyperbeamNodeFetchJson(
+    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'search', params || {}),
+    extraHeaders
+  );
+  const search = sdkSearchFromHyperbeam(result);
+  return search && Array.isArray(search.items) ? search : null;
+}
+
+async function hyperbeamNodeWarmImmutableClaim(id) {
+  if (!hyperbeamNodeConfigured()) return false;
+
+  const result = storeResponsePayload(await hyperbeamNodeFetchImmutableJson(id));
+  return Boolean(immutableClaimFromHyperbeam(result, id));
+}
+
 async function hyperbeamNodeUploadList(params, extraHeaders) {
   const result = await hyperbeamNodeFetchJson(
     hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_UPLOAD, 'list', params || {}),
@@ -1426,4 +1444,6 @@ module.exports = {
   hyperbeamNodeMediaUrl,
   hyperbeamNodeResolve,
   hyperbeamNodeSdkCall,
+  hyperbeamNodeSourceClaimSearch,
+  hyperbeamNodeWarmImmutableClaim,
 };

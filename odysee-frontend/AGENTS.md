@@ -51,6 +51,20 @@ required immutable `value` and `thumbnail` links server-side, and keeps a
 bounded cache of successful immutable reads. Do not move this product hydration
 work into the generic search device.
 
+## Homepage
+
+The private homepage repository supplies category rules and pinned mutable
+claim IDs only. The SSR homepage materializer resolves every selected row item
+to an immutable native ID or legacy outpoint, performs a direct HyperBEAM read
+for every selected entry, and atomically publishes a persistent snapshot only
+after all selected entries are cached successfully.
+
+The homepage API returns ordered `immutableIds`. `buildHomepage.ts` converts
+them to immutable URIs, and `ClaimTilesDiscover` batch-hydrates those URIs
+without issuing browser claim searches or resolving mutable pins. Keep
+`CUSTOM_HOMEPAGE_SNAPSHOT_FILE` outside the deployment checkout and use
+`pnpm run homepage:materialize` to force a complete prewarm.
+
 ## Debug Console
 
 The console reports the single HyperBEAM request path. Its graph always shows known nodes, with inactive nodes dimmed and call counts derived only from observed events.
