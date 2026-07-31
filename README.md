@@ -306,10 +306,13 @@ never repeats the category claim searches and never receives mutable pin IDs as
 its rendering source.
 
 Set `CUSTOM_HOMEPAGE_DIR` to the private checkout's `homepages/v2` directory.
-`CUSTOM_HOMEPAGE_SNAPSHOT_FILE` should point outside the deployment checkout so
-snapshots survive releases. `CUSTOM_HOMEPAGE_SNAPSHOT_MAX_AGE_MS` controls
-background refresh age. Run `pnpm run homepage:materialize` to force a complete
-refresh and cache warm before exposing a deployment.
+`CUSTOM_HOMEPAGE_SNAPSHOT_FILE` must point to persistent writable storage outside
+the deployment checkout so snapshots survive releases. Production containers run
+`pnpm run homepage:materialize` before opening the web port. Materialization fails
+the deployment if source data is empty or any final media, signing-channel, or
+internal banner object cannot be cached. Candidates with stale signing-channel
+references are excluded and backfilled before publication. Web requests only read
+the completed snapshot and never trigger a refresh.
 
 ### Playback and Media
 

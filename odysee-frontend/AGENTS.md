@@ -69,12 +69,14 @@ the immutable signing-channel ID associated with each media ID.
 `ClaimTilesDiscover` batch-hydrates media and signing channels without issuing
 browser claim searches or resolving mutable pins. Homepage tiles must navigate
 to `/$/id/<immutable-id>`; a legacy canonical URI is display metadata, not the
-navigation identity. Keep
-`CUSTOM_HOMEPAGE_SNAPSHOT_FILE` outside the deployment checkout and use
-`pnpm run homepage:materialize` to force a complete prewarm.
+navigation identity. Keep `CUSTOM_HOMEPAGE_SNAPSHOT_FILE` on persistent writable
+storage outside the deployment checkout. Production startup must complete `pnpm
+run homepage:materialize` before opening the web port; request handling only reads
+the published snapshot and must never trigger materialization.
 Media hydration must reach Redux as soon as the immutable batch read succeeds.
 Signing-channel or other optional enrichment must never gate rendering the
 resolved media rows.
+Internal featured-banner targets are materialized and routed by immutable ID too.
 
 ## Debug Console
 

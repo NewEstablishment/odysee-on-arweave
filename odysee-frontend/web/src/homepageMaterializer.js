@@ -1,24 +1,28 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { hyperbeamNodeSourceClaimSearch, hyperbeamNodeWarmImmutableClaim } = require('./odyseeHyperbeamNode');
+const {
+  hyperbeamNodeResolve,
+  hyperbeamNodeSourceClaimSearch,
+  hyperbeamNodeWarmImmutableClaim,
+} = require('./odyseeHyperbeamNode');
 
 const DEFAULT_PAGE_SIZE = 8;
-const DEFAULT_MAX_AGE_MS = 15 * 60 * 1000;
 const QUERY_CONCURRENCY = 2;
-const WARM_CONCURRENCY = 6;
+const WARM_CONCURRENCY = 2;
 const CHANNEL_WARM_CONCURRENCY = 2;
-const WARM_RETRIES = 3;
+const WARM_RETRIES = 5;
+const WARM_RETRY_DELAY_MS = 500;
 const SEARCH_RETRIES = 3;
 const RESOLVE_BATCH_SIZE = 24;
+const BANNER_RESOLVE_BATCH_SIZE = 6;
+const CATEGORY_RESERVE_SIZE = 4;
 
-function homepageSnapshotPath(sourceDir) {
-  return process.env.CUSTOM_HOMEPAGE_SNAPSHOT_FILE || path.resolve(sourceDir, '..', 'materialized-homepages-v2.json');
-}
-
-function homepageSnapshotMaxAgeMs() {
-  const configured = Number(process.env.CUSTOM_HOMEPAGE_SNAPSHOT_MAX_AGE_MS);
-  return Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_MAX_AGE_MS;
+function homepageSnapshotPath() {
+  return (
+    process.env.CUSTOM_HOMEPAGE_SNAPSHOT_FILE ||
+    path.resolve(__dirname, '../../runtime/homepage/materialized-homepages-v2.json')
+  );
 }
 
 function categorySearchParams(category, nowSeconds = Math.floor(Date.now() / 1000)) {
@@ -86,6 +90,7 @@ function mergePinnedIds(ids, pinnedIds, pageSize) {
 
 async function materializeHomepageData(homepageData, dependencies = {}) {
   const search = dependencies.search || hyperbeamNodeSourceClaimSearch;
+  const resolve = dependencies.resolve || hyperbeamNodeResolve;
   const warm = dependencies.warm || hyperbeamNodeWarmImmutableClaim;
   const searchRetries = dependencies.searchRetries ?? SEARCH_RETRIES;
   const searchRetryDelayMs = dependencies.searchRetryDelayMs ?? 200;
@@ -102,8 +107,14 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
 
   const selections = await mapWithConcurrency(jobs, QUERY_CONCURRENCY, async (job) => {
     const pageSize = positiveInteger(job.category.pageSize, DEFAULT_PAGE_SIZE);
+    const searchParams = categorySearchParams(job.category, nowSeconds);
     const [dynamicResult, pinnedResult] = await Promise.all([
-      searchWithRetry(search, categorySearchParams(job.category, nowSeconds), searchRetries, searchRetryDelayMs),
+      searchWithRetry(
+        search,
+        { ...searchParams, page_size: pageSize + CATEGORY_RESERVE_SIZE },
+        searchRetries,
+        searchRetryDelayMs
+      ),
       stringList(job.category.pinnedClaimIds).length
         ? searchWithRetry(
             search,
@@ -136,13 +147,30 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
 
     return {
       ...job,
-      selectedIds: mergePinnedIds(dynamicIds, pinnedIds, pageSize),
+      selectedIds: mergePinnedIds(dynamicIds, pinnedIds, pageSize + CATEGORY_RESERVE_SIZE),
+      pageSize,
       channelClaimIds,
       signingChannelByMediaId,
     };
   });
 
-  const selectedIds = Array.from(new Set(selections.flatMap((selection) => selection.selectedIds)));
+  const bannerItems = locales.flatMap(([, homepage]) => homepage?.featured?.items || []);
+  const bannerEntries = bannerItems.map((item) => [item, homepageClaimUri(item?.url)]).filter(([, uri]) => uri);
+  const bannerUris = Array.from(new Set(bannerEntries.map(([, uri]) => uri)));
+  const bannerResults = await mapWithConcurrency(
+    chunk(bannerUris, BANNER_RESOLVE_BATCH_SIZE),
+    QUERY_CONCURRENCY,
+    (urls) => resolveWithRetry(resolve, urls, searchRetries, searchRetryDelayMs)
+  );
+  const bannerClaims = Object.assign({}, ...bannerResults);
+  const bannerIdsByUri = new Map(
+    bannerUris.map((uri) => [uri, immutableId(bannerClaims?.[uri])]).filter(([, id]) => id)
+  );
+  const unresolvedBannerUris = bannerUris.filter((uri) => !bannerIdsByUri.has(uri));
+  if (unresolvedBannerUris.length) {
+    throw new Error(`Failed to resolve ${unresolvedBannerUris.length} homepage banners`);
+  }
+  const bannerIds = Array.from(new Set(bannerIdsByUri.values()));
   const sourceChannelClaimIds = Array.from(
     new Set(selections.flatMap((selection) => stringList(selection.category.channelIds)))
   );
@@ -170,11 +198,29 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
       .map((item) => [String(item.claim_id || item['claim-id'] || ''), immutableId(item)])
       .filter(([claimId, id]) => claimId && id)
   );
-  const selectedChannelIds = selectedChannelClaimIds.map((claimId) => channelIdsByClaimId.get(claimId)).filter(Boolean);
+  selections.forEach((selection) => {
+    selection.selectedIds = selection.selectedIds
+      .filter((mediaId) => {
+        const channelClaimId = selection.signingChannelByMediaId.get(mediaId);
+        return !channelClaimId || channelIdsByClaimId.has(channelClaimId);
+      })
+      .slice(0, selection.pageSize);
+  });
+  const selectedIds = Array.from(new Set(selections.flatMap((selection) => selection.selectedIds)));
+  const visibleChannelClaimIds = Array.from(
+    new Set(
+      selections.flatMap((selection) =>
+        selection.selectedIds.map((mediaId) => selection.signingChannelByMediaId.get(mediaId)).filter(Boolean)
+      )
+    )
+  );
+  const selectedChannelIds = visibleChannelClaimIds.map((claimId) => channelIdsByClaimId.get(claimId)).filter(Boolean);
   const selectedIdSet = new Set(selectedIds);
-  const channelWarmIds = selectedChannelIds.filter((id) => !selectedIdSet.has(id));
+  const channelWarmIds = Array.from(new Set([...selectedChannelIds, ...bannerIds])).filter(
+    (id) => !selectedIdSet.has(id)
+  );
   const warmRetries = dependencies.warmRetries ?? WARM_RETRIES;
-  const warmRetryDelayMs = dependencies.warmRetryDelayMs ?? 100;
+  const warmRetryDelayMs = dependencies.warmRetryDelayMs ?? WARM_RETRY_DELAY_MS;
   const mediaWarmResults = await warmObjects(selectedIds, WARM_CONCURRENCY, warm, warmRetries, warmRetryDelayMs);
   const channelWarmResults = await warmObjects(
     channelWarmIds,
@@ -188,7 +234,9 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
   const warmed = new Set(warmResults.filter(([, ok]) => ok).map(([id]) => id));
   const failedIds = warmIds.filter((id) => !warmed.has(id));
   if (failedIds.length) {
-    throw new Error(`Failed to cache ${failedIds.length} homepage objects in HyperBEAM`);
+    throw new Error(
+      `Failed to cache ${failedIds.length} homepage objects in HyperBEAM: ${failedIds.slice(0, 5).join(', ')}`
+    );
   }
   const materialized = structuredClone(homepageData || {});
 
@@ -207,8 +255,33 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
       (claimId) => !channelIdsByClaimId.has(claimId)
     );
   });
+  bannerEntries.forEach(([sourceItem, uri]) => {
+    for (const homepage of Object.values(materialized)) {
+      for (const item of homepage?.featured?.items || []) {
+        if (item.url === sourceItem.url) item.immutableId = bannerIdsByUri.get(uri);
+      }
+    }
+  });
+  if (!selections.some((selection) => selection.selectedIds.length)) {
+    throw new Error('Homepage materialization selected no visible entries');
+  }
 
   return materialized;
+}
+
+function homepageClaimUri(value) {
+  if (!value || typeof value !== 'string' || value.startsWith('#')) return null;
+  let pathname = value;
+  try {
+    const url = new URL(value);
+    if (!/(^|\.)odysee\.com$/i.test(url.hostname)) return null;
+    pathname = url.pathname;
+  } catch {
+    if (!pathname.startsWith('/')) return null;
+  }
+  const claimPath = pathname.replace(/^\/+/, '').split('/').filter(Boolean).slice(0, 2).join('/');
+  if (!claimPath) return null;
+  return `lbry://${decodeURIComponent(claimPath).replace(':', '#')}`;
 }
 
 function readHomepageSnapshot(snapshotPath) {
@@ -293,6 +366,23 @@ async function searchWithRetry(search, params, retries, retryDelayMs) {
   throw lastError;
 }
 
+async function resolveWithRetry(resolve, urls, retries, retryDelayMs) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const result = await resolve({ urls });
+      if (result) return result;
+      lastError = new Error('Homepage banner resolution returned no result');
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < retries && retryDelayMs > 0) {
+      await new Promise((done) => setTimeout(done, retryDelayMs * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 function chunk(items, size) {
   const chunks = [];
   for (let index = 0; index < items.length; index += size) {
@@ -303,8 +393,8 @@ function chunk(items, size) {
 
 module.exports = {
   categorySearchParams,
-  homepageSnapshotMaxAgeMs,
   homepageSnapshotPath,
+  homepageClaimUri,
   immutableId,
   materializeHomepageData,
   mergePinnedIds,

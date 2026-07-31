@@ -6,6 +6,7 @@ const test = require('node:test');
 
 const {
   categorySearchParams,
+  homepageClaimUri,
   materializeHomepageData,
   mergePinnedIds,
   readHomepageSnapshot,
@@ -45,6 +46,36 @@ test('categorySearchParams preserves homepage selection rules', () => {
       release_time: '>395200',
     }
   );
+});
+
+test('homepageClaimUri converts only internal claim links', () => {
+  assert.equal(homepageClaimUri('https://odysee.com/@channel:9'), 'lbry://@channel#9');
+  assert.equal(homepageClaimUri('/@channel:9/video:a'), 'lbry://@channel#9/video:a');
+  assert.equal(homepageClaimUri('https://example.com/@channel:9'), null);
+  assert.equal(homepageClaimUri('#section'), null);
+});
+
+test('materialization resolves and warms featured banner targets', async () => {
+  const warmed = [];
+  const result = await materializeHomepageData(
+    {
+      en: {
+        categories: { featured: { pageSize: 1 } },
+        featured: { items: [{ url: 'https://odysee.com/@channel:9' }] },
+      },
+    },
+    {
+      search: async () => ({ items: [{ immutable_id: 'media:0' }] }),
+      resolve: async () => ({ 'lbry://@channel#9': { immutable_id: 'channel:0' } }),
+      warm: async (id) => {
+        warmed.push(id);
+        return true;
+      },
+    }
+  );
+
+  assert.equal(result.en.featured.items[0].immutableId, 'channel:0');
+  assert.deepEqual(new Set(warmed), new Set(['media:0', 'channel:0']));
 });
 
 test('materialization returns ordered immutable IDs only after warming every selected claim', async () => {
@@ -131,6 +162,29 @@ test('materialization rejects an incomplete HyperBEAM cache warm', async () => {
     }),
     /Failed to cache 1 homepage objects/
   );
+});
+
+test('materialization excludes a selected claim whose signing channel cannot be resolved', async () => {
+  const source = {
+    en: {
+      categories: {
+        featured: { label: 'Featured', pageSize: 1 },
+      },
+    },
+  };
+
+  const result = await materializeHomepageData(source, {
+    search: async (params) =>
+      params.claim_ids
+        ? { items: [] }
+        : {
+            items: [{ immutable_id: 'media:0', channel_claim_id: 'missing-channel' }, { immutable_id: 'valid:0' }],
+          },
+    warm: async () => true,
+    searchRetries: 0,
+  });
+
+  assert.deepEqual(result.en.categories.featured.immutableIds, ['valid:0']);
 });
 
 test('materialization records source channels that cannot be converted to immutable IDs', async () => {

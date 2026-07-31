@@ -2,6 +2,9 @@ const { getMaterializedHomepageData } = require('./getHomepageJSON');
 
 getMaterializedHomepageData(true)
   .then((data) => {
+    if (!Object.keys(data).length) {
+      throw new Error('Homepage materialization produced no homepage data');
+    }
     const categories = Object.values(data).reduce(
       (count, homepage) => count + Object.keys(homepage?.categories || {}).length,
       0
@@ -23,7 +26,11 @@ getMaterializedHomepageData(true)
         (category.unresolvedChannelIds || []).forEach((id) => unresolvedChannels.add(id));
       })
     );
-    console.log( // eslint-disable-line no-console
+    if (!categories || !entries) {
+      throw new Error(`Homepage materialization produced ${categories} categories and ${entries} entries`);
+    }
+    console.log(
+      // eslint-disable-line no-console
       `Materialized ${entries} homepage entries across ${categories} categories; ` +
         `${immutableChannels.size} immutable channels, ${unresolvedChannels.size} unresolved source channels`
     );

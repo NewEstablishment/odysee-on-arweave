@@ -11,6 +11,7 @@ import { createNormalizedClaimSearchKey } from 'util/claim';
 import ClaimPreviewTile from 'component/claimPreviewTile';
 import ChannelThumbnail from 'component/channelThumbnail';
 import SubscribeButton from 'component/subscribeButton';
+import { hyperbeamImmutableIdFromUri, hyperbeamImmutableUri, hyperbeamImmutableWebPath } from 'util/hyperbeam-route';
 import './style.lazy.scss';
 
 type Props = {
@@ -70,13 +71,15 @@ function BannerLatestClaims({ channelUri, count }: { channelUri: string; count: 
   }, [searchOptions, searchResult, dispatch]);
 
   const channelName = channelClaim?.value?.title || channelClaim?.name?.replace('@', '') || '';
+  const channelPath =
+    hyperbeamImmutableWebPath(hyperbeamImmutableIdFromUri(channelUri)) || channelUri.replace('lbry://', '/');
 
   if (resultUris.length === 0) return null;
 
   return (
     <div className="banner-latest-claims" onClick={(e) => e.preventDefault()}>
       <div className="banner-latest-claims__header">
-        <NavLink to={channelUri.replace('lbry://', '/')} className="banner-latest-claims__channel-link">
+        <NavLink to={channelPath} className="banner-latest-claims__channel-link">
           <ChannelThumbnail uri={channelUri} xsmall />
           <span className="banner-latest-claims__name" title={channelName}>
             {channelName}
@@ -191,12 +194,16 @@ export default function FeaturedBanner(props: Props) {
       >
         {featured &&
           featured.items.map((item, i) => {
+            const canonicalChannelUri = getChannelUri(item.url);
+            const channelUri = canonicalChannelUri
+              ? hyperbeamImmutableUri(item.immutableId) || canonicalChannelUri
+              : null;
             return (
               <div className="featured-banner-slide" key={i} style={{ minWidth: width }}>
                 <NavLink
                   className="featured-banner-image"
                   onClick={(e) => handleAnchor(e, item.url)}
-                  to={getUriTo(item.url)}
+                  to={hyperbeamImmutableWebPath(item.immutableId) || getUriTo(item.url)}
                   target={!item.url.includes('odysee.com') ? '_blank' : undefined}
                   title={item.label}
                 >
@@ -205,9 +212,7 @@ export default function FeaturedBanner(props: Props) {
                     style={{ width: width }}
                   />
                 </NavLink>
-                {getChannelUri(item.url) && (
-                  <BannerLatestClaims channelUri={getChannelUri(item.url)} count={latestClaimCount} />
-                )}
+                {channelUri && <BannerLatestClaims channelUri={channelUri} count={latestClaimCount} />}
               </div>
             );
           })}

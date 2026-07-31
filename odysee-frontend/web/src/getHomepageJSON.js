@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  homepageSnapshotMaxAgeMs,
+  homepageClaimUri,
   homepageSnapshotPath,
   materializeHomepageData,
   readHomepageSnapshot,
@@ -125,36 +125,29 @@ async function refreshMaterializedHomepageData(snapshotPath) {
 }
 
 function isCurrentHomepageSnapshot(data) {
-  const categories = Object.values(data || {}).flatMap((homepage) =>
-    Object.values((homepage && homepage.categories) || {})
-  );
-  return categories.every(
+  const homepages = Object.values(data || {});
+  const categories = homepages.flatMap((homepage) => Object.values((homepage && homepage.categories) || {}));
+  const categoriesCurrent = categories.every(
     (category) =>
       !Array.isArray(category.immutableIds) ||
       Object.prototype.hasOwnProperty.call(category, 'immutableSigningChannelIds')
   );
+  const bannersCurrent = homepages.every((homepage) =>
+    (homepage?.featured?.items || []).every((item) => !homepageClaimUri(item?.url) || item.immutableId)
+  );
+  return Boolean(homepages.length && categories.length && categoriesCurrent && bannersCurrent);
 }
 
 async function getMaterializedHomepageData(forceRefresh = false) {
   loadHomepageData();
   if (!memo.homepageData) return {};
 
-  const sourceDir = getHomepageSourceDir();
-  const snapshotPath = homepageSnapshotPath(sourceDir);
+  const snapshotPath = homepageSnapshotPath();
   const snapshot = readHomepageSnapshot(snapshotPath);
-  if (
-    !forceRefresh &&
-    snapshot &&
-    isCurrentHomepageSnapshot(snapshot.data) &&
-    snapshot.ageMs <= homepageSnapshotMaxAgeMs()
-  )
-    return snapshot.data;
+  if (!forceRefresh && snapshot && isCurrentHomepageSnapshot(snapshot.data)) return snapshot.data;
 
-  if (!forceRefresh && snapshot) {
-    refreshMaterializedHomepageData(snapshotPath).catch((err) => {
-      console.log('getHomepageJSON materialization:', err); // eslint-disable-line no-console
-    });
-    return snapshot.data;
+  if (!forceRefresh) {
+    throw new Error(snapshot ? 'Homepage snapshot format is outdated' : 'Homepage snapshot is unavailable');
   }
 
   return refreshMaterializedHomepageData(snapshotPath);
@@ -232,4 +225,5 @@ module.exports = {
   getMaterializedHomepageData,
   getHomepageJsonV1,
   getHomepageJsonV2,
+  isCurrentHomepageSnapshot,
 };
