@@ -78,12 +78,12 @@ read(ID, Opts) ->
             end
     end.
 
-%% @doc Gives the fields of a transaction that are needed to construct an
-%% ANS-104 message.
+%% @doc Gives the fields needed to construct an Arweave message.
 item_spec() ->
     <<"""
         node {
             id
+            bundledIn { id }
             anchor
             signature
             recipient
@@ -130,12 +130,30 @@ data(ID, Opts) ->
     end.
 
 %% @doc Find the location of the scheduler based on its ID, through GraphQL.
+%% Current AO location records use lowercase tags. Nodes may disable the
+%% fallback to legacy capitalized tags with `scheduler-legacy-locations'.
 location(Address, Opts) ->
+    maybe
+        % Fallback to legacy capitalized tags if a lower-case result is not
+        % available and `scheduler-legacy-locations' is enabled.
+        Error = {error, _} ?=
+            do_location(Address, <<"type">>, <<"[\"location\"]">>, Opts),
+        true ?= hb_opts:get(scheduler_legacy_locations, true, Opts)
+            orelse Error,
+        do_location(
+            Address,
+            <<"Type">>,
+            <<"[\"Location\", \"Scheduler-Location\"]">>,
+            Opts
+        )
+    end.
+do_location(Address, TagName, TagValues, Opts) ->
     Query =
         <<"query($Addresses: [String!]!) { ",
                 "transactions(",
                 "owners: $Addresses, ",
-                "tags: { name: \"Type\" values: [\"Location\", \"Scheduler-Location\"] }, ",
+                "tags: { name: \"", TagName/binary, "\" values: ",
+                    TagValues/binary, " }, ",
                 "first: 1",
             "){ ",
                 "edges { ",
@@ -355,6 +373,13 @@ result_to_message(Item, Opts) ->
         _ ->
             result_to_message(undefined, Item, Opts)
     end.
+%% @doc Load an L1 transaction in its native form.
+result_to_message(ExpectedID, #{ <<"bundledIn">> := null }, Opts) ->
+    hb_ao:resolve(
+        #{ <<"device">> => <<"arweave@2.9">> },
+        #{ <<"path">> => <<"tx">>, <<"tx">> => ExpectedID },
+        Opts
+    );
 result_to_message(ExpectedID, Item, Opts) ->
     GQLOpts =
         Opts#{
@@ -481,11 +506,6 @@ normalize_null(null) -> <<>>;
 normalize_null(not_found) -> <<>>;
 normalize_null(Bin) when is_binary(Bin) -> Bin.
 
-decode_id_or_null(Bin) when byte_size(Bin) > 0 ->
-    hb_util:human_id(Bin);
-decode_id_or_null(_) ->
-    <<>>.
-
 decode_or_null(Bin) when is_binary(Bin) ->
     hb_util:decode(Bin);
 decode_or_null(_) ->
@@ -561,9 +581,17 @@ scheduler_location_test() ->
 
 %% @doc Test l1 message from graphql
 l1_transaction_test() ->
-    _Node = hb_http_server:start_node(#{}),
-    {ok, Res} = read(<<"uJBApOt4ma3pTfY6Z4xmknz5vAasup4KcGX7FJ0Of8w">>, #{}),
+    ID = <<"uJBApOt4ma3pTfY6Z4xmknz5vAasup4KcGX7FJ0Of8w">>,
+    Node = hb_http_server:start_node(
+        #{ <<"store">> => [#{ <<"store-module">> => hb_store_gateway }] }
+    ),
+    ClientOpts = #{ <<"store">> => [hb_test_utils:test_store(hb_store_volatile)] },
+    {ok, Res} = hb_http:get(Node, ID, ClientOpts),
     ?event(gateway, {l1_transaction, Res}),
+    Devices = hb_message:commitment_devices(Res, ClientOpts),
+    ?assert(lists:member(<<"tx@1.0">>, Devices)),
+    ?assertNot(lists:member(<<"ans104@1.0">>, Devices)),
+    ?assert(hb_message:verify(Res, all, ClientOpts)),
     Data = maps:get(<<"data">>, Res),
     ?assertEqual(<<"Hello World">>, Data).
 

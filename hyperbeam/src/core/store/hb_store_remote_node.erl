@@ -61,7 +61,7 @@ read_request(Opts = #{ <<"node">> := Node }, Key) ->
     HTTPRes =
         hb_http:get(
             Node,
-            #{ <<"path">> => read_path(Key) },
+            #{ <<"path">> => <<"/~cache@1.0/read">>, <<"read">> => Key },
             Opts
         ),
     case HTTPRes of
@@ -85,19 +85,13 @@ read_request(Opts = #{ <<"node">> := Node }, Key) ->
     end;
 read_request(_, _) -> {error, not_found}.
 
-read_path(Key) ->
-    Query =
-        unicode:characters_to_binary(
-            uri_string:compose_query([{<<"read">>, Key}])
-        ),
-    <<"/~cache@1.0/read?", Query/binary>>.
-
 remote_read_message(Opts, Key, Res) ->
+    Msg = without_transport_commitment(Res, Opts),
     case should_verify_remote_read(Opts, Key) of
         true ->
-            verify_remote_read(Opts, Key, Res);
+            verify_remote_read(Opts, Key, Msg);
         false ->
-            hb_message:with_only_committed(Res, Opts)
+            hb_message:with_only_committed(Msg, Opts)
     end.
 
 should_verify_remote_read(Opts, Key) ->
@@ -118,6 +112,18 @@ verify_remote_read(Opts, Key, Msg) ->
     end.
 read(Opts, #{ <<"read">> := Key }, _NodeOpts) ->
     read_request(Opts, Key).
+
+%% @doc Remove the transport commitments from the response.
+without_transport_commitment(Msg, Opts) when is_map(Msg) ->
+    WithoutCommitment =
+        hb_message:without_commitments(
+            #{ <<"committed">> => [<<"hashpath">>] },
+            Msg,
+            Opts
+        ),
+    hb_message:without_unless_signed([<<"hashpath">>], WithoutCommitment, Opts);
+without_transport_commitment(Res, _Opts) ->
+    Res.
 
 %% @doc Cache the data if the cache is enabled. The `local-store' option may
 %% either be `false' or a store definition to use as the local cache. Additional
@@ -172,12 +178,19 @@ maybe_cache(StoreOpts, Data, Links) ->
         ignored
     end.
 
-%% @doc Read local store cached value.
-read_local_cache(StoreOpts, ID, _Opts) ->
+%% @doc Read local store cached value. Maintains the `Opts` for the recursive
+%% `hb_cache:read` call, but uses the `StoreOpts` as the source of the
+%% `local-store` value.
+read_local_cache(StoreOpts, ID, Opts) ->
     ?event({read_local_cache, StoreOpts, ID}),
     case hb_maps:get(<<"local-store">>, StoreOpts, false, StoreOpts) of
         false -> {error, not_found};
-        Store -> hb_cache:read(ID, StoreOpts#{ <<"store">> => Store })
+        Store ->
+            CacheOpts = hb_util:deep_merge(Opts, StoreOpts, Opts),
+            hb_cache:read(
+                ID,
+                CacheOpts#{ <<"store">> => Store }
+            )
     end.
 
 %% @doc Write a key to the remote node.

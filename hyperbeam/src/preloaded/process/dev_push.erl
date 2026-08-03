@@ -623,8 +623,12 @@ schedule_result(TargetProcess, MsgToPush, Codec, Origin, Opts) ->
         {ok, 307} ->
             Location = hb_ao:get(<<"location">>, Res, Opts),
             ?event(push, {redirect, {location, {explicit, Location}}}),
-            NormMsg = normalize_message(MsgToPush, Opts),
-            SignedNormMsg = hb_message:commit(NormMsg, Opts),
+            % Strip the now-resolved hint from the target and re-sign the
+            % already-augmented message to the target's policy -- preserving the
+            % `from-*' provenance and honoring the policy, rather than
+            % re-committing the raw message with the default wallet.
+            NormMsg = normalize_message(AugmentedMsg, Opts),
+            SignedNormMsg = apply_security(NormMsg, TargetProcess, Codec, Opts),
             remote_schedule_result(Location, SignedNormMsg, Opts);
         {error, 422} ->
             ?event(push, {wrong_format, {422, Res}, {codec, Codec}}, Opts),
@@ -679,6 +683,10 @@ augment_message(Origin, ToSched, Opts) ->
 %% - `authority': A single committer, or list of comma separated committers.
 %% - (Default: Signs with default wallet)
 apply_security(Msg, TargetProcess, Codec, Opts) ->
+    % Verify the result before it is signed for POSTing, if paranoid mode
+    % enables push_result. `commit_result' signs `uncommitted(Msg)', so we
+    % verify exactly that content here, before any signature is applied.
+    hb_message:paranoid_verify(push_result, hb_message:uncommitted(Msg), Opts),
     apply_security(policy, Msg, TargetProcess, Codec, Opts).
 apply_security(policy, Msg, TargetProcess, Codec, Opts) ->
     case hb_ao:get(<<"policy">>, TargetProcess, not_found, Opts) of
@@ -862,8 +870,30 @@ max_depth_test_cases() ->
         {timeout, 30, fun test_max_depth_zero_schedules_only/0},
         {timeout, 30, fun test_max_depth_one_walks_one_hop/0},
         {timeout, 30, fun test_compute_push_hook_idempotent/0},
+        fun test_paranoid_push_result/0,
         fun test_parse_max_depth/0
     ].
+
+test_paranoid_push_result() ->
+    % The `push_result' topic verifies the result before it is signed for
+    % POSTing (at the `apply_security' entry): corrupting a committed
+    % sub-message is caught before any signature is applied.
+    Opts =
+        #{
+            <<"priv-wallet">> => hb:wallet(),
+            <<"paranoid-verify">> => [push_result],
+            <<"debug-print">> => []
+        },
+    Nested = hb_message:commit(#{ <<"body">> => <<"ok">> }, Opts),
+    ?assertThrow(
+        {paranoid_verification_failure, push_result, _, _, _},
+        apply_security(
+            #{ <<"body">> => Nested#{ <<"body">> => <<"mangled">> } },
+            #{},
+            <<"httpsig@1.0">>,
+            Opts
+        )
+    ).
 
 -ifdef(ENABLE_GENESIS_WASM).
 genesis_wasm_tests() -> [{timeout, 30, fun test_nested_push_prompts_encoding_change/0}].
@@ -876,7 +906,9 @@ test_full_push() ->
     Opts = #{
         <<"priv-wallet">> => hb:wallet(),
         <<"cache-control">> => <<"always">>,
-        <<"store">> => [hb_test_utils:test_store(hb_store_lmdb)]
+        <<"store">> => [hb_test_utils:test_store(hb_store_lmdb)],
+        % Exercise the `push_result' paranoid check against a real signed push.
+        <<"paranoid-verify">> => [push_result]
     },
     Base = hb_process_test_vectors:aos_process(Opts),
     hb_cache:write(Base, Opts),

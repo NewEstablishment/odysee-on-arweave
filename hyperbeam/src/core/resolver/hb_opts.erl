@@ -84,8 +84,10 @@
         %   false - No paranoid verification
         %   true - Verify all messages in all contexts
         %   [http_request] - Verify messages in outbound HTTP requests only
+        %   [http_result] - Verify outbound HTTP results before wire encoding
         %   [cache_write] - Verify messages only when writing to cache
         %   [cache_read] - Verify messages only when reading from cache
+        %   [push_result] - Verify process push results before signing
         %   [http_request, cache_write] - Verify in both contexts
         <<"debug-print">> =>
             {
@@ -289,7 +291,7 @@ raw_default_message() ->
         % Every modification to `Opts' called directly by the node operator
         % should be recorded here.
         <<"node-history">> => [],
-        <<"debug-stack-depth">> => 40,
+        <<"debug-stack-depth">> => 8,
         <<"debug-print">> => false,
         <<"debug-log">> => false,
         <<"log-dir">> => <<"logs">>,
@@ -314,6 +316,7 @@ raw_default_message() ->
         <<"debug-print-fail-mode">> => long,
 		<<"trusted">> => #{},
         <<"name-resolvers">> => ?DEFAULT_NAME_RESOLVERS,
+        <<"name-reserved-host-labels">> => [],
         <<"routes">> => [
             % Local CU routes.
             #{

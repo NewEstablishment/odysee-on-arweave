@@ -2030,12 +2030,18 @@ media_player_proxy_failure_returns_json_test() ->
             {"/v6/streams/[...]", player, {401, <<"blocked">>}}
         ]),
     try
-        {ok, Res} =
-            media(
+        {ok, Stream} =
+            stream(
                 #{},
                 #{ <<"claim">> => target_claim(), <<"player-server">> => MockServer },
                 #{}
             ),
+        {ok, Res} = media_error_result(player_media_response(
+            Stream,
+            #{},
+            #{ <<"player-server">> => MockServer },
+            #{}
+        )),
         Body = hb_json:decode(hb_maps:get(<<"body">>, Res, #{})),
         ?assertEqual(502, hb_maps:get(<<"status">>, Res, #{})),
         ?assertEqual(<<"application/json">>, hb_maps:get(<<"content-type">>, Res, #{})),

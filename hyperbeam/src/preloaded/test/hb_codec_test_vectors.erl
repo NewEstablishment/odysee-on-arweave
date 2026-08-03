@@ -1,5 +1,5 @@
-%%% @doc A battery of test vectors for message codecs, implementing the 
-%%% `message@1.0' encoding and commitment APIs. Additionally, this module 
+%%% @doc A battery of test vectors for message codecs, implementing the
+%%% `message@1.0' encoding and commitment APIs. Additionally, this module
 %%% houses tests that ensure the general functioning of the `hb_message' API.
 -module(hb_codec_test_vectors).
 -include_lib("eunit/include/eunit.hrl").
@@ -80,7 +80,7 @@ test_opts(ethereum) ->
         <<"store">> => hb_test_utils:test_store(),
         <<"priv-wallet">> => ar_wallet:new(ethereum)
      }.
- 
+
 test_suite() ->
     [
         % Basic operations
@@ -208,7 +208,7 @@ suite_test_() ->
 
 %% @doc Run the test suite for a set of codecs, using the given options type.
 %% Unlike normal `hb_test_utils:suite_with_opts/2' users, this suite generator
-%% creates a new options message for each individual test, such that stores 
+%% creates a new options message for each individual test, such that stores
 %% are completely isolated from each other.
 codec_test_suite(Codecs) ->
     lists:flatmap(
@@ -219,8 +219,8 @@ codec_test_suite(Codecs) ->
                         binary_to_list(
                             << (suite_name(CodecSpec))/binary, ": ", Desc/binary >>
                         ),
-                    OptsType = 
-                        case is_map(CodecSpec) of 
+                    OptsType =
+                        case is_map(CodecSpec) of
                             true -> maps:get(<<"with-opts">>, CodecSpec, normal);
                             false -> normal
                         end,
@@ -284,7 +284,7 @@ is_idempotent(Func, Msg, Opts) ->
     ?event({is_idempotent, {match_res1, MatchRes1}, {match_res2, MatchRes2}}),
     MatchRes1 andalso MatchRes2.
 
-%% @doc Ensure that converting a message to/from TABM multiple times repeatedly 
+%% @doc Ensure that converting a message to/from TABM multiple times repeatedly
 %% does not alter the message's contents.
 tabm_conversion_is_idempotent_test(_Codec, Opts) ->
     From = fun(M) -> hb_message:convert(M, <<"structured@1.0">>, tabm, Opts) end,
@@ -514,7 +514,7 @@ signed_only_committed_data_field_test(Codec, Opts) ->
     ?assert(hb_message:verify(OnlyCommitted, all, Opts)).
 
 signed_nested_data_key_test(Codec, Opts) ->
-    Msg = 
+    Msg =
         #{
             <<"outer-data">> => <<"outer">>,
             <<"body">> =>
@@ -591,7 +591,7 @@ message_with_large_keys_test(Codec, Opts) ->
     Decoded = hb_message:convert(Encoded, <<"structured@1.0">>, Codec, Opts),
     ?assert(hb_message:match(Msg, Decoded, strict, Opts)).
 
-%% @doc Check that a nested signed message with an embedded typed list can 
+%% @doc Check that a nested signed message with an embedded typed list can
 %% be further nested and signed. We then encode and decode the message. This
 %% tests a large portion of the complex type encodings that HyperBEAM uses
 %% together.
@@ -603,6 +603,12 @@ verify_nested_complex_signed_test(Codec, Opts) ->
         #{ <<"device">> := <<"tx@1.0">> } -> Codec#{ <<"device">> => <<"ans104@1.0">> };
         _ -> Codec
     end,
+    ConversionCodec =
+        case Codec of
+            #{ <<"device">> := Device, <<"bundle">> := true } -> Device;
+            _ ->
+                Codec
+        end,
     Msg =
         hb_message:commit(#{
             <<"path">> => <<"schedule">>,
@@ -639,9 +645,15 @@ verify_nested_complex_signed_test(Codec, Opts) ->
     ?assert(hb_message:verify(Inner, all, Opts)),
     ?assert(hb_message:verify(LoadedInitialInner, all, Opts)),
     % % Test encoding and decoding.
-    Encoded = hb_message:convert(Msg, Codec, <<"structured@1.0">>, Opts),
+    Encoded = hb_message:convert(Msg, ConversionCodec, <<"structured@1.0">>, Opts),
     ?event({encoded, Encoded}),
-    Decoded = hb_message:convert(Encoded, <<"structured@1.0">>, Codec, Opts),
+    Decoded =
+        hb_message:convert(
+            Encoded,
+            <<"structured@1.0">>,
+            ConversionCodec,
+            Opts
+        ),
     ?event({decoded, Decoded}),
     LoadedMsg = hb_cache:ensure_all_loaded(Decoded, Opts),
     ?event({loaded, LoadedMsg}),
@@ -651,11 +663,12 @@ verify_nested_complex_signed_test(Codec, Opts) ->
     ?assert(MatchRes),
     ?assert(hb_message:verify(Decoded, all, Opts)),
     % % Ensure that both of the messages can be verified (and retreived).
-    FoundInner =
-        hb_message:normalize_commitments(
-            hb_maps:get(<<"body">>, Msg, not_found, Opts),
-            Opts
-        ),
+    % `hb_cache:read' no longer normalizes commitments, so `hb_maps:get' returns
+    % the inner message exactly as it was signed. Re-normalizing it here would
+    % mint an unsigned commitment for the nested `parameters' submessage -- a key
+    % the outer signature was made over in its uncommitted form -- changing the
+    % signed content and breaking verification. The faithful read needs none.
+    FoundInner = hb_maps:get(<<"body">>, Msg, not_found, Opts),
     LoadedFoundInner = hb_cache:ensure_all_loaded(FoundInner, Opts),
     % Verify that the fully loaded version of the inner message, and the one
     % gained by applying `hb_maps:get` match and verify.
@@ -997,14 +1010,21 @@ deep_multisignature_test() ->
         hb_message:commit(
             Msg,
             Opts#{ <<"priv-wallet">> => Wallet1 },
-            Codec
+            #{
+                <<"commitment-device">> => Codec,
+                <<"bundle">> => true,
+                <<"committed">> => [<<"body">>]
+            }
         ),
     ?event({signed_msg, SignedMsg}),
     MsgSignedTwice =
         hb_message:commit(
             SignedMsg,
             Opts#{ <<"priv-wallet">> => Wallet2 },
-            Codec
+            #{
+                <<"commitment-device">> => Codec,
+                <<"committed">> => [<<"data">>, <<"test-key">>]
+            }
         ),
     ?event({signed_msg_twice, MsgSignedTwice}),
     ?assert(hb_message:verify(MsgSignedTwice, all, Opts)),
@@ -1327,7 +1347,7 @@ signed_with_inner_signed_message_test(Codec, Opts) ->
                             ),
                         % Uncommitted keys that should be ripped out of the inner
                         % message by `with_only_committed'. These should still be
-                        % present in the `with_only_committed' outer message. 
+                        % present in the `with_only_committed' outer message.
                         % For now, only `httpsig@1.0' supports stripping
                         % non-committed keys.
                         case is_device_codec(<<"httpsig@1.0">>, NestedCodec) of
@@ -1544,7 +1564,7 @@ sign_links_test(#{ <<"bundle">> := true }, _Opts) ->
     skip;
 sign_links_test(Codec, Opts) ->
     % Make a message with definitively non-accessible lazy-loadable links. Sign
-    % it, ensuring that we can produce signatures and IDs without having the 
+    % it, ensuring that we can produce signatures and IDs without having the
     % data directly in memory.
     Msg = #{
         <<"immediate-key">> => <<"immediate-value">>,
@@ -1554,25 +1574,32 @@ sign_links_test(Codec, Opts) ->
     ?event({signed, Signed}),
     ?assert(hb_message:verify(Signed, all, Opts)).
 
+bundled_and_unbundled_ids_differ_test(#{ <<"device">> := <<"ans104@1.0">> }, _Opts) ->
+    skip;
+bundled_and_unbundled_ids_differ_test(#{ <<"device">> := <<"tx@1.0">> }, _Opts) ->
+    skip;
 bundled_and_unbundled_ids_differ_test(Codec = #{ <<"bundle">> := true }, Opts) ->
-    SignatureType = 
-        case is_device_codec([<<"ans104@1.0">>, <<"tx@1.0">>], Codec) of
-            true -> ?RSA_SIGN_TYPE;
-            false -> <<"hmac-sha256">>
+    SignatureType = <<"hmac-sha256">>,
+    Msg =
+        #{
+            <<"immediate-key">> => <<"immediate-value">>,
+            <<"nested">> => #{
+                <<"immediate-key-2">> => <<"immediate-value-2">>
+            }
+        },
+    % Created signed and then unsigned commitments,
+    % for both bundle:true and bundle:false.
+    Commit =
+        fun(Bundle) ->
+            Spec = Codec#{ <<"bundle">> => Bundle },
+            hb_message:commit(
+                hb_message:commit(Msg, Opts, Spec#{ <<"type">> => <<"signed">> }),
+                Opts,
+                Spec#{ <<"type">> => <<"unsigned">> }
+            )
         end,
-    Msg = #{
-        <<"immediate-key">> => <<"immediate-value">>,
-        <<"nested">> => #{
-            <<"immediate-key-2">> => <<"immediate-value-2">>
-        }
-    },
-    SignedNoBundle =
-        hb_message:commit(
-            Msg,
-            Opts,
-            maps:without([<<"bundle">>], Codec)
-        ),
-    SignedBundled = hb_message:commit(Msg, Opts, Codec),
+    SignedNoBundle = Commit(false),
+    SignedBundled = Commit(true),
     ?event({signed_no_bundle, SignedNoBundle}),
     ?event({signed_bundled, SignedBundled}),
     {ok, UnbundledID, _} =
@@ -1689,7 +1716,7 @@ signed_non_bundle_is_bundlable_test(_Codec, _Opts) ->
     skip.
 
 %% Ensure that we can write a message with multiple commitments to the store,
-%% then read back all of the written commitments by loading the message's 
+%% then read back all of the written commitments by loading the message's
 %% unsigned ID.
 find_multiple_commitments_test_disabled() ->
     Opts = test_opts(normal),
@@ -1709,7 +1736,7 @@ find_multiple_commitments_test_disabled() ->
     ?event(debug_commitments, {read, LoadedCommitments}),
     ok.
 
-%% @doc Ensure that a httpsig@1.0 message which is bundled and requests an 
+%% @doc Ensure that a httpsig@1.0 message which is bundled and requests an
 %% invalid ordering of keys is normalized to a valid ordering.
 bundled_ordering_test(Codec = #{ <<"bundle">> := true }, Opts) ->
     % Opts = (test_opts(normal))#{

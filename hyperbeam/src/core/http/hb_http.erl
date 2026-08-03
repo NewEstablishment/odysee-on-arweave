@@ -209,7 +209,11 @@ request_response(Method, Peer, Path, Response, Duration, Opts) ->
                         >>
                     };
                 {_, Value} ->
-                    {hb_http_client:response_status_to_atom(Status), Value}
+                    add_peer_stores(
+                        {hb_http_client:response_status_to_atom(Status), Value},
+                        Peer,
+                        Opts
+                    )
             end;
         false ->
             % Find the codec device from the headers, if set.
@@ -220,14 +224,55 @@ request_response(Method, Peer, Path, Response, Duration, Opts) ->
                     <<"httpsig@1.0">>,
                     Opts
                 ),
-            outbound_result_to_message(
-                CodecDev,
-                Status,
-                NormHeaderMap,
-                Body,
+            add_peer_stores(
+                outbound_result_to_message(
+                    CodecDev,
+                    Status,
+                    NormHeaderMap,
+                    Body,
+                    Opts
+                ),
+                Peer,
                 Opts
             )
     end.
+
+%% @doc Give every link in a response the stores needed to resolve it: the
+%% client's own local stores, followed by the peer that served the response.
+%% We additionally add the local stores as a cache that the read links should
+%% be replicated to on this node, if they are resolved.
+add_peer_stores({Status, Res}, Peer, Opts) ->
+    LocalStore = hb_opts:get(store, [], hb_store:scope(Opts, local)),
+    {
+        Status,
+        set_link_stores(
+            Res,
+            LocalStore ++ [
+                #{
+                    <<"store-module">> => hb_store_remote_node,
+                    <<"node">> => Peer,
+                    <<"access">> => [<<"read">>],
+                    <<"local-store">> => LocalStore
+                }
+            ]
+        )
+    }.
+
+%% @doc Add's the given `Stores` value to every link in a message, recursively.
+set_link_stores({link, ID, LinkOpts}, Stores) ->
+    {link,
+        ID,
+        LinkOpts#{
+            <<"store">> => Stores,
+            <<"scope">> => [local, remote]
+        }
+    };
+set_link_stores(Msg, Stores) when is_map(Msg) ->
+    maps:map(fun(_Key, Value) -> set_link_stores(Value, Stores) end, Msg);
+set_link_stores(Msg, Stores) when is_list(Msg) ->
+    lists:map(fun(Value) -> set_link_stores(Value, Stores) end, Msg);
+set_link_stores(Value, _Stores) ->
+    Value.
 
 %% @doc Convert an HTTP response to a message.
 outbound_result_to_message(<<"ans104@1.0">>, Status, Headers, Body, Opts) ->
@@ -530,7 +575,14 @@ reply(InitReq, TABMReq, RawStatus, RawMessage, Opts) ->
             true -> fin;
             false -> nofin
         end,
-    cowboy_req:stream_body(EncodedBody, Fin, PostStreamReq),
+    % Stream the body back to the caller if there is content. If we already
+    % signal a non-content reply, skip.
+    case Status of
+        NonContentStatus
+            when (NonContentStatus == 204)
+            orelse (NonContentStatus == 304) -> skip;
+        _ -> cowboy_req:stream_body(EncodedBody, Fin, PostStreamReq)
+    end,
     EndTime = os:system_time(millisecond),
     ReqDuration = EndTime - hb_maps:get(start_time, Req, undefined, Opts),
     ReplyDuration = EndTime - ReplyStartTime,
@@ -547,6 +599,7 @@ reply(InitReq, TABMReq, RawStatus, RawMessage, Opts) ->
             {duration, EndTime - hb_maps:get(start_time, Req, undefined, Opts)},
             {body_size, byte_size(EncodedBody)},
             {method, cowboy_req:method(Req)},
+            {host, get_host(TABMReq, Opts)},
             {path,
                 {string,
                     uri_string:percent_decode(
@@ -755,6 +808,9 @@ base_exposed_headers() ->
 
 %% @doc Generate the headers and body for a HTTP response message.
 encode_reply(Status, TABMReq, Message, Opts) ->
+    % Verify the result while it is still in `structured@1.0' form, before it is
+    % converted to the target wire codec, if paranoid mode enables http_result.
+    hb_message:paranoid_verify(http_result, Message, Opts),
     Codec = accept_to_codec(TABMReq, Message, Opts),
     ?event(debug_http, {encoding_reply, {codec, Codec}, {message, Message}}),
     BaseHdrs =
@@ -815,16 +871,9 @@ encode_reply(Status, TABMReq, Message, Opts) ->
                 maps:get(<<"body">>, ErrMsg, <<>>)
             };
         {_, <<"httpsig@1.0">>, _} ->
-            TABM =
-                hb_message:convert(
-                    Message,
-                    tabm,
-                    <<"structured@1.0">>,
-                    Opts#{ <<"topic">> => ao_internal }
-                ),
             EncMessage =
                 hb_message:convert(
-                    TABM,
+                    Message,
                     case AcceptBundle of
                         true ->
                             #{
@@ -840,8 +889,8 @@ encode_reply(Status, TABMReq, Message, Opts) ->
                                     hb_opts:get(generate_index, true, Opts)
                             }
                     end,
-                    tabm,
-                    Opts
+                    <<"structured@1.0">>,
+                    Opts#{ <<"topic">> => ao_internal }
                 ),
             {
                 Status,
@@ -1283,6 +1332,18 @@ real_ip(Req = #{ headers := RawHeaders }, Opts) ->
         IP -> IP
     end.
 
+%% @doc Find the hostname from either the inbound TABM request form,
+%% or set explicitly in the node message.
+get_host(TABMReq, Opts) ->
+    ReqHost = maps:get(<<"host">>, TABMReq, <<"no_host">>),
+    case hb_opts:get(node_host, no_host, Opts) of
+        no_host ->
+            ReqHost;
+        NodeHost ->
+            % Replace suffix part
+            filename:rootname(ReqHost, <<".", NodeHost/binary>>)
+    end.
+
 %%% Metrics
 
 init_prometheus() ->
@@ -1336,6 +1397,24 @@ record_request_metric(TotalDuration, ReplyDuration, StatusCode) ->
 test_opts() ->
     #{ <<"store">> => hb_test_utils:test_store(), <<"priv-wallet">> => hb:wallet() }.
 
+isolated_test_opts() ->
+    #{
+        <<"store">> => hb_test_utils:test_store(),
+        <<"priv-wallet">> => ar_wallet:new()
+    }.
+
+%% @doc Verify that request hosts are formatted appropriately for logging.
+get_host_test_parallel() ->
+    Opts = #{ <<"node-host">> => <<"example.com">> },
+    ?assertEqual(
+        <<"abc">>,
+        get_host(#{ <<"host">> => <<"abc.example.com">> }, Opts)
+    ),
+    ?assertEqual(
+        <<"example.com">>,
+        get_host(#{ <<"host">> => <<"example.com">> }, Opts)
+    ).
+
 simple_ao_resolve_unsigned_test() ->
     URL = hb_http_server:start_node(),
     TestMsg = #{ <<"path">> => <<"/key1">>, <<"key1">> => <<"Value1">> },
@@ -1351,6 +1430,22 @@ simple_ao_resolve_signed_test() ->
             test_opts()
         ),
     ?assertEqual(<<"Value1">>, Res).
+
+paranoid_http_result_test() ->
+    % The `http_result' topic verifies each response at the reply boundary (in
+    % `encode_reply', before wire conversion): a validly committed result
+    % encodes cleanly, while corrupting its committed body is caught.
+    Opts =
+        (test_opts())#{
+            <<"paranoid-verify">> => [http_result],
+            <<"debug-print">> => []
+        },
+    Valid = hb_message:commit(#{ <<"body">> => <<"ok">> }, Opts),
+    ?assertMatch({_, _, _}, encode_reply(200, #{}, Valid, Opts)),
+    ?assertThrow(
+        {paranoid_verification_failure, http_result, _, _, _},
+        encode_reply(200, #{}, Valid#{ <<"body">> => <<"mangled">> }, Opts)
+    ).
 
 nested_ao_resolve_test() ->
     URL = hb_http_server:start_node(),
@@ -1500,23 +1595,128 @@ ans104_wasm_test() ->
         ),
     ?assert(hb_message:verify(Msg, all, ClientOpts)),
     ?event({msg, Msg}),
-    %% TODO: We could resolve before return, but I don't think that 
-    %% is the desired behaviour.
-    {ok, Res} =
+    ?assertMatch(
+        {ok, #{ <<"output">> := [6.0] }},
         post(
             URL,
             Msg#{ <<"path">> => <<"/init/compute/results">> },
             ClientOpts
+        )
+    ).
+
+nested_signed_bundle_over_http_test() ->
+    Parent = self(),
+    ServerOpts =
+        (isolated_test_opts())#{
+            <<"port">> => 0,
+            <<"on">> => #{
+                <<"request">> => #{
+                    <<"device">> => #{
+                        <<"request">> =>
+                            fun(_, HookReq, HookOpts) ->
+                                Parent ! {nested_httpsig_request, HookReq},
+                                {error, #{
+                                    <<"status">> => 200,
+                                    <<"response">> =>
+                                        nested_signed_response(HookOpts)
+                                }}
+                            end
+                    }
+                }
+            }
+        },
+    ClientOpts =
+        (isolated_test_opts())#{ <<"http-only-result">> => false },
+    Inner = nested_signed_response(ClientOpts),
+    Request =
+        hb_message:commit(
+            #{
+                <<"accept-bundle">> => true,
+                <<"codec-device">> => <<"httpsig@1.0">>,
+                <<"require-codec">> => <<"httpsig@1.0">>,
+                <<"response">> => Inner
+            },
+            ClientOpts,
+            #{
+                <<"commitment-device">> => <<"httpsig@1.0">>,
+                <<"bundle">> => true
+            }
         ),
-    %% TODO: Is there a better way to do this?
-    {link, LinkID, _ } = maps:get(<<"output">>, Res),
-    %% We need to resolve agaisnt the server cache
-    {ok, #{<<"body">> := Body}} = post(URL, Msg#{<<"path">> => <<"/", LinkID/binary, "/1">>}, ClientOpts),
-    ?assertEqual(<<"6.00000000000000000000e+00">>, Body),
-    % @TODO this assertion should pass, but it doesn't due to how `bundle`
-    % tag is handled between client an server. Commenting out for now.
-    % ?assertEqual(6.0, hb_ao:get(<<"output/1">>, Res, ClientOpts)),
-    skip.
+    {ok, Reply} =
+        post(
+            hb_http_server:start_node(ServerOpts),
+            <<"/~meta@1.0/info">>,
+            Request,
+            ClientOpts
+        ),
+    Received =
+        receive
+            {nested_httpsig_request, #{ <<"request">> := Req }} -> Req
+        after 5_000 ->
+            error(nested_httpsig_request_timeout)
+        end,
+    ?assert(hb_message:verify(Received, all, ServerOpts)),
+    ReceivedInner = maps:get(<<"response">>, Received),
+    ?assertEqual(Inner, ReceivedInner),
+    ?assert(hb_message:verify(ReceivedInner, all, ServerOpts)),
+    ?assertEqual(
+        ReceivedInner,
+        maps:get(
+            <<"response">>,
+            hb_cache:ensure_all_loaded(Received, ServerOpts)
+        )
+    ),
+    ReplyInner = maps:get(<<"response">>, Reply),
+    ?assert(hb_message:verify(Reply, all, ClientOpts)),
+    ?assert(hb_message:verify(ReplyInner, all, ClientOpts)),
+    ?assertEqual(
+        ReplyInner,
+        hb_cache:ensure_all_loaded(ReplyInner, ClientOpts)
+    ).
+
+nested_signed_response(Opts) ->
+    Response = #{
+        <<"body">> => #{ <<"nested">> => #{ <<"value">> => <<"x">> } },
+        <<"status">> => 200
+    },
+    {ok, _} = hb_cache:write(Response, Opts),
+    Unsigned =
+        hb_cache:ensure_all_loaded(
+            hb_message:commit(
+                Response,
+                Opts,
+                #{
+                    <<"commitment-device">> => <<"httpsig@1.0">>,
+                    <<"type">> => <<"unsigned">>
+                }
+            ),
+            Opts
+        ),
+    hb_message:commit(
+        Unsigned,
+        Opts,
+        #{
+            <<"commitment-device">> => <<"httpsig@1.0">>,
+            <<"bundle">> => true
+        }
+    ).
+
+%% @doc Ensure that linked submessages in a response can be resolved by
+%% reading them back from the peer that served it.
+remote_response_links_test() ->
+    ServerOpts = #{ <<"store">> => hb_test_utils:test_store() },
+    ClientOpts = #{ <<"store">> => hb_test_utils:test_store() },
+    {ok, ID} = hb_cache:write(#{ <<"a">> => #{ <<"b">> => 123 } }, ServerOpts),
+    {ok, Res} =
+        get(
+            hb_http_server:start_node(ServerOpts),
+            #{
+                <<"path">> => ID,
+                <<"accept-bundle">> => false
+            },
+            ClientOpts
+        ),
+    ?assertEqual(123, hb_ao:get(<<"a/b">>, Res, ClientOpts)).
 
 send_large_signed_request_test() ->
     Opts = #{ <<"priv-wallet">> => hb:wallet() },

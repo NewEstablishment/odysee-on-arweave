@@ -27,7 +27,7 @@ index(M1, M2, Opts) ->
 %% @doc Route a request to the associated data via its manifest.
 route(<<"index">>, M1, M2, Opts) ->
     ?event({manifest_index, M1, M2}),
-    case manifest(M1, M2, Opts) of
+    case manifest(M1, <<>>, Opts) of
         {ok, Manifest} ->
             % Get the path to the index page from the manifest. We make
             % sure to use `hb_maps:get/4' to ensure that we do not recurse
@@ -63,7 +63,7 @@ route(ID, _, _, Opts) when ?IS_ID(ID) ->
     hb_cache:read(ID, Opts);
 route(Key, M1, M2, Opts) ->
     ?event(debug_manifest, {manifest_lookup, {key, Key}, {m1, M1}, {m2, {explicit, M2}}}),
-    {ok, Manifest} = manifest(M1, M2, Opts),
+    {ok, Manifest} = manifest(M1, Key, Opts),
     {ok, Res} = maps:find(<<"paths">>, Manifest),
     case maps:get(Key, Res, no_path_match) of
         no_path_match ->
@@ -164,7 +164,7 @@ maybe_cast_manifest(Msg, Opts) ->
 
 %% @doc Find and deserialize a manifest from the given base, returning a 
 %% message with the `~manifest@1.0' device.
-manifest(Base, _Req, Opts) ->
+manifest(Base, Path, Opts) ->
     JSON =
         hb_maps:get_first(
             [
@@ -174,17 +174,45 @@ manifest(Base, _Req, Opts) ->
             not_found,
             Opts
     ),
-    FlatManifest = #{ <<"paths">> := FlatPaths } = hb_json:decode(JSON),
-    DeepPaths =
-        hb_message:convert(
-            FlatPaths,
-            <<"structured@1.0">>,
-            <<"flat@1.0">>,
-            Opts
-        ),
-    LinkifiedPaths = linkify(DeepPaths, Opts),
-    Structured = FlatManifest#{ <<"paths">> => LinkifiedPaths },
+    StructuredManifest = #{ <<"paths">> := StructuredPaths } =
+        decode_manifest(JSON, Path, Opts),
+    LinkifiedPaths = linkify(StructuredPaths, Opts),
+    Structured = StructuredManifest#{ <<"paths">> => LinkifiedPaths },
     {ok, Structured#{ <<"device">> => <<"manifest@1.0">> }}.
+
+%% @doc Decode a manifest while retaining only paths relevant to the current
+%% route component.
+decode_manifest(JSON, Path, Opts) ->
+    Prefix = <<Path/binary, "/">>,
+    PrefixSize = byte_size(Prefix),
+    {Manifest, _, <<>>} =
+        json:decode(
+            JSON,
+            {0, #{}},
+            #{
+                object_start =>
+                    fun({Depth, _}) -> {Depth + 1, #{}} end,
+                object_push =>
+                    fun
+                        (Key, Value, {2, Object}) ->
+                            {2,
+                                case Key of
+                                    K when K =:= <<"path">>; K =:= Path ->
+                                        hb_util:deep_set(Key, Value, Object, Opts);
+                                    <<Prefix:PrefixSize/binary, _/binary>> ->
+                                        hb_util:deep_set(Key, Value, Object, Opts);
+                                    _ ->
+                                        Object
+                                end
+                            };
+                        (Key, Value, {Depth, Object}) ->
+                            {Depth, Object#{ Key => Value }}
+                    end,
+                object_finish =>
+                    fun({_, Object}, Parent) -> {Object, Parent} end
+            }
+        ),
+    Manifest.
 
 %% @doc Generate a nested message of links to content from a parsed (and
 %% structured) manifest.
@@ -354,26 +382,24 @@ manifest_inner_redirect_test_parallel() ->
     Opts = hb_name_test_utils:manifest_opts(),
     Node = hb_http_server:start_node(Opts),
     %% Request manifest to node.
-    ?assertMatch(
-        {ok, #{<<"commitments">> := #{<<"Tqh6oIS2CLUaDY11YUENlvvHmDim1q16pMyXAeSKsFM">> := _ }}},
-        hb_http:get(
-            Node,
-            #{<<"path">> => <<"/42jky7O3rzKkMOfHBXgK-304YjulzEYqHc9qyjT3efA">>},
-            Opts
-        )
+    hb_test_utils:assert_manifest_response(
+        Node,
+        #{<<"path">> => <<"/42jky7O3rzKkMOfHBXgK-304YjulzEYqHc9qyjT3efA">>},
+        <<"text/html">>,
+        <<"<title>Portal</title>">>,
+        Opts
     ).
 
 %% @doc Accessing `/TXID/assets/ArticleBlock-Dtwjc54T.js` should return valid message.
 access_key_path_in_manifest_test_parallel() ->
     Opts = hb_name_test_utils:manifest_opts(),
     Node = hb_http_server:start_node(Opts),
-    ?assertMatch(
-        {ok, #{<<"commitments">> := #{<<"oLnQY-EgiYRg9XyO7yZ_mC0Ehy7TFR3UiDhFvxcohC4">> := _ }}},
-        hb_http:get(
-            Node,
-            #{<<"path">> => <<"/42jky7O3rzKkMOfHBXgK-304YjulzEYqHc9qyjT3efA/assets/ArticleBlock-Dtwjc54T.js">>},
-            Opts
-        )
+    hb_test_utils:assert_manifest_response(
+        Node,
+        #{<<"path">> => <<"/42jky7O3rzKkMOfHBXgK-304YjulzEYqHc9qyjT3efA/assets/ArticleBlock-Dtwjc54T.js">>},
+        <<"application/javascript">>,
+        <<"const __vite__mapDeps">>,
+        Opts
     ).
 
 %% This works with `not_found.js` but doesn't follow the logic if under a 
@@ -381,11 +407,10 @@ access_key_path_in_manifest_test_parallel() ->
 manifest_should_fallback_on_not_found_path_test_parallel() ->
     Opts = hb_name_test_utils:manifest_opts(),
     Node = hb_http_server:start_node(Opts),
-    ?assertMatch(
-        {ok, #{<<"commitments">> := #{<<"Tqh6oIS2CLUaDY11YUENlvvHmDim1q16pMyXAeSKsFM">> := _ }}},
-        hb_http:get(
-            Node,
-            #{<<"path">> => <<"/42jky7O3rzKkMOfHBXgK-304YjulzEYqHc9qyjT3efA/x.js">>},
-            Opts
-        )
+    hb_test_utils:assert_manifest_response(
+        Node,
+        #{<<"path">> => <<"/42jky7O3rzKkMOfHBXgK-304YjulzEYqHc9qyjT3efA/x.js">>},
+        <<"text/html">>,
+        <<"<title>Portal</title>">>,
+        Opts
     ).

@@ -1,12 +1,12 @@
 %%% @doc A device that inserts new messages into the schedule to allow processes
 %%% to passively 'call' themselves without user interaction.
 -module(dev_cron).
--export([once/3, every/3, stop/3, info/1, info/3]).
+-export([once/3, every/3, stop/3, report/3, info/1, info/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %% @doc Exported function for getting device info.
-info(_) -> 
+info(_) ->
 	#{ default => fun handler/4 }.
 
 info(_Base, _Req, _Opts) ->
@@ -17,6 +17,7 @@ info(_Base, _Req, _Opts) ->
 			<<"info">> => <<"Get device info">>,
 			<<"once">> => <<"Schedule a one-time message">>,
 			<<"every">> => <<"Schedule a recurring message">>,
+			<<"report">> => <<"Get scheduled task status {task}">>,
 			<<"stop">> => <<"Stop a scheduled task {task}">>
 		}
 	},
@@ -81,12 +82,12 @@ every(_Base, Req, Opts) ->
 		extract_path(Req, Opts),
 		hb_ao:get(<<"interval">>, Req, Opts)
 	} of
-		{not_found, _} -> 
+		{not_found, _} ->
 			{error, <<"No cron path found in message.">>};
 		{_, not_found} ->
 			{error, <<"No interval found in message.">>};
-		{CronPath, IntervalString} -> 
-			try 
+		{CronPath, IntervalString} ->
+			try
 				IntervalMillis = parse_time(IntervalString),
 				if IntervalMillis =< 0 ->
 					throw(invalid_interval_value);
@@ -137,7 +138,7 @@ every(_Base, Req, Opts) ->
 
 %% @doc Exported function for stopping a scheduled task.
 stop(_Base, Req, Opts) ->
-	case hb_ao:get(<<"task">>, Req, Opts) of
+	case hb_maps:get(<<"stop">>, Req, not_found, Opts) of
 		not_found ->
 			{error, <<"No task ID found in message.">>};
 		TaskID ->
@@ -161,6 +162,25 @@ stop(_Base, Req, Opts) ->
                             <<"details">> => Error
                     }}
 			end
+	end.
+
+%% @doc Exported function for getting a scheduled task status report.
+report(_Base, Req, Opts) ->
+	case hb_maps:get(<<"report">>, Req, not_found, Opts) of
+		not_found ->
+			{error, <<"No task ID found in message.">>};
+		TaskID ->
+			Name = {<<"cron@1.0">>, TaskID},
+			Active =
+				case hb_name:lookup(Name) of
+					Pid when is_pid(Pid) -> erlang:is_process_alive(Pid);
+					undefined -> false
+				end,
+			{ok, #{
+				<<"status">> => 200,
+				<<"task-id">> => TaskID,
+				<<"active">> => Active
+			}}
 	end.
 
 every_worker_loop(CronPath, Req, Opts, IntervalMillis) ->
@@ -230,7 +250,7 @@ stop_once_test() ->
 	?assert(is_pid(OncePid), "Lookup did not return a PID"),
 	?assert(erlang:is_process_alive(OncePid), "OnceWorker process died prematurely"),
 	% Call stop on the once task while it's sleeping
-	OnceStopPath = <<"/~cron@1.0/stop?task=", OnceTaskID/binary>>,
+	OnceStopPath = <<"/~cron@1.0/stop=", OnceTaskID/binary>>,
 	{ok, OnceStopResult} = hb_http:get(Node, OnceStopPath, #{}),
 	?event({cron_stop_once_test_stopped, OnceStopResult}),
 	% Verify success response from stop
@@ -255,7 +275,7 @@ stop_every_test() ->
 	TestWorkerNameId = hb_util:human_id(crypto:strong_rand_bytes(32)),
 	hb_name:register({<<"test">>, TestWorkerNameId}, TestWorkerPid),
 	% Create an "every" task that calls the test worker
-	EveryUrlPath = <<"/~cron@1.0/every?test-id=", TestWorkerNameId/binary, 
+	EveryUrlPath = <<"/~cron@1.0/every?test-id=", TestWorkerNameId/binary,
 					   "&interval=200-milliseconds",
 				   "&cron-path=/~test-device@1.0/increment_counter">>,
 	{ok, #{ <<"body">> := CronTaskID }} = hb_http:get(Node, EveryUrlPath, #{}),
@@ -267,7 +287,7 @@ stop_every_test() ->
 	% Wait a bit to ensure the cron worker has run a few times
 		timer:sleep(400),
 	% Call stop on the cron task using its ID
-	EveryStopPath = <<"/~cron@1.0/stop?task=", CronTaskID/binary>>,
+	EveryStopPath = <<"/~cron@1.0/stop=", CronTaskID/binary>>,
 	{ok, EveryStopResult} = hb_http:get(Node, EveryStopPath, #{}),
 	?event({cron_stop_every_test_stopped, EveryStopResult}),
 	% Verify success response
@@ -290,10 +310,31 @@ stop_every_test() ->
 	% Call stop again using the same CronTaskID to verify the error
 	{error, <<"Task not found.">>} = hb_http:get(Node, EveryStopPath, #{}).
 
+report_every_test() ->
+	Node = hb_http_server:start_node(),
+	TestWorkerPid = spawn(fun test_worker/0),
+	TestWorkerNameId = hb_util:human_id(crypto:strong_rand_bytes(32)),
+	hb_name:register({<<"test">>, TestWorkerNameId}, TestWorkerPid),
+	EveryUrlPath = <<"/~cron@1.0/every?test-id=", TestWorkerNameId/binary,
+					   "&interval=200-milliseconds",
+				   "&cron-path=/~test-device@1.0/increment_counter">>,
+	{ok, #{ <<"body">> := CronTaskID }} = hb_http:get(Node, EveryUrlPath, #{}),
+	ReportPath = <<"/~cron@1.0/report=", CronTaskID/binary>>,
+	?assertMatch(
+		{ok, #{<<"task-id">> := CronTaskID, <<"active">> := true}},
+		hb_http:get(Node, ReportPath, #{})
+	),
+	EveryStopPath = <<"/~cron@1.0/stop=", CronTaskID/binary>>,
+	{ok, _EveryStopResult} = hb_http:get(Node, EveryStopPath, #{}),
+	?assertMatch(
+		{ok, #{<<"task-id">> := CronTaskID, <<"active">> := false}},
+		hb_http:get(Node, ReportPath, #{})
+	).
+
 
 %% @doc This test verifies that a one-time task can be scheduled and executed.
 once_executed_test() ->
-	% start a new node 
+	% start a new node
 	Node = hb_http_server:start_node(),
 	% spawn a worker on the new node that calls test_worker/0 which inits
     % test_worker/1 with a state of undefined
@@ -310,7 +351,7 @@ once_executed_test() ->
             ID/binary
         >>,
 	% this should call the worker via the test device
-	% the test device should look up the worker via the id given 
+	% the test device should look up the worker via the id given
 	{ok, #{ <<"body">> := _ReqMsgId }} = hb_http:get(Node, UrlPath, #{}),
 	% wait for the request to be processed
 		timer:sleep(400),
@@ -335,7 +376,7 @@ every_worker_loop_test() ->
 	hb_name:register({<<"test">>, ID}, PID),
 	UrlPath =
         <<
-	            "/~cron@1.0/200-milliseconds", 
+	            "/~cron@1.0/200-milliseconds",
 		    "=\"/~test-device@1.0/increment_counter\"",
             "?test-id=",
             ID/binary
@@ -355,7 +396,7 @@ every_worker_loop_test() ->
 		?event({cron_every_test_timeout, {pid, PID}, {lookup_result, FinalLookup}}),
 		throw({test_timeout_waiting_for_state, {id, ID}})
 	end.
-	
+
 %% @doc This is a helper function that is used to test the cron device.
 %% It is used to increment a counter and update the state of the worker.
 test_worker() -> test_worker(#{count => 0}).

@@ -231,12 +231,13 @@ native_create(Target, Base, Req, Opts) ->
             {ok, Params} ?= proxy_params(Base, Req, Opts),
             {ok, Body} ?= required_first([<<"comment">>, <<"body">>, <<"text">>], Params, Opts),
             Message = native_comment_message(Target, Body, Params),
-            % Commit with the node wallet so the stored comment carries a node
-            % commitment and is verifiable by its committed id. `hb_cache:write'
-            % returns the *uncommitted* content id (committed ids are linked to
-            % it), so the comment id handed out is content-addressed; the
-            % channel signature carried in the message is the authorship proof.
-            {ok, CommentID} ?= hb_cache:write(hb_message:commit(Message, Opts), Opts),
+            Committed = hb_message:commit(Message, Opts),
+            CommentID = hb_message:id(
+                Committed,
+                #{},
+                Opts#{ <<"linkify-mode">> => discard }
+            ),
+            {ok, _StorageID} ?= hb_cache:write(Committed, Opts),
             Comment = native_comment_row(CommentID, Message),
             {ok, #{
                 <<"device">> => ?DEVICE,
@@ -436,11 +437,19 @@ native_comment_rows(Selector, Opts) ->
         fun(Path) ->
             ID = hb_path:to_binary(Path),
             case native_comment_read(ID, Opts) of
-                {ok, Message} -> {true, native_comment_row(ID, Message)};
+                {ok, Message} ->
+                    {true, native_comment_row(native_comment_id(Message, Opts), Message)};
                 not_found -> false
             end
         end,
         Paths
+    ).
+
+native_comment_id(Message, Opts) ->
+    hb_message:id(
+        Message,
+        #{},
+        Opts#{ <<"linkify-mode">> => discard }
     ).
 
 indexed_paths(Map, Opts) ->

@@ -11,30 +11,23 @@
 %%% Utility macro to check if a binary is a Lua script content-type.
 -define(IS_LUA_TYPE(CT), CT == <<"application/lua">> orelse CT == <<"text/x-lua">>).
 
-%%% The set of functions that will be sandboxed by default if `sandbox' is set 
-%%% to only `true'. Setting `sandbox' to a map allows the invoker to specify
-%%% which functions should be sandboxed and what to return instead. Providing
-%%% a list instead of a map will result in all functions being sandboxed and
-%%% returning `sandboxed'.
--define(DEFAULT_SANDBOX, [
-    {['_G', io], <<"sandboxed">>},
-    {['_G', file], <<"sandboxed">>},
+%%% The set of functions that will be sandboxed by default. If the node message
+%%% parameter `lua-minimum-sandbox' is set to a different spec, it will be used.
+%%% Messages may add to this sandbox spec, but they may not remove functions.
+-define(DEFAULT_MIN_SANDBOX, [
+    {['_G', loadfile], <<"sandboxed">>},
+    {['_G', dofile], <<"sandboxed">>},
+    {['_G', package, searchers], <<"sandboxed">>},  % disk module searcher
+    {['_G', package, searchpath], <<"sandboxed">>}, % disk path prober
     {['_G', os, execute], <<"sandboxed">>},
     {['_G', os, exit], <<"sandboxed">>},
     {['_G', os, getenv], <<"sandboxed">>},
     {['_G', os, remove], <<"sandboxed">>},
     {['_G', os, rename], <<"sandboxed">>},
-    {['_G', os, tmpname], <<"sandboxed">>},
-    {['_G', package], <<"sandboxed">>},
-    {['_G', loadfile], <<"sandboxed">>},
-    {['_G', require], <<"sandboxed">>},
-    {['_G', dofile], <<"sandboxed">>},
-    {['_G', load], <<"sandboxed">>},
-    {['_G', loadfile], <<"sandboxed">>},
-    {['_G', loadstring], <<"sandboxed">>}
+    {['_G', os, tmpname], <<"sandboxed">>}
 ]).
 
-%% @doc All keys that are not directly available in the base message are 
+%% @doc All keys that are not directly available in the base message are
 %% resolved by calling the Lua function in the module of the same name.
 %% Additionally, we exclude the `keys', `set', `encode' and `decode' functions
 %% which are `message@1.0' core functions, and Lua public utility functions.
@@ -57,7 +50,7 @@ info(Base) ->
             maps:keys(Base)
     }.
 
-%% @doc Initialize the device state, loading the script into memory if it is 
+%% @doc Initialize the device state, loading the script into memory if it is
 %% a reference.
 init(Base, Req, Opts) ->
     ensure_initialized(Base, Req, Opts).
@@ -67,7 +60,7 @@ init(Base, Req, Opts) ->
 %% from the base message.
 ensure_initialized(Base, _Req, Opts) ->
     case hb_private:from_message(Base) of
-        #{<<"state">> := _} -> 
+        #{<<"state">> := _} ->
             ?event(debug_lua, lua_state_already_initialized),
             {ok, Base};
         _ ->
@@ -106,7 +99,7 @@ find_modules(Base, Opts) ->
         {Module, _} when is_binary(Module)->
             find_modules(Base#{ <<"module">> => [Module] }, Opts);
         {Module, _} when is_map(Module) ->
-            % If the module is a map, check its content type to see if it is 
+            % If the module is a map, check its content type to see if it is
             % a literal Lua module, or a map of modules with content types.
             case hb_ao:get(<<"content-type">>, Module, Opts) of
                 LuaCT when ?IS_LUA_TYPE(LuaCT) ->
@@ -152,13 +145,14 @@ load_modules([ModuleID | Rest], Opts, Acc) when ?IS_ID(ModuleID) ->
 load_modules([Module|Rest], Opts, Acc) when is_map(Module) ->
     % We have found a message with a Lua module inside. Search for the binary
     % of the program in the body and the data.
+    PlainModule = {as, <<"message@1.0">>, Module},
     ModuleBin =
         hb_ao:get_first(
             [
-                {Module, <<"body">>},
-                {Module, <<"data">>}
+                {PlainModule, <<"body">>},
+                {PlainModule, <<"data">>}
             ],
-            Module,
+            not_found,
             Opts
         ),
     case ModuleBin of
@@ -175,7 +169,7 @@ load_modules([Module|Rest], Opts, Acc) when is_map(Module) ->
                 <<"module">> => Module
             }};
         ModuleBin ->
-            % Get the `name' key from the script message if it exists, or 
+            % Get the `name' key from the script message if it exists, or
             % return the module ID as the module name.
             ModuleRef =
                 case hb_maps:find(<<"name">>, Module, Opts) of
@@ -188,7 +182,19 @@ load_modules([Module|Rest], Opts, Acc) when is_map(Module) ->
 
 %% @doc Initialize a new Lua state with a given base message and module.
 initialize(Base, Modules, Opts) ->
-    State0 = luerl:init(),
+    % Apply the node's minimum sandbox and install the disk-free `require'
+    % before loading any modules, such that code run while a module loads
+    % cannot escape them. The message may add further restrictions via
+    % `sandbox', but cannot lift these.
+    State0 =
+        case hb_opts:get(<<"lua-minimum-sandbox">>, ?DEFAULT_MIN_SANDBOX, Opts) of
+            false -> luerl:init();
+            MinSpec ->
+                dev_lua_require:install(
+                    sandbox(luerl:init(), MinSpec, Opts),
+                    Opts
+                )
+        end,
     % Load each script into the Lua state.
     State1 =
         lists:foldl(
@@ -215,11 +221,13 @@ initialize(Base, Modules, Opts) ->
             State0,
             Modules
         ),
-    % Apply any sandboxing rules to the state.
+    % Apply any additional sandboxing requested by the message after module load.
     State2 =
-        case hb_ao:get(<<"sandbox">>, {as, <<"message@1.0">>, Base}, false, Opts) of
+        case hb_maps:get(<<"sandbox">>, Base, false, Opts) of
             false -> State1;
-            true -> sandbox(State1, ?DEFAULT_SANDBOX, Opts);
+            true ->
+                % Default sandbox has already been applied, so no-op.
+                State1;
             Spec -> sandbox(State1, Spec, Opts)
         end,
     % Install the AO-Core Lua library into the state.
@@ -252,7 +260,7 @@ functions(Base, _Req, Opts) ->
     end.
 
 %% @doc Sandbox (render inoperable) a set of Lua functions. Each function is
-%% referred to as if it is a path in AO-Core, with its value being what to 
+%% referred to as if it is a path in AO-Core, with its value being what to
 %% return to the caller. For example, 'os.exit' would be referred to as
 %% referred to as `os/exit'. If preferred, a list rather than a map may be
 %% provided, in which case the functions all return `sandboxed'.
@@ -270,7 +278,7 @@ sandbox(State, [Path | Rest], Opts) ->
 %% @doc Call the Lua script with the given arguments.
 compute(Key, RawBase, RawReq, Opts) ->
     ?event(debug_lua, compute_called),
-    Req = 
+    Req =
         hb_cache:read_all_commitments(
             RawReq,
             Opts
@@ -279,7 +287,7 @@ compute(Key, RawBase, RawReq, Opts) ->
     ?event(debug_lua, ensure_initialized_done),
     % Get the state from the base message's private element.
     OldPriv = #{ <<"state">> := State } = hb_private:from_message(Base),
-    % TODO: looks like the script is injected in multiple places, does the 
+    % TODO: looks like the script is injected in multiple places, does the
     % script need to be passed?
     % Get the Lua function to call from the base message.
     Function =
@@ -336,7 +344,7 @@ compute(Key, RawBase, RawReq, Opts) ->
 process_response({ok, [Result], NewState}, Priv, Opts) ->
     process_response({ok, [<<"ok">>, Result], NewState}, Priv, Opts);
 process_response({ok, [Status, MsgResult], NewState}, Priv, Opts) ->
-    % If the result is a HyperBEAM device return (`{Status, Msg}'), decode it 
+    % If the result is a HyperBEAM device return (`{Status, Msg}'), decode it
     % and add the previous `priv' element back into the resulting message.
     case decode(MsgResult, Opts) of
         Msg when is_map(Msg) ->
@@ -516,23 +524,34 @@ simple_invocation_test() ->
         },
         <<"parameters">> => []
     },
-    ?assertEqual(2, hb_ao:get(<<"assoctable/b">>, Base, #{})).
+    ?assertEqual(2, hb_ao:get(<<"assoctable/b">>, Base, #{})),
+    InlineBase = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"content-type">> => <<"application/lua">>,
+        <<"data">> => Script,
+        <<"parameters">> => []
+    },
+    ?assertEqual(2, hb_ao:get(<<"assoctable/b">>, InlineBase, #{})).
 
 post_invocation_message_validation_test() ->
     {ok, Script} = file:read_file("test/test.lua"),
     Opts = #{ <<"priv-wallet">> => hb:wallet() },
     Base =
         hb_message:commit(
-            #{
-                <<"device">> => <<"lua@5.3a">>,
-                <<"module">> => #{
-                    <<"content-type">> => <<"application/lua">>,
-                    <<"body">> => Script
+            hb_message:commit(
+                #{
+                    <<"device">> => <<"lua@5.3a">>,
+                    <<"module">> => #{
+                        <<"content-type">> => <<"application/lua">>,
+                        <<"body">> => Script
+                    },
+                    <<"test-key">> => <<"test-value-1">>
                 },
-                <<"test-key">> => <<"test-value-1">>
-            },
-            Opts
-        ),
+                Opts
+            ),
+            Opts,
+            #{ <<"type">> => <<"unsigned">> }
+    ),
     {ok, UnsignedID} = hb_cache:write(Base, Opts),
     ?event({base, {msg, Base}, {unsigned_id, UnsignedID}}),
     {ok, Res} = hb_ao:resolve(Base, <<"mutate_test_key">>, Opts),
@@ -553,7 +572,7 @@ load_modules_by_id() ->
     [{_,Code}|_] = Acc,
     <<Prefix:8/binary, _/binary>> = Code,
     ?assertEqual(<<"function">>, Prefix).
-    
+
 multiple_modules_test() ->
     {ok, Module} = file:read_file("test/test.lua"),
     Module2 =
@@ -608,6 +627,185 @@ sandboxed_failure_test() ->
         <<"sandbox">> => true
     },
     ?assertMatch({error, _}, hb_ao:resolve(Base, <<"sandboxed_fail">>, #{})).
+
+default_sandboxed_failure_test() ->
+    {ok, Module} = file:read_file("test/test.lua"),
+    Base = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => Module
+        },
+        <<"parameters">> => []
+    },
+    ?assertMatch({error, _}, hb_ao:resolve(Base, <<"sandboxed_fail">>, #{})).
+
+minimum_sandbox_overrides_false_test() ->
+    {ok, Module} = file:read_file("test/test.lua"),
+    Base = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => Module
+        },
+        <<"parameters">> => [],
+        <<"sandbox">> => false
+    },
+    ?assertMatch({error, _}, hb_ao:resolve(Base, <<"sandboxed_fail">>, #{})).
+
+lua_minimum_sandbox_can_be_disabled_test() ->
+    {ok, Module} = file:read_file("test/test.lua"),
+    Base = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => Module
+        },
+        <<"parameters">> => [],
+        <<"sandbox">> => false
+    },
+    ?assertMatch(
+        {ok, _},
+        hb_ao:resolve(
+            Base,
+            <<"sandboxed_fail">>,
+            #{ <<"lua-minimum-sandbox">> => false }
+        )
+    ).
+
+module_load_is_sandboxed_by_default_test() ->
+    Module =
+        <<
+            """
+            local ok = pcall(os.getenv, "PWD")
+            function load_sandboxed()
+                if ok then
+                    return "escaped"
+                else
+                    return "sandboxed"
+                end
+            end
+            """
+        >>,
+    Base = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => Module
+        },
+        <<"parameters">> => []
+    },
+    ?assertEqual(
+        {ok, <<"sandboxed">>},
+        hb_ao:resolve(Base, <<"load_sandboxed">>, #{})
+    ).
+
+io_popen_is_sandboxed_by_default_test() ->
+    Module =
+        <<
+            """
+            function popen_fail()
+                return io.popen("id")
+            end
+            """
+        >>,
+    Base = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => Module
+        },
+        <<"parameters">> => []
+    },
+    ?assertMatch({error, _}, hb_ao:resolve(Base, <<"popen_fail">>, #{})).
+
+require_cannot_load_from_disk_test() ->
+    % Untrusted code cannot restore `require's filesystem search by
+    % reassigning `package.path': `test/test.lua' exists on disk, but the
+    % sandboxed `require' resolves only from `package.loaded'/`package.preload'.
+    Module =
+        <<
+            """
+            function disk_require()
+                package.path = "./test/?.lua"
+                local ok = pcall(require, "test")
+                if ok then return "loaded-from-disk" else return "blocked" end
+            end
+            """
+        >>,
+    Base = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => Module
+        },
+        <<"parameters">> => []
+    },
+    % Positive control: with the sandbox disabled, the native `require' does
+    % load `test/test.lua' from disk -- proving the vector is real and that
+    % `blocked' under the default is meaningful, not an incidental failure.
+    ?assertEqual(
+        {ok, <<"loaded-from-disk">>},
+        hb_ao:resolve(
+            Base,
+            <<"disk_require">>,
+            #{ <<"lua-minimum-sandbox">> => false }
+        )
+    ),
+    ?assertEqual(
+        {ok, <<"blocked">>},
+        hb_ao:resolve(Base, <<"disk_require">>, #{})
+    ).
+
+require_serves_preloaded_modules_test() ->
+    % The sandboxed `require' still resolves modules registered in
+    % `package.preload', as legitimate processes such as AOS rely upon.
+    Module =
+        <<
+            """
+            function preload_require()
+                package.preload["mymod"] = function() return "from-preload" end
+                return require("mymod")
+            end
+            """
+        >>,
+    Base = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => Module
+        },
+        <<"parameters">> => []
+    },
+    ?assertEqual(
+        {ok, <<"from-preload">>},
+        hb_ao:resolve(Base, <<"preload_require">>, #{})
+    ).
+
+package_disk_searcher_is_sandboxed_test() ->
+    % The native filesystem searcher cannot be invoked directly either:
+    % `package.searchers' is rendered inoperable, so no callable disk loader
+    % remains in the `package' table.
+    Module =
+        <<
+            """
+            function searcher_type()
+                return type(package.searchers)
+            end
+            """
+        >>,
+    Base = #{
+        <<"device">> => <<"lua@5.3a">>,
+        <<"module">> => #{
+            <<"content-type">> => <<"application/lua">>,
+            <<"body">> => Module
+        },
+        <<"parameters">> => []
+    },
+    ?assertEqual(
+        {ok, <<"string">>},
+        hb_ao:resolve(Base, <<"searcher_type">>, #{})
+    ).
 
 %% @doc Run an AO-Core resolution from the Lua environment.
 ao_core_sandbox_test() ->
@@ -864,10 +1062,10 @@ generate_lua_process(File, Opts) ->
                 <<"content-type">> => <<"application/lua">>,
                 <<"body">> => Module
             },
-            <<"authority">> => [ 
-                Address, 
+            <<"authority">> => [
+                Address,
                 <<"E3FJ53E6xtAzcftBpaw2E1H4ZM9h6qy6xz9NXh5lhEQ">>
-            ], 
+            ],
             <<"scheduler-location">> =>
                 hb_util:human_id(ar_wallet:to_address(Wallet)),
             <<"test-random-seed">> => rand:uniform(1337)
@@ -880,11 +1078,11 @@ generate_test_message(Process, Opts) ->
     generate_test_message(
         Process,
         Opts,
-        <<""" 
+        <<"""
         Count = 0
-        function add() 
+        function add()
             Send({Target = 'Foo', Data = 'Bar' });
-            Count = Count + 1 
+            Count = Count + 1
         end
         add()
         return Count
@@ -898,7 +1096,7 @@ generate_test_message(Process, Opts, ToEval) when is_binary(ToEval) ->
             <<"action">> => <<"Eval">>,
             <<"body">> => #{
                 <<"content-type">> => <<"application/lua">>,
-                <<"body">> => hb_util:bin(ToEval) 
+                <<"body">> => hb_util:bin(ToEval)
             }
         }
     );
@@ -938,7 +1136,7 @@ generate_stack(File) ->
         <<"passes">> => 2,
         <<"stack-keys">> => [<<"init">>, <<"compute">>],
         <<"module">> => Module,
-        <<"process">> => 
+        <<"process">> =>
             hb_message:commit(#{
                 <<"type">> => <<"Process">>,
                 <<"module">> => #{

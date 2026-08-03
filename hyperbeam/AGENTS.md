@@ -2,7 +2,9 @@
 
 This directory is the runtime and storage side of the Odysee-on-HyperBEAM system. Keep generic HyperBEAM primitives reusable and isolate Odysee protocol translation in Odysee devices and stores.
 
-HyperBEAM implements AO-Core. Read `README.md`, `CONTRIBUTING.md`, and `docs/misc/hacking-on-hyperbeam.md` before changing core behavior.
+HyperBEAM implements AO-Core. Read `README.md`, `CONTRIBUTING.md`,
+`docs/misc/hacking-on-hyperbeam.md`, and `UPSTREAM.md` before changing core
+behavior or synchronizing the vendored runtime.
 
 ## Engineering Rules
 

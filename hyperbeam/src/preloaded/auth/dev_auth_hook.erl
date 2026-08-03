@@ -139,7 +139,8 @@ request(Base, HookReq, Opts) ->
                 SignedReq,
                 NewOpts
             ),
-        ok ?= maybe_store_signed([SignedReq | MessageSequence], NewOpts),
+        {ok, StoredIDs} ?=
+            maybe_store_signed([SignedReq | MessageSequence], NewOpts),
         ?event(auth_hook_processed_messages),
         % Call the key provider to finalize the response
         ExecutableSequence = executable_sequence(MessageSequence, NewOpts),
@@ -150,6 +151,12 @@ request(Base, HookReq, Opts) ->
                 ExecutableSequence,
                 NewOpts
             ),
+        ok ?= maybe_link_executable_result(
+            MessageSequence,
+            FinalSequence,
+            StoredIDs,
+            NewOpts
+        ),
         ?event({auth_hook_returning, {priv_final_sequence, FinalSequence}}),
         {ok, #{ <<"body">> => FinalSequence, <<"request">> => SignedReq }}
     else
@@ -422,11 +429,11 @@ resolve_executable_sequence(Executable, Fallback, Opts) ->
 maybe_store_signed(Messages, Opts) ->
     case hb_opts:get(store_all_signed, false, Opts) of
         true -> store_signed(Messages, Opts);
-        false -> ok
+        false -> {ok, []}
     end.
 
 store_signed([], _Opts) ->
-    ok;
+    {ok, []};
 store_signed([{as, _Device, Msg} | Rest], Opts) when is_map(Msg) ->
     store_signed([Msg | Rest], Opts);
 store_signed([Msg | Rest], Opts) when is_map(Msg) ->
@@ -434,11 +441,43 @@ store_signed([Msg | Rest], Opts) when is_map(Msg) ->
         [] ->
             store_signed(Rest, Opts);
         _ ->
-            {ok, _} = hb_cache:write(Msg, signed_store_opts(Msg, Opts)),
-            store_signed(Rest, Opts)
+            {ok, ID} = hb_cache:write(Msg, signed_store_opts(Msg, Opts)),
+            {ok, RestIDs} = store_signed(Rest, Opts),
+            {ok, [ID | RestIDs]}
     end;
 store_signed([_ | Rest], Opts) ->
     store_signed(Rest, Opts).
+
+maybe_link_executable_result(Messages, FinalSequence, [StoredID | _], Opts) ->
+    case {executable_id_request(Messages), final_result_id(FinalSequence)} of
+        {true, {ok, ID}} ->
+            hb_store:link(
+                hb_opts:get(store, no_viable_store, Opts),
+                #{ ID => StoredID },
+                Opts
+            ),
+            ok;
+        _ ->
+            ok
+    end;
+maybe_link_executable_result(_Messages, _FinalSequence, _StoredIDs, _Opts) ->
+    ok.
+
+executable_id_request([_Base, #{ <<"path">> := <<"id">> }]) ->
+    true;
+executable_id_request([{as, _Dev, #{ <<"path">> := <<"id">> }}]) ->
+    true;
+executable_id_request(_) ->
+    false.
+
+final_result_id([ID | _]) when ?IS_ID(ID) ->
+    {ok, ID};
+final_result_id([#{ <<"body">> := ID } | _]) when ?IS_ID(ID) ->
+    {ok, ID};
+final_result_id([_ | Rest]) ->
+    final_result_id(Rest);
+final_result_id([]) ->
+    error.
 
 signed_store_opts(Msg, Opts) ->
     case hb_maps:get(<<"path">>, Msg, not_found, Opts) of
@@ -976,6 +1015,43 @@ readable_id([ID | Rest], Opts) ->
     end;
 readable_id([], _Opts) ->
     erlang:error(upload_id_not_found).
+
+%% @doc Ensure that signed requests are stored and recallable if
+%% `store-all-signed' is enabled.
+store_hook_signed_test() ->
+    Node =
+        hb_http_server:start_node(
+            #{
+                <<"port">> => 0,
+                <<"store-all-signed">> => true,
+                <<"on">> => #{
+                    <<"request">> => #{
+                        <<"device">> => <<"auth-hook@1.0">>,
+                        <<"path">> => <<"request">>,
+                        <<"when">> => #{ <<"keys">> => [<<"!">>] },
+                        <<"secret-provider">> => #{
+                            <<"device">> => <<"http-auth@1.0">>,
+                            <<"access-control">> => #{
+                                <<"device">> => <<"http-auth@1.0">>
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+    AuthStr = <<"Basic ", (base64:encode(<<"user:pass">>))/binary>>,
+    {ok, ID} =
+        hb_http:post(
+            Node,
+            #{
+                <<"path">> => <<"/id?committers=all&!">>,
+                <<"authorization">> => AuthStr,
+                <<"stored-key">> => <<"stored-value">>
+            },
+            #{}
+        ),
+    {ok, Read} = hb_http:get(Node, <<"/", ID/binary>>, #{}),
+    ?assertEqual(<<"stored-value">>, hb_ao:get(<<"stored-key">>, Read, #{})).
 
 %% @doc The cookie hook test(s) call `GET /commitments', which returns the
 %% commitments found on the client request during execution on the server.

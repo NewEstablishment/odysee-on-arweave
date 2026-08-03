@@ -20,15 +20,15 @@
 %%% Before writing a message to the store, we convert it to Type-Annotated
 %%% Binary Messages (TABMs), such that each of the keys in the message is
 %%% either a map or a direct binary.
-%%% 
+%%%
 %%% Nested keys are lazily loaded from the stores, such that large deeply
 %%% nested messages where only a small part of the data is actually used are
 %%% not loaded into memory unnecessarily. In order to ensure that a message is
 %%% loaded from the cache after a `read', we can use the `ensure_loaded/1' and
 %%% `ensure_all_loaded/1' functions. Ensure loaded will load the exact value
-%%% that has been requested, while ensure all loaded will load the entire 
+%%% that has been requested, while ensure all loaded will load the entire
 %%% structure of the message into memory.
-%%% 
+%%%
 %%% Lazily loadable `links' are expressed as a tuple of the following form:
 %%% `{link, ID, LinkOpts}', where `ID' is the path to the data in the store,
 %%% and `LinkOpts' is a map of suggested options to use when loading the data.
@@ -46,10 +46,11 @@
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -define(MATCH_PREFIX, <<"~match@1.0">>).
+-define(DIRECT_VALUE_LENGTH, 60).
 
 %% @doc Ensure that a value is loaded from the cache if it is an ID or a link.
 %% If it is not loadable we raise an error. If the value is a message, we will
-%% load only the first `layer' of it: Representing all nested messages inside 
+%% load only the first `layer' of it: Representing all nested messages inside
 %% the result as links. If the value has an associated `type' key in the extra
 %% options, we apply it to the read value, 'lazily' recreating a `structured@1.0'
 %% form.
@@ -74,7 +75,7 @@ ensure_loaded(Ref,
             {store, _Store}
         }
     ),
-    CacheReadResult = 
+    CacheReadResult =
         case hb_opts:get(commitment, undefined, Opts) of
             true ->
                 do_read_commitment(ID, hb_util:deep_merge(Opts, LkOpts, Opts));
@@ -115,7 +116,7 @@ ensure_loaded(Ref, Link = {link, ID, LinkOpts = #{ <<"lazy">> := true }}, RawOpt
     % the options that are already set in the link.
     UnscopedOpts = hb_util:deep_merge(RawOpts, LinkOpts, RawOpts),
     Opts = hb_store:scope(UnscopedOpts, hb_opts:get(scope, local, LinkOpts)),
-    CacheReadResult = 
+    CacheReadResult =
         case hb_opts:get(commitment, undefined, Opts) of
             true ->
                 do_read_commitment(ID, Opts);
@@ -192,7 +193,7 @@ list(Path, Store) ->
     list(Path, Store, #{}).
 list(Path, Store, Opts) ->
     case hb_store:read(Store, Path, Opts) of
-        {composite, Names} -> Names;
+        {composite, Names} -> lists:map(fun child_name/1, Names);
         _ -> []
     end.
 
@@ -236,7 +237,7 @@ normalize_match_spec(MatchSpec, _ReadMode, Opts) ->
 store_match(NormalizedSpec, Opts) ->
     ConvertedMatchSpec =
         maps:map(
-            fun(_, Value) -> generate_binary_path(Value, Opts) end,
+            fun(Key, Value) -> store_match_value(Key, Value, Opts) end,
             NormalizedSpec
         ),
     case hb_store:match(
@@ -334,50 +335,64 @@ do_write_message(List, Store, Opts) when is_list(List) ->
         Opts
     );
 do_write_message(Msg, Store, Opts) when is_map(Msg) ->
-    ?event_debug(debug_cache, {writing_message, Msg}),
-    % Calculate the IDs of the message.
-    UncommittedID = hb_message:id(Msg, none, Opts#{ <<"linkify-mode">> => discard }),
-    CanonicalID = hb_message:id(Msg, #{}, Opts#{ <<"linkify-mode">> => discard }),
-    AllIDs = calculate_all_ids(Msg, Opts),
-    AltIDs = AllIDs -- [UncommittedID],
-    MsgHashpathAlg = hb_path:hashpath_alg(Msg, Opts),
-    ?event_debug(debug_cache, {writing_message, {id, UncommittedID}, {alt_ids, AltIDs}, {original, Msg}}),
-    % Write all of the keys of the message into the store.
-    hb_store:group(Store, UncommittedID, Opts),
-    maps:map(
-        fun(Key, Value) ->
-            write_key(UncommittedID, Key, MsgHashpathAlg, Value, Store, Opts)
-        end,
-        maps:without([<<"priv">>], Msg)
-    ),
-    % Optionally store the message into the match index, if configured.
-    case hb_opts:get(match_index, false, Opts) of
-        false -> ok;
-        _ -> write_match_index([CanonicalID], Msg, Opts)
-    end,
-    % Write the commitments to the store, linking each commitment ID to the
-    % uncommitted message.
-    lists:map(
-        fun(AltID) ->
-            ?event_debug(debug_cache,
-                {linking_commitment,
-                    {uncommitted_id, UncommittedID},
-                    {committed_id, AltID}
-            }),
-            hb_store:link(Store, #{ AltID => UncommittedID }, Opts)
-        end,
-        AltIDs
-    ),
+    {ok, UncommittedID, Ops} = write_message_ops(Msg, Opts),
+    run_write_ops(Store, Ops, Opts),
     {ok, UncommittedID}.
 
-%% @doc Write a single key for a message into the store.
-write_key(Base, <<"commitments">>, _HPAlg, RawCommitments, Store, Opts) ->
-    % The commitments are a special case: We calculate the single-part hashpath
-    % for the `baseID/commitments` key, then write each commitment to the store
-    % and link it to `baseCommHP/commitmentID`.
+write_message_ops(Bin, Opts) when is_binary(Bin) ->
+    Path = generate_binary_path(Bin, Opts),
+    {ok, Path, [{write, Path, Bin}]};
+write_message_ops(List, Opts) when is_list(List) ->
+    write_message_ops(
+        hb_message:convert(List, tabm, <<"structured@1.0">>, Opts),
+        Opts
+    );
+write_message_ops(Msg, Opts) when is_map(Msg) ->
+    ?event_debug(debug_cache, {writing_message, Msg}),
+    UncommittedID =
+        hb_message:id(Msg, none, Opts#{ <<"linkify-mode">> => discard }),
+    AllIDs = calculate_all_ids(Msg, UncommittedID, Opts),
+    AltIDs = AllIDs -- [UncommittedID],
+    MsgHashpathAlg = hb_path:hashpath_alg(Msg, Opts),
+    ?event_debug(debug_cache,
+        {writing_message,
+            {id, UncommittedID},
+            {alt_ids, AltIDs},
+            {original, Msg}
+        }
+    ),
+    KeyOps =
+        maps:fold(
+            fun(Key, Value, Acc) ->
+                write_key_ops(UncommittedID, Key, MsgHashpathAlg, Value, Opts, Acc)
+            end,
+            [{group, UncommittedID}],
+            maps:without([<<"priv">>], Msg)
+        ),
+    MatchOps =
+        case match_store(Opts) of
+            [] -> KeyOps;
+            _ -> [{match, AllIDs, Msg} | KeyOps]
+        end,
+    Ops =
+        lists:foldl(
+            fun(AltID, Acc) ->
+                ?event_debug(debug_cache,
+                    {linking_commitment,
+                        {uncommitted_id, UncommittedID},
+                        {committed_id, AltID}
+                    }
+                ),
+                [{link, AltID, UncommittedID} | Acc]
+            end,
+            MatchOps,
+            AltIDs
+        ),
+    {ok, UncommittedID, lists:reverse(Ops)}.
+
+write_key_ops(Base, <<"commitments">>, _HPAlg, RawCommitments, Opts, Acc) ->
     Commitments = prepare_commitments(RawCommitments, Opts),
     CommitmentsBase = commitment_path(Base, Opts),
-    hb_store:group(Store, CommitmentsBase, Opts),
     ?event(
         {writing_commitments,
             {base, Base},
@@ -385,25 +400,22 @@ write_key(Base, <<"commitments">>, _HPAlg, RawCommitments, Store, Opts) ->
             {commitments_base, CommitmentsBase}
         }
     ),
-    maps:map(
-        fun(BaseCommID, Commitment) ->
-            ?event_debug(debug_cache, {writing_commitment, {commitment, Commitment}}),
-            {ok, CommMsgID} = do_write_message(Commitment, Store, Opts),
-            hb_store:link(
-                Store,
-                #{ << CommitmentsBase/binary, "/", BaseCommID/binary >> => CommMsgID },
-                Opts
-            )
-        end,
-        Commitments
-    ),
-    % Link the commitments base to `base/commitments`.
-    hb_store:link(
-        Store,
-        #{ <<Base/binary, "/commitments">> => CommitmentsBase },
-        Opts
-    );
-write_key(Base, Key, HPAlg, Value, Store, Opts) ->
+    Acc1 = [{group, CommitmentsBase} | Acc],
+    Acc2 =
+        maps:fold(
+            fun(BaseCommID, Commitment, InnerAcc) ->
+                ?event_debug(debug_cache, {writing_commitment, {commitment, Commitment}}),
+                {ok, CommMsgID, CommOps} = write_message_ops(Commitment, Opts),
+                [
+                    {link, <<CommitmentsBase/binary, "/", BaseCommID/binary>>, CommMsgID}
+                    | prepend_reversed(CommOps, InnerAcc)
+                ]
+            end,
+            Acc1,
+            Commitments
+        ),
+    [{link, <<Base/binary, "/commitments">>, CommitmentsBase} | Acc2];
+write_key_ops(Base, Key, HPAlg, Value, Opts, Acc) ->
     KeyHashPath =
         hb_path:hashpath(
             Base,
@@ -411,9 +423,116 @@ write_key(Base, Key, HPAlg, Value, Store, Opts) ->
             HPAlg,
             Opts
         ),
-    {ok, Path} = do_write_message(Value, Store, Opts),
-    hb_store:link(Store, #{ KeyHashPath => Path }, Opts),
-    {ok, Path}.
+    case is_immediate_value(Key, Value) of
+        true ->
+            [{write, KeyHashPath, encode_immediate_value(Value)} | Acc];
+        false ->
+            {ok, Path, ValueOps} = write_message_ops(Value, Opts),
+            [
+                {link, KeyHashPath, Path}
+                | prepend_reversed(ValueOps, Acc)
+            ]
+    end.
+
+%% @doc True when `Value' should be stored at `Key''s path instead of linked
+%% through `data/'.
+is_immediate_value(Key, Value) ->
+    is_binary(Value) andalso
+        byte_size(Value) < ?DIRECT_VALUE_LENGTH andalso
+        not hb_link:is_link_key(Key).
+
+%% @doc Encode an immediate value so it cannot be confused with cache markers.
+%% Most values are stored unchanged. Literal marker-looking values get a single
+%% `raw:' prefix, so decoding removes exactly one layer and preserves literal
+%% values that start with `link:' or `raw:'.
+encode_immediate_value(<<"group">>) -> <<"raw:group">>;
+encode_immediate_value(<<"link:", _/binary>> = Value) -> <<"raw:", Value/binary>>;
+encode_immediate_value(<<"raw:", _/binary>> = Value) -> <<"raw:", Value/binary>>;
+encode_immediate_value(Value) -> Value.
+
+%% @doc Decode a value read from a message key path. Linked payloads under
+%% `data/' are not immediate values, so leave them byte-for-byte intact.
+decode_immediate_value(<<"data/", _/binary>>, Value) -> Value;
+decode_immediate_value(_Path, <<"raw:", Value/binary>>) -> Value;
+decode_immediate_value(_Path, Value) -> Value.
+
+store_match_value(Key, Bin, Opts) when is_binary(Bin) ->
+    case is_immediate_value(Key, Bin) of
+        true -> encode_immediate_value(Bin);
+        false -> <<"link:", (generate_binary_path(Bin, Opts))/binary>>
+    end;
+store_match_value(_Key, Map, Opts) when is_map(Map) ->
+    <<"link:",
+        (hb_message:id(
+            Map,
+            none,
+            Opts#{ <<"linkify-mode">> => discard }
+        ))/binary
+    >>;
+store_match_value(Key, List, Opts) when is_list(List) ->
+    case io_lib:printable_unicode_list(List) of
+        true ->
+            store_match_value(Key, iolist_to_binary(List), Opts);
+        false ->
+            store_match_value(
+                Key,
+                hb_message:convert(List, tabm, <<"structured@1.0">>, Opts),
+                Opts
+            )
+    end;
+store_match_value(Key, Other, Opts) ->
+    store_match_value(Key, hb_path:to_binary(Other), Opts).
+
+prepend_reversed(Ops, Acc) ->
+    lists:foldl(fun(Op, InnerAcc) -> [Op | InnerAcc] end, Acc, Ops).
+
+run_write_ops(Store, Ops, Opts) ->
+    run_write_ops(Store, Ops, Opts, []).
+run_write_ops(Store, [], Opts, Pending) ->
+    flush_write_ops(Store, Pending, Opts);
+run_write_ops(Store, [{match, IDs, Msg} | Rest], Opts, Pending) ->
+    flush_write_ops(Store, Pending, Opts),
+    write_match_index(IDs, Msg, Opts),
+    run_write_ops(Store, Rest, Opts, []);
+run_write_ops(Store, [Op | Rest], Opts, Pending) ->
+    run_write_ops(Store, Rest, Opts, [Op | Pending]).
+
+flush_write_ops(_Store, [], _Opts) ->
+    ok;
+flush_write_ops(Store, Pending, Opts) ->
+    apply_write_ops(Store, lists:reverse(Pending), Opts).
+
+%% @doc Apply a list of write/group/link operations through the store's existing
+%% interfaces, collapsing a message's per-key store round-trips into a small
+%% constant number of calls: the group markers, then all values in a single
+%% `write' map, then all links in a single `link' map. Links stay links -- the
+%% store decides how to represent them -- so this is store-agnostic.
+apply_write_ops(Store, Ops, Opts) ->
+    {Groups, Writes, Links} =
+        lists:foldl(
+            fun({group, Path}, {Gs, Ws, Ls}) ->
+                    {[Path | Gs], Ws, Ls};
+               ({write, Path, Value}, {Gs, Ws, Ls}) ->
+                    {Gs, Ws#{ Path => Value }, Ls};
+               ({link, New, Existing}, {Gs, Ws, Ls}) ->
+                    {Gs, Ws, Ls#{ New => Existing }}
+            end,
+            {[], #{}, #{}},
+            Ops
+        ),
+    lists:foreach(
+        fun(Group) -> hb_store:group(Store, Group, Opts) end,
+        lists:reverse(Groups)
+    ),
+    case map_size(Writes) of
+        0 -> ok;
+        _ -> hb_store:write(Store, Writes, Opts)
+    end,
+    case map_size(Links) of
+        0 -> ok;
+        _ -> hb_store:link(Store, Links, Opts)
+    end,
+    ok.
 
 %% @doc Write all message keys to the optional match index.
 write_match_index(IDs, Base, Opts) ->
@@ -421,26 +540,25 @@ write_match_index(IDs, Base, Opts) ->
         [] -> {skip, <<"No store configured for match index.">>};
         Store ->
             IndexBase = hb_message:uncommitted(hb_private:reset(Base)),
-            hb_maps:map(
-                fun(RawKey, Value) ->
+            Ops =
+                hb_maps:fold(
+                fun(RawKey, Value, Acc) ->
                     Key = hb_ao:normalize_key(RawKey),
                     ValuePath = match_value_path(Value, Opts),
-                    hb_store:group(Store, match_address(Key, ValuePath), Opts),
-                    lists:foreach(
-                        fun(ID) ->
-                            Address = match_address(Key, ValuePath, ID),
-                            ?event(
-                                debug_match,
-                                {writing_reverse_index, {address, Address}},
-                                Opts
-                            ),
-                            hb_store:write(Store, #{ Address => <<"">> }, Opts)
+                    MatchAddress = match_address(Key, ValuePath),
+                    lists:foldl(
+                        fun(ID, InnerAcc) ->
+                            Address = match_address_id(MatchAddress, ID),
+                            [{write, Address, <<"">>} | InnerAcc]
                         end,
+                        [{group, MatchAddress} | Acc],
                         IDs
                     )
                 end,
+                [],
                 IndexBase
-            )
+            ),
+            apply_write_ops(Store, lists:reverse(Ops), Opts)
     end.
 
 %% @doc Select the store that should receive reverse match-index writes.
@@ -451,13 +569,31 @@ write_match_index(IDs, Base, Opts) ->
 %% `false' disables index writes, `true' uses the normal configured
 %% store, and a store definition/list writes the index there.
 match_store(Opts) ->
-    Global = hb_opts:get(match_index, false, #{ <<"only">> => global }),
-    LocalStore = hb_opts:get(store, Global, Opts#{ <<"only">> => local }),
-    case hb_opts:get(match_index, LocalStore, Opts#{ <<"only">> => local }) of
+    LocalMatchIndex = maps:get(<<"match-index">>, Opts, undefined),
+    LocalStore = maps:get(<<"store">>, Opts, undefined),
+    GlobalMatchIndex = hb_opts:get(match_index, false, #{ <<"only">> => global }),
+    MatchIndexStore =
+        case {LocalMatchIndex, LocalStore} of
+            {false, _} ->
+                false;
+            {[], _} ->
+                [];
+            {undefined, undefined} ->
+                GlobalMatchIndex;
+            {undefined, _} ->
+                LocalStore;
+            {Local, Store}
+                    when Store =/= undefined andalso
+                        Local =:= GlobalMatchIndex ->
+                Store;
+            {Local, _} ->
+                Local
+        end,
+    case MatchIndexStore of
         false -> [];
         true -> hb_opts:get(store, [], Opts);
-        Store when is_list(Store) -> Store;
-        Store -> [Store]
+        ResolvedStore when is_list(ResolvedStore) -> ResolvedStore;
+        ResolvedStore -> [ResolvedStore]
     end.
 
 %% @doc Calculate the address of a key-value pair in the match index.
@@ -465,9 +601,9 @@ match_address(Key, Value) ->
     KeyBin = match_bin(Key),
     ValueBin = match_bin(Value),
     iolist_to_binary([?MATCH_PREFIX, "&", KeyBin, "=", ValueBin]).
-match_address(Key, Value, ID) ->
+match_address_id(Address, ID) ->
     IDBin = match_bin(ID),
-    <<(match_address(Key, Value))/binary, "/", IDBin/binary>>.
+    <<Address/binary, "/", IDBin/binary>>.
 
 %% @doc Normalize a match-index path part.
 match_bin(Bin) when is_binary(Bin) -> Bin;
@@ -483,7 +619,7 @@ match_bin(Other) ->
 
 %% @doc Return the path representation used by cache key-value links.
 match_value_path(Bin, Opts) when is_binary(Bin) ->
-    <<"data/", (hb_path:hashpath(Bin, Opts))/binary>>;
+    generate_binary_path(Bin, Opts);
 match_value_path(Map, Opts) when is_map(Map) ->
     hb_message:id(Map, none, Opts#{ <<"linkify-mode">> => discard });
 match_value_path(List, Opts) when is_list(List) ->
@@ -516,20 +652,27 @@ commitment_path(Base, Opts) ->
     hb_path:hashpath(<<Base/binary, "/commitments">>, Opts).
 
 %% @doc Calculate the IDs for a message.
-calculate_all_ids(Bin, _Opts) when is_binary(Bin) -> [];
-calculate_all_ids(Msg, Opts) ->
-    Commitments =
-        hb_maps:without(
-            [<<"priv">>],
+calculate_all_ids(Bin, _UncommittedID, _Opts) when is_binary(Bin) -> [];
+calculate_all_ids(Msg, UncommittedID, Opts) ->
+    CommIDs =
+        hb_maps:keys(
             hb_maps:get(<<"commitments">>, Msg, #{}, Opts),
-			Opts
+            Opts
         ),
-    CommIDs = hb_maps:keys(Commitments, Opts),
-    ?event_debug({calculating_ids, {msg, Msg}, {commitments, Commitments}, {comm_ids, CommIDs}}),
-    All = hb_message:id(Msg, all, Opts#{ <<"linkify-mode">> => discard }),
-    case lists:member(All, CommIDs) of
-        true -> CommIDs;
-        false -> [All | CommIDs]
+    ?event_debug({calculating_ids, {msg, Msg}, {comm_ids, CommIDs}}),
+    case length(CommIDs) of
+        0 ->
+            % With no commitments the `all' id is the uncommitted id we already
+            % computed; skip re-serializing the message to recompute it.
+            [UncommittedID];
+        _ ->
+            All = hb_message:id(Msg, all, Opts#{ <<"linkify-mode">> => discard }),
+            Canonical = hb_message:id(
+                Msg,
+                #{},
+                Opts#{ <<"linkify-mode">> => discard }
+            ),
+            lists:usort([Canonical, All | CommIDs])
     end.
 
 %% @doc Write a hashpath and its message to the store and link it.
@@ -581,7 +724,7 @@ read(Path, Opts) ->
             {ok, Res};
         {{ok, Res}, _} ->
             hb_message:paranoid_verify(cache_read, Res, Opts),
-            {ok, hb_message:normalize_commitments(Res, Opts)};
+            {ok, Res};
         {Other, _} ->
             Other
     end.
@@ -638,13 +781,11 @@ read_all_commitments(Msg, Opts) ->
 store_read(Req = #{ <<"read">> := Path }, Store, Opts) ->
     store_read(Path, Path, Req, Store, Opts);
 store_read(Path, Store, Opts) ->
-    store_read(Path, Path, Store, Opts).
-store_read(_Target, _Path, no_viable_store, _) ->
-    {error, not_found};
-store_read(Target, Path, Store, Opts) ->
-    store_read(Target, Path, #{ <<"read">> => Path }, Store, Opts).
+    store_read(Path, Path, #{ <<"read">> => Path }, Store, Opts).
 store_read(_Target, _Path, _Req, no_viable_store, _) ->
     {error, not_found};
+store_read(Target, <<"data/", _/binary>> = PathBin, Req, Store, Opts) ->
+    read_resolved_path(Target, PathBin, Req, Store, Opts);
 store_read(Target, Path, Req, Store, Opts) ->
     PathBin = hb_path:to_binary(Path),
     case hb_store:resolve(Store, PathBin, Opts) of
@@ -654,81 +795,114 @@ store_read(Target, Path, Req, Store, Opts) ->
                 {fully_resolved_path, ResolvedFullPath},
                 {store, Store}
             }),
-            case hb_store:read(Store, Req#{ <<"read">> => ResolvedFullPath }, Opts) of
-                {ok, Bin} ->
-                    ?event_debug({reading_data, ResolvedFullPath}),
-                    {ok, Bin};
-                {composite, RawSubpaths} ->
-                    ?event_debug({reading_composite, ResolvedFullPath}),
-                    Subpaths = lists:map(fun hb_util:bin/1, RawSubpaths),
-                    ?event(
-                        {listed,
-                            {original_path, Path},
-                            {subpaths, {explicit, Subpaths}}
-                        }
-                    ),
-                    Msg =
-                        prepare_links(
-                            Target,
-                            ResolvedFullPath,
-                            Subpaths,
-                            Store,
-                            Opts
-                        ),
-                    ?event(
-                        {completed_read,
-                            {resolved_path, ResolvedFullPath},
-                            {explicit, Msg}
-                        }
-                    ),
-                    {ok, Msg};
-                {error, _} = Error ->
-                    Error;
-                {failure, _} = Failure ->
-                    Failure
-            end;
+            read_resolved_path(Target, ResolvedFullPath, Req, Store, Opts);
         {error, _} = Error ->
             Error;
         {failure, _} = Failure ->
             Failure
     end.
 
-%% @doc Prepare a set of links from a listing of subpaths.
-prepare_links(Target, RootPath, Subpaths, Store, Opts) ->
-    case hb_opts:get(cache_read_mode, normal, Opts) of
-        raw -> prepare_raw_links(RootPath, Subpaths, Store);
-        _ -> prepare_typed_links(Target, RootPath, Subpaths, Store, Opts)
+%% @doc Read a path whose intermediate links are already resolved, skipping the
+%% redundant per-segment `hb_store:resolve' round-trip.
+read_resolved_path(_Target, _Path, _Req, no_viable_store, _) ->
+    {error, not_found};
+read_resolved_path(Target, ResolvedFullPath, Req, Store, Opts) ->
+    case hb_store:read(Store, Req#{ <<"read">> => ResolvedFullPath }, Opts) of
+        {ok, Bin} ->
+            ?event_debug({reading_data, ResolvedFullPath}),
+            {ok, decode_immediate_value(ResolvedFullPath, Bin)};
+        {composite, Children} ->
+            ?event_debug({reading_composite, ResolvedFullPath}),
+            Subpaths =
+                [
+                    hb_util:bin(child_name(Child))
+                ||
+                    Child <- Children
+                ],
+            ?event(
+                {listed,
+                    {original_path, Target},
+                    {subpaths, {explicit, Subpaths}}
+                }
+            ),
+            Msg =
+                case hb_opts:get(cache_read_mode, normal, Opts) of
+                    raw ->
+                        maps:from_list(
+                            [
+                                {
+                                    Subpath,
+                                    {link,
+                                        hb_path:to_binary([ResolvedFullPath, Subpath]),
+                                        #{ <<"lazy">> => true, <<"store">> => Store }
+                                    }
+                                }
+                            ||
+                                Subpath <- Subpaths,
+                                Subpath =/= <<"ao-types">>
+                            ]
+                        );
+                    _ ->
+                        Values =
+                            maps:from_list([
+                                {hb_util:bin(Subpath), Value}
+                            ||
+                                {Subpath, Value} <- Children
+                            ]),
+                        prepare_typed_values(
+                            Target,
+                            ResolvedFullPath,
+                            Subpaths,
+                            Values,
+                            Store,
+                            Opts
+                        )
+                end,
+            ?event(
+                {completed_read,
+                    {resolved_path, ResolvedFullPath},
+                    {explicit, Msg}
+                }
+            ),
+            {ok, Msg};
+        {error, _} = Error ->
+            Error;
+        {failure, _} = Failure ->
+            Failure
     end.
 
-%% @doc Prepare lazy links without touching typed codec helpers. Used in
-%% circumstances where codec devices have not yet been loaded.
-prepare_raw_links(RootPath, Subpaths, Store) ->
-    maps:from_list(
-        [
-            {
-                Subpath,
-                {link,
-                    hb_path:to_binary([RootPath, Subpath]),
-                    #{ <<"lazy">> => true, <<"store">> => Store }
-                }
-            }
-        ||
-            Subpath <- Subpaths,
-            Subpath =/= <<"ao-types">>
-        ]
-    ).
+%% @doc Normalize a composite child entry to its subpath name, dropping any
+%% inline value the prefix read supplied alongside it.
+child_name({Subpath, _Value}) -> Subpath;
+child_name(Subpath) -> Subpath.
 
-%% @doc Prepare typed links using `ao-types' and commitment normalization.
-prepare_typed_links(Target, RootPath, Subpaths, Store, Opts) ->
-    {ok, Implicit, Types} = read_ao_types(RootPath, Subpaths, Store, Opts),
+%% @doc Prepare child values using `ao-types' where present. Immediate values
+%% are returned directly; linked values remain lazy.
+prepare_typed_values(Target, RootPath, Subpaths, Values, Store, Opts) ->
+    {ok, Implicit, Types} = read_ao_types(RootPath, Subpaths, Values, Store, Opts),
     Res =
         maps:from_list(lists:filtermap(
             fun(<<"ao-types">>) -> false;
                 (<<"commitments">>) ->
                     % List the commitments for this message, and load them into
                     % memory. If there no commitments at the path, we exclude
-                    % commitments from the list of links.
-                    CommPath = hb_path:to_binary([RootPath, <<"commitments">>, Target]),
+                    % commitments from the list of links. The `commitments' key is
+                    % itself a link to the hashpath-addressed commitments group.
+                    % The composite read already returned that link inline, so
+                    % when it is present we address the commitment straight from
+                    % the resolved group, skipping the redundant re-reads of
+                    % `RootPath' and `RootPath/commitments' that the scan just
+                    % materialised. Only when the inline value is absent (or is
+                    % not the usual link) do we fall back to resolving the full
+                    % `RootPath/commitments/Target' path from scratch.
+                    CommPath =
+                        case maps:get(<<"commitments">>, Values, none) of
+                            <<"link:", CommGroup/binary>> when byte_size(CommGroup) > 0 ->
+                                hb_path:to_binary([CommGroup, Target]);
+                            _ ->
+                                hb_path:to_binary(
+                                    [RootPath, <<"commitments">>, Target])
+                        end,
                     ?event(read_commitment,
                         {reading_commitment,
                             {target, Target},
@@ -738,7 +912,7 @@ prepare_typed_links(Target, RootPath, Subpaths, Store, Opts) ->
                     ),
                     case do_read_commitment(CommPath, Opts) of
                         {ok, Commitment} ->
-                            LoadedCommitment = 
+                            LoadedCommitment =
                                 ensure_all_loaded(
                                     Commitment,
                                     Opts#{ <<"commitment">> => true }
@@ -773,35 +947,35 @@ prepare_typed_links(Target, RootPath, Subpaths, Store, Opts) ->
                             % The key is a literal value, not a nested composite
                             % message. Subsequently, we return a resolvable link
                             % to the subpath, leaving the key as-is.
-                            {true,
-                                {
-                                    Subpath,
-                                    {link,
-                                        SubkeyPath,
-                                        (case Types of
-                                            #{ Subpath := Type } ->
-                                                % We have an `ao-types' entry for the
-                                                % subpath, so we return a link to the
-                                                % subpath with `lazy' set to `true'
-                                                % because we need to resolve the link
-                                                % to get the final value.
-                                                #{
-                                                    <<"type">> => Type,
-                                                    <<"lazy">> => true
-                                                };
-                                            _ ->
-                                                % We do not have an `ao-types' entry for the
-                                                % subpath, so we return a link to the
-                                                % subpath with `lazy' set to `true',
-                                                % because the subpath is a literal
-                                                % value.
-                                                #{
-                                                    <<"lazy">> => true
-                                                }
-                                        end)#{ <<"store">> => Store }
-                                    }
-                                }
-                            };
+                            LinkOpts =
+                                (case Types of
+                                    #{ Subpath := Type } ->
+                                        % We have an `ao-types' entry for the
+                                        % subpath, so the link carries its type
+                                        % and resolves lazily to the final value.
+                                        #{
+                                            <<"type">> => Type,
+                                            <<"lazy">> => true
+                                        };
+                                    _ ->
+                                        % No `ao-types' entry: the subpath is a
+                                        % literal value, resolved lazily.
+                                        #{
+                                            <<"lazy">> => true
+                                        }
+                                end)#{ <<"store">> => Store },
+                            PreparedValue =
+                                case maps:get(Subpath, Values, none) of
+                                    <<"raw:", ImmediateValue/binary>> ->
+                                        apply_type_to_immediate(ImmediateValue, LinkOpts);
+                                    <<"link:", Path/binary>> ->
+                                        {link, Path, LinkOpts};
+                                    ImmediateValue when is_binary(ImmediateValue) ->
+                                        apply_type_to_immediate(ImmediateValue, LinkOpts);
+                                    _ ->
+                                        {link, SubkeyPath, LinkOpts}
+                                end,
+                            {true, {Subpath, PreparedValue}};
                         true ->
                             % The key is an encoded link, so we create a resolvable
                             % link to the underlying link. This requires that we
@@ -824,8 +998,7 @@ prepare_typed_links(Target, RootPath, Subpaths, Store, Opts) ->
         )),
     Merged = maps:merge(Res, Implicit),
     % Convert the message to an ordered list if the ao-types indicate that it
-    % should be so. If it is a message, we ensure that the commitments are 
-    % normalized (have an unsigned comm. ID) and loaded into memory.
+    % should be so.
     case hb_maps:get(<<".">>, Types, undefined, Opts) of
         <<"list">> ->
             hb_util:message_to_ordered_list(Merged, Opts);
@@ -836,14 +1009,31 @@ prepare_typed_links(Target, RootPath, Subpaths, Store, Opts) ->
             end
     end.
 
+apply_type_to_immediate(Value, #{ <<"type">> := Type }) ->
+    hb_util:decode(Type, Value);
+apply_type_to_immediate(Value, _LinkOpts) ->
+    Value.
+
 %% @doc Read and parse the ao-types for a given path if it is in the supplied
-%% list of subpaths, returning a map of keys and their types.
-read_ao_types(Path, Subpaths, Store, Opts) ->
+%% list of subpaths, returning a map of keys and their types. Prefix reads
+%% already return small inline `ao-types' values, so reuse them when present.
+read_ao_types(Path, Subpaths, Values, Store, Opts) ->
     ?event_debug({reading_ao_types, {path, Path}, {subpaths, {explicit, Subpaths}}}),
     case lists:member(<<"ao-types">>, Subpaths) of
         true ->
-            {ok, TypesBin} =
-                hb_store:read(Store, hb_path:to_binary([Path, <<"ao-types">>]), Opts),
+            TypesPath = hb_path:to_binary([Path, <<"ao-types">>]),
+            TypesBin =
+                case Values of
+                    #{ <<"ao-types">> := <<"raw:", Direct/binary>> } -> Direct;
+                    #{ <<"ao-types">> := <<"link:", _/binary>> } ->
+                        {ok, Bin} = hb_store:read(Store, TypesPath, Opts),
+                        decode_immediate_value(TypesPath, Bin);
+                    #{ <<"ao-types">> := Direct } when is_binary(Direct) ->
+                        Direct;
+                    _ ->
+                        {ok, Bin} = hb_store:read(Store, TypesPath, Opts),
+                        decode_immediate_value(TypesPath, Bin)
+                end,
             Types = structured_decode_types(TypesBin, Opts),
             ?event_debug({parsed_ao_types, {types, Types}}),
             {ok, types_to_implicit(Types), Types};
@@ -1081,7 +1271,7 @@ test_store_simple_signed_message(Store) ->
     CommittedID = hb_message:id(Item, [Address], Opts),
     {ok, RetrievedItemSigned} = read(CommittedID, Opts),
     ?event_debug({retrieved_signed_message, {expected, Item}, {got, RetrievedItemSigned}}),
-    MatchResSigned = 
+    MatchResSigned =
         hb_message:match(
             Item,
             hb_message:normalize_commitments(RetrievedItemSigned, Opts),
@@ -1207,19 +1397,13 @@ test_match_linked_message(Store) ->
     {ok, [MatchedID]} = match(#{ <<"b">> => <<"c">> }, Opts),
     {ok, Read1} = read(MatchedID, Opts),
     ?assertEqual(
-        hb_message:normalize_commitments(
-            #{ <<"b">> => <<"c">>, <<"d">> => <<"e">> },
-            Opts
-        ),
+        #{ <<"b">> => <<"c">>, <<"d">> => <<"e">> },
         hb_cache:ensure_all_loaded(Read1, Opts)
     ),
     {ok, [MatchedID2]} = match(#{ <<"a">> => Inner }, Opts),
     {ok, Read2} = read(MatchedID2, Opts),
     ?assertEqual(
-        hb_message:normalize_commitments(
-            #{ <<"a">> => Inner },
-            Opts
-        ),
+        #{ <<"a">> => Inner },
         ensure_all_loaded(Read2, Opts)
     ).
 
@@ -1242,44 +1426,14 @@ test_match_typed_message(Store) ->
     {ok, [MatchedID]} = match(#{ <<"int-key">> => 1337 }, Opts),
     {ok, Read1} = read(MatchedID, Opts),
     ?assertEqual(
-        hb_message:normalize_commitments(Msg, Opts),
+        Msg,
         ensure_all_loaded(Read1, Opts)
     ),
     {ok, [MatchedID2]} = match(#{ <<"atom-key">> => atom }, Opts),
     {ok, Read2} = read(MatchedID2, Opts),
     ?assertEqual(
-        hb_message:normalize_commitments(Msg, Opts),
+        Msg,
         ensure_all_loaded(Read2, Opts)
-    ).
-
-test_match_signed_message_uses_canonical_id(Store)
-        when map_get(<<"store-module">>, Store) =/= hb_store_lmdb ->
-    skip;
-test_match_signed_message_uses_canonical_id(Store) ->
-    hb_store:reset(Store),
-    Opts = #{
-        <<"store">> => Store,
-        <<"match-index">> => [Store],
-        <<"priv-wallet">> => ar_wallet:new()
-    },
-    Msg = hb_message:commit(
-        #{
-            <<"schema">> => <<"test@1.0">>,
-            <<"type">> => <<"record">>,
-            <<"value">> => <<"canonical">>
-        },
-        Opts
-    ),
-    CanonicalID = hb_message:id(Msg, #{}, Opts),
-    CommitmentIDs = hb_maps:keys(hb_maps:get(<<"commitments">>, Msg, #{}, Opts), Opts),
-    {ok, _} = write(Msg, Opts),
-    ?assertEqual(
-        {ok, [CanonicalID]},
-        match(#{ <<"schema">> => <<"test@1.0">> }, Opts)
-    ),
-    lists:foreach(
-        fun(ID) -> ?assertMatch({ok, _}, read(ID, Opts)) end,
-        CommitmentIDs
     ).
 
 test_raw_match_read(Store) when map_get(<<"store-module">>, Store) =/= hb_store_lmdb ->
@@ -1307,6 +1461,32 @@ test_raw_match_read(Store) ->
         hb_maps:get(<<"body">>, RawMsg, undefined, RawOpts)
     ).
 
+test_immediate_marker_values(Store) ->
+    hb_store:reset(Store),
+    Opts = #{ <<"store">> => Store },
+    Msg = #{
+        <<"groupish">> => <<"group">>,
+        <<"linkish">> => <<"link:literal">>,
+        <<"rawish">> => <<"raw:literal">>
+    },
+    {ok, ID} = write(Msg, Opts),
+    {ok, Read} = read(ID, Opts),
+    ?assertEqual(<<"group">>, hb_maps:get(<<"groupish">>, Read, Opts)),
+    ?assertEqual(<<"link:literal">>, hb_maps:get(<<"linkish">>, Read, Opts)),
+    ?assertEqual(<<"raw:literal">>, hb_maps:get(<<"rawish">>, Read, Opts)),
+    case map_get(<<"store-module">>, Store) of
+        hb_store_lmdb ->
+            ?assertEqual({ok, [ID]}, match(#{ <<"rawish">> => <<"raw:literal">> }, Opts));
+        _ ->
+            ok
+    end.
+
+match_store_control_test() ->
+    Store = hb_test_utils:test_store(hb_store_volatile, <<"match-control">>),
+    ?assertEqual([Store], match_store(#{ <<"store">> => Store })),
+    ?assertEqual([], match_store(#{ <<"store">> => Store, <<"match-index">> => false })),
+    ?assertEqual([], match_store(#{ <<"store">> => Store, <<"match-index">> => [] })).
+
 cache_suite_test_() ->
     hb_store:generate_test_suite([
         {"store unsigned empty message",
@@ -1321,9 +1501,8 @@ cache_suite_test_() ->
         {"match message", fun test_match_message/1},
         {"match linked message", fun test_match_linked_message/1},
         {"match typed message", fun test_match_typed_message/1},
-        {"match signed message uses canonical id",
-            fun test_match_signed_message_uses_canonical_id/1},
-        {"raw match read", fun test_raw_match_read/1}
+        {"raw match read", fun test_raw_match_read/1},
+        {"immediate marker values", fun test_immediate_marker_values/1}
     ]).
 
 %% @doc Test that message whose device is `#{}' cannot be written. If it were to
