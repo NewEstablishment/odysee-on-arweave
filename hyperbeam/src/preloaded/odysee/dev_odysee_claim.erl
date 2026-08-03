@@ -73,6 +73,14 @@ get_id(Base, Req, Opts) ->
                     Opts
                 ),
             {ok, ID} ?= immutable_claim_id(ClaimMsg, Opts),
+            %% Write-through onto the common state plane: persist the normalized
+            %% claim as a committed message and alias it at both its claim id and
+            %% its immutable (txid:nout) id. This makes a legacy claim reachable and
+            %% verifiable by any device and by the generic path -- `GET /<claim-id>'
+            %% resolves and `/<claim-id>/verify' passes -- instead of living only in
+            %% a live proxy fetch. Best-effort: a store/commit failure must never
+            %% fail the resolution the caller asked for.
+            _ = persist_claim(ClaimMsg, ClaimID, ID, Opts),
             Result = #{
                 <<"device">> => ?DEVICE,
                 <<"view">> => <<"claim-id">>,
@@ -511,6 +519,28 @@ safe(Fun) ->
 
 ok_message(Msg) when is_map(Msg) -> {ok, Msg};
 ok_message(Error) -> Error.
+
+%% @doc Write-through persistence for a resolved legacy claim. Commits the
+%% normalized claim message and links it into the top-level store namespace under
+%% both its claim id and its immutable (txid:nout) id, so the claim joins the
+%% common state plane: any device -- and the generic `GET /<id>' path -- can
+%% resolve and verify it, rather than it existing only as a transient proxy
+%% fetch. Best-effort by design: any failure (e.g. no node wallet to commit with,
+%% or an unwritable store) returns `error' without disturbing the caller's
+%% resolution.
+persist_claim(ClaimMsg, ClaimID, ImmutableID, Opts)
+        when is_map(ClaimMsg), is_binary(ClaimID), is_binary(ImmutableID) ->
+    try
+        Committed = hb_message:commit(ClaimMsg, Opts),
+        {ok, WriteID} = hb_cache:write(Committed, Opts),
+        ok = hb_cache:link(WriteID, ClaimID, Opts),
+        ok = hb_cache:link(WriteID, ImmutableID, Opts),
+        {ok, WriteID}
+    catch
+        _:_ -> error
+    end;
+persist_claim(_ClaimMsg, _ClaimID, _ImmutableID, _Opts) ->
+    error.
 
 find_or_fetch_claim(Base, Req, Opts) ->
     case claim_candidate(Base, Req, Opts) of
@@ -1455,6 +1485,28 @@ get_id_rejects_a_claim_without_an_outpoint_test() ->
         {error, immutable_claim_id_not_found},
         get_id(#{}, #{ <<"claim">> => target_claim() }, #{})
     ).
+
+%% With a node wallet and a store present, resolving a claim's id writes the
+%% normalized claim through onto the common state plane: both the claim id and
+%% the immutable id resolve to the same committed, verifiable message.
+get_id_persists_claim_on_common_state_plane_test() ->
+    Store = hb_test_utils:test_store(hb_store_lmdb),
+    ok = hb_store:start(Store),
+    ok = hb_store:reset(Store),
+    Opts = #{ <<"store">> => Store, <<"priv-wallet">> => ar_wallet:new() },
+    TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
+    Claim = (target_claim())#{ <<"txid">> => TxID, <<"nout">> => 2 },
+    {ok, Msg} = get_id(#{}, #{ <<"claim">> => Claim }, Opts),
+    ClaimID = hb_maps:get(<<"claim-id">>, Msg, not_found),
+    ImmutableID = hb_maps:get(<<"id">>, Msg, not_found),
+    ?assertEqual(<<TxID/binary, ":2">>, ImmutableID),
+    %% Both ids now resolve on the common plane...
+    {ok, ByClaim} = hb_cache:read(ClaimID, Opts),
+    {ok, ByImmutable} = hb_cache:read(ImmutableID, Opts),
+    %% ...to a committed, verifiable claim carrying the original claim id.
+    ?assertEqual(true, hb_message:verify(ByClaim, all, Opts)),
+    ?assertEqual(true, hb_message:verify(ByImmutable, all, Opts)),
+    ?assertEqual(ClaimID, hb_maps:get(<<"claim-id">>, ByClaim, not_found, Opts)).
 
 resolve_proxy_result_test() ->
     URI = <<"lbry://@veritasium#f/why-is-it-so-easy-to-disrupt-gps#3">>,
