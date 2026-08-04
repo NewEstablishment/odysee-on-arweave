@@ -17,3 +17,14 @@ odysee-frontend/node_modules/
 odysee-frontend/web/node_modules/
 odysee-frontend/playwright-report/
 odysee-frontend/test-results/
+
+# backend (standalone rebar3 app)
+/_checkouts/
+*.beam
+*.crashdump
+erl_crash.dump
+cache-*/
+hyperbeam-key.json
+wallet.json
+
+/logs/

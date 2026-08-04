@@ -1,0 +1,14 @@
+{application, odysee,
+    [
+        {description,
+            "Odysee on HyperBEAM: the lbry@1.0 device, binding messages to "
+            "native LBRY source objects (blobs, stream descriptors, "
+            "transactions, claim outputs, channels, and channel-signed "
+            "streams) through trustless content-addressed commitments, "
+            "plus the store and client modules used by seed nodes."},
+        {vsn, "0.1.0"},
+        {registered, []},
+        {applications, [kernel, stdlib, hb]},
+        {env, []},
+        {modules, []}
+    ]}.
