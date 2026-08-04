@@ -1,3 +1,12 @@
+%%% @doc DEPRECATED legacy-content resolver store.
+%%%
+%%% Superseded by the `odysee-resolution@1.0' device (`dev_odysee_resolution'),
+%%% which owns the classification + dispatch this module used to perform inside a
+%%% store callback. That logic is domain logic and belongs in a device, not a
+%%% dumb key->bytes store (per the core direction "resolution must be a device,
+%%% not a store"). This module is no longer in the default store stack
+%%% (`hb_opts.erl'); it remains only for the two-node demo script and legacy
+%%% tests, and should be removed once those are migrated to the device.
 -module(hb_store_odysee).
 -export([start/3, stop/3, reset/3, scope/0, scope/1]).
 -export([read/3, type/3, resolve/3]).
@@ -72,17 +81,23 @@ read(StoreOpts, #{ <<"read">> := Key }, NodeOpts) ->
             {error, not_found}
     end.
 
+%% This store is a read-only resolver over remote/legacy data. Mutating and
+%% listing operations return `{error, not_found}' -- the same signal the core
+%% stores use for an unsupported/read-only op (cf. `hb_store_lmdb' read-only
+%% write clauses) -- so the multi-store dispatcher falls through to the next
+%% store with no error recorded, rather than surfacing a novel `read_only' atom
+%% that callers matching on `not_found' would mishandle.
 write(_StoreOpts, _Req, _NodeOpts) ->
-    {error, read_only}.
+    {error, not_found}.
 
 list(_StoreOpts, _Req, _NodeOpts) ->
     {error, not_found}.
 
 group(_StoreOpts, _Req, _NodeOpts) ->
-    {error, read_only}.
+    {error, not_found}.
 
 link(_StoreOpts, _Req, _NodeOpts) ->
-    {error, read_only}.
+    {error, not_found}.
 
 read_claim_output(Outpoint, StoreOpts, NodeOpts) ->
     hb_store_lbry_claim_output:read(
