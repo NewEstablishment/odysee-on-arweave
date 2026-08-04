@@ -120,3 +120,153 @@ serving_store(Peers) ->
     ||
         Peer <- Peers
     ].
+
+%%% Tests
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+%%% The vertical slice: a node configured by `seed_opts/1', driven over
+%%% HTTP exactly as a client drives it, asserting that what comes back
+%%% still verifies. Every other suite here exercises one layer in
+%%% isolation (codecs check byte recipes, stores are called through
+%%% `read/3'); nothing else asserts that the layers compose into a served
+%%% object, which is the only thing that decides whether the architecture
+%%% works.
+%%%
+%%% Source bytes come from the `fixtures' store option, the seam kept
+%%% deliberately (`decisions/keep-fixtures-test-seam.md'), so these are
+%%% deterministic and need no network. That is a real limit, stated rather
+%%% than hidden: this proves the layers compose, NOT that the legacy
+%%% endpoints answer. Live sourcing is a separate check
+%%% (`docs/data-sourcing.md').
+
+%% Boot a seed node through the production config builder, with a fixture
+%% store ahead of the real Odysee stores so no legacy endpoint is reached.
+skeleton_node(Fixtures) ->
+    Store = hb_test_utils:test_store(),
+    Opts =
+        seed_opts(#{
+            <<"store">> => [
+                Store,
+                #{
+                    <<"store-module">> => hb_store_odysee,
+                    <<"fixtures">> => Fixtures,
+                    <<"local-store">> => [Store]
+                }
+            ],
+            <<"priv-wallet">> => ar_wallet:new(),
+            %% A mutable value at a constant address must not be served from
+            %% the resolution cache or an alias never refreshes. Node
+            %% configuration: a device cannot opt its own results out.
+            <<"http-extra-opts">> => #{
+                <<"force-message">> => true,
+                <<"cache-control">> => [<<"no-store">>]
+            }
+        }),
+    {hb_http_server:start_node(Opts), Store}.
+
+skeleton_read(Node, Path) ->
+    hb_http:get(Node, <<"/~cache@1.0/read?read=", Path/binary>>, #{}).
+
+%% A served message must still verify in the client's hands.
+%% `commitment-ids => all' is required: `lbry@1.0' commitments are
+%% content-addressed and carry no committer, so the default selection
+%% checks nothing and would pass a forgery.
+skeleton_assert_verifies(Msg, Opts) ->
+    Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
+    ?assertEqual(
+        true,
+        hb_message:verify(Loaded, #{ <<"commitment-ids">> => <<"all">> }, Opts)
+    ),
+    Loaded.
+
+%% Blob evidence: the smallest complete slice. Bytes in, verified message
+%% out over HTTP, and afterwards addressable by a plain HyperBEAM id with
+%% no knowledge of the store path and no device call, which is what lets a
+%% router or a peer serve Odysee content.
+skeleton_blob_serves_and_addresses_test() ->
+    Bytes = <<"walking skeleton blob payload">>,
+    Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
+    Path = <<"odysee/blob/", Hash/binary>>,
+    {Node, Store} = skeleton_node(#{ <<"lbry/blob/", Hash/binary>> => Bytes }),
+    Opts = #{ <<"store">> => [Store] },
+
+    {ok, ViaPath} = skeleton_read(Node, Path),
+    Served = skeleton_assert_verifies(ViaPath, Opts),
+    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Served, not_found, Opts)),
+
+    Alias = hb_odysee_address:alias(Path),
+    {ok, ViaAlias} = hb_http:get(Node, <<"/", Alias/binary>>, #{}),
+    Addressed = skeleton_assert_verifies(ViaAlias, Opts),
+    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)).
+
+%% Descriptor evidence: parsed, checked against its sd-hash, and serving
+%% the stream metadata playback depends on.
+skeleton_descriptor_serves_test() ->
+    {Raw, SDHash} = skeleton_descriptor(),
+    Path = <<"odysee/descriptor/", SDHash/binary>>,
+    {Node, Store} = skeleton_node(#{ <<"lbry/descriptor/", SDHash/binary>> => Raw }),
+    Opts = #{ <<"store">> => [Store] },
+    {ok, ViaPath} = skeleton_read(Node, Path),
+    Served = skeleton_assert_verifies(ViaPath, Opts),
+    ?assertEqual(SDHash, hb_maps:get(<<"sd-hash">>, Served, not_found, Opts)).
+
+%% Transaction evidence: the txid is recomputed from raw bytes, so a lying
+%% source cannot substitute a different transaction.
+skeleton_transaction_serves_test() ->
+    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
+    {ok, TxMsg} = dev_lbry_commitment:transaction_message(Raw),
+    TxID = maps:get(<<"txid">>, TxMsg),
+    Path = <<"odysee/transaction/", TxID/binary>>,
+    {Node, Store} = skeleton_node(#{ Path => TxMsg }),
+    Opts = #{ <<"store">> => [Store] },
+    {ok, ViaPath} = skeleton_read(Node, Path),
+    Served = skeleton_assert_verifies(ViaPath, Opts),
+    ?assertEqual(TxID, hb_maps:get(<<"txid">>, Served, not_found, Opts)).
+
+%% Tampering must fail closed at the HTTP boundary, not merely inside the
+%% store: bytes that do not hash to the requested id are a read failure,
+%% never a 200.
+skeleton_tampered_source_is_not_served_test() ->
+    Bytes = <<"honest payload">>,
+    Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
+    Path = <<"odysee/blob/", Hash/binary>>,
+    {Node, _Store} =
+        skeleton_node(#{ <<"lbry/blob/", Hash/binary>> => <<"tampered payload">> }),
+    ?assertMatch({error, _}, skeleton_read(Node, Path)).
+
+skeleton_descriptor() ->
+    Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,
+    IV = <<16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31>>,
+    Plaintext = <<"walking skeleton media bytes">>,
+    Pad = 16 - (byte_size(Plaintext) rem 16),
+    Padded = <<Plaintext/binary, (binary:copy(<<Pad>>, Pad))/binary>>,
+    Ciphertext = crypto:crypto_one_time(aes_128_cbc, Key, IV, Padded, true),
+    BlobHash = dev_lbry_stream_descriptor:blob_hash(Ciphertext),
+    Descriptor =
+        #{
+            <<"stream_type">> => <<"lbryfile">>,
+            <<"stream_name">> => hb_util:to_hex(<<"skeleton.mp4">>),
+            <<"key">> => hb_util:to_hex(Key),
+            <<"suggested_file_name">> => hb_util:to_hex(<<"skeleton.mp4">>),
+            <<"stream_hash">> =>
+                dev_lbry_stream_descriptor:blob_hash(<<"skeleton stream hash">>),
+            <<"blobs">> => [
+                #{
+                    <<"length">> => byte_size(Ciphertext),
+                    <<"blob_num">> => 0,
+                    <<"iv">> => hb_util:to_hex(IV),
+                    <<"blob_hash">> => BlobHash
+                },
+                #{
+                    <<"length">> => 0,
+                    <<"blob_num">> => 1,
+                    <<"iv">> => hb_util:to_hex(<<0:128>>)
+                }
+            ]
+        },
+    Raw = hb_json:encode(Descriptor),
+    {Raw, dev_lbry_stream_descriptor:descriptor_hash(Raw)}.
+
+-endif.
