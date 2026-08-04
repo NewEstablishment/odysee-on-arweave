@@ -236,9 +236,6 @@ digest_field_valid(Base, Data, Opts) ->
 
 -ifdef(TEST).
 
-reverse(Bin) ->
-    binary:list_to_bin(lists:reverse(binary:bin_to_list(Bin))).
-
 blob_verify_test() ->
     Bytes = <<"encrypted blob bytes">>,
     Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),

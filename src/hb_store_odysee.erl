@@ -569,36 +569,14 @@ integer_or_undefined(_Value) ->
 %% committer, so the id cannot be recomputed independently of the write),
 %% then the request key is linked to it. A warming failure never breaks
 %% the read.
-%% Warm the local store with a freshly-read message and link every stable
-%% address that should resolve to it. Two kinds of address are linked:
-%%
-%%   - The alias id of the canonical path (`hb_odysee_address:alias/1'),
-%%     which is `?IS_ID'-shaped, so `GET /(alias)' short-circuits to a store
-%%     read on any node holding the link. This is what makes Odysee content
-%%     addressable by generic consumers -- `~query@1.0', peers replicating by
-%%     id, routers -- rather than only through `/~cache@1.0/read' path calls.
-%%   - The bare request key, for outpoints only (see below).
-%%
-%% The message is written first to obtain its canonical cache id: `lbry@1.0'
-%% commitments carry no committer, so the id cannot be recomputed
-%% independently of the write.
-%%
-%% Aliases are linked for every canonical path, including the locator paths
-%% (`odysee/claim/(uri)', `odysee/claim-id/(id)') whose target can change
-%% when a claim is updated. Those re-link on each live read, so an alias
-%% tracks the current resolution. A node serving mutable locators must
-%% therefore disable resolution-result caching
-%% (`http-extra-opts => #{force-message => true, cache-control => [no-store]}'),
-%% or a cached result will be served without the store ever being consulted
-%% and the alias will never refresh. Immutable paths (transaction, outpoint,
-%% descriptor, blob) are unaffected: their content cannot change, so a stale
-%% link is not possible.
-%%
-%% Only bare outpoints warm their request key directly, because a bare key is
-%% classified onto a canonical path at read time and only the outpoint form
-%% is immutable enough for that shortcut to stay correct.
-%%
-%% A warming failure never breaks the read.
+%% Link a freshly-read message to the addresses that should resolve to it:
+%% the canonical path's alias id, plus the request key itself when it is a
+%% bare outpoint (immutable, so the shortcut cannot go stale). The message is
+%% written first to obtain its cache id; `lbry@1.0' commitments carry no
+%% committer, so the id cannot be recomputed independently of the write.
+%% Locator aliases re-link on each live read, so a node serving them needs
+%% `cache-control => [no-store]' or a cached result hides the store and the
+%% alias never refreshes. Warming failure never breaks the read.
 warm_addresses(BareKey, Path, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
     Keys =
         [hb_odysee_address:alias(Path)] ++

@@ -911,7 +911,7 @@ verify_walk_fails_on_tampered_ancestor_test() ->
 
 verify_walk_fails_on_unrelated_parent_test() ->
     % A valid create for a different claim id cannot terminate the walk.
-    {CreateRaw, [UpdateRaw], _ClaimID} = test_chain(1),
+    {_CreateRaw, [UpdateRaw], _ClaimID} = test_chain(1),
     OtherCreate = test_create_tx(<<"other">>),
     {ok, OtherTx} = dev_lbry_tx:parse(OtherCreate),
     {ok, OtherOutput} = claim_output(OtherTx, 0),

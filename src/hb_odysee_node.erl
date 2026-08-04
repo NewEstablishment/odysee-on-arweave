@@ -126,23 +126,13 @@ serving_store(Peers) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-%%% The vertical slice: a node configured by `seed_opts/1', driven over
-%%% HTTP exactly as a client drives it, asserting that what comes back
-%%% still verifies. Every other suite here exercises one layer in
-%%% isolation (codecs check byte recipes, stores are called through
-%%% `read/3'); nothing else asserts that the layers compose into a served
-%%% object, which is the only thing that decides whether the architecture
-%%% works.
-%%%
-%%% Source bytes come from the `fixtures' store option, the seam kept
-%%% deliberately (`decisions/keep-fixtures-test-seam.md'), so these are
-%%% deterministic and need no network. That is a real limit, stated rather
-%%% than hidden: this proves the layers compose, NOT that the legacy
-%%% endpoints answer. Live sourcing is a separate check
-%%% (`docs/data-sourcing.md').
+%%% The vertical slice: a node built by `seed_opts/1' and driven over HTTP
+%%% as a client drives it, asserting what comes back still verifies. Source
+%%% bytes come from the `fixtures' seam, so these prove the layers compose,
+%%% not that the legacy endpoints answer.
 
-%% Boot a seed node through the production config builder, with a fixture
-%% store ahead of the real Odysee stores so no legacy endpoint is reached.
+%% Seed node with a fixture store ahead of the real ones, so no legacy
+%% endpoint is reached.
 skeleton_node(Fixtures) ->
     Store = hb_test_utils:test_store(),
     Opts =
@@ -156,9 +146,8 @@ skeleton_node(Fixtures) ->
                 }
             ],
             <<"priv-wallet">> => ar_wallet:new(),
-            %% A mutable value at a constant address must not be served from
-            %% the resolution cache or an alias never refreshes. Node
-            %% configuration: a device cannot opt its own results out.
+            %% A mutable value at a constant address must not come from the
+            %% resolution cache, or an alias never refreshes.
             <<"http-extra-opts">> => #{
                 <<"force-message">> => true,
                 <<"cache-control">> => [<<"no-store">>]
@@ -169,10 +158,8 @@ skeleton_node(Fixtures) ->
 skeleton_read(Node, Path) ->
     hb_http:get(Node, <<"/~cache@1.0/read?read=", Path/binary>>, #{}).
 
-%% A served message must still verify in the client's hands.
-%% `commitment-ids => all' is required: `lbry@1.0' commitments are
-%% content-addressed and carry no committer, so the default selection
-%% checks nothing and would pass a forgery.
+%% `commitment-ids => all' is required: content-addressed commitments have
+%% no committer, so the default selection checks nothing.
 skeleton_assert_verifies(Msg, Opts) ->
     Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
     ?assertEqual(
@@ -181,10 +168,8 @@ skeleton_assert_verifies(Msg, Opts) ->
     ),
     Loaded.
 
-%% Blob evidence: the smallest complete slice. Bytes in, verified message
-%% out over HTTP, and afterwards addressable by a plain HyperBEAM id with
-%% no knowledge of the store path and no device call, which is what lets a
-%% router or a peer serve Odysee content.
+%% The smallest complete slice: bytes in, verified message out over HTTP,
+%% then addressable by a plain id with no path knowledge and no device call.
 skeleton_blob_serves_and_addresses_test() ->
     Bytes = <<"walking skeleton blob payload">>,
     Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
@@ -201,8 +186,7 @@ skeleton_blob_serves_and_addresses_test() ->
     Addressed = skeleton_assert_verifies(ViaAlias, Opts),
     ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)).
 
-%% Descriptor evidence: parsed, checked against its sd-hash, and serving
-%% the stream metadata playback depends on.
+%% Descriptor parsed and checked against its sd-hash.
 skeleton_descriptor_serves_test() ->
     {Raw, SDHash} = skeleton_descriptor(),
     Path = <<"odysee/descriptor/", SDHash/binary>>,
@@ -212,8 +196,8 @@ skeleton_descriptor_serves_test() ->
     Served = skeleton_assert_verifies(ViaPath, Opts),
     ?assertEqual(SDHash, hb_maps:get(<<"sd-hash">>, Served, not_found, Opts)).
 
-%% Transaction evidence: the txid is recomputed from raw bytes, so a lying
-%% source cannot substitute a different transaction.
+%% The txid is recomputed from raw bytes, so a lying source cannot
+%% substitute a different transaction.
 skeleton_transaction_serves_test() ->
     Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
     {ok, TxMsg} = dev_lbry_commitment:transaction_message(Raw),
@@ -225,9 +209,7 @@ skeleton_transaction_serves_test() ->
     Served = skeleton_assert_verifies(ViaPath, Opts),
     ?assertEqual(TxID, hb_maps:get(<<"txid">>, Served, not_found, Opts)).
 
-%% Tampering must fail closed at the HTTP boundary, not merely inside the
-%% store: bytes that do not hash to the requested id are a read failure,
-%% never a 200.
+%% Tampering fails closed at the HTTP boundary, not just inside the store.
 skeleton_tampered_source_is_not_served_test() ->
     Bytes = <<"honest payload">>,
     Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
