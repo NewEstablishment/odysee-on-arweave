@@ -89,7 +89,7 @@ read(StoreOpts, Req = #{ <<"read">> := Key }, NodeOpts) ->
         not_found ->
             case read_live(Path, Req, StoreOpts, NodeOpts) of
                 {ok, LiveMsg} = OK when is_map(LiveMsg) ->
-                    maybe_warm_bare_key(BareKey, LiveMsg, StoreOpts, NodeOpts),
+                    warm_addresses(BareKey, Path, LiveMsg, StoreOpts, NodeOpts),
                     OK;
                 Other ->
                     Other
@@ -569,20 +569,56 @@ integer_or_undefined(_Value) ->
 %% committer, so the id cannot be recomputed independently of the write),
 %% then the request key is linked to it. A warming failure never breaks
 %% the read.
-maybe_warm_bare_key(Key, Msg, StoreOpts, NodeOpts) ->
-    case is_bare_outpoint(Key) andalso is_map(Msg) of
-        true ->
-            catch link_local(Key, Msg, local_stores(StoreOpts, NodeOpts), NodeOpts),
-            ok;
-        false ->
-            ok
-    end.
-
-link_local(_Key, _Msg, [], _Opts) ->
+%% Warm the local store with a freshly-read message and link every stable
+%% address that should resolve to it. Two kinds of address are linked:
+%%
+%%   - The alias id of the canonical path (`hb_odysee_address:alias/1'),
+%%     which is `?IS_ID'-shaped, so `GET /(alias)' short-circuits to a store
+%%     read on any node holding the link. This is what makes Odysee content
+%%     addressable by generic consumers -- `~query@1.0', peers replicating by
+%%     id, routers -- rather than only through `/~cache@1.0/read' path calls.
+%%   - The bare request key, for outpoints only (see below).
+%%
+%% The message is written first to obtain its canonical cache id: `lbry@1.0'
+%% commitments carry no committer, so the id cannot be recomputed
+%% independently of the write.
+%%
+%% Aliases are linked for every canonical path, including the locator paths
+%% (`odysee/claim/(uri)', `odysee/claim-id/(id)') whose target can change
+%% when a claim is updated. Those re-link on each live read, so an alias
+%% tracks the current resolution. A node serving mutable locators must
+%% therefore disable resolution-result caching
+%% (`http-extra-opts => #{force-message => true, cache-control => [no-store]}'),
+%% or a cached result will be served without the store ever being consulted
+%% and the alias will never refresh. Immutable paths (transaction, outpoint,
+%% descriptor, blob) are unaffected: their content cannot change, so a stale
+%% link is not possible.
+%%
+%% Only bare outpoints warm their request key directly, because a bare key is
+%% classified onto a canonical path at read time and only the outpoint form
+%% is immutable enough for that shortcut to stay correct.
+%%
+%% A warming failure never breaks the read.
+warm_addresses(BareKey, Path, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
+    Keys =
+        [hb_odysee_address:alias(Path)] ++
+        case is_bare_outpoint(BareKey) of
+            true -> [BareKey];
+            false -> []
+        end,
+    catch link_local(Keys, Msg, local_stores(StoreOpts, NodeOpts), NodeOpts),
     ok;
-link_local(Key, Msg, LocalStores, Opts) ->
+warm_addresses(_BareKey, _Path, _Msg, _StoreOpts, _NodeOpts) ->
+    ok.
+
+link_local(_Keys, _Msg, [], _Opts) ->
+    ok;
+link_local(Keys, Msg, LocalStores, Opts) ->
     {ok, Id} = hb_cache:write(Msg, Opts#{ <<"store">> => LocalStores }),
-    hb_store:link(LocalStores, #{ Key => Id }, Opts),
+    lists:foreach(
+        fun(Key) -> hb_store:link(LocalStores, #{ Key => Id }, Opts) end,
+        Keys
+    ),
     ok.
 
 %% Follow `hb_store_gateway''s `local-store' convention when provided;
@@ -907,6 +943,35 @@ restore_uri_scheme(URI) -> URI.
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
+%% The property the alias scheme exists for: an object materialized from a
+%% canonical `odysee/' path is afterwards reachable by a plain `?IS_ID'-shaped
+%% id, with no device call and no knowledge of the path, and it still verifies.
+%% This is what lets `~query@1.0', a peer, or a router address Odysee content.
+alias_address_resolves_to_the_same_message_test() ->
+    Bytes = <<"aliased blob payload">>,
+    Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
+    Path = <<"odysee/blob/", Hash/binary>>,
+    Store = hb_test_utils:test_store(),
+    Opts = #{ <<"store">> => [Store] },
+    SourceStore = #{
+        <<"store-module">> => ?MODULE,
+        <<"fixtures">> => #{ <<"lbry/blob/", Hash/binary>> => Bytes },
+        <<"local-store">> => [Store]
+    },
+    {ok, Msg} = read(SourceStore, #{ <<"read">> => Path }, Opts),
+    %% Fixtures short-circuit `read_live', so warm explicitly here; a live
+    %% read reaches this through `read/3'.
+    ok = warm_addresses(Path, Path, Msg, SourceStore, Opts),
+    Alias = hb_odysee_address:alias(Path),
+    ?assertEqual(43, byte_size(Alias)),
+    {ok, ViaAlias} = hb_cache:read(Alias, Opts),
+    Loaded = hb_cache:ensure_all_loaded(ViaAlias, Opts),
+    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Loaded, not_found, Opts)),
+    ?assertEqual(
+        true,
+        hb_message:verify(Loaded, #{ <<"commitment-ids">> => <<"all">> }, Opts)
+    ).
+
 decoded_store_uri_preserves_claim_id_test() ->
     URI = <<"lbry://@rave#5383026b8b74683313ad6ea5c72f27eedcae026c">>,
     ?assertEqual(
@@ -1223,9 +1288,12 @@ bare_channel_id_claim_outputs_list_returns_immutable_outpoints_test() ->
     {ok, Outpoints} = list(Store, #{ <<"list">> => <<ChannelID/binary, "/claim-outputs">> }, #{}),
     ?assertEqual([<<TxID1/binary, ":0">>, <<TxID2/binary, ":2">>], Outpoints).
 
-%% Warming mechanics: a live-resolved native claim output written through
-%% `maybe_warm_cache' must be readable back from the local store by its bare
-%% outpoint key, so a later bare `GET /(id)' never re-hits the proxy.
+%% Warming mechanics: a live-resolved native claim output must be readable
+%% back from the local store by every address warming links, so a later
+%% `GET /(id)' never re-hits the proxy. Two addresses are linked: the bare
+%% outpoint key (immutable, so the shortcut stays correct) and the canonical
+%% path's alias id (which is what makes the object addressable by a plain id
+%% on any node).
 bare_outpoint_warm_cache_links_local_store_test() ->
     Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
     TxID = dev_lbry_tx:txid(Raw),
@@ -1238,8 +1306,9 @@ bare_outpoint_warm_cache_links_local_store_test() ->
     },
     hb_store:reset(LocalStore),
     Opts = #{ <<"store">> => [LocalStore] },
+    Path = <<"odysee/outpoint/", TxID/binary, "/0">>,
     ?assert(is_bare_outpoint(Outpoint)),
-    ok = maybe_warm_bare_key(Outpoint, ClaimOutput, #{}, Opts),
+    ok = warm_addresses(Outpoint, Path, ClaimOutput, #{}, Opts),
     {ok, Cached0} = hb_cache:read(Outpoint, Opts),
     Cached = hb_cache:ensure_all_loaded(Cached0, Opts),
     ?assertEqual(TxID, hb_maps:get(<<"txid">>, Cached, not_found, Opts)),
@@ -1247,10 +1316,22 @@ bare_outpoint_warm_cache_links_local_store_test() ->
         maps:get(<<"claim-id">>, ClaimOutput),
         hb_maps:get(<<"claim-id">>, Cached, not_found, Opts)
     ),
-    %% Non-outpoint keys never warm, and warming without local stores is a
-    %% harmless no-op.
-    ?assertEqual(ok, maybe_warm_bare_key(<<"odysee/claim/x">>, ClaimOutput, #{}, Opts)),
-    ?assertEqual(ok, maybe_warm_bare_key(Outpoint, ClaimOutput, #{}, #{ <<"store">> => [] })).
+    %% The same object is reachable by the canonical path's alias id, which
+    %% needs no knowledge of the path or of LBRY identifier shapes.
+    {ok, ViaAlias0} = hb_cache:read(hb_odysee_address:alias(Path), Opts),
+    ViaAlias = hb_cache:ensure_all_loaded(ViaAlias0, Opts),
+    ?assertEqual(TxID, hb_maps:get(<<"txid">>, ViaAlias, not_found, Opts)),
+    %% A non-outpoint key does not warm the bare key (only the alias), so a
+    %% mutable locator string never becomes a direct address.
+    LocatorPath = <<"odysee/claim/x">>,
+    ok = warm_addresses(LocatorPath, LocatorPath, ClaimOutput, #{}, Opts),
+    ?assertMatch({error, not_found}, hb_cache:read(LocatorPath, Opts)),
+    ?assertMatch({ok, _}, hb_cache:read(hb_odysee_address:alias(LocatorPath), Opts)),
+    %% Warming without local stores is a harmless no-op.
+    ?assertEqual(
+        ok,
+        warm_addresses(Outpoint, Path, ClaimOutput, #{}, #{ <<"store">> => [] })
+    ).
 
 sample_descriptor() ->
     Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,
