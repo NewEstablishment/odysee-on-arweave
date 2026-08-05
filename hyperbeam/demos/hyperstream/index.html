@@ -6,11 +6,11 @@
     <meta name="referrer" content="no-referrer" />
     <meta
       name="description"
-      content="A standalone Hyperstream broadcaster and WebRTC signaling diagnostics console."
+      content="A standalone Hyperstream broadcaster with WHIP ingest, HLS fallback, P2P delivery, and device diagnostics."
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src http: https:; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; object-src 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src http: https: ws: wss: stun: turn: turns:; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; object-src 'none'"
     />
     <meta name="theme-color" content="#090b0a" />
     <title>Hyperstream Broadcast Console</title>
@@ -55,6 +55,13 @@
               <h1>Broadcast source</h1>
             </div>
             <div class="stage-actions">
+              <label class="source-control" for="ingest-mode">
+                <span>Ingest</span>
+                <select id="ingest-mode">
+                  <option value="browser">Browser WHIP demo</option>
+                  <option value="rtmp">External OBS / RTMP</option>
+                </select>
+              </label>
               <button class="button button-primary" id="start-button" type="button">
                 Start broadcast
               </button>
@@ -70,7 +77,19 @@
               id="publisher-canvas"
               width="1280"
               height="720"
+              hidden
             ></canvas>
+            <video
+              class="broadcast-canvas"
+              id="publisher-video"
+              muted
+              loop
+              autoplay
+              playsinline
+              preload="auto"
+            >
+              <source src="./hyperstream-source.mp4" type="video/mp4" />
+            </video>
 
             <div class="broadcast-overlay">
               <div class="live-label" id="live-label">
@@ -83,11 +102,11 @@
             <div class="media-readout">
               <div>
                 <span>Source</span>
-                <b id="source-readout">1280 × 720 · 30 fps</b>
+                <b id="source-readout">1280 × 720 · animated preview</b>
               </div>
               <div>
                 <span>Viewers</span>
-                <b id="viewer-readout">0 connected</b>
+                <b id="viewer-readout">0 joined</b>
               </div>
               <div>
                 <span>Control plane</span>
@@ -121,10 +140,43 @@
             </div>
           </section>
 
+          <section class="share-strip" id="ingest-strip" aria-labelledby="ingest-title">
+            <div>
+              <p class="eyebrow">External ingest</p>
+              <h2 id="ingest-title">OBS / RTMP</h2>
+              <p id="ingest-help">
+                A short-lived RTMP stream key appears after the media session is provisioned.
+              </p>
+            </div>
+            <div class="share-controls ingest-controls">
+              <input
+                id="rtmp-server"
+                type="text"
+                readonly
+                value="RTMP server will appear here"
+                aria-label="RTMP server"
+              />
+              <button class="button button-quiet" id="copy-rtmp-server" type="button" disabled>
+                Copy server
+              </button>
+              <input
+                id="rtmp-key"
+                type="password"
+                readonly
+                value=""
+                placeholder="Stream key will appear here"
+                aria-label="RTMP stream key"
+              />
+              <button class="button button-quiet" id="copy-rtmp-key" type="button" disabled>
+                Copy key
+              </button>
+            </div>
+          </section>
+
           <section class="audience-panel" aria-labelledby="audience-title">
             <div class="audience-heading">
               <div>
-                <p class="eyebrow">Peer connections</p>
+              <p class="eyebrow">Hyperstream membership</p>
                 <h2 id="audience-title">Live viewers</h2>
               </div>
               <strong id="viewer-count">0 active</strong>
@@ -177,10 +229,10 @@
             </div>
             <ol id="proof-list">
               <li data-proof="session"><span></span>Open broadcast session created</li>
-              <li data-proof="invite"><span></span>Public watch URL generated</li>
+              <li data-proof="ingest"><span></span>Single WHIP ingest connected</li>
+              <li data-proof="manifest"><span></span>HTTPS HLS fallback is live</li>
               <li data-proof="viewer"><span></span>Independent viewer joined</li>
-              <li data-proof="signaling"><span></span>Offer and answer exchanged</li>
-              <li data-proof="media"><span></span>Outbound RTP is advancing</li>
+              <li data-proof="media"><span></span>Viewer reported active playback</li>
             </ol>
           </div>
 
@@ -198,12 +250,47 @@
               <b id="signal-count">0</b>
             </div>
             <div class="metric-row">
-              <span>Connections</span>
-              <b id="connection-count">0 / 8</b>
+              <span>Media uplinks</span>
+              <b id="connection-count">0 / 1</b>
             </div>
             <div class="metric-row">
               <span>Cache policy</span>
               <b id="cache-policy">Unproven</b>
+            </div>
+          </div>
+
+          <div class="request-metrics">
+            <div class="section-label">
+              <span>Media adapter</span>
+              <b>WHIP → HLS/CMAF</b>
+            </div>
+            <div class="metric-row">
+              <span>WHIP connection</span>
+              <b id="ingest-status">Idle</b>
+            </div>
+            <div class="metric-row">
+              <span>ICE state</span>
+              <b id="ingest-ice">New</b>
+            </div>
+            <div class="metric-row">
+              <span>Selected route</span>
+              <b id="ingest-route">Pending</b>
+            </div>
+            <div class="metric-row">
+              <span>Outbound video</span>
+              <b id="ingest-fps">0.0 fps</b>
+            </div>
+            <div class="metric-row">
+              <span>Bytes sent</span>
+              <b id="ingest-bytes">0 B</b>
+            </div>
+            <div class="metric-row">
+              <span>HTTPS manifest</span>
+              <b id="manifest-status">Offline</b>
+            </div>
+            <div class="metric-row">
+              <span>P2P tracker</span>
+              <b id="tracker-status">Unpublished</b>
             </div>
           </div>
         </aside>
@@ -223,7 +310,7 @@
         </div>
         <div class="event-log" id="event-log" role="log" aria-live="polite">
           <div class="event-empty" id="event-empty">
-            Create, join, ready, offer, answer, ICE, and leave events will appear here.
+            Create, update, join, playback-ready, playback-active, and leave events will appear here.
           </div>
         </div>
       </section>
@@ -236,18 +323,18 @@
         </div>
         <div>
           <span class="boundary-index">B</span>
-          <h2>WebRTC carries media</h2>
+          <h2>The adapter carries ingest</h2>
           <p>
-            Each admitted viewer receives a direct peer connection. ICE can expose
-            network addresses to that peer.
+            One WHIP or RTMP uplink enters MediaMTX, which packages a browser-safe HLS
+            fallback outside the device.
           </p>
         </div>
         <div>
           <span class="boundary-index">C</span>
-          <h2>The edge completes production</h2>
+          <h2>Viewers share when possible</h2>
           <p>
-            HTTPS, relay-only TURN or SFU capacity, admission, rate limits, and
-            session affinity.
+            HLS segments use WebRTC data channels opportunistically and HTTPS whenever
+            P2P, UDP, or the tracker is unavailable.
           </p>
         </div>
       </section>
@@ -255,7 +342,7 @@
 
     <footer>
       <span>hyperstream@1.0 · broadcaster</span>
-      <span>create · events · heartbeat · signal · session · close</span>
+      <span>create · update · events · heartbeat · signal · session · close</span>
     </footer>
 
     <script type="module" src="./broadcaster.js"></script>

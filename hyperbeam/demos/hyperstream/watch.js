@@ -1,3 +1,4 @@
+import { createHybridPlayer } from "./hybrid-player.js";
 import {
   DeviceRequestError,
   HyperstreamClient,
@@ -13,16 +14,16 @@ import {
   responseHasMore,
   retryableRequestError,
   safeBodySize,
-  selectedCandidateRoute,
-  validIceCandidate,
-  validSessionDescription,
   wait,
 } from "./shared.js";
+
+const PROTOCOL = "hyperstream-hls-p2p@1";
 
 const elements = {
   headerSession: document.querySelector("#header-session"),
   nodeDot: document.querySelector("#node-dot"),
   nodeStatus: document.querySelector("#node-status"),
+  playButton: document.querySelector("#play-button"),
   retryButton: document.querySelector("#retry-button"),
   leaveButton: document.querySelector("#leave-button"),
   viewerVideo: document.querySelector("#viewer-video"),
@@ -49,10 +50,15 @@ const elements = {
   roundTripTime: document.querySelector("#round-trip-time"),
   videoDimensions: document.querySelector("#video-dimensions"),
   framesDecoded: document.querySelector("#frames-decoded"),
+  frameRate: document.querySelector("#frame-rate"),
   bytesReceived: document.querySelector("#bytes-received"),
   packetsReceived: document.querySelector("#packets-received"),
   packetsLost: document.querySelector("#packets-lost"),
   jitter: document.querySelector("#jitter"),
+  peerCount: document.querySelector("#peer-count"),
+  bufferDepth: document.querySelector("#buffer-depth"),
+  segmentCount: document.querySelector("#segment-count"),
+  originFallbackCount: document.querySelector("#origin-fallback-count"),
   requestCount: document.querySelector("#request-count"),
   signalCount: document.querySelector("#signal-count"),
   foreignSignalCount: document.querySelector("#foreign-signal-count"),
@@ -66,42 +72,31 @@ const telemetry = new Telemetry(elements.eventLog, elements.eventEmpty);
 
 const state = {
   invite: null,
+  descriptor: null,
   client: null,
   peer: null,
   publisherGeneration: 0,
   connectionId: null,
-  pc: null,
-  remoteStream: null,
+  player: null,
   running: false,
   stopping: false,
-  resyncing: false,
   memberActive: false,
   runId: 0,
   intervals: new Set(),
   sendChain: Promise.resolve(),
-  outboundReady: false,
-  outboundIce: [],
-  inboundIce: [],
   latestCursor: 0,
   requestCount: 0,
   signalCount: 0,
   foreignSignalCount: 0,
   startedAt: 0,
-  mediaStartedAt: 0,
-  waitingForOfferAt: 0,
-  fatalHandled: false,
   heartbeatFailures: 0,
-  stats: {
-    framesDecoded: 0,
-    bytesReceived: 0,
-    packetsReceived: 0,
-    packetsLost: 0,
-    jitter: 0,
-    width: 0,
-    height: 0,
-    route: "pending",
-    roundTripTime: 0,
-  },
+  fatalHandled: false,
+  playbackActiveSent: false,
+  p2pActiveSent: false,
+  previousFrames: 0,
+  previousFrameSampleAt: 0,
+  frameRate: 0,
+  latestStats: null,
 };
 
 function setNodeState(mode, text) {
@@ -152,65 +147,64 @@ function addInterval(callback, milliseconds) {
 function resetJoinState() {
   state.runId += 1;
   clearIntervals();
-  closePeerConnection();
+  state.player?.destroy();
+  state.player = null;
+  state.descriptor = null;
   state.peer = createPeer("viewer", "viewer");
   state.publisherGeneration = 0;
-  state.connectionId = randomId("pc");
-  state.pc = null;
-  state.remoteStream = null;
+  state.connectionId = randomId("playback");
   state.running = false;
   state.stopping = false;
-  state.resyncing = false;
   state.memberActive = false;
   state.sendChain = Promise.resolve();
-  state.outboundReady = false;
-  state.outboundIce = [];
-  state.inboundIce = [];
   state.latestCursor = 0;
   state.requestCount = 0;
   state.signalCount = 0;
   state.foreignSignalCount = 0;
   state.startedAt = performance.now();
-  state.mediaStartedAt = 0;
-  state.waitingForOfferAt = 0;
-  state.fatalHandled = false;
   state.heartbeatFailures = 0;
-  state.stats = {
-    framesDecoded: 0,
-    bytesReceived: 0,
-    packetsReceived: 0,
-    packetsLost: 0,
-    jitter: 0,
-    width: 0,
-    height: 0,
-  };
+  state.fatalHandled = false;
+  state.playbackActiveSent = false;
+  state.p2pActiveSent = false;
+  state.previousFrames = 0;
+  state.previousFrameSampleAt = 0;
+  state.frameRate = 0;
+  state.latestStats = null;
   telemetry.reset();
 
+  elements.playButton.hidden = true;
   elements.retryButton.hidden = true;
   elements.leaveButton.disabled = true;
   elements.viewerVideo.classList.remove("ready");
   elements.standby.classList.remove("hidden");
   elements.standbyTitle.textContent = "Joining Hyperstream session";
   elements.standbyDetail.textContent =
-    "The viewer is registering its signed peer identity and waiting for an offer.";
+    "The viewer is registering a signed member and resolving the owner-published playback descriptor.";
   elements.liveLabel.classList.remove("live");
   elements.timecode.textContent = "00:00:00";
-  elements.videoReadout.textContent = "No frames";
-  elements.connectionReadout.textContent = "New";
-  elements.iceReadout.textContent = "New";
+  elements.videoReadout.textContent = "Waiting for manifest";
+  elements.connectionReadout.textContent = "HTTPS fallback";
+  elements.iceReadout.textContent = "0 peers";
   elements.viewerPeer.textContent = state.peer.id;
   elements.viewerGeneration.textContent = "0";
   elements.publisherPeer.textContent = state.invite.publisherId;
-  elements.connectionId.textContent = state.connectionId;
+  elements.connectionId.textContent = "pending";
   elements.sessionCursor.textContent = "0";
-  elements.signalingState.textContent = "stable";
-  elements.gatheringState.textContent = "new";
+  elements.signalingState.textContent = "pending";
+  elements.gatheringState.textContent = "pending";
+  elements.iceRoute.textContent = "HTTPS fallback";
+  elements.roundTripTime.textContent = "0.0 s";
   elements.videoDimensions.textContent = "0 × 0";
   elements.framesDecoded.textContent = "0";
+  elements.frameRate.textContent = "0.0 fps";
   elements.bytesReceived.textContent = "0 B";
-  elements.packetsReceived.textContent = "0";
-  elements.packetsLost.textContent = "0";
-  elements.jitter.textContent = "0 ms";
+  elements.packetsReceived.textContent = "0 B";
+  elements.packetsLost.textContent = "0 B";
+  elements.jitter.textContent = "0.0%";
+  elements.peerCount.textContent = "0";
+  elements.bufferDepth.textContent = "0.0 s";
+  elements.segmentCount.textContent = "0";
+  elements.originFallbackCount.textContent = "0";
   elements.requestCount.textContent = "0";
   elements.signalCount.textContent = "0";
   elements.foreignSignalCount.textContent = "0";
@@ -224,7 +218,6 @@ async function joinStream() {
   }
   resetJoinState();
   setNodeState("", "Probing");
-
   try {
     state.client = new HyperstreamClient(state.invite.endpoint, onDeviceRequest);
     const latency = await state.client.probe();
@@ -235,37 +228,29 @@ async function joinStream() {
       message: "HyperBEAM metadata route responded",
       meta: `${latency} ms`,
     });
-
-    const joinRequest = {
+    const joined = await state.client.call("join", {
       "request-id": randomId("join-viewer"),
       "session-id": state.invite.sessionId,
       "peer-id": state.peer.id,
       metadata: {
         role: "viewer",
         client: "hyperstream-watch",
-        protocol: "hyperstream-webrtc-demo@1",
+        protocol: PROTOCOL,
+        delivery: "https-with-optional-p2p",
       },
-    };
-
-    const joined = await state.client.call("join", joinRequest);
+    });
     state.peer.generation = Number(joined["peer-generation"]);
     state.peer.cursor = Number(joined["current-cursor"] || 0);
     state.latestCursor = state.peer.cursor;
     state.memberActive = true;
-    const snapshot = await state.client.call(
-      "session",
-      memberFields(state.invite.sessionId, state.peer),
-      { silent: true },
-    );
-    if (!sessionDescriptorMatches(snapshot)) {
-      throw new Error("The watch descriptor does not match owner-controlled session metadata.");
-    }
-    state.publisherGeneration = findPublisherGeneration(snapshot);
+    const descriptor = parseSessionDescriptor(joined);
+    state.publisherGeneration = findPublisherGeneration(joined);
     if (!state.publisherGeneration) {
       throw new Error("The publisher peer is not active in this session.");
     }
-
+    state.descriptor = descriptor;
     state.running = true;
+    renderDescriptor();
     elements.leaveButton.disabled = false;
     elements.viewerGeneration.textContent = String(state.peer.generation);
     elements.sessionCursor.textContent = String(state.latestCursor);
@@ -277,115 +262,406 @@ async function joinStream() {
       meta: `generation ${state.peer.generation} · cursor ${state.peer.cursor}`,
     });
 
-    createPeerConnection();
     const runId = state.runId;
+    const segmentValidator = createSegmentValidator(descriptor);
+    const observeHttpsSegment = (details) => {
+      void segmentValidator(details);
+      return true;
+    };
+    state.player = await createHybridPlayer(elements.viewerVideo, {
+      manifestUrl: descriptor.manifestUrl,
+      trackerUrls: descriptor.trackerUrls,
+      swarmId: descriptor.swarmId,
+      validateP2PSegment: segmentValidator,
+      validateHTTPSegment: observeHttpsSegment,
+      iceServers: peerConnectionConfiguration().iceServers,
+      p2pEnabled: true,
+      p2pUploadEnabled: true,
+      p2pMaxPeers: 8,
+      onEvent: (event) => handlePlayerEvent(runId, event),
+      onStats: (stats) => renderPlayerStats(runId, stats),
+    });
+    if (!runMatches(runId)) {
+      state.player?.destroy();
+      return;
+    }
     void pollViewer(runId);
-    addInterval(() => void heartbeatViewer(runId), 10_000);
-    addInterval(() => void refreshSession(runId), 3_000);
-    addInterval(() => void sampleInboundStats(runId), 1_000);
-    addInterval(() => void ensureOffer(runId), 2_000);
+    addInterval(() => void heartbeatViewer(runId), 15_000);
     addInterval(() => updateTimecode(), 250);
-    await sendViewerSignal("watch-ready", fencedBody());
-    state.waitingForOfferAt = performance.now();
-    setViewerStatus("Waiting for offer");
+    await queueSignal("watch-ready", fencedBody({
+      delivery: "hls-p2p",
+      fallback: "https",
+    }));
     elements.standbyTitle.textContent = "Viewer joined";
     elements.standbyDetail.textContent =
-      "A targeted watch-ready signal is queued; the publisher will answer with an SDP offer.";
+      "The HLS player is starting from HTTPS while the private tracker discovers optional peers.";
   } catch (error) {
     await handleFatal(error);
   }
 }
 
-function sessionDescriptorMatches(snapshot) {
-  return (
-    snapshot?.metadata?.protocol === "hyperstream-webrtc-demo@1" &&
-    snapshot.metadata["publisher-peer-id"] === state.invite.publisherId
-  );
+function parseSessionDescriptor(snapshot) {
+  const metadata = snapshot?.metadata;
+  const playback = metadata?.playback;
+  if (
+    metadata?.protocol !== PROTOCOL ||
+    metadata["publisher-peer-id"] !== state.invite.publisherId ||
+    metadata.status !== "live" ||
+    playback?.mode !== "hls-cmaf" ||
+    playback.fallback !== "https" ||
+    playback.integrity?.mode !== "https-origin-sha256" ||
+    typeof playback.integrity?.endpoint !== "string" ||
+    typeof playback.manifest !== "string" ||
+    typeof playback["swarm-id"] !== "string" ||
+    !Array.isArray(playback.trackers) ||
+    playback.trackers.length < 1 ||
+    playback.trackers.length > 4 ||
+    !Number.isInteger(Number(playback["stream-epoch"]))
+  ) {
+    throw new Error("The owner-controlled session metadata has no valid live playback descriptor.");
+  }
+  const digestUrl = new URL(playback.integrity.endpoint, window.location.href);
+  if (digestUrl.origin !== window.location.origin || digestUrl.username || digestUrl.password || digestUrl.hash) {
+    throw new Error("The playback integrity endpoint must be credential-free and same-origin.");
+  }
+  return {
+    manifestUrl: playback.manifest,
+    digestUrl: digestUrl.href,
+    trackerUrls: playback.trackers,
+    swarmId: playback["swarm-id"],
+    streamEpoch: Number(playback["stream-epoch"]),
+  };
+}
+
+function createSegmentValidator(descriptor) {
+  const manifestBase = new URL(".", descriptor.manifestUrl);
+  return async ({ url, byteRange, data }) => {
+    try {
+      const segmentUrl = new URL(url, manifestBase);
+      if (
+        segmentUrl.origin !== manifestBase.origin ||
+        !segmentUrl.pathname.startsWith(manifestBase.pathname) ||
+        segmentUrl.hash
+      ) {
+        return false;
+      }
+      const sessionValues = segmentUrl.searchParams.getAll("session");
+      if (
+        Array.from(segmentUrl.searchParams.keys()).some((key) => key !== "session") ||
+        sessionValues.length > 1 ||
+        (sessionValues.length === 1 && !/^[0-9a-f-]{16,64}$/i.test(sessionValues[0]))
+      ) {
+        return false;
+      }
+      const segment = decodeURIComponent(segmentUrl.pathname.slice(manifestBase.pathname.length));
+      if (!segment || segment.startsWith("/") || segment.includes("..")) {
+        return false;
+      }
+      const digestUrl = new URL(descriptor.digestUrl);
+      digestUrl.searchParams.set("segment", segment);
+      if (sessionValues.length === 1) {
+        digestUrl.searchParams.set("session", sessionValues[0]);
+      }
+      if (byteRange) {
+        return false;
+      }
+      const response = await fetch(digestUrl, {
+        headers: { Accept: "application/json" },
+        cache: "default",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        signal: AbortSignal.timeout(2_500),
+      });
+      if (!response.ok) {
+        return false;
+      }
+      let expected;
+      try {
+        expected = await response.json();
+      } catch {
+        return false;
+      }
+      if (Number(expected.bytes) !== data.byteLength || typeof expected.sha256 !== "string") {
+        return false;
+      }
+      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+      let binary = "";
+      for (const byte of hash) {
+        binary += String.fromCharCode(byte);
+      }
+      const actual = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      return actual === expected.sha256;
+    } catch {
+      return false;
+    }
+  };
 }
 
 function findPublisherGeneration(snapshot) {
   const peers = Array.isArray(snapshot?.peers) ? snapshot.peers : [];
-  const publisher = peers.find(
-    (peer) => peer["peer-id"] === state.invite.publisherId,
-  );
+  const publisher = peers.find((peer) => peer["peer-id"] === state.invite.publisherId);
   return Number(publisher?.["peer-generation"] || 0);
 }
 
-function createPeerConnection() {
-  closePeerConnection();
-  const pc = new RTCPeerConnection(peerConnectionConfiguration());
-  state.pc = pc;
-  state.remoteStream = new MediaStream();
-  elements.viewerVideo.srcObject = state.remoteStream;
+function renderDescriptor() {
+  elements.connectionId.textContent = shortValue(state.descriptor.swarmId, 22);
+  elements.signalingState.textContent = new URL(state.descriptor.trackerUrls[0]).host;
+  elements.gatheringState.textContent = "Hls.js + P2P loader";
+  telemetry.add({
+    source: "session",
+    code: "META",
+    message: "Owner-published playback descriptor accepted",
+    meta: `epoch ${state.descriptor.streamEpoch} · HTTPS fallback · SHA-256 peer validation`,
+  });
+}
 
-  pc.onicecandidate = ({ candidate }) => {
-    if (candidate) {
-      queueViewerIce(candidate);
-    }
-  };
-  pc.ontrack = ({ track, streams }) => {
-    const [stream] = streams;
-    if (stream) {
-      state.remoteStream = stream;
-      elements.viewerVideo.srcObject = stream;
-    } else if (!state.remoteStream.getTracks().some((item) => item.id === track.id)) {
-      state.remoteStream.addTrack(track);
-    }
-    void elements.viewerVideo.play().catch(() => {});
+function handlePlayerEvent(runId, event) {
+  if (!runMatches(runId)) {
+    return;
+  }
+  if (event.type === "mode") {
+    elements.gatheringState.textContent = event.mode;
+    elements.signalingState.textContent = event.trackerCount ? "connecting" : "not used";
     telemetry.add({
-      source: "webrtc",
-      code: "TRACK",
-      message: `${track.kind} track received`,
-      meta: `readyState ${track.readyState}`,
+      source: "player",
+      code: "MODE",
+      message: `Delivery engine: ${event.mode}`,
+      meta: event.trackerCount ? `${event.trackerCount} private tracker` : event.reason,
     });
-  };
-  pc.onconnectionstatechange = () => {
-    renderPeerConnection();
-    if (pc.connectionState === "failed") {
-      void restartNegotiation().catch(handleFatal);
-    }
-  };
-  pc.oniceconnectionstatechange = renderPeerConnection;
-  pc.onicegatheringstatechange = renderPeerConnection;
-  pc.onsignalingstatechange = renderPeerConnection;
-  renderPeerConnection();
+    return;
+  }
+  if (event.type === "manifest") {
+    elements.videoReadout.textContent = "Manifest loaded";
+    telemetry.add({
+      source: "origin",
+      code: "HLS",
+      message: "HTTPS manifest parsed",
+      meta: `${event.levels} rendition${event.levels === 1 ? "" : "s"}`,
+    });
+    return;
+  }
+  if (event.type === "playlist") {
+    telemetry.add({
+      source: "origin",
+      code: event.live ? "LIVE" : "VOD",
+      message: "HLS media playlist updated",
+      meta: `${event.segmentCount} segments · target ${event.targetDuration.toFixed(1)} s`,
+    });
+    return;
+  }
+  if (event.type === "peer-connect") {
+    elements.signalingState.textContent = "tracker connected";
+    telemetry.add({
+      source: "p2p",
+      code: "PEER",
+      message: "Viewer data-channel peer connected",
+      meta: `${shortValue(event.peerId, 12)} · ${event.peerCount} active`,
+    });
+    return;
+  }
+  if (event.type === "peer-close") {
+    telemetry.add({
+      source: "p2p",
+      code: "CLOSE",
+      message: "Viewer data-channel peer closed",
+      meta: `${shortValue(event.peerId, 12)} · ${event.peerCount} active`,
+    });
+    return;
+  }
+  if (event.type === "segment") {
+    telemetry.add({
+      source: event.source === "p2p" ? "p2p" : "origin",
+      code: event.source === "p2p" ? "P2P" : "HTTPS",
+      message: `HLS segment ${event.externalId ?? "loaded"}`,
+      meta: `${formatBytes(event.bytes)}${event.peerId ? ` · peer ${shortValue(event.peerId, 10)}` : ""}`,
+    });
+    return;
+  }
+  if (event.type === "tracker-error" || event.type === "tracker-warning") {
+    elements.signalingState.textContent = "unavailable · HTTPS active";
+    telemetry.add({
+      source: "p2p",
+      code: "FALLBACK",
+      message: "Tracker unavailable; playback remains on HTTPS",
+      meta: event.error?.message || event.warning?.message || "tracker error",
+      error: true,
+    });
+    return;
+  }
+  if (event.type === "p2p-fallback" || event.type === "p2p-disabled") {
+    elements.signalingState.textContent = "HTTPS only";
+    telemetry.add({
+      source: "player",
+      code: "FALLBACK",
+      message: "P2P unavailable; continuing over HTTPS",
+      meta: event.reason,
+    });
+    return;
+  }
+  if (event.type === "segment-error") {
+    telemetry.add({
+      source: "player",
+      code: "SEGMENT",
+      message: "Segment request failed and will be retried",
+      meta: event.error?.message || "segment error",
+      error: true,
+    });
+    return;
+  }
+  if (event.type === "hls-error" && event.fatal) {
+    telemetry.add({
+      source: "player",
+      code: "HLS",
+      message: "Fatal HLS engine error",
+      meta: event.details,
+      error: true,
+    });
+    return;
+  }
+  if (event.type === "recovery-scheduled") {
+    elements.videoReadout.textContent = "Recovering playback";
+    setViewerStatus("Recovering");
+    telemetry.add({
+      source: "player",
+      code: "RETRY",
+      message: `Playback recovery ${event.attempt} of ${event.maxAttempts}`,
+      meta: `${event.details} · retry in ${(event.delayMs / 1_000).toFixed(1)} s`,
+      error: true,
+    });
+    return;
+  }
+  if (event.type === "recovery-error") {
+    telemetry.add({
+      source: "player",
+      code: "RETRY",
+      message: "Playback restart failed",
+      meta: event.error?.message || event.details,
+      error: true,
+    });
+    return;
+  }
+  if (event.type === "recovery-stable") {
+    telemetry.add({
+      source: "player",
+      code: "STABLE",
+      message: "Playback recovery budget reset",
+      meta: "30 seconds of continuous playback",
+    });
+    return;
+  }
+  if (event.type === "player-fatal") {
+    telemetry.add({
+      source: "player",
+      code: "FATAL",
+      message: "Playback recovery exhausted",
+      meta: `${event.details} · ${event.attempts} attempts`,
+      error: true,
+    });
+    void handleFatal(new Error(`Playback failed after ${event.attempts} recovery attempts.`));
+    return;
+  }
+  if (event.type === "playback-error") {
+    elements.playButton.hidden = false;
+    setViewerStatus("Playback blocked");
+    return;
+  }
+  if (event.type === "media") {
+    handleMediaState(event.state);
+  }
 }
 
-function closePeerConnection() {
-  if (state.pc) {
-    state.pc.onicecandidate = null;
-    state.pc.ontrack = null;
-    state.pc.onconnectionstatechange = null;
-    state.pc.oniceconnectionstatechange = null;
-    state.pc.onicegatheringstatechange = null;
-    state.pc.onsignalingstatechange = null;
-    state.pc.close();
-    state.pc = null;
+function handleMediaState(mediaState) {
+  if (mediaState === "playing") {
+    elements.playButton.hidden = true;
+    elements.standby.classList.add("hidden");
+    elements.viewerVideo.classList.add("ready");
+    elements.liveLabel.classList.add("live");
+    elements.videoReadout.textContent = "Live playback";
+    setViewerStatus("Live");
+    void announcePlayback("https");
+    return;
   }
-  if (state.remoteStream) {
-    state.remoteStream.getTracks().forEach((track) => track.stop());
-    state.remoteStream = null;
+  if (mediaState === "waiting" || mediaState === "stalled") {
+    setViewerStatus("Buffering");
+    elements.videoReadout.textContent = "Buffering";
+    return;
   }
-  elements.viewerVideo.srcObject = null;
+  if (mediaState === "pause" && state.running) {
+    setViewerStatus("Paused");
+  }
 }
 
-function renderPeerConnection() {
-  const connectionState = state.pc?.connectionState || "closed";
-  const iceState = state.pc?.iceConnectionState || "closed";
-  const signalingState = state.pc?.signalingState || "closed";
-  const gatheringState = state.pc?.iceGatheringState || "complete";
-  elements.connectionReadout.textContent = connectionState;
-  elements.iceReadout.textContent = iceState;
-  elements.signalingState.textContent = signalingState;
-  elements.gatheringState.textContent = gatheringState;
-  if (connectionState === "connected") {
-    setViewerStatus("Connected");
+function renderPlayerStats(runId, stats) {
+  if (!runMatches(runId)) {
+    return;
+  }
+  state.latestStats = stats;
+  const now = performance.now();
+  const elapsed = state.previousFrameSampleAt ? (now - state.previousFrameSampleAt) / 1_000 : 0;
+  if (!state.previousFrameSampleAt || elapsed >= 0.75) {
+    state.frameRate = elapsed > 0
+      ? Math.max(0, stats.decodedFrames - state.previousFrames) / elapsed
+      : 0;
+    state.previousFrames = stats.decodedFrames;
+    state.previousFrameSampleAt = now;
+  }
+  const p2pActive = stats.peerCount > 0 && stats.p2pBytes > 0;
+  elements.connectionReadout.textContent = p2pActive ? "P2P + HTTPS" : "HTTPS fallback";
+  elements.iceReadout.textContent = `${stats.peerCount} peer${stats.peerCount === 1 ? "" : "s"}`;
+  elements.iceRoute.textContent = p2pActive ? "P2P + HTTPS" : "HTTPS fallback";
+  elements.roundTripTime.textContent = stats.liveLatencySeconds == null
+    ? "pending"
+    : `${stats.liveLatencySeconds.toFixed(1)} s`;
+  elements.videoDimensions.textContent = `${stats.videoWidth} × ${stats.videoHeight}`;
+  elements.framesDecoded.textContent = String(stats.decodedFrames);
+  elements.frameRate.textContent = `${state.frameRate.toFixed(1)} fps`;
+  elements.bytesReceived.textContent = formatBytes(stats.httpBytes);
+  elements.packetsReceived.textContent = formatBytes(stats.p2pBytes);
+  elements.packetsLost.textContent = formatBytes(stats.p2pUploadBytes);
+  elements.jitter.textContent = `${(stats.p2pRatio * 100).toFixed(1)}%`;
+  elements.peerCount.textContent = String(stats.peerCount);
+  elements.bufferDepth.textContent = `${stats.bufferSeconds.toFixed(1)} s`;
+  elements.segmentCount.textContent = String(stats.segments.total);
+  elements.originFallbackCount.textContent = String(stats.segments.http);
+  if (p2pActive) {
+    void announcePlayback("p2p");
+  }
+}
+
+async function announcePlayback(delivery) {
+  if (!state.running || state.stopping) {
+    return;
+  }
+  if (delivery === "https" && state.playbackActiveSent) {
+    return;
+  }
+  if (delivery === "p2p" && state.p2pActiveSent) {
+    return;
+  }
+  if (delivery === "https") {
+    state.playbackActiveSent = true;
+  } else {
+    state.p2pActiveSent = true;
+  }
+  try {
+    await queueSignal("playback-active", fencedBody({
+      delivery,
+      fallback: "https",
+    }));
+  } catch (error) {
+    telemetry.add({
+      source: "viewer",
+      code: "SIGNAL",
+      message: "Playback status signal failed",
+      meta: error instanceof Error ? error.message : "unknown-error",
+      error: true,
+    });
   }
 }
 
 function fencedBody(values = {}) {
   return {
-    protocol: "hyperstream-webrtc-demo@1",
+    protocol: PROTOCOL,
     "publisher-peer-id": state.invite.publisherId,
     "publisher-generation": state.publisherGeneration,
     "viewer-peer-id": state.peer.id,
@@ -396,30 +672,11 @@ function fencedBody(values = {}) {
 
 function bodyMatchesViewer(body) {
   return (
-    body?.protocol === "hyperstream-webrtc-demo@1" &&
+    body?.protocol === PROTOCOL &&
     body["publisher-peer-id"] === state.invite.publisherId &&
     Number(body["publisher-generation"]) === state.publisherGeneration &&
     body["viewer-peer-id"] === state.peer.id &&
     Number(body["viewer-generation"]) === state.peer.generation
-  );
-}
-
-function eventMatchesViewer(event) {
-  return (
-    event["to-peer-id"] === state.peer.id &&
-    event["from-peer-id"] === state.invite.publisherId &&
-    Number(event["from-peer-generation"]) === state.publisherGeneration &&
-    event["connection-id"] === state.connectionId
-  );
-}
-
-function viewerStateMatches(runId, peer, connectionId = null) {
-  return (
-    state.running &&
-    !state.stopping &&
-    state.runId === runId &&
-    state.peer === peer &&
-    (connectionId === null || state.connectionId === connectionId)
   );
 }
 
@@ -430,78 +687,40 @@ function queueSignal(kind, body, requestId = randomId(kind)) {
   return next;
 }
 
-async function sendViewerSignal(kind, body, requestId = randomId(kind)) {
-  const runId = state.runId;
-  const peer = state.peer;
-  const connectionId = state.connectionId;
-  const publisherGeneration = state.publisherGeneration;
+async function sendViewerSignal(kind, body, requestId) {
   const accepted = await state.client.call(
     "signal",
     {
-      ...memberFields(state.invite.sessionId, peer),
+      ...memberFields(state.invite.sessionId, state.peer),
       "request-id": requestId,
       "to-peer-id": state.invite.publisherId,
-      "connection-id": connectionId,
+      "connection-id": state.connectionId,
       kind,
       "content-type": "application/json",
       body,
     },
     { silent: true },
   );
-  if (!viewerStateMatches(runId, peer, connectionId)) {
-    return accepted;
-  }
-  state.latestCursor = Math.max(state.latestCursor, Number(accepted.cursor || 0));
-  elements.sessionCursor.textContent = String(state.latestCursor);
   if (!accepted.duplicate) {
     state.signalCount += 1;
     elements.signalCount.textContent = String(state.signalCount);
   }
+  state.latestCursor = Math.max(state.latestCursor, Number(accepted.cursor || 0));
+  elements.sessionCursor.textContent = String(state.latestCursor);
   telemetry.add({
     source: "viewer",
     code: accepted.duplicate ? "DUP" : "202",
     message: `${kind} → ${state.invite.publisherId}`,
-    meta: `g${publisherGeneration} · cursor ${accepted.cursor} · ${formatBytes(safeBodySize(body))}`,
+    meta: `cursor ${accepted.cursor} · ${formatBytes(safeBodySize(body))}`,
   });
   return accepted;
-}
-
-function queueViewerIce(candidate) {
-  const runId = state.runId;
-  const peer = state.peer;
-  const connectionId = state.connectionId;
-  const value = candidate.toJSON
-    ? candidate.toJSON()
-    : {
-        candidate: candidate.candidate,
-        sdpMid: candidate.sdpMid,
-        sdpMLineIndex: candidate.sdpMLineIndex,
-        usernameFragment: candidate.usernameFragment,
-      };
-  if (!state.outboundReady) {
-    state.outboundIce.push(value);
-    return;
-  }
-  void queueSignal("ice", fencedBody({ ice: value })).catch((error) => {
-    if (viewerStateMatches(runId, peer, connectionId)) {
-      void handleFatal(error);
-    }
-  });
-}
-
-async function flushViewerIce() {
-  state.outboundReady = true;
-  const queued = state.outboundIce.splice(0);
-  for (const ice of queued) {
-    await queueSignal("ice", fencedBody({ ice }));
-  }
 }
 
 async function pollViewer(runId) {
   let consecutiveErrors = 0;
   let firstErrorAt = 0;
   const peer = state.peer;
-  while (state.running && !state.stopping && state.runId === runId) {
+  while (runMatches(runId, peer)) {
     try {
       const page = await state.client.call(
         "events",
@@ -512,13 +731,12 @@ async function pollViewer(runId) {
         },
         { silent: true },
       );
-      if (!viewerStateMatches(runId, peer)) {
+      if (!runMatches(runId, peer)) {
         return;
       }
-      const events = Array.isArray(page.events) ? page.events : [];
-      for (const event of events) {
-        await handleViewerEvent(event);
-        if (!viewerStateMatches(runId, peer)) {
+      for (const event of Array.isArray(page.events) ? page.events : []) {
+        await handleViewerEvent(runId, event);
+        if (!runMatches(runId, peer)) {
           return;
         }
       }
@@ -527,13 +745,13 @@ async function pollViewer(runId) {
       elements.sessionCursor.textContent = String(state.latestCursor);
       consecutiveErrors = 0;
       firstErrorAt = 0;
-      await wait(responseHasMore(page["has-more"]) ? 40 : 300);
+      await wait(responseHasMore(page["has-more"]) ? 50 : 10_000);
     } catch (error) {
-      if (!state.running || state.stopping || state.runId !== runId) {
+      if (!runMatches(runId, peer)) {
         return;
       }
       if (membershipLost(error)) {
-        await rejoinLostPeer(runId, peer);
+        await handleFatal(new Error("Viewer membership expired; retry to rejoin."));
         return;
       }
       if (
@@ -554,47 +772,28 @@ async function pollViewer(runId) {
           consecutiveErrors = 0;
           continue;
         } catch (recoveryError) {
-          if (membershipLost(recoveryError)) {
-            await rejoinLostPeer(runId, peer);
-          } else if (
-            recoveryError instanceof DeviceRequestError &&
-            recoveryError.status === 410 &&
-            recoveryError.reason === "session-closed"
-          ) {
-            finishViewer("Ended", "The Hyperstream session has closed.", true, true);
-          } else {
-            await handleFatal(recoveryError);
-          }
+          await handleFatal(recoveryError);
           return;
         }
       }
       consecutiveErrors += 1;
       firstErrorAt ||= Date.now();
-      const retryable = retryableRequestError(error);
-      if (!retryable || Date.now() - firstErrorAt >= 20_000) {
+      if (!retryableRequestError(error) || Date.now() - firstErrorAt >= 25_000) {
         await handleFatal(error);
         return;
       }
-      await wait(Math.min(3_000, 400 * 2 ** Math.min(consecutiveErrors, 3)));
+      await wait(Math.min(5_000, 750 * 2 ** Math.min(consecutiveErrors, 3)));
     }
   }
 }
 
-async function handleViewerEvent(event) {
+async function handleViewerEvent(runId, event) {
   state.latestCursor = Math.max(state.latestCursor, Number(event.cursor || 0));
   elements.sessionCursor.textContent = String(state.latestCursor);
-
   if (event.type === "session-closed") {
-    telemetry.add({
-      source: "session",
-      code: "CLOSE",
-      message: "Broadcast session closed",
-      meta: `${event.reason || "closed"} · cursor ${event.cursor}`,
-    });
     finishViewer("Ended", "The broadcaster closed the Hyperstream session.", true, true);
     return;
   }
-
   if (event.type === "peer-left") {
     telemetry.add({
       source: "session",
@@ -602,9 +801,15 @@ async function handleViewerEvent(event) {
       message: `${event["peer-id"]} left`,
       meta: `${event.reason || "left"} · cursor ${event.cursor}`,
     });
+    if (event["peer-id"] === state.invite.publisherId) {
+      finishViewer("Ended", "The publisher left the session.", true, true);
+    }
     return;
   }
-
+  if (event.type === "session-updated") {
+    await refreshDescriptor(runId);
+    return;
+  }
   if (event.type !== "signal") {
     telemetry.add({
       source: "session",
@@ -614,413 +819,112 @@ async function handleViewerEvent(event) {
     });
     return;
   }
-
+  if (
+    event["to-peer-id"] !== state.peer.id ||
+    event["from-peer-id"] !== state.invite.publisherId ||
+    Number(event["from-peer-generation"]) !== state.publisherGeneration ||
+    event["connection-id"] !== state.connectionId ||
+    !bodyMatchesViewer(event.body)
+  ) {
+    state.foreignSignalCount += 1;
+    elements.foreignSignalCount.textContent = String(state.foreignSignalCount);
+    return;
+  }
   telemetry.add({
     source: "publisher",
     code: "SIGNAL",
     message: `${event.kind} from ${event["from-peer-id"]}`,
-    meta: `g${event["from-peer-generation"]} · cursor ${event.cursor} · ${formatBytes(safeBodySize(event.body))}`,
+    meta: `cursor ${event.cursor} · ${formatBytes(safeBodySize(event.body))}`,
   });
-
-  if (event.kind === "resync-required") {
-    if (!controlSignalMatchesViewer(event) || !bodyMatchesViewer(event.body)) {
-      markForeignSignal(event);
-      return;
-    }
-    telemetry.add({
-      source: "viewer",
-      code: "RESYNC",
-      message: "Publisher requested a fresh negotiation",
-      meta: event.body.reason || "resync-required",
-    });
-    await restartNegotiation();
-    return;
-  }
-
-  if (!eventMatchesViewer(event) || !bodyMatchesViewer(event.body)) {
-    markForeignSignal(event);
-    return;
-  }
-
-  if (event.kind === "watch-rejected") {
-    await releaseCurrentMembership();
-    finishViewer(
-      "Unavailable",
-      `The broadcaster declined this media connection: ${event.body.reason || "not-admitted"}.`,
-      true,
-    );
-  } else if (event.kind === "offer") {
-    await acceptOffer(event.body);
-  } else if (event.kind === "ice") {
-    await acceptPublisherIce(event.body);
+  if (event.kind === "playback-ack") {
+    elements.videoReadout.textContent = elements.viewerVideo.paused
+      ? "Descriptor acknowledged"
+      : "Live playback";
   }
 }
 
-function controlSignalMatchesViewer(event) {
-  return (
-    event["to-peer-id"] === state.peer.id &&
-    event["from-peer-id"] === state.invite.publisherId &&
-    Number(event["from-peer-generation"]) === state.publisherGeneration
+async function refreshDescriptor(runId) {
+  const snapshot = await state.client.call(
+    "session",
+    memberFields(state.invite.sessionId, state.peer),
+    { silent: true },
   );
+  if (!runMatches(runId)) {
+    return;
+  }
+  const descriptor = parseSessionDescriptor(snapshot);
+  if (
+    descriptor.manifestUrl !== state.descriptor.manifestUrl ||
+    descriptor.swarmId !== state.descriptor.swarmId
+  ) {
+    throw new Error("The live playback epoch changed; retry to join the new swarm safely.");
+  }
+  state.latestCursor = Math.max(state.latestCursor, Number(snapshot["current-cursor"] || 0));
+  telemetry.add({
+    source: "session",
+    code: "UPDATE",
+    message: "Session metadata refresh verified",
+    meta: `epoch ${descriptor.streamEpoch} · cursor ${state.latestCursor}`,
+  });
 }
 
-function markForeignSignal(event) {
-  state.foreignSignalCount += 1;
-  elements.foreignSignalCount.textContent = String(state.foreignSignalCount);
+async function recoverViewerCursor(runId) {
+  const snapshot = await state.client.call(
+    "session",
+    memberFields(state.invite.sessionId, state.peer),
+    { silent: true },
+  );
+  if (!runMatches(runId)) {
+    return;
+  }
+  parseSessionDescriptor(snapshot);
+  state.peer.cursor = Number(snapshot["current-cursor"] || 0);
+  state.latestCursor = state.peer.cursor;
   telemetry.add({
     source: "viewer",
-    code: "FENCE",
-    message: `${event.kind} ignored`,
-    meta: "peer, generation, connection, or body fence mismatch",
-    error: true,
+    code: "RESYNC",
+    message: "Expired event cursor resynchronized",
+    meta: `cursor ${state.peer.cursor}`,
   });
-}
-
-async function acceptOffer(body) {
-  if (!validSessionDescription(body.description, "offer")) {
-    throw new Error("The publisher sent an invalid offer description.");
-  }
-  const runId = state.runId;
-  const peer = state.peer;
-  const connectionId = state.connectionId;
-  const pc = state.pc;
-  state.waitingForOfferAt = 0;
-  await pc.setRemoteDescription(body.description);
-  if (!viewerStateMatches(runId, peer, connectionId) || state.pc !== pc) {
-    return;
-  }
-  for (const ice of state.inboundIce.splice(0)) {
-    await pc.addIceCandidate(ice);
-    if (!viewerStateMatches(runId, peer, connectionId) || state.pc !== pc) {
-      return;
-    }
-  }
-  const answer = await pc.createAnswer();
-  if (!viewerStateMatches(runId, peer, connectionId) || state.pc !== pc) {
-    return;
-  }
-  await pc.setLocalDescription(answer);
-  if (!viewerStateMatches(runId, peer, connectionId) || state.pc !== pc) {
-    return;
-  }
-  await queueSignal(
-    "answer",
-    fencedBody({
-      description: {
-        type: pc.localDescription.type,
-        sdp: pc.localDescription.sdp,
-      },
-    }),
-  );
-  if (!viewerStateMatches(runId, peer, connectionId) || state.pc !== pc) {
-    return;
-  }
-  await flushViewerIce();
-  setViewerStatus("Negotiating media");
-}
-
-async function acceptPublisherIce(body) {
-  if (!validIceCandidate(body.ice)) {
-    throw new Error("The publisher sent an invalid ICE signal.");
-  }
-  const runId = state.runId;
-  const peer = state.peer;
-  const connectionId = state.connectionId;
-  const pc = state.pc;
-  if (!pc.remoteDescription) {
-    state.inboundIce.push(body.ice);
-  } else {
-    await pc.addIceCandidate(body.ice);
-    if (!viewerStateMatches(runId, peer, connectionId) || state.pc !== pc) {
-      return;
-    }
-  }
 }
 
 async function heartbeatViewer(runId) {
-  if (!state.running || state.stopping || state.runId !== runId) {
+  if (!runMatches(runId)) {
     return;
   }
-  const peer = state.peer;
   try {
-    await state.client.call(
+    const reply = await state.client.call(
       "heartbeat",
       {
-        ...memberFields(state.invite.sessionId, peer),
-        "ack-cursor": peer.cursor,
+        ...memberFields(state.invite.sessionId, state.peer),
+        "ack-cursor": state.peer.cursor,
       },
       { silent: true },
     );
-    if (viewerStateMatches(runId, peer)) {
-      state.heartbeatFailures = 0;
+    if (!runMatches(runId)) {
+      return;
     }
+    state.heartbeatFailures = 0;
+    state.latestCursor = Math.max(state.latestCursor, Number(reply["current-cursor"] || 0));
   } catch (error) {
-    if (viewerStateMatches(runId, peer)) {
-      if (membershipLost(error)) {
-        await rejoinLostPeer(runId, peer);
-      } else {
-        state.heartbeatFailures += 1;
-        if (!retryableRequestError(error) || state.heartbeatFailures >= 3) {
-          await handleFatal(error);
-        }
-      }
-    }
-  }
-}
-
-async function refreshSession(runId) {
-  if (!state.running || state.stopping || state.runId !== runId) {
-    return;
-  }
-  const peer = state.peer;
-  try {
-    const snapshot = await state.client.call(
-      "session",
-      memberFields(state.invite.sessionId, peer),
-      { silent: true },
-    );
-    if (!viewerStateMatches(runId, peer)) {
-      return;
-    }
-    if (!sessionDescriptorMatches(snapshot)) {
-      throw new Error("Owner-controlled session metadata no longer matches this watch URL.");
-    }
-    state.latestCursor = Math.max(state.latestCursor, Number(snapshot["current-cursor"] || 0));
-    elements.sessionCursor.textContent = String(state.latestCursor);
-    if (snapshot["session-status"] === "closed") {
-      finishViewer("Ended", "The Hyperstream session has closed.", true, true);
-    }
-  } catch (error) {
-    if (!viewerStateMatches(runId, peer)) {
-      return;
-    }
-    if (membershipLost(error)) {
-      await rejoinLostPeer(runId, peer);
-      return;
-    }
-    if (
-      error instanceof DeviceRequestError &&
-      error.status === 410 &&
-      error.reason === "session-closed"
-    ) {
-      finishViewer("Ended", "The Hyperstream session has closed.", true, true);
-      return;
-    }
-    if (!retryableRequestError(error)) {
+    state.heartbeatFailures += 1;
+    if (state.heartbeatFailures >= 3 && runMatches(runId)) {
       await handleFatal(error);
     }
   }
 }
 
-async function rejoinLostPeer(runId, peer) {
-  if (!viewerStateMatches(runId, peer)) {
-    return;
-  }
-  telemetry.add({
-    source: "viewer",
-    code: "REJOIN",
-    message: "Peer membership was lost; creating a fresh membership",
-    meta: peer.id,
-  });
-  finishViewer(
-    "Rejoining",
-    "The peer membership was lost; creating a new viewer membership.",
-    false,
-    true,
-  );
-  await joinStream();
-}
-
-async function recoverViewerCursor(runId) {
-  if (!state.running || state.stopping || state.runId !== runId) {
-    return;
-  }
-  const peer = state.peer;
-  const snapshot = await state.client.call(
-    "session",
-    memberFields(state.invite.sessionId, peer),
-    { silent: true },
-  );
-  if (!viewerStateMatches(runId, peer)) {
-    return;
-  }
-  if (snapshot["session-status"] === "closed") {
-    finishViewer("Ended", "The Hyperstream session has closed.", true, true);
-    return;
-  }
-  if (!sessionDescriptorMatches(snapshot)) {
-    throw new Error("Owner-controlled session metadata no longer matches this watch URL.");
-  }
-  const publisherGeneration = findPublisherGeneration(snapshot);
-  if (!publisherGeneration) {
-    throw new Error("The publisher peer is no longer active.");
-  }
-  state.publisherGeneration = publisherGeneration;
-  state.peer.cursor = Number(snapshot["current-cursor"] || 0);
-  state.latestCursor = Math.max(state.latestCursor, state.peer.cursor);
-  elements.sessionCursor.textContent = String(state.latestCursor);
-  telemetry.add({
-    source: "viewer",
-    code: "RESYNC",
-    message: "Expired event cursor refreshed from session state",
-    meta: `cursor ${state.peer.cursor}`,
-  });
-  await restartNegotiation();
-}
-
-async function restartNegotiation() {
-  if (!state.running || state.stopping || state.resyncing) {
-    return;
-  }
-  state.resyncing = true;
-  const runId = state.runId;
-  const peer = state.peer;
-  try {
-    closePeerConnection();
-    state.connectionId = randomId("pc");
-    state.sendChain = Promise.resolve();
-    state.outboundReady = false;
-    state.outboundIce = [];
-    state.inboundIce = [];
-    state.mediaStartedAt = 0;
-    state.stats = {
-      framesDecoded: 0,
-      bytesReceived: 0,
-      packetsReceived: 0,
-      packetsLost: 0,
-      jitter: 0,
-      width: 0,
-      height: 0,
-      route: "pending",
-      roundTripTime: 0,
-    };
-    elements.connectionId.textContent = state.connectionId;
-    elements.viewerVideo.classList.remove("ready");
-    elements.standby.classList.remove("hidden");
-    elements.standbyTitle.textContent = "Re-synchronizing";
-    elements.standbyDetail.textContent =
-      "The viewer refreshed session state and requested a new fenced offer.";
-    elements.liveLabel.classList.remove("live");
-    elements.videoReadout.textContent = "No frames";
-    renderStats();
-    createPeerConnection();
-    const connectionId = state.connectionId;
-    await sendViewerSignal("watch-ready", fencedBody());
-    if (viewerStateMatches(runId, peer, connectionId)) {
-      state.waitingForOfferAt = performance.now();
-      setViewerStatus("Waiting for offer");
-    }
-  } finally {
-    if (state.runId === runId && state.peer === peer) {
-      state.resyncing = false;
-    }
-  }
-}
-
-async function ensureOffer(runId) {
-  if (
-    !state.waitingForOfferAt ||
-    !state.pc ||
-    state.pc.remoteDescription ||
-    state.resyncing ||
-    !viewerStateMatches(runId, state.peer)
-  ) {
-    return;
-  }
-  if (performance.now() - state.waitingForOfferAt < 5_000) {
-    return;
-  }
-  telemetry.add({
-    source: "viewer",
-    code: "RETRY",
-    message: "No offer arrived; requesting a fresh negotiation",
-    meta: state.connectionId,
-  });
-  await restartNegotiation();
-}
-
-async function sampleInboundStats(runId) {
-  if (!state.running || state.stopping || state.runId !== runId || !state.pc) {
-    return;
-  }
-  const peer = state.peer;
-  const connectionId = state.connectionId;
-  const pc = state.pc;
-  try {
-    const reports = await pc.getStats();
-    if (
-      !viewerStateMatches(runId, peer, connectionId) ||
-      state.pc !== pc
-    ) {
-      return;
-    }
-    reports.forEach((report) => {
-      const video =
-        report.type === "inbound-rtp" &&
-        !report.isRemote &&
-        (report.kind === "video" || report.mediaType === "video");
-      if (video) {
-        state.stats.framesDecoded = Number(report.framesDecoded || 0);
-        state.stats.bytesReceived = Number(report.bytesReceived || 0);
-        state.stats.packetsReceived = Number(report.packetsReceived || 0);
-        state.stats.packetsLost = Number(report.packetsLost || 0);
-        state.stats.jitter = Number(report.jitter || 0);
-        state.stats.width = Number(report.frameWidth || elements.viewerVideo.videoWidth || 0);
-        state.stats.height = Number(report.frameHeight || elements.viewerVideo.videoHeight || 0);
-      }
-    });
-    const route = selectedCandidateRoute(reports);
-    if (route) {
-      const changed = route.label !== state.stats.route;
-      state.stats.route = route.label;
-      state.stats.roundTripTime = route.roundTripTime;
-      if (changed) {
-        telemetry.add({
-          source: "webrtc",
-          code: "ROUTE",
-          message: "Selected ICE route established",
-          meta: route.label,
-        });
-      }
-    }
-    renderStats();
-  } catch {
-    elements.videoReadout.textContent = "Stats unavailable";
-  }
-}
-
-function renderStats() {
-  elements.framesDecoded.textContent = String(state.stats.framesDecoded);
-  elements.bytesReceived.textContent = formatBytes(state.stats.bytesReceived);
-  elements.packetsReceived.textContent = String(state.stats.packetsReceived);
-  elements.packetsLost.textContent = String(state.stats.packetsLost);
-  elements.jitter.textContent = `${Math.round(state.stats.jitter * 1000)} ms`;
-  elements.videoDimensions.textContent = `${state.stats.width} × ${state.stats.height}`;
-  elements.iceRoute.textContent = state.stats.route;
-  elements.roundTripTime.textContent =
-    `${Math.round(state.stats.roundTripTime * 1000)} ms`;
-
-  if (state.stats.framesDecoded > 0 && state.stats.bytesReceived > 0) {
-    if (!state.mediaStartedAt) {
-      state.mediaStartedAt = performance.now();
-      telemetry.add({
-        source: "webrtc",
-        code: "RTP",
-        message: "Inbound video is advancing",
-        meta: `${state.stats.width} × ${state.stats.height} · ${formatBytes(state.stats.bytesReceived)}`,
-      });
-    }
-    elements.videoReadout.textContent = `${state.stats.framesDecoded} frames`;
-    elements.viewerVideo.classList.add("ready");
-    elements.standby.classList.add("hidden");
-    elements.liveLabel.classList.add("live");
-    setViewerStatus("Live");
+async function attemptVideoPlayback() {
+  if (state.player && (await state.player.play())) {
+    elements.playButton.hidden = true;
   }
 }
 
 function updateTimecode() {
-  const origin = state.mediaStartedAt || state.startedAt;
-  elements.timecode.textContent = formatElapsed(performance.now() - origin);
+  const milliseconds = Number.isFinite(elements.viewerVideo.currentTime)
+    ? elements.viewerVideo.currentTime * 1_000
+    : 0;
+  elements.timecode.textContent = formatElapsed(milliseconds);
 }
 
 async function leaveStream() {
@@ -1029,47 +933,22 @@ async function leaveStream() {
   }
   state.stopping = true;
   elements.leaveButton.disabled = true;
-  setViewerStatus("Leaving");
-  let leftConfirmed = false;
   try {
-    const left = await state.client.call(
-      "leave",
-      memberFields(state.invite.sessionId, state.peer),
-    );
-    state.latestCursor = Math.max(state.latestCursor, Number(left["current-cursor"] || 0));
-    state.memberActive = false;
-    leftConfirmed = true;
-    elements.sessionCursor.textContent = String(state.latestCursor);
-    telemetry.add({
-      source: "viewer",
-      code: "LEAVE",
-      message: "Viewer membership released",
-      meta: `cursor ${state.latestCursor}`,
-    });
+    await releaseCurrentMembership();
   } catch (error) {
     telemetry.add({
       source: "viewer",
       code: "ERR",
-      message: "Viewer leave failed",
+      message: "Leave could not be confirmed",
       meta: error instanceof Error ? error.message : "unknown-error",
       error: true,
     });
-    if (membershipLost(error)) {
-      state.memberActive = false;
-      leftConfirmed = true;
-    }
-  } finally {
-    finishViewer("Left", "This viewer left the broadcast.", true, leftConfirmed);
   }
-}
-
-async function retryJoin() {
-  await releaseCurrentMembership();
-  await joinStream();
+  finishViewer("Left", "You left the Hyperstream session.", true, true);
 }
 
 async function releaseCurrentMembership() {
-  if (!state.client || !state.memberActive || !state.peer?.generation) {
+  if (!state.memberActive || !state.client || !state.peer?.generation) {
     return;
   }
   try {
@@ -1078,74 +957,64 @@ async function releaseCurrentMembership() {
       memberFields(state.invite.sessionId, state.peer),
       { silent: true },
     );
-    state.memberActive = false;
   } catch (error) {
-    if (membershipLost(error)) {
-      state.memberActive = false;
+    if (!(error instanceof DeviceRequestError && [404, 410].includes(error.status))) {
+      throw error;
     }
   }
+  state.memberActive = false;
+}
+
+async function retryJoin() {
+  if (state.memberActive && !state.stopping) {
+    await releaseCurrentMembership().catch(() => {});
+  }
+  finishViewer("Retrying", "Rejoining with a fresh peer generation.", false, true);
+  await joinStream();
 }
 
 async function handleFatal(error) {
-  const runId = state.runId;
-  const peer = state.peer;
-  if (membershipLost(error) && viewerStateMatches(runId, peer)) {
-    await rejoinLostPeer(runId, peer);
-    return;
-  }
-  if (state.fatalHandled || state.stopping) {
+  if (state.fatalHandled) {
     return;
   }
   state.fatalHandled = true;
   telemetry.add({
     source: "viewer",
     code: "ERR",
-    message: "Viewer control flow stopped",
+    message: "Viewer flow stopped",
     meta: error instanceof Error ? error.message : "unknown-error",
     error: true,
   });
-  await releaseCurrentMembership();
-  setNodeState("error", "Connection failed");
-  finishViewer(
-    "Failed",
-    error instanceof Error ? error.message : "The viewer could not join this broadcast.",
-    true,
-  );
+  await releaseCurrentMembership().catch(() => {});
+  finishViewer("Failed", error instanceof Error ? error.message : "Viewer failed.", true, true);
 }
 
 function finishViewer(label, detail, retryable, membershipEnded = false) {
   state.runId += 1;
   state.running = false;
   state.stopping = false;
+  state.memberActive = membershipEnded ? false : state.memberActive;
   clearIntervals();
-  closePeerConnection();
-  if (membershipEnded) {
-    state.memberActive = false;
-  }
-  elements.liveLabel.classList.remove("live");
+  state.player?.destroy();
+  state.player = null;
+  elements.leaveButton.disabled = true;
+  elements.retryButton.hidden = !retryable;
+  elements.playButton.hidden = true;
   elements.viewerVideo.classList.remove("ready");
   elements.standby.classList.remove("hidden");
   elements.standbyTitle.textContent = label;
   elements.standbyDetail.textContent = detail;
-  elements.leaveButton.disabled = true;
-  elements.retryButton.hidden = !retryable;
-  elements.connectionReadout.textContent = "closed";
-  elements.iceReadout.textContent = "closed";
-  elements.signalingState.textContent = "closed";
-  elements.gatheringState.textContent = "complete";
+  elements.liveLabel.classList.remove("live");
   setViewerStatus(label);
 }
 
-function handlePageHide() {
-  if (state.running || state.memberActive) {
-    state.memberActive = false;
-    finishViewer(
-      "Suspended",
-      "This page left the active document. Retry to create a fresh viewer membership.",
-      true,
-      true,
-    );
-  }
+function runMatches(runId, peer = state.peer) {
+  return state.running && !state.stopping && state.runId === runId && state.peer === peer;
+}
+
+function shortValue(value, length) {
+  const text = String(value || "");
+  return text.length > length ? `${text.slice(0, length)}…` : text;
 }
 
 function initializeInvite() {
@@ -1155,31 +1024,21 @@ function initializeInvite() {
     elements.viewerNode.textContent = state.invite.endpoint;
     elements.sessionId.textContent = state.invite.sessionId;
     elements.publisherPeer.textContent = state.invite.publisherId;
-    return true;
+    void joinStream();
   } catch (error) {
-    setNodeState("error", "Invalid watch URL");
+    setNodeState("error", "Invalid invite");
     elements.headerSession.textContent = "Invalid invite";
     elements.retryButton.hidden = true;
-    elements.leaveButton.disabled = true;
-    elements.standbyTitle.textContent = "Cannot open broadcast";
-    elements.standbyDetail.textContent =
-      error instanceof Error ? error.message : "The watch URL is invalid.";
+    elements.standbyTitle.textContent = "Watch URL rejected";
+    elements.standbyDetail.textContent = error instanceof Error ? error.message : "Invalid invite.";
     setViewerStatus("Invalid invite");
-    telemetry.add({
-      source: "viewer",
-      code: "ERR",
-      message: "Watch URL rejected",
-      meta: error instanceof Error ? error.message : "invalid-invite",
-      error: true,
-    });
-    return false;
   }
 }
 
+elements.playButton.addEventListener("click", () => void attemptVideoPlayback());
 elements.retryButton.addEventListener("click", () => void retryJoin());
 elements.leaveButton.addEventListener("click", () => void leaveStream());
 elements.clearButton.addEventListener("click", () => telemetry.reset());
-window.addEventListener("pagehide", handlePageHide);
 
 Object.defineProperty(window, "__hyperstreamViewer", {
   value: Object.freeze({
@@ -1187,34 +1046,30 @@ Object.defineProperty(window, "__hyperstreamViewer", {
       Object.freeze({
         active: state.running && !state.stopping,
         sessionId: state.invite?.sessionId || null,
-        publisherPeerId: state.invite?.publisherId || null,
-        publisherGeneration: state.publisherGeneration,
         viewerPeerId: state.peer?.id || null,
         viewerGeneration: state.peer?.generation || 0,
-        connectionId: state.connectionId,
+        publisherPeerId: state.invite?.publisherId || null,
+        publisherGeneration: state.publisherGeneration,
         cursor: state.latestCursor,
         requestCount: state.requestCount,
         signalCount: state.signalCount,
         foreignSignalCount: state.foreignSignalCount,
-        connectionState: state.pc?.connectionState || "closed",
-        iceConnectionState: state.pc?.iceConnectionState || "closed",
-        signalingState: state.pc?.signalingState || "closed",
-        framesDecoded: state.stats.framesDecoded,
-        bytesReceived: state.stats.bytesReceived,
-        packetsReceived: state.stats.packetsReceived,
-        packetsLost: state.stats.packetsLost,
-        jitter: state.stats.jitter,
-        videoWidth: state.stats.width,
-        videoHeight: state.stats.height,
-        route: state.stats.route,
-        roundTripTime: state.stats.roundTripTime,
+        descriptor: state.descriptor
+          ? {
+              ...state.descriptor,
+              trackerUrls: state.descriptor.trackerUrls.map((value) => {
+                const url = new URL(value);
+                url.search = "";
+                return url.href;
+              }),
+            }
+          : null,
+        player: state.player?.getStats() || state.latestStats,
       }),
   }),
-  writable: false,
   configurable: false,
+  enumerable: false,
+  writable: false,
 });
 
-telemetry.reset();
-if (initializeInvite()) {
-  void joinStream();
-}
+initializeInvite();

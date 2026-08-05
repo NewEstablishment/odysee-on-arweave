@@ -1,0 +1,60 @@
+logLevel: info
+logDestinations: [stdout]
+logStructured: true
+readTimeout: 10s
+writeTimeout: 10s
+writeQueueSize: 1024
+
+authMethod: http
+authHTTPAddress: http://127.0.0.1:9092/api/media-auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+api: true
+apiAddress: 127.0.0.1:9997
+metrics: true
+metricsAddress: 127.0.0.1:9998
+pprof: false
+playback: false
+
+rtsp: false
+rtmp: true
+rtmpEncryption: "no"
+rtmpAddress: :1935
+
+hls: true
+hlsAddress: 127.0.0.1:8888
+hlsEncryption: false
+hlsAllowOrigins: ["*"]
+hlsTrustedProxies: ["127.0.0.1", "::1"]
+hlsAlwaysRemux: false
+hlsVariant: fmp4
+hlsSegmentCount: 12
+hlsSegmentDuration: 2s
+hlsPartDuration: 200ms
+hlsSegmentMaxSize: 20M
+hlsMuxerCloseAfter: 60s
+
+webrtc: true
+webrtcAddress: 127.0.0.1:8889
+webrtcEncryption: false
+webrtcAllowOrigins: ["*"]
+webrtcTrustedProxies: ["127.0.0.1", "::1"]
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcIPsFromInterfaces: true
+webrtcAdditionalHosts: []
+webrtcICEServers2: []
+
+srt: false
+moq: false
+
+pathDefaults:
+  source: publisher
+  overridePublisher: false
+  record: false
+
+paths:
+  all_others:

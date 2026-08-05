@@ -1,0 +1,64 @@
+demo2.zephyrdev.xyz {
+    @media_admission {
+        path /api/media-challenge /api/media-session
+        method POST
+    }
+
+    request_body @media_admission {
+        max_size 16KB
+    }
+
+    rate_limit {
+        zone hyperstream_media_admission {
+            match {
+                path /api/media-challenge /api/media-session
+                method POST
+            }
+            key {client_ip}
+            events 20
+            window 1m
+        }
+        zone hyperstream_media_digest {
+            match {
+                path /api/media-digest/*
+                method GET
+            }
+            key {client_ip}
+            events 6000
+            window 1m
+        }
+        zone hyperstream_tracker_upgrade {
+            match {
+                path /tracker
+                method GET
+            }
+            key {client_ip}
+            events 120
+            window 1m
+        }
+    }
+
+    handle /api/media-auth {
+        respond 404
+    }
+
+    handle_path /whip/* {
+        reverse_proxy 127.0.0.1:8889 {
+            header_down Location ^/ /whip/
+        }
+    }
+
+    handle_path /hls/* {
+        reverse_proxy 127.0.0.1:8888 {
+            header_down Location ^/ /hls/
+        }
+    }
+
+    handle /tracker {
+        reverse_proxy 127.0.0.1:9092
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:9092
+    }
+}

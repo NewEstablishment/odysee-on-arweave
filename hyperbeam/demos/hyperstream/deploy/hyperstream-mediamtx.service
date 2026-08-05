@@ -1,0 +1,32 @@
+[Unit]
+Description=Hyperstream MediaMTX adapter
+After=network-online.target hyperbeam-demo2.service
+Wants=network-online.target hyperbeam-demo2.service
+
+[Service]
+Type=simple
+User=hyperstream-media
+Group=hyperstream-media
+ExecStart=/opt/hyperstream-mediamtx/current/mediamtx /etc/hyperstream-mediamtx/mediamtx.yml
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+MemoryHigh=1536M
+MemoryMax=2G
+TasksMax=512
+LimitNOFILE=1048576
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

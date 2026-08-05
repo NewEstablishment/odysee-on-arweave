@@ -254,6 +254,7 @@ export class HyperstreamClient {
     this.cacheProved = false;
     this.identity = createSigningIdentity();
     this.transport = null;
+    this.transportEpoch = 0;
   }
 
   async probe() {
@@ -263,6 +264,7 @@ export class HyperstreamClient {
       cache: "no-store",
       credentials: "omit",
       referrerPolicy: "no-referrer",
+      signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) {
       throw new Error(`HyperBEAM probe returned HTTP ${response.status}.`);
@@ -276,11 +278,13 @@ export class HyperstreamClient {
     let response;
     let text = "";
     let data = {};
+    let transportEpoch = null;
 
     try {
       if (!validTransportOperation(operation)) {
         throw new Error("The Hyperstream operation is invalid.");
       }
+      transportEpoch = this.transportEpoch;
       const transport = await this.transportContext();
       const requestBody = await encryptTransportRequest(operation, body, transport);
       response = await this.signedPost(
@@ -292,6 +296,10 @@ export class HyperstreamClient {
       text = await response.text();
       data = await decryptTransportResponse(operation, text, transport);
     } catch (error) {
+      if (transportEpoch !== null && this.transportEpoch === transportEpoch) {
+        this.transport = null;
+        this.transportEpoch += 1;
+      }
       this.requestCount += 1;
       this.onRequest({
         operation,
@@ -409,6 +417,7 @@ export class HyperstreamClient {
       cache: "no-store",
       credentials: "omit",
       referrerPolicy: "no-referrer",
+      signal: AbortSignal.timeout(10_000),
     });
   }
 }

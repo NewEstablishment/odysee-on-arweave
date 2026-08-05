@@ -1,0 +1,19 @@
+{
+  "name": "hyperstream-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node --check broadcaster.js && node --check shared.js && node --check watch.js && node --check whip-client.js && node --check hybrid-player.js && node --check build.mjs && node --check webtorrent-tracker.mjs && node --check webtorrent-tracker.test.mjs && node --check server.mjs && node --check server.test.mjs",
+    "test": "node --test webtorrent-tracker.test.mjs server.test.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "hls.js": "1.6.16",
+    "p2p-media-loader-hlsjs": "3.0.1"
+  }
+}

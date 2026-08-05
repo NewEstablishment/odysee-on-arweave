@@ -1,27 +1,66 @@
 # Hyperstream Broadcast Demo
 
-This dependency-free demo exercises `hyperstream@1.0` without the Odysee
-frontend. It has two independent surfaces:
+This standalone technical demo exercises the generic `hyperstream@1.0` device
+without the Odysee frontend. It separates control from media delivery:
 
-- `/` is the broadcaster console. It owns the Hyperstream session, captures an
-  animated canvas, and creates one WebRTC peer connection per viewer.
-- `/watch.html#invite=...` is the watch page. Every tab creates its own peer
-  signing identity, joins the open session, and negotiates its own media
-  connection.
+```text
+Broadcaster
+   | signed Hyperstream session and lifecycle calls
+   +---------------------------------------------> HyperBEAM
+   |
+   | one WHIP or RTMP contribution
+   v
+MediaMTX ---- full-segment fMP4 HLS over HTTPS ----> Viewers
+                                                       ^
+                                                       |
+                  private WebTorrent tracker <---------+
+                  optional P2P segment exchange
+```
 
-HyperBEAM carries membership, leases, ordered lifecycle events, and targeted
-offer, answer, and ICE envelopes. WebRTC carries the media directly from the
-broadcaster to each viewer.
+HyperBEAM remains the signed, sealed session and control plane. It owns the
+session, peer leases, ordered lifecycle events, targeted opaque signals, and
+owner-controlled playback metadata. It does not parse media protocols or carry
+media bytes. MediaMTX is an external media adapter: it accepts one browser WHIP
+or, when enabled, OBS/RTMP contribution and remuxes that stream into
+full-segment fragmented MP4 HLS. Hls.js and P2P Media Loader fetch those encoded
+segments over HTTPS and opportunistically exchange them between viewers through
+WebRTC data channels.
 
-Every demo client signs its outer HyperBEAM requests with one browser-generated
-RSA-PSS/SHA-512 identity. It obtains the node's public ephemeral P-256 key from
-the signed `transport-key` operation, then seals semantic request and response
-bodies with the `hs1` P-256 ECDH, HKDF-SHA256, and AES-256-GCM transport.
-Ordinary HyperBEAM HTTP, hook, signing, and store paths therefore see
-ciphertext. The trusted node still decrypts the envelopes to coordinate the
-session.
+Media allocation happens only after control-plane admission. The broadcaster
+creates a signed Hyperstream session first. The adapter joins that session
+through its internal HyperBEAM origin, verifies the live status, protocol,
+owner metadata, publisher membership, and starting state, and returns a
+short-lived challenge containing its temporary peer coordinates. The owner
+sends a targeted proof signal bound to the challenge, connection, and exact
+publisher and adapter generations. The completion endpoint returns only
+`accepted`; the adapter delivers the media credentials back exclusively through
+an adapter-to-owner targeted Hyperstream signal. Allocation is serialized,
+idempotent for each session/publisher pair, and capped across active MediaMTX
+paths and pending reservations.
 
-## Run
+The broadcaster page is `/`. The independent viewer page is
+`/watch.html#invite=...`. Every page creates an in-memory RSA-PSS/SHA-512
+identity and signs its outer HyperBEAM requests. It obtains the node's public
+ephemeral P-256 key from `transport-key`, then seals semantic request and
+response bodies with the `hs1` P-256 ECDH, HKDF-SHA256, and AES-256-GCM
+transport. The trusted HyperBEAM node decrypts those envelopes to coordinate
+the session; the scheme is not secrecy from the node operator.
+
+## Prerequisites
+
+- Node.js 22 or newer.
+- A HyperBEAM node containing the normal Forge-packaged `hyperstream@1.0`
+  device.
+- MediaMTX 1.20.0 or a compatible release.
+- HTTPS for every non-loopback deployment.
+
+MediaMTX remuxes but does not transcode. Sources must already use codecs that
+the chosen ingest and browser HLS path support. The included browser source is
+H.264 video. For OBS, use H.264 video and AAC audio, with a two-second keyframe
+interval. The two-second GOP is required for the configured two-second HLS
+segment target; less frequent keyframes make segments and live latency longer.
+
+## Local run
 
 Start HyperBEAM from `hyperbeam/`:
 
@@ -30,134 +69,211 @@ HB_CONFIG=demos/hyperstream/hyperbeam-config.json \
   HB_PORT=18785 rebar3 device local
 ```
 
-`hyperstream@1.0` is a normal Forge-packaged device and does not require a
-patched HyperBEAM core. A separate stock node can use a preloaded store
-containing the package or load a published package through its standard
-`trusted-devices` or `trusted-device-signers` policy.
+The supplied node config sets `store-all-signed=false`, because otherwise a
+stock node can retain encrypted heartbeat and polling requests. It also leaves
+`hyperstream-recording-signers=[]`, so recording is disabled until an operator
+deploys an adapter and durable-store policy.
 
-The supplied config disables `store-all-signed`, because the demo's signed
-heartbeat and poll requests would otherwise be persisted as ciphertext at high
-frequency by a stock node. `Cache-Control: no-store` does not control that
-server-side policy. The config also disables recording until explicit
-`hyperstream-recording-signers` are supplied.
-
-Serve the demo from a second terminal in `hyperbeam/`:
+Install and build the browser bundle from `hyperbeam/demos/hyperstream/`:
 
 ```sh
-python3 -m http.server 4173 --bind 127.0.0.1 --directory demos/hyperstream
+npm ci
+npm run build
+npm test
 ```
 
-The dependency-free Node server applies the production response headers used by
-the public demo:
+Start MediaMTX with the supplied configuration:
 
 ```sh
-HOST=127.0.0.1 PORT=4173 \
-  HYPERBEAM_ORIGIN=http://127.0.0.1:18785 \
-  node demos/hyperstream/server.mjs
+mediamtx deploy/mediamtx.yml
 ```
 
-Open <http://127.0.0.1:4173/>, select **Start broadcast**, and copy the generated
-watch URL into another tab or browser. Each viewer joins automatically.
+Start the demo server from the same directory. Use a stable, randomly generated
+media-token secret in any persistent deployment:
 
-The default node address is loopback, so its watch URLs work only on the same
-machine. For viewers on other devices, serve the demo and direct Hyperstream
-route through reachable HTTPS origins and enter that public node URL before
-starting the broadcast. A site named `demoN.example` automatically selects
-`https://devhbN.example`; other public hosts default to a same-origin node route,
-and the field remains editable.
+```sh
+HOST=127.0.0.1 \
+PORT=4173 \
+HYPERBEAM_ORIGIN=http://127.0.0.1:18785 \
+HYPERSTREAM_HYPERBEAM_INTERNAL=http://127.0.0.1:18785 \
+HYPERSTREAM_WHIP_BASE=http://127.0.0.1:8889 \
+HYPERSTREAM_HLS_BASE=http://127.0.0.1:8888 \
+HYPERSTREAM_MEDIAMTX_API=http://127.0.0.1:9997 \
+HYPERSTREAM_MEDIAMTX_HLS_INTERNAL=http://127.0.0.1:8888 \
+HYPERSTREAM_TRACKER_URL=ws://127.0.0.1:4173/tracker \
+HYPERSTREAM_RTMP_BASE=rtmp://127.0.0.1:1935 \
+HYPERSTREAM_MEDIA_TOKEN_SECRET=replace-with-a-random-secret \
+node server.mjs
+```
 
-## What the pages expose
+Open <http://127.0.0.1:4173/>. Choose **Browser WHIP demo** to publish the
+included loop, or **External OBS / RTMP** to receive a short-lived server and
+stream key. The watch URL appears only after the HLS manifest is reachable.
 
-The broadcaster console shows:
+## Runtime configuration
 
-- Session, owner peer, generation, cursor, and current server peer count.
-- Every joined viewer's peer ID, generation, connection ID, WebRTC state, ICE
-  state, signaling state, selected candidate types and transport, round-trip
-  time, encoded frames, packets, and outbound bytes.
-- Sanitized create, join, ready, offer, answer, ICE, leave, and close activity.
-- Transport-key bootstrap, device-call and signal counts, plus the observed
-  `no-store` cache policy.
-- A five-step proof that the session, public watch locator, independent viewer,
-  offer/answer exchange, and outbound RTP path are live.
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `HOST` | Demo-server bind address. | `127.0.0.1` |
+| `PORT` | Demo-server HTTP port. | `4173` |
+| `HYPERBEAM_ORIGIN` | Public HyperBEAM origin used by browsers. | `http://127.0.0.1:18785` |
+| `HYPERSTREAM_HYPERBEAM_INTERNAL` | Internal HyperBEAM origin used to join the session and verify the targeted owner proof. | `HYPERBEAM_ORIGIN`, then `http://127.0.0.1:18785` |
+| `HYPERSTREAM_WHIP_BASE` | Public MediaMTX WHIP base URL. | Same-origin `/whip` |
+| `HYPERSTREAM_HLS_BASE` | Public MediaMTX HLS base URL. | Same-origin `/hls` |
+| `HYPERSTREAM_MEDIAMTX_API` | Credential-free loopback MediaMTX API origin used for active-path accounting and cleanup. | `http://127.0.0.1:9997` |
+| `HYPERSTREAM_MEDIAMTX_HLS_INTERNAL` | Loopback MediaMTX HLS origin used to calculate live-segment digests. | `http://127.0.0.1:8888` |
+| `HYPERSTREAM_TRACKER_URL` | Deployment-owned WebTorrent tracker URL. | Same-origin `/tracker` over WS/WSS |
+| `HYPERSTREAM_RTMP_BASE` | Optional public RTMP server URL exposed to broadcasters. | Disabled |
+| `HYPERSTREAM_MEDIA_TOKEN_SECRET` | HMAC secret for media IDs and distinct publish, tracker, and release capabilities. | Random per process |
+| `HYPERSTREAM_MEDIA_TOKEN_TTL_SECONDS` | Publish-credential admission lifetime. | `900` |
+| `HYPERSTREAM_TRACKER_TOKEN_TTL_SECONDS` | Media-reservation-scoped tracker URL lifetime; accepted range is 900 through 604800 seconds. | `86400` |
+| `HYPERSTREAM_MAX_MEDIA_SESSIONS` | Adapter-wide active-path and pending-reservation ceiling; accepted range is 1 through 100. | `64` |
+| `HYPERSTREAM_MAX_ADMISSION_CHALLENGES` | Simultaneous owner-proof challenge ceiling; accepted range is 8 through 1024. | `128` |
+| `HYPERSTREAM_ADMISSION_CHALLENGE_TTL_SECONDS` | Lifetime of a one-time targeted owner-proof challenge; accepted range is 15 through 40 seconds. | `30` |
+| `HYPERSTREAM_TRACKER_MAX_PEERS` | Tracker connection and per-swarm peer ceiling. | `2048` |
+| `HYPERSTREAM_MEDIA_SESSION_RATE` | Admission requests allowed per client per minute. | `20` |
+| `HYPERSTREAM_MEDIA_SESSION_CLIENTS` | Maximum remembered rate-limit client set. | `4096` |
 
-Each watch page shows:
+The generated media ID includes a truncated HMAC authenticity suffix, so random
+or modified path names fail closed. Its tracker URL includes a separate
+expiring HMAC capability tied to the active media reservation. That read-side
+WebSocket capability is published in the owner-controlled Hyperstream playback
+descriptor so invited viewers can enter the tracker; it cannot authorize WHIP,
+RTMP, or release. It does not bind a protocol info hash: the tracker instead
+permits only one announced swarm per connection, limits each client address to
+32 connections, requires a first announce within 10 seconds, and closes a
+connection after 180 seconds without an announce. A socket also closes when its
+capability expires and is revoked when the media reservation is released. The
+generated watch URL contains the node origin, session ID, and publisher ID.
 
-- Its independently generated peer ID, generation, and connection ID.
-- Publisher identity, event cursor, WebRTC, ICE, gathering, and signaling state.
-- Selected local/remote candidate types, transport protocol, and round-trip
-  time without candidate addresses or ports.
-- Decoded frames, received bytes and packets, packet loss, jitter, and video
-  dimensions.
-- Sanitized device calls and signaling events, including rejected foreign or
-  stale-generation signals.
+The short-lived WHIP bearer token or RTMP stream key and the separate release
+token are sent only through the owner-targeted Hyperstream credential signal.
+They never appear in the HTTP completion response, session metadata, watch URL,
+diagnostics, or recording descriptors. Publish credentials expire after 15
+minutes by default. The release token has a different HMAC scope and authorizes
+only teardown of its exact media reservation.
 
-The event rails render operation names, peer IDs, generations, cursors, states,
-timings, and payload sizes. They never render peer capabilities, SDP, or ICE
-candidate bodies. Browser storage is not used.
+A persistent deployment must set a stable media-token secret. After an adapter
+process restart, a media ID with a valid HMAC suffix is accepted for HLS reads,
+digests, tracker reconnection, and release only while MediaMTX reports that path
+active. This lets an existing MediaMTX publisher and viewers recover without
+persisting publish credentials. A random replacement secret deliberately makes
+those old paths unverifiable, and a MediaMTX restart still ends the live media
+connection.
 
-## Watch URL and admission
+## Network and deployment
 
-The demo intentionally creates an open session suitable for a public
-livestream. Its watch URL fragment contains only a version, node endpoint,
-session ID, and publisher peer ID. It contains no owner credential, viewer
-credential, signing key, peer token, join token, SDP, ICE, or TURN secret. Every
-viewer generates a fresh signing identity in memory and uses its verified signer
-as the Hyperstream peer credential.
+The supplied MediaMTX and Caddy templates use these ports:
 
-Open admission is a demo policy, not an internet-facing abuse-control layer.
-Production deployments must add ingress admission, per-address or
-authenticated-principal rate limits, practical viewer caps, and body limits.
-The broadcaster itself admits at most eight simultaneous media connections and
-limits repeated negotiation attempts per viewer generation. The session ID is a
-locator, not authentication, and peer role metadata is self-asserted. Private
-streams should use verified-signer admission or distribute a restricted-session
-capability through a separate authenticated channel. Capabilities must remain
-inside sealed request bodies and must never be placed in watch URLs.
+| Port | Exposure | Purpose |
+| --- | --- | --- |
+| `443/tcp` | Public | Demo pages, HyperBEAM when proxied, WHIP control, HLS, and WSS tracker. |
+| `1935/tcp` | Local/test when the generic configuration enables RTMP | OBS/RTMP contribution; disabled by the public demo2 configuration. |
+| `8189/udp` and `8189/tcp` | Public when browser WHIP is enabled | Broadcaster-to-MediaMTX WebRTC media. |
+| `8888/tcp` | Loopback | MediaMTX HLS origin behind Caddy. |
+| `8889/tcp` | Loopback | MediaMTX WHIP HTTP endpoint behind Caddy. |
+| `9092/tcp` | Loopback in the demo2 template | Demo server and MediaMTX HTTP auth callback. |
+| `9997/tcp`, `9998/tcp` | Loopback | MediaMTX API and metrics. |
 
-Normal stop and leave actions send signed and sealed requests. Browser
-`pagehide` cannot reliably finish that asynchronous exchange, so an abruptly
-closed tab is removed when its peer lease expires.
+The generic `deploy/mediamtx.yml` keeps plaintext RTMP available for local
+integration testing. The public `demo2.zephyrdev.xyz` deployment instead uses
+`deploy/mediamtx.demo2.yml`, which disables RTMP and accepts browser WHIP only.
+It runs MediaMTX as the dedicated `hyperstream-media` user through
+`deploy/hyperstream-mediamtx.service`: HLS, WHIP HTTP, API, and metrics bind to
+loopback, while only the WHIP ICE UDP/TCP listener binds publicly. Caddy exposes
+the page, HLS, WHIP control, and tracker on HTTPS/WSS port 443.
 
-## Production boundaries
+Install the MediaMTX binary and adapt that service, the appropriate MediaMTX
+configuration, and `deploy/Caddyfile.demo2` to the target host. Keep
+`/api/media-auth`, the MediaMTX API, and the internal HLS digest source reachable
+only from loopback; the public Caddy auth route deliberately returns 404.
+Persist `HYPERSTREAM_MEDIA_TOKEN_SECRET` with mode-restricted service
+configuration. Terminate public page, HLS, WHIP-control, tracker, and HyperBEAM
+traffic with HTTPS, preserve the literal `/~hyperstream@1.0/<operation>` route,
+route a session to one HyperBEAM node, reject oversized bodies, rate-limit
+admission, and disable request/response body logging.
 
-This is a signaling and direct publisher-to-viewer WebRTC demonstration. It
-does not provide TURN, an SFU, RTMP termination, transcoding, automatic
-segmentation, or replay playback. Direct publisher mesh is appropriate for a
-small demonstration; publisher upload and encoding work grow with every viewer.
-Direct ICE candidates can also expose broadcaster and viewer network addresses
-to one another. HTTPS protects the signaling hop but does not hide those
-addresses from the connected peer.
+Viewer playback correctness does not depend on UDP, inbound firewall rules, a
+working tracker, or another peer. Every encoded segment remains available by
+ordinary HLS over HTTPS on port 443, and the player drops back to HTTP-only HLS
+if P2P initialization or delivery fails. TURN is therefore not required for
+playback. Supplying TURN can improve the fraction of viewers that form P2P data
+channels behind restrictive NATs, but relayed P2P traffic then consumes TURN
+bandwidth. The shipped viewer P2P configuration is STUN-only unless
+`globalThis.HYPERSTREAM_RTC_CONFIGURATION` supplies TURN. Browser WHIP and RTMP
+contribution have their own public-port requirements listed above.
 
-The demo uses Cloudflare's public STUN endpoint by default so direct peers can
-discover server-reflexive candidates across ordinary NATs. Deployments can set
-`globalThis.HYPERSTREAM_RTC_CONFIGURATION` before the modules load to provide
-short-lived TURN credentials or a different ICE policy. STUN does not replace
-TURN for restrictive NATs and firewalls.
+Fatal media errors use at most four recovery attempts with delays capped at
+four seconds. A P2P runtime error first rebuilds the player in HTTP-only mode;
+30 seconds of stable playback resets the recovery budget. Exhausting the budget
+stops playback and exposes an explicit retry control instead of looping
+indefinitely.
 
-For a public deployment:
+## Diagnostics
 
-- Serve the pages and direct device route over HTTPS.
-- Preserve the literal `/~hyperstream@1.0/<operation>` route.
-- Route every request for a session to the same HyperBEAM node.
-- Reject oversized fixed-length and chunked bodies before HyperBEAM buffers
-  them.
-- Rate-limit `transport-key`, `create`, `join`, and `signal`.
-- Disable request and response body logging at the edge even though operation
-  bodies are sealed.
-- Use `store-all-signed=false` on a dedicated Hyperstream node, or accept that a
-  stock default node may persist encrypted signed requests at poll frequency.
-- Keep `Cache-Control: no-store` and omit credentials from metadata.
-- Provision relay-only TURN or an SFU separately when network reachability,
-  scale, or peer IP privacy requires it.
+The broadcaster console exposes:
 
-Coordination state and the `hs1` key are local to one Erlang node. A restart
-rotates the key and loses sessions; clients must fetch the new key, rejoin, and
-renegotiate. This sealing prevents incidental plaintext persistence but is not
-end-to-end secrecy from the node operator.
+- Hyperstream session, owner, generation, cursor, peer count, signed device
+  calls, sealed lifecycle signals, and manifest publication;
+- MediaMTX path and ingest state, sanitized WHIP candidate route, frames, bytes,
+  effective frame rate, HLS manifest readiness, and tracker publication;
+- a stable keyed viewer roster showing join, playback acknowledgement, and each
+  viewer's reported HTTPS or P2P-assisted delivery mode.
 
-Recording is intentionally not simulated. A media adapter must first write
-finalized immutable segments to a configured HyperBEAM store, then an
-allowlisted signer-authenticated owner can link those objects with `record`.
-The device writes deterministic replay manifests subject to per-session segment
-and aggregate descriptor-byte limits, but the operator remains responsible for
-store capacity, retention, and garbage collection.
+Each watch page exposes:
+
+- its independently signed peer identity, generation, event cursor, heartbeat,
+  session updates, and targeted playback acknowledgements;
+- HLS manifest and playlist events, tracker state and warnings, P2P peer joins
+  and departures, individual segment source, and HTTP fallback events;
+- HTTP bytes, P2P download and upload bytes, P2P ratio, peer count, buffer depth,
+  live latency, decoded frames and frame rate, video dimensions, and segment
+  counts.
+
+The event rails report operation names, timings, cursors, payload sizes, and
+sanitized states. They do not render credentials, SDP, ICE candidates, peer
+addresses, or ports. Browser storage is not used.
+
+## Current boundaries
+
+- The viewer swarm is opportunistic. Peers can fail to connect, disappear, or
+  contribute nothing; HTTPS remains the independent fallback.
+- P2P WebRTC connections disclose network-address information to connected
+  peers. The default is STUN-only; use an explicit relay-only TURN configuration
+  if peer IP privacy outweighs relay bandwidth.
+- MediaMTX emits a one-rendition master whose advertised bandwidth and
+  resolution can change with the live source. The player normalizes those
+  dynamic attributes before P2P Media Loader sees the master, keeping identical
+  viewers in one stable stream identity rather than fragmenting the swarm.
+- Every P2P-delivered segment is hashed in the viewer and compared with a
+  SHA-256 reference fetched from a same-origin HTTPS endpoint. P2P bytes fail
+  closed on mismatch or when the reference cannot be obtained. Trusted
+  HTTPS-origin bytes start the same check in the background without blocking
+  playback, so digest-service load or failure cannot defeat fallback. The
+  endpoint reads the corresponding full segment through the viewer's loopback
+  MediaMTX HLS session. Segment names, response type, and maximum size are
+  checked; the server bounds positive caches, session-scoped negative caches,
+  per-address request rate, and global digest concurrency. This detects peer
+  corruption relative to the live origin, but the digest service is trusted and
+  mutable: it is not a signed immutable HyperBEAM manifest and does not provide
+  historical verification after origin retention expires.
+- MediaMTX serves one source rendition and performs no transcoding. Unsupported
+  source codecs, audio layouts, or long keyframe intervals must be corrected at
+  the encoder or by adding a separate transcoding and rendition tier.
+- `record` and `close` already create immutable recording-chain and replay
+  manifests after an allowlisted owner links stored segments. The supplied
+  MediaMTX adapter has recording disabled and is not wired to write HyperBEAM
+  segments or invoke those operations, so replay playback is not yet available
+  in this demo.
+- Hyperstream coordination and its `hs1` key are node-local and restart-lost.
+  Viewers must rejoin after a restart; completed immutable recording chains,
+  when an adapter supplies them, survive independently.
+- The tracker and app have explicit peer ceilings, but the complete system has
+  not been load-tested with hundreds of simultaneous viewers. Separate the
+  tracker, add observability, and capacity-test the edge, origin, tracker, and
+  HyperBEAM polling path before claiming that scale.
+
+The open session is appropriate for a public technical demo, not private-stream
+authorization. A session ID is a locator. Private deployments must enforce
+signer admission or distribute restricted-session capabilities through a
+separate authenticated channel.

@@ -6,11 +6,11 @@
     <meta name="referrer" content="no-referrer" />
     <meta
       name="description"
-      content="A standalone Hyperstream WebRTC viewer with live signaling diagnostics."
+      content="A standalone Hyperstream HLS viewer with HTTPS fallback, P2P segment delivery, and device diagnostics."
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src http: https:; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; object-src 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src http: https: ws: wss: stun: turn: turns:; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; object-src 'none'"
     />
     <meta name="theme-color" content="#090b0a" />
     <title>Hyperstream Watch</title>
@@ -47,6 +47,9 @@
               <h1>Live broadcast</h1>
             </div>
             <div class="stage-actions">
+              <button class="button button-primary" id="play-button" type="button" hidden>
+                Play video
+              </button>
               <button class="button button-quiet" id="retry-button" type="button" hidden>
                 Retry
               </button>
@@ -57,7 +60,7 @@
           </div>
 
           <div class="broadcast-frame watch-frame">
-            <video id="viewer-video" autoplay playsinline muted></video>
+            <video id="viewer-video" autoplay playsinline muted controls></video>
             <div class="standby" id="standby">
               <span class="standby-scope" aria-hidden="true"></span>
               <p id="standby-title">Joining Hyperstream session</p>
@@ -76,16 +79,16 @@
 
             <div class="media-readout watch-readout">
               <div>
-                <span>Inbound video</span>
-                <b id="video-readout">No frames</b>
+                <span>Playback</span>
+                <b id="video-readout">Waiting for manifest</b>
               </div>
               <div>
-                <span>Peer connection</span>
-                <b id="connection-readout">New</b>
+                <span>Delivery</span>
+                <b id="connection-readout">HTTPS fallback</b>
               </div>
               <div>
-                <span>ICE transport</span>
-                <b id="ice-readout">New</b>
+                <span>P2P swarm</span>
+                <b id="ice-readout">0 peers</b>
               </div>
             </div>
           </div>
@@ -123,7 +126,7 @@
               <dd id="publisher-peer">—</dd>
             </div>
             <div>
-              <dt>Connection</dt>
+              <dt>Swarm</dt>
               <dd id="connection-id">—</dd>
             </div>
             <div>
@@ -131,47 +134,67 @@
               <dd id="session-cursor">0</dd>
             </div>
             <div>
-              <dt>Signaling</dt>
-              <dd id="signaling-state">stable</dd>
+              <dt>Tracker</dt>
+              <dd id="signaling-state">pending</dd>
             </div>
             <div>
-              <dt>ICE gathering</dt>
-              <dd id="gathering-state">new</dd>
+              <dt>Player engine</dt>
+              <dd id="gathering-state">pending</dd>
             </div>
             <div>
-              <dt>Selected ICE route</dt>
-              <dd id="ice-route">pending</dd>
+              <dt>Active delivery</dt>
+              <dd id="ice-route">HTTPS fallback</dd>
             </div>
             <div>
-              <dt>Round trip</dt>
-              <dd id="round-trip-time">0 ms</dd>
+              <dt>Live latency</dt>
+              <dd id="round-trip-time">0.0 s</dd>
             </div>
           </dl>
 
           <div class="request-metrics">
             <div class="section-label">
-              <span>Inbound RTP</span>
+              <span>Playback and delivery</span>
               <b id="video-dimensions">0 × 0</b>
             </div>
             <div class="metric-row">
-              <span>Frames decoded</span>
+              <span>Presented frames</span>
               <b id="frames-decoded">0</b>
             </div>
             <div class="metric-row">
-              <span>Bytes received</span>
+              <span>Frame rate</span>
+              <b id="frame-rate">0.0 fps</b>
+            </div>
+            <div class="metric-row">
+              <span>HTTP downloaded</span>
               <b id="bytes-received">0 B</b>
             </div>
             <div class="metric-row">
-              <span>Packets received</span>
-              <b id="packets-received">0</b>
+              <span>P2P downloaded</span>
+              <b id="packets-received">0 B</b>
             </div>
             <div class="metric-row">
-              <span>Packets lost</span>
-              <b id="packets-lost">0</b>
+              <span>P2P uploaded</span>
+              <b id="packets-lost">0 B</b>
             </div>
             <div class="metric-row">
-              <span>Jitter</span>
-              <b id="jitter">0 ms</b>
+              <span>P2P ratio</span>
+              <b id="jitter">0.0%</b>
+            </div>
+            <div class="metric-row">
+              <span>Connected peers</span>
+              <b id="peer-count">0</b>
+            </div>
+            <div class="metric-row">
+              <span>Buffer depth</span>
+              <b id="buffer-depth">0.0 s</b>
+            </div>
+            <div class="metric-row">
+              <span>Segments loaded</span>
+              <b id="segment-count">0</b>
+            </div>
+            <div class="metric-row">
+              <span>HTTP segments</span>
+              <b id="origin-fallback-count">0</b>
             </div>
           </div>
 
@@ -214,25 +237,26 @@
         </div>
         <div class="event-log" id="event-log" role="log" aria-live="polite">
           <div class="event-empty" id="event-empty">
-            Join, ready, offer, answer, ICE, heartbeat, and close events will appear here.
+            Join, descriptor acknowledgement, tracker, P2P, HTTP fallback, heartbeat, and close events will appear here.
           </div>
         </div>
       </section>
 
       <section class="watch-boundary" aria-labelledby="privacy-title">
-        <p class="eyebrow">Direct P2P boundary</p>
-        <h2 id="privacy-title">ICE information is visible to the connected peer</h2>
+        <p class="eyebrow">Hybrid delivery boundary</p>
+        <h2 id="privacy-title">HTTPS works even when P2P does not</h2>
         <p>
-          HyperBEAM coordinates the exchange, but direct WebRTC candidates can reveal
-          broadcaster and viewer network addresses to one another. Use relay-only TURN
-          or an SFU when peer IP privacy matters.
+          HyperBEAM coordinates membership and the playback descriptor. Viewers exchange
+          encoded HLS segments over WebRTC data channels when reachable and immediately
+          fall back to ordinary HTTPS on port 443 when they are not. Connected P2P peers
+          can see ICE-derived network addresses, so sharing remains an optional optimization.
         </p>
       </section>
     </main>
 
     <footer>
       <span>hyperstream@1.0 · viewer</span>
-      <span>join · signal · events · heartbeat · leave</span>
+      <span>join · session metadata · signal · events · heartbeat · leave</span>
     </footer>
 
     <script type="module" src="./watch.js"></script>

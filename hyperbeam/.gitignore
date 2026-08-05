@@ -49,4 +49,6 @@ mkdocs-site-manifest.csv
 
 !test/config.json
 !demos/hyperstream/hyperbeam-config.json
+!demos/hyperstream/package.json
+!demos/hyperstream/package-lock.json
 !demos/hyperstream/favicon.svg
