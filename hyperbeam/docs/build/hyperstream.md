@@ -486,6 +486,13 @@ MediaMTX auth callback use loopback `9092/tcp`. The public proxy returns 404 for
 `/api/media-auth`; publish credentials are checked only through the loopback
 callback.
 
+The demo2 template advertises the server's direct public address as its ICE
+host because an HTTP CDN hostname does not proxy UDP/TCP 8189. Update that
+address when moving the deployment. For a Cloudflare-proxied Caddy edge,
+configure global strict trusted-proxy parsing with Cloudflare's current IPv4
+and IPv6 ranges plus `CF-Connecting-IP` and `X-Forwarded-For`; the demo rate
+limits rely on a trustworthy `{client_ip}` value.
+
 The broadcaster shows Hyperstream calls, session state, cursor and viewer
 membership, sanitized WHIP routing, ingest frame and byte counters, HLS
 readiness, and each viewer's acknowledged delivery mode. The viewer shows

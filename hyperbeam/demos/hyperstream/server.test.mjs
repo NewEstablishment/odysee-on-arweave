@@ -7,6 +7,7 @@ process.env.HYPERSTREAM_MEDIA_TOKEN_SECRET = "hyperstream-server-security-test-s
 const {
   closeServer,
   createMediaId,
+  discoverMediaResources,
   mediaPath,
   releaseToken,
   segmentLocator,
@@ -137,4 +138,28 @@ test("allocation lock serializes work and remains usable after rejection", async
     /allocation-failed/,
   );
   assert.equal(await withAllocationLock(async () => "recovered"), "recovered");
+});
+
+test("media discovery ignores disabled protocol collections but not API failures", async () => {
+  const mediaId = createMediaId();
+  const resourceId = "01234567-89ab-cdef-0123-456789abcdef";
+  const resources = await discoverMediaResources(mediaId, async (pathname) => {
+    if (pathname.includes("rtmpconns")) {
+      throw Object.assign(new Error("not-found"), { status: 404 });
+    }
+    return {
+      items: [
+        { id: resourceId, path: mediaId },
+        { id: "fedcba98-7654-3210-fedc-ba9876543210", path: createMediaId() },
+      ],
+    };
+  });
+  assert.deepEqual([...resources.values()], [{ kind: "webrtcsessions", id: resourceId }]);
+
+  await assert.rejects(
+    discoverMediaResources(mediaId, async () => {
+      throw Object.assign(new Error("unavailable"), { status: 503 });
+    }),
+    /unavailable/,
+  );
 });

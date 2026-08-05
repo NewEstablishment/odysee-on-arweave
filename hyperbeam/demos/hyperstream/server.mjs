@@ -490,7 +490,9 @@ async function mediaApiRequest(pathname, options = {}) {
     signal: AbortSignal.timeout(3_000),
   });
   if (!response.ok) {
-    throw new Error(`MediaMTX API returned HTTP ${response.status}.`);
+    const error = new Error(`MediaMTX API returned HTTP ${response.status}.`);
+    error.status = response.status;
+    throw error;
   }
   return response.status === 204 ? null : response.json().catch(() => null);
 }
@@ -953,10 +955,18 @@ function bearerToken(request) {
   return match?.[1] || null;
 }
 
-async function discoverMediaResources(mediaId) {
+async function discoverMediaResources(mediaId, request = mediaApiRequest) {
   const resources = new Map();
   for (const kind of ["rtmpconns", "webrtcsessions"]) {
-    const payload = await mediaApiRequest(`/v3/${kind}/list?itemsPerPage=100`);
+    let payload;
+    try {
+      payload = await request(`/v3/${kind}/list?itemsPerPage=100`);
+    } catch (error) {
+      if (error?.status === 404) {
+        continue;
+      }
+      throw error;
+    }
     for (const item of Array.isArray(payload?.items) ? payload.items : []) {
       if (item?.path === mediaId && typeof item.id === "string") {
         resources.set(`${kind}:${item.id}`, { kind, id: item.id });
@@ -1161,6 +1171,7 @@ if (process.env.HYPERSTREAM_SERVER_NO_LISTEN !== "1") {
 export {
   closeServer,
   createMediaId,
+  discoverMediaResources,
   mediaPath,
   releaseToken,
   segmentLocator,

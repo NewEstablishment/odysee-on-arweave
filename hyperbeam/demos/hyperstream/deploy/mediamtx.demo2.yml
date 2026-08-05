@@ -42,9 +42,8 @@ webrtcAllowOrigins: ["https://demo2.zephyrdev.xyz"]
 webrtcTrustedProxies: ["127.0.0.1", "::1"]
 webrtcLocalUDPAddress: :8189
 webrtcLocalTCPAddress: :8189
-webrtcIPsFromInterfaces: true
-webrtcIPsFromInterfacesList: [ens3]
-webrtcAdditionalHosts: [demo2.zephyrdev.xyz]
+webrtcIPsFromInterfaces: false
+webrtcAdditionalHosts: ["15.204.119.211"]
 webrtcICEServers2: []
 
 srt: false

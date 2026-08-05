@@ -183,6 +183,11 @@ It runs MediaMTX as the dedicated `hyperstream-media` user through
 loopback, while only the WHIP ICE UDP/TCP listener binds publicly. Caddy exposes
 the page, HLS, WHIP control, and tracker on HTTPS/WSS port 443.
 
+The demo2 MediaMTX template advertises the server's direct public address for
+ICE. A CDN-proxied hostname is not an ICE endpoint unless the CDN also proxies
+UDP/TCP 8189. Update `webrtcAdditionalHosts` if the demo server address changes;
+do not substitute the orange-cloud hostname.
+
 Install the MediaMTX binary and adapt that service, the appropriate MediaMTX
 configuration, and `deploy/Caddyfile.demo2` to the target host. Keep
 `/api/media-auth`, the MediaMTX API, and the internal HLS digest source reachable
@@ -192,6 +197,11 @@ configuration. Terminate public page, HLS, WHIP-control, tracker, and HyperBEAM
 traffic with HTTPS, preserve the literal `/~hyperstream@1.0/<operation>` route,
 route a session to one HyperBEAM node, reject oversized bodies, rate-limit
 admission, and disable request/response body logging.
+
+When Caddy is behind Cloudflare, configure the global `servers` options with
+Cloudflare's current IPv4 and IPv6 ranges, `trusted_proxies_strict`, and
+`client_ip_headers CF-Connecting-IP X-Forwarded-For`. The `{client_ip}` rate
+keys in `deploy/Caddyfile.demo2` assume this trusted-proxy parsing is active.
 
 Viewer playback correctness does not depend on UDP, inbound firewall rules, a
 working tracker, or another peer. Every encoded segment remains available by
