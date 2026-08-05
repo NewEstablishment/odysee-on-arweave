@@ -121,30 +121,12 @@ ensure_claim(Base, Req, Opts) ->
             case valid_immutable_read_id(ID) of
                 true ->
                     maybe
-                        {ok, Read} ?= read_immutable(ID, Opts),
+                        {ok, Read} ?= hb_cache:read(ID, Opts),
                         claim_message_from_read(Read, Opts)
                     end;
                 false ->
                     {error, invalid_immutable_id}
             end
-    end.
-
-%% @doc Read immutable claim-output evidence: prefer anything already committed
-%% to the local cache, and on a miss fall through to the resolution device,
-%% which fetches and verifies the legacy content. (Legacy resolution used to be
-%% a store transparently in the read path; it is now an explicit device call.)
-read_immutable(ID, Opts) ->
-    case hb_cache:read(ID, Opts) of
-        {ok, _} = Hit ->
-            Hit;
-        _ ->
-            hb_ao:raw(
-                <<"odysee-resolution@1.0">>,
-                <<"read">>,
-                #{ <<"read">> => ID },
-                #{},
-                Opts
-            )
     end.
 
 claim_message_from_read(Read, Opts) when is_map(Read) ->

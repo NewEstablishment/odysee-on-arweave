@@ -4,7 +4,6 @@
     blob_message/2,
     transaction_message/2,
     claim_output_message/3,
-    auto_output_message/3,
     channel_output_message/3,
     stream_message/3,
     descriptor_message/2,
@@ -39,13 +38,6 @@ transaction_message(TxID, Opts) ->
 %% returning a message with a native `lbry-claim@1.0' commitment.
 claim_output_message(TxID, Nout, Opts) ->
     read_output(TxID, Nout, claim_output_store(Opts), Opts).
-
-%% @doc Read immutable claim-output evidence by outpoint, returning the richest
-%% supported form (stream, then channel, then plain claim). This is the `auto'
-%% counterpart to `channel_output_message'/`stream_message'.
-auto_output_message(TxID, Nout, Opts) ->
-    Store = (claim_output_store(Opts))#{ <<"kind">> => <<"auto">> },
-    read_output(TxID, Nout, Store, Opts).
 
 %% @doc Read immutable channel-output evidence by outpoint through the
 %% store, returning a message with a native `lbry-channel@1.0' commitment

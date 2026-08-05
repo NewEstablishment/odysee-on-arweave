@@ -836,7 +836,7 @@ fetch_blob(Hash, Base, Req, Opts) ->
 read_store_blob(Hash, Base, Req, Opts) ->
     case store_blob_enabled(Base, Req, Opts) of
         true ->
-            case resolve_store_blob(Hash, Opts) of
+            case hb_cache:read(<<"odysee/blob/", Hash/binary>>, Opts) of
                 {ok, Msg} when is_map(Msg) ->
                     case stored_blob_bytes(Msg, Opts) of
                         Body when is_binary(Body) -> verify_fetched_blob(Hash, Body);
@@ -849,25 +849,6 @@ read_store_blob(Hash, Base, Req, Opts) ->
             end;
         false ->
             {error, not_found}
-    end.
-
-%% @doc Resolve an encrypted blob by hash: prefer anything already in the local
-%% cache, and on a miss fall through to the resolution device, which fetches and
-%% verifies the legacy blob. (This tier used to be served transparently by the
-%% `hb_store_odysee' store in the read path; it is now an explicit device call.)
-resolve_store_blob(Hash, Opts) ->
-    Key = <<"odysee/blob/", Hash/binary>>,
-    case hb_cache:read(Key, Opts) of
-        {ok, _} = Hit ->
-            Hit;
-        _ ->
-            hb_ao:raw(
-                <<"odysee-resolution@1.0">>,
-                <<"read">>,
-                #{ <<"read">> => Key },
-                #{},
-                Opts
-            )
     end.
 
 stored_blob_bytes(Msg, Opts) ->
@@ -1621,7 +1602,7 @@ verify_reads_encrypted_blob_from_store_test() ->
     {JSON, Encrypted, _Plain, BlobHash} = test_descriptor(),
     {ok, Desc} = decode(#{}, #{ <<"body">> => JSON }, #{}),
     Store = #{
-        <<"store-module">> => hb_store_lbry_blob,
+        <<"store-module">> => hb_store_odysee,
         <<"fixtures">> => #{
             <<"odysee/blob/", BlobHash/binary>> => #{
                 <<"device">> => <<"odysee-blob@1.0">>,

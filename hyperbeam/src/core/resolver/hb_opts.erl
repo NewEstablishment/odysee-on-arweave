@@ -453,10 +453,10 @@ raw_default_message() ->
                     <<"store-module">> => hb_store_fs,
                     <<"name">> => <<"cache-mainnet">>
                 },
-                %% Legacy LBRY content is resolved by the `odysee-resolution@1.0'
-                %% device (dev_odysee_resolution), not a store in this stack:
-                %% classifying an id and dispatching to its source is domain
-                %% logic that belongs in a device, not a dumb key->bytes store.
+                #{
+                    <<"store-module">> => hb_store_odysee,
+                    <<"name">> => <<"cache-odysee">>
+                },
                 #{
                     <<"store-module">> => hb_store_arweave,
                     <<"name">> => <<"cache-arweave">>,
