@@ -77,6 +77,7 @@ const admissionChallenges = new Map();
 const mediaReservations = new Map();
 const sessionReservations = new Map();
 const segmentDigests = new Map();
+const mediaHlsSessions = new Map();
 const admissionClient = new HyperstreamClient(internalNode);
 let allocationChain = Promise.resolve();
 let digestRequestsInFlight = 0;
@@ -523,6 +524,7 @@ function removeMediaReservation(mediaId) {
       segmentDigests.delete(key);
     }
   }
+  mediaHlsSessions.delete(mediaId);
 }
 
 function recoverMediaReservation(mediaId) {
@@ -798,20 +800,103 @@ function admitDigestRequest(request) {
   return true;
 }
 
-async function calculateSegmentDigest(mediaId, segment, sessionId) {
+async function createMediaHlsSession(mediaId, signal) {
+  const indexUrl = new URL(`${mediaHls}/${mediaId}/index.m3u8`);
+  const challenge = await fetch(indexUrl, {
+    cache: "no-store",
+    redirect: "manual",
+    signal,
+  });
+  if (challenge.status === 200) {
+    await challenge.body?.cancel();
+    return null;
+  }
+  const location = challenge.headers.get("location");
+  const redirected = location ? new URL(location, indexUrl) : null;
+  const setCookies = challenge.headers.getSetCookie();
+  const cookieValue = setCookies
+    .map((value) => value.match(/^cookieCheck=([A-Za-z0-9_-]{1,64})(?:;|$)/)?.[1])
+    .find(Boolean);
+  await challenge.body?.cancel();
+  if (
+    challenge.status !== 302 ||
+    !redirected ||
+    redirected.origin !== indexUrl.origin ||
+    redirected.username ||
+    redirected.password ||
+    redirected.pathname !== indexUrl.pathname ||
+    redirected.hash ||
+    redirected.searchParams.getAll("cookieCheck").length !== 1 ||
+    redirected.searchParams.get("cookieCheck") !== "1" ||
+    Array.from(redirected.searchParams.keys()).some((key) => key !== "cookieCheck") ||
+    !cookieValue
+  ) {
+    throw new RequestError(503, "hls-session-unavailable");
+  }
+  const cookie = `cookieCheck=${cookieValue}`;
+  const admitted = await fetch(redirected, {
+    cache: "no-store",
+    headers: { Cookie: cookie },
+    redirect: "manual",
+    signal,
+  });
+  const contentType = admitted.headers.get("content-type") || "";
+  const admittedCookies = admitted.headers.getSetCookie();
+  const hlsSession = admittedCookies
+    .map((value) => value.match(/^hlsSession=([A-Za-z0-9_-]{16,128})(?:;|$)/)?.[1])
+    .find(Boolean);
+  const accepted = admitted.status === 200 && contentType.toLowerCase().includes("mpegurl") && hlsSession;
+  await admitted.body?.cancel();
+  if (!accepted) {
+    throw new RequestError(503, "hls-session-unavailable");
+  }
+  return `${cookie}; hlsSession=${hlsSession}`;
+}
+
+function mediaHlsSession(mediaId, signal) {
+  const existing = mediaHlsSessions.get(mediaId);
+  if (existing) {
+    return existing;
+  }
+  const pending = createMediaHlsSession(mediaId, signal).catch((error) => {
+    if (mediaHlsSessions.get(mediaId) === pending) {
+      mediaHlsSessions.delete(mediaId);
+    }
+    throw error;
+  });
+  mediaHlsSessions.set(mediaId, pending);
+  return pending;
+}
+
+async function fetchMediaSegment(mediaId, segment, signal, retry = true) {
+  const session = mediaHlsSession(mediaId, signal);
+  const cookie = await session;
+  const response = await fetch(new URL(`${mediaHls}/${mediaId}/${segment}`), {
+    cache: "no-store",
+    headers: cookie ? { Cookie: cookie } : {},
+    redirect: "manual",
+    signal,
+  });
+  if (response.status !== 401 || !retry) {
+    return response;
+  }
+  await response.body?.cancel();
+  if (mediaHlsSessions.get(mediaId) === session) {
+    mediaHlsSessions.delete(mediaId);
+  }
+  return fetchMediaSegment(mediaId, segment, signal, false);
+}
+
+async function calculateSegmentDigest(mediaId, segment) {
   if (digestRequestsInFlight >= 32) {
     throw new RequestError(429, "digest-capacity-reached");
   }
   digestRequestsInFlight += 1;
   try {
-    const segmentUrl = new URL(`${mediaHls}/${mediaId}/${segment}`);
-    segmentUrl.searchParams.set("session", sessionId);
-    const response = await fetch(segmentUrl, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(5_000),
-    });
+    const response = await fetchMediaSegment(mediaId, segment, AbortSignal.timeout(5_000));
     const contentType = response.headers.get("content-type") || "";
     if (!response.ok || response.status !== 200 || !response.body || !contentType.startsWith("video/mp4")) {
+      await response.body?.cancel();
       throw new RequestError(404, "segment-unavailable");
     }
     const hash = createHash("sha256");
@@ -838,6 +923,38 @@ async function calculateSegmentDigest(mediaId, segment, sessionId) {
   }
 }
 
+async function cachedSegmentDigest(mediaId, segment) {
+  const positiveKey = `${mediaId}/${segment}`;
+  const now = Date.now();
+  let cached = segmentDigests.get(positiveKey);
+  const cacheTtl = cached?.failedAt ? 1_000 : 300_000;
+  const cacheAge = cached ? now - (cached.failedAt || cached.createdAt) : 0;
+  if (!cached || cacheAge > cacheTtl) {
+    segmentDigests.delete(positiveKey);
+    if (segmentDigests.size >= 4_096) {
+      segmentDigests.delete(segmentDigests.keys().next().value);
+    }
+    cached = { createdAt: now, failedAt: 0, promise: null };
+    cached.promise = calculateSegmentDigest(mediaId, segment)
+      .then((result) => {
+        if (segmentDigests.get(positiveKey) === cached) {
+          segmentDigests.set(positiveKey, {
+            createdAt: Date.now(),
+            failedAt: 0,
+            promise: Promise.resolve(result),
+          });
+        }
+        return result;
+      })
+      .catch((error) => {
+        cached.failedAt = Date.now();
+        throw error;
+      });
+    segmentDigests.set(positiveKey, cached);
+  }
+  return cached.promise;
+}
+
 async function segmentDigest(request, response, mediaId, url) {
   let reservation = null;
   if (validMediaId(mediaId)) {
@@ -851,43 +968,11 @@ async function segmentDigest(request, response, mediaId, url) {
   if (!locator) {
     throw new RequestError(400, "invalid-segment-locator");
   }
-  const { segment, sessionId } = locator;
+  const { segment } = locator;
   if (!admitDigestRequest(request)) {
     throw new RequestError(429, "rate-limited");
   }
-  const positiveKey = `${mediaId}/${segment}`;
-  const requestKey = `${positiveKey}?session=${sessionId}`;
-  const now = Date.now();
-  let cached = segmentDigests.get(positiveKey);
-  if (!cached || cached.failedAt) {
-    cached = segmentDigests.get(requestKey);
-  }
-  const cacheTtl = cached?.failedAt ? 5_000 : 300_000;
-  const cacheAge = cached ? now - (cached.failedAt || cached.createdAt) : 0;
-  if (!cached || cacheAge > cacheTtl) {
-    segmentDigests.delete(positiveKey);
-    segmentDigests.delete(requestKey);
-    if (segmentDigests.size >= 4_096) {
-      segmentDigests.delete(segmentDigests.keys().next().value);
-    }
-    cached = { createdAt: now, failedAt: 0, promise: null };
-    cached.promise = calculateSegmentDigest(mediaId, segment, sessionId)
-      .then((result) => {
-        segmentDigests.delete(requestKey);
-        segmentDigests.set(positiveKey, {
-          createdAt: Date.now(),
-          failedAt: 0,
-          promise: Promise.resolve(result),
-        });
-        return result;
-      })
-      .catch((error) => {
-        cached.failedAt = Date.now();
-        throw error;
-      });
-    segmentDigests.set(requestKey, cached);
-  }
-  replyJson(request, response, 200, await cached.promise, {
+  replyJson(request, response, 200, await cachedSegmentDigest(mediaId, segment), {
     "Cache-Control": "public, max-age=60",
   });
 }
@@ -1169,6 +1254,8 @@ if (process.env.HYPERSTREAM_SERVER_NO_LISTEN !== "1") {
 }
 
 export {
+  cachedSegmentDigest,
+  calculateSegmentDigest,
   closeServer,
   createMediaId,
   discoverMediaResources,

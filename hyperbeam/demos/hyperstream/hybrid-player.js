@@ -22,8 +22,8 @@ function finiteNumber(value, fallback = 0) {
 function errorDetails(error) {
   if (error instanceof Error) {
     return {
-      name: error.name,
-      message: error.message,
+      name: String(error.name || error.type || "Error"),
+      message: String(error.message || error.type || error.name || "Unknown error"),
     };
   }
   if (error && typeof error === "object") {
@@ -345,7 +345,7 @@ export class HybridPlayer {
           httpNotReceivingBytesTimeoutMs: 3_000,
           isP2PUploadDisabled: !this.p2pUploadEnabled,
           p2pMaxPeers: this.p2pMaxPeers,
-          p2pNotReceivingBytesTimeoutMs: 2_000,
+          p2pNotReceivingBytesTimeoutMs: 8_000,
           rtcConfig: {
             iceServers: this.iceServers,
           },

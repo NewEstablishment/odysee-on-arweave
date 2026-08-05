@@ -238,7 +238,9 @@ Each watch page exposes:
   and departures, individual segment source, and HTTP fallback events;
 - HTTP bytes, P2P download and upload bytes, P2P ratio, peer count, buffer depth,
   live latency, decoded frames and frame rate, video dimensions, and segment
-  counts.
+  counts;
+- HTTPS and P2P integrity-check counts, the most recent validation result, and
+  explicit peer-segment rejection reasons before fallback.
 
 The event rails report operation names, timings, cursors, payload sizes, and
 sanitized states. They do not render credentials, SDP, ICE candidates, peer
@@ -262,11 +264,15 @@ addresses, or ports. Browser storage is not used.
   playback, so digest-service load or failure cannot defeat fallback. The
   endpoint reads the corresponding full segment through the viewer's loopback
   MediaMTX HLS session. Segment names, response type, and maximum size are
-  checked; the server bounds positive caches, session-scoped negative caches,
+  checked; the server bounds positive caches, short-lived shared negative caches,
   per-address request rate, and global digest concurrency. This detects peer
   corruption relative to the live origin, but the digest service is trusted and
   mutable: it is not a signed immutable HyperBEAM manifest and does not provide
   historical verification after origin retention expires.
+- Peer validation allows the adapter's bounded five-second cold digest lookup
+  to finish before the P2P request is considered stalled. HTTPS downloads start
+  immediately, so this integrity-check allowance does not delay fallback
+  playback.
 - MediaMTX serves one source rendition and performs no transcoding. Unsupported
   source codecs, audio layouts, or long keyframe intervals must be corrected at
   the encoder or by adding a separate transcoding and rendition tier.

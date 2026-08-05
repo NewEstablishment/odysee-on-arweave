@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { after, test } from "node:test";
 
 process.env.HYPERSTREAM_SERVER_NO_LISTEN = "1";
@@ -6,6 +7,8 @@ process.env.HYPERSTREAM_MEDIA_TOKEN_SECRET = "hyperstream-server-security-test-s
 
 const {
   closeServer,
+  cachedSegmentDigest,
+  calculateSegmentDigest,
   createMediaId,
   discoverMediaResources,
   mediaPath,
@@ -162,4 +165,83 @@ test("media discovery ignores disabled protocol collections but not API failures
     }),
     /unavailable/,
   );
+});
+
+test("segment digests establish and reuse the MediaMTX HLS cookie session", async () => {
+  const originalFetch = globalThis.fetch;
+  const mediaId = createMediaId();
+  const firstSegment = "19af5749a15e_video1_seg105.mp4";
+  const secondSegment = "19af5749a15e_video1_seg106.mp4";
+  const thirdSegment = "19af5749a15e_video1_seg107.mp4";
+  const payloads = new Map([
+    [firstSegment, new Uint8Array([1, 2, 3, 4])],
+    [secondSegment, new Uint8Array([5, 6, 7])],
+    [thirdSegment, new Uint8Array([8, 9, 10, 11, 12])],
+  ]);
+  const requests = [];
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    requests.push({
+      pathname: url.pathname,
+      search: url.search,
+      cookie: options.headers?.Cookie || null,
+      redirect: options.redirect,
+    });
+    if (url.pathname.endsWith("/index.m3u8") && !url.search) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `${url.pathname}?cookieCheck=1`,
+          "Set-Cookie": "cookieCheck=1; HttpOnly; Secure; SameSite=None",
+        },
+      });
+    }
+    if (url.pathname.endsWith("/index.m3u8") && url.search === "?cookieCheck=1") {
+      assert.equal(options.headers?.Cookie, "cookieCheck=1");
+      return new Response("#EXTM3U\n", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.apple.mpegurl",
+          "Set-Cookie": "hlsSession=01234567-89ab-cdef-0123-456789abcdef; HttpOnly; Secure",
+        },
+      });
+    }
+    const segment = url.pathname.split("/").at(-1);
+    assert.equal(
+      options.headers?.Cookie,
+      "cookieCheck=1; hlsSession=01234567-89ab-cdef-0123-456789abcdef",
+    );
+    assert.equal(url.search, "");
+    const payload = payloads.get(segment);
+    return payload
+      ? new Response(payload, { status: 200, headers: { "Content-Type": "video/mp4" } })
+      : new Response("missing", { status: 404, headers: { "Content-Type": "text/plain" } });
+  };
+  try {
+    for (const segment of [firstSegment, secondSegment]) {
+      const payload = payloads.get(segment);
+      assert.deepEqual(await calculateSegmentDigest(mediaId, segment), {
+        bytes: payload.byteLength,
+        sha256: createHash("sha256").update(payload).digest("base64url"),
+      });
+    }
+    const expected = {
+      bytes: payloads.get(thirdSegment).byteLength,
+      sha256: createHash("sha256").update(payloads.get(thirdSegment)).digest("base64url"),
+    };
+    assert.deepEqual(
+      await Promise.all([
+        cachedSegmentDigest(mediaId, thirdSegment),
+        cachedSegmentDigest(mediaId, thirdSegment),
+      ]),
+      [expected, expected],
+    );
+    const missingSegment = "19af5749a15e_video1_seg108.mp4";
+    await assert.rejects(cachedSegmentDigest(mediaId, missingSegment), /segment-unavailable/);
+    await assert.rejects(cachedSegmentDigest(mediaId, missingSegment), /segment-unavailable/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requests.filter(({ pathname }) => pathname.endsWith("/index.m3u8")).length, 2);
+  assert.equal(requests.filter(({ pathname }) => pathname.endsWith(".mp4")).length, 4);
 });

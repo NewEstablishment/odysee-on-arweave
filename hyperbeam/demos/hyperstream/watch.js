@@ -97,7 +97,20 @@ const state = {
   previousFrameSampleAt: 0,
   frameRate: 0,
   latestStats: null,
+  integrity: createIntegrityState(),
 };
+
+function createIntegrityState() {
+  return {
+    checked: 0,
+    accepted: 0,
+    rejected: 0,
+    p2p: { checked: 0, accepted: 0, rejected: 0 },
+    http: { checked: 0, accepted: 0, rejected: 0 },
+    lastFailure: null,
+    lastSuccess: null,
+  };
+}
 
 function setNodeState(mode, text) {
   elements.nodeDot.classList.remove("online", "error");
@@ -170,6 +183,7 @@ function resetJoinState() {
   state.previousFrameSampleAt = 0;
   state.frameRate = 0;
   state.latestStats = null;
+  state.integrity = createIntegrityState();
   telemetry.reset();
 
   elements.playButton.hidden = true;
@@ -263,7 +277,7 @@ async function joinStream() {
     });
 
     const runId = state.runId;
-    const segmentValidator = createSegmentValidator(descriptor);
+    const segmentValidator = createSegmentValidator(descriptor, runId);
     const observeHttpsSegment = (details) => {
       void segmentValidator(details);
       return true;
@@ -333,9 +347,50 @@ function parseSessionDescriptor(snapshot) {
   };
 }
 
-function createSegmentValidator(descriptor) {
+function recordSegmentValidation(runId, source, segment, accepted, reason, startedAt) {
+  if (!runMatches(runId)) {
+    return accepted;
+  }
+  const normalizedSource = source === "p2p" ? "p2p" : "http";
+  const durationMs = Math.round(performance.now() - startedAt);
+  const entry = {
+    source: normalizedSource,
+    segment,
+    reason,
+    durationMs,
+    at: Date.now(),
+  };
+  state.integrity.checked += 1;
+  state.integrity[normalizedSource].checked += 1;
+  if (accepted) {
+    state.integrity.accepted += 1;
+    state.integrity[normalizedSource].accepted += 1;
+    state.integrity.lastSuccess = entry;
+    return true;
+  }
+  state.integrity.rejected += 1;
+  state.integrity[normalizedSource].rejected += 1;
+  state.integrity.lastFailure = entry;
+  if (normalizedSource === "p2p") {
+    telemetry.add({
+      source: "p2p",
+      code: "VERIFY",
+      message: "Peer segment rejected; HTTPS fallback remains active",
+      meta: `${reason} · ${segment || "unknown segment"} · ${durationMs} ms`,
+      error: true,
+    });
+  }
+  return false;
+}
+
+function createSegmentValidator(descriptor, runId) {
   const manifestBase = new URL(".", descriptor.manifestUrl);
-  return async ({ url, byteRange, data }) => {
+  const digestSessionId = crypto.randomUUID();
+  return async ({ url, byteRange, data, source }) => {
+    const startedAt = performance.now();
+    let segment = null;
+    const finish = (accepted, reason) =>
+      recordSegmentValidation(runId, source, segment, accepted, reason, startedAt);
     try {
       const segmentUrl = new URL(url, manifestBase);
       if (
@@ -343,7 +398,7 @@ function createSegmentValidator(descriptor) {
         !segmentUrl.pathname.startsWith(manifestBase.pathname) ||
         segmentUrl.hash
       ) {
-        return false;
+        return finish(false, "invalid-origin");
       }
       const sessionValues = segmentUrl.searchParams.getAll("session");
       if (
@@ -351,38 +406,39 @@ function createSegmentValidator(descriptor) {
         sessionValues.length > 1 ||
         (sessionValues.length === 1 && !/^[0-9a-f-]{16,64}$/i.test(sessionValues[0]))
       ) {
-        return false;
+        return finish(false, "invalid-query");
       }
-      const segment = decodeURIComponent(segmentUrl.pathname.slice(manifestBase.pathname.length));
+      segment = decodeURIComponent(segmentUrl.pathname.slice(manifestBase.pathname.length));
       if (!segment || segment.startsWith("/") || segment.includes("..")) {
-        return false;
+        return finish(false, "invalid-segment");
       }
       const digestUrl = new URL(descriptor.digestUrl);
       digestUrl.searchParams.set("segment", segment);
-      if (sessionValues.length === 1) {
-        digestUrl.searchParams.set("session", sessionValues[0]);
-      }
+      digestUrl.searchParams.set("session", sessionValues[0] || digestSessionId);
       if (byteRange) {
-        return false;
+        return finish(false, "byte-range-unsupported");
       }
       const response = await fetch(digestUrl, {
         headers: { Accept: "application/json" },
         cache: "default",
         credentials: "omit",
         referrerPolicy: "no-referrer",
-        signal: AbortSignal.timeout(2_500),
+        signal: AbortSignal.timeout(6_000),
       });
       if (!response.ok) {
-        return false;
+        return finish(false, `digest-status-${response.status}`);
       }
       let expected;
       try {
         expected = await response.json();
       } catch {
-        return false;
+        return finish(false, "digest-json-invalid");
       }
-      if (Number(expected.bytes) !== data.byteLength || typeof expected.sha256 !== "string") {
-        return false;
+      if (!Number.isSafeInteger(Number(expected.bytes)) || typeof expected.sha256 !== "string") {
+        return finish(false, "digest-metadata-invalid");
+      }
+      if (Number(expected.bytes) !== data.byteLength) {
+        return finish(false, "digest-size-mismatch");
       }
       const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
       let binary = "";
@@ -390,9 +446,9 @@ function createSegmentValidator(descriptor) {
         binary += String.fromCharCode(byte);
       }
       const actual = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      return actual === expected.sha256;
-    } catch {
-      return false;
+      return finish(actual === expected.sha256, actual === expected.sha256 ? "verified" : "digest-hash-mismatch");
+    } catch (error) {
+      return finish(false, error?.name === "TimeoutError" ? "digest-timeout" : "digest-unavailable");
     }
   };
 }
@@ -484,6 +540,16 @@ function handlePlayerEvent(runId, event) {
       code: "FALLBACK",
       message: "Tracker unavailable; playback remains on HTTPS",
       meta: event.error?.message || event.warning?.message || "tracker error",
+      error: true,
+    });
+    return;
+  }
+  if (event.type === "peer-error") {
+    telemetry.add({
+      source: "p2p",
+      code: "PEER",
+      message: `Viewer peer ${event.phase || "connection"} error`,
+      meta: event.error?.message || "peer error",
       error: true,
     });
     return;
@@ -1064,6 +1130,13 @@ Object.defineProperty(window, "__hyperstreamViewer", {
               }),
             }
           : null,
+        integrity: {
+          ...state.integrity,
+          p2p: { ...state.integrity.p2p },
+          http: { ...state.integrity.http },
+          lastFailure: state.integrity.lastFailure ? { ...state.integrity.lastFailure } : null,
+          lastSuccess: state.integrity.lastSuccess ? { ...state.integrity.lastSuccess } : null,
+        },
         player: state.player?.getStats() || state.latestStats,
       }),
   }),
