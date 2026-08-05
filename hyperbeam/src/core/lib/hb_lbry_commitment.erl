@@ -6,6 +6,7 @@
 %%% `commitment-device' dispatch in `dev_message'.
 -module(hb_lbry_commitment).
 -export([commitment_id/1, commitment/5, with_commitment/6]).
+-export([message_level_verify/3]).
 -export([content_digest_sha384/1]).
 -export([native_id/2, native_id_bytes/1, native_id_fields/2, outpoint_bytes/2]).
 -export([evidence_encode/1, evidence_decode/1, to_unified/1]).
@@ -64,6 +65,29 @@ with_commitment(Msg, Device, Type, NativeIDSpec, Committed, Extra) ->
     {ID, Commitment} = commitment(Device, Type, NativeIDSpec, Committed, Extra),
     Commitments = maps:get(<<"commitments">>, Msg, #{}),
     Msg#{ <<"commitments">> => Commitments#{ ID => Commitment } }.
+
+%% @doc Discriminate a per-commitment verify request from a message-level one.
+%% The LBRY codec devices' `verify/3' are per-commitment verifiers: they are
+%% invoked by `dev_message' once per commitment, with `Req' being that
+%% commitment (which carries its `type'). But `GET /<id>/verify' resolves the
+%% `verify' key on the message's OWN (codec) device, passing the request as
+%% `Req' -- there is no single commitment to check, and the per-commitment logic
+%% fails closed. In that case verify the message's own native commitments via
+%% the standard `hb_message:verify' path (as this module's docs intend).
+%%
+%% Returns `commitment' when `Req' is a single commitment (the caller should run
+%% its per-commitment logic), or `{message, Result}' with the whole-message
+%% verification result otherwise.
+message_level_verify(Base, Req, Opts) ->
+    case hb_maps:get(<<"type">>, Req, undefined, Opts) of
+        undefined ->
+            {message,
+                hb_message:verify(
+                    Base, #{ <<"commitment-ids">> => <<"all">> }, Opts
+                )};
+        _Type ->
+            commitment
+    end.
 
 %% @doc Extract the native identifier from a commitment message, requiring
 %% the `signature' field to encode the same bytes. Returns the normalized

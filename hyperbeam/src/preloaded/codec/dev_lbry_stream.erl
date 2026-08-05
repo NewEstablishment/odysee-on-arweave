@@ -11,6 +11,12 @@ content_type(_) ->
 %% descriptor `sd_hash' re-derived from the stream claim protobuf. See
 %% `hb_lbry_commitment:stream_output_verification/3'.
 verify(Base, Req, Opts) ->
+    case hb_lbry_commitment:message_level_verify(Base, Req, Opts) of
+        {message, Result} -> {ok, Result};
+        commitment -> verify_native(Base, Req, Opts)
+    end.
+
+verify_native(Base, Req, Opts) ->
     Result = hb_lbry_commitment:stream_output_verification(Base, Req, Opts),
     Valid =
         case Result of

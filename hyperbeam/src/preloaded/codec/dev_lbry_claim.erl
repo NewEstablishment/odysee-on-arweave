@@ -12,6 +12,12 @@ content_type(_) ->
 %% proof, `asserted-claim-id' is an assertion-level binding for update
 %% outputs. See `hb_lbry_commitment:claim_output_verification/3'.
 verify(Base, Req, Opts) ->
+    case hb_lbry_commitment:message_level_verify(Base, Req, Opts) of
+        {message, Result} -> {ok, Result};
+        commitment -> verify_native(Base, Req, Opts)
+    end.
+
+verify_native(Base, Req, Opts) ->
     Result = hb_lbry_commitment:claim_output_verification(Base, Req, Opts),
     Valid =
         case Result of

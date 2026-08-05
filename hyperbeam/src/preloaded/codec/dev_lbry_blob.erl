@@ -53,6 +53,12 @@ to_hint(_Msg, Req, _Opts) ->
 %% `blob-hash' and `device' keys must agree with the commitment. Any missing
 %% or mismatching input fails closed.
 verify(Base, Req, Opts) ->
+    case hb_lbry_commitment:message_level_verify(Base, Req, Opts) of
+        {message, Result} -> {ok, Result};
+        commitment -> verify_native(Base, Req, Opts)
+    end.
+
+verify_native(Base, Req, Opts) ->
     Valid =
         maybe
             <<"sha-384">> ?= hb_maps:get(<<"type">>, Req, undefined, Opts),

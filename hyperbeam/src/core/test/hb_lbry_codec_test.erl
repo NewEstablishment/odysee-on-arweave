@@ -102,6 +102,27 @@ blob_codec_roundtrip_and_verify_test() ->
         hb_message:verify(Blob, #{ <<"commitment-ids">> => <<"all">> }, opts())
     ).
 
+%% `GET /<id>/verify' resolves the `verify' key on the message's OWN device
+%% (the codec), passing the request -- not a single commitment -- as `Req'. The
+%% codec's message-level verify must fall back to verifying the message's native
+%% commitments rather than failing closed. Regression guard for the store
+%% serving verifiable messages by plain id.
+blob_message_level_verify_test() ->
+    Bytes = <<"encrypted blob payload">>,
+    Hash = hb_lbry_stream_descriptor:blob_hash(Bytes),
+    Blob =
+        hb_message:convert(
+            Bytes,
+            <<"structured@1.0">>,
+            #{ <<"device">> => <<"lbry-blob@1.0">>, <<"blob-hash">> => Hash },
+            opts()
+        ),
+    % Message-level verify (the GET /<id>/verify path) now returns true...
+    ?assertEqual({ok, true}, hb_ao:resolve(Blob, <<"verify">>, opts())),
+    % ...and still fails closed when the committed data is tampered.
+    Tampered = Blob#{ <<"data">> => <<"tampered payload">> },
+    ?assertEqual({ok, false}, hb_ao:resolve(Tampered, <<"verify">>, opts())).
+
 blob_codec_rejects_hash_mismatch_test() ->
     Bytes = <<"encrypted blob payload">>,
     WrongHash = hb_lbry_stream_descriptor:blob_hash(<<"other payload">>),
