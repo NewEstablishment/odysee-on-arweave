@@ -495,10 +495,25 @@ curl http://127.0.0.1:7700/health
 
 ### 2. Build and start HyperBEAM
 
+Create a config file that uses `hb_store_odysee`. You can modify to include other 
+stores, but this is the minimum config needed.
+
+```json
+{
+  "store": [
+    {
+      "ao-types": "store-module=atom,scope=atom",
+      "store-module": "hb_store_odysee",
+      "name": "cache-odysee"
+    }
+  ]
+}
+```
+
 ```bash
 cd hyperbeam
 HOME=/tmp/odysee-hb-home rebar3 as hyperbeam compile
-HOME=/tmp/odysee-hb-home HB_PORT=18785 rebar3 device local
+HOME=/tmp/odysee-hb-home HB_CONFIG=config.json HB_PORT=18785 rebar3 device local
 ```
 
 Keep the device process attached to a TTY during normal development. Confirm the
