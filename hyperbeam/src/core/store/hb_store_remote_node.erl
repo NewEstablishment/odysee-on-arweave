@@ -6,7 +6,7 @@
 -module(hb_store_remote_node).
 -export([scope/1, type/3, read/3, write/3, link/3, group/3, resolve/3]).
 %%% Public utilities.
--export([maybe_cache/2, maybe_cache/3, read_local_cache/3]).
+-export([maybe_cache/2, maybe_cache/3, local_cache_opts/2, read_local_cache/3]).
 -include("include/hb.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
@@ -185,13 +185,17 @@ read_local_cache(StoreOpts, ID, Opts) ->
     ?event({read_local_cache, StoreOpts, ID}),
     case hb_maps:get(<<"local-store">>, StoreOpts, false, StoreOpts) of
         false -> {error, not_found};
-        Store ->
-            CacheOpts = hb_util:deep_merge(Opts, StoreOpts, Opts),
-            hb_cache:read(
-                ID,
-                CacheOpts#{ <<"store">> => Store }
-            )
+        _Store ->
+            hb_cache:read(ID, local_cache_opts(StoreOpts, Opts))
     end.
+
+%% @doc Merge node and store options for operations against `local-store`.
+%% Store-level options take precedence, while `store` is narrowed to the
+%% configured local cache so lazy links cannot escape into the remote stack.
+local_cache_opts(StoreOpts, Opts) ->
+    LocalStore = hb_maps:get(<<"local-store">>, StoreOpts, [], StoreOpts),
+    Merged = hb_util:deep_merge(Opts, StoreOpts, Opts),
+    Merged#{ <<"store">> => LocalStore }.
 
 %% @doc Write a key to the remote node.
 %%

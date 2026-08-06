@@ -46,7 +46,17 @@ read(StoreOpts, #{ <<"read">> := Key }, NodeOpts) ->
                 {ok, Msg} ->
                     {ok, Msg};
                 not_found ->
-                    read_live(StoreOpts, Hash, NodeOpts)
+                    case hb_store_remote_node:read_local_cache(StoreOpts, Hash, NodeOpts) of
+                        {ok, Msg} ->
+                            %% This could be skipped if we fully trust the store
+                            %% will not serve invalid data.
+                            case verify_cached_blob(StoreOpts, Hash, Msg, NodeOpts) of
+                                {ok, VerifiedMsg} -> {ok, VerifiedMsg};
+                                _ -> read_live(StoreOpts, Hash, NodeOpts)
+                            end;
+                        _ ->
+                            read_live(StoreOpts, Hash, NodeOpts)
+                    end
             end;
         error ->
             {error, not_found}
@@ -63,7 +73,13 @@ read_live(StoreOpts, NormalizedHash, NodeOpts) ->
                                     {size, byte_size(Body)}},
                                 NodeOpts
                             ),
-                            {ok, hb_lbry_commitment:blob_message(NormalizedHash, Body)};
+                            Msg = hb_lbry_commitment:blob_message(NormalizedHash, Body),
+                            hb_store_remote_node:maybe_cache(
+                                StoreOpts,
+                                Msg,
+                                [NormalizedHash]
+                            ),
+                            {ok, Msg};
                         Error ->
                             ?event(lbry_blob,
                                 {blob_hash_rejected, {hash, NormalizedHash}, {error, Error}},
@@ -81,6 +97,23 @@ read_live(StoreOpts, NormalizedHash, NodeOpts) ->
                     {error, {http_status, Status}};
                 {error, Reason} ->
                     {failure, Reason}
+    end.
+
+verify_cached_blob(StoreOpts, Hash, Msg, NodeOpts) ->
+    try
+        CacheOpts = hb_store_remote_node:local_cache_opts(StoreOpts, NodeOpts),
+        Loaded = hb_cache:ensure_all_loaded(Msg, CacheOpts),
+        case blob_bytes(Loaded, CacheOpts) of
+            Bytes when is_binary(Bytes) ->
+                case hb_lbry_stream_descriptor:verify_blob_hash(Hash, Bytes) of
+                    ok -> {ok, hb_lbry_commitment:blob_message(Hash, Bytes)};
+                    _ -> not_found
+                end;
+            _ ->
+                not_found
+        end
+    catch
+        _:_ -> not_found
     end.
 
 fixture(StoreOpts, Hash, Opts) ->
@@ -242,6 +275,68 @@ cache_read_returns_blob_message_test() ->
         )
     after
         hb_mock_server:stop(Handle)
+    end.
+
+read_serves_cached_blob_without_server_test() ->
+    application:ensure_all_started(inets),
+    Body = <<"encrypted bytes">>,
+    Hash = hb_lbry_stream_descriptor:blob_hash(Body),
+    Cache = #{
+        <<"store-module">> => hb_store_volatile,
+        <<"name">> => <<"lbry-blob-cache-test">>
+    },
+    ok = hb_store:start(Cache),
+    {ok, Server, Handle} = hb_mock_server:start([{"/blob", blob, {200, Body}}]),
+    Store = #{
+        <<"store-module">> => ?MODULE,
+        <<"node">> => Server,
+        <<"http-client">> => httpc,
+        <<"local-store">> => Cache
+    },
+    NodeOpts = #{ <<"http-client">> => httpc, <<"store">> => [Cache] },
+    try
+        {ok, First} = read(Store, #{ <<"read">> => Hash }, NodeOpts),
+        {ok, Cached0} = hb_cache:read(Hash, #{ <<"store">> => [Cache] }),
+        Cached = hb_cache:ensure_all_loaded(Cached0, #{ <<"store">> => [Cache] }),
+        ?assertEqual(Body, maps:get(<<"data">>, Cached)),
+        hb_mock_server:stop(Handle),
+        {ok, Second} = read(Store, #{ <<"read">> => Hash }, NodeOpts),
+        ?assertEqual(maps:get(<<"data">>, First), maps:get(<<"data">>, Second)),
+        ?assertEqual(
+            true,
+            hb_message:verify(Second, #{ <<"commitment-ids">> => <<"all">> }, NodeOpts)
+        )
+    after
+        hb_store:stop(Cache)
+    end.
+
+read_refetches_on_corrupted_blob_cache_entry_test() ->
+    application:ensure_all_started(inets),
+    Body = <<"encrypted bytes">>,
+    Hash = hb_lbry_stream_descriptor:blob_hash(Body),
+    Cache = #{
+        <<"store-module">> => hb_store_volatile,
+        <<"name">> => <<"lbry-blob-corrupt-cache-test">>
+    },
+    ok = hb_store:start(Cache),
+    {ok, Server, Handle} = hb_mock_server:start([{"/blob", blob, {200, Body}}]),
+    Store = #{
+        <<"store-module">> => ?MODULE,
+        <<"node">> => Server,
+        <<"http-client">> => httpc,
+        <<"local-store">> => Cache
+    },
+    NodeOpts = #{ <<"http-client">> => httpc, <<"store">> => [Cache] },
+    try
+        ok = hb_store:write([Cache], #{ Hash => <<"garbage">> }, NodeOpts),
+        {ok, Msg} = read(Store, #{ <<"read">> => Hash }, NodeOpts),
+        ?assertEqual(Body, maps:get(<<"data">>, Msg)),
+        {ok, Cached0} = hb_cache:read(Hash, #{ <<"store">> => [Cache] }),
+        Cached = hb_cache:ensure_all_loaded(Cached0, #{ <<"store">> => [Cache] }),
+        ?assertEqual(Body, maps:get(<<"data">>, Cached))
+    after
+        hb_mock_server:stop(Handle),
+        hb_store:stop(Cache)
     end.
 
 read_rejects_hash_mismatch_test() ->
