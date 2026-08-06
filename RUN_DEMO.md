@@ -67,6 +67,11 @@ not an oracle.
 Needs Erlang/OTP 27+, rebar3, node >= 22.12, and network access to Odysee.
 
 ```sh
+# 0. Get the store-first frontend. It is not tracked here: the repo already
+#    carries odysee-frontend/ from master, which calls the deleted device
+#    paths and will not work against this backend.
+git checkout origin/neo/1.0 -- frontend && git reset -q HEAD frontend
+
 # 1. Build the UI. The node API must be baked in at BUILD time.
 cd frontend
 corepack enable && corepack prepare pnpm@10.33.0 --activate
