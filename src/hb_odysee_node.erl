@@ -251,4 +251,51 @@ skeleton_descriptor() ->
     Raw = hb_json:encode(Descriptor),
     {Raw, dev_lbry_stream_descriptor:descriptor_hash(Raw)}.
 
+
+%% Live sourcing against real Odysee infrastructure. Network dependent, so it
+%% is opt-in: set ODYSEE_LIVE=1 to run. Everything else in this suite uses the
+%% fixtures seam and proves only that the layers compose.
+live_transaction_sourcing_test_() ->
+    {timeout, 120, fun() ->
+        case os:getenv("ODYSEE_LIVE") of
+            false -> ok;
+            _ -> run_live_transaction()
+        end
+    end}.
+
+run_live_transaction() ->
+    TxID = <<"d22e243be78d4dd4b5fcbebf800dcebc066b1df1b042b363910e5f507d1d61f6">>,
+    Path = <<"odysee/transaction/", TxID/binary>>,
+    Store = hb_test_utils:test_store(),
+    Opts = #{ <<"store">> => [Store] },
+    SourceStore =
+        #{
+            <<"store-module">> => hb_store_odysee,
+            <<"local-store">> => [Store]
+        },
+    %% The full store read: sources from the live SDK proxy, verifies the
+    %% txid against the raw bytes, and warms the local cache and addresses.
+    {ok, Msg} = hb_store_odysee:read(SourceStore, #{ <<"read">> => Path }, Opts),
+    ?assertEqual(TxID, hb_maps:get(<<"txid">>, Msg, not_found, Opts)),
+    ?assertEqual(
+        true,
+        hb_message:verify(
+            hb_cache:ensure_all_loaded(Msg, Opts),
+            #{ <<"commitment-ids">> => <<"all">> },
+            Opts
+        )
+    ),
+    %% Warming linked the alias, so the object is now addressable by id.
+    {ok, ViaAlias} = hb_cache:read(hb_odysee_address:alias(Path), Opts),
+    ?assertEqual(
+        TxID,
+        hb_maps:get(
+            <<"txid">>,
+            hb_cache:ensure_all_loaded(ViaAlias, Opts),
+            not_found,
+            Opts
+        )
+    ),
+    ok.
+
 -endif.

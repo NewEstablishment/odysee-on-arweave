@@ -257,9 +257,16 @@ claim_kind(_Claim) ->
 %% @doc Construct evidence for one output through the claim-output store,
 %% attaching the channel attestation commitment to signed stream claims.
 outpoint_evidence(<<"stream">>, TxID, Nout, StoreOpts, NodeOpts) ->
-    maybe
-        {ok, StreamMsg} ?= kind_output(<<"stream">>, TxID, Nout, StoreOpts, NodeOpts),
-        attach_attestation(StreamMsg, StoreOpts, NodeOpts)
+    case kind_output(<<"stream">>, TxID, Nout, StoreOpts, NodeOpts) of
+        {ok, StreamMsg} ->
+            attach_attestation(StreamMsg, StoreOpts, NodeOpts);
+        _Error ->
+            %% The SDK labels livestream placeholders `stream', but their
+            %% protobuf carries no source, so no sd-hash exists and the
+            %% stream constructor fails closed. The claim itself is still
+            %% valid and verifiable, it simply has no stream media, so serve
+            %% generic claim evidence rather than failing the whole read.
+            kind_output(<<"claim">>, TxID, Nout, StoreOpts, NodeOpts)
     end;
 outpoint_evidence(Kind, TxID, Nout, StoreOpts, NodeOpts) ->
     kind_output(Kind, TxID, Nout, StoreOpts, NodeOpts).
