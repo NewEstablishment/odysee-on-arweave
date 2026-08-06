@@ -159,9 +159,14 @@ skeleton_read(Node, Path) ->
     hb_http:get(Node, <<"/~cache@1.0/read?read=", Path/binary>>, #{}).
 
 %% `commitment-ids => all' is required: content-addressed commitments have
-%% no committer, so the default selection checks nothing.
+%% no committer, so the default selection checks nothing. Assert the
+%% commitments are actually PRESENT first: verifying an empty selection
+%% returns true vacuously, so a message that lost its commitments in transit
+%% would otherwise pass this check while carrying no proof at all.
 skeleton_assert_verifies(Msg, Opts) ->
     Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
+    Commitments = hb_maps:get(<<"commitments">>, Loaded, #{}, Opts),
+    ?assert(map_size(hb_cache:ensure_all_loaded(Commitments, Opts)) > 0),
     ?assertEqual(
         true,
         hb_message:verify(Loaded, #{ <<"commitment-ids">> => <<"all">> }, Opts)
