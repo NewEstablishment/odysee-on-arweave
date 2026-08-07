@@ -1,0 +1,118 @@
+@import 'init/breakpoints';
+
+.publish-visibility__options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-s);
+
+  @media (max-width: $breakpoint-tablet) {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-xs);
+  }
+
+  @media (max-width: $breakpoint-xxsmall) {
+    grid-template-columns: 1fr;
+  }
+
+  &--two {
+    grid-template-columns: repeat(2, 1fr);
+
+    @media (max-width: $breakpoint-xxsmall) {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+.publish-visibility__option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-s);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius);
+  background: var(--color-card-background);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease;
+
+  @media (max-width: $breakpoint-tablet) {
+    padding: var(--spacing-xs);
+  }
+
+  &:hover:not(:disabled) {
+    border-color: var(--color-primary);
+  }
+
+  &--selected {
+    border-color: var(--color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.publish-visibility__option-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-small);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.publish-visibility__option-desc {
+  margin: 0;
+  font-size: var(--font-xsmall);
+  color: var(--color-text-subtitle);
+  line-height: 1.4;
+}
+
+p.publish-visibility__warning {
+  color: var(--color-text-warning);
+  font-size: var(--font-xsmall);
+  margin: var(--spacing-s) 0 0;
+}
+
+p.publish-visibility__caution {
+  color: var(--color-text-warning);
+  border: 1px solid var(--color-text-warning);
+  padding: var(--spacing-s);
+  border-radius: var(--border-radius);
+  font-size: var(--font-small);
+  margin: var(--spacing-s) 0 0;
+}
+
+.publish-visibility__scheduled {
+  margin-top: var(--spacing-s);
+
+  input,
+  select {
+    background: rgba(var(--color-text-base), 0.06) !important;
+  }
+
+  label::before {
+    background-color: rgba(var(--color-text-base), 0.06) !important;
+  }
+
+  .form-field-date-picker {
+    margin-top: var(--spacing-xs);
+
+    @media (max-width: $breakpoint-small) {
+      .form-field-date-picker__controls {
+        flex-wrap: wrap;
+      }
+    }
+  }
+}
+
+.publish-visibility__note {
+  font-size: var(--font-xsmall);
+  color: var(--color-text-subtitle);
+  margin: var(--spacing-s) 0 0;
+}
+
+.form-field-date-picker__error {
+  margin-top: 2px;
+}

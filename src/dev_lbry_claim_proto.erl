@@ -1,19 +1,26 @@
 -module(dev_lbry_claim_proto).
 -export([stream_sd_hash/1, channel_public_key/1, decode_metadata/1]).
 
-%% @doc Decode a stream claim protobuf message into a native, Odysee-shaped
+%% @doc Decode a claim protobuf message into a native, Odysee-shaped
 %% `value' map (title/description/thumbnail/tags/source/video/...), matching the
 %% shape produced for HyperBEAM-native uploads. This lets the client parse
 %% legacy and native content through one identical codepath. Returns
-%% `{ok, Value}' for a stream claim, or `not_found' for messages without a
-%% stream body (e.g. channel claims). Field numbers mirror the LBRY claim
-%% protobuf schema.
+%% `{ok, Value}' for stream and channel claims, or `not_found' for messages
+%% without either body. Field numbers mirror the LBRY claim protobuf schema.
 decode_metadata(Message) when is_binary(Message) ->
     case length_field(Message, 1) of
         {ok, Stream} ->
             {ok, stream_value(Message, Stream)};
         _ ->
-            not_found
+            case length_field(Message, 2) of
+                {ok, Channel} ->
+                    case channel_value(Message, Channel) of
+                        Value when map_size(Value) > 0 -> {ok, Value};
+                        _ -> not_found
+                    end;
+                _ ->
+                    not_found
+            end
     end;
 decode_metadata(_) ->
     not_found.
@@ -29,6 +36,17 @@ stream_value(Claim, Stream) ->
             media_dimensions_value(Video, Audio)
         )
     ).
+
+channel_value(Claim, Channel) ->
+    put_if_present(#{
+        <<"title">> => string_field(Claim, 8),
+        <<"description">> => string_field(Claim, 9),
+        <<"thumbnail">> => thumbnail_value(optional_field(Claim, 10)),
+        <<"tags">> => string_fields(Claim, 11),
+        <<"cover">> => thumbnail_value(optional_field(Channel, 4)),
+        <<"email">> => string_field(Channel, 2),
+        <<"website_url">> => string_field(Channel, 3)
+    }).
 
 base_stream_value(Claim, Stream, Source, MediaType) ->
     #{
@@ -316,6 +334,21 @@ decode_metadata_without_stream_returns_not_found_test() ->
     Channel = field(1, <<2, 1:256>>),
     Claim = field(2, Channel),
     ?assertEqual(not_found, decode_metadata(Claim)).
+
+decode_metadata_extracts_channel_value_test() ->
+    Cover = field(5, <<"https://example.com/banner.png">>),
+    Channel = <<(field(1, <<2, 1:256>>))/binary, (field(4, Cover))/binary>>,
+    Thumbnail = field(5, <<"https://example.com/avatar.png">>),
+    Claim =
+        <<
+            (field(2, Channel))/binary,
+            (field(8, <<"Library Cat">>))/binary,
+            (field(10, Thumbnail))/binary
+        >>,
+    {ok, Value} = decode_metadata(Claim),
+    ?assertEqual(<<"Library Cat">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(#{ <<"url">> => <<"https://example.com/avatar.png">> }, maps:get(<<"thumbnail">>, Value)),
+    ?assertEqual(#{ <<"url">> => <<"https://example.com/banner.png">> }, maps:get(<<"cover">>, Value)).
 
 varint_field_bin(Number, Value) ->
     Key = Number bsl 3,

@@ -1,0 +1,406 @@
+@import 'init/breakpoints';
+
+// Extends reach-ui menu button base stylesheet
+/* Used to detect in JavaScript if apps have loaded styles or not. */
+:root {
+  --reach-menu-button: 1;
+}
+
+reach-portal {
+  [data-reach-menu] {
+    [data-reach-menu-items] {
+      &:focus-visible {
+        background-color: var(--color-header-background);
+      }
+
+      [data-reach-menu-item][data-selected] {
+        .menu__link {
+          color: var(--color-primary-contrast);
+        }
+        .icon {
+          stroke: var(--color-primary-contrast);
+        }
+      }
+    }
+  }
+}
+
+[data-reach-menu] {
+  display: block;
+  position: absolute;
+  z-index: 999999;
+  font-size: var(--font-body);
+  max-width: calc(100% - var(--height-button) - var(--spacing-xs));
+}
+
+.menu__wrapper {
+  display: contents;
+}
+
+.MuiMenuItem-root {
+  padding: 0px;
+  margin: 0px !important;
+  color: var(--color-text) !important;
+
+  &:hover {
+    color: var(--color-primary-contrast) !important;
+  }
+}
+
+.MuiMenu-list--paper {
+  display: flex;
+
+  .menu__link {
+    display: flex !important;
+  }
+}
+
+[data-reach-menu-list],
+.MuiMenu-list--paper {
+  display: block;
+  white-space: nowrap;
+  outline: none;
+  background-color: var(--color-background) !important;
+  border: 2px solid var(--color-border) !important;
+  border-top: none;
+  -webkit-backdrop-filter: blur(4px) !important;
+  backdrop-filter: blur(4px) !important;
+
+  &:focus-visible {
+    background-color: var(--color-header-background) !important;
+    outline: unset !important;
+  }
+}
+
+[data-reach-menu-item] {
+  display: block;
+  z-index: 2;
+
+  &:focus-visible {
+    box-shadow: none;
+  }
+}
+
+[data-reach-menu-item] {
+  cursor: pointer;
+  display: block;
+  color: inherit;
+  font: inherit;
+  text-decoration: initial;
+  border-radius: var(--border-radius);
+
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+[data-reach-menu-item][data-selected] {
+  color: var(--color-primary-contrast) !important;
+  background-color: var(--color-navigation-hover);
+  box-shadow: none;
+
+  .icon {
+    stroke: var(--color-primary-contrast) !important;
+  }
+
+  .comment__menu-help {
+    color: var(--color-primary-contrast);
+  }
+}
+
+.menu__button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+
+  .icon {
+    stroke: var(--color-text);
+  }
+
+  &:hover {
+    opacity: 1;
+
+    .icon {
+      stroke: var(--color-link);
+    }
+  }
+}
+
+.menu__title {
+  &[aria-expanded='true'] {
+    transform: rotate(0deg);
+  }
+}
+
+.menu__list {
+  font-size: var(--font-small);
+  animation: menu-animate-in var(--animation-duration) var(--animation-style);
+  transform-origin: top;
+  border-radius: var(--border-radius);
+  padding: var(--spacing-xs) 0;
+
+  [data-reach-menu-item] {
+    margin: 0 var(--spacing-xxs);
+  }
+
+  &.membership-tier1 {
+    [data-reach-menu-item][data-selected] {
+      background-color: rgba(var(--color-membership-1), 1) !important;
+      .menu__link {
+        background-color: unset;
+      }
+    }
+  }
+  &.membership-tier2 {
+    [data-reach-menu-item][data-selected] {
+      background-color: rgba(var(--color-membership-2), 1) !important;
+      .menu__link {
+        background-color: unset;
+      }
+    }
+  }
+  &.membership-tier3 {
+    [data-reach-menu-item][data-selected] {
+      background-color: rgba(var(--color-membership-3), 1) !important;
+      .menu__link {
+        background-color: unset;
+      }
+    }
+  }
+  &.membership-tier4 {
+    [data-reach-menu-item][data-selected] {
+      background-color: rgba(var(--color-membership-4), 1) !important;
+      .menu__link {
+        background-color: unset;
+      }
+    }
+  }
+  &.membership-tier5 {
+    [data-reach-menu-item][data-selected] {
+      background-color: rgba(var(--color-membership-5), 1) !important;
+      .menu__link {
+        background-color: unset;
+      }
+    }
+  }
+  &.membership-tier6 {
+    [data-reach-menu-item][data-selected] {
+      background-color: rgba(var(--color-membership-6), 1) !important;
+      .menu__link {
+        background-color: unset;
+      }
+    }
+  }
+}
+
+.menu__list--preview {
+  [data-reach-menu-item] {
+    pointer-events: none;
+    opacity: 0.4;
+  }
+}
+
+.menu__list--header {
+  @extend .menu__list;
+  z-index: 100002 !important;
+  animation: none;
+
+  margin-top: 10px;
+
+  .MuiPaper-root {
+    animation: menu-animate-in var(--animation-duration) var(--animation-style);
+    transform-origin: top right;
+    top: calc(var(--header-height) - 12px) !important;
+    transition: none !important;
+    @media (max-width: $breakpoint-small) {
+      top: calc(var(--header-height-mobile) - 10px) !important;
+      right: 0 !important;
+      left: auto !important;
+    }
+  }
+
+  .channel-selector {
+    margin: 0px;
+    display: flex;
+
+    > .menu__wrapper > .menu__link:hover,
+    > .menu__wrapper > .menu__link:focus-visible,
+    > .menu__wrapper > .menu__link[aria-expanded='true'] {
+      background-color: var(--color-navigation-hover) !important;
+      color: var(--color-primary-contrast) !important;
+      border-radius: var(--border-radius);
+
+      .icon {
+        stroke: var(--color-primary-contrast) !important;
+      }
+    }
+
+    .icon--ChevronDown {
+      margin-left: var(--spacing-s);
+    }
+  }
+
+  [data-reach-menu-item][data-selected] {
+    .menu__link {
+      color: var(--color-odysee-contrast) !important;
+    }
+    .icon {
+      stroke: var(--color-primary-contrast);
+    }
+  }
+
+  [data-reach-menu-item][data-selected] {
+    color: var(--color-odysee-contrast) !important;
+    background-color: var(--color-odysee) !important;
+    box-shadow: none;
+
+    .icon {
+      stroke: var(--color-odysee-contrast) !important;
+    }
+
+    .comment__menu-help {
+      color: var(--color-odysee-contrast) !important;
+    }
+  }
+}
+
+.menu__chat-comment {
+  padding: var(--spacing-xxs) 0 var(--spacing-xxs) 0;
+}
+
+.menu__list--comments {
+  @extend .menu__list;
+}
+
+.MuiList-root {
+  .MuiMenuItem-root > .menu__link:hover {
+    color: inherit !important;
+    background-color: transparent !important;
+
+    .icon {
+      stroke: currentColor !important;
+    }
+  }
+}
+
+.MuiMenuItem-root {
+  margin-left: 0px !important;
+  font-size: var(--font-small) !important;
+  display: block !important;
+}
+
+.MuiMenuItem-root.menu__link:hover {
+  color: var(--color-primary-contrast) !important;
+  background-color: var(--color-navigation-hover) !important;
+  border-radius: var(--border-radius);
+}
+
+.menu__link {
+  display: flex;
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-s) var(--spacing-xs) var(--spacing-s);
+  height: var(--button-height);
+  color: var(--color-text);
+
+  .icon {
+    stroke: var(--color-menu-icon);
+    margin-right: var(--spacing-s);
+  }
+
+  .badge {
+    margin-left: var(--spacing-s);
+  }
+
+  &:hover {
+    color: var(--color-primary-contrast) !important;
+
+    .icon {
+      stroke: var(--color-primary-contrast);
+      margin-right: var(--spacing-s);
+    }
+  }
+}
+
+.menu__link--sign-out {
+  .menu__link-help {
+    display: block;
+    font-size: var(--font-xxsmall);
+    color: var(--color-text-subtitle);
+  }
+
+  &:hover .menu__link-help {
+    color: var(--color-primary-contrast);
+  }
+}
+
+.menu__link--notification {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  position: relative;
+  z-index: 2;
+}
+
+.menu__link--notification--with-overlay {
+  pointer-events: none;
+
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  [role='button'],
+  [data-notification-ignore] {
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+  }
+
+  .notification__link-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: auto;
+  }
+}
+
+.menu__link--notification {
+  .icon__wrapper {
+    height: 2.5rem;
+    width: 2.5rem;
+    color: var(--color-text);
+  }
+
+  &:hover {
+    cursor: pointer;
+  }
+}
+
+.menu__link--notification-nolink {
+  @extend .menu__link--notification;
+
+  &:hover {
+    cursor: default;
+  }
+}
+
+.menu__link--all-notifications {
+  @extend .button--alt;
+  width: auto;
+  align-self: flex-start;
+  margin-right: auto;
+  font-weight: var(--font-weight-bold);
+  margin-top: var(--spacing-m);
+}
+
+.menu__link-label {
+  display: flex;
+  align-items: center;
+}
+
+.menu__separator {
+  margin-top: var(--border-radius);
+  margin-bottom: var(--border-radius);
+}

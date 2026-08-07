@@ -1,0 +1,125 @@
+.form-field--SimpleMDE {
+  margin-top: 4px;
+
+  #create__comment-wrapper {
+    margin-top: var(--spacing-xxxxs);
+  }
+}
+
+.markdown-editor {
+  border-radius: var(--border-radius);
+  color: var(--color-input);
+  overflow: hidden;
+  --markdown-editor-max-height: 32rem;
+}
+
+.markdown-editor__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-s);
+  flex-wrap: wrap;
+  padding: 0.5rem;
+  background-color: var(--color-border);
+  color: rgba(var(--color-text-base), 0.7);
+  border-bottom: 1px solid var(--color-input-border);
+}
+
+.markdown-editor__toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xxs);
+  flex-wrap: wrap;
+}
+
+.markdown-editor__toolbar-button {
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 var(--spacing-xs);
+  border-radius: var(--border-radius);
+  border: none;
+  background: var(--color-background);
+  color: var(--color-header-link);
+  font-size: var(--font-xsmall);
+  font-weight: var(--font-weight-bold);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--color-primary-contrast);
+    background-color: var(--color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
+
+.markdown-editor__toolbar-button--preview {
+  min-width: 4.75rem;
+}
+
+.markdown-editor__textarea,
+.markdown-editor__preview {
+  width: 100%;
+  min-height: 20rem;
+  max-height: var(--markdown-editor-max-height);
+  background: transparent;
+  color: var(--color-input);
+}
+
+.markdown-editor__textarea {
+  border: none;
+  resize: vertical;
+  padding: var(--spacing-s);
+  line-height: 1.55;
+  overflow-x: hidden;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+
+  &::placeholder {
+    color: var(--color-input-placeholder);
+    opacity: 0.5;
+  }
+
+  &:focus,
+  &:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+}
+
+.markdown-editor__textarea--hidden {
+  display: none;
+}
+
+.markdown-editor__preview {
+  overflow: auto;
+  padding: var(--spacing-s);
+
+  .markdown-preview {
+    min-height: 100%;
+  }
+}
+
+.markdown-editor__preview--hidden {
+  display: none;
+}
+
+.markdown-editor__statusbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-s);
+  flex-wrap: wrap;
+  padding: var(--spacing-xs) var(--spacing-s);
+  border-radius: var(--border-radius);
+  background-color: rgba(var(--color-header-background-base), 0.5);
+  font-size: var(--font-xsmall);
+  color: var(--color-input-label);
+
+  .editor-statusbar__upload-hint {
+    margin-right: auto;
+  }
+}

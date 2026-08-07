@@ -1,0 +1,43 @@
+@import '../init/breakpoints';
+
+.browser-notifications__banner {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--spacing-xl);
+  justify-content: space-between;
+  border: 2px solid var(--color-primary);
+  background-color: rgba(var(--color-primary-static), 0.1);
+  width: 100%;
+
+  @media (max-width: $breakpoint-small) {
+    flex-direction: column;
+    margin-bottom: var(--spacing-m);
+  }
+}
+
+.browser-notifications__actions {
+  display: flex;
+  align-items: center;
+
+  @media (max-width: $breakpoint-small) {
+    margin-top: var(--spacing-l);
+  }
+}
+
+.browser-notifications__overview {
+  display: flex;
+  align-items: center;
+}
+
+.browser-notifications__icon {
+  margin-right: var(--spacing-m);
+  flex-shrink: 0;
+}
+.browser-notifications__button {
+  margin-right: var(--spacing-m);
+}
+
+.notifications-blocked__subText {
+  color: var(--color-text-subtitle);
+  font-size: var(--font-small);
+}

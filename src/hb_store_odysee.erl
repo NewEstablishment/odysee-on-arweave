@@ -128,6 +128,8 @@ read_live(<<"odysee/claim-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     end;
 read_live(<<"odysee/channel-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts);
+read_live(<<"odysee/channel-claims/", Rest/binary>>, StoreOpts, NodeOpts) ->
+    channel_claims_read(Rest, StoreOpts, NodeOpts);
 read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, Decoded} ?= decode_component(Encoded),
@@ -633,6 +635,30 @@ list_live(<<"odysee/channel-id/", Rest/binary>>, Req, StoreOpts, NodeOpts) ->
     end;
 list_live(_Path, _Req, _StoreOpts, _NodeOpts) ->
     {error, not_found}.
+
+channel_claims_read(Rest, StoreOpts, NodeOpts) ->
+    {Encoded, Page, PageSize} =
+        case binary:split(Rest, <<"/">>, [global]) of
+            [E] -> {E, 1, 20};
+            [E, P] -> {E, int_param(P, 1), 20};
+            [E, P, S | _] -> {E, int_param(P, 1), int_param(S, 20)}
+        end,
+    Req = #{ <<"page">> => Page, <<"page-size">> => PageSize },
+    maybe
+        {ok, Locators} ?=
+            list_channel_search(
+                Encoded,
+                Req,
+                StoreOpts,
+                NodeOpts,
+                fun list_claim_outputs/2
+            ),
+        {ok, #{
+            <<"page">> => Page,
+            <<"page-size">> => PageSize,
+            <<"locators">> => iolist_to_binary(lists:join(<<",">>, Locators))
+        }}
+    end.
 
 list_channel_search(Encoded, Req, StoreOpts, NodeOpts, Project) ->
     maybe
