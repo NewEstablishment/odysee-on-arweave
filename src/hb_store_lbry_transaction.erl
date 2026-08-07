@@ -24,7 +24,10 @@ read(StoreOpts, #{ <<"read">> := TxID }, NodeOpts) ->
     case valid_txid(TxID) of
         true ->
             NormalizedTxID = hb_util:to_lower(TxID),
-            fetch_transaction(StoreOpts, NormalizedTxID, NodeOpts);
+            case hb_store_remote_node:read_local_cache(StoreOpts, TxID, NodeOpts) of
+                {ok, Msg} -> {ok, Msg};
+                _ -> fetch_transaction(StoreOpts, NormalizedTxID, NodeOpts)
+            end;
         false ->
             {error, not_found}
     end.
@@ -37,6 +40,7 @@ fetch_transaction(StoreOpts, TxID, NodeOpts) ->
         {ok, Raw} ?= decode_tx_hex(Hex),
         {ok, Msg} ?= dev_lbry_commitment:transaction_message(Raw),
         ok ?= matching_txid(TxID, Msg),
+        hb_store_remote_node:maybe_cache(StoreOpts, Msg, [TxID]),
         {ok, Msg}
     end.
 
@@ -91,10 +95,7 @@ read_returns_committed_transaction_message_test() ->
             hb_util:encode(binary:decode_hex(dev_lbry_tx:task0_tx_hex())),
             maps:get(<<"raw">>, Msg)
         ),
-        ?assertEqual(
-            true,
-            hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
-        )
+        ?assert(verify_lbry_message(Msg))
     after
         hb_mock_server:stop(Handle)
     end.
@@ -151,5 +152,11 @@ store(Server) ->
         <<"lbry-proxy-node">> => Server,
         <<"http-client">> => httpc
     }.
+
+verify_lbry_message(Msg) ->
+    lists:all(
+        fun(Commitment) -> dev_lbry:verify(Msg, Commitment, #{}) =:= {ok, true} end,
+        maps:values(maps:get(<<"commitments">>, Msg))
+    ).
 
 -endif.
