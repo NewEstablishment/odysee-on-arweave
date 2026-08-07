@@ -613,15 +613,14 @@ function sdkClaimFromHyperbeam(result) {
 function sdkSearchFromHyperbeam(result) {
   if (!result) return null;
   const sdkResult =
-    result.result && (Array.isArray(result.result.items) || Array.isArray(result.result.ids))
-      ? result.result
-      : result;
+    result.result && (Array.isArray(result.result.items) || Array.isArray(result.result.ids)) ? result.result : result;
   const items = Array.isArray(sdkResult.items)
     ? sdkResult.items
     : Array.isArray(sdkResult.ids)
       ? sdkResult.ids
       : undefined;
-  const pageSize = sdkResult.page_size ?? sdkResult['page-size'] ?? sdkResult.limit ?? result.page_size ?? result['page-size'];
+  const pageSize =
+    sdkResult.page_size ?? sdkResult['page-size'] ?? sdkResult.limit ?? result.page_size ?? result['page-size'];
   const offset = Number(sdkResult.offset ?? result.offset ?? 0);
   const totalItems =
     sdkResult.total_items ??
@@ -1224,7 +1223,9 @@ function genericSearchRequest(params) {
     filters.push(`claim_type IN [${claimTypes.map((type) => JSON.stringify(type)).join(', ')}]`);
   }
 
-  const mediaTypes = ['audio', 'video', 'image', 'text', 'application'].filter((type) => searchFlag(value(params, type)));
+  const mediaTypes = ['audio', 'video', 'image', 'text', 'application'].filter((type) =>
+    searchFlag(value(params, type))
+  );
   if (claimTypes.length === 1 && claimTypes[0] === 'stream' && mediaTypes.length === 1) {
     filters.push(`media_type = ${JSON.stringify(mediaTypes[0])}`);
   } else if (claimTypes.length === 1 && claimTypes[0] === 'stream' && mediaTypes.length > 1) {

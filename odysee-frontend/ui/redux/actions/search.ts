@@ -8,7 +8,6 @@ import { selectClaimForUri, selectClaimIdForUri, selectClaimIsNsfwForUri } from 
 import { doClaimSearch, doResolveClaimIds, doResolveUris } from 'redux/actions/claims';
 import { buildURI, isURIValid } from 'util/lbryURI';
 import {
-  makeSelectHasReachedMaxResultsLength,
   makeSelectSearchUrisForQuery,
   selectPersonalRecommendations,
   selectSearchOptions,
@@ -17,14 +16,12 @@ import {
 import { selectUser } from 'redux/selectors/user';
 import handleFetchResponse from 'util/handle-fetch';
 import { getSearchQueryString } from 'util/query-params';
-import { createNormalizedSearchKey, getRecommendationSearchOptions, getShortsRecommendationSearchOptions } from 'util/search';
+import { getRecommendationSearchOptions, getShortsRecommendationSearchOptions } from 'util/search';
 import { SEARCH_SERVER_API, SEARCH_SERVER_API_ALT, RECSYS_FYP_ENDPOINT } from 'config';
 import { SEARCH_OPTIONS } from 'constants/search';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
-import { fetchHyperbeamSearchIds } from 'util/hyperbeam';
-import { hyperbeamImmutableUri, hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const isDev = process.env.NODE_ENV !== 'production';
 // ****************************************************************************
 // FYP
@@ -165,107 +162,7 @@ const processLighthouseResults = (results: Array<any>) => {
   return uris;
 };
 
-const hitIds = (item: any) =>
-  (typeof item === 'string'
-    ? [item]
-    : [
-        item?.hyperbeam?.immutable_id,
-        item?.hyperbeam?.['immutable-id'],
-        item?.immutable_id,
-        item?.['immutable-id'],
-        item?.doc_id,
-        item?.['doc-id'],
-        item?.claim_id,
-        item?.['claim-id'],
-        item?.claimId,
-        item?.legacy_outpoint,
-        item?.['legacy-outpoint'],
-      ]
-  ).filter(Boolean);
-
-const immutableSearchUris = (items: Array<any>) =>
-  uniqueUris(
-    items
-      .map((item) => hitIds(item)[0])
-      .map((id) => hyperbeamImmutableUri(String(id || '')))
-      .filter(Boolean) as Array<string>
-  );
-
-const claimSearchUri = (claim: any) =>
-  hyperbeamImmutableUriFromClaim(claim) || claim?.canonical_url || claim?.permanent_url || claim?.short_url;
-
-const orderedHyperbeamSearchUris = (
-  results: Array<any>,
-  resolveInfo: any,
-  fallbackUris: Array<string>,
-  storeUrisById: Record<string, string> = {}
-) => {
-  if (!resolveInfo) return fallbackUris;
-
-  const urisByClaimId = {};
-  Object.values(resolveInfo).forEach((resolved: any) => {
-    const claim = resolved && (resolved.stream || resolved.channel || resolved.collection || resolved);
-    if (!claim || !claim.claim_id) return;
-
-    const uri = claimSearchUri(claim);
-    if (uri) urisByClaimId[claim.claim_id] = uri;
-  });
-
-  const orderedUris = [];
-  results.forEach((item) => {
-    if (!item) return;
-    const storeUri = hitIds(item)
-      .map((id) => storeUrisById[id])
-      .find(Boolean);
-    const claimId = item.claim_id || item['claim-id'] || item.claimId;
-    const uri = claimId && urisByClaimId[claimId];
-    const fallbackUri = claimSearchUri(item);
-    const resultUri = storeUri || uri || fallbackUri;
-    if (resultUri && !orderedUris.includes(resultUri)) orderedUris.push(resultUri);
-  });
-
-  return orderedUris.length ? orderedUris : fallbackUris;
-};
-
-const HYPERBEAM_MEDIA_SEARCH_OPTIONS = [
-  SEARCH_OPTIONS.MEDIA_AUDIO,
-  SEARCH_OPTIONS.MEDIA_VIDEO,
-  SEARCH_OPTIONS.MEDIA_TEXT,
-  SEARCH_OPTIONS.MEDIA_IMAGE,
-  SEARCH_OPTIONS.MEDIA_APPLICATION,
-];
-
-const durationMinutesToSeconds = (value: any) => {
-  if (value === undefined || value === null || value === '') return value;
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? Math.max(0, Math.round(numberValue * 60)) : value;
-};
-
-const hyperbeamSearchParams = (query: string, searchOptions: SearchOptions) => {
-  const params = {
-    ...searchOptions,
-    s: query,
-    size: searchOptions.size,
-    from: searchOptions.from,
-  };
-  const claimType = String(searchOptions[SEARCH_OPTIONS.CLAIM_TYPE] || '');
-  const fileOnly = claimType === SEARCH_OPTIONS.INCLUDE_FILES;
-
-  if (fileOnly) {
-    params[SEARCH_OPTIONS.MIN_DURATION] = durationMinutesToSeconds(searchOptions[SEARCH_OPTIONS.MIN_DURATION]);
-    params[SEARCH_OPTIONS.MAX_DURATION] = durationMinutesToSeconds(searchOptions[SEARCH_OPTIONS.MAX_DURATION]);
-  } else {
-    HYPERBEAM_MEDIA_SEARCH_OPTIONS.forEach((option) => delete params[option]);
-    delete params[SEARCH_OPTIONS.MIN_DURATION];
-    delete params[SEARCH_OPTIONS.MAX_DURATION];
-  }
-
-  return params;
-};
-
 const uniqueUris = (uris: Array<string>) => Array.from(new Set(uris.filter(Boolean)));
-let searchRequestSequence = 0;
-const activeSearchRequests = new Map<string, number>();
 
 export const doSearch =
   (rawQuery: string, searchOptions: SearchOptions) => (dispatch: Dispatch, getState: GetState) => {
@@ -279,50 +176,28 @@ export const doSearch =
     }
 
     const state = getState();
-    const hideShorts = Object.prototype.hasOwnProperty.call(searchOptions, SEARCH_OPTIONS.EXCLUDE_SHORTS)
-      ? Boolean(searchOptions[SEARCH_OPTIONS.EXCLUDE_SHORTS])
-      : Boolean(selectClientSetting(state, SETTINGS.HIDE_SHORTS));
-    const effectiveSearchOptions = {
-      ...searchOptions,
-      [SEARCH_OPTIONS.EXCLUDE_SHORTS]: hideShorts,
-      [SEARCH_OPTIONS.EXCLUDE_SHORTS_ASPECT_RATIO_LTE]: SETTINGS.SHORTS_ASPECT_RATIO_LTE,
-      [SEARCH_OPTIONS.EXCLUDE_SHORTS_DURATION_LTE]: SETTINGS.SHORTS_DURATION_LTE,
-    };
-    const queryWithOptions = getSearchQueryString(query, effectiveSearchOptions);
-    const requestKey = createNormalizedSearchKey(queryWithOptions);
-    const size = effectiveSearchOptions.size;
-    const from = effectiveSearchOptions.from;
-    const hyperbeamSearchEnabled = !effectiveSearchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
+    const queryWithOptions = getSearchQueryString(query, searchOptions);
+    const size = searchOptions.size;
+    const from = searchOptions.from;
     // If we have already searched for something, we don't need to do anything
     const urisForQuery = makeSelectSearchUrisForQuery(queryWithOptions)(state);
-    const hasReachedMaxResultsLength = makeSelectHasReachedMaxResultsLength(queryWithOptions)(state);
 
     if (urisForQuery && !!urisForQuery.length) {
-      const requestedEnd = Number(from || 0) + Number(size || 0);
-      if (!size || urisForQuery.length >= requestedEnd || hasReachedMaxResultsLength) {
+      if (!size || !from || from + size < urisForQuery.length) {
         return;
       }
     }
 
-    if (activeSearchRequests.has(requestKey)) return;
-    const requestId = ++searchRequestSequence;
-    activeSearchRequests.set(requestKey, requestId);
-    const isActiveRequest = () => activeSearchRequests.get(requestKey) === requestId;
-    const releaseRequest = () => {
-      if (isActiveRequest()) activeSearchRequests.delete(requestKey);
-    };
-
     dispatch({
       type: ACTIONS.SEARCH_START,
-      data: { query: queryWithOptions, requestId },
     });
-    const isSearchingRecommendations = effectiveSearchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
+    const isSearchingRecommendations = searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
     const cmd = isSearchingRecommendations && !isDev ? lighthouse.searchRecommendations : lighthouse.search;
 
-    const dispatchSearchResult = (type: string, uris: Array<string>, poweredBy?: string, uuid?: string) => {
-      if (!isActiveRequest()) return false;
+    const finishSearch = (uris: Array<string>, poweredBy?: string, uuid?: string, returnCachedClaims?: boolean) => {
+      dispatch(doResolveUris(uris, returnCachedClaims));
       dispatch({
-        type,
+        type: ACTIONS.SEARCH_SUCCESS,
         data: {
           query: queryWithOptions,
           from: from,
@@ -330,19 +205,8 @@ export const doSearch =
           uris,
           poweredBy,
           uuid,
-          requestId,
         },
       });
-      if (type === ACTIONS.SEARCH_SUCCESS || type === ACTIONS.SEARCH_FAIL) releaseRequest();
-      return true;
-    };
-
-    const failSearch = () => dispatchSearchResult(ACTIONS.SEARCH_FAIL, []);
-
-    const finishSearch = (uris: Array<string>, poweredBy?: string, uuid?: string, returnCachedClaims?: boolean) => {
-      if (!isActiveRequest()) return;
-      dispatch(doResolveUris(uris, returnCachedClaims));
-      dispatchSearchResult(ACTIONS.SEARCH_SUCCESS, uris, poweredBy, uuid);
     };
 
     const fetchLighthouseResults = () =>
@@ -355,33 +219,31 @@ export const doSearch =
       fetchLighthouseResults()
         .then(({ result, poweredBy, uuid, uris }) => {
           if (isSearchingRecommendations) {
-            const claimIds = Array.from(new Set<string>(result.map((x) => x.claimId).filter(Boolean)));
-            const resolveTimeout = new Promise((resolve) => setTimeout(resolve, 2000));
-            Promise.race([dispatch(doResolveClaimIds(claimIds)).catch(() => undefined), resolveTimeout]).then(
-              (resolveInfo) => {
-                const resolvedUris = orderedHyperbeamSearchUris(result, resolveInfo, uris);
-                dispatchSearchResult(ACTIONS.SEARCH_SUCCESS, resolvedUris, poweredBy, uuid);
-              }
-            );
+            // Temporarily resolve using `claim_search` until the SDK bug is fixed.
+            const claimIds = result.map((x) => x.claimId);
+            dispatch(doResolveClaimIds(claimIds)).finally(() => {
+              dispatch({
+                type: ACTIONS.SEARCH_SUCCESS,
+                data: {
+                  query: queryWithOptions,
+                  from: from,
+                  size: size,
+                  uris,
+                  poweredBy,
+                  uuid,
+                },
+              });
+            });
             return;
           }
 
           finishSearch(uniqueUris(uris), poweredBy, uuid);
         })
-        .catch(failSearch);
-
-    if (hyperbeamSearchEnabled) {
-      fetchHyperbeamSearchIds(hyperbeamSearchParams(query, effectiveSearchOptions))
-        .then((data) => {
-          if (!isActiveRequest()) return;
-          if (!data || !Array.isArray(data.items)) throw new Error('HyperBEAM search returned no items array');
-          const uris = immutableSearchUris(data.items);
-          if (data.items.length && !uris.length) throw new Error('HyperBEAM search returned invalid immutable IDs');
-          finishSearch(uris, 'HyperBEAM');
-        })
-        .catch(failSearch);
-      return;
-    }
+        .catch(() => {
+          dispatch({
+            type: ACTIONS.SEARCH_FAIL,
+          });
+        });
 
     runLighthouseSearch();
   };

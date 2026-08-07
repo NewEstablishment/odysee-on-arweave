@@ -13,6 +13,7 @@ interface Config {
   LBRY_API_URL: string | undefined;
   LBRY_WEB_BUFFER_API: string | undefined;
   ODYSEE_HYPERBEAM_NODE_API: string | undefined;
+  COMMENT_SERVER_API: string | undefined;
   SEARCH_SERVER_API: string | undefined;
   SEARCH_SERVER_API_ALT: string | undefined;
   LIVESTREAM_SERVER_API: string | undefined;
@@ -41,6 +42,7 @@ interface Config {
   PLAYER_SERVER: string | undefined;
   HYPERBEAM_PLAYBACK_URL: string | undefined;
   HYPERBEAM_BASE_URL: string | undefined;
+  HYPERBEAM_ALLOW_COMPATIBILITY_READS: boolean;
   SITE_TITLE: string | undefined;
   SITE_NAME: string | undefined;
   SITE_DESCRIPTION: string | undefined;

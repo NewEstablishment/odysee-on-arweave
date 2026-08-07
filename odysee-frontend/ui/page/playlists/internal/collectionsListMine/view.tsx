@@ -184,6 +184,12 @@ export default function CollectionsListMine(props: Props) {
     }
   }, [dispatch, savedCollectionIds]);
   React.useEffect(() => {
+    const publishedIds = JSON.parse(paginatedCollectionsStr).filter((id: string) => /^[0-9a-f]{40}$/i.test(id));
+    if (publishedIds.length > 0) {
+      dispatch(doResolveClaimIds(publishedIds));
+    }
+  }, [dispatch, paginatedCollectionsStr]);
+  React.useEffect(() => {
     const paginatedCollections = JSON.parse(paginatedCollectionsStr);
 
     if (paginatedCollections.length > 0) {

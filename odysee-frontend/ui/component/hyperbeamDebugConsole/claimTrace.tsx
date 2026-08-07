@@ -1,6 +1,7 @@
 import React from 'react';
 import { sanitizeHyperbeamDebugValue, sanitizeHyperbeamDebugUrl, type HyperbeamDebugEvent } from 'util/hyperbeamDebug';
-import { fetchHyperbeamAccountSdk } from 'util/hyperbeam';
+import Lbry from 'lbry';
+import { hyperbeamStoreReadPath } from 'util/hyperbeam';
 import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 import { getAuthToken } from 'util/saved-passwords';
 
@@ -20,7 +21,7 @@ type TraceStep = {
 };
 
 const AUTH_TRACE_TARGET = 'auth:~odysee-account@1.0/preference-get:enable-sync';
-const SEARCH_TRACE_TARGET = 'search:~search@1.0/query';
+const SEARCH_TRACE_TARGET = 'search:~odysee-search@1.0/query';
 
 export type TraceFocus = {
   kind: 'auth' | 'claim' | 'search';
@@ -144,10 +145,14 @@ export default function ClaimTrace({
     };
 
     const nativeUpload = isHyperbeamUploadTraceClaim(selectedClaim);
+
     const nodeBase = hyperbeamNodeBase();
 
     if (nodeBase && !nativeUpload && selectedClaim.txid && !cachedSourceObservation(events, selectedClaim.txid)) {
-      enqueue(`tx:${selectedClaim.txid}`, `${nodeBase}/odysee/transaction/${encodeURIComponent(selectedClaim.txid)}`);
+      enqueue(
+        `tx:${selectedClaim.txid}`,
+        `${nodeBase}/${hyperbeamStoreReadPath(`odysee/transaction/${selectedClaim.txid}`)}`
+      );
     }
 
     if (
@@ -159,7 +164,7 @@ export default function ClaimTrace({
     ) {
       enqueue(
         `descriptor:${selectedClaim.sdHash}`,
-        `${nodeBase}/odysee/descriptor/${encodeURIComponent(selectedClaim.sdHash)}`
+        `${nodeBase}/${hyperbeamStoreReadPath(`odysee/descriptor/${selectedClaim.sdHash}`)}`
       );
     }
 
@@ -177,7 +182,7 @@ export default function ClaimTrace({
       };
     }
 
-    fetchHyperbeamAccountSdk('preference_get', { key: 'enable-sync' })
+    Lbry.preference_get({ key: 'enable-sync' })
       .then((response) => {
         if (cancelled) return;
         setProfile({
@@ -431,9 +436,9 @@ function authTraceFocus(status: TraceStatus): TraceFocus {
 function searchTraceFocus(status: TraceStatus): TraceFocus {
   return {
     kind: 'search',
-    label: `search ~search@1.0/query · ${status}`,
+    label: `search ~odysee-search@1.0/query · ${status}`,
     target: SEARCH_TRACE_TARGET,
-    devicePath: '/~search@1.0/query',
+    devicePath: '/~odysee-search@1.0/query',
     requestKey: 'search:',
   };
 }
@@ -1663,10 +1668,10 @@ function searchTraceSteps(
       label: 'Select HyperBEAM search request',
       kind: 'input',
       status: 'ok',
-      detail: '~search@1.0/query',
+      detail: '~odysee-search@1.0/query',
       response: sanitizeHyperbeamDebugValue({
         target: SEARCH_TRACE_TARGET,
-        devicePath: '/~search@1.0/query',
+        devicePath: '/~odysee-search@1.0/query',
       }),
     },
     {
@@ -1709,9 +1714,9 @@ function isSearchDeviceEventData(data: Record<string, any>) {
   const responseDevice = normalizeDeviceName(data.responseDevice);
   const path = String(data.devicePath || data.nativePath || data.urlParts?.path || data.url || '');
   return (
-    device === '~search@1.0' ||
-    responseDevice === '~search@1.0' ||
-    path.includes('/~search@1.0/query')
+    device === '~odysee-search@1.0' ||
+    responseDevice === '~odysee-search@1.0' ||
+    path.includes('/~odysee-search@1.0/query')
   );
 }
 

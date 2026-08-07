@@ -5,6 +5,25 @@ const IMMUTABLE_ID_PATTERN = /^[0-9A-Za-z_-]{41,128}$/;
 
 export const HYPERBEAM_IMMUTABLE_WEB_PREFIX = '/$/id/';
 
+const playlistLidToCollectionId = new Map<string, string>();
+const collectionIdToPlaylistLid = new Map<string, string>();
+
+export function registerPlaylistLidAlias(playlistMessageId?: string | null, collectionId?: string | null) {
+  if (!playlistMessageId || !collectionId) return;
+  playlistLidToCollectionId.set(String(playlistMessageId), String(collectionId));
+  collectionIdToPlaylistLid.set(String(collectionId), String(playlistMessageId));
+}
+
+export function collectionIdFromLid(lid?: string | null): string | null {
+  if (!lid) return null;
+  return playlistLidToCollectionId.get(String(lid)) || String(lid);
+}
+
+export function lidForCollectionId(collectionId?: string | null): string | null {
+  if (!collectionId) return null;
+  return collectionIdToPlaylistLid.get(String(collectionId)) || String(collectionId);
+}
+
 export function normalizeHyperbeamImmutableId(value?: string | null): string | undefined {
   if (!value) return undefined;
 

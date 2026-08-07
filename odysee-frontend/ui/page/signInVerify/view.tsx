@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Page from 'component/page';
 import ReCAPTCHA from 'react-google-recaptcha';
 import Button from 'component/button';
-import { fetchHyperbeamAccountApi } from 'util/hyperbeam';
+import { Lbryio } from 'lbryinc';
 import I18nMessage from 'component/i18nMessage';
 import Card from 'component/common/card';
 import { useLocation } from 'react-router-dom';
@@ -74,7 +74,7 @@ function SignInVerifyPage() {
 
   function verifyUser(captchaValue?: string) {
     verificationApiHistory.called = true;
-    fetchHyperbeamAccountApi('user-email-confirm', {
+    Lbryio.call('user_email', 'confirm', {
       auth_token: authToken,
       email: userSubmittedEmail,
       verification_token: verificationToken,

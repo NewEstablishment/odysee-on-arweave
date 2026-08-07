@@ -1,0 +1,50 @@
+Subject: Forward byte-range request fields from ~cache@1.0/read to the store
+
+The cache device drops `start`/`end`/`range` request fields: `read/3` passes
+only the location to `hb_cache:read/2`, so a store-backed media read never
+sees the range and reassembles the whole object (a 653 MB video timed out).
+`hb_store:read` already accepts a `#{<<"read">> := _}` request map, and
+`hb_store_odysee`'s `request_range/2` already honors `start`/`end`/`range`;
+this only wires the range through. Ranged media then returns 206 with a
+targeted blob fetch (~3s cold for a 1 MB slice) instead of a full-object read.
+
+diff --git a/src/preloaded/node/dev_cache.erl b/src/preloaded/node/dev_cache.erl
+index 2d90dac5..a4579013 100644
+--- a/src/preloaded/node/dev_cache.erl
++++ b/src/preloaded/node/dev_cache.erl
+@@ -25,6 +25,35 @@ read(_M1, M2, Opts) ->
+     Location = hb_ao:get(<<"read">>, M2, Opts),
+     ?event({read, {key_extracted, Location}}),
+     ?event(debug_gateway, cache_read),
++    case range_fields(M2, Opts) of
++        RangeFields when map_size(RangeFields) > 0 ->
++            %% A byte-range request (`start'/`end', or an RFC-7233 `range')
++            %% targets store-backed media. `hb_cache:read/2' takes only a
++            %% location and drops the range, so the store would reassemble the
++            %% whole object. Forward the range to the store directly, which
++            %% honors it (`hb_store:read' accepts a `#{<<"read">> := _}'
++            %% request map).
++            Store = hb_opts:get(store, no_viable_store, Opts),
++            hb_store:read(Store, RangeFields#{ <<"read">> => Location }, Opts);
++        _ ->
++            read_location(Location, M2, Opts)
++    end.
++
++%% @doc Collect any byte-range request fields present in the request, so a
++%% ranged read can be forwarded to the store instead of triggering a full read.
++range_fields(M2, Opts) ->
++    lists:foldl(
++        fun(Key, Acc) ->
++            case hb_maps:get(Key, M2, not_found, Opts) of
++                not_found -> Acc;
++                Value -> Acc#{ Key => Value }
++            end
++        end,
++        #{},
++        [<<"start">>, <<"end">>, <<"range">>]
++    ).
++
++read_location(Location, M2, Opts) ->
+     case hb_cache:read(Location, Opts) of
+         {ok, Res} ->
+             ?event({read, {cache_result, ok, Res}}),

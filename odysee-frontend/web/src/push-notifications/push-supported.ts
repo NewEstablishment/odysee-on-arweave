@@ -2,6 +2,8 @@ import { isSupported } from 'firebase/messaging';
 import { isServedFromManifest } from 'util/manifest-prefix';
 
 export const isPushSupported = async (): Promise<boolean> => {
+  // Served statically from an Arweave path manifest there is no origin-root
+  // /sw.js to register, so push notifications are unavailable.
   if (isServedFromManifest()) return false;
 
   const hasServiceWorker = 'serviceWorker' in navigator;

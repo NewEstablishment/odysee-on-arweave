@@ -744,7 +744,7 @@ function UploadForm(props: Props) {
         // Hyperbeam-eligible files never start the legacy early tus upload:
         // they publish through the node directly at submit time.
         const itemId = pipelineItemIdRef.current;
-        const file = filePath;
+        const file: File = filePath;
 
         dispatch(
           doAddPipelineItem({

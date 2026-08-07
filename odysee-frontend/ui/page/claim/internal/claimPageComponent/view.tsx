@@ -42,6 +42,8 @@ import { doFetchItemsInCollection } from 'redux/actions/collections';
 import { PREFERENCE_EMBED } from 'constants/tags';
 import withResolvedClaimRender from 'hocs/withResolvedClaimRender';
 import {
+  collectionIdFromLid,
+  lidForCollectionId,
   hyperbeamImmutableIdFromClaim,
   hyperbeamImmutableWebPath,
   isHyperbeamImmutableWebPath,
@@ -79,7 +81,7 @@ const ClaimPageComponent = (props: Props) => {
   const { canonical_url: canonicalUrl, claim_id: claimId } = claim || {};
   const immutablePath = hyperbeamImmutableWebPath(hyperbeamImmutableIdFromClaim(claim));
   const collectionId =
-    urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID) ||
+    collectionIdFromLid(urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID)) ||
     (claim && claim.value_type === 'collection' && claim.claim_id) ||
     null;
   const latestContentClaim = useAppSelector((state) =>
@@ -132,11 +134,11 @@ const ClaimPageComponent = (props: Props) => {
     playlistResumePromptShownRef.current = playlistResumePromptKey;
 
     const firstItemUrlParams = new URLSearchParams(search);
-    firstItemUrlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, claim.claim_id);
+    firstItemUrlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, lidForCollectionId(claim.claim_id) || claim.claim_id);
     const firstItemUrl = formatLbryUrlForWeb(`${collectionFirstItemUri}?${firstItemUrlParams.toString()}`);
 
     const resumeUrlParams = new URLSearchParams(search);
-    resumeUrlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, claim.claim_id);
+    resumeUrlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, lidForCollectionId(claim.claim_id) || claim.claim_id);
     const resumeUrl = formatLbryUrlForWeb(`${playlistLastPlayedUri}?${resumeUrlParams.toString()}`);
 
     dispatch(
@@ -208,7 +210,7 @@ const ClaimPageComponent = (props: Props) => {
 
         if (urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID)) {
           const listId = urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID) || '';
-          urlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, listId);
+          urlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, lidForCollectionId(listId) || listId);
         }
 
         if (urlParams.toString()) replaceUrl += `?${urlParams.toString()}`;
@@ -260,7 +262,7 @@ const ClaimPageComponent = (props: Props) => {
       switch (collection?.type) {
         case COL_TYPES.COLLECTION:
         case COL_TYPES.PLAYLIST: {
-          urlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, claim.claim_id);
+          urlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, lidForCollectionId(claim.claim_id) || claim.claim_id);
           const newUrl = formatLbryUrlForWeb(`${collectionFirstItemUri}?${urlParams.toString()}`);
           if (shouldPromptPlaylistResume) {
             return (

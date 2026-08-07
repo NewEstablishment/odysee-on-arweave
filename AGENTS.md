@@ -34,7 +34,7 @@ plans and old branch snapshots do not override the current architecture.
 | `odysee-frontend/` | React/Redux application, SDK-shaped integration facade, SSR server, bridges, playback, uploads, and diagnostics. |
 | `odysee-frontend/AGENTS.md` | Detailed browser/SSR routing, hydration, comments, search, and validation contracts. |
 | `scripts/` | Cross-component operational tooling. It currently contains the Chainquery-to-Meilisearch importer and its tests. |
-| `aidocs-local/` | Ignored local-only plans, meeting notes, investigation records, and session handoffs. Do not treat it as committed project documentation. |
+| `aidocs/` | Shared architecture docs, decision records, run instructions, and specs. |
 
 External source references are separate sibling repositories. The local
 Meilisearch checkout is at `../meilisearch`, with its normal locally built binary
@@ -332,9 +332,7 @@ the remaining risk plainly.
 - Update the relevant guide in the same change when architecture, ownership,
   public operations, identity, configuration, run commands, validation, or known
   limitations change.
-- Store detailed uncommitted working plans, meeting-derived context,
-  investigations, and handoffs under ignored `aidocs-local/` when persistence is
-  useful.
+- Store shareable plans, specs, and decision records under `aidocs/`.
 - Plans should describe decisions, constraints, acceptance criteria, and
   verification in detail while minimizing copied implementation code.
 - Record durable current decisions, not completed migration checklists or stale

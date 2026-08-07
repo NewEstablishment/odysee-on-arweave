@@ -1,8 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/home/rave/Work/ODYSEE/REPOSITORIES/odysee-on-arweave/hyperbeam/native/lib/secp256k1/build/cmake_install.cmake",
-		"/home/rave/Work/ODYSEE/REPOSITORIES/odysee-on-arweave/hyperbeam/native/lib/secp256k1/build/src/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

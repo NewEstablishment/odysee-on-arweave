@@ -4,6 +4,7 @@ import { isEmpty } from 'util/object';
 import { lazyImport } from 'util/lazyImport';
 import classnames from 'classnames';
 import { isURIValid } from 'util/lbryURI';
+import { lidForCollectionId } from 'util/hyperbeam-route';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import * as PAGES from 'constants/pages';
 import * as SETTINGS from 'constants/settings';
@@ -272,7 +273,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   let navigateSearch = new URLSearchParams();
 
   if (!isCollection && listId) {
-    navigateSearch.set(COLLECTIONS_CONSTS.COLLECTION_ID, listId);
+    navigateSearch.set(COLLECTIONS_CONSTS.COLLECTION_ID, lidForCollectionId(listId) || listId);
   }
 
   if (searchParams) {

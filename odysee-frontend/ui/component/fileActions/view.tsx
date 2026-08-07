@@ -42,6 +42,7 @@ import { makeSelectFileRenderModeForUri, selectContentStates } from 'redux/selec
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
 import { DISABLE_DOWNLOAD_BUTTON_TAG, DISABLE_REACTIONS_ALL_TAG, DISABLE_REACTIONS_VIDEO_TAG } from 'constants/tags';
 import { isStreamPlaceholderClaim } from 'util/claim';
+import { collectionIdFromLid } from 'util/hyperbeam-route';
 type Props = {
   uri: string;
   hideRepost?: boolean;
@@ -103,7 +104,7 @@ export default function FileActions(props: Props) {
     isCollectionClaim ||
     isChannel;
   const urlParams = new URLSearchParams(search);
-  const collectionId = urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID);
+  const collectionId = collectionIdFromLid(urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID));
   const showDownload =
     !isLivestreamClaim &&
     !(disableDownloadButton && !claimIsMine) &&
