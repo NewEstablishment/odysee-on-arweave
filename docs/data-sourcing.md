@@ -148,6 +148,15 @@ are rejected without network I/O.
   `odysee/descriptor/<96hex>`, `odysee/blob/<96hex>` — plus bare-key
   classification: `txid:nout` → claim output, 96-hex → blob, 64-hex →
   transaction, 40-hex → claim ID.
+- **Locator listing**: `odysee/channel-claims/<40hex>[/<page>[/<page-size>]]`
+  returns an *uncommitted* map of ordered `txid:nout` locators for a channel's
+  current stream claims, via `claim_search` on the SDK proxy. Discovery only,
+  same trust class as the mutable namespaces: nothing in the list is served as
+  fact, each locator must be hydrated and verified through its own immutable
+  read, and a dishonest proxy can at worst hide or reorder entries. Mutable at
+  a constant path, so it relies on the node's `no-store` cache policy.
+  Retirement condition: replaced by `~query@1.0`/`~search@1.0` over the common
+  cache once the search index covers legacy channel content.
 - **Fetches**: for the *mutable* namespaces (`claim-id`, `claim`/URI,
   `channel-id`), a locator lookup via the SDK proxy (`resolve` /
   `claim_search`) to obtain the current outpoint; then delegation to the

@@ -130,6 +130,8 @@ read_live(<<"odysee/channel-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts);
 read_live(<<"odysee/channel-claims/", Rest/binary>>, StoreOpts, NodeOpts) ->
     channel_claims_read(Rest, StoreOpts, NodeOpts);
+read_live(<<"odysee/playlist/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    playlist_read(Encoded, StoreOpts, NodeOpts);
 read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, Decoded} ?= decode_component(Encoded),
@@ -635,6 +637,115 @@ list_live(<<"odysee/channel-id/", Rest/binary>>, Req, StoreOpts, NodeOpts) ->
     end;
 list_live(_Path, _Req, _StoreOpts, _NodeOpts) ->
     {error, not_found}.
+
+playlist_read(Encoded, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Decoded} ?= decode_component(Encoded),
+        {ok, TxID, Nout} ?= playlist_source_outpoint(Decoded, StoreOpts, NodeOpts),
+        {ok, ClaimMsg} ?= kind_output(<<"claim">>, TxID, Nout, StoreOpts, NodeOpts),
+        playlist_message(ClaimMsg, TxID, Nout, StoreOpts, NodeOpts)
+    end.
+
+playlist_source_outpoint(Decoded, StoreOpts, NodeOpts) ->
+    case is_bare_outpoint(Decoded) of
+        true ->
+            <<TxID:64/binary, ":", NoutBin/binary>> = Decoded,
+            {ok, normalize_hex(TxID), binary_to_integer(NoutBin)};
+        false ->
+            maybe
+                ClaimID = normalize_hex(Decoded),
+                ok ?= require_hex_size(ClaimID, 40, invalid_claim_id),
+                {ok, Claim} ?=
+                    hb_odysee_client:claim_search(
+                        ClaimID,
+                        store_node_opts(StoreOpts, NodeOpts)
+                    ),
+                {ok, TxID} ?= claim_txid(Claim),
+                {ok, Nout} ?= claim_nout(Claim),
+                {ok, TxID, Nout}
+            end
+    end.
+
+playlist_message(ClaimMsg, TxID, Nout, StoreOpts, NodeOpts) ->
+    Value = maps:get(<<"value">>, ClaimMsg, #{}),
+    Entries =
+        [
+            Entry
+        ||
+            Entry <- binary:split(
+                maps:get(<<"claims">>, Value, <<>>),
+                <<",">>,
+                [global]
+            ),
+            Entry =/= <<>>
+        ],
+    case Entries of
+        [] ->
+            {error, not_found};
+        _ ->
+            maybe
+                {ok, Items} ?= playlist_roots(Entries, StoreOpts, NodeOpts),
+                Envelope = maps:get(<<"claim-envelope">>, ClaimMsg, #{}),
+                Msg = playlist_fields(#{
+                    <<"type">> => <<"playlist">>,
+                    <<"schema">> => <<"odysee-playlist@1">>,
+                    <<"author">> =>
+                        maps:get(<<"signing-channel-id">>, Envelope, not_found),
+                    <<"title">> => maps:get(<<"title">>, Value, not_found),
+                    <<"description">> =>
+                        maps:get(<<"description">>, Value, not_found),
+                    <<"thumbnail">> =>
+                        maps:get(
+                            <<"url">>,
+                            maps:get(<<"thumbnail">>, Value, #{}),
+                            not_found
+                        ),
+                    <<"items">> => Items,
+                    <<"revision">> => 0,
+                    <<"state">> => <<"active">>,
+                    <<"legacy-claim-id">> =>
+                        maps:get(<<"claim-id">>, ClaimMsg, not_found),
+                    <<"legacy-outpoint">> =>
+                        <<TxID/binary, ":", (integer_to_binary(Nout))/binary>>
+                }),
+                {ok, ID} = hb_cache:write(Msg, local_write_opts(NodeOpts)),
+                {ok, Msg#{ <<"playlist-id">> => ID }}
+            end
+    end.
+
+playlist_fields(Msg) ->
+    maps:filter(fun(_Key, FieldValue) -> FieldValue =/= not_found end, Msg).
+
+playlist_roots(Entries, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Search} ?=
+            hb_odysee_client:call(
+                <<"claim_search">>,
+                #{
+                    <<"claim_ids">> => Entries,
+                    <<"page_size">> => length(Entries),
+                    <<"no_totals">> => true
+                },
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        Located =
+            maps:from_list(
+                [
+                    {normalize_hex(ClaimID), Outpoint}
+                ||
+                    Claim <- first_found([<<"claims">>, <<"items">>], Search, [], NodeOpts),
+                    ClaimID <- [first_found([<<"claim_id">>], Claim, not_found, NodeOpts)],
+                    is_binary(ClaimID),
+                    Outpoint <- [claim_outpoint(Claim, NodeOpts)],
+                    is_binary(Outpoint)
+                ]
+            ),
+        Roots = [maps:get(Entry, Located) || Entry <- Entries, maps:is_key(Entry, Located)],
+        case Roots of
+            [] -> {error, not_found};
+            _ -> {ok, iolist_to_binary(lists:join(<<",">>, Roots))}
+        end
+    end.
 
 channel_claims_read(Rest, StoreOpts, NodeOpts) ->
     {Encoded, Page, PageSize} =

@@ -125,10 +125,30 @@ async function expandStoreEvidenceValue(payload: any): Promise<any> {
       .catch(() => null);
     return isObject(sub) ? sub : undefined;
   };
+  const linkedList = async (key: string) => {
+    const subLink = value(raw, `${key}+link`, `${key}-link`);
+    if (!isStandaloneImmutableId(subLink)) return undefined;
+    const sub = await fetchCachedImmutableJsonOrNull(String(subLink))
+      .then(responsePayload)
+      .catch(() => null);
+    if (!isObject(sub)) return undefined;
+    return Object.keys(sub)
+      .filter((entryKey) => /^\d+$/.test(entryKey))
+      .sort((a, b) => Number(a) - Number(b))
+      .map((entryKey) => sub[entryKey])
+      .filter((entry) => typeof entry === 'string');
+  };
   const [thumbnail, cover, source, video, audio] = await Promise.all(
     ['thumbnail', 'cover', 'source', 'video', 'audio'].map(linked)
   );
+  const [linkedClaims, tags] = await Promise.all(['claims', 'tags'].map(linkedList));
   const { status: _status, 'ao-result': _aoResult, ...claimValue } = raw;
+  const inlineClaims = value(claimValue, 'claims');
+  const claims =
+    linkedClaims ||
+    (typeof inlineClaims === 'string' && inlineClaims
+      ? inlineClaims.split(',').filter(Boolean)
+      : undefined);
   return {
     ...payload,
     value: {
@@ -138,6 +158,8 @@ async function expandStoreEvidenceValue(payload: any): Promise<any> {
       ...(source ? { source } : {}),
       ...(video ? { video } : {}),
       ...(audio ? { audio } : {}),
+      ...(claims ? { claims } : {}),
+      ...(tags ? { tags } : {}),
     },
   };
 }
@@ -2062,7 +2084,9 @@ function storeClaimFromHyperbeam(payload: any, channelPayload?: any, fallbackNam
     nout,
     ...(outpoint ? { outpoint, immutable_id: outpoint, immutable_store_path: `odysee/outpoint/${outpoint}` } : {}),
     type: 'claim',
-    value_type: value(payload, 'value-type', 'value_type') || (isChannel ? 'channel' : 'stream'),
+    value_type:
+      value(payload, 'value-type', 'value_type') ||
+      (isChannel ? 'channel' : Array.isArray(value(claimValue, 'claims')) ? 'collection' : 'stream'),
     canonical_url: value(payload, 'canonical-url', 'canonical_url') || url,
     permanent_url: value(payload, 'permanent-url', 'permanent_url') || url,
     short_url: value(payload, 'short-url', 'short_url') || url,
@@ -2790,6 +2814,34 @@ function claimIdFromSignatureInput(input: any): string | undefined {
 function outpointParts(id: any): { txid: string; nout: number } | null {
   const match = String(id || '').match(/^([0-9a-f]{64}):([0-9]+)$/i);
   return match ? { txid: match[1], nout: Number(match[2]) } : null;
+}
+
+export async function fetchPlaylistIdForLegacyId(collectionClaimId: any): Promise<string | null> {
+  if (!isClaimId(collectionClaimId)) return null;
+  const result = await fetchCachedStoreJsonOrNull(storePath('odysee/playlist', String(collectionClaimId))).catch(
+    () => null
+  );
+  const nativeId = value(storePayload(result) || {}, 'playlist-id', 'playlist_id');
+  return typeof nativeId === 'string' && isStandaloneImmutableId(nativeId) ? nativeId : null;
+}
+
+export async function fetchPlaylistMessage(playlistId: any): Promise<any | null> {
+  if (!isStandaloneImmutableId(playlistId)) return null;
+  const payload = await fetchCachedImmutableJsonOrNull(String(playlistId))
+    .then(responsePayload)
+    .catch(() => null);
+  return payload && value(payload, 'type') === 'playlist' ? payload : null;
+}
+
+export function playlistRouteId(collectionId: any, claim?: any): string {
+  const outpoint = claim?.outpoint || claim?.immutable_id;
+  if (isOutpointId(outpoint)) return webSafeImmutableId(outpoint);
+  return String(collectionId || '');
+}
+
+export function outpointFromPlaylistRouteId(routeId: any): string | null {
+  const match = String(routeId || '').match(/^out_([0-9a-f]{64})_([0-9]+)$/i);
+  return match ? `${match[1]}:${match[2]}` : null;
 }
 
 function webSafeImmutableId(id: any): string {

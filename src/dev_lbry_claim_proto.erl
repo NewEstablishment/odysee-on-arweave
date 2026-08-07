@@ -19,7 +19,12 @@ decode_metadata(Message) when is_binary(Message) ->
                         _ -> not_found
                     end;
                 _ ->
-                    not_found
+                    case length_field(Message, 3) of
+                        {ok, Collection} ->
+                            {ok, collection_value(Message, Collection)};
+                        _ ->
+                            not_found
+                    end
             end
     end;
 decode_metadata(_) ->
@@ -47,6 +52,32 @@ channel_value(Claim, Channel) ->
         <<"email">> => string_field(Channel, 2),
         <<"website_url">> => string_field(Channel, 3)
     }).
+
+collection_value(Claim, Collection) ->
+    put_if_present(#{
+        <<"title">> => string_field(Claim, 8),
+        <<"description">> => string_field(Claim, 9),
+        <<"thumbnail">> => thumbnail_value(optional_field(Claim, 10)),
+        <<"tags">> => string_fields(Claim, 11),
+        <<"claims">> => collection_claim_ids(Collection)
+    }).
+
+collection_claim_ids(Collection) ->
+    case
+        [
+            hb_util:to_hex(reverse_bytes(Hash))
+        ||
+            Reference <- all_length_fields(Collection, 2, []),
+            {ok, Hash} <- [length_field(Reference, 1)],
+            byte_size(Hash) =:= 20
+        ]
+    of
+        [] -> not_found;
+        IDs -> iolist_to_binary(lists:join(<<",">>, IDs))
+    end.
+
+reverse_bytes(Bin) ->
+    binary:list_to_bin(lists:reverse(binary:bin_to_list(Bin))).
 
 base_stream_value(Claim, Stream, Source, MediaType) ->
     #{
@@ -334,6 +365,21 @@ decode_metadata_without_stream_returns_not_found_test() ->
     Channel = field(1, <<2, 1:256>>),
     Claim = field(2, Channel),
     ?assertEqual(not_found, decode_metadata(Claim)).
+
+decode_metadata_extracts_collection_value_test() ->
+    ClaimIDA = binary:decode_hex(<<"e8eb248600a8fe5348c0712460970e9e208456cf">>),
+    ClaimIDB = binary:decode_hex(<<"fe5d333f9d5b6ed0732c8f8b7b8426e89e2968ee">>),
+    ReferenceA = field(1, reverse_bytes(ClaimIDA)),
+    ReferenceB = field(1, reverse_bytes(ClaimIDB)),
+    Collection = <<(field(2, ReferenceA))/binary, (field(2, ReferenceB))/binary>>,
+    Claim = <<(field(3, Collection))/binary, (field(8, <<"Japanese Metal">>))/binary>>,
+    {ok, Value} = decode_metadata(Claim),
+    ?assertEqual(<<"Japanese Metal">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(
+        <<"e8eb248600a8fe5348c0712460970e9e208456cf,",
+          "fe5d333f9d5b6ed0732c8f8b7b8426e89e2968ee">>,
+        maps:get(<<"claims">>, Value)
+    ).
 
 decode_metadata_extracts_channel_value_test() ->
     Cover = field(5, <<"https://example.com/banner.png">>),

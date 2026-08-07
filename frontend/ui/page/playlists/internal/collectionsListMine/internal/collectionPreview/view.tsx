@@ -1,4 +1,5 @@
 import React from 'react';
+import { fetchPlaylistIdForLegacyId, playlistRouteId } from 'util/hyperbeam';
 import { NavLink } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import CollectionItemCount from './internal/collectionItemCount';
@@ -100,6 +101,18 @@ function CollectionPreview(props: Props) {
     selectCollectionAutoPublishScheduledAtForId(state, collectionId)
   );
   const navigate = useNavigate();
+  const [playlistMessageId, setPlaylistMessageId] = React.useState('');
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchPlaylistIdForLegacyId(collectionId)
+      .then((nativeId) => {
+        if (!cancelled && nativeId) setPlaylistMessageId(nativeId);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [collectionId]);
   if (collectionType === 'featuredChannels') return null;
   const previewThumbnail = thumbnail || thumbnailFromSecondaryClaim || thumbnailFromClaim;
   const optimizedPreviewThumbnail = previewThumbnail
@@ -110,7 +123,7 @@ function CollectionPreview(props: Props) {
     return <ClaimPreviewLoading />;
   }
 
-  const navigateUrl = `/$/${PAGES.PLAYLIST}/${collectionId}`;
+  const navigateUrl = `/$/${PAGES.PLAYLIST}/${playlistMessageId || playlistRouteId(collectionId, claim)}`;
   const firstItemPath = firstPlayableCollectionItemUrl ? formatLbryUrlForWeb(firstPlayableCollectionItemUrl) : '/';
   const hidePlayAll = collectionType === COL_TYPES.FEATURED_CHANNELS || collectionType === COL_TYPES.CHANNELS;
   const usedCollectionName = getLocalizedNameForCollectionId(collectionId) || collectionName;
