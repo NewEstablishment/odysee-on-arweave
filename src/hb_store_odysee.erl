@@ -260,13 +260,18 @@ outpoint_evidence(<<"stream">>, TxID, Nout, StoreOpts, NodeOpts) ->
     case kind_output(<<"stream">>, TxID, Nout, StoreOpts, NodeOpts) of
         {ok, StreamMsg} ->
             attach_attestation(StreamMsg, StoreOpts, NodeOpts);
-        _Error ->
+        {error, not_a_stream_claim} ->
             %% The SDK labels livestream placeholders `stream', but their
             %% protobuf carries no source, so no sd-hash exists and the
             %% stream constructor fails closed. The claim itself is still
             %% valid and verifiable, it simply has no stream media, so serve
             %% generic claim evidence rather than failing the whole read.
-            kind_output(<<"claim">>, TxID, Nout, StoreOpts, NodeOpts)
+            %% Only this label degrades: a transport failure must propagate,
+            %% or a transient proxy error silently yields sd-hash-less
+            %% evidence and media reads fail with `missing_sd_hash'.
+            kind_output(<<"claim">>, TxID, Nout, StoreOpts, NodeOpts);
+        Error ->
+            Error
     end;
 outpoint_evidence(Kind, TxID, Nout, StoreOpts, NodeOpts) ->
     kind_output(Kind, TxID, Nout, StoreOpts, NodeOpts).
@@ -328,10 +333,19 @@ read_native_outpoint(TxID, Nout, StoreOpts, NodeOpts) ->
         NodeOpts
     ).
 
+%% Try each kind in turn, but advance ONLY when the claim genuinely is not of
+%% that kind. A transport failure must propagate: otherwise a transient proxy
+%% error walks the whole kind list and returns weaker evidence (or
+%% `not_found') for a claim that is perfectly readable a moment later.
 read_native_outpoint(TxID, Nout, [Kind | Rest], StoreOpts, NodeOpts) ->
     case kind_output(Kind, TxID, Nout, StoreOpts, NodeOpts) of
-        {ok, Msg} -> evidence_result(Msg, NodeOpts);
-        _ -> read_native_outpoint(TxID, Nout, Rest, StoreOpts, NodeOpts)
+        {ok, Msg} ->
+            evidence_result(Msg, NodeOpts);
+        {error, Label} when Label == not_a_stream_claim;
+                            Label == not_a_channel_claim ->
+            read_native_outpoint(TxID, Nout, Rest, StoreOpts, NodeOpts);
+        Error ->
+            Error
     end;
 read_native_outpoint(_TxID, _Nout, [], _StoreOpts, _NodeOpts) ->
     {error, not_found}.
@@ -956,6 +970,28 @@ alias_address_resolves_to_the_same_message_test() ->
         true,
         hb_message:verify(Loaded, #{ <<"commitment-ids">> => <<"all">> }, Opts)
     ).
+
+%% A transport failure must NOT be mistaken for "this claim is not a stream".
+%% The stream-to-claim fallback exists for livestream placeholders whose
+%% protobuf carries no source; if it also swallowed fetch errors, a transient
+%% proxy failure would yield claim evidence with no `sd-hash' and the media
+%% read would fail with `missing_sd_hash' for a perfectly good claim.
+outpoint_evidence_propagates_transport_errors_test() ->
+    Unreachable =
+        #{
+            <<"store-module">> => ?MODULE,
+            %% Port 1 is reserved and refuses instantly, so this is a
+            %% transport failure and never a claim-shape rejection.
+            <<"lbry-proxy-node">> => <<"http://127.0.0.1:1">>,
+            <<"http-client">> => httpc
+        },
+    TxID = binary:copy(<<"a">>, 64),
+    Result = outpoint_evidence(<<"stream">>, TxID, 0, Unreachable, #{}),
+    %% The property under test: it must not silently succeed with weaker
+    %% evidence. `hb_odysee_client' reports transport and 5xx as
+    %% `{failure, _}' and 4xx as `{error, _}'; either is acceptable here.
+    ?assertNotMatch({ok, _}, Result),
+    ?assert(element(1, Result) =:= failure orelse element(1, Result) =:= error).
 
 decoded_store_uri_preserves_claim_id_test() ->
     URI = <<"lbry://@rave#5383026b8b74683313ad6ea5c72f27eedcae026c">>,

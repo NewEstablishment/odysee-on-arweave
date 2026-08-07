@@ -57,15 +57,28 @@ fetch_output(StoreOpts, TxID, Nout, NodeOpts) ->
             ),
         {ok, Raw} ?= dev_lbry_commitment:evidence_decode(maps:get(<<"raw">>, TxMsg)),
         {ok, Ancestry} ?= output_ancestry(StoreOpts, Raw, Nout, NodeOpts),
+        %% The raw transaction is in hand and txid-verified by this point, so
+        %% a constructor rejection is a property of the claim itself, not of
+        %% the network. Label those separately: callers degrade to a weaker
+        %% kind only on the label, never on a transport failure.
         case kind(StoreOpts, NodeOpts) of
             <<"channel">> ->
-                dev_lbry_commitment:channel_output_message(Raw, Nout, Ancestry);
+                kind_result(
+                    dev_lbry_commitment:channel_output_message(Raw, Nout, Ancestry),
+                    not_a_channel_claim
+                );
             <<"stream">> ->
-                dev_lbry_commitment:stream_claim_message(Raw, Nout, Ancestry);
+                kind_result(
+                    dev_lbry_commitment:stream_claim_message(Raw, Nout, Ancestry),
+                    not_a_stream_claim
+                );
             _ ->
                 dev_lbry_commitment:claim_output_message(Raw, Nout, Ancestry)
         end
     end.
+
+kind_result({ok, Msg}, _Label) -> {ok, Msg};
+kind_result(_Error, Label) -> {error, Label}.
 
 %% @doc Build the create-ancestry proof for an update output when the
 %% `walk-ancestry' option is enabled. Conditions that merely prevent the
@@ -209,8 +222,12 @@ read_rejects_channel_kind_for_stream_claim_test() ->
     {ok, Server, Handle} = proxy_server(dev_lbry_tx:task0_tx_hex()),
     try
         Store = (store(Server))#{ <<"kind">> => <<"channel">> },
+        %% The label matters more than the underlying protobuf reason: callers
+        %% degrade to a weaker kind on `not_a_channel_claim' but must NOT
+        %% degrade on a transport failure, and `{missing_field, _}' cannot
+        %% carry that distinction.
         ?assertEqual(
-            {error, {missing_field, 2}},
+            {error, not_a_channel_claim},
             read(
                 Store,
                 #{ <<"read">> => <<TxID/binary, ":0">> },
