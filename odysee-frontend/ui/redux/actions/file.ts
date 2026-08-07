@@ -238,7 +238,7 @@ export const doFileGetForUri = (uri: string, opt?: FileGetOptions | null, onSucc
             })
           );
         } else {
-          const hyperbeamPlaybackUrl = !accessKey ? await fetchHyperbeamPlaybackUrl(uri, outpoint) : '';
+          const hyperbeamPlaybackUrl = !accessKey ? await fetchHyperbeamPlaybackUrl(uri) : '';
           const resolvedStreamInfo = hyperbeamPlaybackUrl
             ? { ...streamInfo, streaming_url: hyperbeamPlaybackUrl }
             : streamInfo;

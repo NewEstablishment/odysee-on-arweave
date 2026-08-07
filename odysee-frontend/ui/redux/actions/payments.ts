@@ -13,7 +13,7 @@ import * as STRIPE from 'constants/stripe';
 import * as MODALS from 'constants/modal_types';
 import { doOpenModal } from 'redux/actions/app';
 import { getStripeEnvironment } from 'util/stripe';
-import { fetchHyperbeamAccountApi } from 'util/hyperbeam';
+import { isHyperbeamEnabled } from 'util/hyperbeamMode';
 const stripeEnvironment = getStripeEnvironment();
 export const doTipAccountCheckForUri = (uri: string) => async (dispatch: Dispatch, getState: GetState) => {
   const state = getState();
@@ -35,10 +35,15 @@ export const doTipAccountStatus = () => async (dispatch: Dispatch, getState: Get
   dispatch({
     type: ACTIONS.STRIPE_ACCOUNT_STATUS_START,
   });
-  const accountStatusRequest = fetchHyperbeamAccountApi('account-status', {
-    environment: stripeEnvironment,
-    v2: true,
-  });
+  const accountStatusRequest = Lbryio.call(
+    'account',
+    'status',
+    {
+      environment: stripeEnvironment,
+      v2: true,
+    },
+    'post'
+  );
   return await accountStatusRequest
     .then((accountStatusResponse: StripeAccountStatus | AccountStatus) => {
       dispatch({

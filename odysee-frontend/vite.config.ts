@@ -401,9 +401,10 @@ function devHyperbeamAuthRoutesPlugin() {
         }
 
         if (requestUrl.pathname === DEV_HYPERBEAM_PUBLIC_STORE_BATCH_PATH && req.method === 'POST') {
-          const nodeUrl = String(
-            process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || ''
-          ).replace(/\/+$/, '');
+          const nodeUrl = String(process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || '').replace(
+            /\/+$/,
+            ''
+          );
           if (!nodeUrl) {
             res.statusCode = 404;
             res.setHeader('Content-Type', 'application/json');
@@ -449,18 +450,17 @@ function devHyperbeamAuthRoutesPlugin() {
           } catch (error) {
             res.statusCode = 502;
             res.setHeader('Content-Type', 'application/json');
-            res.end(
-              JSON.stringify({ error: error instanceof Error ? error.message : 'hyperbeam batch proxy failed' })
-            );
+            res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'hyperbeam batch proxy failed' }));
           }
           return;
         }
 
         if (requestUrl.pathname.startsWith(DEV_HYPERBEAM_PUBLIC_DEVICE_PREFIX) && req.method === 'POST') {
           const devicePath = requestUrl.pathname.slice(DEV_HYPERBEAM_PUBLIC_DEVICE_PREFIX.length);
-          const nodeUrl = String(
-            process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || ''
-          ).replace(/\/+$/, '');
+          const nodeUrl = String(process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || '').replace(
+            /\/+$/,
+            ''
+          );
 
           if (!nodeUrl || !DEV_HYPERBEAM_PUBLIC_DEVICE_PATHS.has(devicePath)) {
             res.statusCode = 404;
@@ -995,11 +995,14 @@ function ssrTemplatePlugin() {
 
         if (assetTags.length === 0) return;
 
+        // The static bundle uses relative URLs (base './'); the Koa server
+        // serves assets under /public/, so rebase the tags for the template.
         const serverAssetTags = assetTags.map((tag) =>
           tag.replace(/(src|href)="\.?\/?(assets\/[^"]+)"/, '$1="/public/$2"')
         );
         const cleanTemplate = stripInjectedAssetTags(template);
         const injected = cleanTemplate.replace('</head>', `    ${serverAssetTags.join('\n    ')}\n  </head>`);
+
         fs.writeFileSync(templateHtml, injected, 'utf8');
       },
     },
@@ -1013,6 +1016,9 @@ function stripInjectedAssetTags(html: string) {
   );
 }
 
+// HyperBEAM path syntax reserves ~ & ( ) + = (device hints / hb_singleton
+// operators) inside path segments, so emitted filenames must stay within
+// [A-Za-z0-9_.-] for manifest-served assets to resolve on a node.
 function sanitizeEmittedName(name: string) {
   return name.replace(/[^A-Za-z0-9_.-]/g, '_');
 }
@@ -1083,6 +1089,10 @@ const codeSplittingGroups = [
 export default defineConfig({
   root: __dirname,
   publicDir: 'static',
+  // Static-manifest builds use a relative base so the bundle works from any
+  // subpath (a HyperBEAM node serving the Arweave path manifest at
+  // /<ManifestID>/); index.html injects a runtime <base> tag for deep links.
+  // The Koa server build keeps absolute /public/ asset URLs.
   base: isServeCommand ? '/' : isStaticManifestBuild ? './' : '/public/',
 
   define: {
@@ -1325,6 +1335,7 @@ export default defineConfig({
               },
             }
           : {}),
+
         codeSplitting: {
           minSize: 20_000,
           groups: codeSplittingGroups,

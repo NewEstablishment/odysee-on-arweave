@@ -1,14 +1,14 @@
 import * as ACTIONS from 'constants/action_types';
-import { fetchHyperbeamSubCount, fetchHyperbeamViewCount } from 'util/hyperbeam';
+import { Lbryio } from 'lbryinc';
 const FETCH_SUB_COUNT_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const FETCH_SUB_COUNT_IDLE_FIRE_MS = 100;
 export const doFetchViewCount = (claimIdCsv: string) => (dispatch: Dispatch) => {
   dispatch({
     type: ACTIONS.FETCH_VIEW_COUNT_STARTED,
   });
-  return fetchHyperbeamViewCount(claimIdCsv)
+  return Lbryio.call('file', 'view_count', { claim_id: claimIdCsv })
     .then((result) => {
-      if (!result) throw new Error('HyperBEAM file view_count returned no counts');
+      if (!result) throw new Error('file view_count returned no counts');
       return result;
     })
     .then((result: Array<number>) => {
@@ -46,9 +46,9 @@ const executeFetchSubCount = (claimIdCsv: string) => (dispatch: Dispatch, getSta
     type: ACTIONS.FETCH_SUB_COUNT_STARTED,
   });
   const filteredClaimIdCsv = claimIds.join(',');
-  return fetchHyperbeamSubCount(filteredClaimIdCsv)
+  return Lbryio.call('subscription', 'sub_count', { claim_id: filteredClaimIdCsv })
     .then((result) => {
-      if (!result) throw new Error('HyperBEAM subscription sub_count returned no counts');
+      if (!result) throw new Error('subscription sub_count returned no counts');
       return result;
     })
     .then((result: Array<number>) => {

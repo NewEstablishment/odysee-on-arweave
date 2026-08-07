@@ -32,7 +32,6 @@ import { makeSelectNotificationForCommentId } from 'redux/selectors/notification
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { toHex } from 'util/hex';
 import { getChannelFromClaim } from 'util/claim';
-import { commentAnchorForClaim, invalidateHyperbeamClaimPage } from 'util/hyperbeam';
 import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
@@ -109,9 +108,6 @@ export function doCommentList(
     return Comments.comment_list({
       page,
       claim_id: claimId,
-      // The loading switch: comments are looked up by the claim id when the
-      // resolved claim carries a legacy one, else by its immutable id.
-      target: commentAnchorForClaim(claim),
       page_size: pageSize,
       parent_id: parentId,
       top_level: !parentId,
@@ -151,16 +147,14 @@ export function doCommentList(
           return result;
         };
 
-        const commentChannelIds = Array.from(
-          new Set((comments || []).map((comment) => comment.channel_id).filter(Boolean))
-        ) as Array<string>;
-        returnResult();
+        // Batch resolve comment authors
+        const commentChannelIds = comments && comments.map((comment) => comment.channel_id || '');
 
-        if (commentChannelIds.length && !isLivestream) {
-          dispatch(doResolveClaimIds(commentChannelIds)).catch(() => undefined);
+        if (commentChannelIds && !isLivestream) {
+          return dispatch(doResolveClaimIds(commentChannelIds)).finally(() => returnResult());
         }
 
-        return result;
+        return returnResult();
       })
       .catch((error) => {
         const { message } = error;
@@ -979,9 +973,6 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
     return Comments.comment_create({
       comment: comment,
       claim_id: claim_id,
-      // New comments anchor on the uniform target: the immutable id for
-      // native content, the claim id for legacy videos.
-      target: commentAnchorForClaim(claim),
       channel_id: activeChannelClaim.claim_id,
       channel_name: activeChannelClaim.name,
       parent_id: parent_id,
@@ -1034,7 +1025,6 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
           LocalStorage.setItem('lastCommentedClaims', JSON.stringify(lastCommentedClaims));
         }
 
-        invalidateHyperbeamClaimPage(claim_id);
         dispatch({
           type: ACTIONS.COMMENT_CREATE_COMPLETED,
           data: {
@@ -1155,7 +1145,6 @@ export function doCommentAbandon(
         // Comment may not be deleted if the signing channel can't be signed.
         // This will happen if the channel was recently created or abandoned.
         if (result.abandoned) {
-          invalidateHyperbeamClaimPage(result.claim_id);
           dispatch({
             type: ACTIONS.COMMENT_ABANDON_COMPLETED,
             data: {
@@ -1232,7 +1221,6 @@ export function doCommentUpdate(comment_id: string, comment: string) {
       })
         .then((result: CommentEditResponse) => {
           if (result != null) {
-            invalidateHyperbeamClaimPage(result.claim_id);
             dispatch({
               type: ACTIONS.COMMENT_UPDATE_COMPLETED,
               data: {
@@ -1698,24 +1686,6 @@ async function allSettledSequential(items, fn) {
   }
 
   return results;
-}
-
-// Moderation data (block lists, am-i, delegates) is only needed on surfaces
-// that render comments or moderation UI, so it syncs lazily from those mounts
-// (once per session) instead of on every app boot.
-let moderationDataSynced = false;
-export function doSyncCommentModerationData() {
-  return async (dispatch: Dispatch, getState: GetState) => {
-    if (moderationDataSynced) return;
-
-    const myChannels = selectMyChannelClaims(getState()) as Claim[] | null;
-    if (!myChannels || myChannels.length === 0) return;
-
-    moderationDataSynced = true;
-    await dispatch(doFetchModBlockedList(false));
-    await dispatch(doFetchCommentModAmIList());
-    await dispatch(doCommentModListDelegatesForMyChannels());
-  };
 }
 
 export function doFetchModBlockedList(nativeSync: boolean = true) {
@@ -2556,3 +2526,21 @@ export const doFetchBlockedWords = () => {
       });
   };
 };
+
+// Moderation data (block lists, am-i, delegates) is only needed on surfaces
+// that render comments or moderation UI, so it syncs lazily from those mounts
+// (once per session) instead of on every app boot.
+let moderationDataSynced = false;
+export function doSyncCommentModerationData() {
+  return async (dispatch: Dispatch, getState: GetState) => {
+    if (moderationDataSynced) return;
+
+    const myChannels = selectMyChannelClaims(getState()) as Claim[] | null;
+    if (!myChannels || myChannels.length === 0) return;
+
+    moderationDataSynced = true;
+    await dispatch(doFetchModBlockedList(false));
+    await dispatch(doFetchCommentModAmIList());
+    await dispatch(doCommentModListDelegatesForMyChannels());
+  };
+}

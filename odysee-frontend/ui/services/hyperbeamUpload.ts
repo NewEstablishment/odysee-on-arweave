@@ -163,11 +163,59 @@ export async function publishThroughHyperbeam(
   if (!dataId) throw new Error('HyperBEAM store write response did not include an ID.');
 
   const indexResponse = await indexUploadResponse(dataId, uploadPayload, identityToken);
-  if (!indexResponse) throw new Error('HyperBEAM upload device is not configured.');
-  const indexJson = await responseJson(indexResponse);
+  if (!indexResponse) throw new Error('HyperBEAM node is not configured.');
+  const indexJson = await responseJsonWithHeaders(indexResponse);
   if (!indexResponse.ok) throw new Error(errorMessage(indexJson, indexResponse.status));
 
-  return normalizePublishResponse(indexJson, publishPayload, file, myChannels);
+  const recordId = storeWriteId(indexJson);
+  if (!recordId) throw new Error('HyperBEAM upload index did not return an ID.');
+
+  return normalizePublishResponse(
+    synthesizedUploadResponse(recordId, dataId, uploadPayload),
+    publishPayload,
+    file,
+    myChannels
+  );
+}
+
+// The stored index message resolves back into a claim through the
+// immutable-id route (`immutableClaimFromHyperbeam`), so the publish
+// response is synthesized from the same fields the resolver reads.
+function synthesizedUploadResponse(recordId: string, dataId: string, uploadPayload: Record<string, any>) {
+  const metadata = uploadPayload.metadata || {};
+  return {
+    'record-id': recordId,
+    'read-path': `/${dataId}`,
+    outputs: [
+      {
+        name: uploadPayload.name,
+        normalized_name: uploadPayload.name,
+        claim_id: recordId,
+        value_type: 'stream',
+        confirmations: 1,
+        meta: {},
+        value: {
+          title: metadata.title,
+          description: metadata.description,
+          ...(metadata.thumbnail_url ? { thumbnail: { url: metadata.thumbnail_url } } : {}),
+          ...(metadata.video ? { video: metadata.video } : {}),
+          ...(metadata.audio ? { audio: metadata.audio } : {}),
+          source: {
+            name: uploadPayload.filename,
+            size: String(uploadPayload.size || ''),
+            media_type: uploadPayload.content_type,
+          },
+        },
+        hyperbeam: {
+          device: 'odysee-upload@1.0',
+          'record-id': recordId,
+          record_id: recordId,
+          'data-id': dataId,
+          data_id: dataId,
+        },
+      },
+    ],
+  };
 }
 
 async function genericStoreWriteResponse(file: Blob) {
@@ -185,16 +233,47 @@ async function genericStoreWriteResponse(file: Blob) {
   });
 }
 
+// The index record is a plain native message: `POST /id?!=true` commits it
+// with the caller's auth-hook identity and the node persists it, exactly
+// like a comment. The resolver's immutable-id route reads it back.
 async function indexUploadResponse(dataId: string, uploadPayload: Record<string, any>, authToken?: string) {
-  return hyperbeamDevicePostParams64(
-    HYPERBEAM_DEVICE.upload,
-    'index&!',
-    {
-      ...uploadPayload,
-      data_id: dataId,
-    },
-    odyseeAuthHeaders(authToken)
+  const base = hyperbeamNodeBase();
+  if (!base) return null;
+
+  const metadata = uploadPayload.metadata || {};
+  const channel = metadata.channel || {};
+  const message: Record<string, any> = {
+    schema: 'odysee-upload@1.0',
+    type: 'upload',
+    name: uploadPayload.name,
+    filename: uploadPayload.filename,
+    'content-type': uploadPayload.content_type,
+    'source-size': String(uploadPayload.size || ''),
+    'data-id': dataId,
+    'streaming-url': `/${dataId}`,
+    title: metadata.title,
+    description: metadata.description,
+    'thumbnail-url': metadata.thumbnail_url,
+    license: metadata.license,
+    'release-time': metadata.release_time,
+    'channel-id': channel.claim_id,
+    'channel-name': channel.name,
+    timestamp: Math.floor(Date.now() / 1000),
+  };
+  const body = Object.fromEntries(
+    Object.entries(message).filter(([, value]) => value !== undefined && value !== null && value !== '')
   );
+
+  return fetch(`${base}/id?!=true&committers=all`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...odyseeAuthHeaders(authToken),
+    },
+    body: JSON.stringify(body),
+  });
 }
 
 function publishMetadata(publishPayload: PublishParams) {
