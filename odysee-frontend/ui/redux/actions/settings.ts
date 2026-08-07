@@ -390,6 +390,8 @@ export function doOpenAnnouncements() {
 export function doFetchHomepages(hp?: string) {
   return (dispatch: Dispatch) => {
     if (isServedFromManifest()) {
+      // Static manifest serving has no /$/api homepage endpoint; rely on the
+      // built-in homepage data instead.
       dispatch({
         type: ACTIONS.FETCH_HOMEPAGES_FAILED,
       });

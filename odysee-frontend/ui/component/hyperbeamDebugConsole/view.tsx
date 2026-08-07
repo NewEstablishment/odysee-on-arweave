@@ -1515,11 +1515,7 @@ function architectureColumnWidths(
     left: architectureColumnWidth(['Browser UI', 'SDK facade', 'SSR proxy'], 112, 180),
     middle: architectureColumnWidth(['HyperBEAM', 'Auth hook'], 118, 170),
     device: architectureColumnWidth(deviceRows, 190, 280),
-    store: architectureColumnWidth(
-      ['Search index', ...storeRows.map(([store]) => store)],
-      132,
-      250
-    ),
+    store: architectureColumnWidth(['Search index', ...storeRows.map(([store]) => store)], 132, 250),
     backend: architectureColumnWidth(['Media store', ...legacyRows.map(([backend]) => backend)], 132, 220),
   };
 }

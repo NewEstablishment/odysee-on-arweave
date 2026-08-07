@@ -241,6 +241,9 @@ document.addEventListener('drop', (event) => {
   event.preventDefault();
 });
 
+// The Arweave path-manifest device only falls back to index.html for a single
+// missing path segment, so multi-segment deep links cannot use history routing
+// when served from a manifest — route in the URL hash there instead.
 const AppRouter = isServedFromManifest() ? HashRouter : BrowserRouter;
 
 function RouterSyncBridge() {

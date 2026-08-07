@@ -1,6 +1,26 @@
 <!doctype html>
 <html dir="ltr">
   <head>
+    <script>
+      // When served from a HyperBEAM node via the Arweave path-manifest device
+      // the app lives under /<ManifestID>/... — anchor all relative URLs to the
+      // manifest root so assets resolve on deep links too.
+      // Keep the regex in sync with ui/util/manifest-prefix.ts.
+      (function () {
+        var match = window.location.pathname.match(/^\/([A-Za-z0-9_-]{43})(?=\/|$)/);
+        if (match) {
+          var base = document.createElement('base');
+          base.href = match[0] + '/';
+          document.head.appendChild(base);
+          // The app hash-routes under a manifest (only single-segment paths
+          // fall back to index.html), so fold any path remainder into the hash.
+          var rest = window.location.pathname.slice(match[0].length);
+          if (rest && rest !== '/' && !window.location.hash) {
+            window.history.replaceState(null, '', match[0] + '#' + rest + window.location.search);
+          }
+        }
+      })();
+    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta http-equiv="Pragma" content="no-cache" />

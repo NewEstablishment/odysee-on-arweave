@@ -19,7 +19,6 @@ import rewards from 'rewards';
 import { Lbryio } from 'lbryinc';
 import { DOMAIN, LOCALE_API } from 'config';
 import { getDefaultLanguage } from 'util/default-languages';
-import { fetchHyperbeamAccountApi } from 'util/hyperbeam';
 import { LocalStorage, LS } from 'util/storage';
 import { doMembershipMine } from 'redux/actions/memberships';
 import { selectDefaultChannelId } from 'redux/selectors/settings';
@@ -77,12 +76,8 @@ function installAuthTokenFromResponse(response: any) {
   }
 }
 
-function callOdyseeAccountApi(resource: string, action: string, params: any = {}, _method = 'post') {
-  return fetchHyperbeamAccountApi(`${resource}-${action}`.replace(/_/g, '-'), params).catch((error) => {
-    const status = Number(String(error?.message || '').match(/failed with ([0-9]+)/)?.[1]);
-    if (status) error.response = { status };
-    throw error;
-  });
+function callOdyseeAccountApi(resource: string, action: string, params: any = {}, method = 'post') {
+  return Lbryio.call(resource, action, params, method);
 }
 
 function resendVerificationEmail(email: string) {
@@ -92,7 +87,7 @@ function resendVerificationEmail(email: string) {
   });
 }
 
-function authenticateThroughHyperbeam(domain: string, language: string, dispatch: Dispatch) {
+function authenticateOdyseeAccount(domain: string, language: string, dispatch: Dispatch) {
   return Lbryio.getAuthToken()
     .then((token) => {
       if (!token || token.length > 60) return false;
@@ -332,7 +327,7 @@ export function doAuthenticate(
     checkAuthBusy()
       .then(() => {
         dispatch(doFetchGeoBlockedList());
-        return authenticateThroughHyperbeam(DOMAIN, getDefaultLanguage(), dispatch);
+        return authenticateOdyseeAccount(DOMAIN, getDefaultLanguage(), dispatch);
       })
       .then((user) => {
         LocalStorage.removeItem(LS.AUTH_IN_PROGRESS);

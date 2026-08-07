@@ -67,23 +67,21 @@ not an oracle.
 Needs Erlang/OTP 27+, rebar3, node >= 22.12, and network access to Odysee.
 
 ```sh
-# 0. Get the store-first frontend. It is not tracked here: the repo already
-#    carries odysee-frontend/ from master, which calls the deleted device
-#    paths and will not work against this backend.
-git checkout origin/neo/1.0 -- frontend && git reset -q HEAD frontend
-
-# 1. Build the UI. The node API must be baked in at BUILD time.
-cd frontend
+# 1. Build the UI from the tracked odysee-frontend/, which carries the
+#    store-first data layer. The node API must be baked in at BUILD time,
+#    and the manifest profile (relative base, node-safe asset names) is
+#    required for serving from the node.
+cd odysee-frontend
 corepack enable && corepack prepare pnpm@10.33.0 --activate
 pnpm install
-NODE_ENV=production ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm build
+ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run build:manifest
 
 # 2. Build the preloaded device store, once.
 cd .. && HB_PORT=18734 rebar3 device local     # ctrl-C twice once it boots
 
 # 3. Start the node and publish the UI into it.
 #    One line. rebar3 shell ignores multi-line --eval and races EOF, hence the sleep.
-HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'Opts = hb_odysee_node:seed_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, M} = hb_odysee_ui:publish("frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, M]), receive stop -> ok end.' < <(sleep 100000)
+HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'Opts = hb_odysee_node:seed_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, M]), receive stop -> ok end.' < <(sleep 100000)
 ```
 
 Then open, using the manifest id it prints:

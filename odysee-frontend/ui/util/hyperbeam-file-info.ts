@@ -1,3 +1,5 @@
+import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+
 export function localHyperbeamUploadFileInfo(
   claim: Claim | null | undefined,
   uri: string,
@@ -46,6 +48,8 @@ export function localHyperbeamUploadFileInfo(
   } as any;
 }
 
+// Native uploads read straight from the node's message store by immutable id.
 function uploadReadUrl(uploadId: string | null | undefined) {
-  return uploadId ? `/$/api/hyperbeam-upload/v1/read/${encodeURIComponent(uploadId)}` : '';
+  const node = String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  return node && uploadId ? `${node}/${encodeURIComponent(uploadId)}` : '';
 }
