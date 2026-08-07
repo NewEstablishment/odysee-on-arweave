@@ -372,13 +372,7 @@ require_claim_id(ClaimID, Msg) ->
 
 media_from_stream_path(Path, Req, StoreOpts, NodeOpts) ->
     maybe
-        {ok, Stream0} ?= read(StoreOpts, #{ <<"read">> => Path }, NodeOpts),
-        %% A freshly-sourced read returns lazy links for values that were
-        %% just written, so `sd-hash' can arrive as a link rather than a
-        %% binary and the extraction below would report it missing. Force
-        %% the whole message first: on a warm read this is a no-op, on a
-        %% cold one it is the difference between serving media and failing.
-        Stream = hb_cache:ensure_all_loaded(Stream0, NodeOpts),
+        {ok, Stream} ?= read(StoreOpts, #{ <<"read">> => Path }, NodeOpts),
         {ok, Source} ?= stream_media_source(Stream, NodeOpts),
         media_response(Source, Req, store_node_opts(StoreOpts, NodeOpts))
     end.
