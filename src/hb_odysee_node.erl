@@ -407,19 +407,31 @@ upload_video_roundtrip_test() ->
         }, none, Opts),
     ?assertNotEqual([Committer], stored_signers(FreshUserID, Opts)).
 
-%% @doc The numbered values of a `~query@1.0' reply, in order.
+%% @doc The values of a `~query@1.0' reply's numbered keys, ordered by their
+%% integer value (so `"10"' follows `"9"', not `"1"').
 match_paths(Reply, Opts) ->
     Loaded = hb_cache:ensure_all_loaded(Reply, Opts),
-    [
-        V
-    ||
-        {K, V} <- lists:sort(hb_maps:to_list(Loaded, Opts)),
-        lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(K))
-    ].
+    Numbered =
+        [
+            {binary_to_integer(K), V}
+        ||
+            {K, V} <- hb_maps:to_list(Loaded, Opts),
+            lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(K))
+        ],
+    [V || {_, V} <- lists:sort(Numbered)].
 
-%% @doc Read a query match the way a verifying client must: attach the
-%% stored commitments, then accept the entry only if its committer IS the
-%% claimed channel and the commitment verifies. Returns the title.
+%% @doc Read a query match the way a verifying client must, and return its
+%% title only if the claimed channel genuinely signed this content.
+%%
+%% The check is membership, not sole authorship. Storage is content
+%% addressed, so a message's commitments are grouped by its signer-independent
+%% content id: anyone can upload byte-identical content and have their
+%% commitment coalesced into the same group. Demanding the channel be the
+%% ONLY signer would let an attacker censor a genuine upload by re-uploading
+%% its public bytes, adding a second signer. So verify the channel's OWN
+%% commitments and ignore any others: a spoof (content the channel never
+%% signed) has no such commitment and is rejected; an attacker's extra
+%% commitment on genuine content changes nothing.
 verified_channel_entry(Path, Channel, Opts) ->
     {ok, Msg} = hb_cache:read(Path, Opts),
     Loaded =
@@ -427,14 +439,22 @@ verified_channel_entry(Path, Channel, Opts) ->
             hb_cache:ensure_all_loaded(Msg, Opts),
             Opts
         ),
-    IsGenuine =
-        lists:usort(hb_message:signers(Loaded, Opts)) =:= [Channel] andalso
+    Commitments = hb_maps:get(<<"commitments">>, Loaded, #{}, Opts),
+    ByChannel =
+        [
+            ID
+        ||
+            {ID, C} <- hb_maps:to_list(Commitments, Opts),
+            hb_maps:get(<<"committer">>, C, none, Opts) =:= Channel
+        ],
+    Genuine =
+        ByChannel =/= [] andalso
             hb_message:verify(
                 Loaded,
-                #{ <<"commitment-ids">> => <<"all">> },
+                #{ <<"commitment-ids">> => ByChannel },
                 Opts
             ),
-    case IsGenuine of
+    case Genuine of
         true -> {true, hb_maps:get(<<"title">>, Loaded, not_found, Opts)};
         false -> false
     end.
@@ -442,9 +462,10 @@ verified_channel_entry(Path, Channel, Opts) ->
 %% A channel is its owner's address: the profile is a committed message and
 %% uploads reference the address under `channel'. The channel page is a
 %% `~query@1.0' match on that key. The query is convention; the proof is the
-%% commitment: a listing reader keeps only entries whose committer IS the
-%% claimed channel, so a spoofed entry from another identity matches the
-%% query but fails the filter.
+%% commitment: a listing reader keeps entries the claimed channel signed. A
+%% spoof (another identity's content tagged with the channel) is rejected,
+%% and a censorship attempt (an attacker re-uploading the genuine bytes to
+%% co-sign the shared object) does not hide the real upload.
 channel_profile_and_listing_test() ->
     {Node, Opts} = upload_node(),
     {ProfileReply, ProfileID} =
@@ -459,15 +480,20 @@ channel_profile_and_listing_test() ->
         hb_maps:get(<<"name">>, hb_cache:ensure_all_loaded(Profile, Opts), not_found, Opts)
     ),
     Upload =
-        fun(Title) -> #{
+        fun(Title, Body) -> #{
             <<"type">> => <<"stream">>,
             <<"channel">> => Channel,
             <<"title">> => Title,
-            <<"body">> => crypto:strong_rand_bytes(1024)
+            <<"body">> => Body
         } end,
-    {_, _} = commit_post(Node, Upload(<<"first">>), ProfileReply, Opts),
-    {_, _} = commit_post(Node, Upload(<<"second">>), ProfileReply, Opts),
-    {_, _} = commit_post(Node, Upload(<<"spoofed">>), none, Opts),
+    Genuine = Upload(<<"first">>, <<"genuine video bytes">>),
+    {_, _} = commit_post(Node, Genuine, ProfileReply, Opts),
+    {_, _} = commit_post(Node, Upload(<<"second">>, crypto:strong_rand_bytes(1024)), ProfileReply, Opts),
+    %% Same channel key, a different identity, distinct content: a spoof.
+    {_, _} = commit_post(Node, Upload(<<"spoofed">>, crypto:strong_rand_bytes(1024)), none, Opts),
+    %% The genuine video's exact bytes re-uploaded from a fresh identity:
+    %% content-addressing coalesces it into the same object and co-signs it.
+    {_, _} = commit_post(Node, Genuine, none, Opts),
     {ok, QueryReply} =
         hb_http:post(Node, #{
             <<"path">> => <<"/~query@1.0/only">>,
@@ -476,6 +502,7 @@ channel_profile_and_listing_test() ->
             <<"only">> => [<<"type">>, <<"channel">>],
             <<"return">> => <<"paths">>
         }, Opts),
+    %% Four uploads, but the poison coalesced with the genuine one: 3 objects.
     Paths = match_paths(QueryReply, Opts),
     ?assertEqual(3, length(Paths)),
     Verified =
@@ -483,6 +510,7 @@ channel_profile_and_listing_test() ->
             fun(P) -> verified_channel_entry(P, Channel, Opts) end,
             Paths
         )),
+    %% Spoof rejected; the co-signed genuine upload still listed.
     ?assertEqual([<<"first">>, <<"second">>], Verified).
 
 %% A comment is a committed message referencing its video under `parent';
