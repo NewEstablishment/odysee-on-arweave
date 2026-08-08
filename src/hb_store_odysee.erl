@@ -658,12 +658,32 @@ warm_addresses(_BareKey, _Path, _Msg, _StoreOpts, _NodeOpts) ->
 link_local(_Keys, _Msg, [], _Opts) ->
     ok;
 link_local(Keys, Msg, LocalStores, Opts) ->
-    {ok, Id} = hb_cache:write(Msg, Opts#{ <<"store">> => LocalStores }),
+    WriteOpts = Opts#{ <<"store">> => LocalStores },
+    {ok, UncommittedID} = hb_cache:write(Msg, WriteOpts),
+    %% Link to a COMMITMENT id, never to the uncommitted id `hb_cache:write'
+    %% returns. `hb_cache' selects a message's commitment by the id the
+    %% caller asked for, building `commitments/<Target>' from the requested
+    %% path, so the uncommitted id names no commitment and serves the content
+    %% with no proof at all.
+    %%
+    %% This makes the link target correct, not the link itself verifiable:
+    %% these keys are locators (a path hash, a bare outpoint), and neither
+    %% names a commitment either, so a read through one still arrives without
+    %% proof. Callers that need proof address the object by its commitment id
+    %% or by its canonical path. See `skeleton_blob_serves_and_addresses_test'
+    %% in `hb_odysee_node' for both halves.
+    Target = commitment_target(Msg, UncommittedID, WriteOpts),
     lists:foreach(
-        fun(Key) -> hb_store:link(LocalStores, #{ Key => Id }, Opts) end,
+        fun(Key) -> hb_store:link(LocalStores, #{ Key => Target }, Opts) end,
         Keys
     ),
     ok.
+
+commitment_target(Msg, UncommittedID, Opts) ->
+    case hb_maps:keys(hb_maps:get(<<"commitments">>, Msg, #{}, Opts), Opts) of
+        [] -> UncommittedID;
+        [CommitmentID | _] -> CommitmentID
+    end.
 
 %% Follow `hb_store_gateway''s `local-store' convention when provided;
 %% otherwise the node's own local-scope stores (this store is `remote',

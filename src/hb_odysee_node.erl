@@ -173,8 +173,30 @@ skeleton_assert_verifies(Msg, Opts) ->
     ),
     Loaded.
 
+%% The `lbry@1.0' commitment ids on a message, newest-agnostic and ordered
+%% only by the map. These are content-addressed, so each names the object in
+%% the store; the node's own response signature does not.
+lbry_commitment_ids(Msg, Opts) ->
+    Commitments = hb_cache:ensure_all_loaded(
+        hb_maps:get(<<"commitments">>, Msg, #{}, Opts), Opts),
+    [
+        ID
+    ||
+        {ID, Commitment} <- hb_maps:to_list(Commitments, Opts),
+        hb_maps:get(<<"commitment-device">>, Commitment, none, Opts)
+            =:= <<"lbry@1.0">>
+    ].
+
 %% The smallest complete slice: bytes in, verified message out over HTTP,
 %% then addressable by a plain id with no path knowledge and no device call.
+%%
+%% The verifiable plain id is a COMMITMENT id. `hb_cache' selects the
+%% commitment named by the id the caller asked for (`prepare_typed_values'
+%% builds `commitments/<Target>' from the requested path), so an id derived
+%% from the content selects its own proof and an id derived from anything
+%% else cannot. The alias is a path hash with no cryptographic relationship
+%% to the bytes, so it is a locator: it resolves to the same object, but a
+%% caller who wants proof asks by commitment id or by canonical path.
 skeleton_blob_serves_and_addresses_test() ->
     Bytes = <<"walking skeleton blob payload">>,
     Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
@@ -186,10 +208,27 @@ skeleton_blob_serves_and_addresses_test() ->
     Served = skeleton_assert_verifies(ViaPath, Opts),
     ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Served, not_found, Opts)),
 
+    %% Addressable by a plain id, and it still carries its proof. Select the
+    %% `lbry@1.0' commitment specifically: a served message also carries the
+    %% node's own signature over the response, which is minted per request
+    %% and names nothing in the store.
+    [CommitmentID | _] = lbry_commitment_ids(Served, Opts),
+    {ok, ViaID} = hb_http:get(Node, <<"/", CommitmentID/binary>>, #{}),
+    Addressed = skeleton_assert_verifies(ViaID, Opts),
+    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)),
+
+    %% The alias locates the same object, without carrying the proof.
     Alias = hb_odysee_address:alias(Path),
     {ok, ViaAlias} = hb_http:get(Node, <<"/", Alias/binary>>, #{}),
-    Addressed = skeleton_assert_verifies(ViaAlias, Opts),
-    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)).
+    ?assertEqual(
+        Hash,
+        hb_maps:get(
+            <<"blob-hash">>,
+            hb_cache:ensure_all_loaded(ViaAlias, Opts),
+            not_found,
+            Opts
+        )
+    ).
 
 %% Descriptor parsed and checked against its sd-hash.
 skeleton_descriptor_serves_test() ->
