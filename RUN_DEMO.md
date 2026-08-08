@@ -110,10 +110,47 @@ Claims, channels, streams, transactions, descriptors, blobs, video playback,
 auth, search. All cryptographically verified, cached locally after first
 fetch, and addressable by a plain HyperBEAM id.
 
+## Writes: uploads, channels, comments
+
+Native content never touches LBRY. Boot the node with
+`hb_odysee_node:upload_opts/1` instead of `seed_opts/1` and the stock auth
+hook turns any POST carrying the `!` commit flag into a committed, stored,
+queryable message, signed with a cookie-derived per-user wallet, so a
+browser needs no wallet. No new devices; the whole plane is node options.
+
+```sh
+# Upload a video. The reply's message-id is its permanent address.
+curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+  -H "content-type: video/mp4" -H "type: stream" -H "title: my video" \
+  --data-binary @video.mp4
+
+# It now serves, byte-exact and signed, at:
+#   GET /<message-id>
+
+# Who am I? The profile's commitment names its committer:
+curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+  -H "type: channel" -H "name: my channel"          # -> <profile-id>
+curl "$NODE/<profile-id>/commitments/<profile-id>/committer"   # -> <address>
+
+# Tag uploads with `channel: <address>`; the channel page is a query:
+curl -X POST "$NODE/~query@1.0/only" -H "type: stream" \
+  -H "channel: <address>" -H "only: type,channel" -H "return: paths"
+
+# Comments reference the video id:
+curl -X POST "$NODE/id?!=true&committers=all" \
+  -H "type: comment" -H "parent: <video-id>" --data-binary "nice one"
+```
+
+The query is convention; the proof is the commitment. A listing reader
+keeps entries whose committer IS the claimed channel (anyone can claim any
+`channel` key, nobody can fake the signature). The write-plane tests in
+`hb_odysee_node` drive all of this over HTTP, spoof included.
+
 ## What does not
 
-- **Comments, uploads, reactions, view and subscriber counts, moderation.**
-  Those devices were deleted and have not been rebuilt. This is the real gap.
+- **Reactions, view and subscriber counts, moderation.** Not rebuilt.
+- **Frontend for writes.** The write plane is HTTP-only for now; the UI
+  still renders legacy content. Integration comes after battletesting.
 - **Homepage tiles.** Claims resolve, but the frontend wants decoded display
   metadata that evidence messages do not carry.
 - **Seeking.** `dev_cache` drops the request, so Range headers never reach the
