@@ -407,6 +407,84 @@ upload_video_roundtrip_test() ->
         }, none, Opts),
     ?assertNotEqual([Committer], stored_signers(FreshUserID, Opts)).
 
+%% @doc The numbered values of a `~query@1.0' reply, in order.
+match_paths(Reply, Opts) ->
+    Loaded = hb_cache:ensure_all_loaded(Reply, Opts),
+    [
+        V
+    ||
+        {K, V} <- lists:sort(hb_maps:to_list(Loaded, Opts)),
+        lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(K))
+    ].
+
+%% @doc Read a query match the way a verifying client must: attach the
+%% stored commitments, then accept the entry only if its committer IS the
+%% claimed channel and the commitment verifies. Returns the title.
+verified_channel_entry(Path, Channel, Opts) ->
+    {ok, Msg} = hb_cache:read(Path, Opts),
+    Loaded =
+        hb_cache:read_all_commitments(
+            hb_cache:ensure_all_loaded(Msg, Opts),
+            Opts
+        ),
+    IsGenuine =
+        lists:usort(hb_message:signers(Loaded, Opts)) =:= [Channel] andalso
+            hb_message:verify(
+                Loaded,
+                #{ <<"commitment-ids">> => <<"all">> },
+                Opts
+            ),
+    case IsGenuine of
+        true -> {true, hb_maps:get(<<"title">>, Loaded, not_found, Opts)};
+        false -> false
+    end.
+
+%% A channel is its owner's address: the profile is a committed message and
+%% uploads reference the address under `channel'. The channel page is a
+%% `~query@1.0' match on that key. The query is convention; the proof is the
+%% commitment: a listing reader keeps only entries whose committer IS the
+%% claimed channel, so a spoofed entry from another identity matches the
+%% query but fails the filter.
+channel_profile_and_listing_test() ->
+    {Node, Opts} = upload_node(),
+    {ProfileReply, ProfileID} =
+        commit_post(Node, #{
+            <<"type">> => <<"channel">>,
+            <<"name">> => <<"probe channel">>
+        }, none, Opts),
+    [Channel] = stored_signers(ProfileID, Opts),
+    {ok, Profile} = hb_http:get(Node, <<"/", ProfileID/binary>>, Opts),
+    ?assertEqual(
+        <<"probe channel">>,
+        hb_maps:get(<<"name">>, hb_cache:ensure_all_loaded(Profile, Opts), not_found, Opts)
+    ),
+    Upload =
+        fun(Title) -> #{
+            <<"type">> => <<"stream">>,
+            <<"channel">> => Channel,
+            <<"title">> => Title,
+            <<"body">> => crypto:strong_rand_bytes(1024)
+        } end,
+    {_, _} = commit_post(Node, Upload(<<"first">>), ProfileReply, Opts),
+    {_, _} = commit_post(Node, Upload(<<"second">>), ProfileReply, Opts),
+    {_, _} = commit_post(Node, Upload(<<"spoofed">>), none, Opts),
+    {ok, QueryReply} =
+        hb_http:post(Node, #{
+            <<"path">> => <<"/~query@1.0/only">>,
+            <<"type">> => <<"stream">>,
+            <<"channel">> => Channel,
+            <<"only">> => [<<"type">>, <<"channel">>],
+            <<"return">> => <<"paths">>
+        }, Opts),
+    Paths = match_paths(QueryReply, Opts),
+    ?assertEqual(3, length(Paths)),
+    Verified =
+        lists:sort(lists:filtermap(
+            fun(P) -> verified_channel_entry(P, Channel, Opts) end,
+            Paths
+        )),
+    ?assertEqual([<<"first">>, <<"second">>], Verified).
+
 %% Live sourcing against real Odysee infrastructure. Network dependent, so it
 %% is opt-in: set ODYSEE_LIVE=1 to run. Everything else in this suite uses the
 %% fixtures seam and proves only that the layers compose.
