@@ -83,18 +83,63 @@ link(_StoreOpts, _Req, _NodeOpts) ->
 read(StoreOpts, Req = #{ <<"read">> := Key }, NodeOpts) ->
     BareKey = normalize_key(Key),
     Path = canonical_read_path(BareKey),
-    case fixture(Path, StoreOpts, NodeOpts) of
-        {ok, Msg} ->
-            fixture_result(Msg, NodeOpts);
-        not_found ->
-            case read_live(Path, Req, StoreOpts, NodeOpts) of
-                {ok, LiveMsg} = OK when is_map(LiveMsg) ->
-                    warm_addresses(BareKey, Path, LiveMsg, StoreOpts, NodeOpts),
-                    OK;
-                Other ->
-                    Other
-            end
-    end.
+    Result =
+        case fixture(Path, StoreOpts, NodeOpts) of
+            {ok, Msg} ->
+                fixture_result(Msg, NodeOpts);
+            not_found ->
+                case read_live(Path, Req, StoreOpts, NodeOpts) of
+                    {ok, LiveMsg} = OK when is_map(LiveMsg) ->
+                        warm_addresses(BareKey, Path, LiveMsg, StoreOpts, NodeOpts),
+                        OK;
+                    Other ->
+                        Other
+                end
+        end,
+    with_http_status(Result).
+
+%% HyperBEAM derives a response status through `dev_meta:message_to_status/2',
+%% which recognises a fixed set of atoms and falls through to a `200'
+%% catch-all for everything else. A bare `{error, invalid_outpoint}' is
+%% therefore served as HTTP 200 with the reason as the body, and a caller
+%% cannot tell a served object from a refused one. Carry the status
+%% explicitly so the boundary reports what actually happened.
+%%
+%% `not_found' is left exactly as it is: it already maps to 404, and callers
+%% (`dev_cache' among them) branch on that precise shape to fall back.
+with_http_status({error, not_found} = NotFound) ->
+    NotFound;
+with_http_status({error, Reason}) when is_atom(Reason) ->
+    {error, #{
+        <<"status">> => error_status(Reason),
+        <<"body">> => atom_to_binary(Reason, utf8)
+    }};
+with_http_status(Other) ->
+    Other.
+
+%% The caller named something that cannot address an object.
+error_status(invalid_nout) -> 400;
+error_status(invalid_odysee_store_path) -> 400;
+error_status(invalid_outpoint) -> 400;
+error_status(invalid_outpoint_path) -> 400;
+error_status(invalid_range) -> 400;
+error_status(invalid_txid) -> 400;
+error_status(missing_nout) -> 400;
+error_status(missing_txid) -> 400;
+error_status(not_a_directory) -> 400;
+%% The legacy source answered, but what it returned does not verify. The
+%% request was well formed, so this is an upstream fault rather than a
+%% client one.
+error_status(invalid_claim_signature) -> 502;
+error_status(invalid_evidence) -> 502;
+error_status(invalid_proxy_json) -> 502;
+error_status(invalid_tx_hex) -> 502;
+error_status(native_commitment_failure) -> 502;
+error_status(unsigned_claim) -> 502;
+error_status(protected) -> 403;
+%% Anything else is an object we cannot produce: absent upstream, or a claim
+%% whose kind did not match the one the path asked for.
+error_status(_) -> 404.
 
 read_live(<<"odysee/media/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
     media_from_stream_path(<<"odysee/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
