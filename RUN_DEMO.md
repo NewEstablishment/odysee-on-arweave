@@ -81,7 +81,9 @@ cd .. && HB_PORT=18734 rebar3 device local     # ctrl-C twice once it boots
 
 # 3. Start the node and publish the UI into it.
 #    One line. rebar3 shell ignores multi-line --eval and races EOF, hence the sleep.
-HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'Opts = hb_odysee_node:seed_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, M]), receive stop -> ok end.' < <(sleep 100000)
+#    hackney must be started first: hb_sup starts hb_http_client, which calls
+#    hackney_pool before the app is up, and the node dies during boot without it.
+HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'application:ensure_all_started(hackney), application:ensure_all_started(inets), Opts = hb_odysee_node:seed_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, M]), receive stop -> ok end.' < <(sleep 100000)
 ```
 
 Then open, using the manifest id it prints:
@@ -96,7 +98,7 @@ mutable locators at constant addresses and stale claims get served.
 ### Tests
 
 ```sh
-rebar3 device test --with-core        # 252 tests. --with-core is required,
+rebar3 device test --with-core        # 255 tests. --with-core is required,
                                       # plain `device test` runs 91 and skips
                                       # the whole store layer
 ODYSEE_LIVE=1 rebar3 device test --with-core   # adds live-infrastructure test
@@ -117,10 +119,18 @@ fetch, and addressable by a plain HyperBEAM id.
 - **Seeking.** `dev_cache` drops the request, so Range headers never reach the
   store. Whole-object playback only.
 - **Account banner.** Expected, there is no account backend.
-- **Known bug:** `GET /<alias>` returns the bytes but **no commitments**, so
-  an alias fetch is not verifiable. Use the `/~cache@1.0/read?read=...` form
-  when the proof matters. Details and the failing test are in
-  `ARCHITECTURE_READ_PATH.md`.
+- **Search.** `~query@1.0` returns HTTP 500 on any query with no results, an
+  upstream `case_clause` in `dev_query:match/4`. Fixed by
+  `patches/dev-query-match-error-tuple.patch`; unpatched nodes still 500.
+
+By design, not a bug: `GET /<alias>` returns the bytes but no commitments.
+An alias is a hash of a *path*, so it has no cryptographic relationship to
+the content and cannot name the content's proof. The verifiable plain id is
+the `lbry@1.0` commitment id, and `GET /<commitment-id>` does carry the
+proof; so does the canonical `/~cache@1.0/read?read=...` form. Aliases and
+bare outpoints are locators. See `skeleton_blob_serves_and_addresses_test`
+in `hb_odysee_node` for both halves, and `ARCHITECTURE_READ_PATH.md` for the
+full read path.
 
 ## Read next
 
