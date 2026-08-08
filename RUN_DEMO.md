@@ -98,7 +98,7 @@ mutable locators at constant addresses and stale claims get served.
 ### Tests
 
 ```sh
-rebar3 device test --with-core        # 255 tests. --with-core is required,
+rebar3 device test --with-core        # 258 tests. --with-core is required,
                                       # plain `device test` runs 91 and skips
                                       # the whole store layer
 ODYSEE_LIVE=1 rebar3 device test --with-core   # adds live-infrastructure test
@@ -141,10 +141,13 @@ curl -X POST "$NODE/id?!=true&committers=all" \
   -H "type: comment" -H "parent: <video-id>" --data-binary "nice one"
 ```
 
-The query is convention; the proof is the commitment. A listing reader
-keeps entries whose committer IS the claimed channel (anyone can claim any
-`channel` key, nobody can fake the signature). The write-plane tests in
-`hb_odysee_node` drive all of this over HTTP, spoof included.
+The query is convention; the proof is the commitment. A listing reader keeps
+entries the claimed channel signed (anyone can claim any `channel` key, nobody
+can forge the signature). Membership, not sole authorship: because storage is
+content addressed, an attacker can re-upload a video's public bytes to co-sign
+the shared object, so demanding the channel be the only signer would let them
+censor a genuine upload. The write-plane tests in `hb_odysee_node` drive all
+of this over HTTP, both the spoof and the censorship attempt.
 
 ## What does not
 

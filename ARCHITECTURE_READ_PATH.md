@@ -93,27 +93,29 @@ not an oracle.
 - **Two independent fixture seams** exist with different key namespaces: the
   facade keys by canonical `odysee/...` path, the sub-stores by bare hash.
 
-## Known bug: the alias serves unverifiable data
+## By design: the alias is a locator, not a proof
 
-`GET /<alias>` returns the message content but **no commitments**. Measured on
-the running node:
+`GET /<alias>` returns the message content but **no commitments**, while
+`GET /<commitment-id>` carries them:
 
 ```
-via path:   3 commitments  (hmac-sha256, rsa-pss-sha512, lbry@1.0/sha-256d)
-via alias:  0 commitments
+via commitment id:  3 commitments  (hmac-sha256, rsa-pss-sha512, lbry@1.0/sha-256d)
+via alias:          0 commitments
 ```
 
-So an alias fetch hands a peer bytes it cannot check, which defeats the point
-of making content addressable to peers and routers.
+This is not a bug. `hb_cache` selects a message's commitment by the id the
+caller requested, building `commitments/<Target>` from the requested path.
+An alias is `sha256("odysee-alias:v1:" ++ Path)`, a hash of a *path*, so it
+has no cryptographic relationship to the content and can never name the
+content's proof. An id that verifies must be derived from the bytes: the
+`lbry@1.0` (or uploader) commitment id, or the canonical
+`/~cache@1.0/read?read=...` path, both of which do carry the commitments.
 
-The in-process read (`hb_cache:read(alias, Opts)`) **does** carry commitments;
-only the HTTP path loses them, so the fault is in response construction for the
-`?IS_ID` short-circuit, not in the link target. A first fix that pointed the
-link at a commitment id did **not** resolve it and was reverted.
+`skeleton_blob_serves_and_addresses_test` asserts both halves: the commitment
+id is addressable **and** verifiable over HTTP, the alias resolves to the same
+object as a locator. `link_local` targets a commitment id (commit `44853cb`),
+so the shortcut points at a proof-bearing id even though the alias itself does
+not name one.
 
-`skeleton_blob_serves_and_addresses_test` now asserts commitments are present
-before verifying, and **currently fails**, which is correct: it was previously
-passing vacuously, because verifying an empty commitment set returns true.
-
-Until this is fixed, treat the path form as the verifiable address and the
-alias as a convenience locator.
+Treat the commitment id or the path form as the verifiable address, and the
+alias (and bare outpoint) as convenience locators.

@@ -34,7 +34,8 @@ so a seek costs one small fetch, not a whole-video reassembly per request.
 ## 3. `dev-query-match-error-tuple.patch`
 
 `dev_query:match/4` crashes with `case_clause` on every query that has no
-results, so `~query@1.0` returns HTTP 500 rather than an empty result.
+results, so `~query@1.0` returns HTTP 500 rather than a 404 miss (or, for
+`return=boolean`, `{ok, false}`).
 `hb_cache:store_match/2` returns `{error, not_found}` on an empty match
 (and `hb_cache:match/2` does the same on the `match@1.0` path), but
 `dev_query:match/4` only has clauses for `{ok, _}` and a bare `not_found`.
