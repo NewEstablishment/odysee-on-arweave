@@ -485,6 +485,48 @@ channel_profile_and_listing_test() ->
         )),
     ?assertEqual([<<"first">>, <<"second">>], Verified).
 
+%% A comment is a committed message referencing its video under `parent';
+%% listing is a `~query@1.0' match on parent and type. The commenter's
+%% identity comes from the commitment, never from a claimed key, and a
+%% different session is a different identity.
+comment_flow_test() ->
+    {Node, Opts} = upload_node(),
+    {_, VideoID} =
+        commit_post(Node, #{
+            <<"type">> => <<"stream">>,
+            <<"title">> => <<"commented video">>,
+            <<"body">> => crypto:strong_rand_bytes(256)
+        }, none, Opts),
+    {_, CommentID} =
+        commit_post(Node, #{
+            <<"type">> => <<"comment">>,
+            <<"parent">> => VideoID,
+            <<"body">> => <<"first comment">>
+        }, none, Opts),
+    {ok, QueryReply} =
+        hb_http:post(Node, #{
+            <<"path">> => <<"/~query@1.0/only">>,
+            <<"type">> => <<"comment">>,
+            <<"parent">> => VideoID,
+            <<"only">> => [<<"type">>, <<"parent">>],
+            <<"return">> => <<"paths">>
+        }, Opts),
+    [CommentPath] = match_paths(QueryReply, Opts),
+    {ok, Comment} = hb_cache:read(CommentPath, Opts),
+    Loaded = hb_cache:ensure_all_loaded(Comment, Opts),
+    ?assertEqual(
+        <<"first comment">>,
+        hb_maps:get(<<"body">>, Loaded, not_found, Opts)
+    ),
+    ?assertEqual(
+        VideoID,
+        hb_maps:get(<<"parent">>, Loaded, not_found, Opts)
+    ),
+    ?assertNotEqual(
+        stored_signers(VideoID, Opts),
+        stored_signers(CommentID, Opts)
+    ).
+
 %% Live sourcing against real Odysee infrastructure. Network dependent, so it
 %% is opt-in: set ODYSEE_LIVE=1 to run. Everything else in this suite uses the
 %% fixtures seam and proves only that the layers compose.
