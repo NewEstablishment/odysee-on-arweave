@@ -12,8 +12,20 @@
 %%% peers serves the same content trustlessly. `serving_store/1' returns
 %%% the store stack for that configuration.
 -module(hb_odysee_node).
--export([start_seed/0, start_seed/1, seed_opts/1, serving_store/1]).
+-export([start_seed/0, start_seed/1, seed_opts/1, upload_opts/1, serving_store/1]).
 -export([cookie_auth_hooks/1]).
+
+%% The keys the auth hook must leave out of the signature. The hook's own
+%% defaults (secret, cookie, path, ...) plus the transport keys `hb_http'
+%% attaches to a request. Transport keys are rewritten when the stored
+%% message is later served, so signing them makes the served copy fail
+%% verification against its own commitment.
+-define(UNSIGNED_REQUEST_KEYS, [
+    <<"secret">>, <<"cookie">>, <<"set-cookie">>, <<"path">>,
+    <<"method">>, <<"authorization">>, <<"!">>,
+    <<"accept">>, <<"accept-bundle">>, <<"ao-peer">>, <<"ao-peer-port">>,
+    <<"committers">>, <<"host">>, <<"user-agent">>
+]).
 
 %% @doc Start a seed node on an OS-assigned port with default options.
 start_seed() ->
@@ -33,6 +45,21 @@ seed_opts(Overrides) ->
             ++ odysee_stores(Overrides),
     Base = maps:merge(#{ <<"port">> => 0 }, maps:remove(<<"store">>, Overrides)),
     Base#{ <<"store">> => Stores }.
+
+%% @doc Seed-node options that also accept committed writes: uploads,
+%% channel profiles, comments. The stock auth hook signs any request
+%% carrying the `!' commit flag with a cookie-derived per-user wallet,
+%% `store-all-signed' persists what it signs, and the match index makes
+%% the writes discoverable through `~query@1.0'. Writes land in the
+%% primary (first) store, which must support `match' (LMDB does).
+upload_opts(Overrides) ->
+    Opts = #{ <<"store">> := Stores } = seed_opts(Overrides),
+    Opts#{
+        <<"on">> => cookie_auth_hooks(Opts),
+        <<"store-all-signed">> => true,
+        <<"match-index">> => [hd(Stores)],
+        <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS
+    }.
 
 %% @doc The read-only Odysee source stores.
 odysee_stores(Opts) ->
@@ -295,6 +322,90 @@ skeleton_descriptor() ->
     Raw = hb_json:encode(Descriptor),
     {Raw, dev_lbry_stream_descriptor:descriptor_hash(Raw)}.
 
+
+%%% The write loop: a node built by `upload_opts/1', driven over HTTP the way
+%%% a browser drives it. A POST carrying the `!' commit flag is signed with a
+%%% cookie-derived wallet, persisted, and its signed id returned; everything
+%%% after that is ordinary reads and queries.
+
+upload_node() ->
+    Store = hb_test_utils:test_store(),
+    Node =
+        hb_http_server:start_node(upload_opts(#{
+            <<"store">> => [Store],
+            <<"priv-wallet">> => ar_wallet:new()
+        })),
+    {Node, #{ <<"store">> => [Store] }}.
+
+%% @doc POST a message with the commit flag. Passing a previous reply reuses
+%% its session cookie, so the request commits as the same user; `none' is a
+%% fresh session and therefore a fresh identity.
+commit_post(Node, Msg, PrevReply, Opts) ->
+    Req = Msg#{ <<"path">> => <<"/id?!=true&committers=all">> },
+    WithCookie =
+        case PrevReply of
+            none -> Req;
+            _ -> with_cookie(Req, PrevReply, Opts)
+        end,
+    {ok, Reply} = hb_http:post(Node, WithCookie, Opts),
+    ID = hb_maps:get(<<"message-id">>, Reply, not_found, Opts),
+    ?assert(is_binary(ID)),
+    {Reply, ID}.
+
+%% What a browser does: each `set-cookie' line's `name=value' pair, joined
+%% into one `cookie' header on the next request.
+with_cookie(Req, PrevReply, Opts) ->
+    SetCookie =
+        case hb_maps:get(<<"set-cookie">>, PrevReply, [], Opts) of
+            Lines when is_list(Lines) -> Lines;
+            Line -> [Line]
+        end,
+    Pairs = [hd(binary:split(L, <<";">>)) || L <- SetCookie],
+    Req#{ <<"cookie">> => iolist_to_binary(lists:join(<<"; ">>, Pairs)) }.
+
+%% @doc The committers of the message as stored, without the transport
+%% signature a served copy also carries.
+stored_signers(ID, Opts) ->
+    {ok, Msg} = hb_cache:read(ID, Opts),
+    hb_message:signers(hb_cache:ensure_all_loaded(Msg, Opts), Opts).
+
+%% Bytes and metadata in one committed POST. The reply carries the signed
+%% id; reading that id back returns the exact bytes with the uploader's
+%% commitment attached and verifying. The same cookie commits as the same
+%% identity.
+upload_video_roundtrip_test() ->
+    {Node, Opts} = upload_node(),
+    Bytes = crypto:strong_rand_bytes(64 * 1024),
+    {Reply, ID} =
+        commit_post(Node, #{
+            <<"type">> => <<"stream">>,
+            <<"title">> => <<"upload roundtrip probe">>,
+            <<"content-type">> => <<"video/mp4">>,
+            <<"body">> => Bytes
+        }, none, Opts),
+    {ok, ReadBack} = hb_http:get(Node, <<"/", ID/binary>>, Opts),
+    Loaded = hb_cache:ensure_all_loaded(ReadBack, Opts),
+    ?assertEqual(Bytes, hb_maps:get(<<"body">>, Loaded, not_found, Opts)),
+    ?assertEqual(
+        <<"video/mp4">>,
+        hb_maps:get(<<"content-type">>, Loaded, not_found, Opts)
+    ),
+    skeleton_assert_verifies(ReadBack, Opts),
+    [Committer] = stored_signers(ID, Opts),
+    {_, SameUserID} =
+        commit_post(Node, #{
+            <<"type">> => <<"stream">>,
+            <<"title">> => <<"same user">>,
+            <<"body">> => <<"second">>
+        }, Reply, Opts),
+    ?assertEqual([Committer], stored_signers(SameUserID, Opts)),
+    {_, FreshUserID} =
+        commit_post(Node, #{
+            <<"type">> => <<"stream">>,
+            <<"title">> => <<"fresh user">>,
+            <<"body">> => <<"third">>
+        }, none, Opts),
+    ?assertNotEqual([Committer], stored_signers(FreshUserID, Opts)).
 
 %% Live sourcing against real Odysee infrastructure. Network dependent, so it
 %% is opt-in: set ODYSEE_LIVE=1 to run. Everything else in this suite uses the
