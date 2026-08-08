@@ -114,10 +114,21 @@ with_http_status({error, Reason}) when is_atom(Reason) ->
         <<"status">> => error_status(Reason),
         <<"body">> => atom_to_binary(Reason, utf8)
     }};
+%% Tuple reasons only arise after input validation (a malformed path yields
+%% an atom via `require_hex_size'/`valid_hex_size'): they carry the detail of
+%% something the legacy source returned that did not parse or verify, e.g.
+%% `{txid_mismatch, _, _}', `{hash_mismatch, _, _}', `{http_status, 4xx, _}'.
+%% That is an upstream fault, so 502, with the tag as the body.
+with_http_status({error, Reason}) when is_tuple(Reason), is_atom(element(1, Reason)) ->
+    {error, #{
+        <<"status">> => 502,
+        <<"body">> => atom_to_binary(element(1, Reason), utf8)
+    }};
 with_http_status(Other) ->
     Other.
 
 %% The caller named something that cannot address an object.
+error_status(invalid_claim_id) -> 400;
 error_status(invalid_nout) -> 400;
 error_status(invalid_odysee_store_path) -> 400;
 error_status(invalid_outpoint) -> 400;
@@ -126,7 +137,6 @@ error_status(invalid_range) -> 400;
 error_status(invalid_txid) -> 400;
 error_status(missing_nout) -> 400;
 error_status(missing_txid) -> 400;
-error_status(not_a_directory) -> 400;
 %% The legacy source answered, but what it returned does not verify. The
 %% request was well formed, so this is an upstream fault rather than a
 %% client one.
