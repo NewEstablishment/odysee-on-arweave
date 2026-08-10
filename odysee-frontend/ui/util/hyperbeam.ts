@@ -101,11 +101,33 @@ async function storeClaimEntry(result: any): Promise<any | null> {
   const payload = await expandStoreEvidenceValue(storePayload(result));
   if (!payload) return null;
 
+  return storeClaimFromHyperbeam(payload, await fetchSigningChannelEvidence(payload));
+}
+
+function signingChannelIdFromEvidence(payload: any): string | null {
   const decoded = decodeClaimMetadata(payload);
-  const channelResult = decoded?.signedChannelId
-    ? await fetchCachedStoreJsonOrNull(storePath('odysee/channel', decoded.signedChannelId)).catch(() => null)
-    : null;
-  return storeClaimFromHyperbeam(payload, await expandStoreEvidenceValue(storePayload(channelResult)));
+  if (isClaimId(decoded?.signedChannelId)) return String(decoded.signedChannelId);
+
+  const commitments = value(payload, 'commitments');
+  if (!isObject(commitments)) return null;
+  for (const commitment of Object.values(commitments)) {
+    const channelId = value(commitment, 'channel-id', 'channel_id');
+    if (isClaimId(channelId)) return String(channelId);
+  }
+  return null;
+}
+
+async function fetchSigningChannelEvidence(payload: any): Promise<any | null> {
+  const channelId = signingChannelIdFromEvidence(payload);
+  const evidenceLink = value(payload, 'channel-evidence+link', 'channel-evidence-link');
+  const result = isStandaloneImmutableId(evidenceLink)
+    ? await fetchCachedImmutableJsonOrNull(String(evidenceLink)).catch(() => null)
+    : channelId
+      ? await fetchCachedStoreJsonOrNull(storePath('odysee/channel', channelId)).catch(() => null)
+      : null;
+  const channel = await expandStoreEvidenceValue(storePayload(result));
+  const resolvedChannelId = value(channel, 'claim-id', 'claim_id', 'channel-id', 'channel_id');
+  return channel && (!channelId || resolvedChannelId === channelId) ? channel : null;
 }
 
 async function expandStoreEvidenceValue(payload: any): Promise<any> {
@@ -1564,11 +1586,7 @@ async function fetchStoreClaimByAnyId(id: string): Promise<Array<Claim>> {
       .then(expandStoreEvidenceValue)
       .catch(() => null);
     if (payload) {
-      const decoded = decodeClaimMetadata(payload);
-      const channelResult = decoded?.signedChannelId
-        ? await fetchCachedStoreJsonOrNull(storePath('odysee/channel', decoded.signedChannelId)).catch(() => null)
-        : null;
-      const claim = storeClaimFromHyperbeam(payload, await expandStoreEvidenceValue(storePayload(channelResult)));
+      const claim = storeClaimFromHyperbeam(payload, await fetchSigningChannelEvidence(payload));
       if (claim) return [claim];
     }
     return fetchHyperbeamImmutableClaim(id);
@@ -1652,8 +1670,12 @@ async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, c
   const needsHyperbeam = !claim.hyperbeam && Boolean(value(claim, 'hyperbeam+link', 'hyperbeam-link'));
   const needsValue = !claim.value && Boolean(value(claim, 'value+link', 'value-link'));
   const needsMeta = !claim.meta && Boolean(value(claim, 'meta+link', 'meta-link'));
-  const needsSigningChannel =
+  const nativeChannelId =
+    value(claim, 'channel-id', 'channel_id', 'signing-channel-id', 'signing_channel_id') ||
+    value(claim.hyperbeam, 'channel-id', 'channel_id', 'signing-channel-id', 'signing_channel_id');
+  const needsLinkedSigningChannel =
     !claim.signing_channel && Boolean(value(claim, 'signing_channel+link', 'signing-channel+link'));
+  const needsNativeSigningChannel = !claim.signing_channel && isClaimId(nativeChannelId);
   const existingValue = claim.value;
   const needsSource = Boolean(
     existingValue &&
@@ -1665,19 +1687,38 @@ async function expandHyperbeamImmutableClaim(baseUrl: string, claimId: string, c
     !existingValue.thumbnail &&
     (value(existingValue, 'thumbnail+link', 'thumbnail-link') || value(claim, 'value+link', 'value-link'))
   );
-  if (!needsHyperbeam && !needsValue && !needsMeta && !needsSigningChannel && !needsSource && !needsThumbnail)
+  if (
+    !needsHyperbeam &&
+    !needsValue &&
+    !needsMeta &&
+    !needsLinkedSigningChannel &&
+    !needsNativeSigningChannel &&
+    !needsSource &&
+    !needsThumbnail
+  )
     return claim;
 
   const [hyperbeam, claimValue0, meta, signingChannel0] = await Promise.all([
     needsHyperbeam ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'hyperbeam') : Promise.resolve(null),
     needsValue ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value') : Promise.resolve(null),
     needsMeta ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'meta') : Promise.resolve(null),
-    needsSigningChannel
+    needsLinkedSigningChannel
       ? fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'signing_channel')
-      : Promise.resolve(null),
+      : needsNativeSigningChannel
+        ? fetchCachedImmutableChannelJsonOrNull(String(nativeChannelId)).then(responsePayload)
+        : Promise.resolve(null),
   ]);
   const claimValue = claimValue0 || existingValue;
-  const signingChannel = signingChannel0 ? await expandHyperbeamLinkedChannel(baseUrl, claimId, signingChannel0) : null;
+  const signingChannel = signingChannel0
+    ? needsNativeSigningChannel
+      ? sdkClaimFromHyperbeam(signingChannel0) || signingChannel0
+      : await expandHyperbeamLinkedChannel(baseUrl, claimId, signingChannel0)
+    : needsNativeSigningChannel
+      ? {
+          claim_id: String(nativeChannelId),
+          name: value(claim, 'channel-name', 'channel_name') || value(claim.hyperbeam, 'channel-name', 'channel_name'),
+        }
+      : null;
   const source =
     claimValue && !claimValue.source && value(claimValue, 'source+link', 'source-link')
       ? await fetchHyperbeamImmutableSubmessage(baseUrl, claimId, 'value/source')
@@ -1979,7 +2020,8 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   const nativeUpload = Boolean(
     value(claim, 'hyperbeam') ||
     value(claim, 'hyperbeam+link', 'hyperbeam-link') ||
-    value(claim, 'hyperbeam_upload', 'hyperbeam-upload')
+    value(claim, 'hyperbeam_upload', 'hyperbeam-upload') ||
+    value(claim, 'schema') === 'odysee-upload@1.0'
   );
   const claimId = nativeUpload && requestedClaimId ? requestedClaimId : value(claim, 'claim_id', 'claim-id');
   if (!claim || !claimId) return claim;
@@ -1990,6 +2032,9 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
   const mediaId = value(hyperbeam, 'media_id', 'media-id', 'mediaId') || value(claim, 'claim_id', 'claim-id');
   const valueType = value(claim, 'value_type', 'value-type') || claim.value_type;
   const meta = normalizeHyperbeamClaimMeta(value(claim, 'meta'));
+  const signingChannel = claim.signing_channel
+    ? normalizeHyperbeamChannelClaim(claim.signing_channel)
+    : claim.signing_channel;
 
   return {
     ...claim,
@@ -2032,9 +2077,9 @@ function sdkClaimFromHyperbeam(result: any, requestedClaimId?: string): any {
       : value(claim, 'short_url', 'short-url') || claim.short_url,
     value_type: valueType,
     meta,
-    signing_channel: claim.signing_channel
-      ? normalizeHyperbeamChannelClaim(claim.signing_channel)
-      : claim.signing_channel,
+    is_channel_signature_valid:
+      nativeUpload && signingChannel ? true : value(claim, 'is_channel_signature_valid', 'is-channel-signature-valid'),
+    signing_channel: signingChannel,
   };
 }
 
@@ -2093,9 +2138,7 @@ function storeClaimFromHyperbeam(payload: any, channelPayload?: any, fallbackNam
   const isChannel = Boolean(value(payload, 'public-key', 'public_key')) || String(name || '').startsWith('@');
   const signingChannel = !isChannel && channelPayload ? storeClaimFromHyperbeam(channelPayload) : undefined;
   const mediaUrl = !isChannel ? hyperbeamMediaUrl(outpoint, sdHash) : '';
-  const url = name
-    ? claimUrl(String(name), !isChannel && outpoint ? webSafeImmutableId(outpoint) : String(claimId))
-    : undefined;
+  const url = name ? claimUrl(String(name), outpoint ? webSafeImmutableId(outpoint) : String(claimId)) : undefined;
   const thumbnail = value(claimValue, 'thumbnail');
 
   return compactParams({
@@ -2232,12 +2275,10 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
   if (!immutableId) return null;
 
   const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
-  const decodedClaim = decodeClaimMetadata(storePayload(result));
-  const signingChannel = decodedClaim?.signedChannelId
-    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
-        .then(responsePayload)
-        .catch(() => null)
-    : null;
+  const payload = storePayload(result);
+  const signedChannelId = signingChannelIdFromEvidence(payload);
+  const decodedClaim = signedChannelId ? { signedChannelId } : null;
+  const signingChannel = await fetchSigningChannelEvidence(payload);
   // A token route (lbry://out_.../immutable_...) has no real claim name to
   // compare against; only enforce the name when the uri carries one.
   let name;
@@ -2309,7 +2350,8 @@ function immutableClaimFromHyperbeam(
   const decodedValue: Record<string, any> = {};
   const decodedSource: Record<string, any> = {};
   const channelPayload = storePayload(channelResult);
-  const channelClaim = sdkClaimFromHyperbeam(channelPayload) || channelPayload;
+  const channelClaim =
+    storeClaimFromHyperbeam(channelPayload) || sdkClaimFromHyperbeam(channelPayload) || channelPayload;
   const claim = sdkClaimFromHyperbeam(payload) || payload;
   const existingValue = isObject(value(claim, 'value')) ? value(claim, 'value') : {};
   const payloadSource = isObject(value(payload, 'source')) ? value(payload, 'source') : {};
@@ -2877,10 +2919,10 @@ export function immutableIdForClaim(claim: any): string | null {
 }
 
 export async function createNativePlaylist(fields: {
-  title: string,
-  description?: string,
-  thumbnail?: string,
-  items?: Array<string>,
+  title: string;
+  description?: string;
+  thumbnail?: string;
+  items?: Array<string>;
 }): Promise<string> {
   const message = compactParams({
     type: 'playlist',
@@ -2897,8 +2939,8 @@ export async function createNativePlaylist(fields: {
 
 export async function writeNativePlaylistRevision(
   rootId: string,
-  head: { message: any, messageId: string },
-  fields: { title?: string, description?: string, thumbnail?: string, items: Array<string> }
+  head: { message: any; messageId: string },
+  fields: { title?: string; description?: string; thumbnail?: string; items: Array<string> }
 ): Promise<string> {
   const current = head.message || {};
   const message = compactParams({
@@ -2916,9 +2958,7 @@ export async function writeNativePlaylistRevision(
   return writeNativeMessage(message, 'playlist revision');
 }
 
-export async function fetchNativePlaylistHead(
-  rootId: string
-): Promise<{ message: any, messageId: string } | null> {
+export async function fetchNativePlaylistHead(rootId: string): Promise<{ message: any; messageId: string } | null> {
   const root = await fetchPlaylistMessage(rootId);
   if (!root) return null;
 
@@ -2938,10 +2978,7 @@ export async function fetchNativePlaylistHead(
     const revision = await fetchPlaylistMessage(revisionId).catch(() => null);
     if (!revision || value(revision, 'revision-of') !== rootId) continue;
     const revisionNumber = toNumber(value(revision, 'revision'), 0);
-    if (
-      revisionNumber > headRevision ||
-      (revisionNumber === headRevision && revisionId < head.messageId)
-    ) {
+    if (revisionNumber > headRevision || (revisionNumber === headRevision && revisionId < head.messageId)) {
       head = { message: revision, messageId: revisionId };
       headRevision = revisionNumber;
     }

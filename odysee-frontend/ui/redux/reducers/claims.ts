@@ -161,19 +161,43 @@ function updateIfClaimChanged(original, delta, key, newClaim) {
 }
 
 function mergeResolvedChannelClaim(originalClaim, newClaim) {
-  if (!originalClaim || !newClaim || newClaim.value_type !== 'channel') return newClaim;
+  if (!originalClaim || !newClaim) return newClaim;
+
+  const resolvedClaim = {
+    ...newClaim,
+    ...(originalClaim.signing_channel || newClaim.signing_channel
+      ? {
+          signing_channel: {
+            ...originalClaim.signing_channel,
+            ...newClaim.signing_channel,
+            ...(originalClaim.signing_channel?.value || newClaim.signing_channel?.value
+              ? {
+                  value: {
+                    ...originalClaim.signing_channel?.value,
+                    ...newClaim.signing_channel?.value,
+                  },
+                }
+              : {}),
+          },
+          is_channel_signature_valid: newClaim.is_channel_signature_valid ?? originalClaim.is_channel_signature_valid,
+        }
+      : {}),
+  };
+  if (resolvedClaim.value_type !== 'channel') return resolvedClaim;
 
   const mergedClaim = {
     ...originalClaim,
-    ...newClaim,
-    ...(originalClaim.hyperbeam || newClaim.hyperbeam
-      ? { hyperbeam: { ...originalClaim.hyperbeam, ...newClaim.hyperbeam } }
+    ...resolvedClaim,
+    ...(originalClaim.hyperbeam || resolvedClaim.hyperbeam
+      ? { hyperbeam: { ...originalClaim.hyperbeam, ...resolvedClaim.hyperbeam } }
       : {}),
-    ...(originalClaim.value || newClaim.value ? { value: { ...originalClaim.value, ...newClaim.value } } : {}),
-    ...(originalClaim.meta || newClaim.meta ? { meta: { ...originalClaim.meta, ...newClaim.meta } } : {}),
+    ...(originalClaim.value || resolvedClaim.value
+      ? { value: { ...originalClaim.value, ...resolvedClaim.value } }
+      : {}),
+    ...(originalClaim.meta || resolvedClaim.meta ? { meta: { ...originalClaim.meta, ...resolvedClaim.meta } } : {}),
   };
   const originalClaimsInChannel = Number(originalClaim.meta?.claims_in_channel || 0);
-  const newClaimsInChannel = Number(newClaim.meta?.claims_in_channel || 0);
+  const newClaimsInChannel = Number(resolvedClaim.meta?.claims_in_channel || 0);
   if (!originalClaimsInChannel || newClaimsInChannel >= originalClaimsInChannel) return mergedClaim;
 
   return {
