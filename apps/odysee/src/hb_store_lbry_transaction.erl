@@ -26,13 +26,29 @@ read(StoreOpts, #{ <<"read">> := TxID }, NodeOpts) ->
             NormalizedTxID = hb_util:to_lower(TxID),
             case hb_store_remote_node:read_local_cache(StoreOpts, TxID, NodeOpts) of
                 {ok, Msg} -> {ok, Msg};
-                _ -> fetch_transaction(StoreOpts, NormalizedTxID, NodeOpts)
+                _ -> fetch_transaction(StoreOpts, NormalizedTxID, NodeOpts, 2)
             end;
         false ->
             {error, not_found}
     end.
 
-fetch_transaction(StoreOpts, TxID, NodeOpts) ->
+%% The SDK proxy intermittently fails single requests, exactly as the ancestry
+%% walk in `hb_store_lbry_claim_output' already documents. A transient failure
+%% here is worse than a slow read: callers that degrade to a weaker claim kind
+%% turn it into evidence with no `sd-hash', and the media read then fails with
+%% `missing_sd_hash' for a claim that is perfectly readable a moment later.
+%% Give the fetch one retry before reporting failure.
+fetch_transaction(StoreOpts, TxID, NodeOpts, Attempts) ->
+    case do_fetch_transaction(StoreOpts, TxID, NodeOpts) of
+        {ok, Msg} ->
+            {ok, Msg};
+        _Error when Attempts > 1 ->
+            fetch_transaction(StoreOpts, TxID, NodeOpts, Attempts - 1);
+        Error ->
+            Error
+    end.
+
+do_fetch_transaction(StoreOpts, TxID, NodeOpts) ->
     maybe
         {ok, TxResult} ?=
             hb_odysee_client:transaction_show(TxID, proxy_opts(StoreOpts, NodeOpts)),
