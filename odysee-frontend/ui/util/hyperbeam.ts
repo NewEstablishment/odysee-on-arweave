@@ -35,6 +35,9 @@ const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
+const HYPERBEAM_PUBLIC_STORE_BATCH_PATH = '/$/api/hyperbeam-public-store/v1/read-batch';
+const HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
+const HYPERBEAM_CHANNEL_SEARCH_BATCH_SIZE = 20;
 // Native writes POST straight to the node; `!` is the auth-hook commit flag,
 // so the node's configured auth hook decides whether the write is committed.
 // The commit flag signs the request via the node's auth hook; committers=all
@@ -119,12 +122,15 @@ function signingChannelIdFromEvidence(payload: any): string | null {
 
 async function fetchSigningChannelEvidence(payload: any): Promise<any | null> {
   const channelId = signingChannelIdFromEvidence(payload);
+  const inlineEvidence = value(payload, 'channel-evidence', 'channel_evidence');
   const evidenceLink = value(payload, 'channel-evidence+link', 'channel-evidence-link');
-  const result = isStandaloneImmutableId(evidenceLink)
-    ? await fetchCachedImmutableJsonOrNull(String(evidenceLink)).catch(() => null)
-    : channelId
-      ? await fetchCachedStoreJsonOrNull(storePath('odysee/channel', channelId)).catch(() => null)
-      : null;
+  const result = inlineEvidence
+    ? inlineEvidence
+    : isStandaloneImmutableId(evidenceLink)
+      ? await fetchCachedImmutableJsonOrNull(String(evidenceLink)).catch(() => null)
+      : channelId
+        ? await fetchCachedStoreJsonOrNull(storePath('odysee/channel-json', channelId)).catch(() => null)
+        : null;
   const channel = await expandStoreEvidenceValue(storePayload(result));
   const resolvedChannelId = value(channel, 'claim-id', 'claim_id', 'channel-id', 'channel_id');
   return channel && (!channelId || resolvedChannelId === channelId) ? channel : null;
@@ -1516,7 +1522,7 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   if (claimIds.length) return fetchHyperbeamResolveClaimIds({ ...params, claim_ids: claimIds });
 
   const channelIds = paramValues(params, 'channel_ids', 'channel-ids', 'channel_id', 'channel-id');
-  if (channelIds.length) return fetchHyperbeamChannelClaims(channelIds[0], params);
+  if (channelIds.length) return fetchHyperbeamChannelClaims(channelIds, params);
 
   const pageSize = toNumber(params.page_size, 20);
   return {
@@ -1529,19 +1535,18 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
 }
 
 async function fetchHyperbeamChannelClaims(
-  channelId: string,
+  channelIds: Array<string>,
   params: ClaimSearchOptions
 ): Promise<ClaimSearchResponse | null> {
   const page = toNumber(params.page, 1);
   const pageSize = toNumber(params.page_size, 20);
   const empty = { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
-  if (!isClaimId(channelId)) return empty;
+  const validChannelIds = Array.from(new Set(channelIds.filter(isClaimId)));
+  if (!validChannelIds.length || validChannelIds.length !== channelIds.length) return empty;
 
   const anyParams: any = params;
-  const futureOnly = paramValues(params, 'release_time', 'release-time').some((bound) => bound.startsWith('>'));
   const constrained =
     Boolean(anyParams.has_no_source) ||
-    futureOnly ||
     Boolean(anyParams.duration) ||
     Boolean(anyParams.fee_amount) ||
     paramValues(params, 'any_tags', 'all_tags', 'text').length > 0;
@@ -1550,30 +1555,136 @@ async function fetchHyperbeamChannelClaims(
   const claimTypes = paramValues(params, 'claim_type', 'claim-type');
   if (claimTypes.length && !claimTypes.includes('stream')) return empty;
 
-  const result = await fetchCachedStoreJsonOrNull(
-    storePath('odysee/channel-claims', `${channelId}/${page}/${pageSize}`)
-  ).catch(() => null);
-  const payload = storePayload(result);
-  const locators = String(value(payload || {}, 'locators') || '')
-    .split(',')
-    .map((locator) => locator.trim())
-    .filter(Boolean);
+  const candidateLimit = page * pageSize;
+  const discoveryLimit = candidateLimit + pageSize;
+  const releaseBounds = paramValues(params, 'release_time', 'release-time');
+  const releaseAfter = releaseBounds
+    .filter((bound) => bound.startsWith('>'))
+    .map((bound) => toNumber(bound.slice(1), 0))
+    .reduce((latest, timestamp) => Math.max(latest, timestamp), 0);
+  const now = Math.floor(Date.now() / 1000);
+  const releaseBefore = releaseBounds
+    .filter((bound) => bound.startsWith('<'))
+    .map((bound) => toNumber(bound.slice(1), now))
+    .reduce((earliest, timestamp) => Math.min(earliest, timestamp), now);
+  const effectiveReleaseBounds = [`>${releaseAfter}`, `<${releaseBefore}`];
+  const channelBatches = chunkValues(validChannelIds, HYPERBEAM_CHANNEL_SEARCH_BATCH_SIZE);
+  const locatorBatches = await Promise.all(
+    channelBatches.map(async (batch) => {
+      const result = await fetchCachedStoreJsonOrNull(
+        storePath('odysee/channel-claims', `${batch.join(',')}/1/${discoveryLimit}/${releaseAfter}/${releaseBefore}`)
+      ).catch(() => null);
+      const payload = storePayload(result);
+      const locators = String(value(payload || {}, 'locators') || '')
+        .split(',')
+        .map((locator) => locator.trim())
+        .filter(Boolean);
+      const releaseTimes = String(value(payload || {}, 'release-times', 'release_times') || '')
+        .split(',')
+        .map((timestamp) => toNumber(timestamp, 0));
+      return locators
+        .map((locator, index) => ({ locator, releaseTime: releaseTimes[index] || 0 }))
+        .filter(({ releaseTime }) => releaseTime > releaseAfter && releaseTime < releaseBefore);
+    })
+  );
+  const releasesByLocator = new Map<string, number>();
+  locatorBatches.flat().forEach(({ locator, releaseTime }) => {
+    releasesByLocator.set(locator, Math.max(releasesByLocator.get(locator) || 0, releaseTime));
+  });
+  const locators = Array.from(releasesByLocator)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, candidateLimit)
+    .map(([locator]) => locator);
   if (!locators.length) return empty;
+  const hasMore = releasesByLocator.size > page * pageSize;
 
-  const items = await fetchHyperbeamClaimsByIds(locators);
+  const candidates = (await fetchHyperbeamClaimsByIds(locators, false))
+    .filter((claim) => claimMatchesReleaseBounds(claim, effectiveReleaseBounds))
+    .sort((left, right) => claimReleaseTime(right) - claimReleaseTime(left));
+  const items = candidates.slice((page - 1) * pageSize, page * pageSize);
   const totalItems = (page - 1) * pageSize + items.length;
   return {
     items,
     page,
     page_size: pageSize,
     total_items: totalItems,
-    total_pages: items.length < pageSize ? page : page + 1,
+    total_pages: hasMore ? page + 1 : page,
   };
 }
 
-export async function fetchHyperbeamClaimsByIds(ids: Array<string>): Promise<Array<Claim>> {
-  const claims = await Promise.all(ids.filter(Boolean).map(fetchStoreClaimByAnyId));
+export async function fetchHyperbeamClaimsByIds(
+  ids: Array<string>,
+  retryMissingBatchResults: boolean = true
+): Promise<Array<Claim>> {
+  const requestedIds = ids.filter(Boolean);
+  const batch = await fetchHyperbeamClaimBatch(requestedIds);
+  const claims = await Promise.all(
+    requestedIds.map(async (id) => {
+      const result = batch?.[id];
+      if (result) {
+        const claim = await claimFromHyperbeamBatchResult(id, result);
+        if (claim.length) return claim;
+      }
+      if (batch && !retryMissingBatchResults) return [];
+      return fetchStoreClaimByAnyId(id);
+    })
+  );
   return claims.flat().filter(Boolean);
+}
+
+async function fetchHyperbeamClaimBatch(ids: Array<string>): Promise<Record<string, any> | null> {
+  if (typeof window === 'undefined' || !ids.length) return null;
+  try {
+    const batches = await Promise.all(
+      chunkValues(ids, HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT).map(async (batch) => {
+        const response = await fetch(HYPERBEAM_PUBLIC_STORE_BATCH_PATH, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { accept: 'application/json', 'content-type': 'application/json' },
+          body: JSON.stringify({ ids: batch }),
+          signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+        });
+        if (!response.ok) return null;
+        const result = await response.json();
+        return isObject(result?.results) ? result.results : null;
+      })
+    );
+    if (batches.some((batch) => !batch)) return null;
+    return Object.assign({}, ...batches);
+  } catch {
+    return null;
+  }
+}
+
+function chunkValues<T>(values: Array<T>, size: number): Array<Array<T>> {
+  const chunks: Array<Array<T>> = [];
+  for (let offset = 0; offset < values.length; offset += size) chunks.push(values.slice(offset, offset + size));
+  return chunks;
+}
+
+function claimReleaseTime(claim: Claim): number {
+  return toNumber((claim as any).value?.release_time || (claim as any).release_time, 0);
+}
+
+function claimMatchesReleaseBounds(claim: Claim, bounds: Array<string>): boolean {
+  const releaseTime = claimReleaseTime(claim);
+  return bounds.every((bound) => {
+    const operator = bound.charAt(0);
+    const timestamp = Number(bound.slice(1));
+    if (!Number.isFinite(timestamp) || (operator !== '>' && operator !== '<')) return true;
+    return operator === '>' ? releaseTime > timestamp : releaseTime < timestamp;
+  });
+}
+
+async function claimFromHyperbeamBatchResult(id: string, result: any): Promise<Array<Claim>> {
+  if (isOutpointId(id)) {
+    const payload = await expandStoreEvidenceValue(storePayload(result));
+    const claim = storeClaimFromHyperbeam(payload, await fetchSigningChannelEvidence(payload));
+    return claim ? [claim] : [];
+  }
+  if (!isStandaloneImmutableId(id)) return [];
+  const claim = sdkClaimFromHyperbeam(cacheReadClaim(storePayload(result)), id);
+  return claim?.claim_id ? [claim] : [];
 }
 
 async function fetchStoreClaimByAnyId(id: string): Promise<Array<Claim>> {

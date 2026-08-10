@@ -245,6 +245,9 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   const signingChannel = claim && claim.signing_channel;
   const immutableClaimUri = hyperbeamImmutableUriFromClaim(claim);
   const immutableChannelUri = hyperbeamImmutableUriFromClaim(signingChannel);
+  const signingChannelThumbnail = signingChannel?.value?.thumbnail;
+  const signingChannelThumbnailUrl =
+    typeof signingChannelThumbnail === 'string' ? signingChannelThumbnail : signingChannelThumbnail?.url;
   const repostedChannelUri =
     claim && claim.repost_channel_url && claim.value_type === 'channel'
       ? claim.permanent_url || claim.canonical_url
@@ -686,7 +689,11 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
                 {!isChannelUri && signingChannel && (
                   <div className="claim-preview__channel-staked">
                     <UriIndicator focusable={false} uri={uri} link hideAnonymous external={isEmbed}>
-                      <ChannelThumbnail uri={immutableChannelUri || ''} xsmall />
+                      <ChannelThumbnail
+                        uri={immutableChannelUri || ''}
+                        thumbnailPreview={signingChannelThumbnailUrl}
+                        xsmall
+                      />
                     </UriIndicator>
                   </div>
                 )}

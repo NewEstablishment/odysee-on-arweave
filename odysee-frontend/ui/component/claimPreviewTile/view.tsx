@@ -152,6 +152,9 @@ function ClaimPreviewTile(props: Props) {
   const signingChannel = claim && claim.signing_channel;
   const isChannel = claim && claim.value_type === 'channel';
   const channelUri = hyperbeamImmutableUriFromClaim(isChannel ? claim : signingChannel);
+  const signingChannelThumbnail = signingChannel?.value?.thumbnail;
+  const signingChannelThumbnailUrl =
+    typeof signingChannelThumbnail === 'string' ? signingChannelThumbnail : signingChannelThumbnail?.url;
   const channelTitle = signingChannel && ((signingChannel.value && signingChannel.value.title) || signingChannel.name);
   const isChannelPage = React.useContext(ChannelPageContext);
   const shouldShowViewCount = !(
@@ -382,7 +385,12 @@ function ClaimPreviewTile(props: Props) {
               ) : (
                 <React.Fragment>
                   <UriIndicator focusable={false} uri={uri} link hideAnonymous external={isEmbed}>
-                    <ChannelThumbnail uri={channelUri || ''} xsmall checkMembership={false} />
+                    <ChannelThumbnail
+                      uri={channelUri || ''}
+                      thumbnailPreview={signingChannelThumbnailUrl}
+                      xsmall
+                      checkMembership={false}
+                    />
                   </UriIndicator>
 
                   <div className="claim-tile__about">

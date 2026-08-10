@@ -89,7 +89,11 @@ read(StoreOpts, Req = #{ <<"read">> := Key }, NodeOpts) ->
         not_found ->
             case read_live(Path, Req, StoreOpts, NodeOpts) of
                 {ok, LiveMsg} = OK when is_map(LiveMsg) ->
-                    warm_addresses(BareKey, Path, LiveMsg, StoreOpts, NodeOpts),
+                    case Path of
+                        <<"odysee/claim-json/", _/binary>> -> ok;
+                        <<"odysee/channel-json/", _/binary>> -> ok;
+                        _ -> warm_addresses(BareKey, Path, LiveMsg, StoreOpts, NodeOpts)
+                    end,
                     OK;
                 Other ->
                     Other
@@ -136,6 +140,26 @@ read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, Decoded} ?= decode_component(Encoded),
         channel_read(Decoded, StoreOpts, NodeOpts)
+    end;
+read_live(<<"odysee/channel-json/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Decoded} ?= decode_component(Encoded),
+        ChannelID = normalize_hex(Decoded),
+        ok ?= require_hex_size(ChannelID, 40, invalid_claim_id),
+        {ok, Claim} ?=
+            hb_odysee_client:claim_search(ChannelID, store_node_opts(StoreOpts, NodeOpts)),
+        {ok, TxID} ?= claim_txid(Claim),
+        {ok, Nout} ?= claim_nout(Claim),
+        {ok, Msg} ?= kind_output(<<"channel">>, TxID, Nout, StoreOpts, NodeOpts),
+        ok ?= require_claim_id(ChannelID, Msg),
+        json_evidence_result(Msg, NodeOpts)
+    end;
+read_live(<<"odysee/claim-json/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Outpoint} ?= decode_component(Encoded),
+        {ok, TxID, Nout} ?= parse_bare_outpoint(Outpoint),
+        {ok, Msg} ?= kind_output(<<"claim">>, TxID, Nout, StoreOpts, NodeOpts),
+        json_evidence_result(Msg, NodeOpts)
     end;
 read_live(<<"odysee/stream/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
@@ -371,6 +395,63 @@ evidence_result(Msg, Opts) ->
             end;
         false -> {error, invalid_evidence}
     end.
+
+json_evidence_result(Msg, Opts) ->
+    case hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, Opts) of
+        true ->
+            case hb_message:with_only_committed(Msg, Opts) of
+                {ok, Narrowed} ->
+                    {ok, #{
+                        <<"status">> => 200,
+                        <<"content-type">> => <<"application/json">>,
+                        <<"body">> => hb_json:encode(hydration_payload(Narrowed))
+                    }};
+                Other -> Other
+            end;
+        false -> {error, invalid_evidence}
+    end.
+
+hydration_payload(Msg) ->
+    Keys = [
+        <<"address">>, <<"amount">>, <<"claim">>, <<"claim-id">>, <<"claim-name">>,
+        <<"claim-op">>, <<"confirmations">>, <<"height">>, <<"nout">>,
+        <<"public-key">>, <<"sd-hash">>, <<"timestamp">>, <<"txid">>
+    ],
+    Payload = hydration_value(Msg, Keys),
+    case maps:get(<<"channel-evidence">>, Msg, undefined) of
+        Channel when is_map(Channel) ->
+            Payload#{ <<"channel-evidence">> => hydration_value(Channel, Keys) };
+        _ ->
+            Payload
+    end.
+
+hydration_value(Msg, TopKeys) ->
+    ValueKeys = [
+        <<"author">>, <<"cover">>, <<"description">>, <<"email">>,
+        <<"fee">>, <<"languages">>, <<"license">>, <<"locations">>,
+        <<"release_time">>, <<"stream_type">>, <<"tags">>, <<"thumbnail">>,
+        <<"title">>, <<"website_url">>
+    ],
+    NestedKeys = [<<"audio">>, <<"source">>, <<"video">>],
+    Value0 = maps:get(<<"value">>, Msg, #{}),
+    Value1 =
+        case is_map(Value0) of
+            true -> maps:with(ValueKeys, Value0);
+            false -> #{}
+        end,
+    Value =
+        lists:foldl(
+            fun(Key, Acc) ->
+                case maps:get(Key, Value0, undefined) of
+                    Nested when is_map(Nested) ->
+                        Acc#{ Key => maps:without([<<"commitments">>], Nested) };
+                    _ -> Acc
+                end
+            end,
+            Value1,
+            NestedKeys
+        ),
+    (maps:with(TopKeys, Msg))#{ <<"value">> => Value }.
 
 %% @doc The node options, with the store stack narrowed to local scope for
 %% evidence write-back. An empty local stack disables the write cleanly.
@@ -767,52 +848,109 @@ playlist_locate(ClaimIDs, StoreOpts, NodeOpts) ->
     end.
 
 channel_claims_read(Rest, StoreOpts, NodeOpts) ->
-    {Encoded, Page, PageSize} =
+    {Encoded, Page, PageSize, ReleaseAfter, ReleaseBefore} =
         case binary:split(Rest, <<"/">>, [global]) of
-            [E] -> {E, 1, 20};
-            [E, P] -> {E, int_param(P, 1), 20};
-            [E, P, S | _] -> {E, int_param(P, 1), int_param(S, 20)}
+            [E] -> {E, 1, 20, 0, 2147483647};
+            [E, P] -> {E, int_param(P, 1), 20, 0, 2147483647};
+            [E, P, S] -> {E, int_param(P, 1), int_param(S, 20), 0, 2147483647};
+            [E, P, S, A] ->
+                {E, int_param(P, 1), int_param(S, 20), int_param(A, 0), 2147483647};
+            [E, P, S, A, B | _] ->
+                {E, int_param(P, 1), int_param(S, 20), int_param(A, 0), int_param(B, 2147483647)}
         end,
-    Req = #{ <<"page">> => Page, <<"page-size">> => PageSize },
+    Req = #{
+        <<"page">> => Page,
+        <<"page-size">> => PageSize,
+        <<"release-after">> => ReleaseAfter,
+        <<"release-before">> => ReleaseBefore
+    },
     maybe
-        {ok, Locators} ?=
+        {ok, Rows} ?=
             list_channel_search(
                 Encoded,
                 Req,
                 StoreOpts,
                 NodeOpts,
-                fun list_claim_outputs/2
+                fun list_claim_output_rows/2
             ),
+        Locators = [Locator || {Locator, _ReleaseTime} <- Rows],
+        ReleaseTimes = [integer_to_binary(ReleaseTime) || {_Locator, ReleaseTime} <- Rows],
         {ok, #{
             <<"page">> => Page,
             <<"page-size">> => PageSize,
-            <<"locators">> => iolist_to_binary(lists:join(<<",">>, Locators))
+            <<"locators">> => iolist_to_binary(lists:join(<<",">>, Locators)),
+            <<"release-times">> => iolist_to_binary(lists:join(<<",">>, ReleaseTimes))
         }}
     end.
 
 list_channel_search(Encoded, Req, StoreOpts, NodeOpts, Project) ->
     maybe
-        {ok, ChannelID} ?= decode_component(Encoded),
+        {ok, ChannelIDs} ?= decode_channel_ids(Encoded),
         Page = int_param(hb_maps:get(<<"page">>, Req, 1, NodeOpts), 1),
         PageSize = int_param(
             hb_maps:get(<<"page-size">>, Req, 20, NodeOpts),
             20
         ),
         OrderBy = hb_maps:get(<<"order-by">>, Req, [<<"release_time">>], NodeOpts),
+        ReleaseAfter = int_param(
+            hb_maps:get(<<"release-after">>, Req, 0, NodeOpts),
+            0
+        ),
+        ReleaseBefore = int_param(
+            hb_maps:get(<<"release-before">>, Req, 2147483647, NodeOpts),
+            2147483647
+        ),
+        SearchReqBase = #{
+            <<"channel_ids">> => ChannelIDs,
+            <<"claim_type">> => <<"stream">>,
+            <<"page">> => Page,
+            <<"page_size">> => PageSize,
+            <<"order_by">> => OrderBy,
+            <<"no_totals">> => true
+        },
+        ReleaseFilters =
+            [
+                Filter
+             || Filter <- [
+                    case ReleaseAfter > 0 of
+                        true -> <<">", (integer_to_binary(ReleaseAfter))/binary>>;
+                        false -> none
+                    end,
+                    case ReleaseBefore < 2147483647 of
+                        true -> <<"<", (integer_to_binary(ReleaseBefore))/binary>>;
+                        false -> none
+                    end
+                ],
+                Filter =/= none
+            ],
+        SearchReq = case ReleaseFilters of
+            [] -> SearchReqBase;
+            [Filter] -> SearchReqBase#{<<"release_time">> => Filter};
+            _ -> SearchReqBase#{<<"release_time">> => ReleaseFilters}
+        end,
         {ok, Search} ?=
             hb_odysee_client:call(
                 <<"claim_search">>,
-                #{
-                    <<"channel_ids">> => [normalize_hex(ChannelID)],
-                    <<"claim_type">> => <<"stream">>,
-                    <<"page">> => Page,
-                    <<"page_size">> => PageSize,
-                    <<"order_by">> => OrderBy,
-                    <<"no_totals">> => true
-                },
+                SearchReq,
                 store_node_opts(StoreOpts, NodeOpts)
             ),
         {ok, Project(Search, NodeOpts)}
+    end.
+
+decode_channel_ids(Encoded) ->
+    maybe
+        {ok, Decoded} ?= decode_component(Encoded),
+        ChannelIDs = lists:usort([
+            normalize_hex(ChannelID)
+         ||
+            ChannelID <- binary:split(Decoded, <<",">>, [global]),
+            ChannelID =/= <<>>
+        ]),
+        true ?= ChannelIDs =/= [],
+        true ?= lists:all(fun(ChannelID) -> valid_hex_size(ChannelID, 20) end, ChannelIDs),
+        {ok, ChannelIDs}
+    else
+        _ -> {error, invalid_channel_ids}
     end.
 
 fixture(Path, StoreOpts, Opts) ->
@@ -906,6 +1044,19 @@ list_claim_outputs(Search, Opts) ->
         Outpoint <- [claim_outpoint(Claim, Opts)],
         Outpoint =/= not_found
     ].
+
+list_claim_output_rows(Search, Opts) ->
+    [
+        {Outpoint, claim_release_time(Claim, Opts)}
+    ||
+        Claim <- first_found([<<"claims">>, <<"items">>], Search, [], Opts),
+        Outpoint <- [claim_outpoint(Claim, Opts)],
+        Outpoint =/= not_found
+    ].
+
+claim_release_time(Claim, Opts) ->
+    Value = first_found([<<"value">>], Claim, #{}, Opts),
+    int_param(first_found([<<"release_time">>], Value, 0, Opts), 0).
 
 claim_outpoint(Claim, Opts) ->
     TxID = first_found([<<"txid">>], Claim, not_found, Opts),
@@ -1083,6 +1234,15 @@ restore_uri_scheme(URI) -> URI.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+
+multiple_channel_ids_are_validated_and_deduplicated_test() ->
+    ChannelID1 = <<"d336d22d3a5e370dc7dea1b9dbc2713ab1683891">>,
+    ChannelID2 = <<"d7522129dceca00beed54fad01328c8612012e00">>,
+    {ok, ChannelIDs} = decode_channel_ids(
+        <<ChannelID1/binary, ",", ChannelID2/binary, ",", ChannelID1/binary>>
+    ),
+    ?assertEqual(lists:sort([ChannelID1, ChannelID2]), ChannelIDs),
+    ?assertEqual({error, invalid_channel_ids}, decode_channel_ids(<<ChannelID1/binary, ",bad">>)).
 
 %% The property the alias scheme exists for: an object materialized from a
 %% canonical `odysee/' path is afterwards reachable by a plain `?IS_ID'-shaped
@@ -1450,6 +1610,51 @@ bare_channel_id_claim_outputs_list_returns_immutable_outpoints_test() ->
     ),
     {ok, Outpoints} = list(Store, #{ <<"list">> => <<ChannelID/binary, "/claim-outputs">> }, #{}),
     ?assertEqual([<<TxID1/binary, ":0">>, <<TxID2/binary, ":2">>], Outpoints).
+
+channel_claims_read_forwards_release_cutoff_test() ->
+    ChannelID = <<"fb364ef587872515f545a5b4b3182b58073f230f">>,
+    ChannelID2 = <<"64bdbe210b3d9ba616f3a197ea3e0388e360f5e8">>,
+    TxID = <<"6f4fc565d9f7b553c2b87b17f0e1821adc281b6331b926d72df44ee45d44f284">>,
+    Response =
+        hb_json:encode(#{
+            <<"jsonrpc">> => <<"2.0">>,
+            <<"result">> => #{
+                <<"items">> => [#{
+                    <<"txid">> => TxID,
+                    <<"nout">> => 0,
+                    <<"value">> => #{ <<"release_time">> => 5678 }
+                }]
+            },
+            <<"id">> => 1
+        }),
+    {ok, Server, Handle} = hb_mock_server:start([
+        {"/api/v1/proxy", proxy, {200, Response}}
+    ]),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        {ok, Result} = read(
+            Store,
+            #{
+                <<"read">> =>
+                    <<"odysee/channel-claims/", ChannelID/binary, ",", ChannelID2/binary,
+                        "/1/20/1234/6789">>
+            },
+            #{ <<"store">> => [] }
+        ),
+        ?assertEqual(<<TxID/binary, ":0">>, maps:get(<<"locators">>, Result)),
+        ?assertEqual(<<"5678">>, maps:get(<<"release-times">>, Result)),
+        [Req] = hb_mock_server:get_requests(Handle, proxy),
+        Sent = hb_json:decode(maps:get(<<"body">>, Req)),
+        Params = maps:get(<<"params">>, Sent),
+        ?assertEqual([<<">1234">>, <<"<6789">>], maps:get(<<"release_time">>, Params)),
+        ?assertNot(maps:is_key(<<"limit_claims_per_channel">>, Params))
+    after
+        hb_mock_server:stop(Handle)
+    end.
 
 %% Warming mechanics: a live-resolved native claim output must be readable
 %% back from the local store by every address warming links, so a later

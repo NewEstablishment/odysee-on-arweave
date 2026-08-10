@@ -43,7 +43,7 @@ const HYPERBEAM_PUBLIC_STORE_READ_TIMEOUT_MS = 15000;
 const HYPERBEAM_PUBLIC_STORE_CACHE_TTL_MS = 30 * 60 * 1000;
 const HYPERBEAM_PUBLIC_STORE_CACHE_LIMIT = 10000;
 const HYPERBEAM_PUBLIC_STORE_LINK_DEPTH = 3;
-const HYPERBEAM_PUBLIC_STORE_LINK_FIELDS = new Set(['value', 'thumbnail']);
+const HYPERBEAM_PUBLIC_STORE_LINK_FIELDS = new Set(['value', 'thumbnail', 'channel-evidence', 'signing_channel']);
 const hyperbeamPublicStoreCache = new Map();
 const hyperbeamPublicStoreReads = new Map();
 const HYPERBEAM_UPLOAD_PATH = '/id?!=true&committers=all';
@@ -209,6 +209,7 @@ async function postHyperbeamPublicStoreBatch(ctx) {
   const entries = await readHyperbeamPublicStoreEntries(nodeUrl, ids);
   const results = new Map(entries.filter((entry) => entry.result).map((entry) => [entry.id, entry.result]));
   const expansionTimings = await expandHyperbeamPublicStoreLinks(nodeUrl, results);
+  const channelTimings = await attachHyperbeamPublicStoreChannels(nodeUrl, results);
 
   ctx.status = 200;
   ctx.set('Cache-Control', 'no-store');
@@ -217,6 +218,7 @@ async function postHyperbeamPublicStoreBatch(ctx) {
     errors: Object.fromEntries(entries.filter((entry) => !entry.result).map((entry) => [entry.id, entry.error])),
     timings: entries.map(({ id, status, elapsed_ms }) => ({ id, status, elapsed_ms })),
     expansion_timings: expansionTimings,
+    channel_timings: channelTimings,
     elapsed_ms: Date.now() - startedAt,
   };
 }
@@ -243,13 +245,13 @@ async function readHyperbeamPublicStoreEntry(nodeUrl, id) {
     const itemStartedAt = Date.now();
     try {
       const response = await getBuffer(
-        `${nodeUrl}/${encodeURIComponent(id)}?accept-bundle=true`,
+        hyperbeamPublicStoreReadUrl(nodeUrl, id),
         { accept: 'application/json' },
         HYPERBEAM_PUBLIC_STORE_READ_TIMEOUT_MS
       );
       const parsed = parseJsonBuffer(response.body);
-      const ok = response.statusCode >= 200 && response.statusCode < 300 && parsed && typeof parsed === 'object';
-      const result = ok ? { ...response.headers, ...parsed } : null;
+      const ok = response.statusCode >= 200 && response.statusCode < 300;
+      const result = ok ? { ...response.headers, ...(parsed && typeof parsed === 'object' ? parsed : {}) } : null;
       if (result) cacheHyperbeamPublicStoreResult(cacheKey, result);
       return {
         id,
@@ -275,6 +277,58 @@ async function readHyperbeamPublicStoreEntry(nodeUrl, id) {
 
   hyperbeamPublicStoreReads.set(cacheKey, read);
   return read;
+}
+
+function hyperbeamPublicStoreReadUrl(nodeUrl, id) {
+  if (/^channel:[0-9a-f]{40}$/i.test(id)) {
+    const read = encodeURIComponent(`odysee/channel-json/${id.slice('channel:'.length)}`);
+    return `${nodeUrl}/~cache@1.0/read?read=${read}&accept-bundle=false`;
+  }
+  if (/^[0-9a-f]{64}:\d+$/i.test(id)) {
+    const read = encodeURIComponent(`odysee/claim-json/${id}`);
+    return `${nodeUrl}/~cache@1.0/read?read=${read}&accept-bundle=false`;
+  }
+  return `${nodeUrl}/${encodeURIComponent(id)}?accept-bundle=false`;
+}
+
+async function attachHyperbeamPublicStoreChannels(nodeUrl, results) {
+  const claimsByChannel = new Map();
+  results.forEach((result) => {
+    if (result['channel-evidence'] || result.channel_evidence) return;
+    const channelId = hyperbeamClaimSigningChannelId(result.claim);
+    if (!channelId) return;
+    const claims = claimsByChannel.get(channelId) || [];
+    claims.push(result);
+    claimsByChannel.set(channelId, claims);
+  });
+  if (!claimsByChannel.size) return [];
+
+  const entries = await readHyperbeamPublicStoreEntries(
+    nodeUrl,
+    Array.from(claimsByChannel.keys(), (channelId) => `channel:${channelId}`)
+  );
+  entries.forEach((entry) => {
+    if (!entry.result) return;
+    const channelId = entry.id.slice('channel:'.length);
+    (claimsByChannel.get(channelId) || []).forEach((claim) => {
+      claim['channel-evidence'] = entry.result;
+    });
+  });
+  return entries.map(({ id, status, elapsed_ms, cached }) => ({ id, status, elapsed_ms, cached }));
+}
+
+function hyperbeamClaimSigningChannelId(claim) {
+  if (typeof claim !== 'string' || !claim) return null;
+  try {
+    const bytes =
+      /^[0-9a-f]+$/i.test(claim) && claim.length % 2 === 0
+        ? Buffer.from(claim, 'hex')
+        : Buffer.from(claim, 'base64url');
+    if (bytes.length <= 85 || bytes[0] !== 1) return null;
+    return Buffer.from(bytes.subarray(1, 21)).reverse().toString('hex');
+  } catch {
+    return null;
+  }
 }
 
 function cacheHyperbeamPublicStoreResult(cacheKey, result) {
@@ -1224,6 +1278,7 @@ function getBuffer(url, extraHeaders = {}, timeoutMs = 0) {
         path: `${target.pathname}${target.search}`,
         method: 'GET',
         insecureHTTPParser: true,
+        maxHeaderSize: 2 * 1024 * 1024,
         headers: extraHeaders,
       },
       (res) => {

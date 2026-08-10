@@ -9,6 +9,7 @@ import * as ACTIONS from 'constants/action_types';
 import mergeClaim from 'util/merge-claim';
 import { getChannelIdFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import { claimToStoredCollection } from 'util/collections';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const reducers = {};
 const defaultState: ClaimsState = {
   byId: {},
@@ -349,6 +350,7 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
     }
 
     if (channel && channel.claim_id) {
+      const immutableChannelUri = hyperbeamImmutableUriFromClaim(channel);
       if (!stream) {
         updateIfValueChanged(state.claimsByUri, byUriDelta, url, channel.claim_id);
       }
@@ -366,16 +368,25 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
 
       updateIfValueChanged(state.claimsByUri, byUriDelta, channel.permanent_url, channel.claim_id);
       updateIfValueChanged(state.claimsByUri, byUriDelta, channel.canonical_url, channel.claim_id);
+      if (immutableChannelUri) {
+        updateIfValueChanged(state.claimsByUri, byUriDelta, immutableChannelUri, channel.claim_id);
+      }
       newResolvingUrls.delete(channel.canonical_url);
       newResolvingUrls.delete(channel.permanent_url);
+      if (immutableChannelUri) newResolvingUrls.delete(immutableChannelUri);
       newFailedToResolveUrls.delete(channel.canonical_url);
       newFailedToResolveUrls.delete(channel.permanent_url);
+      if (immutableChannelUri) newFailedToResolveUrls.delete(immutableChannelUri);
     }
 
     if (repostSrcChannel && repostSrcChannel.claim_id) {
+      const immutableRepostChannelUri = hyperbeamImmutableUriFromClaim(repostSrcChannel);
       updateIfClaimChanged(state.byId, byIdDelta, repostSrcChannel.claim_id, repostSrcChannel);
       updateIfValueChanged(state.claimsByUri, byUriDelta, repostSrcChannel.permanent_url, repostSrcChannel.claim_id);
       updateIfValueChanged(state.claimsByUri, byUriDelta, repostSrcChannel.canonical_url, repostSrcChannel.claim_id);
+      if (immutableRepostChannelUri) {
+        updateIfValueChanged(state.claimsByUri, byUriDelta, immutableRepostChannelUri, repostSrcChannel.claim_id);
+      }
     }
 
     if (collection) {
