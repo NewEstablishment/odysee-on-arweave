@@ -360,7 +360,14 @@ channel_output_message(Raw, Nout, Ancestry) ->
         TxIDHex = maps:get(<<"txid">>, ClaimMsg),
         % `value' is decoded and committed by claim_output_message above; carry
         % it into the channel commitment's committed set so it stays verifiable.
-        ValueKeys = case maps:is_key(<<"value">>, ClaimMsg) of true -> [<<"value">>]; false -> [] end,
+        %% REVERTED (2026-08-08): committing `value` here makes the freshly
+        %% built channel evidence fail `hb_message:verify/3`, so
+        %% `hb_store_odysee:evidence_result/2` fails closed and EVERY
+        %% channel-signed claim read returns invalid_evidence /
+        %% invalid_channel_evidence (whole watch page breaks). Repro:
+        %% `GET /~cache@1.0/read?read=odysee/channel-id/<id>`. Re-land by
+        %% making the committed value survive verification round-trips.
+        ValueKeys = [],
         Msg = (maps:remove(<<"commitments">>, ClaimMsg))#{
             <<"channel-id">> => ClaimID,
             <<"public-key">> => PublicKeyHex
@@ -409,7 +416,14 @@ stream_claim_message(Raw, Nout, Ancestry) ->
         TxIDHex = maps:get(<<"txid">>, ClaimMsg),
         % `value' is decoded and committed by claim_output_message above; carry
         % it into the stream commitment's committed set so it stays verifiable.
-        ValueKeys = case maps:is_key(<<"value">>, ClaimMsg) of true -> [<<"value">>]; false -> [] end,
+        %% REVERTED (2026-08-08): committing `value` here makes the freshly
+        %% built channel evidence fail `hb_message:verify/3`, so
+        %% `hb_store_odysee:evidence_result/2` fails closed and EVERY
+        %% channel-signed claim read returns invalid_evidence /
+        %% invalid_channel_evidence (whole watch page breaks). Repro:
+        %% `GET /~cache@1.0/read?read=odysee/channel-id/<id>`. Re-land by
+        %% making the committed value survive verification round-trips.
+        ValueKeys = [],
         Msg = ClaimMsg#{
             <<"sd-hash">> => SDHash
         },

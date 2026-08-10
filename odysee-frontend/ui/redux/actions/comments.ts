@@ -849,9 +849,53 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
     const targetClaimId = claim.signing_channel ? claim.signing_channel.claim_id : claim_id; // claim_id is for anonymous content and on channel page comments
 
     if (!activeChannelClaim) {
-      console.error('Unable to create comment. No activeChannel is set.'); // eslint-disable-line
+      // No channel selected: post an anonymous native comment. The node
+      // commits the write under the browser's cookie-derived identity, so
+      // no channel signature is attached and the channel-policy gates
+      // (switch cooldown, multi-channel) don't apply.
+      if (!dry_run) {
+        dispatch({
+          type: ACTIONS.COMMENT_CREATE_STARTED,
+        });
+      }
 
-      return;
+      return Comments.comment_create({
+        comment: comment,
+        claim_id: claim_id,
+        parent_id: parent_id,
+        sticker: sticker,
+        environment: stripeEnvironment,
+        is_protected: is_protected || undefined,
+        amount: amount,
+        dry_run: dry_run,
+      } as unknown as CommentCreateParams)
+        .then((result: CommentCreateResponse) => {
+          if (dry_run) {
+            return result;
+          }
+
+          dispatch({
+            type: ACTIONS.COMMENT_CREATE_COMPLETED,
+            data: {
+              uri,
+              livestream,
+              comment: result,
+              claimId: claim_id,
+            },
+          });
+          return result;
+        })
+        .catch((error) => {
+          if (!dry_run) {
+            dispatch({
+              type: ACTIONS.COMMENT_CREATE_FAILED,
+              data: error,
+            });
+          }
+
+          dispatchToast(dispatch, resolveApiMessage(error.message));
+          return Promise.reject(error);
+        });
     }
 
     if (myCommentedChannelIds === undefined) {

@@ -81,7 +81,10 @@ function getCommentsMembersOnlyRestriction(
     channelClaimId &&
     doFetchCreatorSettings(channelClaimId)
       .then((cs: SettingsResponse) => (isLivestream ? cs.livestream_chat_members_only : cs.comments_members_only))
-      .catch(() => undefined)
+      // The settings surface does not exist on a store-first node (no
+      // Commentron, no settings device); treat "unavailable" as
+      // not-members-only rather than blocking every comment submit.
+      .catch(() => false)
   );
 }
 
@@ -364,7 +367,8 @@ export function CommentCreate(props: Props) {
   const submitButtonProps = {
     button: 'primary',
     type: 'submit',
-    requiresAuth: true,
+    // No auth requirement: without an account the comment posts as an
+    // anonymous native message under the browser's cookie identity.
   };
   const actionButtonProps = {
     button: 'alt',
@@ -915,54 +919,10 @@ export function CommentCreate(props: Props) {
   // **************************************************************************
   // Render
   // **************************************************************************
-  if (!isFetchingChannels && !hasChannels) {
-    return (
-      <div
-        role="button"
-        className="comment-create__auth"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-
-          if (embed) {
-            window.open(`https://odysee.com/$/${PAGES.AUTH}?redirect=/$/${PAGES.LIVESTREAM}`);
-            return;
-          }
-
-          doOpenModal(MODALS.CONFIRM, {
-            title: __('Channel is required for commenting'),
-            subtitle: __("You'll need a channel to comment on this upload."),
-            labelOk: __('Continue to channel creation'),
-            onConfirm: (closeModal) => {
-              const pathPlusRedirect = `/$/${PAGES.CHANNEL_NEW}?redirect=${pathname}`;
-
-              if (isLivestream) {
-                window.open(pathPlusRedirect);
-              } else {
-                navigate(pathPlusRedirect);
-              }
-
-              closeModal();
-            },
-          });
-        }}
-      >
-        <FormField
-          type="textarea"
-          name="comment__signup-prompt"
-          placeholder={__(commentLabelText)}
-          disabled={isMobile}
-        />
-
-        {!isMobile && (
-          <div className="section__actions--no-margin">
-            <Button disabled button="primary" label={__('Send --[button to submit something]--')} requiresAuth />
-          </div>
-        )}
-      </div>
-    );
-  }
-
+  // A channel is no longer required: without one, the comment posts as an
+  // anonymous native message committed under the browser's cookie identity
+  // (see doCommentCreate's anonymous branch), so the real form renders for
+  // channel-less users too instead of the old channel-creation prompt.
   return (
     <>
       {notAuthedToLiveChat && (

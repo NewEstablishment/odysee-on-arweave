@@ -31,7 +31,18 @@ seed_opts(Overrides) ->
     Stores =
         maps:get(<<"store">>, Overrides, hb_opts:get(store, [], #{}))
             ++ odysee_stores(Overrides),
-    Base = maps:merge(#{ <<"port">> => 0 }, maps:remove(<<"store">>, Overrides)),
+    Defaults = #{
+        <<"port">> => 0,
+        %% Browser writes (comments, uploads): the cookie identity commits
+        %% a `POST /id?!=true&committers=all', `store-all-signed' persists
+        %% the committed message, and `~reply-id@1.0' (appended by
+        %% `cookie_auth_hooks/1') surfaces the stored id in the reply.
+        %% Override hooks are folded in rather than replaced, so callers
+        %% supplying their own `on' handlers keep the write path.
+        <<"store-all-signed">> => true,
+        <<"on">> => cookie_auth_hooks(Overrides)
+    },
+    Base = maps:merge(Defaults, maps:without([<<"store">>, <<"on">>], Overrides)),
     Base#{ <<"store">> => Stores }.
 
 %% @doc The read-only Odysee source stores.

@@ -1,0 +1,50 @@
+--- a/src/forge/plugin/src/hb_forge_test.erl	2026-08-06 11:48:56
++++ b/src/forge/plugin/src/hb_forge_test.erl	2026-08-08 21:11:07
+@@ -941,7 +941,10 @@
+ compile_preloaded_test_modules() ->
+     compile_test_modules(
+         unique_build_dir("device-test-fixtures"),
+-        lists:sort(filelib:wildcard("src/preloaded/test/hb_*.erl")),
++        lists:sort(
++            filelib:wildcard("src/preloaded/test/hb_*.erl") ++
++                filelib:wildcard("apps/*/src/preloaded/test/hb_*.erl")
++        ),
+         preloaded_test_compile_failed
+     ).
+ 
+@@ -1036,7 +1039,9 @@
+     Paths =
+         filelib:wildcard("src/*.erl") ++
+         filelib:wildcard("src/core/**/*.erl") ++
+-        filelib:wildcard("src/forge/*.erl"),
++        filelib:wildcard("src/forge/*.erl") ++
++        % rebar3 umbrella checkouts keep their sources under apps/<app>/src.
++        filelib:wildcard("apps/*/src/**/*.erl"),
+     First = "src/core/test/hb_test_parallel.erl",
+     [First || lists:member(First, Paths)] ++ lists:sort(Paths -- [First]).
+ 
+--- a/src/forge/plugin/src/hb_forge_args.erl	2026-08-06 11:48:56
++++ b/src/forge/plugin/src/hb_forge_args.erl	2026-08-08 21:11:02
+@@ -289,10 +289,20 @@
+     hb:wallet(hb_util:list(Path)).
+ 
+ %% @doc Choose the default device source root for HB vs external checkouts.
++%% External checkouts may be rebar3 umbrellas (`apps/<app>/src'); include
++%% every app source dir that exists alongside the classic flat `src'.
+ default_device_src() ->
+     case is_hb_checkout() of
+-        true -> <<"src/preloaded">>;
+-        false -> <<"src">>
++        true ->
++            <<"src/preloaded">>;
++        false ->
++            Dirs =
++                [D || D <- ["src" | filelib:wildcard("apps/*/src")],
++                    filelib:is_dir(D)],
++            case Dirs of
++                [] -> <<"src">>;
++                _ -> hb_util:bin(lists:join(",", Dirs))
++            end
+     end.
+ 
+ bootstrap_preloaded_dirs() ->

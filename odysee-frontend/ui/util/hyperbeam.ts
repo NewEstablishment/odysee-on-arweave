@@ -147,9 +147,7 @@ async function expandStoreEvidenceValue(payload: any): Promise<any> {
   const inlineClaims = value(claimValue, 'claims');
   const claims =
     linkedClaims ||
-    (typeof inlineClaims === 'string' && inlineClaims
-      ? inlineClaims.split(',').filter(Boolean)
-      : undefined);
+    (typeof inlineClaims === 'string' && inlineClaims ? inlineClaims.split(',').filter(Boolean) : undefined);
   return {
     ...payload,
     value: {
@@ -270,8 +268,14 @@ export async function fetchHyperbeamCommentById(params: CommentByIdParams): Prom
 export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): Promise<CommentCreateResponse | null> {
   if (params.dry_run) return fetchLegacyCommentron('comment.Create', params);
 
-  await requireNativeCommentAuthorAllowed(params.claim_id, params.channel_id);
-  const message = await signNativeCommentMessage(nativeCommentMessage(params));
+  // Without a channel the comment is anonymous: the node's cookie-derived
+  // identity commits the write, so there is no channel signature to attach
+  // and no author to check against creator block controls.
+  const anonymous = !params.channel_id;
+  if (!anonymous) await requireNativeCommentAuthorAllowed(params.claim_id, params.channel_id);
+  const message = anonymous
+    ? nativeCommentMessage(params)
+    : await signNativeCommentMessage(nativeCommentMessage(params));
   const commentId = await writeNativeMessage(message, 'comment');
   clearNativeCommentCaches();
   const comment = await fetchNativeCommentVersionById(commentId);
@@ -590,7 +594,19 @@ async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
 // native reads accept structurally complete signed messages; the node's
 // auth hook gates what gets committed in the first place.
 function hasNativeCommentSignature(comment: any): boolean {
+  // Fully anonymous comments (no channel identity at all) are committed by
+  // the node under the writer's cookie wallet; accept them. A comment that
+  // names a channel but lacks the matching signature fields is half-signed
+  // and stays rejected.
+  if (isAnonymousNativeComment(comment)) return true;
   return Boolean(comment?.channel_id && comment?.channel_name && comment?.signature && comment?.signing_ts);
+}
+
+function isAnonymousNativeComment(comment: any): boolean {
+  // Anonymous = no channel identity. Don't test `signature`: the mapper
+  // fills it from the message's `signature` field, which for a store read is
+  // the HTTP-sig transport commitment (always present), not a channel sig.
+  return Boolean(comment) && !comment.channel_id && !comment.channel_name && !comment.channel_url;
 }
 
 type NativeCommentControlState = {
@@ -946,18 +962,24 @@ async function fetchNativeCommentAncestors(comment: any): Promise<Array<any>> {
 }
 
 function isNativeComment(message: any): boolean {
-  return Boolean(
-    message &&
-    value(message, 'device') !== 'cacheviz@1.0' &&
-    String(value(message, 'method') || '').toUpperCase() !== 'GET' &&
-    message.type === 'comment' &&
-    message.schema === 'odysee-comment@1.0' &&
-    typeof value(message, 'comment', 'body', 'text') === 'string' &&
-    typeof value(message, 'target', 'claim-id', 'claim_id') === 'string' &&
-    typeof value(message, 'channel-id', 'channel_id', 'author') === 'string' &&
-    Boolean(commentChannelUrl(message)) &&
-    Boolean(nativeCommentId(message))
-  );
+  if (
+    !message ||
+    value(message, 'device') === 'cacheviz@1.0' ||
+    String(value(message, 'method') || '').toUpperCase() === 'GET' ||
+    message.type !== 'comment' ||
+    message.schema !== 'odysee-comment@1.0' ||
+    typeof value(message, 'comment', 'body', 'text') !== 'string' ||
+    typeof value(message, 'target', 'claim-id', 'claim_id') !== 'string' ||
+    !nativeCommentId(message)
+  ) {
+    return false;
+  }
+
+  // Anonymous native comments carry no channel identity at all (the write is
+  // committed by the poster's cookie wallet); accept those. A comment that
+  // names a channel must resolve a channel url.
+  const hasChannel = typeof value(message, 'channel-id', 'channel_id', 'author') === 'string';
+  return hasChannel ? Boolean(commentChannelUrl(message)) : true;
 }
 
 async function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
