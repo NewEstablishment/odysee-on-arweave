@@ -49,6 +49,7 @@ type CollectionLocalCreateParams = {
   items: Array<string>;
   type: string;
   sourceId?: string;
+  id?: string;
 };
 
 type CollectionType = string;

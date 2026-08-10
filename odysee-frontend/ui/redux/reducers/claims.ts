@@ -153,25 +153,33 @@ function updateIfValueChanged(original, delta, key, newValue) {
  * @param newClaim
  */
 function updateIfClaimChanged(original, delta, key, newClaim) {
-  const claim = preserveExistingChannelMeta(original[key], newClaim);
+  const claim = mergeResolvedChannelClaim(original[key], newClaim);
 
   if (!original[key] || claimHasNewData(original[key], claim)) {
     delta[key] = claim;
   }
 }
 
-function preserveExistingChannelMeta(originalClaim, newClaim) {
+function mergeResolvedChannelClaim(originalClaim, newClaim) {
   if (!originalClaim || !newClaim || newClaim.value_type !== 'channel') return newClaim;
 
+  const mergedClaim = {
+    ...originalClaim,
+    ...newClaim,
+    ...(originalClaim.hyperbeam || newClaim.hyperbeam
+      ? { hyperbeam: { ...originalClaim.hyperbeam, ...newClaim.hyperbeam } }
+      : {}),
+    ...(originalClaim.value || newClaim.value ? { value: { ...originalClaim.value, ...newClaim.value } } : {}),
+    ...(originalClaim.meta || newClaim.meta ? { meta: { ...originalClaim.meta, ...newClaim.meta } } : {}),
+  };
   const originalClaimsInChannel = Number(originalClaim.meta?.claims_in_channel || 0);
   const newClaimsInChannel = Number(newClaim.meta?.claims_in_channel || 0);
-  if (!originalClaimsInChannel || newClaimsInChannel >= originalClaimsInChannel) return newClaim;
+  if (!originalClaimsInChannel || newClaimsInChannel >= originalClaimsInChannel) return mergedClaim;
 
   return {
-    ...newClaim,
+    ...mergedClaim,
     meta: {
-      ...newClaim.meta,
-      ...originalClaim.meta,
+      ...mergedClaim.meta,
       claims_in_channel: originalClaimsInChannel,
     },
   };

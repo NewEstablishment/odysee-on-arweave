@@ -243,6 +243,8 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   const showCollectionContext = isClaimAllowedForCollection(claim);
   const isChannelUri = isChannelClaim(claim, uri);
   const signingChannel = claim && claim.signing_channel;
+  const immutableClaimUri = hyperbeamImmutableUriFromClaim(claim);
+  const immutableChannelUri = hyperbeamImmutableUriFromClaim(signingChannel);
   const repostedChannelUri =
     claim && claim.repost_channel_url && claim.value_type === 'channel'
       ? claim.permanent_url || claim.canonical_url
@@ -269,7 +271,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   const navigateUrl =
     isCollection && listId && defaultCollectionAction === COLLECTIONS_CONSTS.DEFAULT_ACTION_VIEW
       ? `/$/${PAGES.PLAYLIST}/${listId}`
-      : formatLbryUrlForWeb(hyperbeamImmutableUriFromClaim(claim) || claim?.canonical_url || uri || '/');
+      : formatLbryUrlForWeb((claim ? immutableClaimUri : uri) || '/');
   let navigateSearch = new URLSearchParams();
 
   if (!isCollection && listId) {
@@ -287,11 +289,11 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   }
 
   function playPlaylistItem() {
-    if (!claim) return;
+    if (!claim || !immutableClaimUri) return;
 
     dispatch(
       doPlayNextUri({
-        uri: hyperbeamImmutableUriFromClaim(claim) || claim.canonical_url || uri,
+        uri: immutableClaimUri,
         collectionId: listId,
         navigateInline: !disableClickNavigation,
       })
@@ -299,6 +301,12 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   }
 
   const handleNavLinkClick = (e) => {
+    if (claim && !immutableClaimUri) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     const previewTime = (window as any).__previewCurrentTime;
     const previewUnmuted = (window as any).__previewMuted === false;
     if (previewTime && previewTime > 0 && previewUnmuted) {
@@ -324,7 +332,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
 
   const navLinkProps = {
     to: {
-      pathname: disableClickNavigation ? pathname : navigateUrl,
+      pathname: disableClickNavigation || (claim && !immutableClaimUri) ? pathname : navigateUrl,
       search: disableClickNavigation ? search : navigateSearch.toString() ? '?' + navigateSearch.toString() : '',
     },
     onClick: handleNavLinkClick,
@@ -426,12 +434,11 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
           'data-hyperbeam-claim-txid': claim.txid,
           'data-hyperbeam-claim-nout': claim.nout,
           'data-hyperbeam-claim-sd-hash': claim.value?.source?.sd_hash,
-          'data-hyperbeam-claim-uri': claim.canonical_url || claim.permanent_url || uri,
+          'data-hyperbeam-claim-uri': immutableClaimUri,
           'data-hyperbeam-claim-title': title || claim.name,
           'data-hyperbeam-claim-type': claim.value_type,
           'data-hyperbeam-signing-channel-id': claim.signing_channel?.claim_id,
-          'data-hyperbeam-signing-channel-uri':
-            claim.signing_channel?.canonical_url || claim.signing_channel?.permanent_url,
+          'data-hyperbeam-signing-channel-uri': immutableChannelUri,
           'data-hyperbeam-signing-channel-title': channelTitle || claim.signing_channel?.name,
         }
       : {};
@@ -679,7 +686,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
                 {!isChannelUri && signingChannel && (
                   <div className="claim-preview__channel-staked">
                     <UriIndicator focusable={false} uri={uri} link hideAnonymous external={isEmbed}>
-                      <ChannelThumbnail uri={signingChannel.permanent_url} xsmall />
+                      <ChannelThumbnail uri={immutableChannelUri || ''} xsmall />
                     </UriIndicator>
                   </div>
                 )}

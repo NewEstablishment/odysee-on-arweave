@@ -293,7 +293,6 @@ async function writeNativeMessage(message: Record<string, any>, label: string): 
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
-      ...authTokenHeader(),
     },
     body: JSON.stringify(message),
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
@@ -2373,7 +2372,9 @@ function immutableClaimFromHyperbeam(
   const valueType =
     value(claim, 'value_type', 'value-type') ||
     value(payload, 'value_type', 'value-type') ||
-    (device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' ? 'channel' : 'stream');
+    (device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' || String(rawName || '').startsWith('@')
+      ? 'channel'
+      : 'stream');
   const sourceName =
     value(payloadSource, 'name') ||
     value(valueSource, 'name') ||
@@ -2868,9 +2869,87 @@ export async function fetchPlaylistMessage(playlistId: any): Promise<any | null>
   return payload;
 }
 
+export function immutableIdForClaim(claim: any): string | null {
+  const nativeId = value(claim || {}, 'immutable_id', 'immutable-id');
+  if (isStandaloneImmutableId(nativeId) || isOutpointId(nativeId)) return String(nativeId);
+  const outpoint = value(claim || {}, 'outpoint');
+  return isOutpointId(outpoint) ? String(outpoint) : null;
+}
+
+export async function createNativePlaylist(fields: {
+  title: string,
+  description?: string,
+  thumbnail?: string,
+  items?: Array<string>,
+}): Promise<string> {
+  const message = compactParams({
+    type: 'playlist',
+    schema: 'odysee-playlist@1',
+    title: fields.title,
+    description: fields.description,
+    thumbnail: fields.thumbnail,
+    items: (fields.items || []).filter(Boolean).join(','),
+    state: 'active',
+    revision: 0,
+  });
+  return writeNativeMessage(message, 'playlist');
+}
+
+export async function writeNativePlaylistRevision(
+  rootId: string,
+  head: { message: any, messageId: string },
+  fields: { title?: string, description?: string, thumbnail?: string, items: Array<string> }
+): Promise<string> {
+  const current = head.message || {};
+  const message = compactParams({
+    type: 'playlist',
+    schema: 'odysee-playlist@1',
+    title: fields.title ?? value(current, 'title'),
+    description: fields.description ?? value(current, 'description'),
+    thumbnail: fields.thumbnail ?? value(current, 'thumbnail'),
+    items: fields.items.filter(Boolean).join(','),
+    state: 'active',
+    'revision-of': rootId,
+    'previous-version': head.messageId,
+    revision: toNumber(value(current, 'revision'), 0) + 1,
+  });
+  return writeNativeMessage(message, 'playlist revision');
+}
+
+export async function fetchNativePlaylistHead(
+  rootId: string
+): Promise<{ message: any, messageId: string } | null> {
+  const root = await fetchPlaylistMessage(rootId);
+  if (!root) return null;
+
+  const paths = await fetchPublicQueryJson({
+    schema: 'odysee-playlist@1',
+    type: 'playlist',
+    'revision-of': rootId,
+  })
+    .then((result) => uniquePaths(queryPaths(result)))
+    .catch(() => []);
+
+  let head = { message: root, messageId: rootId };
+  let headRevision = toNumber(value(root, 'revision'), 0);
+  for (const path of paths) {
+    const revisionId = String(path).split('/').pop() || '';
+    if (!isStandaloneImmutableId(revisionId)) continue;
+    const revision = await fetchPlaylistMessage(revisionId).catch(() => null);
+    if (!revision || value(revision, 'revision-of') !== rootId) continue;
+    const revisionNumber = toNumber(value(revision, 'revision'), 0);
+    if (
+      revisionNumber > headRevision ||
+      (revisionNumber === headRevision && revisionId < head.messageId)
+    ) {
+      head = { message: revision, messageId: revisionId };
+      headRevision = revisionNumber;
+    }
+  }
+  return head;
+}
+
 export function playlistRouteId(collectionId: any, claim?: any): string {
-  const outpoint = claim?.outpoint || claim?.immutable_id;
-  if (isOutpointId(outpoint)) return webSafeImmutableId(outpoint);
   return String(collectionId || '');
 }
 

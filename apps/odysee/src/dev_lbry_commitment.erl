@@ -358,16 +358,7 @@ channel_output_message(Raw, Nout, Ancestry) ->
         ClaimOp = maps:get(<<"claim-op">>, ClaimMsg),
         Type = claim_commitment_type(ClaimMsg),
         TxIDHex = maps:get(<<"txid">>, ClaimMsg),
-        % `value' is decoded and committed by claim_output_message above; carry
-        % it into the channel commitment's committed set so it stays verifiable.
-        %% REVERTED (2026-08-08): committing `value` here makes the freshly
-        %% built channel evidence fail `hb_message:verify/3`, so
-        %% `hb_store_odysee:evidence_result/2` fails closed and EVERY
-        %% channel-signed claim read returns invalid_evidence /
-        %% invalid_channel_evidence (whole watch page breaks). Repro:
-        %% `GET /~cache@1.0/read?read=odysee/channel-id/<id>`. Re-land by
-        %% making the committed value survive verification round-trips.
-        ValueKeys = [],
+        ValueKeys = value_committed_keys(ClaimMsg),
         Msg = (maps:remove(<<"commitments">>, ClaimMsg))#{
             <<"channel-id">> => ClaimID,
             <<"public-key">> => PublicKeyHex
@@ -414,16 +405,7 @@ stream_claim_message(Raw, Nout, Ancestry) ->
         ClaimOp = maps:get(<<"claim-op">>, ClaimMsg),
         Type = claim_commitment_type(ClaimMsg),
         TxIDHex = maps:get(<<"txid">>, ClaimMsg),
-        % `value' is decoded and committed by claim_output_message above; carry
-        % it into the stream commitment's committed set so it stays verifiable.
-        %% REVERTED (2026-08-08): committing `value` here makes the freshly
-        %% built channel evidence fail `hb_message:verify/3`, so
-        %% `hb_store_odysee:evidence_result/2` fails closed and EVERY
-        %% channel-signed claim read returns invalid_evidence /
-        %% invalid_channel_evidence (whole watch page breaks). Repro:
-        %% `GET /~cache@1.0/read?read=odysee/channel-id/<id>`. Re-land by
-        %% making the committed value survive verification round-trips.
-        ValueKeys = [],
+        ValueKeys = value_committed_keys(ClaimMsg),
         Msg = ClaimMsg#{
             <<"sd-hash">> => SDHash
         },
@@ -444,6 +426,9 @@ stream_claim_message(Raw, Nout, Ancestry) ->
                 )
             )}
     end.
+
+value_committed_keys(#{ <<"value">> := _ }) -> [<<"value">>];
+value_committed_keys(_) -> [].
 
 %% @doc Set every commitment on a message to the union of all the
 %% commitments' committed key lists. `hb_message:with_only_committed' (and

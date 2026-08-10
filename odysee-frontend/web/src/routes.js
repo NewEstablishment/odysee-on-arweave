@@ -369,6 +369,7 @@ async function postHyperbeamUpload(ctx) {
   const contentType = ctx.get('content-type') || 'application/octet-stream';
   const authHeaders = {
     ...(authToken ? { 'x-odysee-auth-token': authToken } : {}),
+    ...(ctx.get('cookie') ? { cookie: ctx.get('cookie') } : {}),
     accept: ctx.get('accept') || 'application/json',
     'accept-bundle': ctx.get('accept-bundle') || 'false',
   };
@@ -390,6 +391,7 @@ async function postHyperbeamUpload(ctx) {
   copyHeader(ctx, response.headers, 'url');
   copyHeader(ctx, response.headers, 'signers');
   copyHeader(ctx, response.headers, 'signers+link');
+  copyHeader(ctx, response.headers, 'set-cookie');
   ctx.body = response.body;
 }
 
@@ -1167,7 +1169,7 @@ function postStream(url, stream, extraHeaders = {}) {
         res.on('end', () => {
           resolve({
             statusCode: res.statusCode || 502,
-            headers: res.headers,
+            headers: { ...res.headers, ...res.trailers },
             body: Buffer.concat(chunks),
           });
         });
@@ -1199,7 +1201,7 @@ function postBuffer(url, body, extraHeaders = {}) {
         res.on('end', () => {
           resolve({
             statusCode: res.statusCode || 502,
-            headers: res.headers,
+            headers: { ...res.headers, ...res.trailers },
             body: Buffer.concat(chunks),
           });
         });

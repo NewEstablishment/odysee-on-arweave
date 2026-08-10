@@ -53,8 +53,8 @@ const CollectionPage = (props: Props) => {
     if (routePlaylistId) {
       fetchPlaylistMessage(routePlaylistId)
         .then((playlist) => {
-          const originId = playlist?.['legacy-claim-id'];
-          if (originId) setOutpointCollectionId(String(originId));
+          if (!playlist) return;
+          setOutpointCollectionId(String(playlist['legacy-claim-id'] || routePlaylistId));
         })
         .catch(() => {});
       return;

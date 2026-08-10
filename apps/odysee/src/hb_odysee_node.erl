@@ -78,7 +78,7 @@ odysee_stores(Opts) ->
     ] ++ hb_opts:get(<<"odysee-extra-stores">>, [], Opts).
 
 %% @doc The node's default `on' hooks, with the `~auth-hook@1.0' request
-%% handler's secret provider swapped to `~cookie@1.0', followed by a
+%% handler's secret provider swapped to `~odysee-cookie@1.0', followed by a
 %% `~reply-id@1.0' stage that surfaces the stored message's ID in the
 %% reply. Browsers then receive a stable anonymous identity
 %% automatically: the first commit-flag request mints a cookie-derived
@@ -97,7 +97,7 @@ cookie_auth_hooks(Opts) ->
                         [
                             Handler#{
                                 <<"secret-provider">> =>
-                                    #{ <<"device">> => <<"cookie@1.0">> }
+                                    #{ <<"device">> => <<"odysee-cookie@1.0">> }
                             },
                             #{
                                 <<"device">> => <<"reply-id@1.0">>,

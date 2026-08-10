@@ -105,7 +105,8 @@ const ClaimPageComponent = (props: Props) => {
   const isEmbed = pathname && pathname.startsWith('/$/embed');
   // In embed mode with live/latest path, use the resolved URL instead of the channel URL
   const effectiveUri = isEmbed && isNewestPath && latestClaimUrl ? latestClaimUrl : uri;
-  const { isChannel } = parseURI(effectiveUri);
+  const { isChannel: isChannelUri } = parseURI(effectiveUri);
+  const isChannel = claim?.value_type === 'channel' || isChannelUri;
   const shouldPromptPlaylistResume = Boolean(
     !isEmbed &&
     claim &&
@@ -285,7 +286,8 @@ const ClaimPageComponent = (props: Props) => {
   }
 
   if (isChannel) {
-    return <ChannelPage uri={effectiveUri} location={location} />;
+    const channelUri = claim?.canonical_url || claim?.permanent_url || effectiveUri;
+    return <ChannelPage uri={channelUri} location={location} />;
   }
 
   return (
