@@ -14,6 +14,18 @@ import {
   nativeCommentSignatureData,
 } from 'util/nativeCommentRevisions';
 import {
+  isNativeMessageId,
+  nativeMessageVersionRef,
+  verifyNativeMessage,
+  type VerifiedNativeMessage,
+} from 'util/nativeMessageVerification';
+import {
+  isNextNativePlaylistRevision,
+  latestNativePlaylistRevision,
+  nativePlaylistMessageId,
+  type NativePlaylistVersion,
+} from 'util/nativePlaylistRevisions';
+import {
   isNativeUploadMessage,
   latestNativeUploadRevision,
   nativeUploadMessageId,
@@ -21,6 +33,7 @@ import {
 } from 'util/nativeUploadRevisions';
 import {
   hasNativeCommentControlAuthority,
+  hasNativeCommentControlCommitterAuthority,
   isNativeCommentControlEnabled,
   legacyBlockControlsToImport,
   latestNativeCommentControls,
@@ -58,6 +71,7 @@ const nativeCommentControlQueryCache = new Map<
   { expiresAt: number; promise: Promise<Array<NativeCommentControl>> }
 >();
 const nativeCommentTargetOwnerCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
+const nativeCommentTargetCommitterCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
 let lastNativeCommentControlTimestamp = 0;
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
@@ -313,7 +327,7 @@ export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): 
   const commentId = await writeNativeMessage(message, 'comment');
   clearNativeCommentCaches();
   const comment = await fetchNativeCommentVersionById(commentId);
-  if (!comment) throw new Error('HyperBEAM native comment failed channel signature verification');
+  if (!comment) throw new Error('HyperBEAM native comment failed commitment verification');
   return comment;
 }
 
@@ -424,6 +438,7 @@ function nativeCommentMatchesSelectors(comment: any, selectors: Record<string, a
   const fields: Record<string, any> = {
     schema: comment?.schema,
     type: comment?.type,
+    'comment-ref': comment?.comment_ref,
     'claim-id': comment?.claim_id,
     state: comment?.state,
     author: comment?.channel_id,
@@ -509,6 +524,7 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
+    'comment-ref': nativeMessageVersionRef(),
     parent: params.parent_id || 'root',
     state: 'active',
     author: params.channel_id,
@@ -519,6 +535,7 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
     'channel-name': params.channel_name,
     'channel-signature': params.signature,
     'signing-ts': params.signing_ts,
+    'version-ref': nativeMessageVersionRef(),
     timestamp: Math.floor(Date.now() / 1000),
     'support-amount': params.amount || params.support_amount,
     'support-tx-id': params.support_tx_id,
@@ -538,6 +555,7 @@ function nativeCommentRevisionMessage(root: any, current: any, params: CommentEd
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
+    'comment-ref': root.comment_ref || root.comment_id,
     parent: root.parent_id || 'root',
     state: 'active',
     author: root.channel_id,
@@ -551,7 +569,8 @@ function nativeCommentRevisionMessage(root: any, current: any, params: CommentEd
     timestamp: root.timestamp,
     'updated-at': updatedAt,
     'revision-of': root.comment_id,
-    'previous-version': current.hyperbeam_message_id || current.comment_id,
+    'previous-version': current.version_ref || current.hyperbeam_message_id || current.comment_id,
+    'version-ref': nativeMessageVersionRef(),
     revision: toNumber(current.revision, 0) + 1,
     'revision-timestamp': Date.now(),
     operation: 'edit',
@@ -588,7 +607,16 @@ async function fetchNativeCommentById(id: string): Promise<any | null> {
 }
 
 async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
-  const direct = await fetchNativeCommentVersionById(id);
+  let direct = await fetchNativeCommentVersionById(id);
+  if (!direct) {
+    const byReference = await fetchNativeCommentCollection({
+      schema: 'odysee-comment@1.0',
+      type: 'comment',
+      'comment-ref': id,
+      state: 'active',
+    });
+    direct = byReference.find((comment) => comment.comment_id === id) || null;
+  }
   if (!direct) return null;
 
   const rootId = direct.revision_of || direct.comment_id;
@@ -601,14 +629,29 @@ async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
   return comments.find((comment) => comment.comment_id === rootId) || direct;
 }
 
+async function fetchNativeCommentRoot(rootId: string): Promise<any | null> {
+  const direct = await fetchNativeCommentVersionById(rootId);
+  if (direct && !direct.revision_of) return direct;
+
+  const versions = await fetchNativeCommentVersions({
+    schema: 'odysee-comment@1.0',
+    type: 'comment',
+    'comment-ref': rootId,
+    state: 'active',
+  });
+  return versions.find((comment) => comment.comment_id === rootId && !comment.revision_of) || null;
+}
+
 async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
-  if (!id) return null;
+  if (!isStandaloneImmutableId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
   const result = await fetchCachedStoreJsonOrNull(
     `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
     false
   );
-  const payload = storePayload(result);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  const payload = verified?.payload;
+  if (!payload) return null;
   const message = {
     ...payload,
     'message-id': normalizedId,
@@ -619,14 +662,16 @@ async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
   if (!hasNativeCommentSignature(comment)) return null;
   return {
     ...comment,
-    hyperbeam_owner: comment.channel_id,
+    hyperbeam_owner: verified.owner,
+    hyperbeam_committers: verified.committers,
+    hyperbeam_commitment_verification: 'verified',
     hyperbeam_signature_verification: 'unverified',
   };
 }
 
-// The store node exposes no channel-signature verification surface, so
-// native reads accept structurally complete signed messages; the node's
-// auth hook gates what gets committed in the first place.
+// Transport commitment verification and channel signature verification are
+// separate proofs. The generic verifier establishes the native committer;
+// channel-bearing comments must still carry the complete channel signature.
 function hasNativeCommentSignature(comment: any): boolean {
   // Fully anonymous comments (no channel identity at all) are committed by
   // the node under the writer's cookie wallet; accept them. A comment that
@@ -798,12 +843,20 @@ async function resolveNativeCommentControlPaths(paths: Array<string>): Promise<A
 async function fetchNativeCommentControlById(id: string): Promise<NativeCommentControl | null> {
   if (!id) return null;
   const normalizedId = id.replace(/^\/+/, '');
+  if (!isStandaloneImmutableId(normalizedId)) return null;
   const result = await fetchCachedStoreJsonOrNull(
     `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
     false
   );
-  const payload = storePayload(result);
-  const control = normalizeNativeCommentControl({ ...payload, 'message-id': normalizedId });
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  const control = normalizeNativeCommentControl({
+    ...verified.payload,
+    'message-id': normalizedId,
+    hyperbeam_owner: verified.owner,
+    hyperbeam_committers: verified.committers,
+    hyperbeam_commitment_verification: 'verified',
+  });
   if (!isNativeCommentControl(control)) return null;
   return control;
 }
@@ -822,7 +875,9 @@ function isNativeCommentControl(control: NativeCommentControl): boolean {
     control.event_timestamp &&
     control.signature &&
     control.signing_ts &&
-    control.hyperbeam_message_id
+    control.hyperbeam_message_id &&
+    control.hyperbeam_owner &&
+    control.hyperbeam_commitment_verification === 'verified'
   );
 }
 
@@ -833,7 +888,31 @@ async function authorizeNativeCommentControl(
   comments: Array<any>
 ): Promise<boolean> {
   const comment = comments.find((item) => String(item?.comment_id || '') === String(control.comment_id || ''));
-  return hasNativeCommentControlAuthority(control, { target, owner, comment });
+  if (!hasNativeCommentControlAuthority(control, { target, owner, comment })) return false;
+  const targetOwner = control.authority === 'owner' ? await nativeCommentTargetCommitter(target) : null;
+  return hasNativeCommentControlCommitterAuthority(control, { targetOwner, comment });
+}
+
+async function nativeCommentTargetCommitter(target: string): Promise<string | null> {
+  if (!isStandaloneImmutableId(target)) return null;
+  const now = Date.now();
+  const cached = nativeCommentTargetCommitterCache.get(target);
+  if (cached && cached.expiresAt > now) return cached.promise;
+  const promise = fetchNativeUploadHead(target)
+    .then((head) => head?.owner || null)
+    .then((owner) => {
+      if (!owner) nativeCommentTargetCommitterCache.delete(target);
+      return owner;
+    })
+    .catch((error) => {
+      nativeCommentTargetCommitterCache.delete(target);
+      throw error;
+    });
+  nativeCommentTargetCommitterCache.set(target, {
+    expiresAt: now + NATIVE_COMMENT_TARGET_OWNER_CACHE_MS,
+    promise,
+  });
+  return promise;
 }
 
 async function nativeCommentTargetOwner(target: string): Promise<string | null> {
@@ -885,6 +964,7 @@ function nativeCommentControlMessage(params: {
   return compactParams({
     schema: NATIVE_COMMENT_CONTROL_SCHEMA,
     type: NATIVE_COMMENT_CONTROL_TYPE,
+    'control-ref': nativeMessageVersionRef(),
     control: params.control,
     action: params.action,
     authority: params.authority,
@@ -916,6 +996,9 @@ async function signNativeCommentControlMessage(message: Record<string, any>): Pr
 async function writeNativeCommentControl(message: Record<string, any>, label: string): Promise<string> {
   const id = await writeNativeMessage(await signNativeCommentControlMessage(message), label);
   clearNativeCommentCaches();
+  if (!(await fetchNativeCommentControlById(id))) {
+    throw new Error(`HyperBEAM native ${label} failed commitment verification`);
+  }
   return id;
 }
 
@@ -928,6 +1011,7 @@ function clearNativeCommentCaches() {
   nativeCommentQueryCache.clear();
   nativeCommentControlQueryCache.clear();
   nativeCommentTargetOwnerCache.clear();
+  nativeCommentTargetCommitterCache.clear();
 }
 
 async function requireNativeCommentAuthorAllowed(target: string, author: string) {
@@ -1145,7 +1229,7 @@ export async function fetchHyperbeamCommentEdit(params: CommentEditParams): Prom
   if (!current) return fetchLegacyCommentron('comment.Edit', params);
 
   const rootId = current.revision_of || current.comment_id;
-  const root = current.revision_of ? await fetchNativeCommentVersionById(rootId) : current;
+  const root = current.revision_of ? await fetchNativeCommentRoot(rootId) : current;
   if (!root) throw new Error('HyperBEAM native comment root is unavailable');
   if (!params.channel_id || params.channel_id !== root.channel_id) {
     throw new Error('HyperBEAM native comment must be edited by its original channel');
@@ -2017,16 +2101,19 @@ function commentFromHyperbeam(comment: any): any {
   const channelName = value(comment, 'channel-name', 'channel_name');
   const channelUrl = commentChannelUrl(comment);
   const revisionOf = value(comment, 'revision-of', 'revision_of');
+  const commentRef = value(comment, 'comment-ref', 'comment_ref');
   const revision = value(comment, 'revision');
   const revisionTimestamp = value(comment, 'revision-timestamp', 'revision_timestamp');
   return compactParams({
     ...comment.source,
     schema: value(comment, 'schema'),
     type: value(comment, 'type'),
-    comment_id: revisionOf || value(comment, 'comment-id', 'comment_id', 'id'),
+    comment_id: revisionOf || commentRef || value(comment, 'comment-id', 'comment_id', 'id'),
+    comment_ref: commentRef,
     hyperbeam_message_id: value(comment, 'message-id', 'message_id', 'comment-id', 'comment_id', 'id'),
     revision_of: revisionOf,
     previous_version: value(comment, 'previous-version', 'previous_version'),
+    version_ref: value(comment, 'version-ref', 'version_ref'),
     revision: revision === undefined || revision === null ? undefined : toNumber(revision, 0),
     revision_timestamp:
       revisionTimestamp === undefined || revisionTimestamp === null ? undefined : toNumber(revisionTimestamp, 0),
@@ -3026,7 +3113,7 @@ function isOutpointId(id: any): boolean {
 }
 
 function isStandaloneImmutableId(id: any): boolean {
-  return /^[0-9A-Za-z_-]{41,128}$/.test(String(id || ''));
+  return isNativeMessageId(id);
 }
 
 function isClaimId(id: any): boolean {
@@ -3093,18 +3180,60 @@ export async function fetchNativeUploadVersion(
 ): Promise<NativeUploadVersion | null> {
   if (!isStandaloneImmutableId(messageId)) return null;
 
-  const payload = knownPayload || storePayload(await fetchImmutableJsonOrNull(messageId));
+  const verified = await fetchVerifiedNativeMessage<NativeUploadVersion>(messageId, knownPayload);
+  const payload = verified?.payload;
   if (!payload || !isNativeUploadMessage(payload)) return null;
-  const owner = await fetchNativeMessageCommitter(messageId);
-  if (!owner) return null;
 
   return {
     ...payload,
     'message-id': messageId,
-    owner,
+    owner: verified.owner,
+    committers: verified.committers,
+    'commitment-verification': 'verified',
     state: value(payload, 'state') || 'active',
     revision: toNumber(value(payload, 'revision'), 0),
   };
+}
+
+export async function fetchVerifiedNativeMessage<T extends Record<string, any> = Record<string, any>>(
+  messageId: string,
+  knownPayload?: T | null
+): Promise<VerifiedNativeMessage<T> | null> {
+  return verifyNativeMessage<T>(
+    messageId,
+    {
+      loadPayload: async (id) => storePayload(await fetchImmutableJsonOrNull(id)) as T | null,
+      verifyCommitment: fetchNativeMessageCommitmentVerification,
+      loadCommitter: fetchNativeMessageCommitter,
+    },
+    knownPayload
+  );
+}
+
+async function fetchNativeMessageCommitmentVerification(messageId: string): Promise<boolean> {
+  const baseUrl = hyperbeamBaseUrl();
+  if (!baseUrl) return false;
+
+  try {
+    const encodedId = encodeURIComponent(messageId);
+    const response = await fetch(`${baseUrl}/${encodedId}/verify?commitment-ids=${encodedId}`, {
+      method: 'GET',
+      credentials: hyperbeamFetchCredentials(baseUrl),
+      headers: { accept: 'application/json' },
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+    });
+    if (!response.ok) return false;
+    const parsed = parseDeviceJson(await response.text());
+    const result = isObject(parsed) ? value(parsed, 'body', 'result', 'value') : parsed;
+    return (
+      result === true ||
+      String(result || '')
+        .trim()
+        .toLowerCase() === 'true'
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function fetchNativeMessageCommitter(messageId: string): Promise<string | null> {
@@ -3144,14 +3273,25 @@ export async function fetchPlaylistIdForLegacyId(collectionClaimId: any): Promis
   return nativeId;
 }
 
-export async function fetchPlaylistMessage(playlistId: any): Promise<any | null> {
+export async function fetchPlaylistMessage(playlistId: any): Promise<NativePlaylistVersion | null> {
   if (!isStandaloneImmutableId(playlistId)) return null;
-  const payload = await fetchCachedImmutableJsonOrNull(String(playlistId))
+  const messageId = String(playlistId);
+  const payload = await fetchCachedImmutableJsonOrNull(messageId)
     .then(responsePayload)
     .catch(() => null);
   if (!payload || value(payload, 'type') !== 'playlist') return null;
-  registerPlaylistLidAlias(String(playlistId), value(payload, 'legacy-claim-id', 'legacy_claim_id'));
-  return payload;
+  const verified = await fetchVerifiedNativeMessage<NativePlaylistVersion>(messageId, payload);
+  if (!verified || value(verified.payload, 'schema') !== 'odysee-playlist@1') return null;
+  registerPlaylistLidAlias(messageId, value(verified.payload, 'legacy-claim-id', 'legacy_claim_id'));
+  return {
+    ...verified.payload,
+    'message-id': messageId,
+    owner: verified.owner,
+    committers: verified.committers,
+    'commitment-verification': 'verified',
+    state: value(verified.payload, 'state') || 'active',
+    revision: toNumber(value(verified.payload, 'revision'), 0),
+  };
 }
 
 export function immutableIdForClaim(claim: any): string | null {
@@ -3176,8 +3316,13 @@ export async function createNativePlaylist(fields: {
     items: (fields.items || []).filter(Boolean).join(','),
     state: 'active',
     revision: 0,
+    'version-ref': nativeMessageVersionRef(),
   });
-  return writeNativeMessage(message, 'playlist');
+  const playlistId = await writeNativeMessage(message, 'playlist');
+  if (!(await fetchPlaylistMessage(playlistId))) {
+    throw new Error('HyperBEAM native playlist failed commitment verification');
+  }
+  return playlistId;
 }
 
 export async function writeNativePlaylistRevision(
@@ -3195,15 +3340,23 @@ export async function writeNativePlaylistRevision(
     items: fields.items.filter(Boolean).join(','),
     state: 'active',
     'revision-of': rootId,
-    'previous-version': head.messageId,
+    'previous-version': value(current, 'version-ref', 'version_ref') || head.messageId,
+    'version-ref': nativeMessageVersionRef(),
     revision: toNumber(value(current, 'revision'), 0) + 1,
+    'revision-timestamp': Date.now(),
   });
-  return writeNativeMessage(message, 'playlist revision');
+  const revisionId = await writeNativeMessage(message, 'playlist revision');
+  const written = await fetchPlaylistMessage(revisionId);
+  const root = await fetchPlaylistMessage(rootId);
+  if (!root || !written || !isNextNativePlaylistRevision(root, current, written)) {
+    throw new Error('HyperBEAM native playlist revision failed ownership or chain validation');
+  }
+  return revisionId;
 }
 
 export async function fetchNativePlaylistHead(rootId: string): Promise<{ message: any; messageId: string } | null> {
   const root = await fetchPlaylistMessage(rootId);
-  if (!root) return null;
+  if (!root || value(root, 'revision-of', 'revision_of')) return null;
 
   const paths = await fetchPublicQueryJson({
     schema: 'odysee-playlist@1',
@@ -3213,20 +3366,15 @@ export async function fetchNativePlaylistHead(rootId: string): Promise<{ message
     .then((result) => uniquePaths(queryPaths(result)))
     .catch(() => []);
 
-  let head = { message: root, messageId: rootId };
-  let headRevision = toNumber(value(root, 'revision'), 0);
+  const revisions: Array<NativePlaylistVersion> = [];
   for (const path of paths) {
     const revisionId = String(path).split('/').pop() || '';
     if (!isStandaloneImmutableId(revisionId)) continue;
     const revision = await fetchPlaylistMessage(revisionId).catch(() => null);
-    if (!revision || value(revision, 'revision-of') !== rootId) continue;
-    const revisionNumber = toNumber(value(revision, 'revision'), 0);
-    if (revisionNumber > headRevision || (revisionNumber === headRevision && revisionId < head.messageId)) {
-      head = { message: revision, messageId: revisionId };
-      headRevision = revisionNumber;
-    }
+    if (revision) revisions.push(revision);
   }
-  return head;
+  const head = latestNativePlaylistRevision(root, revisions);
+  return { message: head, messageId: nativePlaylistMessageId(head) };
 }
 
 export function playlistRouteId(collectionId: any, claim?: any): string {

@@ -105,6 +105,36 @@ Because Odysee can mint multiple sessions for one account, production identity
 is derived from the resolved account ID rather than the individual session
 token. That keeps ownership stable across logins.
 
+## Native-message verification
+
+All native product hydration uses one fail-closed verifier in
+`odysee-frontend/ui/util/nativeMessageVerification.ts`. For an immutable
+locator `<id>`, it loads that message, requires
+`/<id>/verify?commitment-ids=<id>` to return true, and reads the committer from
+`/<id>/commitments/<id>/committer`. Product code receives the payload only when
+all three checks succeed. It must request the exact ID rather than
+`commitment-ids=all`, which can succeed vacuously for an uncommitted message.
+
+Uploads, comments, comment controls, and playlists use this verifier for every
+root or revision they hydrate, including query results and write read-back.
+Uncommitted or unverifiable query artifacts are ignored. Upload, comment, and
+playlist revision projection accepts only a contiguous chain from the same
+verified committer. Comment controls also require transport authority: author
+controls must have the comment root's committer, while owner controls must have
+the target native upload's committer.
+
+Signed application references keep logical chains stable when a query path has
+a different physical commitment locator: comments use `comment-ref`, revisions
+use `version-ref`, and controls use `control-ref`. The physical message ID is
+still retained for exact immutable reads and verification.
+
+Transport commitment verification does not prove a claimed LBRY channel
+identity. Channel signatures remain a separate proof and are currently only
+checked for structural completeness by the frontend. Native channel writes and
+a verified account-to-channel binding do not exist on this branch yet, so
+owner controls for legacy targets fail closed instead of trusting a claimed
+channel ID.
+
 ## Upload records
 
 The frontend uses the same-origin
@@ -199,18 +229,22 @@ node --check web/src/fetchStreamUrl.js
 Focused native tests:
 
 ```sh
+pnpm run test:native-message-verification
 pnpm run test:native-upload-revisions
 pnpm run test:hyperbeam-upload-smoke
 pnpm run test:hyperbeam-query-comment-smoke
 pnpm run test:native-comment-revisions
 pnpm run test:native-comment-controls
+pnpm run test:native-playlist-revisions
+pnpm run test:hyperbeam-playlist-smoke
 pnpm run test:static-manifest
 ```
 
-The upload smoke requires a running write-capable HyperBEAM node and SSR
-frontend. It exercises media upload, metadata creation, owner-valid update,
-attacker-signed tombstone rejection, owner delete, query projection, and
-byte-exact media read-back.
+The upload, comment, and playlist smokes require a running write-capable
+HyperBEAM node and SSR frontend. They exercise exact commitment verification,
+committer-based ownership, rejection of uncommitted query artifacts and
+hostile revisions, revision projection, moderation controls, and byte-exact
+media read-back.
 
 ## Current limitations
 
@@ -224,6 +258,10 @@ byte-exact media read-back.
   surface are not rebuilt in the store-first path.
 - Production deployment still needs a real account-resolution source and
   equivalent same-origin auth behavior.
+- Native channel messages and a verified account-to-channel binding are not
+  implemented yet. Channel-bearing comment signatures are not cryptographically
+  verified in the production frontend, and owner moderation for legacy targets
+  therefore fails closed.
 - Some frontend compatibility routes still mention removed product devices;
   they are cleanup debt, not supported architecture.
 

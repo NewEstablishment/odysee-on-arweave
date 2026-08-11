@@ -4,8 +4,12 @@ export const NATIVE_COMMENT_CONTROL_SIGNATURE_SCOPE = 'native-comment-control-v1
 
 export type NativeCommentControl = {
   hyperbeam_message_id?: string;
+  hyperbeam_owner?: string;
+  hyperbeam_committers?: Array<string>;
+  hyperbeam_commitment_verification?: string;
   schema?: string;
   type?: string;
+  control_ref?: string;
   control?: string;
   action?: string;
   authority?: string;
@@ -30,6 +34,11 @@ export type NativeCommentControlContext = {
   comment?: Record<string, any>;
 };
 
+export type NativeCommentControlTransportContext = {
+  targetOwner: string | null;
+  comment?: Record<string, any>;
+};
+
 export type NativeCommentControlProjection = {
   removed: boolean;
   hidden: boolean;
@@ -49,6 +58,7 @@ export function nativeCommentControlSignatureData(control: NativeCommentControl)
     compact({
       schema: field(control, 'schema'),
       type: field(control, 'type'),
+      'control-ref': field(control, 'control-ref', 'control_ref'),
       control: field(control, 'control'),
       action: field(control, 'action'),
       authority: field(control, 'authority'),
@@ -70,8 +80,16 @@ export function normalizeNativeCommentControl(source: NativeCommentControl): Nat
   return compact({
     ...source,
     hyperbeam_message_id: field(source, 'message-id', 'message_id', 'hyperbeam_message_id', 'id'),
+    hyperbeam_owner: field(source, 'hyperbeam-owner', 'hyperbeam_owner'),
+    hyperbeam_committers: field(source, 'hyperbeam-committers', 'hyperbeam_committers'),
+    hyperbeam_commitment_verification: field(
+      source,
+      'hyperbeam-commitment-verification',
+      'hyperbeam_commitment_verification'
+    ),
     schema: field(source, 'schema'),
     type: field(source, 'type'),
+    control_ref: field(source, 'control-ref', 'control_ref'),
     control: field(source, 'control'),
     action: field(source, 'action'),
     authority: field(source, 'authority'),
@@ -176,6 +194,21 @@ export function hasNativeCommentControlAuthority(
       ['liked', 'unliked'].includes(String(normalized.action))
     );
   }
+  return false;
+}
+
+export function hasNativeCommentControlCommitterAuthority(
+  control: NativeCommentControl,
+  context: NativeCommentControlTransportContext
+): boolean {
+  const normalized = normalizeNativeCommentControl(control);
+  const committer = normalized.hyperbeam_owner;
+  if (!committer || normalized.hyperbeam_commitment_verification !== 'verified') return false;
+
+  if (normalized.authority === 'author') {
+    return Boolean(context.comment && committer === field(context.comment, 'hyperbeam-owner', 'hyperbeam_owner'));
+  }
+  if (normalized.authority === 'owner') return Boolean(context.targetOwner && committer === context.targetOwner);
   return false;
 }
 

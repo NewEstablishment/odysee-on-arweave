@@ -143,6 +143,14 @@ async function readUpload(id) {
   const text = await response.text();
   if (!response.ok) throw new Error(`Read ${id} failed: ${response.status} ${text.slice(0, 500)}`);
   const stored = { ...responseHeaders(response), ...(parseJson(text) || {}) };
+  const verifyResponse = await fetch(
+    `${hyperbeamBase}/${encodeURIComponent(id)}/verify?commitment-ids=${encodeURIComponent(id)}`,
+    { headers: { accept: 'application/json' } }
+  );
+  const verifyText = await verifyResponse.text();
+  if (!verifyResponse.ok || String(parseJson(verifyText)?.body ?? parseJson(verifyText) ?? verifyText) !== 'true') {
+    throw new Error(`Commitment verification ${id} failed: ${verifyResponse.status} ${verifyText.slice(0, 500)}`);
+  }
   const ownerResponse = await fetch(
     `${hyperbeamBase}/${encodeURIComponent(id)}/commitments/${encodeURIComponent(id)}/committer`,
     { headers: { accept: 'application/json' } }

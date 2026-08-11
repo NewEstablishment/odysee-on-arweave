@@ -10,6 +10,7 @@ import {
 } from 'constants/tags';
 import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 import { fetchNativeUploadHead, fetchNativeUploadVersion } from 'util/hyperbeam';
+import { nativeMessageVersionRef } from 'util/nativeMessageVerification';
 import {
   isNextNativeUploadRevision,
   nativeUploadRevisionNumber,
@@ -137,7 +138,7 @@ export async function publishThroughHyperbeam(
     content_type: file.type || publishPayload.content_type || 'application/octet-stream',
     size: file.size,
     name: publishPayload.name,
-    version_ref: nativeUploadVersionRef(),
+    version_ref: nativeMessageVersionRef(),
     metadata: {
       ...publishMetadata(publishPayload),
       ...(await fileMediaMetadata(file)),
@@ -377,7 +378,7 @@ function nativeUploadRevisionMessage(
     operation,
     'revision-of': recordId,
     'previous-version': field(current, 'version-ref', 'version_ref', 'message-id', 'message_id'),
-    'version-ref': nativeUploadVersionRef(),
+    'version-ref': nativeMessageVersionRef(),
     revision: nativeUploadRevisionNumber(current) + 1,
     'revision-timestamp': Date.now(),
   });
@@ -418,16 +419,6 @@ function uploadPayloadFromNativeVersion(version: NativeUploadVersion) {
 
 function nativeUploadDataId(version: NativeUploadVersion): string {
   return String(field(version, 'data-id', 'data_id') || '');
-}
-
-function nativeUploadVersionRef(): string {
-  const cryptoObj = typeof crypto !== 'undefined' ? crypto : undefined;
-  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
-  if (cryptoObj?.getRandomValues) {
-    const bytes = cryptoObj.getRandomValues(new Uint8Array(24));
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  }
-  throw new Error('Secure randomness is unavailable for the HyperBEAM upload version reference.');
 }
 
 function field(source: Record<string, any>, ...keys: Array<string>): any {

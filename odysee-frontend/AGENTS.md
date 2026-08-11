@@ -38,6 +38,13 @@ discovery order.
 - Merged native/historical lists deduplicate by stable identity and sort the
   combined result instead of prepending one source.
 
+Every native product locator must be hydrated through
+`fetchVerifiedNativeMessage`. A valid result requires the exact immutable
+message, `/<id>/verify?commitment-ids=<id>` returning true, and the committer at
+`/<id>/commitments/<id>/committer`. Do not use `commitment-ids=all`; it can be
+vacuously true for an uncommitted message. Discard query paths and write
+read-backs that do not pass the exact check.
+
 ## Authentication and SSR bridges
 
 The Odysee `auth_token` cookie cannot be sent from the browser to a node on a
@@ -91,6 +98,20 @@ Native comments are ordinary signed messages discovered with generic
 hierarchy, counts, sorting, and moderation projection belong in the integration
 layer. Do not mutate an existing comment.
 
+Comments use a signed `comment-ref` as their logical ID and signed
+`version-ref` values for contiguous revisions. Controls use a signed
+`control-ref`. Keep the physical locator separately for exact verification.
+Comment revisions must retain the root committer. Author controls must be
+committed by the comment root's committer; owner controls must be committed by
+the target native upload's committer. A claimed channel ID or structurally
+present channel signature is not transport authority.
+
+Playlists follow the same exact-verification and same-committer revision rules.
+Their revisions must be contiguous through signed `version-ref` values.
+Transport verification does not cryptographically prove LBRY channel
+signatures. Native channel writes and an account-to-channel proof are not
+implemented yet, so legacy-target owner controls must fail closed.
+
 `~query@1.0` is exact local discovery. `~search@1.0` is generic full-text
 search. Both return locators; neither should return product-hydrated Redux
 objects. An unpatched query device may fail on an empty result, so callers may
@@ -134,17 +155,22 @@ node --check web/src/fetchStreamUrl.js
 Use the focused scripts for affected behavior:
 
 ```sh
+pnpm run test:native-message-verification
 pnpm run test:native-upload-revisions
 pnpm run test:hyperbeam-upload-smoke
 pnpm run test:hyperbeam-query-comment-smoke
 pnpm run test:native-comment-revisions
 pnpm run test:native-comment-controls
+pnpm run test:native-playlist-revisions
+pnpm run test:hyperbeam-playlist-smoke
 pnpm run test:static-manifest
 ```
 
-The upload smoke needs a running write-capable node and SSR frontend. It must
-cover byte-exact read-back, valid owner update/delete, hostile revision
-rejection, and discovery/projection—not only a successful HTTP status.
+The upload, comment, and playlist smokes need a running write-capable node and
+SSR frontend. They must cover exact commitment verification, committer
+ownership, rejection of uncommitted query artifacts and hostile revisions,
+discovery/projection, and byte-exact upload read-back—not only a successful
+HTTP status.
 
 Update this guide whenever the single data route, identity, auth forwarding,
 revision contract, local operation, validation, or known limitations change.
