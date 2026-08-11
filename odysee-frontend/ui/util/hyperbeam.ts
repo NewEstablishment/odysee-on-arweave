@@ -14,6 +14,12 @@ import {
   nativeCommentSignatureData,
 } from 'util/nativeCommentRevisions';
 import {
+  isNativeUploadMessage,
+  latestNativeUploadRevision,
+  nativeUploadMessageId,
+  type NativeUploadVersion,
+} from 'util/nativeUploadRevisions';
+import {
   hasNativeCommentControlAuthority,
   isNativeCommentControlEnabled,
   legacyBlockControlsToImport,
@@ -321,6 +327,7 @@ async function writeNativeMessage(message: Record<string, any>, label: string): 
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
+      ...authTokenHeader(),
     },
     body: JSON.stringify(message),
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
@@ -746,8 +753,7 @@ function uniquePaths(paths: Array<string>): Array<string> {
 
 function nativeQueryRequest(selectors: Record<string, any>): Record<string, any> {
   return {
-    ...selectors,
-    only: [...Object.keys(selectors), 'accept'],
+    only: selectors,
     return: 'paths',
     'cache-control': ['no-store', 'no-cache'],
   };
@@ -1683,7 +1689,9 @@ async function claimFromHyperbeamBatchResult(id: string, result: any): Promise<A
     return claim ? [claim] : [];
   }
   if (!isStandaloneImmutableId(id)) return [];
-  const claim = sdkClaimFromHyperbeam(cacheReadClaim(storePayload(result)), id);
+  const payload = cacheReadClaim(storePayload(result));
+  if (isNativeUploadMessage(payload)) return fetchHyperbeamImmutableClaim(id);
+  const claim = sdkClaimFromHyperbeam(payload, id);
   return claim?.claim_id ? [claim] : [];
 }
 
@@ -1743,6 +1751,10 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
     const json = await response.json().catch(() => null);
     const claimPayload = responsePayload(json);
     const expandedClaim = await expandHyperbeamImmutableClaim(baseUrl, claimId, cacheReadClaim(claimPayload));
+    const uploadHead = isNativeUploadMessage(expandedClaim)
+      ? await fetchNativeUploadHead(claimId, expandedClaim).catch(() => null)
+      : null;
+    const effectiveClaim = uploadHead?.current || expandedClaim;
     pushHyperbeamDebug(
       'response',
       {
@@ -1763,13 +1775,13 @@ async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Clai
         contentLength: response.headers.get('content-length'),
         requestKey: `claim:${claimId}`,
         claimKeys: claimId,
-        body: expandedClaim || json,
+        body: effectiveClaim || json,
       },
       response.ok ? 'ok' : 'error'
     );
-    if (!response.ok || !json) return [];
+    if (!response.ok || !json || uploadHead?.current?.state === 'deleted') return [];
 
-    const claim = sdkClaimFromHyperbeam(expandedClaim || cacheReadClaim(claimPayload), claimId);
+    const claim = sdkClaimFromHyperbeam(effectiveClaim || cacheReadClaim(claimPayload), claimId);
     return claim?.claim_id ? [claim] : [];
   } catch {
     return [];
@@ -2386,7 +2398,12 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
   if (!immutableId) return null;
 
   const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
-  const payload = storePayload(result);
+  const initialPayload = storePayload(result);
+  const uploadHead = isNativeUploadMessage(initialPayload)
+    ? await fetchNativeUploadHead(immutableId, initialPayload).catch(() => null)
+    : null;
+  if (uploadHead?.current?.state === 'deleted') return null;
+  const payload = uploadHead?.current || initialPayload;
   const signedChannelId = signingChannelIdFromEvidence(payload);
   const decodedClaim = signedChannelId ? { signedChannelId } : null;
   const signingChannel = await fetchSigningChannelEvidence(payload);
@@ -2398,7 +2415,7 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
     name = parsed.streamName || parsed.claimName;
   } catch {}
   if (name && immutableIdFromRouteToken(String(name))) name = undefined;
-  const claim = immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name);
+  const claim = immutableClaimFromHyperbeam(payload, immutableId, signingChannel, decodedClaim, name);
   if (!claim) return null;
 
   return !name || claim.name === name ? claim : null;
@@ -2474,6 +2491,10 @@ function immutableClaimFromHyperbeam(
   const txid = value(payload, 'txid') || immutableOutpoint?.txid;
   const nout = value(payload, 'nout') || immutableOutpoint?.nout;
   const device = value(payload, 'device');
+  const nativeUpload = value(payload, 'schema') === 'odysee-upload@1.0' && value(payload, 'type') === 'upload';
+  const nativeUploadRootId = nativeUpload ? value(payload, 'revision-of', 'revision_of') || immutableId : undefined;
+  const nativeUploadVersionId = nativeUpload ? value(payload, 'message-id', 'message_id') || immutableId : undefined;
+  const nativeUploadDataId = nativeUpload ? value(payload, 'data-id', 'data_id') : undefined;
   const outpoint =
     typeof txid === 'string' && (typeof nout === 'number' || typeof nout === 'string') ? `${txid}:${nout}` : null;
   const storeId = immutableId || outpoint || value(payload, 'id') || sourceClaimId;
@@ -2492,6 +2513,7 @@ function immutableClaimFromHyperbeam(
   const description =
     value(existingValue, 'description') || value(payload, 'description') || value(decodedValue, 'description') || '';
   const sdHash =
+    nativeUploadDataId ||
     value(payload, 'sd_hash', 'sd-hash') ||
     value(payloadSource, 'sd_hash', 'sd-hash') ||
     value(valueSource, 'sd_hash', 'sd-hash') ||
@@ -2510,8 +2532,8 @@ function immutableClaimFromHyperbeam(
       value(valueSource, 'url')
   );
   const directMediaUrl =
-    !String(storeId).includes(':') && isMediaContentType(mediaType)
-      ? `${hyperbeamBaseUrl()}/${encodeDataPath(storeId)}`
+    !String(nativeUploadDataId || storeId).includes(':') && isMediaContentType(mediaType)
+      ? `${hyperbeamBaseUrl()}/${encodeDataPath(String(nativeUploadDataId || storeId))}`
       : '';
   const mediaUrl = explicitMediaUrl || hyperbeamMediaUrl(outpoint, sdHash) || directMediaUrl;
   const canonicalUrl =
@@ -2563,7 +2585,9 @@ function immutableClaimFromHyperbeam(
       title,
       description,
       thumbnail: thumbnailObject(
-        value(existingValue, 'thumbnail') || value(payload, 'thumbnail') || value(decodedValue, 'thumbnail'),
+        value(existingValue, 'thumbnail') ||
+          value(payload, 'thumbnail', 'thumbnail-url', 'thumbnail_url') ||
+          value(decodedValue, 'thumbnail'),
         mediaUrl,
         mediaType
       ),
@@ -2571,11 +2595,15 @@ function immutableClaimFromHyperbeam(
         value(existingValue, 'stream_type', 'stream-type') ||
         value(decodedValue, 'stream_type', 'stream-type') ||
         streamTypeFromMediaType(mediaType),
-      tags: value(existingValue, 'tags') || value(decodedValue, 'tags'),
+      tags: value(existingValue, 'tags') || value(payload, 'tags') || value(decodedValue, 'tags'),
+      languages: value(existingValue, 'languages') || value(payload, 'languages'),
       license: value(existingValue, 'license') || value(decodedValue, 'license'),
       release_time:
-        value(existingValue, 'release_time', 'release-time') || value(decodedValue, 'release_time', 'release-time'),
-      video: value(existingValue, 'video') || value(decodedValue, 'video'),
+        value(existingValue, 'release_time', 'release-time') ||
+        value(payload, 'release-time', 'release_time') ||
+        value(decodedValue, 'release_time', 'release-time'),
+      video: value(existingValue, 'video') || value(payload, 'video') || value(decodedValue, 'video'),
+      audio: value(existingValue, 'audio') || value(payload, 'audio') || value(decodedValue, 'audio'),
       source: compactParams({
         ...payloadSource,
         ...valueSource,
@@ -2600,6 +2628,20 @@ function immutableClaimFromHyperbeam(
       txid,
       nout,
       device,
+      ...(nativeUpload
+        ? {
+            'record-id': nativeUploadRootId,
+            record_id: nativeUploadRootId,
+            'version-id': nativeUploadVersionId,
+            version_id: nativeUploadVersionId,
+            'version-ref': value(payload, 'version-ref', 'version_ref'),
+            version_ref: value(payload, 'version-ref', 'version_ref'),
+            'data-id': nativeUploadDataId,
+            data_id: nativeUploadDataId,
+            revision: toNumber(value(payload, 'revision'), 0),
+            state: value(payload, 'state') || 'active',
+          }
+        : {}),
     }),
   });
 }
@@ -2999,6 +3041,96 @@ function claimIdFromSignatureInput(input: any): string | undefined {
 function outpointParts(id: any): { txid: string; nout: number } | null {
   const match = String(id || '').match(/^([0-9a-f]{64}):([0-9]+)$/i);
   return match ? { txid: match[1], nout: Number(match[2]) } : null;
+}
+
+export type NativeUploadHead = {
+  root: NativeUploadVersion;
+  current: NativeUploadVersion;
+  rootId: string;
+  messageId: string;
+  owner: string;
+};
+
+export async function fetchNativeUploadHead(
+  messageId: string,
+  knownVersion?: NativeUploadVersion | null
+): Promise<NativeUploadHead | null> {
+  if (!isStandaloneImmutableId(messageId)) return null;
+
+  const version = await fetchNativeUploadVersion(messageId, knownVersion);
+  if (!version || !isNativeUploadMessage(version)) return null;
+  const rootId = String(value(version, 'revision-of', 'revision_of') || messageId);
+  if (!isStandaloneImmutableId(rootId)) return null;
+  const root = rootId === messageId ? version : await fetchNativeUploadVersion(rootId);
+  if (!root || value(root, 'revision-of', 'revision_of')) return null;
+
+  const paths = await fetchPublicQueryJson(
+    nativeQueryRequest({
+      schema: 'odysee-upload@1.0',
+      type: 'upload',
+      'revision-of': rootId,
+    })
+  )
+    .then((result) => uniquePaths(queryPaths(result)))
+    .catch(() => []);
+  const revisions = (await Promise.all(paths.map((path) => fetchNativeUploadVersion(path).catch(() => null)))).filter(
+    Boolean
+  ) as Array<NativeUploadVersion>;
+  const current = latestNativeUploadRevision(root, revisions);
+
+  return {
+    root,
+    current,
+    rootId,
+    messageId: nativeUploadMessageId(current),
+    owner: String(root.owner),
+  };
+}
+
+export async function fetchNativeUploadVersion(
+  messageId: string,
+  knownPayload?: NativeUploadVersion | null
+): Promise<NativeUploadVersion | null> {
+  if (!isStandaloneImmutableId(messageId)) return null;
+
+  const payload = knownPayload || storePayload(await fetchImmutableJsonOrNull(messageId));
+  if (!payload || !isNativeUploadMessage(payload)) return null;
+  const owner = await fetchNativeMessageCommitter(messageId);
+  if (!owner) return null;
+
+  return {
+    ...payload,
+    'message-id': messageId,
+    owner,
+    state: value(payload, 'state') || 'active',
+    revision: toNumber(value(payload, 'revision'), 0),
+  };
+}
+
+async function fetchNativeMessageCommitter(messageId: string): Promise<string | null> {
+  const baseUrl = hyperbeamBaseUrl();
+  if (!baseUrl) return null;
+
+  try {
+    const encodedId = encodeURIComponent(messageId);
+    const response = await fetch(`${baseUrl}/${encodedId}/commitments/${encodedId}/committer`, {
+      method: 'GET',
+      credentials: hyperbeamFetchCredentials(baseUrl),
+      headers: { accept: 'application/json' },
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    const parsed = parseDeviceJson(text);
+    const committer =
+      (isObject(parsed) && value(parsed, 'committer', 'owner', 'body')) || (typeof parsed === 'string' ? parsed : text);
+    const normalized = String(committer || '')
+      .replace(/^"|"$/g, '')
+      .trim();
+    return normalized && normalized.length <= 1024 ? normalized : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchPlaylistIdForLegacyId(collectionClaimId: any): Promise<string | null> {

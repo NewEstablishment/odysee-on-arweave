@@ -1,128 +1,142 @@
-# Odysee on HyperBEAM
+# Odysee on HyperBEAM: store-first demo
 
-Odysee served from a single HyperBEAM node. Legacy Odysee infrastructure is a
-byte source only: every fact the node serves is re-derived from raw bytes and
-carried as a commitment, so a client never has to trust the node.
+This branch serves verified historical Odysee content and native signed writes
+from a HyperBEAM store stack. It has one product frontend,
+`odysee-frontend/`, and no application-device layer for claims, streams,
+comments, or uploads.
 
-Verified working: the UI loads from the node, a real video plays, and every
-byte was hash-checked on the way through.
+## Components
 
----
+| Component | Responsibility |
+| --- | --- |
+| `lbry@1.0` | Verifies and commits LBRY evidence. |
+| `odysee-auth@1.0` | Maps an auth session to a stable account signing identity. |
+| `reply-id@1.0` | Returns the stored ID for a committed write. |
+| `search@1.0` | Generic full-text discovery. |
+| `hb_store_odysee` | Classifies compatibility locators and sources verified immutable messages. |
+| Four `hb_store_lbry_*` stores | Transactions, claim outputs, stream descriptors, and blobs. |
 
-## What it is
+Cold historical reads fetch and verify source evidence, then populate local
+storage. Warm reads are local. Native uploads, channels, and comments are
+ordinary committed messages written through `/id` and found through generic
+query/search.
 
-**Four devices and five stores.** No application devices.
+## Build and start
 
-| | |
-|---|---|
-| `lbry@1.0` | verification only, proves LBRY evidence |
-| `odysee-auth@1.0` | session to account to signing key |
-| `search@1.0`, `reply-id@1.0` | generic full-text, write-reply shim |
-| `hb_store_odysee` | the compatibility boundary: classify a legacy id, fetch, verify, cache |
-| 4 x `hb_store_lbry_*` | transaction, claim output, stream descriptor, blob |
+Prerequisites: Erlang/OTP 27 or newer, `rebar3`, Node.js 22.12 or newer,
+`pnpm` 10.33.0, and network access for live historical reads.
 
-The old design had 25+ application devices (`odysee-claim@1.0`,
-`odysee-stream@1.0`, ...). They are gone. Reads are store reads, so anything
-that can read a HyperBEAM store can read Odysee content: `~query@1.0`, a peer
-node, a router such as weave.space.
-
-Why that matters operationally: every custom device must be trust-pinned by
-every node operator who wants to serve your content. Four pins is a different
-proposition from twenty-five.
-
-## The flow
-
-```mermaid
-flowchart TD
-    A["Browser: GET /~cache@1.0/read?read=odysee/media/stream-id/txid:0"] --> B[Store stack, in order]
-    B -->|hit| C[Local cache, served in ms]
-    B -->|miss| D[hb_store_odysee]
-    D --> E[Classify the key by shape]
-    E --> F[Fetch from legacy: SDK proxy locator, blob CDN bytes]
-    F --> G{Verify}
-    G -->|"txid = reverse(sha256d(raw))<br/>every blob = sha384"| H[Build committed message]
-    G -->|mismatch| I[Read fails, nothing served]
-    H --> J[Write to local cache, link addresses]
-    J --> K[HTTP response: fields as headers, commitments as signature]
-    style G fill:#854F0B,color:#fff
-    style I fill:#A32D2D,color:#fff
-```
-
-Read-through caching: the first read pays for legacy, everything after is
-local. Same object measured on the demo: **3.4s cold, 0.002s warm**.
-
-The response *is* the proof:
-
-```
-txid:            d22e243be78d...
-raw:             AQAAAAKConULCnjLdPQnQ43-Vpqt...
-signature-input: comm-...=("raw" "txid");alg="lbry@1.0/sha-256d"
-```
-
-Recompute `reverse(sha256d(raw))`, compare to `txid`. The node is a transport,
-not an oracle.
-
-## Run it locally
-
-Needs Erlang/OTP 27+, rebar3, node >= 22.12, and network access to Odysee.
+Build the canonical frontend and publish the local device store:
 
 ```sh
-# 1. Build the UI from the tracked odysee-frontend/, which carries the
-#    store-first data layer. The node API must be baked in at BUILD time,
-#    and the manifest profile (relative base, node-safe asset names) is
-#    required for serving from the node.
 cd odysee-frontend
-corepack enable && corepack prepare pnpm@10.33.0 --activate
+corepack enable
+corepack prepare pnpm@10.33.0 --activate
 pnpm install
 ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run build:manifest
 
-# 2. Build the preloaded device store, once.
-cd .. && HB_PORT=18734 rebar3 device local     # ctrl-C twice once it boots
-
-# 3. Start the node and publish the UI into it.
-#    One line. rebar3 shell ignores multi-line --eval and races EOF, hence the sleep.
-HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'Opts = hb_odysee_node:seed_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, M]), receive stop -> ok end.' < <(sleep 100000)
+cd ..
+HB_PORT=18734 rebar3 device local
 ```
 
-Then open, using the manifest id it prints:
-
-```
-http://127.0.0.1:18800/<MANIFEST>/#/@conculturepodcast:c/what-if-anakin-won-star-wars-alternate:b
-```
-
-`cache-control => no-store` is required. Without it the resolution cache pins
-mutable locators at constant addresses and stale claims get served.
-
-### Tests
+Stop the temporary `device local` node after it publishes
+`_build/device-local-store`, then start a write-capable demo node. The command
+below explicitly enables arbitrary tokens for local demonstration and reduces
+the PBKDF2 cost so the smoke is fast. Never use either setting in production.
 
 ```sh
-rebar3 device test --with-core        # 252 tests. --with-core is required,
-                                      # plain `device test` runs 91 and skips
-                                      # the whole store layer
-ODYSEE_LIVE=1 rebar3 device test --with-core   # adds live-infrastructure test
+HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'application:ensure_all_started(hackney), application:ensure_all_started(inets), Opts = hb_odysee_node:upload_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"odysee-auth-allow-unvalidated-tokens">> => true, <<"odysee-auth-pbkdf2-iterations">> => 1, <<"odysee-auth-pbkdf2-key-length">> => 64, <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, Manifest} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, Manifest]), receive stop -> ok end.'
 ```
 
-## What works
+Open the printed manifest ID:
 
-Claims, channels, streams, transactions, descriptors, blobs, video playback,
-auth, search. All cryptographically verified, cached locally after first
-fetch, and addressable by a plain HyperBEAM id.
+```text
+http://127.0.0.1:18800/<MANIFEST>/#/
+```
 
-## What does not
+`cache-control: no-store` prevents the HTTP resolution cache from pinning a
+mutable locator to stale content during development.
 
-- **Comments, uploads, reactions, view and subscriber counts, moderation.**
-  Those devices were deleted and have not been rebuilt. This is the real gap.
-- **Homepage tiles.** Claims resolve, but the frontend wants decoded display
-  metadata that evidence messages do not carry.
-- **Seeking.** `dev_cache` drops the request, so Range headers never reach the
-  store. Whole-object playback only.
-- **Account banner.** Expected, there is no account backend.
-- **Known bug:** `GET /<alias>` returns the bytes but **no commitments**, so
-  an alias fetch is not verifiable. Use the `/~cache@1.0/read?read=...` form
-  when the proof matters. Details and the failing test are in
-  `ARCHITECTURE_READ_PATH.md`.
+For the normal SSR application instead of the static manifest:
 
-## Read next
+```sh
+cd odysee-frontend
+ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run dev:web-server
+```
 
-`ARCHITECTURE_READ_PATH.md` traces the whole read path in 26 steps with
-file:line references.
+Open `http://localhost:9090`. Run only one frontend supervisor.
+
+## Verify a native write
+
+The demo node accepts an explicit token header. A production node must validate
+the token through `odysee-session-accounts` or `odysee-account-api`.
+
+```sh
+NODE=http://127.0.0.1:18800
+TOKEN=local-demo-user
+
+curl -X POST "$NODE/id?!=true&committers=all" \
+  -H "x-odysee-auth-token: $TOKEN" \
+  -H "content-type: video/mp4" \
+  -H "type: stream" \
+  -H "title: my video" \
+  --data-binary @video.mp4
+```
+
+The reply is the permanent message ID. Read the bytes back with
+`GET /<message-id>` and inspect the owner at:
+
+```text
+GET /<message-id>/commitments/<message-id>/committer
+```
+
+The same token produces the same signing identity. A different token produces
+a different signer. Omitting the token from a committed write returns `401`.
+Tokens and derived secrets are not included in the stored message.
+
+## Verify the frontend upload flow
+
+With HyperBEAM on `18800` and the SSR frontend on `9090`:
+
+```sh
+cd odysee-frontend
+pnpm run test:native-upload-revisions
+pnpm run test:hyperbeam-upload-smoke
+```
+
+The smoke writes media and a metadata root, appends a valid owner update,
+injects an attacker-signed tombstone and confirms it is ignored, appends the
+owner tombstone, discovers and projects the chain, and compares the served media
+bytes exactly with the uploaded bytes.
+
+## Full validation
+
+```sh
+rebar3 device test --with-core
+
+cd odysee-frontend
+pnpm run fmt:check
+pnpm run typecheck:tsc
+pnpm run check
+node --check web/src/odyseeHyperbeamNode.js
+node --check web/src/fetchStreamUrl.js
+```
+
+`--with-core` is required for store and HTTP coverage. After changing a device,
+rerun `rebar3 device local` before manual node testing; compilation does not
+republish the local device store.
+
+## Current limitations
+
+- Unpatched upstream `query@1.0` can fail on an empty result. The proposed fix
+  is `patches/dev-query-match-error-tuple.patch`.
+- HTTP range propagation through the cache path is incomplete, so seeking is
+  weaker than whole-object playback.
+- Reactions, view/subscriber counts, and full historical moderation are not
+  rebuilt.
+- Some dormant frontend compatibility routes still name removed Odysee product
+  devices. The current upload mutation path does not use them.
+- Production requires an account-resolution source; the demo's arbitrary-token
+  option is deliberately unsafe outside local development.
+
+`ARCHITECTURE_READ_PATH.md` traces the verified historical read path in detail.

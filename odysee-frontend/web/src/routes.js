@@ -423,7 +423,6 @@ async function postHyperbeamUpload(ctx) {
   const contentType = ctx.get('content-type') || 'application/octet-stream';
   const authHeaders = {
     ...(authToken ? { 'x-odysee-auth-token': authToken } : {}),
-    ...(ctx.get('cookie') ? { cookie: ctx.get('cookie') } : {}),
     accept: ctx.get('accept') || 'application/json',
     'accept-bundle': ctx.get('accept-bundle') || 'false',
   };

@@ -83,22 +83,77 @@ link(_StoreOpts, _Req, _NodeOpts) ->
 read(StoreOpts, Req = #{ <<"read">> := Key }, NodeOpts) ->
     BareKey = normalize_key(Key),
     Path = canonical_read_path(BareKey),
-    case fixture(Path, StoreOpts, NodeOpts) of
-        {ok, Msg} ->
-            fixture_result(Msg, NodeOpts);
-        not_found ->
-            case read_live(Path, Req, StoreOpts, NodeOpts) of
-                {ok, LiveMsg} = OK when is_map(LiveMsg) ->
-                    case Path of
-                        <<"odysee/claim-json/", _/binary>> -> ok;
-                        <<"odysee/channel-json/", _/binary>> -> ok;
-                        _ -> warm_addresses(BareKey, Path, LiveMsg, StoreOpts, NodeOpts)
-                    end,
-                    OK;
-                Other ->
-                    Other
-            end
-    end.
+    Result =
+        case fixture(Path, StoreOpts, NodeOpts) of
+            {ok, Msg} ->
+                fixture_result(Msg, NodeOpts);
+            not_found ->
+                case read_live(Path, Req, StoreOpts, NodeOpts) of
+                    {ok, LiveMsg} = OK when is_map(LiveMsg) ->
+                        case Path of
+                            <<"odysee/claim-json/", _/binary>> -> ok;
+                            <<"odysee/channel-json/", _/binary>> -> ok;
+                            _ -> warm_addresses(BareKey, Path, LiveMsg, StoreOpts, NodeOpts)
+                        end,
+                        OK;
+                    Other ->
+                        Other
+                end
+        end,
+    with_http_status(Result).
+
+%% HyperBEAM derives a response status through `dev_meta:message_to_status/2',
+%% which recognises a fixed set of atoms and falls through to a `200'
+%% catch-all for everything else. A bare `{error, invalid_outpoint}' is
+%% therefore served as HTTP 200 with the reason as the body, and a caller
+%% cannot tell a served object from a refused one. Carry the status
+%% explicitly so the boundary reports what actually happened.
+%%
+%% `not_found' is left exactly as it is: it already maps to 404, and callers
+%% (`dev_cache' among them) branch on that precise shape to fall back.
+with_http_status({error, not_found} = NotFound) ->
+    NotFound;
+with_http_status({error, Reason}) when is_atom(Reason) ->
+    {error, #{
+        <<"status">> => error_status(Reason),
+        <<"body">> => atom_to_binary(Reason, utf8)
+    }};
+%% Tuple reasons only arise after input validation (a malformed path yields
+%% an atom via `require_hex_size'/`valid_hex_size'): they carry the detail of
+%% something the legacy source returned that did not parse or verify, e.g.
+%% `{txid_mismatch, _, _}', `{hash_mismatch, _, _}', `{http_status, 4xx, _}'.
+%% That is an upstream fault, so 502, with the tag as the body.
+with_http_status({error, Reason}) when is_tuple(Reason), is_atom(element(1, Reason)) ->
+    {error, #{
+        <<"status">> => 502,
+        <<"body">> => atom_to_binary(element(1, Reason), utf8)
+    }};
+with_http_status(Other) ->
+    Other.
+
+%% The caller named something that cannot address an object.
+error_status(invalid_claim_id) -> 400;
+error_status(invalid_nout) -> 400;
+error_status(invalid_odysee_store_path) -> 400;
+error_status(invalid_outpoint) -> 400;
+error_status(invalid_outpoint_path) -> 400;
+error_status(invalid_range) -> 400;
+error_status(invalid_txid) -> 400;
+error_status(missing_nout) -> 400;
+error_status(missing_txid) -> 400;
+%% The legacy source answered, but what it returned does not verify. The
+%% request was well formed, so this is an upstream fault rather than a
+%% client one.
+error_status(invalid_claim_signature) -> 502;
+error_status(invalid_evidence) -> 502;
+error_status(invalid_proxy_json) -> 502;
+error_status(invalid_tx_hex) -> 502;
+error_status(native_commitment_failure) -> 502;
+error_status(unsigned_claim) -> 502;
+error_status(protected) -> 403;
+%% Anything else is an object we cannot produce: absent upstream, or a claim
+%% whose kind did not match the one the path asked for.
+error_status(_) -> 404.
 
 read_live(<<"odysee/media/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
     media_from_stream_path(<<"odysee/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
@@ -698,12 +753,32 @@ warm_addresses(_BareKey, _Path, _Msg, _StoreOpts, _NodeOpts) ->
 link_local(_Keys, _Msg, [], _Opts) ->
     ok;
 link_local(Keys, Msg, LocalStores, Opts) ->
-    {ok, Id} = hb_cache:write(Msg, Opts#{ <<"store">> => LocalStores }),
+    WriteOpts = Opts#{ <<"store">> => LocalStores },
+    {ok, UncommittedID} = hb_cache:write(Msg, WriteOpts),
+    %% Link to a COMMITMENT id, never to the uncommitted id `hb_cache:write'
+    %% returns. `hb_cache' selects a message's commitment by the id the
+    %% caller asked for, building `commitments/<Target>' from the requested
+    %% path, so the uncommitted id names no commitment and serves the content
+    %% with no proof at all.
+    %%
+    %% This makes the link target correct, not the link itself verifiable:
+    %% these keys are locators (a path hash, a bare outpoint), and neither
+    %% names a commitment either, so a read through one still arrives without
+    %% proof. Callers that need proof address the object by its commitment id
+    %% or by its canonical path. See `skeleton_blob_serves_and_addresses_test'
+    %% in `hb_odysee_node' for both halves.
+    Target = commitment_target(Msg, UncommittedID, WriteOpts),
     lists:foreach(
-        fun(Key) -> hb_store:link(LocalStores, #{ Key => Id }, Opts) end,
+        fun(Key) -> hb_store:link(LocalStores, #{ Key => Target }, Opts) end,
         Keys
     ),
     ok.
+
+commitment_target(Msg, UncommittedID, Opts) ->
+    case hb_maps:keys(hb_maps:get(<<"commitments">>, Msg, #{}, Opts), Opts) of
+        [] -> UncommittedID;
+        [CommitmentID | _] -> CommitmentID
+    end.
 
 %% Follow `hb_store_gateway''s `local-store' convention when provided;
 %% otherwise the node's own local-scope stores (this store is `remote',

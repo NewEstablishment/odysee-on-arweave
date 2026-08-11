@@ -12,8 +12,20 @@
 %%% peers serves the same content trustlessly. `serving_store/1' returns
 %%% the store stack for that configuration.
 -module(hb_odysee_node).
--export([start_seed/0, start_seed/1, seed_opts/1, serving_store/1]).
+-export([start_seed/0, start_seed/1, seed_opts/1, upload_opts/1, serving_store/1]).
 -export([cookie_auth_hooks/1]).
+
+%% The keys the auth hook must leave out of the signature. The hook's own
+%% defaults (secret, cookie, path, ...) plus the transport keys `hb_http'
+%% attaches to a request. Transport keys are rewritten when the stored
+%% message is later served, so signing them makes the served copy fail
+%% verification against its own commitment.
+-define(UNSIGNED_REQUEST_KEYS, [
+    <<"secret">>, <<"cookie">>, <<"set-cookie">>, <<"path">>,
+    <<"method">>, <<"authorization">>, <<"!">>,
+    <<"accept">>, <<"accept-bundle">>, <<"ao-peer">>, <<"ao-peer-port">>,
+    <<"committers">>, <<"host">>, <<"user-agent">>
+]).
 
 %% @doc Start a seed node on an OS-assigned port with default options.
 start_seed() ->
@@ -33,7 +45,7 @@ seed_opts(Overrides) ->
             ++ odysee_stores(Overrides),
     Defaults = #{
         <<"port">> => 0,
-        %% Browser writes (comments, uploads): the cookie identity commits
+        %% Browser writes (comments, uploads): the token-derived identity commits
         %% a `POST /id?!=true&committers=all', `store-all-signed' persists
         %% the committed message, and `~reply-id@1.0' (appended by
         %% `cookie_auth_hooks/1') surfaces the stored id in the reply.
@@ -44,6 +56,21 @@ seed_opts(Overrides) ->
     },
     Base = maps:merge(Defaults, maps:without([<<"store">>, <<"on">>], Overrides)),
     Base#{ <<"store">> => Stores }.
+
+%% @doc Seed-node options that also accept committed writes: uploads,
+%% channel profiles, comments. The stock auth hook signs any request
+%% carrying the `!' commit flag with a token-derived per-account wallet,
+%% `store-all-signed' persists what it signs, and the match index makes
+%% the writes discoverable through `~query@1.0'. Writes land in the
+%% primary (first) store, which must support `match' (LMDB does).
+upload_opts(Overrides) ->
+    Opts = #{ <<"store">> := Stores } = seed_opts(Overrides),
+    Opts#{
+        <<"on">> => cookie_auth_hooks(Opts),
+        <<"store-all-signed">> => true,
+        <<"match-index">> => [hd(Stores)],
+        <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS
+    }.
 
 %% @doc The read-only Odysee source stores.
 odysee_stores(Opts) ->
@@ -78,14 +105,15 @@ odysee_stores(Opts) ->
     ] ++ hb_opts:get(<<"odysee-extra-stores">>, [], Opts).
 
 %% @doc The node's default `on' hooks, with the `~auth-hook@1.0' request
-%% handler's secret provider swapped to `~odysee-cookie@1.0', followed by a
+%% handler's secret provider swapped to `~odysee-auth@1.0', followed by a
 %% `~reply-id@1.0' stage that surfaces the stored message's ID in the
-%% reply. Browsers then receive a stable anonymous identity
-%% automatically: the first commit-flag request mints a cookie-derived
-%% per-user wallet, every subsequent request with that cookie commits as
-%% the same user, and the committed writes (uploads, comments) persist
-%% via the hook's `store-all-signed' handling. Pass the result as the
-%% node's `on' option.
+%% reply. The hook is gated (`when') to requests that carry the `!'
+%% commit flag or an explicit Odysee auth-token header, so anonymous
+%% reads pass through unchallenged. A request that does fire the hook
+%% derives a per-account wallet from the Odysee `auth_token', and the
+%% committed writes (uploads, comments) persist via the hook's
+%% `store-all-signed' handling. Pass the result as the node's `on'
+%% option.
 cookie_auth_hooks(Opts) ->
     Hooks = hb_opts:get(on, #{}, Opts),
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
@@ -96,8 +124,21 @@ cookie_auth_hooks(Opts) ->
                     (Handler = #{ <<"device">> := <<"auth-hook@1.0">> }) ->
                         [
                             Handler#{
+                                <<"when">> => #{
+                                    <<"keys">> =>
+                                        [
+                                            <<"!">>,
+                                            <<"odysee-auth-token">>,
+                                            <<"x-odysee-auth-token">>,
+                                            <<"x-lbry-auth-token">>
+                                        ]
+                                },
                                 <<"secret-provider">> =>
-                                    #{ <<"device">> => <<"odysee-cookie@1.0">> }
+                                    #{
+                                        <<"device">> => <<"odysee-auth@1.0">>,
+                                        <<"access-control">> =>
+                                            #{ <<"device">> => <<"odysee-auth@1.0">> }
+                                    }
                             },
                             #{
                                 <<"device">> => <<"reply-id@1.0">>,
@@ -184,8 +225,30 @@ skeleton_assert_verifies(Msg, Opts) ->
     ),
     Loaded.
 
+%% The `lbry@1.0' commitment ids on a message, newest-agnostic and ordered
+%% only by the map. These are content-addressed, so each names the object in
+%% the store; the node's own response signature does not.
+lbry_commitment_ids(Msg, Opts) ->
+    Commitments = hb_cache:ensure_all_loaded(
+        hb_maps:get(<<"commitments">>, Msg, #{}, Opts), Opts),
+    [
+        ID
+    ||
+        {ID, Commitment} <- hb_maps:to_list(Commitments, Opts),
+        hb_maps:get(<<"commitment-device">>, Commitment, none, Opts)
+            =:= <<"lbry@1.0">>
+    ].
+
 %% The smallest complete slice: bytes in, verified message out over HTTP,
 %% then addressable by a plain id with no path knowledge and no device call.
+%%
+%% The verifiable plain id is a COMMITMENT id. `hb_cache' selects the
+%% commitment named by the id the caller asked for (`prepare_typed_values'
+%% builds `commitments/<Target>' from the requested path), so an id derived
+%% from the content selects its own proof and an id derived from anything
+%% else cannot. The alias is a path hash with no cryptographic relationship
+%% to the bytes, so it is a locator: it resolves to the same object, but a
+%% caller who wants proof asks by commitment id or by canonical path.
 skeleton_blob_serves_and_addresses_test() ->
     Bytes = <<"walking skeleton blob payload">>,
     Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
@@ -197,10 +260,27 @@ skeleton_blob_serves_and_addresses_test() ->
     Served = skeleton_assert_verifies(ViaPath, Opts),
     ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Served, not_found, Opts)),
 
+    %% Addressable by a plain id, and it still carries its proof. Select the
+    %% `lbry@1.0' commitment specifically: a served message also carries the
+    %% node's own signature over the response, which is minted per request
+    %% and names nothing in the store.
+    [CommitmentID | _] = lbry_commitment_ids(Served, Opts),
+    {ok, ViaID} = hb_http:get(Node, <<"/", CommitmentID/binary>>, #{}),
+    Addressed = skeleton_assert_verifies(ViaID, Opts),
+    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)),
+
+    %% The alias locates the same object, without carrying the proof.
     Alias = hb_odysee_address:alias(Path),
     {ok, ViaAlias} = hb_http:get(Node, <<"/", Alias/binary>>, #{}),
-    Addressed = skeleton_assert_verifies(ViaAlias, Opts),
-    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)).
+    ?assertEqual(
+        Hash,
+        hb_maps:get(
+            <<"blob-hash">>,
+            hb_cache:ensure_all_loaded(ViaAlias, Opts),
+            not_found,
+            Opts
+        )
+    ).
 
 %% Descriptor parsed and checked against its sd-hash.
 skeleton_descriptor_serves_test() ->
@@ -267,6 +347,258 @@ skeleton_descriptor() ->
     Raw = hb_json:encode(Descriptor),
     {Raw, dev_lbry_stream_descriptor:descriptor_hash(Raw)}.
 
+
+%%% The write loop: a node built by `upload_opts/1', driven over HTTP the way
+%%% a browser drives it. A POST carrying the `!' commit flag is signed with a
+%%% token-derived wallet, persisted, and its signed id returned; everything
+%%% after that is ordinary reads and queries.
+
+upload_node() ->
+    Store = hb_test_utils:test_store(),
+    Node =
+        hb_http_server:start_node(upload_opts(#{
+            <<"store">> => [Store],
+            <<"priv-wallet">> => ar_wallet:new(),
+            <<"odysee-auth-allow-unvalidated-tokens">> => true,
+            <<"odysee-auth-pbkdf2-iterations">> => 1,
+            <<"odysee-auth-pbkdf2-key-length">> => 64
+        })),
+    {Node, #{ <<"store">> => [Store] }}.
+
+%% @doc POST a message with the commit flag. Passing a previous reply reuses
+%% its session: the auth token it carried commits as the same user; `none'
+%% is a fresh session (a fresh token) and therefore a fresh identity. The
+%% token is threaded through the returned reply, as the session cookie was
+%% before `~odysee-auth@1.0' made writes token-authenticated.
+commit_post(Node, Msg, PrevReply, Opts) ->
+    Token =
+        case PrevReply of
+            none -> hb_util:encode(crypto:strong_rand_bytes(16));
+            #{ <<"x-odysee-auth-token">> := PrevToken } -> PrevToken
+        end,
+    Req = Msg#{
+        <<"path">> => <<"/id?!=true&committers=all">>,
+        <<"x-odysee-auth-token">> => Token
+    },
+    WithCookie =
+        case PrevReply of
+            PrevMap when is_map(PrevMap) -> with_cookie(Req, PrevReply, Opts);
+            _ -> Req
+        end,
+    {ok, Reply} = hb_http:post(Node, WithCookie, Opts),
+    % A body-only reply collapses to the stored id itself; a message reply
+    % carries it under `message-id'.
+    ID =
+        case Reply of
+            Bin when is_binary(Bin) -> Bin;
+            _ -> hb_maps:get(<<"message-id">>, Reply, not_found, Opts)
+        end,
+    ?assert(is_binary(ID)),
+    ReplyMap = if is_map(Reply) -> Reply; true -> #{ <<"body">> => Reply } end,
+    {ReplyMap#{ <<"x-odysee-auth-token">> => Token }, ID}.
+
+%% What a browser does: each `set-cookie' line's `name=value' pair, joined
+%% into one `cookie' header on the next request.
+with_cookie(Req, PrevReply, Opts) ->
+    SetCookie =
+        case hb_maps:get(<<"set-cookie">>, PrevReply, [], Opts) of
+            Lines when is_list(Lines) -> Lines;
+            Line -> [Line]
+        end,
+    Pairs = [hd(binary:split(L, <<";">>)) || L <- SetCookie],
+    Req#{ <<"cookie">> => iolist_to_binary(lists:join(<<"; ">>, Pairs)) }.
+
+%% @doc The committers of the message as stored, without the transport
+%% signature a served copy also carries.
+stored_signers(ID, Opts) ->
+    {ok, Msg} = hb_cache:read(ID, Opts),
+    hb_message:signers(hb_cache:ensure_all_loaded(Msg, Opts), Opts).
+
+%% Bytes and metadata in one committed POST. The reply carries the signed
+%% id; reading that id back returns the exact bytes with the uploader's
+%% commitment attached and verifying. The same cookie commits as the same
+%% identity.
+upload_video_roundtrip_test() ->
+    {Node, Opts} = upload_node(),
+    Bytes = crypto:strong_rand_bytes(64 * 1024),
+    {Reply, ID} =
+        commit_post(Node, #{
+            <<"type">> => <<"stream">>,
+            <<"title">> => <<"upload roundtrip probe">>,
+            <<"content-type">> => <<"video/mp4">>,
+            <<"body">> => Bytes
+        }, none, Opts),
+    {ok, ReadBack} = hb_http:get(Node, <<"/", ID/binary>>, Opts),
+    Loaded = hb_cache:ensure_all_loaded(ReadBack, Opts),
+    ?assertEqual(Bytes, hb_maps:get(<<"body">>, Loaded, not_found, Opts)),
+    ?assertEqual(
+        <<"video/mp4">>,
+        hb_maps:get(<<"content-type">>, Loaded, not_found, Opts)
+    ),
+    skeleton_assert_verifies(ReadBack, Opts),
+    [Committer] = stored_signers(ID, Opts),
+    {_, SameUserID} =
+        commit_post(Node, #{
+            <<"type">> => <<"stream">>,
+            <<"title">> => <<"same user">>,
+            <<"body">> => <<"second">>
+        }, Reply, Opts),
+    ?assertEqual([Committer], stored_signers(SameUserID, Opts)),
+    {_, FreshUserID} =
+        commit_post(Node, #{
+            <<"type">> => <<"stream">>,
+            <<"title">> => <<"fresh user">>,
+            <<"body">> => <<"third">>
+        }, none, Opts),
+    ?assertNotEqual([Committer], stored_signers(FreshUserID, Opts)).
+
+%% @doc The values of a `~query@1.0' reply's numbered keys, ordered by their
+%% integer value (so `"10"' follows `"9"', not `"1"').
+match_paths(Reply, Opts) ->
+    Loaded = hb_cache:ensure_all_loaded(Reply, Opts),
+    Numbered =
+        [
+            {binary_to_integer(K), V}
+        ||
+            {K, V} <- hb_maps:to_list(Loaded, Opts),
+            lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(K))
+        ],
+    [V || {_, V} <- lists:sort(Numbered)].
+
+%% @doc Read a query match the way a verifying client must, and return its
+%% title only if the claimed channel genuinely signed this content.
+%%
+%% The check is membership, not sole authorship. Storage is content
+%% addressed, so a message's commitments are grouped by its signer-independent
+%% content id: anyone can upload byte-identical content and have their
+%% commitment coalesced into the same group. Demanding the channel be the
+%% ONLY signer would let an attacker censor a genuine upload by re-uploading
+%% its public bytes, adding a second signer. So verify the channel's OWN
+%% commitments and ignore any others: a spoof (content the channel never
+%% signed) has no such commitment and is rejected; an attacker's extra
+%% commitment on genuine content changes nothing.
+verified_channel_entry(Path, Channel, Opts) ->
+    {ok, Msg} = hb_cache:read(Path, Opts),
+    Loaded =
+        hb_cache:read_all_commitments(
+            hb_cache:ensure_all_loaded(Msg, Opts),
+            Opts
+        ),
+    Commitments = hb_maps:get(<<"commitments">>, Loaded, #{}, Opts),
+    ByChannel =
+        [
+            ID
+        ||
+            {ID, C} <- hb_maps:to_list(Commitments, Opts),
+            hb_maps:get(<<"committer">>, C, none, Opts) =:= Channel
+        ],
+    Genuine =
+        ByChannel =/= [] andalso
+            hb_message:verify(
+                Loaded,
+                #{ <<"commitment-ids">> => ByChannel },
+                Opts
+            ),
+    case Genuine of
+        true -> {true, hb_maps:get(<<"title">>, Loaded, not_found, Opts)};
+        false -> false
+    end.
+
+%% A channel is its owner's address: the profile is a committed message and
+%% uploads reference the address under `channel'. The channel page is a
+%% `~query@1.0' match on that key. The query is convention; the proof is the
+%% commitment: a listing reader keeps entries the claimed channel signed. A
+%% spoof (another identity's content tagged with the channel) is rejected,
+%% and a censorship attempt (an attacker re-uploading the genuine bytes to
+%% co-sign the shared object) does not hide the real upload.
+channel_profile_and_listing_test() ->
+    {Node, Opts} = upload_node(),
+    {ProfileReply, ProfileID} =
+        commit_post(Node, #{
+            <<"type">> => <<"channel">>,
+            <<"name">> => <<"probe channel">>
+        }, none, Opts),
+    [Channel] = stored_signers(ProfileID, Opts),
+    {ok, Profile} = hb_http:get(Node, <<"/", ProfileID/binary>>, Opts),
+    ?assertEqual(
+        <<"probe channel">>,
+        hb_maps:get(<<"name">>, hb_cache:ensure_all_loaded(Profile, Opts), not_found, Opts)
+    ),
+    Upload =
+        fun(Title, Body) -> #{
+            <<"type">> => <<"stream">>,
+            <<"channel">> => Channel,
+            <<"title">> => Title,
+            <<"body">> => Body
+        } end,
+    Genuine = Upload(<<"first">>, <<"genuine video bytes">>),
+    {_, _} = commit_post(Node, Genuine, ProfileReply, Opts),
+    {_, _} = commit_post(Node, Upload(<<"second">>, crypto:strong_rand_bytes(1024)), ProfileReply, Opts),
+    %% Same channel key, a different identity, distinct content: a spoof.
+    {_, _} = commit_post(Node, Upload(<<"spoofed">>, crypto:strong_rand_bytes(1024)), none, Opts),
+    %% The genuine video's exact bytes re-uploaded from a fresh identity:
+    %% content-addressing coalesces it into the same object and co-signs it.
+    {_, _} = commit_post(Node, Genuine, none, Opts),
+    {ok, QueryReply} =
+        hb_http:post(Node, #{
+            <<"path">> => <<"/~query@1.0/only">>,
+            <<"type">> => <<"stream">>,
+            <<"channel">> => Channel,
+            <<"only">> => [<<"type">>, <<"channel">>],
+            <<"return">> => <<"paths">>
+        }, Opts),
+    %% Four uploads, but the poison coalesced with the genuine one: 3 objects.
+    Paths = match_paths(QueryReply, Opts),
+    ?assertEqual(3, length(Paths)),
+    Verified =
+        lists:sort(lists:filtermap(
+            fun(P) -> verified_channel_entry(P, Channel, Opts) end,
+            Paths
+        )),
+    %% Spoof rejected; the co-signed genuine upload still listed.
+    ?assertEqual([<<"first">>, <<"second">>], Verified).
+
+%% A comment is a committed message referencing its video under `parent';
+%% listing is a `~query@1.0' match on parent and type. The commenter's
+%% identity comes from the commitment, never from a claimed key, and a
+%% different session is a different identity.
+comment_flow_test() ->
+    {Node, Opts} = upload_node(),
+    {_, VideoID} =
+        commit_post(Node, #{
+            <<"type">> => <<"stream">>,
+            <<"title">> => <<"commented video">>,
+            <<"body">> => crypto:strong_rand_bytes(256)
+        }, none, Opts),
+    {_, CommentID} =
+        commit_post(Node, #{
+            <<"type">> => <<"comment">>,
+            <<"parent">> => VideoID,
+            <<"body">> => <<"first comment">>
+        }, none, Opts),
+    {ok, QueryReply} =
+        hb_http:post(Node, #{
+            <<"path">> => <<"/~query@1.0/only">>,
+            <<"type">> => <<"comment">>,
+            <<"parent">> => VideoID,
+            <<"only">> => [<<"type">>, <<"parent">>],
+            <<"return">> => <<"paths">>
+        }, Opts),
+    [CommentPath] = match_paths(QueryReply, Opts),
+    {ok, Comment} = hb_cache:read(CommentPath, Opts),
+    Loaded = hb_cache:ensure_all_loaded(Comment, Opts),
+    ?assertEqual(
+        <<"first comment">>,
+        hb_maps:get(<<"body">>, Loaded, not_found, Opts)
+    ),
+    ?assertEqual(
+        VideoID,
+        hb_maps:get(<<"parent">>, Loaded, not_found, Opts)
+    ),
+    ?assertNotEqual(
+        stored_signers(VideoID, Opts),
+        stored_signers(CommentID, Opts)
+    ).
 
 %% Live sourcing against real Odysee infrastructure. Network dependent, so it
 %% is opt-in: set ODYSEE_LIVE=1 to run. Everything else in this suite uses the
