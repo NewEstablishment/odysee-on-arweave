@@ -1,6 +1,7 @@
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { isHyperbeamDeviceEnabled } from 'util/hyperbeamRouting';
 import { getAuthToken } from 'util/saved-passwords';
+import { isServedFromManifest } from 'util/manifest-prefix';
 
 export const HYPERBEAM_DEVICE = {
   account: '~odysee-account@1.0',
@@ -20,7 +21,14 @@ export const HYPERBEAM_DEVICE = {
 };
 
 export function hyperbeamNodeBase() {
-  return String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  const configured = String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  if (configured) return configured;
+  if (typeof window !== 'undefined' && isServedFromManifest()) return window.location.origin;
+  return '';
+}
+
+export function hyperbeamNodeEnabled() {
+  return Boolean(hyperbeamNodeBase());
 }
 
 // On a HyperBEAM node the write API is a cookie-authed commit, not the legacy
@@ -28,7 +36,7 @@ export function hyperbeamNodeBase() {
 // being present as upload being available. Scoped to the upload path only; do
 // NOT fold this into the app-wide verified-email gate.
 export function hyperbeamUploadEnabled() {
-  return Boolean(hyperbeamNodeBase());
+  return hyperbeamNodeEnabled();
 }
 
 export function hyperbeamDeviceBase(device: string) {

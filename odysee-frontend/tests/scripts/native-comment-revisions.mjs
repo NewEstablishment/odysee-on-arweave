@@ -8,7 +8,9 @@ import {
 
 const root = {
   comment_id: 'root-id',
+  comment_ref: 'root-id',
   hyperbeam_message_id: 'root-id',
+  version_ref: 'root-version',
   hyperbeam_owner: 'owner-a',
   channel_id: 'channel-a',
   claim_id: 'claim-a',
@@ -18,6 +20,11 @@ const root = {
 };
 const revisionOne = revision(root, root, 'revision-1', 1, 200, 'first edit');
 const revisionTwo = revision(root, revisionOne, 'revision-2', 2, 300, 'second edit');
+const deletion = {
+  ...revision(root, revisionTwo, 'deletion', 3, 400, ''),
+  operation: 'delete',
+  state: 'deleted',
+};
 const foreignRevision = { ...revisionOne, hyperbeam_message_id: 'foreign', hyperbeam_owner: 'owner-b' };
 const skippedRevision = { ...revisionTwo, hyperbeam_message_id: 'skipped', revision: 3 };
 const forkA = revision(root, root, 'fork-a', 1, 400, 'fork A');
@@ -27,6 +34,9 @@ assert.equal(isNextNativeCommentRevision(root, root, revisionOne), true);
 assert.equal(isNextNativeCommentRevision(root, root, foreignRevision), false);
 assert.equal(isNextNativeCommentRevision(root, root, skippedRevision), false);
 assert.equal(latestNativeCommentRevision(root, [revisionTwo, revisionOne]), revisionTwo);
+assert.equal(isNextNativeCommentRevision(root, revisionTwo, deletion), true);
+assert.equal(isNextNativeCommentRevision(root, deletion, { ...deletion, revision: 4 }), false);
+assert.equal(latestNativeCommentRevision(root, [deletion, revisionTwo, revisionOne]), deletion);
 assert.equal(latestNativeCommentRevision(root, [forkB, forkA]), forkB);
 assert.deepEqual(collapseNativeCommentRevisions([revisionTwo, foreignRevision, root, revisionOne, revisionOne]), [
   revisionTwo,
@@ -36,6 +46,7 @@ assert.deepEqual(collapseNativeCommentRevisions([foreignRevision]), []);
 const signedRawRevision = {
   schema: 'odysee-comment@1.0',
   type: 'comment',
+  'comment-ref': 'root-id',
   target: 'claim-a',
   parent: 'root',
   state: 'active',
@@ -44,6 +55,7 @@ const signedRawRevision = {
   timestamp: 100,
   'revision-of': 'root-id',
   'previous-version': 'root-id',
+  'version-ref': 'revision-version',
   revision: 1,
   'revision-timestamp': 200,
   operation: 'edit',
@@ -52,6 +64,7 @@ const signedRawRevision = {
 const signedNormalizedRevision = {
   schema: 'odysee-comment@1.0',
   type: 'comment',
+  comment_ref: 'root-id',
   claim_id: 'claim-a',
   parent_id: undefined,
   state: 'active',
@@ -60,6 +73,7 @@ const signedNormalizedRevision = {
   timestamp: 100,
   revision_of: 'root-id',
   previous_version: 'root-id',
+  version_ref: 'revision-version',
   revision: 1,
   revision_timestamp: 200,
   operation: 'edit',
@@ -73,6 +87,7 @@ assert.notEqual(
 const signedRawRoot = {
   schema: 'odysee-comment@1.0',
   type: 'comment',
+  'comment-ref': 'root-id',
   target: 'claim-a',
   parent: 'root',
   state: 'active',
@@ -84,6 +99,7 @@ const signedRawRoot = {
 const signedNormalizedRoot = {
   schema: 'odysee-comment@1.0',
   type: 'comment',
+  comment_ref: 'root-id',
   claim_id: 'claim-a',
   parent_id: undefined,
   state: 'active',
@@ -107,7 +123,8 @@ function revision(rootComment, previous, id, number, timestamp, comment) {
     comment_id: rootComment.comment_id,
     hyperbeam_message_id: id,
     revision_of: rootComment.comment_id,
-    previous_version: previous.hyperbeam_message_id,
+    previous_version: previous.version_ref || previous.hyperbeam_message_id,
+    version_ref: `${id}-version`,
     revision: number,
     revision_timestamp: timestamp,
     operation: 'edit',

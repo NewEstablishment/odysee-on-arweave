@@ -1,9 +1,11 @@
 export type NativeCommentRevision = {
   comment_id?: string;
+  comment_ref?: string;
   hyperbeam_message_id?: string;
   hyperbeam_owner?: string;
   revision_of?: string;
   previous_version?: string;
+  version_ref?: string;
   revision?: number;
   revision_timestamp?: number;
   channel_id?: string;
@@ -24,6 +26,7 @@ export function nativeCommentSignatureData(comment: NativeCommentRevision): stri
     compact({
       schema: field(comment, 'schema'),
       type: field(comment, 'type'),
+      'comment-ref': field(comment, 'comment-ref', 'comment_ref'),
       target: field(comment, 'target', 'claim-id', 'claim_id'),
       parent: field(comment, 'parent', 'parent-id', 'parent_id') || 'root',
       state: field(comment, 'state'),
@@ -32,6 +35,7 @@ export function nativeCommentSignatureData(comment: NativeCommentRevision): stri
       timestamp: numberField(comment, 'timestamp'),
       'revision-of': field(comment, 'revision-of', 'revision_of'),
       'previous-version': field(comment, 'previous-version', 'previous_version'),
+      'version-ref': field(comment, 'version-ref', 'version_ref'),
       revision: numberField(comment, 'revision'),
       'revision-timestamp': numberField(comment, 'revision-timestamp', 'revision_timestamp'),
       operation: field(comment, 'operation'),
@@ -75,19 +79,22 @@ export function isNextNativeCommentRevision(
   candidate: NativeCommentRevision
 ): boolean {
   const rootId = root.comment_id;
-  const currentId = current.hyperbeam_message_id || current.comment_id;
+  const currentId = current.version_ref || current.hyperbeam_message_id || current.comment_id;
   const expectedRevision = revisionNumber(current) + 1;
+  const operationIsValid =
+    (candidate.operation === 'edit' && candidate.state === 'active') ||
+    (candidate.operation === 'delete' && candidate.state === 'deleted');
 
   return Boolean(
     rootId &&
     currentId &&
+    current.state !== 'deleted' &&
     root.hyperbeam_owner &&
     candidate.hyperbeam_owner === root.hyperbeam_owner &&
     candidate.revision_of === rootId &&
     candidate.previous_version === currentId &&
     revisionNumber(candidate) === expectedRevision &&
-    candidate.operation === 'edit' &&
-    candidate.state === 'active' &&
+    operationIsValid &&
     candidate.channel_id === root.channel_id &&
     candidate.claim_id === root.claim_id &&
     normalizedParent(candidate.parent_id) === normalizedParent(root.parent_id) &&

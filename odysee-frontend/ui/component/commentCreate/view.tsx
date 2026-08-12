@@ -62,6 +62,7 @@ import { selectUserIsMemberOfMembersOnlyChatForCreatorId } from 'redux/selectors
 import { doArTip as doArTipAction } from 'redux/actions/arwallet';
 import { selectArweaveTippingErrorForId } from 'redux/selectors/arwallet';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 const stripeEnvironment = getStripeEnvironment();
 
@@ -71,6 +72,7 @@ function getCommentsMembersOnlyRestriction(
   isLivestream: boolean | undefined,
   doFetchCreatorSettings: (channelId: string) => Promise<any>
 ) {
+  if (hyperbeamNodeEnabled()) return false;
   const isAnonymous = claimId && !channelClaimId;
 
   if (isAnonymous) {
@@ -138,6 +140,7 @@ export function CommentCreate(props: Props) {
 
   const fileUri = React.useContext(AppContext)?.uri;
   const dispatch = useAppDispatch();
+  const hyperbeamEnabled = hyperbeamNodeEnabled();
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const supportDisabled = useAppSelector((state) =>
     makeSelectTagInClaimOrChannelForUri(uri, DISABLE_SUPPORT_TAG)(state)
@@ -280,11 +283,11 @@ export function CommentCreate(props: Props) {
   const stickerPrice = selectedSticker && selectedSticker.price;
   const tipSelectorError = tipError || disableReviewButton;
   const disabled =
-    commentSettingDisabled ||
+    (!hyperbeamEnabled && commentSettingDisabled) ||
     deletedComment ||
     isSubmitting ||
-    isFetchingChannels ||
-    isFetchingCreatorSettings ||
+    (!hyperbeamEnabled && isFetchingChannels) ||
+    (!hyperbeamEnabled && isFetchingCreatorSettings) ||
     hasNothingToSumbit ||
     !minAmountMet ||
     disableInput;
@@ -364,7 +367,7 @@ export function CommentCreate(props: Props) {
   const submitButtonProps = {
     button: 'primary',
     type: 'submit',
-    requiresAuth: true,
+    requiresAuth: !hyperbeamEnabled,
   };
   const actionButtonProps = {
     button: 'alt',
@@ -762,7 +765,7 @@ export function CommentCreate(props: Props) {
 
         if (setQuickReply) setQuickReply(res);
 
-        if (res && res.signature) {
+        if (res && res.comment_id) {
           if (!stickerValue) setCommentValue('');
           setReviewingSupportComment(false);
           setTipSelector(false);
@@ -825,7 +828,7 @@ export function CommentCreate(props: Props) {
   }, [charCount]);
   // Fetch channel constraints if not already.
   React.useEffect(() => {
-    if (!channelSettings && channelClaimId) {
+    if (!hyperbeamEnabled && !channelSettings && channelClaimId) {
       doFetchCreatorSettings(channelClaimId).catch(() => {});
     }
   }, []);
@@ -903,9 +906,13 @@ export function CommentCreate(props: Props) {
       });
     } // eslint-disable-next-line react-hooks/exhaustive-deps -- @see TODO_NEED_VERIFICATION
   }, [textInjection]);
-  const notAuthedToLiveChat = Boolean(
-    (isLivestream ? isLivestreamChatMembersOnly : areCommentsMembersOnly) && !userHasMembersOnlyChatPerk && !claimIsMine
-  );
+  const notAuthedToLiveChat =
+    !hyperbeamEnabled &&
+    Boolean(
+      (isLivestream ? isLivestreamChatMembersOnly : areCommentsMembersOnly) &&
+      !userHasMembersOnlyChatPerk &&
+      !claimIsMine
+    );
   let commentLabelText = 'Say something about this...';
 
   if (notAuthedToLiveChat) {
@@ -915,7 +922,7 @@ export function CommentCreate(props: Props) {
   // **************************************************************************
   // Render
   // **************************************************************************
-  if (!isFetchingChannels && !hasChannels) {
+  if (!hyperbeamEnabled && !isFetchingChannels && !hasChannels) {
     return (
       <div
         role="button"
@@ -1018,7 +1025,7 @@ export function CommentCreate(props: Props) {
                 create__comment: !isReply,
                 disabled_chat_comments: notAuthedToLiveChat,
               })}
-              disabled={isFetchingChannels || disableInput}
+              disabled={(!hyperbeamEnabled && isFetchingChannels) || disableInput}
               isLivestream={isLivestream}
               label={<FormChannelSelector isReply={Boolean(isReply)} isLivestream={Boolean(isLivestream)} />}
               noticeLabel={

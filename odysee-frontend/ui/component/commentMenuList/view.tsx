@@ -294,18 +294,19 @@ function CommentMenuList(props: Props) {
           </span>
         </MenuItem>
       )}
-      {commentIsMine && activeChannelClaim && activeChannelClaim.permanent_url === authorUri && !disableEdit && (
+      {commentIsMine && !disableEdit && (
         <MenuItem className="comment__menu-option menu__link" onSelect={handleEditComment}>
           <Icon aria-hidden icon={ICONS.EDIT} />
           {__('Edit')}
         </MenuItem>
       )}
       {!disableRemove &&
-        activeChannelClaim &&
-        (activeChannelIsModerator ||
-          activeChannelIsAdmin ||
-          activeChannelClaim.permanent_url === authorUri ||
-          activeChannelClaim.permanent_url === contentChannelPermanentUrl) && (
+        (commentIsMine ||
+          (activeChannelClaim &&
+            (activeChannelIsModerator ||
+              activeChannelIsAdmin ||
+              activeChannelClaim.permanent_url === authorUri ||
+              activeChannelClaim.permanent_url === contentChannelPermanentUrl))) && (
           <MenuItem className="comment__menu-option" onSelect={handleDeleteComment}>
             <div className="menu__link">
               <Icon aria-hidden icon={ICONS.DELETE} />

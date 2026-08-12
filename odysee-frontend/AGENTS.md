@@ -22,7 +22,10 @@ Search and query responses are ordered locators, not claim objects. Hydrate each
 
 ## Auth And SSR Bridges
 
-Local browser cookies cannot be sent to a HyperBEAM node on another origin. The Koa server therefore exposes same-origin routes under `/$/api/hyperbeam-auth-device/v1/*`; it reads the cookie, forwards only the required auth carrier, and leaves token stripping/signing to HyperBEAM auth.
+The manifest frontend and HyperBEAM node are normally same-origin. The node's
+`cookie@1.0` provider mints a browser identity on the first committed write;
+later account, upload, and comment writes reuse that cookie without email,
+password, an Odysee auth token, or an LBRY channel signature.
 
 The SSR routes are transport/auth/upload/thumbnail bridges, not a second data mode. Production should use same-origin HyperBEAM where possible, while preserving these routes where browser cookie or server-held signer boundaries require them.
 
@@ -30,13 +33,24 @@ Thumbnail upload uses a server-held `HYPERBEAM_CACHE_WRITER_JWK` to sign generic
 
 ## Comments
 
-The `Comments` facade in `ui/comments.ts` always calls HyperBEAM helpers. It must not call Commentron directly.
+The `Comments` facade in `ui/comments.ts` always calls native HyperBEAM helpers.
+It must not call Commentron or an LBRY API directly.
 
 - Native roots, replies, revisions, and owner controls are discovered through stock `~query@1.0/only` and hydrated by immutable ID.
 - Product logic performs deduplication, revision-chain selection, hierarchy construction, counts, sorting, moderation projection, and pagination.
-- Historical Commentron data is accessed through `~odysee-comment@1.0` and merged at the integration boundary.
-- Native edits and controls are append-only; never mutate a stored comment.
-- Channel thumbnails and author URIs must tolerate native normalized comment identities without passing an ID-only string to the LBRY URI parser.
+- Root comments and replies are generic committed messages. Edits and author
+  deletes are append-only revisions; never mutate a stored comment.
+- Require the local HyperBEAM account before creation. Its cookie committer,
+  not its local-storage fields, owns the resulting comment.
+- Accept a version only after verifying its exact commitment and deriving its
+  owner from the transport committer. Claimed profile fields never grant
+  authority.
+- The HyperBEAM account profile is display metadata. Display its name only when
+  the profile message verifies under the comment's committer, and never pass
+  the native profile ID to the LBRY URI parser.
+- Advanced moderation, creator reactions, delegates, and mutable settings are
+  unsupported until native cookie-committer contracts exist. Do not silently
+  fall back to legacy services.
 
 ## Search
 
@@ -95,12 +109,16 @@ node --check web/src/fetchStreamUrl.js
 ```
 
 Use the focused native comment, control, upload, static-manifest, and browser smoke scripts when their surfaces change.
+For the cookie-owned comment lifecycle, run
+`HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments`
+against the configured local node.
 
 ## Current State And Limitations
 
 - The browser-side legacy wiring switch and compatibility-read toggle are retired.
 - Search and query produce locators and hydrate separately; do not regress to passing backend search documents directly into Redux.
-- Native and legacy comments are merged, but historical data still depends on the HyperBEAM Commentron adapter.
+- Comments are node-native only. Root, reply, edit, and author-delete flows are
+  implemented; advanced moderation and settings remain unsupported.
 - Meilisearch must be running and populated for fuzzy search. It is not a source of truth.
 - The normal SSR deployment remains necessary for local auth bridges and server-held cache signing.
 - Recommendations and local wallet operations have separate contracts and should not be mislabeled as normal search or browser legacy mode.

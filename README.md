@@ -326,9 +326,11 @@ post-filtering in React changes pagination and ranking.
 
 ### Comments, Revisions, and Moderation
 
-Native comments are signed structured messages written through the generic ID
-path. Their stable selectors include `type=comment`, `target`, `parent`, `state`,
-`author`, and `schema=odysee-comment@1.0`.
+Native comments are structured messages written through the same generic
+`POST /id?!=true&committers=all` path as native uploads. The node's
+`cookie@1.0` identity commits each write; comments do not call Commentron or
+require an LBRY channel signature. Their stable selectors include
+`type=comment`, `target`, `parent`, and `schema=odysee-comment@1.0`.
 
 One target-wide `query@1.0/only` request discovers native comment IDs. Product
 logic then hydrates messages and performs:
@@ -338,20 +340,24 @@ logic then hydrates messages and performs:
 - root/reply hierarchy construction;
 - total and reply counts;
 - sorting and pagination;
-- owner-control projection;
-- merging with historical Commentron results.
+- owner-control projection.
 
-Edits are append-only. A revision has its own physical immutable ID and links to
-the logical root with `revision-of`, `previous-version`, and a monotonically
-increasing revision number. The current view accepts only a contiguous,
-same-author, signature-valid chain.
+Each root has an application-level `comment-ref`, and every stored version has a
+`version-ref`; query results are still hydrated and verified by their physical
+immutable message IDs. Edits and deletes are append-only revisions linked with
+`revision-of`, `previous-version`, and a monotonically increasing revision
+number. The current view accepts only a contiguous chain whose exact commitment
+verifies and whose transport committer matches the root committer. The local
+HyperBEAM account must be signed in before a comment is written and supplies a
+display name only after that profile record verifies under the same committer.
 
 Channel-owner actions such as hide, pin, creator heart, and creator-channel block
 are append-only `odysee-comment-control@1.0` messages. The latest valid authorized
 control event determines the projection; the original comment is never mutated.
-Historical Commentron controls remain behind `odysee-comment@1.0`. Existing owner
-rules can only become owner-signed native controls after that owner authenticates
-and signs them.
+The current native lifecycle covers roots, replies, edits, and author deletes.
+Pinning, creator reactions, channel blocking, delegates, and mutable comment
+settings remain unsupported until they have cookie-committer-native contracts;
+they do not fall back to Commentron.
 
 ### Uploads and Thumbnails
 
@@ -653,6 +659,8 @@ Focused integration scripts include:
 ```bash
 pnpm run test:hyperbeam-upload-smoke
 pnpm run test:hyperbeam-query-comment-smoke
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
+pnpm run test:native-message-verification
 pnpm run test:native-comment-revisions
 pnpm run test:native-comment-controls
 pnpm run test:static-manifest
@@ -699,8 +707,10 @@ store made the call rather than patching the React page.
 - Odysee fuzzy search depends on a running, populated Meilisearch index.
 - Historical claim discovery still depends on Chainquery/Lighthouse-compatible
   data imported into that index.
-- Historical comments and several moderation/settings operations still use
-  Commentron through `odysee-comment@1.0`.
+- Comments are node-native only. Root, reply, edit, and author-delete flows are
+  implemented; advanced moderation, creator reactions, and mutable comment
+  settings remain intentionally unsupported rather than falling back to a
+  legacy service.
 - Complete mutable-name and claim-ID migration to owner-controlled reference
   messages is not finished.
 - Claim-output transaction verification alone does not prove inclusion in the

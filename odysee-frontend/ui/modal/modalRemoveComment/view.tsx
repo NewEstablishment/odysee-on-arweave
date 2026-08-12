@@ -10,7 +10,7 @@ import { selectCommentForCommentId } from 'redux/selectors/comments';
 type Props = {
   commentId: string;
   // sha256 digest identifying the comment
-  deleterClaim: Claim;
+  deleterClaim?: Claim;
   deleterIsModOrAdmin?: boolean;
   creatorClaim?: Claim;
   supportAmount?: any;
