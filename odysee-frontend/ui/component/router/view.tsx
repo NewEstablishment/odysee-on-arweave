@@ -5,6 +5,7 @@ import * as SETTINGS from 'constants/settings';
 import { PAGE_TITLE } from 'constants/pageTitles';
 import { useIsSmallScreen, useIsMediumScreen, useIsLargeScreen } from 'effects/use-screensize';
 import { lazyImport } from 'util/lazyImport';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import { LINKED_COMMENT_QUERY_PARAM } from 'constants/comment';
 import { parseURI } from 'util/lbryURI';
 import { SITE_TITLE } from 'config';
@@ -619,7 +620,7 @@ function AppRouter(props: Props) {
   const effectiveUri = playlistClaimUri || passedUri;
 
   const currentScroll = useAppSelector(selectScrollStartingPosition);
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserVerifiedEmail) || hyperbeamUploadEnabled();
   const isGlobalMod = Boolean(useAppSelector(selectUser)?.global_mod);
   const hasNavigated = useAppSelector(selectHasNavigated);
   const hasUnclaimedRefereeReward = useAppSelector(selectHasUnclaimedRefereeReward);
@@ -886,7 +887,12 @@ function AppRouter(props: Props) {
         />
         <Route
           path={`/$/${PAGES.UPLOAD}`}
-          element={<PrivateRoute component={UploadPage} isAuthenticated={isAuthenticated} />}
+          element={
+            <PrivateRoute
+              component={UploadPage}
+              isAuthenticated={isAuthenticated || hyperbeamUploadEnabled()}
+            />
+          }
         />
         <Route
           path={`/$/${PAGES.POST}`}
