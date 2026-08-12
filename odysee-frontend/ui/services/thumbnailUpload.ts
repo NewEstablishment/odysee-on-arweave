@@ -1,49 +1,29 @@
-const HYPERBEAM_THUMBNAIL_UPLOAD_URL = '/$/api/hyperbeam-thumbnail/v1/upload';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
-export default function uploadThumbnail(data: FormData): Promise<any> {
-  return uploadHyperbeamThumbnail(data);
-}
-
-function parseUploadResponse(text: string) {
-  try {
-    return text.length ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(text);
-  }
-}
-
-async function uploadHyperbeamThumbnail(data: FormData): Promise<any> {
+// A thumbnail is just bytes. Store it through the same committed-write endpoint
+// as a video (POST /id?!) and reference the node-served image by its id. The
+// legacy /$/api/hyperbeam-thumbnail endpoint does not exist on a HyperBEAM node.
+export default async function uploadThumbnail(data: FormData): Promise<any> {
   const file = data.get('file-input');
   if (!(file instanceof Blob)) throw new Error('Thumbnail upload requires a file.');
 
-  const contentBase64 = await blobToBase64(file);
-  const response = await fetch(HYPERBEAM_THUMBNAIL_UPLOAD_URL, {
+  const base = hyperbeamNodeBase();
+  if (!base) throw new Error('No HyperBEAM node configured for thumbnail upload.');
+
+  const response = await fetch(`${base}/id?!=true&committers=all`, {
     method: 'POST',
     credentials: 'include',
     headers: {
       accept: 'application/json',
-      'content-type': 'application/json',
+      'content-type': file.type || 'image/jpeg',
     },
-    body: JSON.stringify({
-      content_base64: contentBase64,
-      content_type: file.type || 'image/jpeg',
-      filename: file instanceof File ? file.name : undefined,
-    }),
+    body: file,
   });
-  const text = await response.text();
-  const json = parseUploadResponse(text);
-  if (!response.ok && json.type !== 'error') throw new Error(text || response.statusText);
-  return json;
-}
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      resolve(result.includes(',') ? result.split(',').pop() || '' : result);
-    });
-    reader.addEventListener('error', () => reject(reader.error || new Error('Unable to read thumbnail.')));
-    reader.readAsDataURL(blob);
-  });
+  const id = response.headers.get('message-id') || '';
+  if (!response.ok || !id) {
+    throw new Error(`Thumbnail upload failed (${response.status}).`);
+  }
+
+  return { type: 'success', message: `${base}/${id}` };
 }

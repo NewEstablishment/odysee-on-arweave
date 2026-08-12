@@ -1,5 +1,6 @@
 import 'scss/component/_header.scss';
 import { ENABLE_NO_SOURCE_CLAIMS } from 'config';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import * as PUBLISH_TYPES from 'constants/publish_types';
@@ -45,6 +46,7 @@ export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
   const { authRedirect } = props;
   const dispatch = useAppDispatch();
   const authenticated = useAppSelector(selectUserVerifiedEmail);
+  const canUpload = authenticated || hyperbeamUploadEnabled();
   const user = useAppSelector(selectUser);
   const doBeginPublish = (type: PublishType) => dispatch(doBeginPublishAction(type));
   const livestreamEnabled = Boolean(ENABLE_NO_SOURCE_CLAIMS && user && !user.odysee_live_disabled);
@@ -57,7 +59,7 @@ export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
   const uploadProps = {
     requiresAuth: !authenticated,
   };
-  return authenticated ? (
+  return canUpload ? (
     <div className="header__buttons">
       <UploadManagerMenu hasActivity={hasUploadActivity} onUploadClick={() => doBeginPublish(PUBLISH_TYPES.FILE)} />
       {livestreamEnabled && <HeaderLivestreamButton uploadProps={uploadProps} doBeginPublish={doBeginPublish} />}

@@ -23,6 +23,14 @@ export function hyperbeamNodeBase() {
   return String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
 }
 
+// On a HyperBEAM node the write API is a cookie-authed commit, not the legacy
+// verified-email account. Uploads work without that account, so treat the node
+// being present as upload being available. Scoped to the upload path only; do
+// NOT fold this into the app-wide verified-email gate.
+export function hyperbeamUploadEnabled() {
+  return Boolean(hyperbeamNodeBase());
+}
+
 export function hyperbeamDeviceBase(device: string) {
   const base = hyperbeamNodeBase();
   return base && isHyperbeamDeviceEnabled(device) ? `${base}/${device}` : '';
