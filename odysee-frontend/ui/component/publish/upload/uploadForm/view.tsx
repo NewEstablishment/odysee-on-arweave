@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from 'react-redux';
 import { buildURI, isURIValid, isNameValid } from 'util/lbryURI';
 import { lazyImport } from 'util/lazyImport';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import { resolvePublishPayload } from 'util/publish';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import Button from 'component/button';
@@ -196,9 +197,12 @@ function UploadForm(props: Props) {
     name &&
     isNameValid(name) &&
     title &&
-    fileBitrate < BITRATE.MAX &&
+    // No transcoder in HyperBEAM mode, so the bitrate ceiling does not gate publish.
+    (hyperbeamUploadEnabled() || fileBitrate < BITRATE.MAX) &&
     bid &&
-    thumbnail &&
+    // A HyperBEAM upload derives no display metadata from a thumbnail, so it is
+    // not required there; the legacy publish path still requires one.
+    (thumbnail || hyperbeamUploadEnabled()) &&
     !bidError &&
     !emptyPostError &&
     !releaseTimeError &&
@@ -206,7 +210,7 @@ function UploadForm(props: Props) {
     !(uploadThumbnailStatus === THUMBNAIL_STATUSES.IN_PROGRESS);
   const isOverwritingExistingClaim = !editingURI && myClaimForUri;
   const formValid =
-    !(fileSizeTooBig && !(isStillEditing && prevFileSizeTooBig)) &&
+    (hyperbeamUploadEnabled() || !(fileSizeTooBig && !(isStillEditing && prevFileSizeTooBig))) &&
     (!memberRestrictionStatus.isApplicable || memberRestrictionStatus.isSelectionValid) &&
     (isOverwritingExistingClaim
       ? false
@@ -697,7 +701,10 @@ function UploadForm(props: Props) {
     if (activeStep === 0 && newStep === 1 && source === 'next' && filePath && filePath instanceof File) {
       const filename = filePath.name;
       const needsConvert = fileFormat && fileFormat.toLowerCase() === 'mkv' && !publishFormValues.skipConvert;
-      const needsOptimize = fileBitrate > BITRATE.RECOMMENDED && !publishFormValues.skipOptimize;
+      // HyperBEAM stores the raw file and plays it directly, so never route a
+      // high-bitrate file into the transcode/optimize pipeline.
+      const needsOptimize =
+        !hyperbeamUploadEnabled() && fileBitrate > BITRATE.RECOMMENDED && !publishFormValues.skipOptimize;
       const pipelineAlreadyHandled =
         pipelineInFlightRef.current ||
         filePath === preparedSourceFileRef.current ||
@@ -740,7 +747,12 @@ function UploadForm(props: Props) {
         if (!started) {
           dispatch(doUpdatePipelineItem(itemId, { stage: 'queued' }));
         }
-      } else if (!pipelineAlreadyHandled && !earlyUploadPromiseRef.current && !isHyperbeamEligibleFile(filePath)) {
+      } else if (
+        !hyperbeamUploadEnabled() &&
+        !pipelineAlreadyHandled &&
+        !earlyUploadPromiseRef.current &&
+        !isHyperbeamEligibleFile(filePath)
+      ) {
         // Hyperbeam-eligible files never start the legacy early tus upload:
         // they publish through the node directly at submit time.
         const itemId = pipelineItemIdRef.current;

@@ -1,4 +1,5 @@
 import { ESTIMATED_FEE, MINIMUM_PUBLISH_BID } from 'constants/claim';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import { COPYRIGHT, OTHER } from 'constants/licenses';
 import { PAYWALL } from 'constants/publish';
 import * as PUBLISH from 'constants/publish';
@@ -175,8 +176,10 @@ export function resolvePublishPayload(
           claim_id: claimId,
         }
       : {}),
-    // 'stream_update' support
-    ...(optimize
+    // 'stream_update' support. HyperBEAM stores the raw file (no transcoder),
+    // so never flag it for optimization -- that would also make the file
+    // ineligible for the direct node upload and trigger the legacy tus path.
+    ...(optimize && !hyperbeamUploadEnabled()
       ? {
           optimize_file: true,
         }
