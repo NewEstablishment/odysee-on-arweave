@@ -34,6 +34,7 @@ const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
+const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
 // Native writes POST straight to the node; `!` is the auth-hook commit flag,
 // so the node's configured auth hook decides whether the write is committed.
 // The commit flag signs the request via the node's auth hook; committers=all
@@ -74,7 +75,31 @@ async function resolveStoreClaimForUri(uri: string): Promise<any | null> {
   if (storeClaim) return storeClaim;
 
   const claimId = claimIdFromUri(uri);
-  return claimId && isClaimId(claimId) ? fetchStoreClaimById(claimId) : null;
+  const byId = claimId && isClaimId(claimId) ? await fetchStoreClaimById(claimId) : null;
+  if (byId) return byId;
+
+  // Native uploads live in the match-index, not the legacy `odysee/claim`
+  // namespace. Resolve a bare `lbry://<name>` for one by looking its upload
+  // record up by name, then reuse the immutable-id route to build the claim.
+  return fetchUploadClaimByName(uri).catch(() => null);
+}
+
+// Bridge a bare `lbry://<name>` to a native upload: the upload's index record
+// (`odysee-upload@1.0`) is the name -> record-id link, and the record-id
+// resolves through the immutable-id route.
+async function fetchUploadClaimByName(uri: string): Promise<any | null> {
+  let name;
+  try {
+    const parsed = parseURI(uri);
+    name = parsed.streamName || parsed.claimName;
+  } catch {}
+  if (!name) return null;
+
+  const request = nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA, name });
+  const recordId = uniquePaths(queryPaths(await fetchPublicQueryJson(request))).find(Boolean);
+  if (!recordId) return null;
+
+  return resolveImmutableClaimById(recordId);
 }
 
 async function fetchStoreClaimForUri(uri: string): Promise<any | null> {
@@ -1424,6 +1449,33 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   };
 }
 
+// List the node's native uploads as claims, for the "your uploads" page. The
+// match-index holds every `odysee-upload@1.0' record; each record-id resolves
+// to a claim through the immutable-id route.
+export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
+  const page = toNumber(params?.page, 1);
+  const pageSize = toNumber(params?.page_size, 20);
+  const claimType = paramValues(params, 'claim_type', 'claim-type');
+  if (claimType.length && !claimType.includes('stream')) {
+    return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
+  }
+
+  const request = nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA });
+  const recordIds = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+  const claims = (
+    await Promise.all(recordIds.map((id) => resolveImmutableClaimById(id).catch(() => null)))
+  ).filter(Boolean);
+
+  const start = (page - 1) * pageSize;
+  return {
+    items: claims.slice(start, start + pageSize),
+    page,
+    page_size: pageSize,
+    total_items: claims.length,
+    total_pages: Math.max(1, Math.ceil(claims.length / pageSize)),
+  };
+}
+
 export async function fetchHyperbeamClaimsByIds(ids: Array<string>): Promise<Array<Claim>> {
   const claims = await Promise.all(ids.filter(Boolean).map(fetchStoreClaimByAnyId));
   return claims.flat().filter(Boolean);
@@ -2088,13 +2140,6 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
   const immutableId = immutableRouteIdFromUri(uri);
   if (!immutableId) return null;
 
-  const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
-  const decodedClaim = decodeClaimMetadata(storePayload(result));
-  const signingChannel = decodedClaim?.signedChannelId
-    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
-        .then(responsePayload)
-        .catch(() => null)
-    : null;
   // A token route (lbry://out_.../immutable_...) has no real claim name to
   // compare against; only enforce the name when the uri carries one.
   let name;
@@ -2103,6 +2148,19 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
     name = parsed.streamName || parsed.claimName;
   } catch {}
   if (name && immutableIdFromRouteToken(String(name))) name = undefined;
+  return resolveImmutableClaimById(immutableId, name);
+}
+
+// Read a record by its immutable/store id and build a claim. Shared by the
+// immutable-id route and the upload name bridge.
+async function resolveImmutableClaimById(immutableId: string, name?: string): Promise<any | null> {
+  const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
+  const decodedClaim = decodeClaimMetadata(storePayload(result));
+  const signingChannel = decodedClaim?.signedChannelId
+    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
+        .then(responsePayload)
+        .catch(() => null)
+    : null;
   const claim = immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name);
   if (!claim) return null;
 

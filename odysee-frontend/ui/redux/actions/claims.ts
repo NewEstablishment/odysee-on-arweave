@@ -34,7 +34,8 @@ import {
 import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
-import { fetchHyperbeamResolveClaimIds } from 'util/hyperbeam';
+import { fetchHyperbeamResolveClaimIds, fetchHyperbeamUploads } from 'util/hyperbeam';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import { canDeleteThroughHyperbeam, deleteThroughHyperbeam } from 'services/hyperbeamUpload';
 import { getAuthToken } from 'util/saved-passwords';
 import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
@@ -575,13 +576,16 @@ export function doFetchClaimListMine(
       }
     };
 
-    Lbry.claim_list({
-      page: page,
-      page_size: pageSize,
-      claim_type: claimTypes,
-      channel_id: channelIds,
-      resolve,
-    })
+    const claimListRequest = hyperbeamUploadEnabled()
+      ? fetchHyperbeamUploads({ page, page_size: pageSize, claim_type: claimTypes })
+      : Lbry.claim_list({
+          page: page,
+          page_size: pageSize,
+          claim_type: claimTypes,
+          channel_id: channelIds,
+          resolve,
+        });
+    claimListRequest
       .then((result: StreamListResponse) => completeClaimListMine(result, false))
       .catch(() =>
         completeClaimListMine(emptyClaimListResult(page, pageSize), true).catch(() =>
