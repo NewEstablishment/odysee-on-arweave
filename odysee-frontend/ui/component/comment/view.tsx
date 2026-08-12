@@ -9,7 +9,6 @@
  *   see it.
  */
 import * as ICONS from 'constants/icons';
-import * as PAGES from 'constants/pages';
 import * as KEYCODES from 'constants/keycodes';
 import { COMMENT_HIGHLIGHTED } from 'constants/classnames';
 import { INLINE_PLAYER_WRAPPER_CLASS } from 'constants/player';
@@ -18,10 +17,9 @@ import {
   COMMENT_PAGE_SIZE_REPLIES,
   LINKED_COMMENT_QUERY_PARAM,
   THREAD_COMMENT_QUERY_PARAM,
-  THRESHOLD_MS,
 } from 'constants/comment';
 import { FF_MAX_CHARS_IN_COMMENT } from 'constants/form-field';
-import { SITE_NAME, ENABLE_COMMENT_REACTIONS } from 'config';
+import { ENABLE_COMMENT_REACTIONS } from 'config';
 import React, { useEffect, useState } from 'react';
 import { parseURI } from 'util/lbryURI';
 import DateTime from 'component/dateTime';
@@ -58,7 +56,6 @@ import {
   selectDateForUri,
 } from 'redux/selectors/claims';
 import { doCommentUpdate, doCommentList } from 'redux/actions/comments';
-import { doToast } from 'redux/actions/notifications';
 import { doClearPlayingUri, doClearPlayingSource } from 'redux/actions/content';
 import {
   selectFetchedCommentAncestors,
@@ -73,6 +70,7 @@ import { selectPlayingUri } from 'redux/selectors/content';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { getChannelIdFromClaim } from 'util/claim';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 const CommentCreate = lazyImport(
   () =>
@@ -148,6 +146,7 @@ function CommentView(props: Props) {
   } = comment || ({} as Partial<CommentData>);
   const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
   const activeChannelId = activeChannelClaim && activeChannelClaim.claim_id;
+  const hyperbeamEnabled = hyperbeamNodeEnabled();
   const reactionKey = activeChannelId ? `${commentId}:${activeChannelId}` : commentId;
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const creatorId = getChannelIdFromClaim(claim);
@@ -158,7 +157,9 @@ function CommentView(props: Props) {
   const hasChannels = useAppSelector(selectHasChannels);
   const playingUri = useAppSelector(selectPlayingUri);
   const stakedLevel = useAppSelector((state) => selectStakedLevelForChannelUri(state, channelUrl));
-  const isCommenterChannelDeleted = useAppSelector((state) => selectClaimForUri(state, channelUrl) === null);
+  const isCommenterChannelDeleted = useAppSelector(
+    (state) => Boolean(channelUrl) && selectClaimForUri(state, channelUrl) === null
+  );
   const linkedCommentAncestors = useAppSelector(selectFetchedCommentAncestors);
   const totalReplyPages = useAppSelector((state) => makeSelectTotalReplyPagesForParentId(commentId)(state));
   const odyseeMembership = useAppSelector((state) => selectUserOdyseeMembership(state, channelId)) || '';
@@ -181,8 +182,9 @@ function CommentView(props: Props) {
   } = comment;
   const claimName = authorTitle || author;
   const timePosted = comment.timestamp * 1000;
-  const commentIsEdited = parseInt(comment.signing_ts) - comment.timestamp > THRESHOLD_MS.IS_EDITED / 1000;
-  const commentIsMine = channelId && myChannelIds && myChannelIds.includes(channelId);
+  const commentIsEdited = comment.revision > 0 || Boolean(comment.updated_at);
+  const commentIsMine = comment.is_my_comment || (channelId && myChannelIds && myChannelIds.includes(channelId));
+  const isNativeProfile = Boolean(comment.hyperbeam_profile_id);
   const isMobile = useIsMobile();
   const ROUGH_HEADER_HEIGHT = isMobile ? 56 : 60; // @see: --header-height
 
@@ -305,18 +307,7 @@ function CommentView(props: Props) {
   }
 
   function handleCommentReply() {
-    if (!hasChannels) {
-      navigate(`/$/${PAGES.CHANNEL_NEW}?redirect=${pathname}`);
-      dispatch(
-        doToast({
-          message: __('A channel is required to comment on %SITE_NAME%', {
-            SITE_NAME,
-          }),
-        })
-      );
-    } else {
-      setReplying(!isReplying);
-    }
+    if (hyperbeamEnabled || hasChannels) setReplying(!isReplying);
 
     dispatch(doClearPlayingSource());
   }
@@ -400,6 +391,8 @@ function CommentView(props: Props) {
             <div className="comment__meta-information">
               {!author ? (
                 <span className="comment__author">{__('Anonymous')}</span>
+              ) : isNativeProfile ? (
+                <span className="comment__author">{claimName}</span>
               ) : (
                 <Menu>
                   <MenuButton
@@ -506,7 +499,7 @@ function CommentView(props: Props) {
                     button="primary"
                     type="submit"
                     label={__('Done')}
-                    requiresAuth={IS_WEB}
+                    requiresAuth={IS_WEB && !hyperbeamEnabled}
                     disabled={message === editedMessage}
                   />
                   <Button button="link" label={__('Cancel')} onClick={() => handleEditComment(false)} />
@@ -542,8 +535,8 @@ function CommentView(props: Props) {
                     })}
                   >
                     <Button
-                      requiresAuth={IS_WEB}
-                      label={commentingEnabled ? __('Reply') : __('Log in to reply')}
+                      requiresAuth={IS_WEB && !hyperbeamEnabled}
+                      label={hyperbeamEnabled || commentingEnabled ? __('Reply') : __('Log in to reply')}
                       className="comment__action"
                       onClick={handleCommentReply}
                       icon={ICONS.REPLY}

@@ -1,0 +1,42 @@
+{
+  "port": 18785,
+  "store-all-signed": true,
+  "http-extra-opts": {
+    "force-message": true,
+    "cache-control": ["no-store"]
+  },
+  "on": {
+    "request": [
+      { "device": "rate-limit@1.0" },
+      {
+        "device": "auth-hook@1.0",
+        "path": "request",
+        "secret-provider": { "device": "cookie@1.0" },
+        "when": { "keys": ["authorization", "!"] },
+        "ignored-keys": [
+          "secret",
+          "cookie",
+          "set-cookie",
+          "path",
+          "method",
+          "authorization",
+          "host",
+          "accept",
+          "accept-bundle",
+          "ao-peer",
+          "user-agent",
+          "connection",
+          "content-type",
+          "content-length",
+          "transfer-encoding",
+          "content-digest",
+          "!"
+        ]
+      },
+      { "device": "reply-id@1.0", "path": "request" },
+      { "device": "name@1.0" },
+      { "device": "manifest@1.0" },
+      { "device": "blacklist@1.0" }
+    ]
+  }
+}

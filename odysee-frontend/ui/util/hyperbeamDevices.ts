@@ -1,6 +1,7 @@
 import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { isHyperbeamDeviceEnabled } from 'util/hyperbeamRouting';
 import { getAuthToken } from 'util/saved-passwords';
+import { isServedFromManifest } from 'util/manifest-prefix';
 
 export const HYPERBEAM_DEVICE = {
   account: '~odysee-account@1.0',
@@ -20,7 +21,14 @@ export const HYPERBEAM_DEVICE = {
 };
 
 export function hyperbeamNodeBase() {
-  return String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  const configured = String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  if (configured) return configured;
+  if (typeof window !== 'undefined' && isServedFromManifest()) return window.location.origin;
+  return '';
+}
+
+export function hyperbeamNodeEnabled() {
+  return Boolean(hyperbeamNodeBase());
 }
 
 export function hyperbeamDeviceBase(device: string) {

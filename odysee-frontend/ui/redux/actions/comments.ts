@@ -37,9 +37,9 @@ import Comments from 'comments';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
 import { getStripeEnvironment } from 'util/stripe';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 const stripeEnvironment = getStripeEnvironment();
 const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
-const COMMENTRON_FAILED_TO_FETCH = 'Failed to fetch (comments.odysee.tv)';
 const PROMISE_FULFILLED = 'fulfilled';
 const MENTION_REGEX = /(?:^| |\n)@[^\s=&#$@%?:;/"<>%{}|^~[]*(?::[\w]+)?/gm;
 
@@ -80,7 +80,7 @@ export function doCommentList(
     let channelSignature: { signature?: string; signing_ts?: string } = {};
     let myChannelClaim;
 
-    if (isProtected) {
+    if (isProtected && !hyperbeamNodeEnabled()) {
       if (!myChannelClaims) {
         return dispatch({
           type: ACTIONS.COMMENT_LIST_FAILED,
@@ -152,7 +152,12 @@ export function doCommentList(
         };
 
         const commentChannelIds = Array.from(
-          new Set((comments || []).map((comment) => comment.channel_id).filter(Boolean))
+          new Set(
+            (comments || [])
+              .filter((comment) => !comment.hyperbeam_profile_id)
+              .map((comment) => comment.channel_id)
+              .filter(Boolean)
+          )
         ) as Array<string>;
         returnResult();
 
@@ -189,12 +194,6 @@ export function doCommentList(
                 message: __('Failed to fetch comments.'),
               })
             );
-            return dispatch({
-              type: ACTIONS.COMMENT_LIST_FAILED,
-              data: error,
-            });
-
-          case COMMENTRON_FAILED_TO_FETCH:
             return dispatch({
               type: ACTIONS.COMMENT_LIST_FAILED,
               data: error,
@@ -309,13 +308,6 @@ export function doCommentListOwn(
       })
       .catch((error) => {
         switch (error.message) {
-          case COMMENTRON_FAILED_TO_FETCH:
-            dispatch({
-              type: ACTIONS.COMMENT_LIST_FAILED,
-              data: error,
-            });
-            break;
-
           case FETCH_API_FAILED_TO_FETCH:
             dispatch(
               doToast({
@@ -845,6 +837,7 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
       sticker,
       is_protected,
       amount,
+      environment,
       dry_run,
     } = params;
     const state = getState();
@@ -852,6 +845,39 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
     const myCommentedChannelIds = selectMyCommentedChannelIdsForId(state, claim_id);
     const mentionedChannels: Array<MentionedChannel> = [];
     const claim = selectClaimForClaimId(state, claim_id);
+
+    if (hyperbeamNodeEnabled()) {
+      if (!dry_run) dispatch({ type: ACTIONS.COMMENT_CREATE_STARTED });
+      return Comments.comment_create({
+        comment,
+        claim_id,
+        target: params.target || claim_id,
+        parent_id,
+        sticker,
+        mentioned_channels: mentionedChannels,
+        is_protected: is_protected || undefined,
+        amount,
+        support_tx_id: txid,
+        payment_intent_id,
+        payment_tx_id,
+        environment,
+        dry_run,
+      } as CommentCreateParams)
+        .then((result: CommentCreateResponse) => {
+          if (dry_run) return result;
+          dispatch({
+            type: ACTIONS.COMMENT_CREATE_COMPLETED,
+            data: { uri, livestream, comment: result, claimId: claim_id },
+          });
+          return result;
+        })
+        .catch((error) => {
+          if (!dry_run) dispatch({ type: ACTIONS.COMMENT_CREATE_FAILED, data: error });
+          dispatchToast(dispatch, resolveApiMessage(error.message));
+          return Promise.reject(error);
+        });
+    }
+
     const targetClaimId = claim.signing_channel ? claim.signing_channel.claim_id : claim_id; // claim_id is for anonymous content and on channel page comments
 
     if (!activeChannelClaim) {
@@ -1061,6 +1087,23 @@ export function doCommentCreate(uri: string, livestream: boolean, params: Commen
 }
 export function doCommentPin(commentId: string, claimId: string, remove: boolean) {
   return async (dispatch: Dispatch, getState: GetState) => {
+    if (hyperbeamNodeEnabled()) {
+      dispatch({ type: ACTIONS.COMMENT_PIN_STARTED });
+      return Comments.comment_pin({ comment_id: commentId, remove } as CommentPinParams)
+        .then((result: CommentPinResponse) => {
+          dispatch({
+            type: ACTIONS.COMMENT_PIN_COMPLETED,
+            data: { pinnedComment: result.items, claimId, unpin: remove },
+          });
+          return result;
+        })
+        .catch((error) => {
+          dispatch({ type: ACTIONS.COMMENT_PIN_FAILED, data: error });
+          dispatchToast(dispatch, __('Unable to pin this comment, please try again later.'));
+          throw error;
+        });
+    }
+
     const state = getState();
     const activeChannel = selectActiveChannelClaim(state);
 
@@ -1114,7 +1157,8 @@ export function doCommentPin(commentId: string, claimId: string, remove: boolean
 }
 
 /**
- * Deletes a comment in Commentron.
+ * Deletes a comment. The node-native path appends an author-owned tombstone;
+ * the inactive compatibility path retains the older channel-claim arguments.
  *
  * @param commentId The comment ID to delete.
  * @param deleterClaim The channel-claim of the person doing the deletion.
@@ -1132,6 +1176,21 @@ export function doCommentAbandon(
   creatorClaim?: Claim
 ) {
   return async (dispatch: Dispatch, getState: GetState) => {
+    if (hyperbeamNodeEnabled()) {
+      dispatch({ type: ACTIONS.COMMENT_ABANDON_STARTED });
+      return Comments.comment_abandon({ comment_id: commentId } as CommentAbandonParams)
+        .then((result: CommentAbandonResponse) => {
+          if (!result.abandoned) throw new Error('Native comment was not deleted');
+          dispatch({ type: ACTIONS.COMMENT_ABANDON_COMPLETED, data: { comment_id: commentId } });
+          return result;
+        })
+        .catch((error) => {
+          dispatch({ type: ACTIONS.COMMENT_ABANDON_FAILED, data: error });
+          dispatch(doToast({ message: __('Unable to delete this comment, please try again later.'), isError: true }));
+          throw error;
+        });
+    }
+
     if (!deleterClaim) {
       const state = getState();
       deleterClaim = selectActiveChannelClaim(state);
@@ -1196,6 +1255,20 @@ export function doCommentUpdate(comment_id: string, comment: string) {
     return doCommentAbandon(comment_id);
   } else {
     return async (dispatch: Dispatch, getState: GetState) => {
+      if (hyperbeamNodeEnabled()) {
+        dispatch({ type: ACTIONS.COMMENT_UPDATE_STARTED });
+        return Comments.comment_edit({ comment_id, comment } as CommentEditParams)
+          .then((result: CommentEditResponse) => {
+            dispatch({ type: ACTIONS.COMMENT_UPDATE_COMPLETED, data: { comment: result } });
+            return result;
+          })
+          .catch((error) => {
+            dispatch({ type: ACTIONS.COMMENT_UPDATE_FAILED, data: error });
+            dispatch(doToast({ message: __('Unable to edit this comment, please try again later.'), isError: true }));
+            throw error;
+          });
+      }
+
       const state = getState();
       const activeChannelClaim = selectActiveChannelClaim(state);
 

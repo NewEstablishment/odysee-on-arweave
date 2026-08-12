@@ -251,7 +251,7 @@ its product transport boundary.
 | `odysee-frontend/ui/lbry.ts` | SDK-shaped facade used by existing actions. It routes supported product calls to HyperBEAM without exposing transport details to every component. |
 | `ui/util/hyperbeamRouting.ts` | Allowlist and routing ownership for public reads and trusted writes. |
 | `ui/util/hyperbeam.ts` | Request construction, immutable hydration, claim merging, query/comments integration, and normalized response conversion. |
-| `ui/comments.ts` | Comment facade. Native query/write behavior and historical Commentron access both remain behind HyperBEAM. |
+| `ui/comments.ts` | Comment facade. The active flow uses native query/write behavior only; unsupported historical/super-chat operations fail closed. |
 | `ui/services/hyperbeamUpload.ts` | Browser-side chunking/upload orchestration and native upload metadata requests. |
 | `ui/services/thumbnailUpload.ts` | Calls the same-origin server route that signs trusted cache writes. |
 | `web/src/odyseeHyperbeamNode.js` | SSR-side HyperBEAM adapter for claim, search, stream, upload, and account calls. |
@@ -381,16 +381,18 @@ Native comments are signed structured messages written through the generic ID
 path. Their stable selectors include `type=comment`, `target`, `parent`, `state`,
 `author`, and `schema=odysee-comment@1.0`.
 
-One target-wide `query@1.0/only` request discovers native comment IDs. Product
-logic then hydrates messages and performs:
+Each signed comment, revision, or tombstone is followed by an
+`odysee-comment-index@1.0` locator record containing its immutable `data-id`.
+One target-wide `query@1.0/only` request discovers those records. Product logic
+then hydrates the exact signed messages, verifies their commitments and
+committers, and performs:
 
 - logical-root deduplication;
 - latest valid revision selection;
 - root/reply hierarchy construction;
 - total and reply counts;
 - sorting and pagination;
-- owner-control projection;
-- merging with historical Commentron results.
+- owner-control projection.
 
 Edits are append-only. A revision has its own physical immutable ID and links to
 the logical root with `revision-of`, `previous-version`, and a monotonically
@@ -400,9 +402,8 @@ same-author, signature-valid chain.
 Channel-owner actions such as hide, pin, creator heart, and creator-channel block
 are append-only `odysee-comment-control@1.0` messages. The latest valid authorized
 control event determines the projection; the original comment is never mutated.
-Historical Commentron controls remain behind `odysee-comment@1.0`. Existing owner
-rules can only become owner-signed native controls after that owner authenticates
-and signs them.
+The active frontend comment flow neither reads nor writes Commentron, and native
+lists do not merge historical comments.
 
 ### Uploads and Thumbnails
 
@@ -419,15 +420,15 @@ the browser. The corresponding signer address must be configured in the node's
 
 ### Authentication
 
-The browser's Odysee cookie cannot be sent directly to a node on another origin.
-The local/SSR server therefore exposes same-origin routes under
-`/$/api/hyperbeam-auth-device/v1/*`. It extracts the cookie and forwards only the
-required request carrier.
+Native signup posts a name to the generic committed ID path. `auth-hook@1.0`
+delegates to `cookie@1.0`, which mints a `secret-*` cookie on that first write and
+uses it as the signer for later comments. `reply-id@1.0` returns the committed
+message ID alongside the cookie response. There is no email or password.
 
-`auth-hook@1.0` delegates to `odysee-auth@1.0`, which maps the session to account
-authority, derives signing material, and removes token fields before a message is
-signed or stored. Production deployments may route directly when the browser and
-node share the required origin/auth boundary.
+The browser and node must share a cookie site. The manifest deployment is
+same-origin; local SSR development should use matching hostnames, for example
+`localhost` for both ports. `odysee-auth@1.0` and the SSR auth bridges remain for
+compatibility operations that still use an Odysee session.
 
 ### Static Manifest Publishing
 
@@ -549,7 +550,7 @@ curl http://127.0.0.1:7700/health
 ```bash
 cd hyperbeam
 HOME=/tmp/odysee-hb-home rebar3 as hyperbeam compile
-HOME=/tmp/odysee-hb-home HB_PORT=18785 rebar3 device local
+HOME=/tmp/odysee-hb-home HB_CONFIG=config/odysee-cookie.json rebar3 device local
 ```
 
 Keep the device process attached to a TTY during normal development. Confirm the
@@ -566,7 +567,7 @@ cd odysee-frontend
 corepack enable
 corepack prepare pnpm@10.33.0 --activate
 pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18785 pnpm run dev:web-server
+ODYSEE_HYPERBEAM_NODE_API=http://localhost:18785 pnpm run dev:web-server
 ```
 
 Open `http://localhost:9090`. The development command runs the asset watcher and
@@ -735,8 +736,11 @@ store made the call rather than patching the React page.
 - Odysee fuzzy search depends on a running, populated Meilisearch index.
 - Historical claim discovery still depends on Chainquery/Lighthouse-compatible
   data imported into that index.
-- Historical comments and several moderation/settings operations still use
-  Commentron through `odysee-comment@1.0`.
+- Reactions and several advanced moderation/settings operations are not yet
+  implemented for the native cookie account.
+- The current `secret-*` identity cookie is browser-readable and is not yet a
+  production-hardened account/recovery boundary. Production rollout still
+  requires secure cookie attributes and an explicit CSRF/origin policy.
 - Complete mutable-name and claim-ID migration to owner-controlled reference
   messages is not finished.
 - Claim-output transaction verification alone does not prove inclusion in the

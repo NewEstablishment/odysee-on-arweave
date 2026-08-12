@@ -113,15 +113,15 @@ objects cannot be hydrated to the same claim.
 
 ## Native Comments And Controls
 
-New comments are signed structured messages written through the generic ID path. Stable selectors include `type=comment`, `target`, `parent`, `state`, `author`, and `schema=odysee-comment@1.0`.
+New comments are signed structured messages written through the generic ID path. Each write has a separate `odysee-comment-index@1.0` locator containing its immutable `data-id`. Stable selectors include `type=comment-index`, `claim-id`, `state`, `author`, and `schema=odysee-comment-index@1.0`. Query results are locators only; the frontend must hydrate and verify each signed comment by exact immutable ID.
 
 Edits are append-only revisions. The root immutable ID is the logical comment ID; each revision has its own physical ID and links with `revision-of`, `previous-version`, and a monotonically increasing revision number. The integration accepts only a contiguous, same-owner, signature-valid chain.
 
-Owner controls are append-only `odysee-comment-control@1.0` messages. Visibility, pin, creator heart, and creator-channel block state are derived from the latest valid authorized event. The original comment is never mutated. Legacy Commentron controls are compatibility data; owner-authenticated legacy block rows may be lazily promoted to signed native controls once the owner signs in.
+Owner controls are append-only `odysee-comment-control@1.0` messages. Visibility, pin, creator heart, and creator-channel block state are derived from the latest valid authorized event. The original comment is never mutated. The active frontend does not merge or write Commentron comments.
 
 ## Auth And Trusted Writes
 
-The normal request hook runs `auth-hook@1.0`. Odysee browser auth reaches `dev_odysee_auth`, which derives request authority and strips token fields before persistence. Local development uses the frontend same-origin bridge because an Odysee cookie cannot be sent directly to `127.0.0.1`; same-origin production can route cookie-authenticated requests directly.
+Native accounts run `auth-hook@1.0` with `cookie@1.0`. The first committed write mints a `secret-*` cookie; later writes use the same signer. `reply-id@1.0` attaches the committed message ID to the trailing cookie response. Use `config/odysee-cookie.json`, and keep the browser and node on matching hostnames so the cookie remains same-site. `odysee-auth@1.0` remains available for compatibility operations that require an Odysee session.
 
 Thumbnail bytes are written through native `cache@1.0/write`, not an Odysee-specific cache device. The frontend proxy signs with `HYPERBEAM_CACHE_WRITER_JWK`; the resulting address must be in the node's `cache_writers`. The signature uses RSA-PSS/SHA-512, a body `content-digest`, HyperBEAM's derived-component convention, and a `comm-` label.
 
@@ -133,7 +133,7 @@ The frontend can be published as an Arweave path manifest through generic signed
 
 ```sh
 HOME=/tmp/odysee-hb-home rebar3 as hyperbeam compile
-HOME=/tmp/odysee-hb-home HB_PORT=18785 rebar3 device local
+HOME=/tmp/odysee-hb-home HB_CONFIG=config/odysee-cookie.json rebar3 device local
 ```
 
 Start the local device shell with a TTY. Do not narrow the device set for normal development. Verify the listener and metadata route before testing the frontend.
@@ -156,7 +156,7 @@ The two-node source/cache demo remains available at `scripts/odysee-two-node-dem
 - Browser-selectable legacy wiring has been removed. Legacy systems are backend sources behind devices/stores only.
 - Generic `query@1.0` and `search@1.0` remain upstream-style reusable primitives.
 - Odysee fuzzy search still depends on Meilisearch and a populated legacy/native index.
-- Historical comments and several account/moderation operations still require Commentron through `odysee-comment@1.0`.
+- Reactions and several advanced moderation/settings operations are not yet implemented for the native cookie account.
 - Full mutable-name/claim migration to owned references is not complete.
 - A real TEE deployment requires an AMD SEV-SNP Linux host and the hb-os stack; ordinary local development is not a TEE.
 

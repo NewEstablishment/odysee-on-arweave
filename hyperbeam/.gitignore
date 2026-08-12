@@ -24,6 +24,7 @@ rebar3.crashdump
 
 *.json
 !.vscode/*
+!config/*.json
 
 *.bin
 .vscode/c_cpp_properties.json

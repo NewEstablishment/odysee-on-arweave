@@ -183,17 +183,19 @@ Meilisearch document must not mutate the underlying object.
 ### Comments and moderation
 
 - New comments are signed native messages written through the generic ID path.
-- One target-wide `query@1.0/only` discovery request should find native comment
-  paths; product logic handles hydration, valid revision selection, hierarchy,
-  counts, sorting, moderation, historical merging, and pagination.
+- Each comment write is followed by an `odysee-comment-index@1.0` locator record
+  containing its immutable `data-id`. One target-wide `query@1.0/only` request
+  discovers index records; product logic hydrates and verifies the signed
+  comments by exact immutable ID before revision selection, hierarchy, counts,
+  sorting, moderation, and pagination.
 - Edits are append-only revisions with `revision-of`, `previous-version`, and a
   monotonic revision number. Accept only contiguous, same-owner, signature-valid
   chains.
 - Channel-owner hide, pin, creator-heart, and creator-channel-block actions are
   append-only `odysee-comment-control@1.0` messages. Apply only the latest valid,
   authorized control state.
-- Historical comments and controls remain behind `odysee-comment@1.0`; browser
-  code must not call Commentron directly.
+- The active frontend comment flow does not read or write Commentron. Historical
+  comments are not merged into native lists.
 
 ### Uploads and thumbnails
 
@@ -207,8 +209,12 @@ Meilisearch document must not mutate the underlying object.
 
 ### Authentication
 
-- The normal request hook is `auth-hook@1.0` with `odysee-auth@1.0` as the Odysee
-  secret provider.
+- Native accounts use `auth-hook@1.0` with `cookie@1.0`; the node mints the
+  `secret-*` cookie on the first committed write. `reply-id@1.0` preserves the
+  committed message ID in the response while the cookie hook returns
+  `set-cookie`.
+- `odysee-auth@1.0` remains the provider for compatibility operations that need
+  an Odysee session.
 - Same-origin SSR bridges exist where browser cookies cannot cross origins or a
   server-held signer is required. They are transport/security boundaries, not a
   second data mode.
@@ -236,7 +242,7 @@ Build and start HyperBEAM:
 ```sh
 cd hyperbeam
 HOME=/tmp/odysee-hb-home rebar3 as hyperbeam compile
-HOME=/tmp/odysee-hb-home HB_PORT=18785 rebar3 device local
+HOME=/tmp/odysee-hb-home HB_CONFIG=config/odysee-cookie.json rebar3 device local
 ```
 
 Install and start the frontend:
@@ -246,7 +252,7 @@ cd odysee-frontend
 corepack enable
 corepack prepare pnpm@10.33.0 --activate
 pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18785 pnpm run dev:web-server
+ODYSEE_HYPERBEAM_NODE_API=http://localhost:18785 pnpm run dev:web-server
 ```
 
 Keep required services running while the user tests. If a required service

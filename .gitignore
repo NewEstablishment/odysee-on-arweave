@@ -13,6 +13,13 @@ hyperbeam/_build/
 hyperbeam/deps/
 hyperbeam/log/
 
+# Local HyperBEAM runtime state and node identity.
+/cache-*/
+/logs/
+/hyperbeam-key.json
+/*.crashdump
+/erl_crash.dump
+
 odysee-frontend/node_modules/
 odysee-frontend/web/node_modules/
 odysee-frontend/playwright-report/

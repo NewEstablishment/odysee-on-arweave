@@ -5,7 +5,6 @@ import {
   fetchHyperbeamCommentEdit,
   fetchHyperbeamCommentList,
   fetchHyperbeamCommentPin,
-  fetchHyperbeamCommentSuperList,
   fetchHyperbeamModerationAddDelegate,
   fetchHyperbeamModerationAmI,
   fetchHyperbeamModerationBlock,
@@ -73,7 +72,7 @@ const Comments = {
   setting_list_blocked_words: (params: SettingsParams) => hyperbeamOnly(fetchHyperbeamSettingListBlockedWords(params), 'setting list blocked words'),
   setting_update: (params: UpdateSettingsParams) => hyperbeamOnly(fetchHyperbeamSettingUpdate(params), 'setting update'),
   setting_get: (params: SettingsParams) => hyperbeamOnly(fetchHyperbeamSettingGet(params), 'setting get'),
-  super_list: (params: SuperListParams) => hyperbeamOnly(fetchHyperbeamCommentSuperList(params), 'super chat list'),
+  super_list: (_params: SuperListParams) => Promise.reject(new Error('Native super chats are not implemented')),
   verify_claim_signature: (params: VerifyClaimSignatureParams) =>
     hyperbeamOnly(fetchHyperbeamVerifyClaimSignature(params), 'claim signature verification'),
 };
