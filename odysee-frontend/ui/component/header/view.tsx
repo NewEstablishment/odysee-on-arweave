@@ -257,11 +257,7 @@ const Header = (props: Props) => {
                   }
                 }}
               />
-              <Button
-                navigate={`/$/${PAGES.AUTH}${authRedirectParam}`}
-                button="primary"
-                label={__('Sign Up')}
-              />
+              <Button navigate={`/$/${PAGES.AUTH}${authRedirectParam}`} button="primary" label={__('Sign Up')} />
             </div>
           )}
         </>

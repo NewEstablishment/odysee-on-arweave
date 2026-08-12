@@ -20,7 +20,7 @@ const ACCOUNT_KEY = 'hyperbeam-account';
 const SAVED_KEY = 'hyperbeam-account-saved';
 const COOKIE_PREFIX = 'secret-';
 
-export type HyperbeamAccount = { name: string, id: string };
+export type HyperbeamAccount = { name: string; id: string };
 
 function read(key: string): HyperbeamAccount | null {
   if (typeof localStorage === 'undefined') return null;

@@ -25,8 +25,7 @@ if (ODYSEE_HYPERBEAM_NODE_API && typeof window !== 'undefined' && typeof window.
 
   const nativeFetch = window.fetch.bind(window);
   (window as any).fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url =
-      typeof input === 'string' ? input : input instanceof URL ? input.href : (input && (input as Request).url) || '';
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input && input.url) || '';
     if (legacyHosts.some((host) => url.startsWith(host))) {
       return Promise.resolve(new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }));
     }

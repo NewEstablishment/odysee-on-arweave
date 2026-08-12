@@ -888,10 +888,7 @@ function AppRouter(props: Props) {
         <Route
           path={`/$/${PAGES.UPLOAD}`}
           element={
-            <PrivateRoute
-              component={UploadPage}
-              isAuthenticated={isAuthenticated || hyperbeamUploadEnabled()}
-            />
+            <PrivateRoute component={UploadPage} isAuthenticated={isAuthenticated || hyperbeamUploadEnabled()} />
           }
         />
         <Route
