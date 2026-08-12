@@ -27,4 +27,10 @@ cache-*/
 hyperbeam-key.json
 wallet.json
 
+# demo runtime artifacts (published UI store, captured manifest, test rig)
+/ui-store/
+/ui-store-test/
+/.demo-manifest
+/config-test.json
+
 /logs/

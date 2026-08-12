@@ -1,0 +1,98 @@
+{
+  "port": 18801,
+  "store-all-signed": true,
+  "http-extra-opts": {
+    "force-message": true,
+    "cache-control": [
+      "no-store"
+    ]
+  },
+  "store": [
+    {
+      "store-module": "hb_store_fs",
+      "name": "ui-store",
+      "ao-types": "store-module=\"atom\"",
+      "access": [
+        "read"
+      ]
+    },
+    {
+      "store-module": "hb_store_lmdb",
+      "name": "cache-odysee-demo",
+      "ao-types": "store-module=\"atom\", capacity=\"integer\"",
+      "capacity": 4294967296
+    },
+    {
+      "store-module": "hb_store_lmdb",
+      "name": "cache-http",
+      "ao-types": "store-module=\"atom\", capacity=\"integer\"",
+      "capacity": 1073741824
+    },
+    {
+      "store-module": "hb_store_odysee",
+      "name": "cache-odysee",
+      "ao-types": "store-module=\"atom\""
+    },
+    {
+      "store-module": "hb_store_lbry_claim_output",
+      "name": "cache-lbry-claim-output",
+      "ao-types": "store-module=\"atom\""
+    },
+    {
+      "store-module": "hb_store_lbry_transaction",
+      "name": "cache-lbry-transaction",
+      "ao-types": "store-module=\"atom\""
+    },
+    {
+      "store-module": "hb_store_lbry_stream_descriptor",
+      "name": "cache-lbry-stream-descriptor",
+      "ao-types": "store-module=\"atom\""
+    },
+    {
+      "store-module": "hb_store_lbry_blob",
+      "name": "cache-lbry-blob",
+      "ao-types": "store-module=\"atom\""
+    }
+  ],
+  "match-index": [
+    {
+      "store-module": "hb_store_lmdb",
+      "name": "cache-odysee-demo",
+      "ao-types": "store-module=\"atom\", capacity=\"integer\"",
+      "capacity": 4294967296
+    }
+  ],
+  "on": {
+    "request": [
+      {
+        "device": "rate-limit@1.0"
+      },
+      {
+        "device": "auth-hook@1.0",
+        "path": "request",
+        "secret-provider": {
+          "device": "cookie@1.0"
+        },
+        "when": {
+          "keys": [
+            "authorization",
+            "!"
+          ]
+        }
+      },
+      {
+        "device": "reply-id@1.0",
+        "path": "request"
+      },
+      {
+        "device": "name@1.0"
+      },
+      {
+        "device": "manifest@1.0"
+      },
+      {
+        "device": "blacklist@1.0"
+      }
+    ]
+  }
+}
