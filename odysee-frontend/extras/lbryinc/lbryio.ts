@@ -2,6 +2,7 @@ import * as ACTIONS from 'constants/action_types';
 import Lbry from 'lbry';
 // Use browser-native URLSearchParams instead of Node's querystring module
 import analytics from 'analytics';
+import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 const Lbryio: {
   enabled: boolean;
   authenticationPromise: Promise<any> | null;
@@ -34,6 +35,14 @@ Lbryio.setLocalApi = (endpoint) => {
 };
 
 Lbryio.call = (resource, action, params = {}, method = 'post') => {
+  // In HyperBEAM mode there is no legacy LBRY.io/Odysee backend. Resolve every
+  // legacy call with an empty array: it is object-and-array shaped, so no
+  // consumer crashes, and because it resolves, no `.catch' fires an error
+  // toast. This neutralizes all legacy web2 calls at the single chokepoint.
+  if (ODYSEE_HYPERBEAM_NODE_API) {
+    return Promise.resolve([]);
+  }
+
   if (!Lbryio.enabled) {
     return Promise.reject(new Error(__('LBRY internal API is disabled')));
   }
@@ -263,6 +272,9 @@ Lbryio.getStripeToken = () =>
     : 'pk_live_e8M4dRNnCCbmpZzduEUZBgJO';
 
 Lbryio.getExchangeRates = () => {
+  if (ODYSEE_HYPERBEAM_NODE_API) {
+    return Promise.resolve({ LBC_USD: 1, LBC_BTC: 1, BTC_USD: 1 });
+  }
   if (!Lbryio.exchangeLastFetched || Date.now() - Lbryio.exchangeLastFetched > EXCHANGE_RATE_TIMEOUT) {
     Lbryio.exchangePromise = new Promise((resolve, reject) => {
       Lbryio.call('lbc', 'exchange_rate', {}, 'post', true)

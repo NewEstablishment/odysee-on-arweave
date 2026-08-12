@@ -6,6 +6,8 @@ import React, { useEffect, useState } from 'react';
 import { AppContext } from 'contexts/app';
 export { AppContext };
 import { isEmbedPath } from 'util/embed';
+import { isHyperbeamSignedIn } from 'util/hyperbeamAccount';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import LivestreamPublishProvider from 'component/livestreamPublishProvider';
 import { lazyImport } from 'util/lazyImport';
 import { tusUnlockAndNotify, tusHandleTabUpdates } from 'util/tus';
@@ -370,7 +372,7 @@ function App() {
       }
     }
 
-    if (user === null && !embedPath) {
+    if (user === null && !embedPath && !isHyperbeamSignedIn() && !hyperbeamUploadEnabled()) {
       return <NagNoUser />;
     }
 

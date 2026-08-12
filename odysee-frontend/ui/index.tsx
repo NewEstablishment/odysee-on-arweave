@@ -1,3 +1,7 @@
+// Installs the HyperBEAM legacy-host fetch guard as an import side effect,
+// before any other module can fire a legacy web2 request.
+import 'util/hyperbeamFetchGuard';
+
 if (typeof Object.hasOwn !== 'function') {
   (Object as any).hasOwn = (obj: any, key: PropertyKey) => Object.prototype.hasOwnProperty.call(obj, key);
 }
