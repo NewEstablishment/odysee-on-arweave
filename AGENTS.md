@@ -1,160 +1,151 @@
 # Odysee on HyperBEAM Agent Guide
 
-This file defines the current monorepo-wide engineering rules. Keep it aligned
-with the implementation; do not use old branch plans as architecture.
+This repository implements Odysee as a standalone OTP application on a pinned
+upstream HyperBEAM dependency. The store-first architecture on the current
+branch is the source of truth.
 
 ## Start here
 
 Before changing code:
 
 1. Read the root `README.md`.
-2. Read `odysee-frontend/AGENTS.md` for browser, Redux, SSR, auth bridge,
-   upload, playback, search, comments, or diagnostics changes.
-3. Inspect `git status` and the relevant code. The worktree may contain user
-   changes or an active merge; preserve both staged and unstaged intent.
-4. Identify the owning boundary before editing. Do not patch rendering to hide
-   a store, identity, verification, or normalization defect.
+2. Read `docs/architecture.md` and the relevant file under `decisions/`.
+3. Read `odysee-frontend/AGENTS.md` before changing browser behavior.
+4. Inspect `git status` and preserve unrelated user changes.
+5. Identify whether the change belongs in a source store, the single LBRY
+   verifier, generic write/query configuration, or the frontend integration
+   boundary.
+
+Do not infer architecture from older master/Rave snapshots. If they conflict,
+the standalone Ayush/store-first implementation, its decision records, and the
+current tests win. Add other-branch capabilities only when they are genuinely
+missing and can be expressed without replacing these contracts.
 
 ## Repository map
 
 | Path | Ownership |
 | --- | --- |
-| `README.md` | Current system orientation, contracts, operation, validation, and limitations. |
-| `apps/odysee/src/` | Standalone Erlang app: devices, LBRY verification, source clients, node options, and stores. |
-| `odysee-frontend/` | The one React/Redux frontend, SSR server, integration facade, bridges, manifest builder, and frontend tests. |
-| `odysee-frontend/AGENTS.md` | Frontend-specific contracts and validation. |
-| `aidocs/` | Detailed architecture notes and demonstrations. |
-| `patches/` | Small proposals for the pinned upstream HyperBEAM dependency. |
+| `src/` | Standalone backend application, source stores, verification modules, node helpers, and manifest publisher. |
+| `rebar.config` | Pinned upstream HyperBEAM dependency and build configuration. |
+| `config.json` | Cookie-auth, match-index, stores, and manifest-hook demo configuration. |
+| `odysee-frontend/` | Static React application and the sole frontend integration boundary. |
+| `docs/` | Maintained architecture and operator documentation. |
+| `decisions/` | Durable architectural decisions. |
+| `patches/` | Minimal upstream patches that cannot live in this application. |
+| `RUN_DEMO.md` | Working local launch and end-to-end examples. |
 
-There is no tracked `hyperbeam/` source tree and no second `frontend/` tree.
-HyperBEAM is pinned in `rebar.config` and materialized under `_build`. Do not
-copy dependency source into the repository or recreate a proof-of-concept UI.
+There is no tracked `hyperbeam/` fork. Never recreate it for an application
+change. HyperBEAM source is an upstream dependency under `_build/*/lib/hb` and
+is read-only except when deliberately updating a narrow documented patch.
 
 ## System contract
 
 ```text
-Browser / SSR
-    -> frontend SDK-shaped integration
-    -> generic HyperBEAM message, cache, query, and search surfaces
-    -> local/cache/source stores
-    -> compatibility sources only behind those stores
+Static manifest browser
+    -> generic HyperBEAM HTTP/message/query routes
+    -> local cache or store-first Odysee/LBRY sources
+    -> verified immutable evidence
 ```
 
-Legacy Odysee services are source systems, not an alternate browser mode. Do
-not add a Legacy/HyperBEAM toggle, direct product fetches from React, or a broad
-Odysee SDK proxy device.
+- Historical Odysee services are locators or byte sources behind stores.
+- Native uploads, profiles, comments, and revisions are generic committed
+  messages written through `/id?!` and discovered with `query@1.0`.
+- Production uses the manifest frontend served by the node. Do not introduce a
+  required SSR/proxy product path.
+- Browser product code must not call Commentron, Lbryio, the SDK proxy,
+  Lighthouse, Meilisearch, recommendations, geo, or other Web2 services as an
+  alternate data mode.
 
 ## Architectural invariants
 
-1. **Immutable reads are ID-first.** An immutable ID returns that exact object,
-   never an unrelated current claim version.
-2. **Discovery returns locators.** Query/search returns paths or IDs. Hydrate
-   separately and preserve the discovered order.
-3. **Generic devices stay generic.** Do not add Odysee ranking, hydration,
-   moderation, or revision semantics to upstream `message@1.0`, `cache@1.0`,
-   `query@1.0`, or the generic `search@1.0` surface.
-4. **Stores source objects; integration implements product behavior.** Stores
-   locate, normalize, verify, and cache source objects. The frontend integration
-   projects uploads/comments and produces Redux-compatible shape.
-5. **Source evidence remains separate from UI semantics.** LBRY transactions,
-   claims, descriptors, blobs, ancestry, and commitments belong under
-   `apps/odysee/src/`, not in React.
-6. **Credentials are request-only.** Tokens, cookies, secrets, private keys,
-   and derivation controls must not enter signed or persisted public messages.
-7. **Indexes are not sources of truth.** Query/search discovers objects; signed
-   native messages and verified LBRY evidence remain authoritative.
-8. **Native state is append-only.** Updates, deletes, comment edits, and
-   controls create immutable signed revisions rather than mutating history.
-9. **Observed diagnostics report reality.** Do not invent device calls, stores,
-   backends, or graph edges.
+1. **Upstream HyperBEAM is a dependency.** Keep product code in this
+   application; do not vendor or casually patch the runtime.
+2. **Reads are stores.** Historical resolution and media reads go through the
+   configured store stack and generic cache/message routes.
+3. **Writes are generic committed messages.** Do not add application upload,
+   comment, account, reaction, or moderation devices when a signed message plus
+   exact query expresses the contract.
+4. **One LBRY commitment device.** `lbry@1.0` verifies every evidence kind.
+   Do not restore the old family of per-kind codec devices.
+5. **Immutable reads are exact.** An immutable ID or outpoint must return that
+   object, never a mutable current replacement.
+6. **Names are locators.** URI and claim-ID resolution may change; the resolved
+   evidence has an immutable identity.
+7. **Discovery returns locators.** Query/search results are hydrated separately
+   by immutable read.
+8. **Source bytes fail closed.** Recompute transaction and SHA-384 identities
+   before serving or caching evidence.
+9. **Credentials are request-only.** Never persist cookies, tokens, private
+   keys, or auth carriers in a public message.
+10. **Native state is append-only.** Edits, deletes, reactions, moderation, and
+    metadata updates need signed revisions/events, not mutation.
+11. **Indexes are not authority.** Match/full-text indexes locate messages;
+    committed messages and verified source evidence remain authoritative.
+12. **Observed diagnostics report reality.** Do not fabricate devices, calls,
+    backends, or verification state.
 
 ## Change ownership
 
 | Concern | Correct location |
 | --- | --- |
-| Odysee/LBRY source lookup and normalization | `hb_store_odysee.erl` or a dedicated `hb_store_lbry_*` module |
-| LBRY binary format, hash, ancestry, or commitment verification | `dev_lbry*` and related helpers under `apps/odysee/src/` |
-| Request hooks, hosted identity, node store stack, and boot options | `dev_odysee_auth.erl`, `dev_reply_id.erl`, and `hb_odysee_node.erl` |
-| Generic full-text indexing/search | `dev_search.erl` and `hb_search.erl` |
-| SDK routing, discovery, hydration, source merging, revision projection, and Redux shape | `odysee-frontend/ui/lbry.ts`, `ui/util/hyperbeam.ts`, and focused integration services |
-| Cookie or server-held signer boundary | `odysee-frontend/web/src/` SSR routes |
-| Rendering and interaction only | React components |
+| LBRY evidence construction or verification | `src/dev_lbry*.erl` and their supporting modules. |
+| Historical lookup, playback bytes, cache warming, or source normalization | `src/hb_store_*.erl` and `src/hb_odysee_*.erl`. |
+| Node store stack, cookie hook, match index, or manifest publishing | `src/hb_odysee_node.erl`, `src/hb_odysee_ui.erl`, and `config.json`. |
+| Generic local full-text behavior | `src/dev_search.erl` and `src/hb_search.erl`. |
+| Browser routing, hydration, upload/comment messages, and SDK-shaped Redux adaptation | `odysee-frontend/ui/lbry.ts`, `ui/util/hyperbeam.ts`, and related services. |
+| Rendering only | React components. |
 
-Search for existing helpers before adding an abstraction. On the backend check
-`hb_ao`, `hb_maps`, `hb_message`, and the existing Odysee modules. On the
-frontend preserve the facade and shared normalization path.
+Do not fix a store or identity defect in a page component. Search for existing
+helpers before creating another transport or normalization path.
 
-## Identity rules
+## Native identity and writes
 
-| Object | Identity |
-| --- | --- |
-| Native HyperBEAM message | Immutable commitment ID |
-| Legacy claim output | Immutable `<txid>:<nout>` outpoint |
-| Legacy transaction | Display-order 64-character transaction ID |
-| Legacy blob | 96-character SHA-384 hash |
-| Stream descriptor | SHA-384 `sd_hash` |
-| Legacy claim | 40-character mutable locator/reference ID |
-| URI or name | Mutable lookup input |
-| Search/query result | Immutable message locator |
-| Native upload revision | Physical message ID plus signed logical root/version references |
+The native browser identity is the node's `secret-*` cookie, minted by
+`cookie@1.0` on the first committed write. Local storage contains display
+metadata only and grants no authority.
 
-Never replace an immutable outpoint or native ID with a mutable claim ID during
-search, hydration, playback, cache reads, or Redux ingestion.
+Uploads:
 
-## Authentication rules
+- Post raw bytes to `/id?!=true&committers=all`.
+- Write a generic `odysee-upload@1.0` index message linking metadata to the
+  immutable data ID.
+- Resolve/list uploads through the match index and exact immutable reads.
+- Never enter the legacy transcode/TUS path in HyperBEAM mode.
+- Never persist browser `File` or transient pipeline objects.
 
-- Normal committed writes use `auth-hook@1.0` with `odysee-auth@1.0` as the
-  secret provider and `reply-id@1.0` after persistence.
-- The hook is gated to commit-flag or token-bearing requests; ordinary reads
-  must not receive an auth challenge.
-- Production tokens must resolve to an account through the node-owned session
-  map or account API. Fail closed for unknown tokens and fail distinctly for an
-  unavailable account service.
-- `odysee-auth-allow-unvalidated-tokens` is explicitly development-only.
-- Derive a stable identity from the account, not a session, when an account
-  source is configured.
-- PBKDF2 policy belongs to node options. Reject request attempts to choose a
-  secret, salt, algorithm, iterations, key length, or ignored-key list.
-- Same-origin bridges may forward cookies/tokens because browsers cannot send
-  Odysee cookies cross-origin. They are transport/security boundaries, never a
-  second data mode.
+Comments:
 
-## Upload rules
+- Write roots and replies as ordinary committed messages.
+- Discover them through one target-wide `query@1.0/only` request.
+- Hydrate and verify each exact immutable ID and derive ownership from its
+  committer.
+- Edits and author deletes are contiguous, same-owner append-only revisions.
+- A claimed profile is displayable only when its profile message verifies
+  under the same committer.
+- Do not silently fall back to Commentron or legacy APIs.
 
-- Media and metadata are ordinary messages written through generic `/id`.
-- Root records use `schema: odysee-upload@1.0`, `type: upload`, and retain the
-  immutable media `data-id`.
-- Updates/deletes are append-only snapshots with the same owner/root/data/name
-  and creation time, contiguous revision number, current previous reference,
-  and a signed stable `version-ref`.
-- Reject forks, gaps, owner changes, immutable-field changes, invalid
-  operations, and all revisions after a valid tombstone.
-- A query locator's physical RSA-PSS commitment ID can differ after serving;
-  do not use that transport-sensitive ID as the logical revision link.
-- The current UI mutation bridge is
-  `/$/api/hyperbeam-upload/v1/write`. Old route names that invoke
-  `~odysee-upload@1.0` are dormant cleanup debt and must not be reused.
+Native reactions and moderation are not implemented. When added, they should
+follow the same committed-message/event pattern and explicit authority checks.
 
-## Local operation
+## Frontend rules
 
-The normal local services are:
-
-| Service | Default address |
-| --- | --- |
-| HyperBEAM write/seed node | `http://127.0.0.1:18800` in the demo |
-| Frontend SSR | `http://localhost:9090` |
-
-Build the preloaded device store with `rebar3 device local` after backend
-device changes. `rebar3 compile` alone can leave a manual node running old
-published code. Run only one frontend `dev:web-server` supervisor.
+- `ODYSEE_HYPERBEAM_NODE_API` selects the node; it is not a Legacy/HyperBEAM
+  mode switch.
+- Install the host-level legacy fetch guard before application imports.
+- Manifest builds use hash routing, relative assets, and node-safe content
+  types.
+- Bare native `lbry://<name>` resolution uses the upload index and immutable
+  hydration.
+- Cookie-sensitive writes must use the same site/origin as the manifest.
+- Keep account signup name-only: no email, password, or Web2 account call.
 
 ## Validation
-
-Choose the broadest practical check for the touched boundary.
 
 Backend baseline:
 
 ```sh
+rebar3 compile
+HB_PORT=0 rebar3 eunit
 rebar3 device test --with-core
 ```
 
@@ -162,38 +153,32 @@ Frontend baseline:
 
 ```sh
 cd odysee-frontend
-pnpm run fmt:check
 pnpm run typecheck:tsc
 pnpm run check
-node --check web/src/odyseeHyperbeamNode.js
-node --check web/src/fetchStreamUrl.js
-```
-
-Focused integration checks:
-
-```sh
-pnpm run test:native-upload-revisions
-pnpm run test:hyperbeam-upload-smoke
-pnpm run test:hyperbeam-query-comment-smoke
 pnpm run test:native-comment-revisions
+pnpm run test:native-message-verification
 pnpm run test:native-comment-controls
 pnpm run test:static-manifest
+pnpm run build:manifest
 ```
 
-For user-facing flows, verify the real browser/HTTP path. Passing a unit test
-does not prove auth forwarding, query projection, byte serving, or rendering.
-Always run `git diff --check` before finishing and report unrun checks.
+Run the cookie-owned browser lifecycle against a configured node when auth,
+uploads, or comments change:
+
+```sh
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
+```
+
+Always run `git diff --check`. Report skipped, timed-out, or environment-blocked
+tests plainly; a compile or unit test alone does not prove the browser flow.
 
 ## Documentation and Git hygiene
 
-- Update `README.md` and the relevant `AGENTS.md` when architecture, ownership,
-  public contracts, run commands, validation, or limitations change.
-- Keep detailed branch-specific investigations in `aidocs/` when useful.
-- Preserve unrelated user changes and the staged/unstaged split of an active
-  merge. Never reset or revert work you did not create.
-- Do not commit unless the user explicitly requests it.
-- Do not commit credentials, caches, build output, dependency trees, raw
-  transcripts, or database dumps.
-- Avoid comments that only narrate code. Explain only non-obvious contracts.
-- Continue through implementation, validation, cleanup, and documentation
-  unless the user pauses the work or a real external blocker remains.
+- Update `README.md`, `docs/`, `decisions/`, and this guide when architecture,
+  ownership, public operations, identity, configuration, or validation changes.
+- Preserve unrelated user changes in a dirty worktree.
+- Do not commit credentials, generated manifests, build output, dependency
+  trees, caches, logs, or local node keys.
+- Do not create commits unless the user asks.
+- Do not rewrite or force-push shared history.
+- Remove obsolete experimental artifacts while leaving unrelated files alone.

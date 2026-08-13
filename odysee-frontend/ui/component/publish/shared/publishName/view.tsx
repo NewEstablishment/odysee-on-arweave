@@ -1,4 +1,5 @@
 import { DOMAIN } from 'config';
+import { hyperbeamUploadEnabled, hyperbeamNodeBase } from 'util/hyperbeamDevices';
 import { INVALID_NAME_ERROR } from 'constants/claim';
 import React, { useState, useEffect } from 'react';
 import { isNameValid } from 'util/lbryURI';
@@ -46,7 +47,10 @@ function PublishName(props: Props) {
   const isMobile = useIsMobile();
   const shouldLockName =
     isStillEditing || (publishType === 'livestream' && Boolean(editingURI) && liveCreateType === 'edit_placeholder');
-  let prefix = IS_WEB ? (isMobile ? '' : `${DOMAIN}/`) : 'lbry://';
+  // In HyperBEAM mode the content lives on this node, not odysee.com; show the
+  // node origin so the URL slug is not misleading.
+  const webPrefix = hyperbeamUploadEnabled() ? `${hyperbeamNodeBase().replace(/^https?:\/\//, '')}/` : `${DOMAIN}/`;
+  let prefix = IS_WEB ? (isMobile ? '' : webPrefix) : 'lbry://';
 
   if (activeChannelName && !incognito) {
     prefix += `${activeChannelName}/`;

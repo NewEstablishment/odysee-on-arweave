@@ -9,7 +9,6 @@ export type NativeCommentControl = {
   hyperbeam_commitment_verification?: string;
   schema?: string;
   type?: string;
-  control_ref?: string;
   control?: string;
   action?: string;
   authority?: string;
@@ -34,11 +33,6 @@ export type NativeCommentControlContext = {
   comment?: Record<string, any>;
 };
 
-export type NativeCommentControlTransportContext = {
-  targetOwner: string | null;
-  comment?: Record<string, any>;
-};
-
 export type NativeCommentControlProjection = {
   removed: boolean;
   hidden: boolean;
@@ -58,7 +52,6 @@ export function nativeCommentControlSignatureData(control: NativeCommentControl)
     compact({
       schema: field(control, 'schema'),
       type: field(control, 'type'),
-      'control-ref': field(control, 'control-ref', 'control_ref'),
       control: field(control, 'control'),
       action: field(control, 'action'),
       authority: field(control, 'authority'),
@@ -89,7 +82,6 @@ export function normalizeNativeCommentControl(source: NativeCommentControl): Nat
     ),
     schema: field(source, 'schema'),
     type: field(source, 'type'),
-    control_ref: field(source, 'control-ref', 'control_ref'),
     control: field(source, 'control'),
     action: field(source, 'action'),
     authority: field(source, 'authority'),
@@ -199,7 +191,7 @@ export function hasNativeCommentControlAuthority(
 
 export function hasNativeCommentControlCommitterAuthority(
   control: NativeCommentControl,
-  context: NativeCommentControlTransportContext
+  context: { targetOwner: string | null; comment?: Record<string, any> }
 ): boolean {
   const normalized = normalizeNativeCommentControl(control);
   const committer = normalized.hyperbeam_owner;

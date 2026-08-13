@@ -81,17 +81,20 @@ export function isNextNativeCommentRevision(
   const rootId = root.comment_id;
   const currentId = current.version_ref || current.hyperbeam_message_id || current.comment_id;
   const expectedRevision = revisionNumber(current) + 1;
+  const operationIsValid =
+    (candidate.operation === 'edit' && candidate.state === 'active') ||
+    (candidate.operation === 'delete' && candidate.state === 'deleted');
 
   return Boolean(
     rootId &&
     currentId &&
+    current.state !== 'deleted' &&
     root.hyperbeam_owner &&
     candidate.hyperbeam_owner === root.hyperbeam_owner &&
     candidate.revision_of === rootId &&
     candidate.previous_version === currentId &&
     revisionNumber(candidate) === expectedRevision &&
-    candidate.operation === 'edit' &&
-    candidate.state === 'active' &&
+    operationIsValid &&
     candidate.channel_id === root.channel_id &&
     candidate.claim_id === root.claim_id &&
     normalizedParent(candidate.parent_id) === normalizedParent(root.parent_id) &&

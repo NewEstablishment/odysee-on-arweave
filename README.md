@@ -1,293 +1,240 @@
 # Odysee on HyperBEAM
 
-This repository runs Odysee content through HyperBEAM with a store-first
-architecture. Historical LBRY/Odysee infrastructure is a source of bytes and
-locators; the node verifies source evidence, commits the result, and caches the
-immutable message before serving it.
+This repository is an Odysee-specific application built on upstream
+HyperBEAM. It is deliberately not a fork of the HyperBEAM runtime.
 
-There is one product frontend: `odysee-frontend/`. Do not create or maintain a
-second `frontend/` tree. The old proof-of-concept frontend was removed; the
-tracked Odysee application is the canonical browser, SSR, manifest, and upload
-integration.
+The architecture is store-first:
+
+```text
+Static manifest frontend
+    -> generic HyperBEAM HTTP routes
+    -> generic committed messages and exact query
+    -> local cache, Odysee source stores, or remote nodes
+```
+
+Legacy Odysee and LBRY services locate or transport source bytes for historical
+content. They are not browser backends. The source stores validate those bytes
+and produce content-addressed `lbry@1.0` evidence before serving or caching
+them.
+
+## Source of truth
+
+The current implementation follows these decisions:
+
+- [`decisions/hb-dependency.md`](decisions/hb-dependency.md): depend on a pinned
+  upstream HyperBEAM revision instead of vendoring the runtime.
+- [`decisions/store-first-no-app-devices.md`](decisions/store-first-no-app-devices.md):
+  reads are store reads; native writes are generic committed messages.
+- [`decisions/single-commitment-device.md`](decisions/single-commitment-device.md):
+  one `lbry@1.0` verification device covers all LBRY evidence kinds.
+- [`docs/architecture.md`](docs/architecture.md): full trust, node-role, read,
+  and write architecture.
+- [`ARCHITECTURE_READ_PATH.md`](ARCHITECTURE_READ_PATH.md): traced HTTP read
+  path with implementation references.
+- [`RUN_DEMO.md`](RUN_DEMO.md): local operation and end-to-end examples.
+
+When an older branch or document conflicts with these decisions and the current
+code, this store-first architecture wins.
 
 ## Repository layout
 
-| Path | Purpose |
+| Path | Responsibility |
 | --- | --- |
-| `apps/odysee/src/` | Odysee Erlang application: LBRY commitment code, auth/search helpers, node options, source clients, and stores. |
-| `odysee-frontend/` | The only frontend: React/Redux UI, SDK-shaped integration, SSR bridges, static-manifest build, and frontend tests. |
-| `aidocs/` | Architecture notes and runnable demonstrations for this branch. |
-| `patches/` | Small proposed fixes for the pinned upstream HyperBEAM dependency. |
-| `rebar.config` | Pins HyperBEAM and builds this project as a standalone Erlang application. |
+| `src/` | The standalone Odysee OTP application: LBRY verification, source stores, node helpers, generic search, reply-ID hook, and manifest publishing. |
+| `odysee-frontend/` | The static React application and its HyperBEAM integration layer. |
+| `docs/` | Architecture, data sourcing, evidence model, search, and node-operation documentation. |
+| `decisions/` | Durable architectural decisions and their tradeoffs. |
+| `patches/` | Narrow upstream HyperBEAM patches that cannot be expressed in this application. |
+| `scripts/` | Operational scripts used by this architecture. |
+| `rebar.config` | Pins the upstream HyperBEAM dependency and builds this application on top of it. |
+| `config.json` | Demo node configuration for cookie-authenticated committed writes and store-first reads. |
 
-HyperBEAM is a pinned dependency under `_build`; it is not a tracked
-`hyperbeam/` subdirectory in this repository. Generated `_build`, cache, and
-frontend dependency/output trees are not source directories.
+There is intentionally no tracked `hyperbeam/` source tree. HyperBEAM is the
+dependency under `_build/*/lib/hb`; product code stays in this repository's
+`src/` directory.
 
-## Architecture
+## Runtime boundaries
+
+### Devices
+
+The application minimizes custom device surface:
+
+| Device | Role |
+| --- | --- |
+| `lbry@1.0` | Verifies transactions, claim outputs, channels, streams, descriptors, blobs, and attestations from their native evidence. |
+| `search@1.0` | Generic local full-text indexing and lookup. It is not an Odysee SDK proxy. |
+| `reply-id@1.0` | Adds the committed message ID to cookie-auth write replies. |
+| `odysee-auth@1.0` | Compatibility authentication helper where an existing session must be translated. It is not the native account model. |
+
+There are no `odysee-claim@1.0`, `odysee-stream@1.0`,
+`odysee-upload@1.0`, or `odysee-comment@1.0` application devices in the active
+architecture. Strings such as `odysee-upload@1.0` and
+`odysee-comment@1.0` are message schemas used for generic writes and queries,
+not executable device endpoints.
+
+### Stores
+
+| Store | Role |
+| --- | --- |
+| `hb_store_odysee` | Classifies Odysee/LBRY keys, performs mutable locator lookups, constructs evidence, and warms local addresses. |
+| `hb_store_lbry_transaction` | Fetches and verifies raw transactions. |
+| `hb_store_lbry_claim_output` | Materializes immutable outpoint evidence. |
+| `hb_store_lbry_stream_descriptor` | Fetches and verifies stream descriptors by SHA-384. |
+| `hb_store_lbry_blob` | Fetches and verifies encrypted blobs by SHA-384. |
+
+Local stores come first. Source stores fill misses and return committed evidence;
+they are not alternate UI APIs.
+
+## Identity
+
+| Object | Identity |
+| --- | --- |
+| Native message | Its committed HyperBEAM message ID. |
+| Legacy claim output | Immutable `<txid>:<nout>` outpoint. |
+| Legacy transaction | Display-order 64-character transaction ID. |
+| Legacy blob or descriptor | 96-character SHA-384 hash. |
+| Legacy claim ID | Mutable locator for the current claim state. |
+| Name or URI | Mutable lookup input, never immutable identity. |
+| Native comment revision | Its own immutable message ID, linked to a logical root comment. |
+
+Bare immutable IDs read through the normal message/cache route. Mutable names
+and claim IDs resolve through namespaced store paths before yielding immutable
+evidence.
+
+## Historical reads and playback
+
+Historical claims and media use store paths such as:
 
 ```text
-Browser or SSR
-    -> odysee-frontend integration facade
-    -> generic HyperBEAM reads, writes, query, cache, and search
-    -> local/cache/source store stack
-    -> historical Odysee/LBRY services only on a verified cache miss
+/~cache@1.0/read?read=odysee/claim/<uri>
+/~cache@1.0/read?read=odysee/claim-id/<claim-id>
+/~cache@1.0/read?read=odysee/stream-id/<txid>:<nout>
+/~cache@1.0/read?read=odysee/media/stream-id/<txid>:<nout>
 ```
 
-The design deliberately avoids a broad Odysee application-device layer.
-Product records such as native uploads, channels, and comments are ordinary
-signed HyperBEAM messages. Discovery returns locators, and the frontend reads
-and projects the immutable messages separately.
+The store layer verifies transaction, descriptor, and blob evidence before
+returning bytes. Hash mismatches fail closed. Mutable reads use `cache-control:
+no-store, no-cache`; immutable ID reads may be cached indefinitely.
 
-The active project devices are narrow:
+## Native account and writes
 
-| Device | Responsibility |
-| --- | --- |
-| `lbry@1.0` | Commit and verify LBRY transactions, claim outputs, stream descriptors, blobs, channels, and related ancestry evidence. |
-| `odysee-auth@1.0` | Resolve an Odysee session to an account-derived hosted signing identity. |
-| `reply-id@1.0` | Return the stored immutable message ID after a committed write. |
-| `search@1.0` | Generic SQLite FTS5 search over HyperBEAM messages. |
+The node's `auth-hook@1.0` uses `cookie@1.0`. The first committed write mints a
+`secret-*` cookie; later writes reuse the same signer. There is no email,
+password, browser wallet, or Web2 account.
 
-The source layer consists of `hb_store_odysee` and four dedicated LBRY stores
-for transactions, claim outputs, stream descriptors, and blobs. Local
-`cache-http` storage is first, so verified and native messages are served and
-queried locally before any compatibility source is consulted.
-
-## Identity and trust
-
-- A native message is named by its immutable HyperBEAM commitment ID.
-- A legacy claim output is named by immutable `<txid>:<nout>` evidence.
-- A 40-character claim ID or an Odysee URI is a mutable locator, not an
-  immutable object key.
-- A legacy transaction uses its display-order 64-character transaction ID.
-- A legacy blob or stream descriptor uses its SHA-384 hash.
-- Search and `query@1.0` return locators; callers hydrate the corresponding
-  messages and preserve result order.
-
-On a cold historical read, `hb_store_odysee` classifies the locator and obtains
-the required source objects. Dedicated stores verify hashes and ancestry and
-emit messages carrying `lbry@1.0` commitments. Invalid evidence fails closed.
-Warm reads come from the local store stack.
-
-Aliases are locators rather than proofs. A canonical immutable ID or the full
-cache read path carries the message commitment; a convenient alias can resolve
-to the bytes without itself being cryptographically related to them.
-
-## Native writes and authentication
-
-Native content is committed through the generic endpoint:
+All native writes use the generic committed-ID route:
 
 ```text
 POST /id?!=true&committers=all
-x-odysee-auth-token: <session token>
 ```
 
-`hb_odysee_node:upload_opts/1` installs the request hook, persistent store, and
-match index needed for writes. The hook runs only for a commit-flag or explicit
-token-bearing request. Anonymous reads remain anonymous; protected writes
-without a valid token return `401`.
+The cookie is a request credential and must not be copied into the committed
+message. The reply exposes the stored ID in `message-id`.
 
-Production nodes must configure one account source:
+## Homepage and categories
 
-- `odysee-session-accounts`: a node-owned `token => account-id` map, useful for
-  controlled/offline environments; or
-- `odysee-account-api`: the Odysee internal API base used to resolve the token
-  through `user/me`.
+The public homepage is represented by one signed immutable
+`odysee-homepage@1.0` snapshot per language. Snapshot discovery uses generic
+`query@1.0`; consumers then hydrate and verify the exact committed message.
+Each category carries an ordered, pre-warmed claim pool. The homepage renders
+the category's configured prefix while the matching category route uses the
+larger pool for first paint, so both views share one source of truth without
+repeating discovery.
 
-The development-only `odysee-auth-allow-unvalidated-tokens` option derives an
-identity directly from an arbitrary token. It is off by default and must not be
-enabled in production. PBKDF2 algorithm, salt, iterations, and key length are
-node options; requests cannot choose them. Tokens and derived secrets are
-request-only and are removed before signing, serialization, indexing, or
-persistence.
+Following is personalized and therefore is not stored in the public language
+snapshot. It is queried dynamically through the store-first integration and
+keeps the same locator-first, immutable-hydration boundary. Snapshot refreshes
+must leave the previous committed snapshot available until a complete
+replacement has been built and verified.
 
-Because Odysee can mint multiple sessions for one account, production identity
-is derived from the resolved account ID rather than the individual session
-token. That keeps ownership stable across logins.
+### Uploads
 
-## Native-message verification
+The browser posts raw file bytes directly to `/id?!`. It then writes a generic
+`odysee-upload@1.0` index record that links the name and metadata to the
+immutable data ID. Bare `lbry://<name>` resolution queries that record and
+hydrates the immutable object. The uploads page queries the same records.
 
-All native product hydration uses one fail-closed verifier in
-`odysee-frontend/ui/util/nativeMessageVerification.ts`. For an immutable
-locator `<id>`, it loads that message, requires
-`/<id>/verify?commitment-ids=<id>` to return true, and reads the committer from
-`/<id>/commitments/<id>/committer`. Product code receives the payload only when
-all three checks succeed. It must request the exact ID rather than
-`commitment-ids=all`, which can succeed vacuously for an uncommitted message.
+There is no legacy transcoder or TUS preparation path in HyperBEAM mode.
+Transient `File` and pipeline objects are excluded from persisted Redux state.
 
-Uploads, comments, comment controls, and playlists use this verifier for every
-root or revision they hydrate, including query results and write read-back.
-Uncommitted or unverifiable query artifacts are ignored. Upload, comment, and
-playlist revision projection accepts only a contiguous chain from the same
-verified committer. Comment controls also require transport authority: author
-controls must have the comment root's committer, while owner controls must have
-the target native upload's committer.
+### Comments
 
-Signed application references keep logical chains stable when a query path has
-a different physical commitment locator: comments use `comment-ref`, revisions
-use `version-ref`, and controls use `control-ref`. The physical message ID is
-still retained for exact immutable reads and verification.
+Comments are ordinary cookie-signed messages, not Commentron records and not
+calls to a custom comment device. `query@1.0/only` discovers them from the
+match index, then the frontend hydrates and verifies exact immutable IDs.
 
-Transport commitment verification does not prove a claimed LBRY channel
-identity. Channel signatures remain a separate proof and are currently only
-checked for structural completeness by the frontend. Native channel writes and
-a verified account-to-channel binding do not exist on this branch yet, so
-owner controls for legacy targets fail closed instead of trusting a claimed
-channel ID.
+- Roots and replies are committed messages.
+- Edits and author deletes are append-only revisions.
+- A revision must be contiguous and owned by the same verified committer.
+- Claimed profile fields never establish authority; the profile message must
+  verify under the same committer.
+- Advanced reactions, moderation, and settings remain unsupported until they
+  have native message contracts.
 
-## Upload records
+The normal UI does not call Commentron, the legacy LBRY API, or an Odysee SDK
+proxy for comments.
 
-The frontend uses the same-origin
-`/$/api/hyperbeam-upload/v1/write` bridge when browser cookies cannot cross to
-the node. The bridge forwards only the auth carrier and bytes to the generic
-commit endpoint; it is a security/transport boundary, not a second data mode.
+## Static manifest frontend
 
-An upload consists of:
-
-1. an immutable media message containing the bytes; and
-2. an immutable root record with `schema: odysee-upload@1.0`, `type: upload`,
-   metadata, owner commitment, and the media `data-id`.
-
-Updates and deletes append signed snapshots. A valid next version must keep the
-same owner, root, media ID, name, and creation timestamp; increment `revision`
-by exactly one; and point `previous-version` at the current signed
-`version-ref`. Deletes are terminal tombstones. The frontend ignores forks,
-owner spoofing, gaps, mutation of immutable fields, and revisions after a
-tombstone.
-
-`version-ref` is an application-level signed chain key. The physical message
-ID remains the immutable locator, but an RSA-PSS message returned through a
-query path can have a different commitment ID after re-signing; revision
-continuity therefore must not depend on that transport-specific ID.
-
-## Frontend integration
-
-`odysee-frontend/ui/lbry.ts` is the SDK-shaped facade used by existing Redux
-actions. `ui/util/hyperbeam.ts` constructs reads and discovery calls, hydrates
-locators, normalizes claim-shaped data, and projects native revision chains.
-React components should render the normalized result rather than introducing
-another transport path.
-
-The frontend still contains some dormant compatibility helpers and route names
-from the removed application-device design. They are not an alternate
-frontend, and new work must not route product data through them. The current
-upload mutation path uses only the generic write bridge.
-
-The public homepage is materialized hourly into one signed immutable
-`odysee-homepage@1.0` message per language. Runtime discovery uses generic
-`query@1.0`, exact immutable reads, commitment verification, and committer
-checks. Homepage rows are hydrated in display order through the generic Lua
-multirequest application. Each language snapshot preserves an ordered,
-pre-warmed category pool: the homepage consumes the configured row prefix and
-the matching category page consumes the larger pool, so category first paint
-does not repeat discovery. Following remains a dynamic per-user query through
-the same source store and ordered hydration boundary.
-The previous signed snapshot remains available while a replacement is built.
-Materialization imports known legacy outpoints first and accepts only verified
-messages committed to the local HyperBEAM store; failed imports never become
-remote immutable-ID probes. If the normal reserve cannot fill a row, only that
-category's candidate pages and freshness window are expanded in bounded
-rounds. The final round appends a semantic category-tag query after an
-exhausted curated channel pool. An incomplete refresh is rejected and the
-previous signed snapshot remains live.
-
-## Build and run
-
-Prerequisites: Erlang/OTP 27 or newer, `rebar3`, Node.js 22.12 or newer, and
-`pnpm` 10.33.0.
-
-Build the frontend manifest and local preloaded-device store:
+Production is a static SPA published as an Arweave path manifest and served by
+the node's generic `manifest@1.0` hook. Manifest builds use hash routing,
+relative assets, and node-safe content types. No production SSR or proxy tier
+is part of the product data path.
 
 ```sh
 cd odysee-frontend
-corepack enable
-corepack prepare pnpm@10.33.0 --activate
-pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run build:manifest
-
-cd ..
-HB_PORT=18734 rebar3 device local --device-src apps/odysee/src
+pnpm run build:manifest
+pnpm run publish:manifest
 ```
 
-The explicit source directory is required because some Forge/rebar working
-directories do not infer umbrella application sources. Confirm the output lists
-`lbry@1.0`, `odysee-auth@1.0`, `reply-id@1.0`, and `search@1.0` before using the
-store. For normal browser development, start a write-capable node with
-`hb_odysee_node:start_upload/1`; it publishes the generic Lua multirequest
-application before accepting traffic. Then run the one SSR frontend:
+`ODYSEE_HYPERBEAM_NODE_API` is baked into the manifest build and should use the
+same origin as the served frontend for cookie writes.
+
+## Local validation
+
+Backend:
 
 ```sh
-cd odysee-frontend
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run dev:web-server
-```
-
-The SSR server normally listens on `http://localhost:9090`. Do not run two
-`dev:web-server` supervisors: duplicate watchers can race or terminate the SSR
-child. See `aidocs/RUN_DEMO.md` for a complete node command and manifest demo.
-
-## Validation
-
-Backend baseline:
-
-```sh
+rebar3 compile
+HB_PORT=0 rebar3 eunit
 rebar3 device test --with-core
 ```
 
-`--with-core` is required for the store and HTTP integration coverage. Run
-`rebar3 device local --device-src apps/odysee/src` after device changes when
-manually testing; `rebar3 compile` alone does not republish the preloaded device
-store.
-
-Frontend baseline:
+Frontend:
 
 ```sh
 cd odysee-frontend
-pnpm run fmt:check
 pnpm run typecheck:tsc
 pnpm run check
-node --check web/src/odyseeHyperbeamNode.js
-node --check web/src/fetchStreamUrl.js
+pnpm run test:native-comment-revisions
+pnpm run test:native-message-verification
+pnpm run test:native-comment-controls
+pnpm run test:static-manifest
+pnpm run build:manifest
 ```
 
-Focused native tests:
+The cookie-owned browser lifecycle can be exercised against a running node:
 
 ```sh
-pnpm run test:native-message-verification
-pnpm run test:native-upload-revisions
-pnpm run test:hyperbeam-upload-smoke
-pnpm run test:hyperbeam-query-comment-smoke
-pnpm run test:native-comment-revisions
-pnpm run test:native-comment-controls
-pnpm run test:native-playlist-revisions
-pnpm run test:hyperbeam-playlist-smoke
-pnpm run test:static-manifest
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
 ```
 
-The upload, comment, and playlist smokes require a running write-capable
-HyperBEAM node and SSR frontend. They exercise exact commitment verification,
-committer-based ownership, rejection of uncommitted query artifacts and
-hostile revisions, revision projection, moderation controls, and byte-exact
-media read-back.
+See [`RUN_DEMO.md`](RUN_DEMO.md) for the complete node and manifest launch
+sequence.
 
 ## Current limitations
 
-- An unpatched upstream `query@1.0` can fail noisily when a query has no
-  results. `patches/dev-query-match-error-tuple.patch` contains the small
-  upstream fix; frontend discovery currently treats this failure as an empty
-  result where possible.
-- HTTP range propagation through the current cache path is incomplete, so
-  whole-object playback works more reliably than seeking.
-- Reactions, view/subscriber counts, and the complete historical moderation
-  surface are not rebuilt in the store-first path.
-- Production deployment still needs a real account-resolution source and
-  equivalent same-origin auth behavior.
-- Native channel messages and a verified account-to-channel binding are not
-  implemented yet. Channel-bearing comment signatures are not cryptographically
-  verified in the production frontend, and owner moderation for legacy targets
-  therefore fails closed.
-- Some frontend compatibility routes still mention removed product devices;
-  they are cleanup debt, not supported architecture.
+- Native reactions, view/subscriber counts, and advanced moderation are not
+  implemented.
+- Upload edit/delete semantics still need a complete append-only design.
+- Mutable-name currentness still depends on an external locator; the evidence
+  proves content integrity, not canonical-chain freshness.
+- Range propagation through the generic cache path is incomplete, so seeking
+  may be limited even when whole-object playback works.
+- The cookie account is local to a node/browser and is not yet a portable or
+  recoverable production identity.
+- TEE deployment and attestation require infrastructure beyond ordinary local
+  development.
 
-For the detailed immutable read sequence, see
-`aidocs/ARCHITECTURE_READ_PATH.md`. For the concise live demonstration, see
-`aidocs/RUN_DEMO.md`.
+Do not hide these gaps by restoring direct browser calls to legacy services or
+by rebuilding a fleet of product-specific devices.

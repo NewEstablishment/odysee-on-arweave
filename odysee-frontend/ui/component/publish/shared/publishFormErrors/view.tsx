@@ -4,6 +4,7 @@ import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { isNameValid } from 'util/lbryURI';
 import { INVALID_NAME_ERROR } from 'constants/claim';
 import { BITRATE } from 'constants/publish';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import { useAppSelector } from 'redux/hooks';
 import {
   selectPublishFormValue,
@@ -51,8 +52,10 @@ function PublishFormErrors(props: Props) {
       {waitForFile && <div>{__('Choose a replay file, or select None')}</div>}
       {missingRequiredFile && <div>{__('Choose a file to upload')}</div>}
       {missingTiers && <div>{__(HELP.NO_TIERS_SELECTED)}</div>}
-      {fileSizeTooBig && !(isStillEditing && prevFileSizeTooBig) && <div>{UPLOAD_SIZE_MESSAGE}</div>}
-      {fileBitrate > BITRATE.MAX && (
+      {!hyperbeamUploadEnabled() && fileSizeTooBig && !(isStillEditing && prevFileSizeTooBig) && (
+        <div>{UPLOAD_SIZE_MESSAGE}</div>
+      )}
+      {!hyperbeamUploadEnabled() && fileBitrate > BITRATE.MAX && (
         <div>{__('Bitrate is over the max, please transcode or choose another file.')}</div>
       )}
       {!title && <div>{__('A title is required')}</div>}

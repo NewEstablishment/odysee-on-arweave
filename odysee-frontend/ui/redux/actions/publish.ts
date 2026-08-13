@@ -44,6 +44,7 @@ import {
   updateThroughHyperbeam,
 } from 'services/hyperbeamUpload';
 import uploadThumbnail from 'services/thumbnailUpload';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import Lbry from 'lbry';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken as getSavedAuthToken } from 'util/saved-passwords';
@@ -85,6 +86,10 @@ function preserveBrowserFile(filePath: any, state: State) {
 }
 
 function needsLegacyUploadPreparation(publishData: PublishState) {
+  // HyperBEAM stores the raw file (no transcoder), so a high-bitrate or mkv file
+  // never needs legacy prep. Returning false here keeps it on the direct node
+  // publish path instead of the legacy tus pipeline (which fetches getToken).
+  if (hyperbeamUploadEnabled()) return false;
   const fileFormat = publishData.fileFormat || '';
   const needsConvert = fileFormat && fileFormat.toLowerCase() === 'mkv' && !publishData.skipConvert;
   const needsOptimize = publishData.fileBitrate > BITRATE.RECOMMENDED && !publishData.skipOptimize;

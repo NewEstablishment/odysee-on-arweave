@@ -6,6 +6,10 @@ const createCompressor = (createCompressorModule as any).default || createCompre
 import { createFilter, createBlacklistFilter } from 'redux-persist-transform-filter';
 const FILTERS = {
   claims: createFilter('claims', ['pendingById']),
+  // File/pipeline state holds non-serializable File objects; persisting them
+  // corrupts storage after a large or interrupted upload and blanks the app on
+  // reload. Keep the draft fields, drop the transient upload state.
+  publish: createBlacklistFilter('publish', ['filePath', 'pipelineItems', 'remoteFileUrl']),
   fileInfo: createFilter('fileInfo', ['fileListPublishedSort', 'fileListDownloadedSort', 'fileListSubscriptionSort']),
   wallet: createFilter('wallet', ['receiveAddress']),
   // We only need to persist the receiveAddress for the wallet

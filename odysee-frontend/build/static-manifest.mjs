@@ -14,8 +14,10 @@ const CONTENT_TYPES = new Map([
   ['.jpeg', 'image/jpeg'],
   ['.jpg', 'image/jpeg'],
   ['.js', 'application/javascript'],
-  ['.json', 'application/json'],
-  ['.map', 'application/json'],
+  // application/json bodies are structurally parsed by the node's /id handler
+  // (translation keys become message keys/headers), so store JSON files opaquely.
+  ['.json', 'text/plain'],
+  ['.map', 'text/plain'],
   ['.mjs', 'application/javascript'],
   ['.mp4', 'video/mp4'],
   ['.otf', 'font/otf'],
@@ -25,7 +27,7 @@ const CONTENT_TYPES = new Map([
   ['.txt', 'text/plain'],
   ['.wasm', 'application/wasm'],
   ['.webm', 'video/webm'],
-  ['.webmanifest', 'application/manifest+json'],
+  ['.webmanifest', 'text/plain'],
   ['.webp', 'image/webp'],
   ['.woff', 'font/woff'],
   ['.woff2', 'font/woff2'],

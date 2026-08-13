@@ -1,6 +1,7 @@
 import { SITE_NAME, WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
 import * as ICONS from 'constants/icons';
 import { BITRATE } from 'constants/publish';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import React from 'react';
 import Button from 'component/button';
 import Icon from 'component/common/icon';
@@ -47,11 +48,18 @@ export default function PublishFilePicker(props: Props) {
 
   const isMkv = fileFormat && fileFormat.toLowerCase() === 'mkv';
   const isBadCodec = isVid && !duration && fileVideoCodec !== '';
-  const isBitrateTooHigh = fileBitrate > BITRATE.MAX;
+  // The bitrate and file-size ceilings exist for the legacy transcoding
+  // pipeline. A HyperBEAM node stores the raw file and plays it directly, so
+  // neither limit applies.
+  const isBitrateTooHigh = !hyperbeamUploadEnabled() && fileBitrate > BITRATE.MAX;
   const isBitrateWarn = fileBitrate > BITRATE.RECOMMENDED && !isBitrateTooHigh;
-  const isFileTooLarge = fileSizeTooBig && !(isStillEditing && prevFileSizeTooBig);
+  const isFileTooLarge = !hyperbeamUploadEnabled() && fileSizeTooBig && !(isStillEditing && prevFileSizeTooBig);
   const showOptimizer =
-    isVid && (fileBitrate > BITRATE.RECOMMENDED || isFileTooLarge) && filePath instanceof File && !optimizerDismissed;
+    !hyperbeamUploadEnabled() &&
+    isVid &&
+    (fileBitrate > BITRATE.RECOMMENDED || isFileTooLarge) &&
+    filePath instanceof File &&
+    !optimizerDismissed;
 
   const hasCriticalIssue = Boolean(isFileTooLarge || isBitrateTooHigh || isBadCodec);
   const hasIssues = hasCriticalIssue || isBitrateWarn || fileNeedsTransmux || isMkv;

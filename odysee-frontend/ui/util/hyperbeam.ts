@@ -1,24 +1,19 @@
-import { COMMENT_SERVER_API, HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { SORT_BY } from 'constants/comment';
-import Lbry from 'lbry';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { registerPlaylistLidAlias } from 'util/hyperbeam-route';
 import { allowHyperbeamCompatibilityReads } from 'util/hyperbeamMode';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
-import { toHex } from 'util/hex';
-import {
-  collapseNativeCommentRevisions,
-  isNextNativeCommentRevision,
-  nativeCommentSignatureData,
-} from 'util/nativeCommentRevisions';
+import { collapseNativeCommentRevisions, isNextNativeCommentRevision } from 'util/nativeCommentRevisions';
 import {
   isNativeMessageId,
   nativeMessageVersionRef,
   verifyNativeMessage,
   type VerifiedNativeMessage,
 } from 'util/nativeMessageVerification';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 import {
   isNextNativePlaylistRevision,
   latestNativePlaylistRevision,
@@ -34,18 +29,15 @@ import {
 import {
   hasNativeCommentControlAuthority,
   hasNativeCommentControlCommitterAuthority,
-  isNativeCommentControlEnabled,
-  legacyBlockControlsToImport,
   latestNativeCommentControls,
   NATIVE_COMMENT_CONTROL_SCHEMA,
   NATIVE_COMMENT_CONTROL_SIGNATURE_SCOPE,
   NATIVE_COMMENT_CONTROL_TYPE,
-  nativeCommentControlSignatureData,
   normalizeNativeCommentControl,
   projectNativeCommentControlState,
   type NativeCommentControl,
 } from 'util/nativeCommentControls';
-import { getAuthToken } from 'util/saved-passwords';
+import { FF_MAX_CHARS_IN_COMMENT } from 'constants/form-field';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
@@ -58,13 +50,13 @@ const HYPERBEAM_PUBLIC_STORE_BATCH_PATH = '/$/api/hyperbeam-public-store/v1/read
 const HYPERBEAM_PUBLIC_CLAIM_SEARCH_PATH = '/$/api/hyperbeam-public-claim-search/v1/search';
 const HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
 const HYPERBEAM_CHANNEL_SEARCH_BATCH_SIZE = 100;
+const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
 // Native writes POST straight to the node; `!` is the auth-hook commit flag,
 // so the node's configured auth hook decides whether the write is committed.
 // The commit flag signs the request via the node's auth hook; committers=all
 // makes /id resolve to the signed ID (the bare id key recalculates the
 // unsigned ID over uncommitted keys too, which nothing registers).
 const HYPERBEAM_NATIVE_WRITE_PATH = 'id?!=true&committers=all';
-const COMMENTRON_FAILURE = 'Failed to fetch (comments.odysee.tv)';
 const storeReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
 const nativeCommentQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<any>> }>();
 const nativeCommentControlQueryCache = new Map<
@@ -72,8 +64,7 @@ const nativeCommentControlQueryCache = new Map<
   { expiresAt: number; promise: Promise<Array<NativeCommentControl>> }
 >();
 const nativeCommentTargetOwnerCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
-const nativeCommentTargetCommitterCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
-let lastNativeCommentControlTimestamp = 0;
+let activeAccountOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const urls = urlsFromResolveParams(params);
@@ -135,7 +126,31 @@ async function resolveStoreClaimForUri(
   if (storeClaim) return storeClaim;
 
   const claimId = claimIdFromUri(uri);
-  return claimId && isClaimId(claimId) ? fetchStoreClaimById(claimId) : null;
+  const byId = claimId && isClaimId(claimId) ? await fetchStoreClaimById(claimId) : null;
+  if (byId) return byId;
+
+  // Native uploads live in the match-index, not the legacy `odysee/claim`
+  // namespace. Resolve a bare `lbry://<name>` for one by looking its upload
+  // record up by name, then reuse the immutable-id route to build the claim.
+  return fetchUploadClaimByName(uri).catch(() => null);
+}
+
+// Bridge a bare `lbry://<name>` to a native upload: the upload's index record
+// (`odysee-upload@1.0`) is the name -> record-id link, and the record-id
+// resolves through the immutable-id route.
+async function fetchUploadClaimByName(uri: string): Promise<any | null> {
+  let name;
+  try {
+    const parsed = parseURI(uri);
+    name = parsed.streamName || parsed.claimName;
+  } catch {}
+  if (!name) return null;
+
+  const request = nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA, name });
+  const recordId = uniquePaths(queryPaths(await fetchPublicQueryJson(request))).find(Boolean);
+  if (!recordId) return null;
+
+  return resolveImmutableClaimById(recordId);
 }
 
 async function fetchStoreClaimForUri(uri: string): Promise<any | null> {
@@ -319,56 +334,28 @@ type DecodedClaimMetadata = {
 };
 
 export async function fetchHyperbeamCommentList(params: CommentListParams): Promise<CommentListResponse | null> {
-  const [nativeResult, legacyResult] = await Promise.allSettled([
-    fetchNativeCommentSource(params),
-    fetchLegacyCommentSource(params),
-  ]);
-  const native = nativeResult.status === 'fulfilled' ? nativeResult.value : null;
-  const legacy = legacyResult.status === 'fulfilled' ? legacyResult.value : null;
-
-  if (!native && !legacy) {
-    const error =
-      nativeResult.status === 'rejected'
-        ? nativeResult.reason
-        : legacyResult.status === 'rejected'
-          ? legacyResult.reason
-          : new Error('No comment source returned a valid response');
-    throw error instanceof Error ? error : new Error(String(error));
-  }
-
-  return mergeCommentSources(params, native, legacy);
+  return paginateNativeComments(params, await fetchNativeCommentSource(params));
 }
 
 export async function fetchHyperbeamCommentById(params: CommentByIdParams): Promise<CommentByIdResponse | null> {
   const native = await fetchNativeCommentById(params.comment_id);
-  if (native) {
-    const ancestors = params.with_ancestors ? await fetchNativeCommentAncestors(native) : [];
-    return { item: native, items: [native], ancestors };
-  }
-
-  const result = await fetchLegacyCommentron('comment.ByID', params);
-  const comment = result && (result.comment || result.item || result.items);
-  const item = Array.isArray(comment) ? comment[0] : comment;
-  if (!item) return null;
-
-  return {
-    item: commentFromHyperbeam(item),
-    items: [commentFromHyperbeam(item)],
-    ancestors: Array.isArray(result.ancestors) ? result.ancestors.map(commentFromHyperbeam) : [],
-  };
+  if (!native) return null;
+  const ancestors = params.with_ancestors ? await fetchNativeCommentAncestors(native) : [];
+  return { item: native, items: [native], ancestors };
 }
 
 export async function fetchHyperbeamCommentCreate(params: CommentCreateParams): Promise<CommentCreateResponse | null> {
-  if (params.dry_run) return fetchLegacyCommentron('comment.Create', params);
-
-  // Without a channel the comment is anonymous: the node's cookie-derived
-  // identity commits the write, so there is no channel signature to attach
-  // and no author to check against creator block controls.
-  const anonymous = !params.channel_id;
-  if (!anonymous) await requireNativeCommentAuthorAllowed(params.claim_id, params.channel_id);
-  const message = anonymous
-    ? nativeCommentMessage(params)
-    : await signNativeCommentMessage(nativeCommentMessage(params));
+  if (!(await activeHyperbeamAccountOwner())) {
+    throw new Error('Sign up or log in with the HyperBEAM account before commenting');
+  }
+  const message = nativeCommentMessage(params);
+  if (params.dry_run) {
+    return commentFromHyperbeam({
+      ...message,
+      'message-id': 'dry-run',
+      'commitment-verification': 'not-written',
+    });
+  }
   const commentId = await writeNativeMessage(message, 'comment');
   clearNativeCommentCaches();
   const comment = await fetchNativeCommentVersionById(commentId);
@@ -386,7 +373,6 @@ async function writeNativeMessage(message: Record<string, any>, label: string): 
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
-      ...authTokenHeader(),
     },
     body: JSON.stringify(message),
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
@@ -397,11 +383,6 @@ async function writeNativeMessage(message: Record<string, any>, label: string): 
   const commentId = nativeWriteId(result);
   if (!commentId) throw new Error(`HyperBEAM native ${label} write did not return an ID`);
   return commentId;
-}
-
-function authTokenHeader(): Record<string, string> {
-  const token = getAuthToken();
-  return token ? { 'x-odysee-auth-token': token } : {};
 }
 
 type CommentSource = {
@@ -486,57 +467,27 @@ function nativeCommentMatchesSelectors(comment: any, selectors: Record<string, a
     'comment-ref': comment?.comment_ref,
     'claim-id': comment?.claim_id,
     state: comment?.state,
-    author: comment?.channel_id,
+    author: comment?.hyperbeam_profile_id || comment?.channel_id,
     parent: comment?.parent_id || 'root',
     'revision-of': comment?.revision_of,
   };
   return Object.entries(selectors).every(([key, expected]) => fields[key] === expected);
 }
 
-async function fetchLegacyCommentSource(params: CommentListParams): Promise<CommentSource | null> {
+function paginateNativeComments(params: CommentListParams, native: CommentSource): CommentListResponse {
   const page = positiveInteger(params.page, 1);
   const pageSize = positiveInteger(params.page_size, 10);
-  const result = await fetchLegacyCommentron('comment.List', {
-    ...params,
-    page: 1,
-    page_size: page * pageSize,
-  });
-  const comments = result && (result.comments || result.items);
-  if (!Array.isArray(comments)) return null;
-
-  return {
-    items: comments.map(commentFromHyperbeam),
-    totalItems: toNumber(value(result, 'total-items', 'total_items'), comments.length),
-    totalFilteredItems: toNumber(
-      value(result, 'total-filtered-items', 'total_filtered_items'),
-      toNumber(value(result, 'total-items', 'total_items'), comments.length)
-    ),
-    hasHiddenComments: Boolean(value(result, 'has-hidden-comments', 'has_hidden_comments')),
-  };
-}
-
-function mergeCommentSources(
-  params: CommentListParams,
-  native: CommentSource | null,
-  legacy: CommentSource | null
-): CommentListResponse {
-  const page = positiveInteger(params.page, 1);
-  const pageSize = positiveInteger(params.page_size, 10);
-  const nativeItems = native?.items || [];
-  const items = dedupeComments([...nativeItems, ...(legacy?.items || [])]);
-  if (nativeItems.length) items.sort(commentComparator(params.sort_by));
+  const items = dedupeComments(native.items).sort(commentComparator(params.sort_by));
   const start = (page - 1) * pageSize;
-  const totalItems = (native?.totalItems || 0) + (legacy?.totalItems || 0);
-  const totalFilteredItems = (native?.totalFilteredItems || 0) + (legacy?.totalFilteredItems || 0);
 
   return {
     items: items.slice(start, start + pageSize),
     page,
     page_size: pageSize,
-    total_items: totalItems,
-    total_filtered_items: totalFilteredItems,
-    total_pages: totalFilteredItems ? Math.ceil(totalFilteredItems / pageSize) : 0,
-    has_hidden_comments: Boolean(native?.hasHiddenComments || legacy?.hasHiddenComments),
+    total_items: native.totalItems,
+    total_filtered_items: native.totalFilteredItems,
+    total_pages: native.totalFilteredItems ? Math.ceil(native.totalFilteredItems / pageSize) : 0,
+    has_hidden_comments: native.hasHiddenComments,
   };
 }
 
@@ -546,7 +497,6 @@ function nativeCommentSelectors(params: CommentListParams): Record<string, any> 
       schema: 'odysee-comment@1.0',
       type: 'comment',
       'claim-id': params.claim_id,
-      state: 'active',
     };
   }
 
@@ -555,7 +505,6 @@ function nativeCommentSelectors(params: CommentListParams): Record<string, any> 
       schema: 'odysee-comment@1.0',
       type: 'comment',
       author: params.author_claim_id,
-      state: 'active',
     };
   }
 
@@ -563,23 +512,27 @@ function nativeCommentSelectors(params: CommentListParams): Record<string, any> 
 }
 
 function nativeCommentMessage(params: CommentCreateParams): Record<string, any> {
-  const comment = params.comment || params.body;
-  if (!comment) throw new Error('Native comment text is required');
+  const comment = nativeCommentText(params.comment || params.body);
+  const target = String(params.target || params.claim_id || '');
+  if (!target) throw new Error('Native comment target is required');
+  const profile = getHyperbeamAccount();
+  if (!profile || !isNativeMessageId(profile.id) || !profile.name.trim()) {
+    throw new Error('A valid HyperBEAM account is required to comment');
+  }
 
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
     'comment-ref': nativeMessageVersionRef(),
-    parent: params.parent_id || 'root',
+    target,
+    parent: params.parent_id || target,
     state: 'active',
-    author: params.channel_id,
+    author: profile?.id,
     comment,
-    'claim-id': params.claim_id,
+    'claim-id': target,
     'parent-id': params.parent_id,
-    'channel-id': params.channel_id,
-    'channel-name': params.channel_name,
-    'channel-signature': params.signature,
-    'signing-ts': params.signing_ts,
+    'profile-id': profile?.id,
+    'profile-name': profile?.name,
     'version-ref': nativeMessageVersionRef(),
     timestamp: Math.floor(Date.now() / 1000),
     'support-amount': params.amount || params.support_amount,
@@ -592,25 +545,27 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
   });
 }
 
-function nativeCommentRevisionMessage(root: any, current: any, params: CommentEditParams): Record<string, any> {
-  const comment = params.comment || params.body;
-  if (!comment) throw new Error('Native comment revision text is required');
-
+function nativeCommentRevisionMessage(
+  root: any,
+  current: any,
+  params: CommentEditParams,
+  operation: 'edit' | 'delete' = 'edit'
+): Record<string, any> {
+  const comment = operation === 'delete' ? '' : nativeCommentText(params.comment || params.body);
   const updatedAt = Math.floor(Date.now() / 1000);
   return compactParams({
     schema: 'odysee-comment@1.0',
     type: 'comment',
     'comment-ref': root.comment_ref || root.comment_id,
-    parent: root.parent_id || 'root',
-    state: 'active',
-    author: root.channel_id,
+    target: root.claim_id,
+    parent: root.parent_id || root.claim_id,
+    state: operation === 'delete' ? 'deleted' : 'active',
+    author: root.hyperbeam_profile_id,
     comment,
     'claim-id': root.claim_id,
     'parent-id': root.parent_id,
-    'channel-id': root.channel_id,
-    'channel-name': root.channel_name,
-    'channel-signature': params.signature,
-    'signing-ts': params.signing_ts,
+    'profile-id': root.hyperbeam_profile_id,
+    'profile-name': root.channel_name,
     timestamp: root.timestamp,
     'updated-at': updatedAt,
     'revision-of': root.comment_id,
@@ -618,7 +573,7 @@ function nativeCommentRevisionMessage(root: any, current: any, params: CommentEd
     'version-ref': nativeMessageVersionRef(),
     revision: toNumber(current.revision, 0) + 1,
     'revision-timestamp': Date.now(),
-    operation: 'edit',
+    operation,
     'support-amount': root.support_amount,
     'support-tx-id': root.support_tx_id,
     sticker: root.sticker,
@@ -629,18 +584,12 @@ function nativeCommentRevisionMessage(root: any, current: any, params: CommentEd
   });
 }
 
-async function signNativeCommentMessage(message: Record<string, any>): Promise<Record<string, any>> {
-  const scopedMessage = { ...message, 'signature-scope': 'native-comment-v1' };
-  const signed = await Lbry.channel_sign({
-    channel_id: value(scopedMessage, 'channel-id', 'channel_id', 'author'),
-    hexdata: toHex(nativeCommentSignatureData(scopedMessage)),
-  });
-  if (!signed?.signature || !signed?.signing_ts) throw new Error('Unable to sign native comment message');
-  return {
-    ...scopedMessage,
-    'channel-signature': signed.signature,
-    'signing-ts': signed.signing_ts,
-  };
+function nativeCommentText(raw: any): string {
+  if (typeof raw !== 'string' || !raw.trim()) throw new Error('Native comment text is required');
+  if (raw.length > FF_MAX_CHARS_IN_COMMENT) {
+    throw new Error(`Native comments cannot exceed ${FF_MAX_CHARS_IN_COMMENT} characters`);
+  }
+  return raw;
 }
 
 async function fetchNativeCommentById(id: string): Promise<any | null> {
@@ -658,7 +607,6 @@ async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
       schema: 'odysee-comment@1.0',
       type: 'comment',
       'comment-ref': id,
-      state: 'active',
     });
     direct = byReference.find((comment) => comment.comment_id === id) || null;
   }
@@ -669,7 +617,6 @@ async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
     schema: 'odysee-comment@1.0',
     type: 'comment',
     'claim-id': direct.claim_id,
-    state: 'active',
   });
   return comments.find((comment) => comment.comment_id === rootId) || direct;
 }
@@ -682,13 +629,12 @@ async function fetchNativeCommentRoot(rootId: string): Promise<any | null> {
     schema: 'odysee-comment@1.0',
     type: 'comment',
     'comment-ref': rootId,
-    state: 'active',
   });
   return versions.find((comment) => comment.comment_id === rootId && !comment.revision_of) || null;
 }
 
 async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
-  if (!isStandaloneImmutableId(id)) return null;
+  if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
   const result = await fetchCachedStoreJsonOrNull(
     `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
@@ -696,34 +642,69 @@ async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
   );
   const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
   const payload = verified?.payload;
-  if (!payload) return null;
+  if (!payload || !verified) return null;
+  const profile = await verifiedNativeCommentProfile(payload, verified.owner);
   const message = {
     ...payload,
     'message-id': normalizedId,
     'comment-id': value(payload, 'comment-id', 'comment_id') || normalizedId,
+    'verified-profile-id': profile?.id,
+    'verified-profile-name': profile?.name,
   };
   if (!isNativeComment(message)) return null;
   const comment = commentFromHyperbeam(message);
-  if (!hasNativeCommentSignature(comment)) return null;
+  const activeOwner = await activeHyperbeamAccountOwner();
   return {
     ...comment,
     hyperbeam_owner: verified.owner,
     hyperbeam_committers: verified.committers,
     hyperbeam_commitment_verification: 'verified',
-    hyperbeam_signature_verification: 'unverified',
+    is_my_comment: Boolean(activeOwner && activeOwner === verified.owner),
   };
 }
 
-// Transport commitment verification and channel signature verification are
-// separate proofs. The generic verifier establishes the native committer;
-// channel-bearing comments must still carry the complete channel signature.
-function hasNativeCommentSignature(comment: any): boolean {
-  // Fully anonymous comments (no channel identity at all) are committed by
-  // the node under the writer's cookie wallet; accept them. A comment that
-  // names a channel but lacks the matching signature fields is half-signed
-  // and stays rejected.
-  if (isAnonymousNativeComment(comment)) return true;
-  return Boolean(comment?.channel_id && comment?.channel_name && comment?.signature && comment?.signing_ts);
+async function verifiedNativeCommentProfile(payload: any, owner: string): Promise<{ id: string; name: string } | null> {
+  const profileId = value(payload, 'profile-id', 'profile_id', 'author');
+  const profileName = value(payload, 'profile-name', 'profile_name');
+  if (!isNativeMessageId(profileId) || typeof profileName !== 'string' || !profileName.trim()) return null;
+
+  const verified = await fetchVerifiedNativeMessage(String(profileId));
+  const storedName = value(verified?.payload || {}, 'name');
+  if (
+    !verified ||
+    verified.owner !== owner ||
+    value(verified.payload, 'type') !== 'channel' ||
+    typeof storedName !== 'string' ||
+    storedName !== profileName
+  ) {
+    return null;
+  }
+  return { id: String(profileId), name: storedName };
+}
+
+async function activeHyperbeamAccountOwner(): Promise<string | null> {
+  const account = getHyperbeamAccount();
+  if (!account || !isNativeMessageId(account.id)) return null;
+  if (activeAccountOwnerCache?.accountId === account.id && activeAccountOwnerCache.expiresAt > Date.now()) {
+    return activeAccountOwnerCache.promise;
+  }
+
+  const promise = fetchVerifiedNativeMessage(account.id).then((verified) => {
+    if (
+      !verified ||
+      value(verified.payload, 'type') !== 'channel' ||
+      value(verified.payload, 'name') !== account.name
+    ) {
+      return null;
+    }
+    return verified.owner;
+  });
+  activeAccountOwnerCache = {
+    accountId: account.id,
+    expiresAt: Date.now() + HYPERBEAM_READ_CACHE_MS,
+    promise,
+  };
+  return promise;
 }
 
 function isAnonymousNativeComment(comment: any): boolean {
@@ -762,10 +743,12 @@ async function projectNativeCommentCollection(
     const state = states.get(String(comment?.claim_id || ''));
     const controls = state?.controls || new Map<string, NativeCommentControl>();
     const projection = projectNativeCommentControlState(comment, state?.owner || null, controls);
-    if (projection.removed || projection.hidden || projection.blocked) hasHiddenComments = true;
+    const deleted = comment.state === 'deleted' || comment.operation === 'delete';
+    if (deleted || projection.removed || projection.hidden || projection.blocked) hasHiddenComments = true;
     return {
       ...comment,
       ...projection,
+      removed: deleted || projection.removed,
       native_owner_id: state?.owner || undefined,
     };
   });
@@ -806,18 +789,6 @@ async function fetchNativeCommentControlState(
     )
   ).filter(Boolean);
   return { owner, controls: latestNativeCommentControls(authorized) };
-}
-
-async function fetchNativeBlockControls(owner: string, subjects?: Array<string>): Promise<Array<NativeCommentControl>> {
-  const selectors = {
-    schema: NATIVE_COMMENT_CONTROL_SCHEMA,
-    type: NATIVE_COMMENT_CONTROL_TYPE,
-    'target-id': owner,
-    control: 'block',
-  };
-  if (!subjects) return fetchNativeCommentControls(selectors);
-  const controls = await Promise.all(subjects.map((subject) => fetchNativeCommentControls({ ...selectors, subject })));
-  return controls.flat();
 }
 
 async function fetchNativeCommentControls(selectors: Record<string, any>): Promise<Array<NativeCommentControl>> {
@@ -886,7 +857,7 @@ async function resolveNativeCommentControlPaths(paths: Array<string>): Promise<A
 }
 
 async function fetchNativeCommentControlById(id: string): Promise<NativeCommentControl | null> {
-  if (!id) return null;
+  if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
   if (!isStandaloneImmutableId(normalizedId)) return null;
   const result = await fetchCachedStoreJsonOrNull(
@@ -918,8 +889,6 @@ function isNativeCommentControl(control: NativeCommentControl): boolean {
     control.actor &&
     control.actor_name &&
     control.event_timestamp &&
-    control.signature &&
-    control.signing_ts &&
     control.hyperbeam_message_id &&
     control.hyperbeam_owner &&
     control.hyperbeam_commitment_verification === 'verified'
@@ -933,39 +902,19 @@ async function authorizeNativeCommentControl(
   comments: Array<any>
 ): Promise<boolean> {
   const comment = comments.find((item) => String(item?.comment_id || '') === String(control.comment_id || ''));
-  if (!hasNativeCommentControlAuthority(control, { target, owner, comment })) return false;
-  const targetOwner = control.authority === 'owner' ? await nativeCommentTargetCommitter(target) : null;
-  return hasNativeCommentControlCommitterAuthority(control, { targetOwner, comment });
-}
-
-async function nativeCommentTargetCommitter(target: string): Promise<string | null> {
-  if (!isStandaloneImmutableId(target)) return null;
-  const now = Date.now();
-  const cached = nativeCommentTargetCommitterCache.get(target);
-  if (cached && cached.expiresAt > now) return cached.promise;
-  const promise = fetchNativeUploadHead(target)
-    .then((head) => head?.owner || null)
-    .then((owner) => {
-      if (!owner) nativeCommentTargetCommitterCache.delete(target);
-      return owner;
-    })
-    .catch((error) => {
-      nativeCommentTargetCommitterCache.delete(target);
-      throw error;
-    });
-  nativeCommentTargetCommitterCache.set(target, {
-    expiresAt: now + NATIVE_COMMENT_TARGET_OWNER_CACHE_MS,
-    promise,
-  });
-  return promise;
+  return (
+    hasNativeCommentControlAuthority(control, { target, owner, comment }) &&
+    hasNativeCommentControlCommitterAuthority(control, { targetOwner: owner, comment })
+  );
 }
 
 async function nativeCommentTargetOwner(target: string): Promise<string | null> {
+  if (!isNativeMessageId(target)) return null;
   const now = Date.now();
   const cached = nativeCommentTargetOwnerCache.get(target);
   if (cached && cached.expiresAt > now) return cached.promise;
-  const promise = fetchHyperbeamClaimsByIds([target])
-    .then((claims) => nativeClaimOwnerId(claims.find((claim) => claim?.claim_id === target) || claims[0]))
+  const promise = fetchVerifiedNativeMessage(target)
+    .then((verified) => verified?.owner || null)
     .then((owner) => {
       if (!owner) nativeCommentTargetOwnerCache.delete(target);
       return owner;
@@ -979,17 +928,6 @@ async function nativeCommentTargetOwner(target: string): Promise<string | null> 
     promise,
   });
   return promise;
-}
-
-function nativeClaimOwnerId(claim: any): string | null {
-  if (!claim) return null;
-  if (value(claim, 'value_type', 'value-type') === 'channel')
-    return String(value(claim, 'claim_id', 'claim-id') || '') || null;
-  const owner =
-    value(claim.signing_channel, 'claim_id', 'claim-id', 'id') ||
-    value(claim, 'channel_claim_id', 'channel-claim-id', 'signing_channel_id', 'signing-channel-id') ||
-    value(claim.hyperbeam, 'channel_id', 'channel-id');
-  return owner ? String(owner) : null;
 }
 
 function nativeCommentControlMessage(params: {
@@ -1023,23 +961,14 @@ function nativeCommentControlMessage(params: {
     'comment-id': params.commentId,
     subject: params.subject,
     'subject-name': params.subjectName,
-    'event-timestamp': nextNativeCommentControlTimestamp(),
+    'event-timestamp': Date.now(),
     'expires-at': params.expiresAt,
     'signature-scope': NATIVE_COMMENT_CONTROL_SIGNATURE_SCOPE,
   });
 }
 
-async function signNativeCommentControlMessage(message: Record<string, any>): Promise<Record<string, any>> {
-  const signed = await Lbry.channel_sign({
-    channel_id: value(message, 'actor', 'channel-id'),
-    hexdata: toHex(nativeCommentControlSignatureData(message)),
-  });
-  if (!signed?.signature || !signed?.signing_ts) throw new Error('Unable to sign native comment control');
-  return { ...message, 'channel-signature': signed.signature, 'signing-ts': signed.signing_ts };
-}
-
 async function writeNativeCommentControl(message: Record<string, any>, label: string): Promise<string> {
-  const id = await writeNativeMessage(await signNativeCommentControlMessage(message), label);
+  const id = await writeNativeMessage(message, label);
   clearNativeCommentCaches();
   if (!(await fetchNativeCommentControlById(id))) {
     throw new Error(`HyperBEAM native ${label} failed commitment verification`);
@@ -1047,33 +976,10 @@ async function writeNativeCommentControl(message: Record<string, any>, label: st
   return id;
 }
 
-function nextNativeCommentControlTimestamp(): number {
-  lastNativeCommentControlTimestamp = Math.max(Date.now(), lastNativeCommentControlTimestamp + 1);
-  return lastNativeCommentControlTimestamp;
-}
-
 function clearNativeCommentCaches() {
   nativeCommentQueryCache.clear();
   nativeCommentControlQueryCache.clear();
   nativeCommentTargetOwnerCache.clear();
-  nativeCommentTargetCommitterCache.clear();
-}
-
-async function requireNativeCommentAuthorAllowed(target: string, author: string) {
-  const owner = await nativeCommentTargetOwner(target);
-  if (!owner) return;
-  const controls = latestNativeCommentControls(
-    (
-      await Promise.all(
-        (
-          await fetchNativeBlockControls(owner, [author])
-        ).map(async (control) => ((await authorizeNativeCommentControl(control, target, owner, [])) ? control : null))
-      )
-    ).filter(Boolean)
-  );
-  if (isNativeCommentControlEnabled(controls.get(`block:${owner}:${author}`))) {
-    throw new Error('This channel is blocked from commenting on the creator channel');
-  }
 }
 
 function nativeCommentId(message: any): string | undefined {
@@ -1124,24 +1030,16 @@ async function fetchNativeCommentAncestors(comment: any): Promise<Array<any>> {
 }
 
 function isNativeComment(message: any): boolean {
-  if (
-    !message ||
-    value(message, 'device') === 'cacheviz@1.0' ||
-    String(value(message, 'method') || '').toUpperCase() === 'GET' ||
-    message.type !== 'comment' ||
-    message.schema !== 'odysee-comment@1.0' ||
-    typeof value(message, 'comment', 'body', 'text') !== 'string' ||
-    typeof value(message, 'target', 'claim-id', 'claim_id') !== 'string' ||
-    !nativeCommentId(message)
-  ) {
-    return false;
-  }
-
-  // Anonymous native comments carry no channel identity at all (the write is
-  // committed by the poster's cookie wallet); accept those. A comment that
-  // names a channel must resolve a channel url.
-  const hasChannel = typeof value(message, 'channel-id', 'channel_id', 'author') === 'string';
-  return hasChannel ? Boolean(commentChannelUrl(message)) : true;
+  return Boolean(
+    message &&
+    value(message, 'device') !== 'cacheviz@1.0' &&
+    String(value(message, 'method') || '').toUpperCase() !== 'GET' &&
+    message.type === 'comment' &&
+    message.schema === 'odysee-comment@1.0' &&
+    typeof value(message, 'comment', 'body', 'text') === 'string' &&
+    typeof value(message, 'target', 'claim-id', 'claim_id') === 'string' &&
+    Boolean(nativeCommentId(message))
+  );
 }
 
 async function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
@@ -1271,16 +1169,17 @@ function positiveInteger(source: any, fallback: number): number {
 
 export async function fetchHyperbeamCommentEdit(params: CommentEditParams): Promise<CommentEditResponse | null> {
   const current = await fetchNativeCommentByIdRaw(params.comment_id);
-  if (!current) return fetchLegacyCommentron('comment.Edit', params);
+  if (!current) throw new Error('HyperBEAM native comment is unavailable');
 
   const rootId = current.revision_of || current.comment_id;
   const root = current.revision_of ? await fetchNativeCommentRoot(rootId) : current;
   if (!root) throw new Error('HyperBEAM native comment root is unavailable');
-  if (!params.channel_id || params.channel_id !== root.channel_id) {
-    throw new Error('HyperBEAM native comment must be edited by its original channel');
+  if (current.state === 'deleted') throw new Error('A deleted native comment cannot be edited');
+  if ((await activeHyperbeamAccountOwner()) !== root.hyperbeam_owner) {
+    throw new Error('HyperBEAM native comment must be edited by its original cookie identity');
   }
 
-  const message = await signNativeCommentMessage(nativeCommentRevisionMessage(root, current, params));
+  const message = nativeCommentRevisionMessage(root, current, params);
   const revisionId = await writeNativeMessage(message, 'comment revision');
   clearNativeCommentCaches();
   const revision = await fetchNativeCommentVersionById(revisionId);
@@ -1292,10 +1191,12 @@ export async function fetchHyperbeamCommentEdit(params: CommentEditParams): Prom
 
 export async function fetchHyperbeamCommentPin(params: CommentPinParams): Promise<CommentPinResponse | null> {
   const comment = await fetchNativeCommentByIdRaw(params.comment_id);
-  if (!comment) return fetchLegacyCommentron('comment.Pin', params);
+  if (!comment) throw new Error('HyperBEAM native comment is unavailable');
   const owner = await nativeCommentTargetOwner(comment.claim_id);
-  if (!owner || params.channel_id !== owner) throw new Error('Only the content owner can pin this native comment');
+  const activeOwner = await activeHyperbeamAccountOwner();
+  if (!owner || activeOwner !== owner) throw new Error('Only the content owner can pin this native comment');
   if (comment.parent_id) throw new Error('Only top-level native comments can be pinned');
+  const account = getHyperbeamAccount();
 
   await writeNativeCommentControl(
     nativeCommentControlMessage({
@@ -1304,8 +1205,8 @@ export async function fetchHyperbeamCommentPin(params: CommentPinParams): Promis
       authority: 'owner',
       target: comment.claim_id,
       owner,
-      actor: params.channel_id,
-      actorName: params.channel_name,
+      actor: owner,
+      actorName: account?.name || owner,
       commentId: comment.comment_id,
     }),
     params.remove ? 'comment unpin' : 'comment pin'
@@ -1316,40 +1217,35 @@ export async function fetchHyperbeamCommentPin(params: CommentPinParams): Promis
 export async function fetchHyperbeamCommentAbandon(
   params: CommentAbandonParams
 ): Promise<CommentAbandonResponse | null> {
-  const comment = await fetchNativeCommentByIdRaw(params.comment_id);
-  if (!comment) return fetchLegacyCommentron('comment.Abandon', params);
-  const actor = params.channel_id || params.mod_channel_id;
-  const actorName = params.channel_name || params.mod_channel_name;
-  const owner = await nativeCommentTargetOwner(comment.claim_id);
-  const authority = actor === comment.channel_id ? 'author' : actor && actor === owner ? 'owner' : null;
-  if (!actor || !actorName || !owner || !authority) {
-    throw new Error('Native comment can only be removed by its author or content owner');
+  const current = await fetchNativeCommentByIdRaw(params.comment_id);
+  if (!current) throw new Error('HyperBEAM native comment is unavailable');
+  const rootId = current.revision_of || current.comment_id;
+  const root = current.revision_of ? await fetchNativeCommentRoot(rootId) : current;
+  if (!root) throw new Error('HyperBEAM native comment root is unavailable');
+  if (current.state === 'deleted') throw new Error('HyperBEAM native comment is already deleted');
+  if ((await activeHyperbeamAccountOwner()) !== root.hyperbeam_owner) {
+    throw new Error('HyperBEAM native comment must be deleted by its original cookie identity');
   }
 
-  await writeNativeCommentControl(
-    nativeCommentControlMessage({
-      control: 'visibility',
-      action: 'hidden',
-      authority,
-      target: comment.claim_id,
-      owner,
-      actor,
-      actorName,
-      commentId: comment.comment_id,
-    }),
-    authority === 'author' ? 'comment deletion' : 'comment hide'
-  );
-  return { abandoned: true, claim_id: comment.claim_id };
+  const message = nativeCommentRevisionMessage(root, current, { comment_id: rootId }, 'delete');
+  const revisionId = await writeNativeMessage(message, 'comment deletion');
+  clearNativeCommentCaches();
+  const revision = await fetchNativeCommentVersionById(revisionId);
+  if (!revision || !isNextNativeCommentRevision(root, current, revision)) {
+    throw new Error('HyperBEAM native comment deletion failed ownership or chain validation');
+  }
+  return { abandoned: true, claim_id: root.claim_id };
 }
 
 export async function fetchHyperbeamReactionReact(params: ReactionReactParams): Promise<ReactionReactResponse | null> {
-  if (params.type !== 'creator_like') return fetchLegacyCommentron('reaction.React', params);
+  if (params.type !== 'creator_like') throw new Error('This native reaction type is not implemented');
   const ids = stringList(params.comment_ids);
   const comments = await Promise.all(ids.map(fetchNativeCommentByIdRaw));
   const native = comments.filter(Boolean);
-  if (!native.length) return fetchLegacyCommentron('reaction.React', params);
+  if (!native.length) throw new Error('No native comments were found for this reaction');
 
   const legacyIds = ids.filter((_, index) => !comments[index]);
+  if (legacyIds.length) throw new Error('Reactions can only target native comments');
   await Promise.all(
     native.map(async (comment) => {
       const owner = await nativeCommentTargetOwner(comment.claim_id);
@@ -1371,247 +1267,87 @@ export async function fetchHyperbeamReactionReact(params: ReactionReactParams): 
       );
     })
   );
-  if (legacyIds.length) {
-    return fetchLegacyCommentron('reaction.React', {
-      ...params,
-      comment_ids: legacyIds.join(','),
-    });
-  }
   return { success: true };
 }
 
-export async function fetchHyperbeamSettingGet(params: SettingsParams): Promise<any | null> {
-  return fetchLegacyCommentron('setting.Get', params);
+export async function fetchHyperbeamSettingGet(_params: SettingsParams): Promise<any | null> {
+  return nativeCommentSettings();
 }
 
-export async function fetchHyperbeamSettingList(params: SettingsParams): Promise<any | null> {
-  return fetchLegacyCommentron('setting.List', params);
+export async function fetchHyperbeamSettingList(_params: SettingsParams): Promise<any | null> {
+  return nativeCommentSettings();
 }
 
-export async function fetchHyperbeamSettingUpdate(params: UpdateSettingsParams): Promise<any | null> {
-  return fetchLegacyCommentron('setting.Update', params);
+export async function fetchHyperbeamSettingUpdate(_params: UpdateSettingsParams): Promise<any | null> {
+  throw new Error('Native comment settings updates are not implemented');
 }
 
-export async function fetchHyperbeamSettingBlockWord(params: BlockWordParams): Promise<any | null> {
-  return fetchLegacyCommentron('setting.BlockWord', params);
+export async function fetchHyperbeamSettingBlockWord(_params: BlockWordParams): Promise<any | null> {
+  throw new Error('Native blocked-word settings are not implemented');
 }
 
-export async function fetchHyperbeamSettingUnblockWord(params: BlockWordParams): Promise<any | null> {
-  return fetchLegacyCommentron('setting.UnBlockWord', params);
+export async function fetchHyperbeamSettingUnblockWord(_params: BlockWordParams): Promise<any | null> {
+  throw new Error('Native blocked-word settings are not implemented');
 }
 
-export async function fetchHyperbeamSettingListBlockedWords(params: SettingsParams): Promise<any | null> {
-  return fetchLegacyCommentron('setting.ListBlockedWords', params);
+export async function fetchHyperbeamSettingListBlockedWords(_params: SettingsParams): Promise<any | null> {
+  return { blocked_words: [] };
 }
 
-export async function fetchHyperbeamModerationBlock(params: ModerationBlockParams): Promise<any | null> {
-  return writeNativeAndLegacyBlockControl(params, false);
-}
-
-export async function fetchHyperbeamModerationUnblock(params: ModerationBlockParams): Promise<any | null> {
-  return writeNativeAndLegacyBlockControl(params, true);
-}
-
-export async function fetchHyperbeamModerationBlockList(params: BlockedListArgs): Promise<any | null> {
-  const { native_sync: nativeSync, ...requestParams } = params as BlockedListArgs & { native_sync?: boolean };
-  const owner = requestParams.mod_channel_id || requestParams.channel_id;
-  const ownerName = requestParams.mod_channel_name || requestParams.channel_name;
-  if (nativeSync === false) {
-    return fetchLegacyCommentron('moderation.BlockedList', requestParams);
-  }
-  const [legacyResult, nativeResult] = await Promise.allSettled([
-    fetchLegacyCommentron('moderation.BlockedList', requestParams),
-    owner ? nativeBlockedList(owner) : Promise.resolve([]),
-  ]);
-  const legacy = legacyResult.status === 'fulfilled' ? legacyResult.value : null;
-  let native = nativeResult.status === 'fulfilled' ? nativeResult.value : [];
-  if (!legacy && nativeResult.status === 'rejected') throw nativeResult.reason;
-
-  if (legacy && owner && ownerName && nativeResult.status === 'fulfilled') {
-    const imported = await importLegacyBlockControls(owner, ownerName, legacy.blocked_channels, native);
-    if (imported) native = await nativeBlockedList(owner);
-  }
-
-  const byChannel = new Map<string, any>();
-  const nativeStates = new Map(native.map((entry) => [entry.blocked_channel_id, entry]));
-  (legacy?.blocked_channels || []).forEach((entry) => {
-    if (!nativeStates.has(entry.blocked_channel_id)) byChannel.set(entry.blocked_channel_id, entry);
-  });
-  native.filter((entry) => entry.blocked).forEach((entry) => byChannel.set(entry.blocked_channel_id, entry));
+function nativeCommentSettings(): Record<string, any> {
   return {
-    ...legacy,
-    blocked_channels: Array.from(byChannel.values()),
-    globally_blocked_channels: legacy?.globally_blocked_channels || [],
-    delegated_blocked_channels: legacy?.delegated_blocked_channels || [],
+    comments_enabled: true,
+    comments_members_only: false,
+    livestream_chat_members_only: false,
+    min_tip_amount_comment: 0,
+    min_tip_amount_super_chat: 0,
+    min_usdc_tip_amount_comment: 0,
+    min_usdc_tip_amount_super_chat: 0,
   };
 }
 
-async function importLegacyBlockControls(
-  owner: string,
-  ownerName: string,
-  legacyChannels: any,
-  nativeStates: Array<any>
-): Promise<boolean> {
-  if (!Array.isArray(legacyChannels) || !legacyChannels.length) return false;
-  const candidates = legacyBlockControlsToImport(legacyChannels, nativeStates);
-  if (!candidates.length) return false;
-
-  for (const entry of candidates) {
-    await writeNativeCommentControl(
-      nativeCommentControlMessage({
-        control: 'block',
-        action: 'blocked',
-        authority: 'owner',
-        target: owner,
-        owner,
-        actor: owner,
-        actorName: ownerName,
-        sourceSystem: 'legacy-commentron',
-        subject: entry.subject,
-        subjectName: entry.subject_name,
-        expiresAt: entry.expires_at,
-      }),
-      'legacy channel block import'
-    );
-  }
-  return true;
+export async function fetchHyperbeamModerationBlock(_params: ModerationBlockParams): Promise<any | null> {
+  throw new Error('Native comment channel blocking is not implemented');
 }
 
-async function writeNativeAndLegacyBlockControl(params: ModerationBlockParams, unblock: boolean): Promise<any> {
-  const legacy = fetchLegacyCommentron(unblock ? 'moderation.UnBlock' : 'moderation.Block', params);
-  const actor = params.mod_channel_id || params.channel_id;
-  const actorName = params.mod_channel_name || params.channel_name;
-  const owner = params.creator_channel_id || actor;
-  const subject = unblock ? params.un_blocked_channel_id : params.blocked_channel_id;
-  const subjectName = unblock ? params.un_blocked_channel_name : params.blocked_channel_name;
-  const native =
-    actor && actorName && owner === actor && subject && subjectName && !params.block_all && !params.global_un_block
-      ? writeNativeCommentControl(
-          nativeCommentControlMessage({
-            control: 'block',
-            action: unblock ? 'unblocked' : 'blocked',
-            authority: 'owner',
-            target: owner,
-            owner,
-            actor,
-            actorName,
-            subject,
-            subjectName,
-            expiresAt:
-              !unblock && params.time_out && params.time_out > 0
-                ? Math.floor(Date.now() / 1000) + params.time_out
-                : undefined,
-          }),
-          unblock ? 'channel unblock' : 'channel block'
-        ).then((id) => ({ success: true, id }))
-      : Promise.resolve(null);
-  const [legacyResult, nativeResult] = await Promise.allSettled([legacy, native]);
-  if (legacyResult.status === 'fulfilled' && legacyResult.value) return legacyResult.value;
-  if (nativeResult.status === 'fulfilled' && nativeResult.value) return nativeResult.value;
-  if (legacyResult.status === 'rejected') throw legacyResult.reason;
-  if (nativeResult.status === 'rejected') throw nativeResult.reason;
-  return null;
+export async function fetchHyperbeamModerationUnblock(_params: ModerationBlockParams): Promise<any | null> {
+  throw new Error('Native comment channel blocking is not implemented');
 }
 
-async function nativeBlockedList(owner: string): Promise<Array<any>> {
-  const controls = await fetchNativeBlockControls(owner);
-  const authorized = (
-    await Promise.all(
-      controls.map(async (control) =>
-        (await authorizeNativeCommentControl(control, owner, owner, [])) ? control : null
-      )
-    )
-  ).filter(Boolean);
-  return Array.from(latestNativeCommentControls(authorized).values())
-    .filter((control) => control.control === 'block' && control.subject)
-    .map((control) => {
-      const blockedAt = Math.floor(Number(control.event_timestamp || 0) / 1000);
-      const expiresAt = Number(control.expires_at || 0);
-      return compactParams({
-        blocked_channel_id: control.subject,
-        blocked_channel_name: value(control, 'subject-name', 'subject_name'),
-        blocked_at: blockedAt,
-        banned_for: expiresAt ? Math.max(0, expiresAt - blockedAt) : undefined,
-        ban_remaining: expiresAt ? Math.max(0, expiresAt - Math.floor(Date.now() / 1000)) : undefined,
-        blocked: isNativeCommentControlEnabled(control),
-      });
-    });
+export async function fetchHyperbeamModerationBlockList(_params: BlockedListArgs): Promise<any | null> {
+  return {
+    blocked_channels: [],
+    globally_blocked_channels: [],
+    delegated_blocked_channels: [],
+  };
 }
 
-export async function fetchHyperbeamModerationAddDelegate(params: ModerationAddDelegateParams): Promise<any | null> {
-  return fetchLegacyCommentron('moderation.AddDelegate', params);
+export async function fetchHyperbeamModerationAddDelegate(_params: ModerationAddDelegateParams): Promise<any | null> {
+  throw new Error('Native comment delegates are not implemented');
 }
 
 export async function fetchHyperbeamModerationRemoveDelegate(
-  params: ModerationRemoveDelegateParams
+  _params: ModerationRemoveDelegateParams
 ): Promise<any | null> {
-  return fetchLegacyCommentron('moderation.RemoveDelegate', params);
+  throw new Error('Native comment delegates are not implemented');
 }
 
 export async function fetchHyperbeamModerationListDelegates(
-  params: ModerationListDelegatesParams
+  _params: ModerationListDelegatesParams
 ): Promise<any | null> {
-  return fetchLegacyCommentron('moderation.ListDelegates', params);
+  return { moderators: [] };
 }
 
-export async function fetchHyperbeamModerationAmI(params: ModerationAmIParams): Promise<any | null> {
-  return fetchLegacyCommentron('moderation.AmI', params);
-}
-
-// Legacy Commentron reads/writes go straight from the browser to the public
-// comment server; failures surface as the standard Commentron fetch error so
-// merge paths degrade to native-only.
-async function fetchLegacyCommentron(method: string, params: Record<string, any>): Promise<any | null> {
-  if (!COMMENT_SERVER_API) return null;
-
-  let response;
-  try {
-    response = await fetch(`${COMMENT_SERVER_API}?m=${method}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: compactParams(params) }),
-      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
-    });
-  } catch (error) {
-    throw isFetchTimeoutOrNetworkError(error) ? new TypeError(COMMENTRON_FAILURE) : error;
-  }
-  if (!response.ok && response.status >= 500) throw new TypeError(COMMENTRON_FAILURE);
-
-  const json = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(`Commentron ${method} failed with ${response.status}`);
-  if (json?.error) throw new Error(json.error.message || String(json.error));
-  return json?.result ?? null;
+export async function fetchHyperbeamModerationAmI(_params: ModerationAmIParams): Promise<any | null> {
+  return { is_moderator: false, is_admin: false };
 }
 
 export async function fetchHyperbeamReactionList(params: ReactionListParams): Promise<ReactionListResponse | null> {
   const ids = stringList(params.comment_ids);
-  const nativeResult = await Promise.allSettled([nativeCreatorHeartReactions(ids, params.channel_id)]).then(
-    ([result]) => result
-  );
-  const native = nativeResult.status === 'fulfilled' ? nativeResult.value : null;
-  const nativeIds = new Set(native?.native_ids || []);
-  const legacyIds = ids.filter((id) => !nativeIds.has(id));
-  const legacyResult = legacyIds.length
-    ? await Promise.allSettled([
-        fetchLegacyCommentron('reaction.List', { ...params, comment_ids: legacyIds.join(',') }).then(
-          reactionListFromHyperbeam
-        ),
-      ]).then(([result]) => result)
-    : ({ status: 'fulfilled', value: null } as PromiseFulfilledResult<null>);
-  const legacy = legacyResult.status === 'fulfilled' ? legacyResult.value : null;
-  if (!legacy && !native) {
-    const error =
-      legacyResult.status === 'rejected'
-        ? legacyResult.reason
-        : nativeResult.status === 'rejected'
-          ? nativeResult.reason
-          : null;
-    if (error) throw error;
-    return null;
-  }
+  const native = await nativeCreatorHeartReactions(ids, params.channel_id);
   return {
-    my_reactions: mergeReactionMaps(legacy?.my_reactions, native?.my_reactions),
-    others_reactions: mergeReactionMaps(legacy?.others_reactions, native?.others_reactions),
+    my_reactions: native?.my_reactions || {},
+    others_reactions: native?.others_reactions || {},
   };
 }
 
@@ -1636,18 +1372,6 @@ async function nativeCreatorHeartReactions(
   };
 }
 
-function mergeReactionMaps(left: any, right: any): Record<string, any> {
-  const result: Record<string, any> = {};
-  const keys = new Set([...Object.keys(isObject(left) ? left : {}), ...Object.keys(isObject(right) ? right : {})]);
-  keys.forEach((key) => {
-    result[key] = {
-      ...(isObject(left?.[key]) ? left[key] : {}),
-      ...(isObject(right?.[key]) ? right[key] : {}),
-    };
-  });
-  return result;
-}
-
 // The store has no general claim-search surface: targeted claim-id lookups
 // resolve through the claim-id/immutable store routes, everything else
 // degrades to an empty result set (fuzzy search goes direct to lighthouse
@@ -1666,6 +1390,30 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     page_size: pageSize,
     total_items: 0,
     total_pages: 0,
+  };
+}
+
+// List the node's native uploads as claims for the "your uploads" page.
+export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
+  const page = toNumber(params?.page, 1);
+  const pageSize = toNumber(params?.page_size, 20);
+  const claimType = paramValues(params, 'claim_type', 'claim-type');
+  if (claimType.length && !claimType.includes('stream')) {
+    return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
+  }
+
+  const request = nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA });
+  const recordIds = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+  const claims = (await Promise.all(recordIds.map((id) => resolveImmutableClaimById(id).catch(() => null)))).filter(
+    Boolean
+  );
+  const start = (page - 1) * pageSize;
+  return {
+    items: claims.slice(start, start + pageSize),
+    page,
+    page_size: pageSize,
+    total_items: claims.length,
+    total_pages: Math.max(1, Math.ceil(claims.length / pageSize)),
   };
 }
 
@@ -2086,12 +1834,9 @@ export async function fetchHyperbeamResolveClaimIds(params: ClaimSearchOptions):
 }
 
 export async function fetchHyperbeamVerifyClaimSignature(
-  params: VerifyClaimSignatureParams
+  _params: VerifyClaimSignatureParams
 ): Promise<VerifyClaimSignatureResponse | null> {
-  const result = await fetchLegacyCommentron('verify.ClaimSignature', params);
-  const isValid = value(result, 'is-valid', 'is_valid');
-
-  return typeof isValid === 'boolean' ? { is_valid: isValid } : null;
+  return { is_valid: false };
 }
 
 export async function fetchHyperbeamChannel(claim: Claim | null | undefined): Promise<HyperbeamChannel | null> {
@@ -2166,12 +1911,16 @@ function stableJson(value: any): string {
 }
 
 function commentFromHyperbeam(comment: any): any {
-  const parentId = value(comment, 'parent-id', 'parent_id', 'parent');
-  const channelId = value(comment, 'channel-id', 'channel_id', 'author');
-  const channelName = value(comment, 'channel-name', 'channel_name');
+  const target = value(comment, 'target', 'claim-id', 'claim_id');
+  const rawParentId = value(comment, 'parent-id', 'parent_id', 'parent');
+  const parentId = rawParentId === target ? undefined : rawParentId;
+  const profileId = value(comment, 'verified-profile-id', 'verified_profile_id');
+  const profileName = value(comment, 'verified-profile-name', 'verified_profile_name');
+  const channelId = profileId || value(comment, 'channel-id', 'channel_id');
+  const channelName = profileName || value(comment, 'channel-name', 'channel_name');
   const channelUrl = commentChannelUrl(comment);
-  const revisionOf = value(comment, 'revision-of', 'revision_of');
   const commentRef = value(comment, 'comment-ref', 'comment_ref');
+  const revisionOf = value(comment, 'revision-of', 'revision_of');
   const revision = value(comment, 'revision');
   const revisionTimestamp = value(comment, 'revision-timestamp', 'revision_timestamp');
   return compactParams({
@@ -2190,14 +1939,15 @@ function commentFromHyperbeam(comment: any): any {
     operation: value(comment, 'operation'),
     state: value(comment, 'state'),
     comment: value(comment, 'comment', 'body', 'text'),
-    claim_id: value(comment, 'claim-id', 'claim_id', 'target'),
+    claim_id: target,
     parent_id: parentId === 'root' ? undefined : parentId,
     channel_id: channelId,
     channel_name: channelName,
     channel_url: channelUrl,
+    hyperbeam_profile_id: profileId,
     timestamp: toNumber(value(comment, 'timestamp', 'created_at'), 0),
     updated_at: value(comment, 'updated-at', 'updated_at'),
-    signature: value(comment, 'channel-signature', 'signature'),
+    signature: value(comment, 'channel-signature'),
     signing_ts: value(comment, 'signing-ts', 'signing_ts'),
     signature_scope: value(comment, 'signature-scope', 'signature_scope'),
     is_pinned: toBoolean(value(comment, 'is-pinned', 'is_pinned')),
@@ -2248,15 +1998,6 @@ function responsePayload(response: any): any {
   if (payload && payload.data !== undefined) return payload.data;
 
   return payload;
-}
-
-function reactionListFromHyperbeam(result: any): any | null {
-  const myReactions = value(result, 'my_reactions', 'my-reactions');
-  const othersReactions = value(result, 'others_reactions', 'others-reactions');
-  const my = isObject(myReactions) ? myReactions : {};
-  const others = isObject(othersReactions) ? othersReactions : {};
-
-  return Object.keys(my).length || Object.keys(others).length ? { my_reactions: my, others_reactions: others } : null;
 }
 
 function parseJsonString(value: any): any {
@@ -2586,7 +2327,24 @@ function toBoolean(value: any): boolean | undefined {
 async function fetchHyperbeamImmutableResolve(uri: string, immutableSigningChannelId?: string): Promise<any | null> {
   const immutableId = immutableRouteIdFromUri(uri);
   if (!immutableId) return null;
+  // A token route (lbry://out_.../immutable_...) has no real claim name to
+  // compare against; only enforce the name when the uri carries one.
+  let name;
+  try {
+    const parsed = parseURI(uri);
+    name = parsed.streamName || parsed.claimName;
+  } catch {}
+  if (name && immutableIdFromRouteToken(String(name))) name = undefined;
+  return resolveImmutableClaimById(immutableId, name, immutableSigningChannelId);
+}
 
+// Read a record by its immutable/store id and build a claim. Shared by the
+// immutable-id route and the upload name bridge.
+async function resolveImmutableClaimById(
+  immutableId: string,
+  name?: string,
+  immutableSigningChannelId?: string
+): Promise<any | null> {
   const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
   const initialPayload = storePayload(result);
   const uploadHead = isNativeUploadMessage(initialPayload)
@@ -2598,14 +2356,6 @@ async function fetchHyperbeamImmutableResolve(uri: string, immutableSigningChann
   const decodedClaim = decodeClaimMetadata(payload) || {};
   if (signedChannelId) decodedClaim.signedChannelId = signedChannelId;
   const signingChannel = await fetchSigningChannelEvidence(payload, immutableSigningChannelId);
-  // A token route (lbry://out_.../immutable_...) has no real claim name to
-  // compare against; only enforce the name when the uri carries one.
-  let name;
-  try {
-    const parsed = parseURI(uri);
-    name = parsed.streamName || parsed.claimName;
-  } catch {}
-  if (name && immutableIdFromRouteToken(String(name))) name = undefined;
   const claim = immutableClaimFromHyperbeam(payload, immutableId, signingChannel, decodedClaim, name);
   if (!claim) return null;
 

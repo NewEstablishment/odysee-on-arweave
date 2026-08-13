@@ -52,7 +52,7 @@ export function nativeMessageVersionRef(): string {
     const bytes = cryptoObject.getRandomValues(new Uint8Array(24));
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
-  throw new Error('Secure randomness is unavailable for the native message version reference.');
+  throw new Error('Secure randomness is unavailable for the native message reference.');
 }
 
 function normalizeCommitter(committer: any): string {

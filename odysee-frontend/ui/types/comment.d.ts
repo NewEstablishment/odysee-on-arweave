@@ -11,13 +11,13 @@ type CommentCreateParams = {
   // Uniform match anchor (2026-07-29 direction): the content's immutable id
   // when it has one, otherwise the claim id. Defaults to claim_id when unset.
   target?: string;
-  channel_id: string;
-  channel_name: string;
+  channel_id?: string;
+  channel_name?: string;
   body?: string;
   comment?: string;
   parent_id?: string;
-  signature: string;
-  signing_ts: string;
+  signature?: string;
+  signing_ts?: string;
   support_amount?: number;
   payment_intent_id?: string;
   environment?: string;
@@ -41,8 +41,8 @@ type CommentEditParams = {
   comment?: string;
   channel_id?: string;
   channel_name?: string;
-  signature: string;
-  signing_ts: string;
+  signature?: string;
+  signing_ts?: string;
 };
 
 type CommentEditResponse = {
@@ -107,10 +107,10 @@ type CommentByIdResponse = {
 
 type CommentPinParams = {
   comment_id: string;
-  channel_id: string;
-  channel_name: string;
-  signature: string;
-  signing_ts: string;
+  channel_id?: string;
+  channel_name?: string;
+  signature?: string;
+  signing_ts?: string;
   remove?: boolean;
 };
 

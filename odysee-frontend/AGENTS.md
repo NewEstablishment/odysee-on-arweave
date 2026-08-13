@@ -1,207 +1,158 @@
 # Odysee Frontend Component Guide
 
-This directory is the repository's only product frontend. It owns the
-React/Redux browser application, SSR server, static-manifest build, same-origin
-security bridges, and the shared HyperBEAM integration layer. Do not create a
-parallel `frontend/` directory or treat stale compatibility routes as a second
-runtime mode.
+This directory contains the static Odysee React application. Its product path
+is the store-first HyperBEAM node; the manifest build is the production shape.
 
 ## Routing contract
 
-- `ODYSEE_HYPERBEAM_NODE_API` selects the HyperBEAM node.
-- There is one product data path. Do not add a Legacy/HyperBEAM selector,
-  browser storage flag, query parameter, or direct React fallback to Odysee
-  network services.
-- `ui/lbry.ts` is the SDK-shaped facade used by existing actions.
-- `ui/util/hyperbeam.ts` owns generic read/query construction, locator
-  hydration, normalization, list merging, and native revision projection.
-- Local wallet/daemon-only operations may retain their existing local contract
-  until a real HyperBEAM contract replaces them. That is not a network legacy
-  mode.
+- `ODYSEE_HYPERBEAM_NODE_API` is required and baked into a manifest build.
+- There is no browser-selectable Legacy/HyperBEAM mode.
+- `ui/lbry.ts` remains the SDK-shaped facade used by Redux and components.
+- `ui/util/hyperbeam.ts` owns node requests, response parsing, immutable
+  hydration, and SDK-compatible normalization.
+- Product data must not bypass HyperBEAM to call Commentron, Lbryio, the SDK
+  proxy, Odysee APIs, search/recommendation services, geo, legal, or blocklist
+  services.
+- `ui/util/hyperbeamFetchGuard.ts` is installed before the app and blocks
+  remaining legacy-host browser requests in HyperBEAM mode.
 
-Historical services may still supply bytes or locators behind the node's
-stores. Compatibility sourcing does not belong in components or Redux actions.
+Legacy services may still source historical bytes behind backend stores. That
+does not authorize a direct browser fallback.
 
-## Identity and hydration
+## Static manifest
 
-Query and search results are locators, not claim objects. Hydrate them through
-normal HyperBEAM reads, normalize at the integration boundary, and preserve
-discovery order.
+`pnpm run build:manifest` is the production build contract:
 
-- Native content uses immutable HyperBEAM message IDs.
-- Legacy immutable claim outputs use `<txid>:<nout>`.
-- Legacy claim IDs and Odysee URIs are mutable locators.
-- Media for a native upload uses its immutable `data-id`, never the metadata
-  record ID.
-- Root and version IDs for native uploads must survive synthesis into SDK claim
-  shape; do not replace them with the media ID.
-- Merged native/historical lists deduplicate by stable identity and sort the
-  combined result instead of prepending one source.
+- hash routing;
+- relative asset paths;
+- filenames and paths accepted by the node manifest handler;
+- JSON-like assets stored opaquely so `/id` does not parse them as message
+  fields;
+- the node API embedded at build time.
 
-Every native product locator must be hydrated through
-`fetchVerifiedNativeMessage`. A valid result requires the exact immutable
-message, `/<id>/verify?commitment-ids=<id>` returning true, and the committer at
-`/<id>/commitments/<id>/committer`. Do not use `commitment-ids=all`; it can be
-vacuously true for an uncommitted message. Discard query paths and write
-read-backs that do not pass the exact check.
+The built SPA is published with `pnpm run publish:manifest` and served through
+the node's generic `manifest@1.0` request hook. Production does not require the
+repository's SSR server or same-origin API bridge. SSR files may remain for
+development or inherited application tooling, but they are not a second
+product-data architecture.
 
-## Authentication and SSR bridges
+The manifest and node should be same-origin so the `secret-*` identity cookie
+is sent on native writes.
 
-The Odysee `auth_token` cookie cannot be sent from the browser to a node on a
-different origin. Same-origin SSR routes may read that HttpOnly cookie and
-forward only the required token to HyperBEAM. Explicit browser tokens use
-`x-odysee-auth-token`.
+## Identity and account UI
 
-`writeNativeMessage` must attach `authTokenHeader()` for direct generic writes.
-The upload service uses `/$/api/hyperbeam-upload/v1/write`; the bridge sends the
-bytes and auth carrier to `/id?!=true&committers=all`. It is a transport and
-security boundary, not an upload device or second data mode.
+- The node's `cookie@1.0` provider mints identity on the first committed write.
+- Signup asks only for a display name and commits a channel-profile message.
+- The cookie signer owns later uploads and comments.
+- Local storage holds only the profile ID/name and signed-in display state. It
+  is not an authority source.
+- Sign out hides the local profile but retains the cookie so login can restore
+  it. Creating a new account clears the old identity cookie first.
+- Do not reintroduce email, password, verified-email, Odysee-token, or LBRY
+  channel-signature gates for native writes.
 
-Never place cookies, auth tokens, derived secrets, or private keys in public
-message fields, URLs, debug events, persistence, or Redux state. Logged-out
-writes are expected to receive `401`; do not invent an anonymous identity in
-local storage.
+## Reads, playback, and hydration
 
-Thumbnail writes that require `HYPERBEAM_CACHE_WRITER_JWK` remain server-side.
-The browser must never receive that signer.
+Historical reads use store paths through generic cache/message routes. Native
+reads use exact committed IDs. Mutable names and claim IDs are locators only.
 
-## Native uploads
-
-`ui/services/hyperbeamUpload.ts` writes two ordinary messages for a new upload:
-immutable media bytes and a signed metadata root with
-`schema: odysee-upload@1.0`, `type: upload`, and `data-id` pointing to the media.
-
-Updates and deletes are append-only snapshots. Projection is centralized in
-`ui/util/nativeUploadRevisions.ts`:
-
-- only the root owner can extend the chain;
-- `revision-of` remains the root and `previous-version` equals the current
-  signed `version-ref`;
-- revisions increase by one;
-- media ID, name, and creation timestamp remain immutable;
-- update keeps the record active and delete creates a terminal tombstone;
-- forks, gaps, owner spoofing, invalid operations, and post-delete revisions
-  are ignored.
-
-Use signed `version-ref` for logical continuity. A message served through a
-query locator can acquire a different physical RSA-PSS commitment ID, so the
-physical locator is not a stable previous-version key.
-
-The current UI mutation code must not call `~odysee-upload@1.0`. Some old SSR,
-debug, and routing constants still mention that removed device; they are
-dormant cleanup debt and not authorization to restore it.
+- Preserve immutable IDs through Redux and navigation.
+- A bare native `lbry://<name>` resolves by querying the
+  `odysee-upload@1.0` index message and hydrating its immutable record ID.
+- Playback reads historical stream/media paths or a native upload's immutable
+  data ID; it does not call a custom stream device.
+- Mutable reads send `cache-control: no-store, no-cache`.
+- Response parsing must preserve HyperBEAM header/multipart fields and exact
+  commitment identity.
 
 ## Homepage snapshots
 
-The public homepage is an hourly signed native `odysee-homepage@1.0` snapshot
-per language. Discover snapshots through generic `query@1.0`, then read the
-exact immutable ID and verify both its commitment and expected committer.
-Hydrate snapshot rows through the generic Lua multirequest application in the
-user's effective display order. Following is dynamic per-user data and is not
-part of the public snapshot. Do not restore per-card HTTP reads or the removed
-`odysee/local-object` presence alias.
+- Use one signed native `odysee-homepage@1.0` snapshot per language.
+- Discover snapshots through generic query and hydrate the exact committed ID.
+- Preserve each category's ordered pre-warmed pool. Homepage rows consume the
+  configured prefix; category routes consume the larger pool for first paint.
+- Following is dynamic per-user data and must not be embedded in the public
+  language snapshot.
+- Continue category pagination after the snapshot pool rather than treating
+  the pool as the complete category history.
+- Production manifest clients must not require an SSR product-data proxy.
 
-A language snapshot owns both homepage rows and category first paint. Preserve
-the ordered pre-warmed category reserve as `immutablePoolIds`; homepage rows
-use the `immutableIds` prefix, while category routes use the full pool and the
-same immutable signing-channel map. Do not make category routes repeat browser
-discovery for their initial content. Dynamic Following discovery may cross the
-same-origin public claim-search bridge, which only transports a bounded source
-store query and must not become a second product-data mode.
+## Uploads and thumbnails
 
-During materialization, import every selected known legacy outpoint before
-probing native-only IDs. The compatibility import response is completion-aware:
-only verified messages committed to the local HyperBEAM store count as
-available. Retry only unresolved imports with bounded backoff, and do not turn
-a failed legacy import into a remote immutable-ID probe. Require exact local
-read-back of the expected native ID after every compatibility cache write.
-Start with the normal three-row candidate reserve. If verified imports cannot
-fill a category, expand only that category's candidate pages and freshness
-window in bounded rounds. The final round may append a category-tag query after
-the curated channel pool; never reorder it ahead of curated results. Never
-publish an incomplete category or remove the prior snapshot while an expanded
-refresh is running.
+- HyperBEAM mode posts raw bytes directly to
+  `/id?!=true&committers=all` with cookie credentials.
+- It writes a generic `odysee-upload@1.0` record after the data write.
+- The uploads page queries those records rather than `claim_list`.
+- Do not run legacy TUS token, transcode, transmux, optimizer, bitrate, or file
+  size gates for a raw node upload.
+- Do not persist `File`, pipeline-item, or remote-upload transient state.
+- Thumbnail bytes use the same generic committed-ID write path. Do not require
+  a server-held cache-writer key or an SSR thumbnail bridge in this
+  architecture.
 
-## Comments and search
+## Comments
 
-Native comments are ordinary signed messages discovered with generic
-`~query@1.0/only` and hydrated by immutable locator. Revision selection,
-hierarchy, counts, sorting, and moderation projection belong in the integration
-layer. Do not mutate an existing comment.
+`ui/comments.ts` is native-only. It must not call Commentron or the LBRY API.
 
-Comments use a signed `comment-ref` as their logical ID and signed
-`version-ref` values for contiguous revisions. Controls use a signed
-`control-ref`. Keep the physical locator separately for exact verification.
-Comment revisions must retain the root committer. Author controls must be
-committed by the comment root's committer; owner controls must be committed by
-the target native upload's committer. A claimed channel ID or structurally
-present channel signature is not transport authority.
+- Roots and replies are ordinary committed messages discovered through stock
+  `query@1.0/only`.
+- Hydrate each returned immutable ID and verify its exact commitment.
+- Derive authority from the verified committer, never claimed channel/profile
+  fields.
+- Display a native profile name only if that profile message verifies under
+  the same committer.
+- Edits and author deletes are append-only revisions linked to the logical root
+  and previous version.
+- Accept only a contiguous same-owner chain; a deleted comment cannot be
+  edited again.
+- Build hierarchy, counts, sorting, pagination, and projection in the
+  integration layer, not in generic query.
+- Never pass a native profile ID to the LBRY URI parser.
 
-Playlists follow the same exact-verification and same-committer revision rules.
-Their revisions must be contiguous through signed `version-ref` values.
-Transport verification does not cryptographically prove LBRY channel
-signatures. Native channel writes and an account-to-channel proof are not
-implemented yet, so legacy-target owner controls must fail closed.
+Creator reactions, advanced moderation, delegates, and settings are currently
+unsupported. Fail explicitly instead of falling back to legacy services.
 
-`~query@1.0` is exact local discovery. `~search@1.0` is generic full-text
-search. Both return locators; neither should return product-hydrated Redux
-objects. An unpatched query device may fail on an empty result, so callers may
-normalize that known failure to an empty list without fabricating results.
+## Publish and route guards
 
-## Debug console
-
-Debug state must describe observed calls only. Known nodes may be drawn as
-inactive, but call counts, edges, stores, backends, and active device paths must
-come from real request events. Removed product-device labels must not be shown
-as active for generic store/message traffic.
-
-## Static manifest and local operation
-
-`pnpm run build:manifest` builds relative assets and hash routing suitable for
-publishing through HyperBEAM. Normal SSR builds use the web server and browser
-routing.
-
-```sh
-corepack enable
-corepack prepare pnpm@10.33.0 --activate
-pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run dev:web-server
-```
-
-The SSR server normally listens on `9090`. Run only one `dev:web-server`
-supervisor.
+- A configured HyperBEAM node enables native upload routes even without a
+  legacy verified-email account.
+- The upload route, header actions, form validation, and publish payload must
+  all use the same `hyperbeamUploadEnabled()` decision.
+- The publish URL shows the node origin in HyperBEAM mode.
+- The no-user/account nag must not block the manifest-native account flow.
 
 ## Validation
 
-For integration changes run:
+Run after changing the frontend integration:
 
 ```sh
-pnpm run fmt:check
 pnpm run typecheck:tsc
 pnpm run check
-node --check web/src/odyseeHyperbeamNode.js
-node --check web/src/fetchStreamUrl.js
+pnpm run test:native-comment-revisions
+pnpm run test:native-message-verification
+pnpm run test:native-comment-controls
+pnpm run test:static-manifest
+pnpm run build:manifest
 ```
 
-Use the focused scripts for affected behavior:
+Against a running cookie-auth node:
 
 ```sh
-pnpm run test:native-message-verification
-pnpm run test:native-upload-revisions
-pnpm run test:hyperbeam-upload-smoke
-pnpm run test:hyperbeam-query-comment-smoke
-pnpm run test:native-comment-revisions
-pnpm run test:native-comment-controls
-pnpm run test:native-playlist-revisions
-pnpm run test:hyperbeam-playlist-smoke
-pnpm run test:static-manifest
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
 ```
 
-The upload, comment, and playlist smokes need a running write-capable node and
-SSR frontend. They must cover exact commitment verification, committer
-ownership, rejection of uncommitted query artifacts and hostile revisions,
-discovery/projection, and byte-exact upload read-back—not only a successful
-HTTP status.
+Also verify the actual browser lifecycle: manifest loads, signup mints the
+cookie, raw upload resolves and plays, comments render after reload, and no
+normal-flow request reaches a legacy host.
 
-Update this guide whenever the single data route, identity, auth forwarding,
-revision contract, local operation, validation, or known limitations change.
+## Current limitations
+
+- Native reactions, view/subscriber counts, and advanced moderation are not
+  implemented.
+- Upload edit/delete needs a complete append-only native contract.
+- Generic cache range propagation limits seeking for some historical media.
+- The cookie identity is node/browser-local and is not yet portable or
+  recoverable.
+
+Update this guide whenever the manifest, account, upload, comment, playback,
+or browser-routing contract changes.
