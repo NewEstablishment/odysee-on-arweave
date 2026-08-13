@@ -7,6 +7,7 @@ const http = require('node:http');
 const https = require('node:https');
 
 const { getHomepage } = require('./homepageApi');
+const { hyperbeamNodeResolveMany, hyperbeamNodeSourceClaimSearch } = require('./odyseeHyperbeamNode');
 
 const { getHtml } = require('./html');
 
@@ -37,15 +38,24 @@ const AUTH_TOKEN_COOKIE = 'auth_token';
 const HYPERBEAM_AUTH_DEVICE_PREFIX = '/$/api/hyperbeam-auth-device/v1';
 const HYPERBEAM_PUBLIC_DEVICE_PREFIX = '/$/api/hyperbeam-public-device/v1';
 const HYPERBEAM_PUBLIC_STORE_BATCH_PATH = '/$/api/hyperbeam-public-store/v1/read-batch';
+const HYPERBEAM_PUBLIC_CLAIM_SEARCH_PATH = '/$/api/hyperbeam-public-claim-search/v1/search';
 const HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
-const HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY = 24;
-const HYPERBEAM_PUBLIC_STORE_READ_TIMEOUT_MS = 15000;
+const HYPERBEAM_PUBLIC_CLAIM_SEARCH_ID_LIMIT = 10000;
+const HYPERBEAM_PUBLIC_CLAIM_SEARCH_PAGE_SIZE_LIMIT = 100;
 const HYPERBEAM_PUBLIC_STORE_CACHE_TTL_MS = 30 * 60 * 1000;
 const HYPERBEAM_PUBLIC_STORE_CACHE_LIMIT = 10000;
 const HYPERBEAM_PUBLIC_STORE_LINK_DEPTH = 3;
-const HYPERBEAM_PUBLIC_STORE_LINK_FIELDS = new Set(['value', 'thumbnail']);
+const HYPERBEAM_PUBLIC_STORE_LINK_FIELDS = new Set([
+  'value',
+  'thumbnail',
+  'cover',
+  'source',
+  'video',
+  'audio',
+  'channel-evidence',
+  'signing_channel',
+]);
 const hyperbeamPublicStoreCache = new Map();
-const hyperbeamPublicStoreReads = new Map();
 const HYPERBEAM_UPLOAD_PATH = '/id?!=true&committers=all';
 const HYPERBEAM_UPLOAD_CHUNK_PATH = '/id?!=true&committers=all';
 const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/id?!=true&committers=all';
@@ -198,6 +208,7 @@ async function postHyperbeamPublicStoreBatch(ctx) {
   const body = await readJsonBody(ctx);
   const requestedIds = Array.isArray(body.ids) ? body.ids : [];
   const ids = Array.from(new Set(requestedIds.map((id) => String(id || '').trim()).filter(Boolean)));
+  const immutableSigningChannelIds = normalizeImmutableSigningChannelIds(body.immutable_signing_channel_ids, ids);
 
   if (!ids.length || ids.length > HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT || ids.some((id) => !isPublicStoreId(id))) {
     ctx.status = 400;
@@ -207,8 +218,11 @@ async function postHyperbeamPublicStoreBatch(ctx) {
 
   const startedAt = Date.now();
   const entries = await readHyperbeamPublicStoreEntries(nodeUrl, ids);
-  const results = new Map(entries.filter((entry) => entry.result).map((entry) => [entry.id, entry.result]));
+  const results = new Map(
+    entries.filter((entry) => entry.result).map((entry) => [entry.id, structuredClone(entry.result)])
+  );
   const expansionTimings = await expandHyperbeamPublicStoreLinks(nodeUrl, results);
+  const channelTimings = await attachHyperbeamPublicStoreChannels(nodeUrl, results, immutableSigningChannelIds);
 
   ctx.status = 200;
   ctx.set('Cache-Control', 'no-store');
@@ -217,64 +231,210 @@ async function postHyperbeamPublicStoreBatch(ctx) {
     errors: Object.fromEntries(entries.filter((entry) => !entry.result).map((entry) => [entry.id, entry.error])),
     timings: entries.map(({ id, status, elapsed_ms }) => ({ id, status, elapsed_ms })),
     expansion_timings: expansionTimings,
+    channel_timings: channelTimings,
     elapsed_ms: Date.now() - startedAt,
   };
 }
 
-async function readHyperbeamPublicStoreEntries(nodeUrl, ids) {
-  return mapConcurrent(ids, HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY, (id) =>
-    readHyperbeamPublicStoreEntry(nodeUrl, id)
+async function postHyperbeamPublicClaimSearch(ctx) {
+  const body = await readJsonBody(ctx);
+  const channelIds = normalizeLegacyClaimIds(body.channel_ids || body.channelIds);
+  const claimIds = normalizeLegacyClaimIds(body.claim_ids || body.claimIds);
+  const requestedIdCount = channelIds.length + claimIds.length;
+  const page = Math.max(1, Number(body.page) || 1);
+  const pageSize = Math.max(1, Number(body.page_size || body.pageSize) || 20);
+
+  if (
+    !requestedIdCount ||
+    requestedIdCount > HYPERBEAM_PUBLIC_CLAIM_SEARCH_ID_LIMIT ||
+    pageSize > HYPERBEAM_PUBLIC_CLAIM_SEARCH_PAGE_SIZE_LIMIT
+  ) {
+    ctx.status = 400;
+    ctx.body = { error: 'invalid hyperbeam claim search' };
+    return;
+  }
+
+  const allowedKeys = [
+    'not_channel_ids',
+    'claim_type',
+    'any_tags',
+    'order_by',
+    'any_languages',
+    'limit_claims_per_channel',
+    'duration',
+    'timestamp',
+    'release_time',
+    'exclude_shorts',
+  ];
+  const params = Object.fromEntries(
+    allowedKeys.filter((key) => body[key] !== undefined).map((key) => [key, body[key]])
+  );
+  const releaseBounds = arrayValue(params.release_time);
+  const releaseAfter = releaseBounds.find((bound) => bound.startsWith('>'));
+  const releaseBefore = releaseBounds.find((bound) => bound.startsWith('<'));
+  if (releaseAfter && params.timestamp === undefined) params.timestamp = releaseAfter;
+  if (releaseAfter || releaseBefore) {
+    params.release_time = releaseBefore || `<${Math.floor(Date.now() / 1000)}`;
+  }
+  Object.assign(params, {
+    ...(channelIds.length ? { channel_ids: channelIds } : {}),
+    ...(claimIds.length ? { claim_ids: claimIds } : {}),
+    page,
+    page_size: pageSize,
+  });
+
+  try {
+    const result = await hyperbeamNodeSourceClaimSearch(params);
+    if (!result) {
+      ctx.status = 503;
+      ctx.body = { error: 'hyperbeam claim search unavailable' };
+      return;
+    }
+    ctx.status = 200;
+    ctx.set('Cache-Control', 'no-store');
+    ctx.body = result;
+  } catch (error) {
+    ctx.status = 502;
+    ctx.body = { error: String(error?.message || error) };
+  }
+}
+
+function normalizeLegacyClaimIds(value) {
+  const values = Array.isArray(value) ? value : value ? String(value).split(',') : [];
+  return Array.from(
+    new Set(
+      values
+        .map((id) =>
+          String(id || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter((id) => /^[0-9a-f]{40}$/.test(id))
+    )
   );
 }
 
-async function readHyperbeamPublicStoreEntry(nodeUrl, id) {
-  const cacheKey = `${nodeUrl}|${id}`;
+function arrayValue(value) {
+  if (Array.isArray(value))
+    return value
+      .map(String)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  return value === undefined || value === null || value === ''
+    ? []
+    : String(value)
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+async function readHyperbeamPublicStoreEntries(nodeUrl, ids, acceptBundle = false) {
+  const entries = Array(ids.length);
+  const misses = [];
   const now = Date.now();
-  const cached = hyperbeamPublicStoreCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
-    return { id, status: 200, elapsed_ms: 0, result: cached.result, error: null, cached: true };
-  }
-  if (cached) hyperbeamPublicStoreCache.delete(cacheKey);
 
-  const pending = hyperbeamPublicStoreReads.get(cacheKey);
-  if (pending) return pending;
-
-  const read = (async () => {
-    const itemStartedAt = Date.now();
-    try {
-      const response = await getBuffer(
-        `${nodeUrl}/${encodeURIComponent(id)}?accept-bundle=true`,
-        { accept: 'application/json' },
-        HYPERBEAM_PUBLIC_STORE_READ_TIMEOUT_MS
-      );
-      const parsed = parseJsonBuffer(response.body);
-      const ok = response.statusCode >= 200 && response.statusCode < 300 && parsed && typeof parsed === 'object';
-      const result = ok ? { ...response.headers, ...parsed } : null;
-      if (result) cacheHyperbeamPublicStoreResult(cacheKey, result);
-      return {
-        id,
-        status: response.statusCode,
-        elapsed_ms: Date.now() - itemStartedAt,
-        result,
-        error: ok ? null : parsed || response.body.toString('utf8').slice(0, 500),
-        cached: false,
-      };
-    } catch (error) {
-      return {
-        id,
-        status: 502,
-        elapsed_ms: Date.now() - itemStartedAt,
-        result: null,
-        error: String(error && error.message ? error.message : error),
-        cached: false,
-      };
-    } finally {
-      hyperbeamPublicStoreReads.delete(cacheKey);
+  ids.forEach((id, index) => {
+    const cacheKey = `${nodeUrl}|${id}`;
+    const cached = hyperbeamPublicStoreCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      entries[index] = { id, status: 200, elapsed_ms: 0, result: cached.result, error: null, cached: true };
+      return;
     }
-  })();
+    if (cached) hyperbeamPublicStoreCache.delete(cacheKey);
+    misses.push({ id, index, cacheKey });
+  });
 
-  hyperbeamPublicStoreReads.set(cacheKey, read);
-  return read;
+  if (misses.length) {
+    const startedAt = Date.now();
+    let resolved = [];
+    let requestError = null;
+    try {
+      resolved = await hyperbeamNodeResolveMany(
+        misses.map(({ id }) => ({ path: hyperbeamPublicStoreReadPath(id, acceptBundle) }))
+      );
+    } catch (error) {
+      requestError = String(error && error.message ? error.message : error);
+    }
+    const elapsed = Date.now() - startedAt;
+    misses.forEach(({ id, index, cacheKey }, resultIndex) => {
+      const response = resolved[resultIndex];
+      const ok = response && response.status === 'ok' && response.result && typeof response.result === 'object';
+      const result = ok ? response.result : null;
+      if (result) cacheHyperbeamPublicStoreResult(cacheKey, result);
+      entries[index] = {
+        id,
+        status: ok ? 200 : 404,
+        elapsed_ms: elapsed,
+        result,
+        error: ok ? null : requestError || response?.result || 'not_found',
+        cached: false,
+      };
+    });
+  }
+
+  return entries;
+}
+
+function hyperbeamPublicStoreReadPath(id, acceptBundle = false) {
+  if (/^channel:[0-9a-f]{40}$/i.test(id)) {
+    return `/~cache@1.0/read?read=${encodeURIComponent(`odysee/channel-json/${id.slice('channel:'.length)}`)}&accept-bundle=${acceptBundle}`;
+  }
+  return `/${encodeURIComponent(id)}`;
+}
+
+function normalizeImmutableSigningChannelIds(source, requestedIds) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return new Map();
+  const allowedIds = new Set(requestedIds);
+  return new Map(
+    Object.entries(source).filter(
+      ([mediaId, channelId]) => allowedIds.has(mediaId) && /^[A-Za-z0-9_-]{43}$/.test(String(channelId || ''))
+    )
+  );
+}
+
+async function attachHyperbeamPublicStoreChannels(nodeUrl, results, immutableSigningChannelIds = new Map()) {
+  const claimsByChannel = new Map();
+  results.forEach((result, mediaId) => {
+    if (result['channel-evidence'] || result.channel_evidence) return;
+    const channelId = hyperbeamClaimSigningChannelId(result.claim);
+    if (!channelId) return;
+    const immutableChannelId = immutableSigningChannelIds.get(mediaId);
+    const locator = immutableChannelId || `channel:${channelId}`;
+    const claims = claimsByChannel.get(locator) || [];
+    claims.push({ result, channelId });
+    claimsByChannel.set(locator, claims);
+  });
+  if (!claimsByChannel.size) return [];
+
+  const entries = await readHyperbeamPublicStoreEntries(nodeUrl, Array.from(claimsByChannel.keys()));
+  const channelResults = new Map(
+    entries.filter((entry) => entry.result).map((entry) => [entry.id, structuredClone(entry.result)])
+  );
+  await expandHyperbeamPublicStoreLinks(nodeUrl, channelResults, 2, true);
+  entries.forEach((entry) => {
+    const channelResult = channelResults.get(entry.id);
+    if (!channelResult) return;
+    const resolvedChannelId = channelResult['claim-id'] || channelResult.claim_id;
+    (claimsByChannel.get(entry.id) || []).forEach(({ result, channelId }) => {
+      if (resolvedChannelId !== channelId) return;
+      result['channel-evidence'] = channelResult;
+    });
+  });
+  return entries.map(({ id, status, elapsed_ms, cached }) => ({ id, status, elapsed_ms, cached }));
+}
+
+function hyperbeamClaimSigningChannelId(claim) {
+  if (typeof claim !== 'string' || !claim) return null;
+  try {
+    const bytes =
+      /^[0-9a-f]+$/i.test(claim) && claim.length % 2 === 0
+        ? Buffer.from(claim, 'hex')
+        : Buffer.from(claim, 'base64url');
+    if (bytes.length <= 85 || bytes[0] !== 1) return null;
+    return Buffer.from(bytes.subarray(1, 21)).reverse().toString('hex');
+  } catch {
+    return null;
+  }
 }
 
 function cacheHyperbeamPublicStoreResult(cacheKey, result) {
@@ -288,16 +448,24 @@ function cacheHyperbeamPublicStoreResult(cacheKey, result) {
   }
 }
 
-async function expandHyperbeamPublicStoreLinks(nodeUrl, results) {
+async function expandHyperbeamPublicStoreLinks(
+  nodeUrl,
+  results,
+  maxDepth = HYPERBEAM_PUBLIC_STORE_LINK_DEPTH,
+  acceptBundle = false
+) {
   const timings = [];
-  for (let depth = 0; depth < HYPERBEAM_PUBLIC_STORE_LINK_DEPTH; depth += 1) {
+  const attemptedIds = new Set();
+  for (let depth = 0; depth < maxDepth; depth += 1) {
     const references = [];
     const seen = new WeakSet();
     results.forEach((result) => collectHyperbeamPublicStoreLinks(result, references, seen));
     if (!references.length) break;
 
-    const linkedIds = Array.from(new Set(references.map(({ id }) => id)));
-    const entries = await readHyperbeamPublicStoreEntries(nodeUrl, linkedIds);
+    const linkedIds = Array.from(new Set(references.map(({ id }) => id))).filter((id) => !attemptedIds.has(id));
+    if (!linkedIds.length) break;
+    linkedIds.forEach((id) => attemptedIds.add(id));
+    const entries = await readHyperbeamPublicStoreEntries(nodeUrl, linkedIds, acceptBundle);
     const linkedResults = new Map(entries.filter((entry) => entry.result).map((entry) => [entry.id, entry.result]));
     references.forEach(({ owner, field, id }) => {
       const linked = linkedResults.get(id);
@@ -390,6 +558,7 @@ async function postHyperbeamUpload(ctx) {
   copyHeader(ctx, response.headers, 'url');
   copyHeader(ctx, response.headers, 'signers');
   copyHeader(ctx, response.headers, 'signers+link');
+  copyHeader(ctx, response.headers, 'set-cookie');
   ctx.body = response.body;
 }
 
@@ -1092,10 +1261,18 @@ function copyHeader(ctx, headers, name) {
 }
 
 function parseJsonBuffer(body) {
+  const text = Buffer.isBuffer(body) ? body.toString('utf8') : String(body);
   try {
-    return JSON.parse(Buffer.isBuffer(body) ? body.toString('utf8') : String(body));
+    return JSON.parse(text);
   } catch {
-    return null;
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace === -1 || lastBrace <= firstBrace) return null;
+    try {
+      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -1167,7 +1344,7 @@ function postStream(url, stream, extraHeaders = {}) {
         res.on('end', () => {
           resolve({
             statusCode: res.statusCode || 502,
-            headers: res.headers,
+            headers: { ...res.headers, ...res.trailers },
             body: Buffer.concat(chunks),
           });
         });
@@ -1199,7 +1376,7 @@ function postBuffer(url, body, extraHeaders = {}) {
         res.on('end', () => {
           resolve({
             statusCode: res.statusCode || 502,
-            headers: res.headers,
+            headers: { ...res.headers, ...res.trailers },
             body: Buffer.concat(chunks),
           });
         });
@@ -1210,10 +1387,18 @@ function postBuffer(url, body, extraHeaders = {}) {
   });
 }
 
-function getBuffer(url, extraHeaders = {}, timeoutMs = 0) {
+function getBuffer(url, extraHeaders = {}, timeoutMs = 0, acceptCompleteJsonOnTimeout = false) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const client = target.protocol === 'https:' ? https : http;
+    const chunks = [];
+    let response;
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      callback(value);
+    };
     const req = client.request(
       {
         protocol: target.protocol,
@@ -1222,13 +1407,14 @@ function getBuffer(url, extraHeaders = {}, timeoutMs = 0) {
         path: `${target.pathname}${target.search}`,
         method: 'GET',
         insecureHTTPParser: true,
+        maxHeaderSize: 2 * 1024 * 1024,
         headers: extraHeaders,
       },
       (res) => {
-        const chunks = [];
+        response = res;
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
-          resolve({
+          finish(resolve, {
             statusCode: res.statusCode || 502,
             headers: res.headers,
             body: Buffer.concat(chunks),
@@ -1236,8 +1422,22 @@ function getBuffer(url, extraHeaders = {}, timeoutMs = 0) {
         });
       }
     );
-    req.on('error', reject);
-    if (timeoutMs > 0) req.setTimeout(timeoutMs, () => req.destroy(new Error(`GET timed out after ${timeoutMs}ms`)));
+    req.on('error', (error) => finish(reject, error));
+    if (timeoutMs > 0) {
+      req.setTimeout(timeoutMs, () => {
+        const body = Buffer.concat(chunks);
+        if (acceptCompleteJsonOnTimeout && response && parseJsonBuffer(body)) {
+          finish(resolve, {
+            statusCode: response.statusCode || 502,
+            headers: response.headers,
+            body,
+          });
+          req.destroy();
+          return;
+        }
+        req.destroy(new Error(`GET timed out after ${timeoutMs}ms`));
+      });
+    }
     req.end();
   });
 }
@@ -1503,6 +1703,7 @@ router.get(`/$/api/auth-token/v1/get`, async (ctx) => {
 router.post(`${HYPERBEAM_AUTH_DEVICE_PREFIX}/:device/:method`, postHyperbeamAuthDevice);
 router.post(`${HYPERBEAM_PUBLIC_DEVICE_PREFIX}/:device/:method`, postHyperbeamPublicDevice);
 router.post(HYPERBEAM_PUBLIC_STORE_BATCH_PATH, postHyperbeamPublicStoreBatch);
+router.post(HYPERBEAM_PUBLIC_CLAIM_SEARCH_PATH, postHyperbeamPublicClaimSearch);
 router.post(`/$/api/hyperbeam-upload/v1/write`, postHyperbeamUpload);
 router.post(`/$/api/hyperbeam-upload/v1/large`, postHyperbeamLargeUpload);
 router.post(`/$/api/hyperbeam-upload/v1/index`, postHyperbeamUploadIndex);

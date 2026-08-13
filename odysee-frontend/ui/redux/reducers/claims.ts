@@ -9,6 +9,7 @@ import * as ACTIONS from 'constants/action_types';
 import mergeClaim from 'util/merge-claim';
 import { getChannelIdFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import { claimToStoredCollection } from 'util/collections';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const reducers = {};
 const defaultState: ClaimsState = {
   byId: {},
@@ -153,25 +154,57 @@ function updateIfValueChanged(original, delta, key, newValue) {
  * @param newClaim
  */
 function updateIfClaimChanged(original, delta, key, newClaim) {
-  const claim = preserveExistingChannelMeta(original[key], newClaim);
+  const claim = mergeResolvedChannelClaim(original[key], newClaim);
 
   if (!original[key] || claimHasNewData(original[key], claim)) {
     delta[key] = claim;
   }
 }
 
-function preserveExistingChannelMeta(originalClaim, newClaim) {
-  if (!originalClaim || !newClaim || newClaim.value_type !== 'channel') return newClaim;
+function mergeResolvedChannelClaim(originalClaim, newClaim) {
+  if (!originalClaim || !newClaim) return newClaim;
 
+  const resolvedClaim = {
+    ...newClaim,
+    ...(originalClaim.signing_channel || newClaim.signing_channel
+      ? {
+          signing_channel: {
+            ...originalClaim.signing_channel,
+            ...newClaim.signing_channel,
+            ...(originalClaim.signing_channel?.value || newClaim.signing_channel?.value
+              ? {
+                  value: {
+                    ...originalClaim.signing_channel?.value,
+                    ...newClaim.signing_channel?.value,
+                  },
+                }
+              : {}),
+          },
+          is_channel_signature_valid: newClaim.is_channel_signature_valid ?? originalClaim.is_channel_signature_valid,
+        }
+      : {}),
+  };
+  if (resolvedClaim.value_type !== 'channel') return resolvedClaim;
+
+  const mergedClaim = {
+    ...originalClaim,
+    ...resolvedClaim,
+    ...(originalClaim.hyperbeam || resolvedClaim.hyperbeam
+      ? { hyperbeam: { ...originalClaim.hyperbeam, ...resolvedClaim.hyperbeam } }
+      : {}),
+    ...(originalClaim.value || resolvedClaim.value
+      ? { value: { ...originalClaim.value, ...resolvedClaim.value } }
+      : {}),
+    ...(originalClaim.meta || resolvedClaim.meta ? { meta: { ...originalClaim.meta, ...resolvedClaim.meta } } : {}),
+  };
   const originalClaimsInChannel = Number(originalClaim.meta?.claims_in_channel || 0);
-  const newClaimsInChannel = Number(newClaim.meta?.claims_in_channel || 0);
-  if (!originalClaimsInChannel || newClaimsInChannel >= originalClaimsInChannel) return newClaim;
+  const newClaimsInChannel = Number(resolvedClaim.meta?.claims_in_channel || 0);
+  if (!originalClaimsInChannel || newClaimsInChannel >= originalClaimsInChannel) return mergedClaim;
 
   return {
-    ...newClaim,
+    ...mergedClaim,
     meta: {
-      ...newClaim.meta,
-      ...originalClaim.meta,
+      ...mergedClaim.meta,
       claims_in_channel: originalClaimsInChannel,
     },
   };
@@ -317,6 +350,7 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
     }
 
     if (channel && channel.claim_id) {
+      const immutableChannelUri = hyperbeamImmutableUriFromClaim(channel);
       if (!stream) {
         updateIfValueChanged(state.claimsByUri, byUriDelta, url, channel.claim_id);
       }
@@ -334,16 +368,25 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
 
       updateIfValueChanged(state.claimsByUri, byUriDelta, channel.permanent_url, channel.claim_id);
       updateIfValueChanged(state.claimsByUri, byUriDelta, channel.canonical_url, channel.claim_id);
+      if (immutableChannelUri) {
+        updateIfValueChanged(state.claimsByUri, byUriDelta, immutableChannelUri, channel.claim_id);
+      }
       newResolvingUrls.delete(channel.canonical_url);
       newResolvingUrls.delete(channel.permanent_url);
+      if (immutableChannelUri) newResolvingUrls.delete(immutableChannelUri);
       newFailedToResolveUrls.delete(channel.canonical_url);
       newFailedToResolveUrls.delete(channel.permanent_url);
+      if (immutableChannelUri) newFailedToResolveUrls.delete(immutableChannelUri);
     }
 
     if (repostSrcChannel && repostSrcChannel.claim_id) {
+      const immutableRepostChannelUri = hyperbeamImmutableUriFromClaim(repostSrcChannel);
       updateIfClaimChanged(state.byId, byIdDelta, repostSrcChannel.claim_id, repostSrcChannel);
       updateIfValueChanged(state.claimsByUri, byUriDelta, repostSrcChannel.permanent_url, repostSrcChannel.claim_id);
       updateIfValueChanged(state.claimsByUri, byUriDelta, repostSrcChannel.canonical_url, repostSrcChannel.claim_id);
+      if (immutableRepostChannelUri) {
+        updateIfValueChanged(state.claimsByUri, byUriDelta, immutableRepostChannelUri, repostSrcChannel.claim_id);
+      }
     }
 
     if (collection) {

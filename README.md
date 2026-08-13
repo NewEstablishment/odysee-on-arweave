@@ -131,6 +131,22 @@ POST /id?!=true&committers=all
 The cookie is a request credential and must not be copied into the committed
 message. The reply exposes the stored ID in `message-id`.
 
+## Homepage and categories
+
+The public homepage is represented by one signed immutable
+`odysee-homepage@1.0` snapshot per language. Snapshot discovery uses generic
+`query@1.0`; consumers then hydrate and verify the exact committed message.
+Each category carries an ordered, pre-warmed claim pool. The homepage renders
+the category's configured prefix while the matching category route uses the
+larger pool for first paint, so both views share one source of truth without
+repeating discovery.
+
+Following is personalized and therefore is not stored in the public language
+snapshot. It is queried dynamically through the store-first integration and
+keeps the same locator-first, immutable-hydration boundary. Snapshot refreshes
+must leave the previous committed snapshot available until a complete
+replacement has been built and verified.
+
 ### Uploads
 
 The browser posts raw file bytes directly to `/id?!`. It then writes a generic

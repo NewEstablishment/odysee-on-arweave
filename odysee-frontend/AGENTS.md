@@ -65,6 +65,18 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Response parsing must preserve HyperBEAM header/multipart fields and exact
   commitment identity.
 
+## Homepage snapshots
+
+- Use one signed native `odysee-homepage@1.0` snapshot per language.
+- Discover snapshots through generic query and hydrate the exact committed ID.
+- Preserve each category's ordered pre-warmed pool. Homepage rows consume the
+  configured prefix; category routes consume the larger pool for first paint.
+- Following is dynamic per-user data and must not be embedded in the public
+  language snapshot.
+- Continue category pagination after the snapshot pool rather than treating
+  the pool as the complete category history.
+- Production manifest clients must not require an SSR product-data proxy.
+
 ## Uploads and thumbnails
 
 - HyperBEAM mode posts raw bytes directly to

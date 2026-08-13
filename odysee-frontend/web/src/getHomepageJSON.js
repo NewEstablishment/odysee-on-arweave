@@ -1,11 +1,25 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {
+  HOMEPAGE_HYPERBEAM_AUTH_TOKEN,
+  HOMEPAGE_SNAPSHOT_COMMITTER,
+  HOMEPAGE_SNAPSHOT_LOOKBACK_HOURS,
+} = require('../../config.cjs');
+const {
+  homepageClaimUri,
+  homepageSnapshotPath,
+  materializeHomepageData,
+  readHomepageSnapshot,
+  writeHomepageSnapshot,
+} = require('./homepageMaterializer');
+const { discoverHomepageSnapshots, publishHomepageSnapshots } = require('./homepageNativeSnapshot');
 
 const memo = {};
 const FORMAT = {
   ROKU: 'roku',
 };
+const NATIVE_SNAPSHOT_CACHE_MS = 60 * 1000;
 
 function walkFiles(dir, handler) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -102,20 +116,107 @@ function loadHomepageData() {
   }
 }
 
+async function refreshMaterializedHomepageData(snapshotPath) {
+  if (!memo.materializePromise) {
+    memo.materializePromise = materializeHomepageData(memo.homepageData)
+      .then(async (data) => {
+        await publishNativeHomepageData(data);
+        writeHomepageSnapshot(snapshotPath, data);
+        return data;
+      })
+      .finally(() => {
+        memo.materializePromise = undefined;
+      });
+  }
+
+  return memo.materializePromise;
+}
+
+async function publishNativeHomepageData(data) {
+  const hasToken = Boolean(HOMEPAGE_HYPERBEAM_AUTH_TOKEN);
+  const hasCommitter = Boolean(HOMEPAGE_SNAPSHOT_COMMITTER);
+  if (!hasToken && !hasCommitter) return;
+  if (!hasToken || !hasCommitter) {
+    throw new Error('Homepage native snapshot publisher requires both auth token and committer');
+  }
+  await publishHomepageSnapshots(data, {
+    authToken: HOMEPAGE_HYPERBEAM_AUTH_TOKEN,
+    expectedCommitter: HOMEPAGE_SNAPSHOT_COMMITTER,
+  });
+  memo.nativeSnapshotData = data;
+  memo.nativeSnapshotLoadedAt = Date.now();
+}
+
+async function readNativeHomepageData(languages) {
+  if (!HOMEPAGE_SNAPSHOT_COMMITTER) return null;
+  if (memo.nativeSnapshotData && Date.now() - memo.nativeSnapshotLoadedAt < NATIVE_SNAPSHOT_CACHE_MS) {
+    return memo.nativeSnapshotData;
+  }
+  const snapshots = await discoverHomepageSnapshots(languages, HOMEPAGE_SNAPSHOT_COMMITTER, {
+    lookbackHours: Number(HOMEPAGE_SNAPSHOT_LOOKBACK_HOURS),
+  });
+  const data = Object.fromEntries(
+    Object.entries(snapshots).map(([language, snapshot]) => [language, snapshot.payload.homepage])
+  );
+  if (Object.keys(data).length) {
+    memo.nativeSnapshotData = data;
+    memo.nativeSnapshotLoadedAt = Date.now();
+  }
+  return data;
+}
+
+function isCurrentHomepageSnapshot(data) {
+  const homepages = Object.values(data || {});
+  const categories = homepages.flatMap((homepage) => Object.values((homepage && homepage.categories) || {}));
+  const categoriesCurrent = categories.every(
+    (category) =>
+      !Array.isArray(category.immutableIds) ||
+      Object.prototype.hasOwnProperty.call(category, 'immutableSigningChannelIds')
+  );
+  const bannersCurrent = homepages.every((homepage) =>
+    (homepage?.featured?.items || []).every((item) => !homepageClaimUri(item?.url) || item.immutableId)
+  );
+  return Boolean(homepages.length && categories.length && categoriesCurrent && bannersCurrent);
+}
+
+async function getMaterializedHomepageData(forceRefresh = false) {
+  loadHomepageData();
+  if (!memo.homepageData) return {};
+
+  const snapshotPath = homepageSnapshotPath();
+  const snapshot = readHomepageSnapshot(snapshotPath);
+  if (!forceRefresh) {
+    try {
+      const nativeData = await readNativeHomepageData(Object.keys(memo.homepageData));
+      if (nativeData && isCurrentHomepageSnapshot(nativeData)) {
+        const mergedData = snapshot ? { ...snapshot.data, ...nativeData } : nativeData;
+        writeHomepageSnapshot(snapshotPath, mergedData);
+        return mergedData;
+      }
+    } catch (error) {
+      console.error('Native homepage snapshot discovery failed:', error); // eslint-disable-line no-console
+    }
+
+    if (snapshot && isCurrentHomepageSnapshot(snapshot.data)) return snapshot.data;
+    throw new Error(snapshot ? 'Homepage snapshot format is outdated' : 'Homepage snapshot is unavailable');
+  }
+
+  return refreshMaterializedHomepageData(snapshotPath);
+}
+
 // ****************************************************************************
 // v1
 // ****************************************************************************
-const getHomepageJsonV1 = () => {
-  loadHomepageData();
-
-  if (!memo.homepageData) {
+const getHomepageJsonV1 = async () => {
+  const homepageData = await getMaterializedHomepageData();
+  if (!Object.keys(homepageData).length) {
     return {};
   }
 
   const v1 = {};
-  const homepageKeys = Object.keys(memo.homepageData);
+  const homepageKeys = Object.keys(homepageData);
   homepageKeys.forEach((hp) => {
-    v1[hp] = memo.homepageData[hp].categories;
+    v1[hp] = homepageData[hp].categories;
   });
   return v1;
 };
@@ -141,28 +242,27 @@ const reformatV2Categories = (categories, format) => {
  *             empty.
  * @returns {{}}
  */
-const getHomepageJsonV2 = (format, lang) => {
-  loadHomepageData();
-
-  if (!memo.homepageData) {
+const getHomepageJsonV2 = async (format, lang) => {
+  const homepageData = await getMaterializedHomepageData();
+  if (!Object.keys(homepageData).length) {
     return {};
   }
 
   const v2 = {};
-  const homepageKeys = Object.keys(memo.homepageData);
+  const homepageKeys = Object.keys(homepageData);
   homepageKeys.forEach((hp) => {
     if (!lang || lang === hp) {
       v2[hp] = {
-        categories: reformatV2Categories(memo.homepageData[hp].categories, format),
-        portals: memo.homepageData[hp].portals,
-        featured: memo.homepageData[hp].featured,
-        meme: memo.homepageData[hp].meme,
-        meme_android: memo.homepageData[hp].meme_android,
-        meme_android_apk: memo.homepageData[hp].meme_android_apk,
-        meme_android_google: memo.homepageData[hp].meme_android_google,
-        discover: memo.homepageData[hp].discover,
-        discoverNew: memo.homepageData[hp]?.discoverNew,
-        customBanners: memo.homepageData[hp]?.customBanners,
+        categories: reformatV2Categories(homepageData[hp].categories, format),
+        portals: homepageData[hp].portals,
+        featured: homepageData[hp].featured,
+        meme: homepageData[hp].meme,
+        meme_android: homepageData[hp].meme_android,
+        meme_android_apk: homepageData[hp].meme_android_apk,
+        meme_android_google: homepageData[hp].meme_android_google,
+        discover: homepageData[hp].discover,
+        discoverNew: homepageData[hp]?.discoverNew,
+        customBanners: homepageData[hp]?.customBanners,
         announcement: memo.announcements[hp],
       };
     } else {
@@ -173,6 +273,8 @@ const getHomepageJsonV2 = (format, lang) => {
 };
 
 module.exports = {
+  getMaterializedHomepageData,
   getHomepageJsonV1,
   getHomepageJsonV2,
+  isCurrentHomepageSnapshot,
 };

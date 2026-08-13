@@ -44,6 +44,7 @@ function resolveHideMembersOnly(global: any, override: any) {
 }
 type Props = {
   uris?: Array<string>;
+  immutableSigningChannelIds?: Record<string, string>;
   prefixUris?: Array<string>;
   pins?: {
     urls?: Array<string>;
@@ -214,6 +215,7 @@ function ClaimListDiscover(props: Props) {
     injectedItem,
     feeAmount,
     uris,
+    immutableSigningChannelIds,
     prefixUris,
     pins,
     tileLayout,
@@ -277,7 +279,8 @@ function ClaimListDiscover(props: Props) {
     [dispatch]
   );
   const doResolveUris = React.useCallback(
-    (u: Array<string>, returnCached: boolean) => dispatch(doResolveUrisAction(u, returnCached)),
+    (u: Array<string>, returnCached: boolean, additionalOptions: any = {}) =>
+      dispatch(doResolveUrisAction(u, returnCached, true, additionalOptions)),
     [dispatch]
   );
   const doFetchThumbnailClaimsForCollectionIds = React.useCallback(
@@ -323,6 +326,10 @@ function ClaimListDiscover(props: Props) {
   const sortByParam = sortBy || urlParams.get(CS.SORT_BY_KEY) || CS.SORT_BY.NEWEST.key;
   const hideRepostsEffective = resolveHideReposts(hideReposts, hideRepostsOverride);
   const [finalUris, setFinalUris] = React.useState<string[]>();
+  const [snapshotContinuationRequested, setSnapshotContinuationRequested] = React.useState(false);
+  const [paginationPending, setPaginationPending] = React.useState(false);
+  const paginationUriCountRef = React.useRef<number | null>(null);
+  const snapshotUrisKey = JSON.stringify(uris || []);
   const langParam = urlParams.get(CS.LANGUAGE_KEY) || null;
   const searchInSelectedLang = searchInLanguage && !ignoreSearchInLanguage;
   const languageParams = resolveLangForClaimSearch(languageSetting, searchInSelectedLang, searchLanguages, langParam);
@@ -609,9 +616,9 @@ function ClaimListDiscover(props: Props) {
     claimSearchResult.length === 0 &&
     !hyperbeamRefreshKeysRef.current.has(optionsStringForEffect);
   const shouldPerformSearch = // -- pins alone will be resolved by the doResolveUris/doResolveClaimIds call
-    hasPins && !channelIdsParam
+    hasPins && !channelIdsParam && !uris
       ? false
-      : !uris &&
+      : (!uris || snapshotContinuationRequested) &&
         (claimSearchResult === undefined ||
           shouldRefreshEmptyHyperbeamChannelSearch ||
           didNavigateForward ||
@@ -677,7 +684,8 @@ function ClaimListDiscover(props: Props) {
 
     if (uris) {
       // --- direct uris
-      const newUris = uris && Array.from(new Set(uris));
+      doResolveUris(uris, false, { immutable_signing_channel_ids: immutableSigningChannelIds });
+      const newUris = Array.from(new Set([...uris, ...(claimSearchResult || [])]));
       injectPinUrls(newUris, orderParam, pins, resolvedPinUris);
       const newFinalUris = filterExcludedUris(newUris, excludeUris);
       setFinalUris(newFinalUris);
@@ -709,6 +717,8 @@ function ClaimListDiscover(props: Props) {
     pins,
     resolvedPinUris,
     uris,
+    immutableSigningChannelIds,
+    doResolveUris,
   ]);
 
   // **************************************************************************
@@ -727,10 +737,19 @@ function ClaimListDiscover(props: Props) {
       return;
     }
 
-    if (!loading && infiniteScroll) {
-      if (claimSearchResult && !claimSearchResultLastPageReached) {
-        setPage(page + 1);
-      }
+    if (!infiniteScroll || paginationPending) return;
+
+    if (uris && !snapshotContinuationRequested) {
+      paginationUriCountRef.current = finalUris?.length || 0;
+      setPaginationPending(true);
+      setSnapshotContinuationRequested(true);
+      return;
+    }
+
+    if (!loading && claimSearchResult && !claimSearchResultLastPageReached) {
+      paginationUriCountRef.current = finalUris?.length || 0;
+      setPaginationPending(true);
+      setPage(page + 1);
     }
   }
 
@@ -771,6 +790,47 @@ function ClaimListDiscover(props: Props) {
 
   // **************************************************************************
   // **************************************************************************
+  React.useEffect(() => {
+    setSnapshotContinuationRequested(false);
+    setPaginationPending(false);
+    paginationUriCountRef.current = null;
+  }, [nonPaginationOptionsKey, snapshotUrisKey]);
+  React.useEffect(() => {
+    const previousCount = paginationUriCountRef.current;
+    if (previousCount === null || !finalUris || finalUris.length <= previousCount) return;
+
+    paginationUriCountRef.current = null;
+    setPaginationPending(false);
+  }, [finalUris]);
+  React.useEffect(() => {
+    if (paginationUriCountRef.current === null || loading || !claimSearchResultLastPageReached) return;
+
+    paginationUriCountRef.current = null;
+    setPaginationPending(false);
+  }, [claimSearchResultLastPageReached, loading]);
+  React.useEffect(() => {
+    if (
+      !uris ||
+      !snapshotContinuationRequested ||
+      loading ||
+      page !== 1 ||
+      !claimSearchResult ||
+      claimSearchResultLastPageReached
+    ) {
+      return;
+    }
+
+    const snapshotCount = new Set(uris).size;
+    const mergedCount = new Set([...uris, ...claimSearchResult]).size;
+    if (mergedCount === snapshotCount) setPage(2);
+  }, [
+    claimSearchResult,
+    claimSearchResultLastPageReached,
+    loading,
+    page,
+    snapshotUrisKey,
+    snapshotContinuationRequested,
+  ]);
   React.useEffect(() => {
     if (channelIds) {
       doFetchOdyseeMembershipForChannelIds(channelIds);
@@ -827,7 +887,9 @@ function ClaimListDiscover(props: Props) {
     />
   );
   const claimListLoading =
-    loading || (channelIdsParam && channelIdsParam.length > 0 && claimSearchResult === undefined);
+    (!uris || snapshotContinuationRequested) &&
+    (loading || (channelIdsParam && channelIdsParam.length > 0 && claimSearchResult === undefined));
+  const showLoadingSkeleton = (claimListLoading || paginationPending) && useSkeletonScreen;
   return (
     <React.Fragment>
       {headerLabel}
@@ -862,15 +924,8 @@ function ClaimListDiscover(props: Props) {
             loadedCallback={loadedCallback}
             isShortFromChannelPage={isShortFromChannelPage}
             sectionTitle={sectionTitle}
+            trailingPlaceholderCount={showLoadingSkeleton ? dynamicPageSize : 0}
           />
-
-          {claimListLoading && useSkeletonScreen && (
-            <div className="claim-grid">
-              {Array.from({ length: dynamicPageSize }, (_, i) => (
-                <ClaimPreviewTile key={i} placeholder="loading" pulse />
-              ))}
-            </div>
-          )}
         </div>
       ) : (
         <div>
@@ -905,8 +960,7 @@ function ClaimListDiscover(props: Props) {
             sectionTitle={sectionTitle}
           />
 
-          {claimListLoading &&
-            useSkeletonScreen &&
+          {showLoadingSkeleton &&
             Array.from({ length: dynamicPageSize }, (_, i) => (
               <ClaimPreview
                 showNoSourceClaims={hasNoSource || showNoSourceClaims}

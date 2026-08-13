@@ -19,6 +19,7 @@ import { doFetchOdyseeMembershipForChannelIds } from 'redux/actions/memberships'
 import { doSetDefaultChannel } from 'redux/actions/settings';
 import { selectDefaultChannelClaim } from 'redux/selectors/settings';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 
 type Props = {
   selectedChannelUrl?: string;
@@ -67,9 +68,11 @@ function ChannelSelector(props: Props) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const activeChannelUrl = activeChannelClaim && activeChannelClaim.permanent_url;
+  const activeChannelPageUrl = hyperbeamImmutableUriFromClaim(activeChannelClaim);
+  const activeChannelDisplayUrl = activeChannelUrl || activeChannelPageUrl;
   const activeChannelId = activeChannelClaim && activeChannelClaim.claim_id;
-  const noActiveChannel = activeChannelUrl === null;
-  const pendingChannelFetch = !noActiveChannel && channelIds === undefined;
+  const noActiveChannel = activeChannelClaim === null;
+  const pendingChannelFetch = !noActiveChannel && (channelIds === undefined || activeChannelClaim === undefined);
 
   React.useEffect(() => {
     if (!autoSet) return;
@@ -96,10 +99,10 @@ function ChannelSelector(props: Props) {
         })}
       >
         <Menu>
-          {isHeaderMenu && channelIds && channelIds.length > 1 ? (
+          {isHeaderMenu && channelIds && channelIds.length > 1 && activeChannelClaim ? (
             <>
               <MenuButton className="menu__link">
-                <ChannelThumbnail uri={activeChannelUrl} hideStakedIndicator xxsmall noLazyLoad />
+                <ChannelThumbnail uri={activeChannelDisplayUrl} hideStakedIndicator xxsmall noLazyLoad />
                 {__('Change Default Channel')}
                 <Icon icon={ICONS.DOWN} />
               </MenuButton>
@@ -110,7 +113,7 @@ function ChannelSelector(props: Props) {
                 <AllSelector isSelected />
               ) : pendingChannelFetch ? (
                 <LoadingSelector isSelected />
-              ) : (incognito && !hideAnon) || !activeChannelUrl ? (
+              ) : (incognito && !hideAnon) || !activeChannelClaim ? (
                 <IncognitoSelector isSelected />
               ) : (
                 <ChannelListItem key={activeChannelId} channelId={activeChannelId} isSelected />
@@ -170,8 +173,8 @@ function ChannelSelector(props: Props) {
           </MenuList>
         </Menu>
       </div>
-      {isHeaderMenu && activeChannelUrl && (
-        <NavLink to={formatLbryUrlForWeb(activeChannelUrl)}>
+      {isHeaderMenu && activeChannelPageUrl && (
+        <NavLink to={formatLbryUrlForWeb(activeChannelPageUrl)}>
           <div className="header__navigationItem--channel">
             <span>↳</span>
             {__('My Channel Page')}

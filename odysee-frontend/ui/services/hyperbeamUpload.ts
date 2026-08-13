@@ -8,7 +8,14 @@ import {
   SCHEDULED_TAGS,
   VISIBILITY_TAGS,
 } from 'constants/tags';
-import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { fetchNativeUploadHead, fetchNativeUploadVersion } from 'util/hyperbeam';
+import { nativeMessageVersionRef } from 'util/nativeMessageVerification';
+import {
+  isNextNativeUploadRevision,
+  nativeUploadRevisionNumber,
+  type NativeUploadVersion,
+} from 'util/nativeUploadRevisions';
 
 const METADATA_KEYS = [
   'title',
@@ -64,75 +71,58 @@ export async function updateThroughHyperbeam(
   if (!recordId) throw new Error('HyperBEAM record ID not found for this claim.');
 
   const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
-  const request = hyperbeamDevicePostParams64(
-    HYPERBEAM_DEVICE.upload,
-    'update&!',
-    {
-      record_id: recordId,
-      metadata: {
-        ...publishMetadata(publishPayload),
-        ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
-      },
-    },
-    odyseeAuthHeaders(uploadIdentityToken(authToken))
-  );
-  if (!request) throw new Error('HyperBEAM upload device is not configured.');
-
-  const response = await request;
-  const json = await responseJson(response);
+  const head = await requireNativeUploadHead(recordId);
+  if (head.current.state === 'deleted') throw new Error('This HyperBEAM upload has already been deleted.');
+  const message = nativeUploadUpdateMessage(recordId, head.current, publishPayload, signingChannel);
+  const response = await genericUploadMessageWriteResponse(message, authToken);
+  if (!response) throw new Error('HyperBEAM node is not configured.');
+  const json = await responseJsonWithHeaders(response);
   if (!response.ok) throw new Error(errorMessage(json, response.status));
+  const versionId = storeWriteId(json);
+  const written = await requireAcceptedNativeUploadRevision(head.root, head.current, versionId);
+  const dataId = nativeUploadDataId(written);
+  if (!dataId) throw new Error('HyperBEAM upload revision lost its immutable media ID.');
 
-  return normalizePublishResponse(json, publishPayload, null, myChannels);
+  return normalizePublishResponse(
+    synthesizedUploadResponse(
+      recordId,
+      dataId,
+      uploadPayloadFromNativeVersion(written),
+      versionId,
+      nativeUploadRevisionNumber(written)
+    ),
+    publishPayload,
+    null,
+    myChannels
+  );
 }
 
 export async function deleteThroughHyperbeam(claim: any, authToken?: string): Promise<void> {
   const recordId = hyperbeamClaimRecordId(claim);
   if (!recordId) throw new Error('HyperBEAM record ID not found for this claim.');
 
-  const request = hyperbeamDevicePostParams64(
-    HYPERBEAM_DEVICE.upload,
-    'delete&!',
-    { record_id: recordId },
-    odyseeAuthHeaders(uploadIdentityToken(authToken))
-  );
-  if (!request) throw new Error('HyperBEAM upload device is not configured.');
-
-  const response = await request;
-  const json = await responseJson(response);
+  const head = await requireNativeUploadHead(recordId);
+  if (head.current.state === 'deleted') return;
+  const message = nativeUploadDeleteMessage(recordId, head.current);
+  const response = await genericUploadMessageWriteResponse(message, authToken);
+  if (!response) throw new Error('HyperBEAM node is not configured.');
+  const json = await responseJsonWithHeaders(response);
   if (!response.ok) throw new Error(errorMessage(json, response.status));
+  const versionId = storeWriteId(json);
+  const written = await requireAcceptedNativeUploadRevision(head.root, head.current, versionId);
+  if (written.state !== 'deleted') throw new Error('HyperBEAM upload delete did not create a tombstone.');
 }
 
-const UPLOAD_IDENTITY_STORAGE_KEY = 'hyperbeam-upload-identity';
-
-// The node's auth hook derives a deterministic signing wallet from this token,
-// so the same value must be sent for upload, edit, and delete to keep a stable
-// owner. Logged-in users use their Odysee auth token; otherwise we persist a
-// stable per-browser identity so uploads remain editable/deletable.
+// Same-origin requests can still authenticate through the HttpOnly Odysee
+// cookie. When JavaScript has the token, forward it explicitly as well so the
+// node receives the same account identity across origins.
 function uploadIdentityToken(authToken?: string): string {
-  if (authToken) return authToken;
-  if (typeof localStorage === 'undefined') return '';
-
-  let identity = localStorage.getItem(UPLOAD_IDENTITY_STORAGE_KEY);
-  if (!identity) {
-    identity = `anon-${randomIdentitySuffix()}`;
-    localStorage.setItem(UPLOAD_IDENTITY_STORAGE_KEY, identity);
-  }
-  return identity;
-}
-
-function randomIdentitySuffix(): string {
-  const cryptoObj = typeof crypto !== 'undefined' ? crypto : undefined;
-  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
-  if (cryptoObj?.getRandomValues) {
-    const bytes = cryptoObj.getRandomValues(new Uint8Array(16));
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return authToken || '';
 }
 
 function hyperbeamClaimRecordId(claim: any) {
   const hyperbeam = claim?.hyperbeam;
-  return hyperbeam?.['record-id'] || hyperbeam?.record_id || hyperbeam?.['data-id'] || hyperbeam?.data_id || '';
+  return hyperbeam?.['record-id'] || hyperbeam?.record_id || hyperbeam?.upload_id || '';
 }
 
 export async function publishThroughHyperbeam(
@@ -148,13 +138,14 @@ export async function publishThroughHyperbeam(
     content_type: file.type || publishPayload.content_type || 'application/octet-stream',
     size: file.size,
     name: publishPayload.name,
+    version_ref: nativeMessageVersionRef(),
     metadata: {
       ...publishMetadata(publishPayload),
       ...(await fileMediaMetadata(file)),
       ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
     },
   };
-  const storeResponse = await genericStoreWriteResponse(file);
+  const storeResponse = await genericStoreWriteResponse(file, identityToken);
   if (!storeResponse) throw new Error('HyperBEAM node is not configured.');
   const storeJson = await responseJsonWithHeaders(storeResponse);
   if (!storeResponse.ok) throw new Error(errorMessage(storeJson, storeResponse.status));
@@ -171,7 +162,7 @@ export async function publishThroughHyperbeam(
   if (!recordId) throw new Error('HyperBEAM upload index did not return an ID.');
 
   return normalizePublishResponse(
-    synthesizedUploadResponse(recordId, dataId, uploadPayload),
+    synthesizedUploadResponse(recordId, dataId, uploadPayload, recordId, 0),
     publishPayload,
     file,
     myChannels
@@ -181,7 +172,13 @@ export async function publishThroughHyperbeam(
 // The stored index message resolves back into a claim through the
 // immutable-id route (`immutableClaimFromHyperbeam`), so the publish
 // response is synthesized from the same fields the resolver reads.
-function synthesizedUploadResponse(recordId: string, dataId: string, uploadPayload: Record<string, any>) {
+function synthesizedUploadResponse(
+  recordId: string,
+  dataId: string,
+  uploadPayload: Record<string, any>,
+  versionId: string,
+  revision: number
+) {
   const metadata = uploadPayload.metadata || {};
   return {
     'record-id': recordId,
@@ -207,27 +204,35 @@ function synthesizedUploadResponse(recordId: string, dataId: string, uploadPaylo
           },
         },
         hyperbeam: {
-          device: 'odysee-upload@1.0',
+          device: 'message@1.0',
+          schema: 'odysee-upload@1.0',
+          immutable_id: recordId,
+          'immutable-id': recordId,
           'record-id': recordId,
           record_id: recordId,
           'data-id': dataId,
           data_id: dataId,
+          'version-id': versionId,
+          version_id: versionId,
+          revision,
+          state: uploadPayload.state || 'active',
         },
       },
     ],
   };
 }
 
-async function genericStoreWriteResponse(file: Blob) {
+async function genericStoreWriteResponse(file: Blob, authToken?: string) {
   const base = hyperbeamNodeBase();
   if (!base) return null;
 
-  return fetch(`${base}/id?!=true&committers=all`, {
+  return fetch('/$/api/hyperbeam-upload/v1/write', {
     method: 'POST',
     credentials: 'include',
     headers: {
       accept: 'application/json',
       'content-type': file.type || 'application/octet-stream',
+      ...odyseeAuthHeaders(authToken),
     },
     body: file,
   });
@@ -259,12 +264,20 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     'channel-id': channel.claim_id,
     'channel-name': channel.name,
     timestamp: Math.floor(Date.now() / 1000),
+    state: 'active',
+    revision: 0,
+    'version-ref': uploadPayload.version_ref,
+    tags: metadata.tags,
+    languages: metadata.languages,
+    'license-url': metadata.license_url,
+    video: metadata.video,
+    audio: metadata.audio,
   };
   const body = Object.fromEntries(
     Object.entries(message).filter(([, value]) => value !== undefined && value !== null && value !== '')
   );
 
-  return fetch(`${base}/id?!=true&committers=all`, {
+  return fetch('/$/api/hyperbeam-upload/v1/write', {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -273,6 +286,164 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
       ...odyseeAuthHeaders(authToken),
     },
     body: JSON.stringify(body),
+  });
+}
+
+async function requireNativeUploadHead(recordId: string) {
+  const head = await fetchNativeUploadHead(recordId);
+  if (!head) {
+    throw new Error('HyperBEAM could not verify the upload root and original owner.');
+  }
+  return head;
+}
+
+async function requireAcceptedNativeUploadRevision(
+  root: NativeUploadVersion,
+  current: NativeUploadVersion,
+  versionId: string
+): Promise<NativeUploadVersion> {
+  if (!versionId) throw new Error('HyperBEAM upload revision write did not return an ID.');
+  const written = await fetchNativeUploadVersion(versionId);
+  if (!written || !isNextNativeUploadRevision(root, current, written)) {
+    throw new Error('HyperBEAM rejected the upload revision ownership or chain.');
+  }
+  return written;
+}
+
+function nativeUploadUpdateMessage(
+  recordId: string,
+  current: NativeUploadVersion,
+  publishPayload: PublishParams,
+  signingChannel?: ChannelClaim
+): Record<string, any> {
+  const payload = publishPayload as any;
+  return nativeUploadRevisionMessage(recordId, current, 'update', 'active', {
+    title: updatedMetadataValue(payload, 'title', current),
+    description: updatedMetadataValue(payload, 'description', current),
+    'thumbnail-url': updatedMetadataValue(payload, 'thumbnail_url', current, 'thumbnail-url', 'thumbnail_url'),
+    tags: updatedMetadataValue(payload, 'tags', current),
+    languages: updatedMetadataValue(payload, 'languages', current),
+    license: updatedMetadataValue(payload, 'license', current),
+    'license-url': updatedMetadataValue(payload, 'license_url', current, 'license-url', 'license_url'),
+    'release-time': updatedMetadataValue(payload, 'release_time', current, 'release-time', 'release_time'),
+    'channel-id': signingChannel?.claim_id || field(current, 'channel-id', 'channel_id'),
+    'channel-name': signingChannel?.name || field(current, 'channel-name', 'channel_name'),
+  });
+}
+
+function nativeUploadDeleteMessage(recordId: string, current: NativeUploadVersion): Record<string, any> {
+  return nativeUploadRevisionMessage(recordId, current, 'delete', 'deleted');
+}
+
+function nativeUploadRevisionMessage(
+  recordId: string,
+  current: NativeUploadVersion,
+  operation: 'update' | 'delete',
+  state: 'active' | 'deleted',
+  overrides: Record<string, any> = {}
+): Record<string, any> {
+  const snapshot = Object.fromEntries(
+    [
+      'name',
+      'filename',
+      'content-type',
+      'source-size',
+      'data-id',
+      'streaming-url',
+      'title',
+      'description',
+      'thumbnail-url',
+      'tags',
+      'languages',
+      'license',
+      'license-url',
+      'release-time',
+      'channel-id',
+      'channel-name',
+      'video',
+      'audio',
+      'timestamp',
+      'version-ref',
+    ]
+      .map((key) => [key, field(current, key, key.replaceAll('-', '_'))])
+      .filter(([, value]) => value !== undefined && value !== null)
+  );
+
+  return compactMessage({
+    schema: 'odysee-upload@1.0',
+    type: 'upload',
+    ...snapshot,
+    ...overrides,
+    state,
+    operation,
+    'revision-of': recordId,
+    'previous-version': field(current, 'version-ref', 'version_ref', 'message-id', 'message_id'),
+    'version-ref': nativeMessageVersionRef(),
+    revision: nativeUploadRevisionNumber(current) + 1,
+    'revision-timestamp': Date.now(),
+  });
+}
+
+function updatedMetadataValue(
+  payload: Record<string, any>,
+  payloadKey: string,
+  current: NativeUploadVersion,
+  ...currentKeys: Array<string>
+) {
+  return Object.prototype.hasOwnProperty.call(payload, payloadKey)
+    ? payload[payloadKey]
+    : field(current, ...(currentKeys.length ? currentKeys : [payloadKey]));
+}
+
+function uploadPayloadFromNativeVersion(version: NativeUploadVersion) {
+  return {
+    name: field(version, 'name'),
+    filename: field(version, 'filename'),
+    content_type: field(version, 'content-type', 'content_type'),
+    size: field(version, 'source-size', 'source_size'),
+    state: field(version, 'state'),
+    metadata: {
+      title: field(version, 'title'),
+      description: field(version, 'description'),
+      thumbnail_url: field(version, 'thumbnail-url', 'thumbnail_url'),
+      tags: field(version, 'tags'),
+      languages: field(version, 'languages'),
+      license: field(version, 'license'),
+      license_url: field(version, 'license-url', 'license_url'),
+      release_time: field(version, 'release-time', 'release_time'),
+      video: field(version, 'video'),
+      audio: field(version, 'audio'),
+    },
+  };
+}
+
+function nativeUploadDataId(version: NativeUploadVersion): string {
+  return String(field(version, 'data-id', 'data_id') || '');
+}
+
+function field(source: Record<string, any>, ...keys: Array<string>): any {
+  for (const key of keys) {
+    if (source?.[key] !== undefined && source[key] !== null) return source[key];
+  }
+  return undefined;
+}
+
+function compactMessage(message: Record<string, any>): Record<string, any> {
+  return Object.fromEntries(Object.entries(message).filter(([, value]) => value !== undefined && value !== null));
+}
+
+async function genericUploadMessageWriteResponse(message: Record<string, any>, authToken?: string) {
+  if (!hyperbeamNodeBase()) return null;
+
+  return fetch('/$/api/hyperbeam-upload/v1/write', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...odyseeAuthHeaders(authToken),
+    },
+    body: JSON.stringify(message),
   });
 }
 

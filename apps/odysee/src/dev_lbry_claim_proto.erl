@@ -1,19 +1,31 @@
 -module(dev_lbry_claim_proto).
 -export([stream_sd_hash/1, channel_public_key/1, decode_metadata/1]).
 
-%% @doc Decode a stream claim protobuf message into a native, Odysee-shaped
+%% @doc Decode a claim protobuf message into a native, Odysee-shaped
 %% `value' map (title/description/thumbnail/tags/source/video/...), matching the
 %% shape produced for HyperBEAM-native uploads. This lets the client parse
 %% legacy and native content through one identical codepath. Returns
-%% `{ok, Value}' for a stream claim, or `not_found' for messages without a
-%% stream body (e.g. channel claims). Field numbers mirror the LBRY claim
-%% protobuf schema.
+%% `{ok, Value}' for stream and channel claims, or `not_found' for messages
+%% without either body. Field numbers mirror the LBRY claim protobuf schema.
 decode_metadata(Message) when is_binary(Message) ->
     case length_field(Message, 1) of
         {ok, Stream} ->
             {ok, stream_value(Message, Stream)};
         _ ->
-            not_found
+            case length_field(Message, 2) of
+                {ok, Channel} ->
+                    case channel_value(Message, Channel) of
+                        Value when map_size(Value) > 0 -> {ok, Value};
+                        _ -> not_found
+                    end;
+                _ ->
+                    case length_field(Message, 3) of
+                        {ok, Collection} ->
+                            {ok, collection_value(Message, Collection)};
+                        _ ->
+                            not_found
+                    end
+            end
     end;
 decode_metadata(_) ->
     not_found.
@@ -29,6 +41,43 @@ stream_value(Claim, Stream) ->
             media_dimensions_value(Video, Audio)
         )
     ).
+
+channel_value(Claim, Channel) ->
+    put_if_present(#{
+        <<"title">> => string_field(Claim, 8),
+        <<"description">> => string_field(Claim, 9),
+        <<"thumbnail">> => thumbnail_value(optional_field(Claim, 10)),
+        <<"tags">> => string_fields(Claim, 11),
+        <<"cover">> => thumbnail_value(optional_field(Channel, 4)),
+        <<"email">> => string_field(Channel, 2),
+        <<"website_url">> => string_field(Channel, 3)
+    }).
+
+collection_value(Claim, Collection) ->
+    put_if_present(#{
+        <<"title">> => string_field(Claim, 8),
+        <<"description">> => string_field(Claim, 9),
+        <<"thumbnail">> => thumbnail_value(optional_field(Claim, 10)),
+        <<"tags">> => string_fields(Claim, 11),
+        <<"claims">> => collection_claim_ids(Collection)
+    }).
+
+collection_claim_ids(Collection) ->
+    case
+        [
+            hb_util:to_hex(reverse_bytes(Hash))
+        ||
+            Reference <- all_length_fields(Collection, 2, []),
+            {ok, Hash} <- [length_field(Reference, 1)],
+            byte_size(Hash) =:= 20
+        ]
+    of
+        [] -> not_found;
+        IDs -> iolist_to_binary(lists:join(<<",">>, IDs))
+    end.
+
+reverse_bytes(Bin) ->
+    binary:list_to_bin(lists:reverse(binary:bin_to_list(Bin))).
 
 base_stream_value(Claim, Stream, Source, MediaType) ->
     #{
@@ -75,7 +124,7 @@ video_value(Video) ->
 audio_value(not_found) ->
     not_found;
 audio_value(Audio) ->
-    put_if_present(#{ <<"duration">> => varint_field(Audio, 2) }).
+    put_if_present(#{ <<"duration">> => varint_field(Audio, 1) }).
 
 thumbnail_value(not_found) ->
     not_found;
@@ -312,10 +361,49 @@ decode_metadata_extracts_native_value_shape_test() ->
     ?assertEqual(1920, maps:get(<<"width">>, VideoValue)),
     ?assertEqual(42, maps:get(<<"duration">>, VideoValue)).
 
+decode_metadata_extracts_audio_duration_test() ->
+    Source = <<(field(2, <<"audio.mp3">>))/binary, (field(4, <<"audio/mpeg">>))/binary>>,
+    Audio = varint_field_bin(1, 33268),
+    Stream = <<(field(1, Source))/binary, (field(12, Audio))/binary>>,
+    Claim = field(1, Stream),
+    {ok, Value} = decode_metadata(Claim),
+    ?assertEqual(<<"audio">>, maps:get(<<"stream_type">>, Value)),
+    ?assertEqual(33268, maps:get(<<"duration">>, maps:get(<<"audio">>, Value))).
+
 decode_metadata_without_stream_returns_not_found_test() ->
     Channel = field(1, <<2, 1:256>>),
     Claim = field(2, Channel),
     ?assertEqual(not_found, decode_metadata(Claim)).
+
+decode_metadata_extracts_collection_value_test() ->
+    ClaimIDA = binary:decode_hex(<<"e8eb248600a8fe5348c0712460970e9e208456cf">>),
+    ClaimIDB = binary:decode_hex(<<"fe5d333f9d5b6ed0732c8f8b7b8426e89e2968ee">>),
+    ReferenceA = field(1, reverse_bytes(ClaimIDA)),
+    ReferenceB = field(1, reverse_bytes(ClaimIDB)),
+    Collection = <<(field(2, ReferenceA))/binary, (field(2, ReferenceB))/binary>>,
+    Claim = <<(field(3, Collection))/binary, (field(8, <<"Japanese Metal">>))/binary>>,
+    {ok, Value} = decode_metadata(Claim),
+    ?assertEqual(<<"Japanese Metal">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(
+        <<"e8eb248600a8fe5348c0712460970e9e208456cf,",
+          "fe5d333f9d5b6ed0732c8f8b7b8426e89e2968ee">>,
+        maps:get(<<"claims">>, Value)
+    ).
+
+decode_metadata_extracts_channel_value_test() ->
+    Cover = field(5, <<"https://example.com/banner.png">>),
+    Channel = <<(field(1, <<2, 1:256>>))/binary, (field(4, Cover))/binary>>,
+    Thumbnail = field(5, <<"https://example.com/avatar.png">>),
+    Claim =
+        <<
+            (field(2, Channel))/binary,
+            (field(8, <<"Library Cat">>))/binary,
+            (field(10, Thumbnail))/binary
+        >>,
+    {ok, Value} = decode_metadata(Claim),
+    ?assertEqual(<<"Library Cat">>, maps:get(<<"title">>, Value)),
+    ?assertEqual(#{ <<"url">> => <<"https://example.com/avatar.png">> }, maps:get(<<"thumbnail">>, Value)),
+    ?assertEqual(#{ <<"url">> => <<"https://example.com/banner.png">> }, maps:get(<<"cover">>, Value)).
 
 varint_field_bin(Number, Value) ->
     Key = Number bsl 3,

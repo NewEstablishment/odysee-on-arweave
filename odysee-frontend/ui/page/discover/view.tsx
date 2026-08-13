@@ -22,6 +22,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectClientSetting, selectHomepageDiscoverNew } from 'redux/selectors/settings';
 import { doResolveUri } from 'redux/actions/claims';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 const CATEGORY_CONTENT_TYPES_FILTER = CS.CONTENT_TYPES.filter((x) => x !== CS.CLAIM_REPOST);
 
@@ -105,6 +106,7 @@ function DiscoverPage(props: Props) {
   }
 
   function getSubSection() {
+    if (hyperbeamNodeEnabled()) return null;
     const includeLivestreams = !tagsQuery && !hideLivestreams;
 
     if (includeLivestreams && (isWildWest || (channelIds && channelIds.length > 0))) {
@@ -218,6 +220,8 @@ function DiscoverPage(props: Props) {
     >
       <ClaimSearchFilterContext.Provider value={claimSearchFilters}>
         <ClaimListDiscover
+          uris={dynamicRouteProps?.categoryUris || dynamicRouteProps?.uris}
+          immutableSigningChannelIds={dynamicRouteProps?.immutableSigningChannelIds}
           pins={getPins(dynamicRouteProps)}
           hideFilters={isWildWest ? true : hideFilter}
           header={repostedUri ? <span /> : undefined}

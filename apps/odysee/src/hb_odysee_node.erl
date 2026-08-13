@@ -12,7 +12,15 @@
 %%% peers serves the same content trustlessly. `serving_store/1' returns
 %%% the store stack for that configuration.
 -module(hb_odysee_node).
--export([start_seed/0, start_seed/1, seed_opts/1, upload_opts/1, serving_store/1]).
+-export([
+    start_seed/0,
+    start_seed/1,
+    start_upload/0,
+    start_upload/1,
+    seed_opts/1,
+    upload_opts/1,
+    serving_store/1
+]).
 -export([cookie_auth_hooks/1]).
 
 %% The keys the auth hook must leave out of the signature. The hook's own
@@ -34,7 +42,19 @@ start_seed() ->
 %% @doc Start a seed node, merging the given options over the seed
 %% defaults. Returns the node's base URL.
 start_seed(Overrides) ->
-    hb_http_server:start_node(seed_opts(Overrides)).
+    Opts = seed_opts(Overrides),
+    {ok, _} = hb_odysee_lua:publish(Opts),
+    hb_http_server:start_node(Opts).
+
+%% @doc Start a write-capable seed node and publish the generic Lua
+%% multirequest application into its local store before accepting traffic.
+start_upload() ->
+    start_upload(#{}).
+
+start_upload(Overrides) ->
+    Opts = upload_opts(Overrides),
+    {ok, _} = hb_odysee_lua:publish(Opts),
+    hb_http_server:start_node(Opts).
 
 %% @doc The seed-node option set: the stock option defaults, with the
 %% Odysee source stores appended after the node's own caches so local
@@ -43,12 +63,23 @@ seed_opts(Overrides) ->
     Stores =
         maps:get(<<"store">>, Overrides, hb_opts:get(store, [], #{}))
             ++ odysee_stores(Overrides),
-    Base = maps:merge(#{ <<"port">> => 0 }, maps:remove(<<"store">>, Overrides)),
+    Defaults = #{
+        <<"port">> => 0,
+        %% Browser writes (comments, uploads): the token-derived identity commits
+        %% a `POST /id?!=true&committers=all', `store-all-signed' persists
+        %% the committed message, and `~reply-id@1.0' (appended by
+        %% `cookie_auth_hooks/1') surfaces the stored id in the reply.
+        %% Override hooks are folded in rather than replaced, so callers
+        %% supplying their own `on' handlers keep the write path.
+        <<"store-all-signed">> => true,
+        <<"on">> => cookie_auth_hooks(Overrides)
+    },
+    Base = maps:merge(Defaults, maps:without([<<"store">>, <<"on">>], Overrides)),
     Base#{ <<"store">> => Stores }.
 
 %% @doc Seed-node options that also accept committed writes: uploads,
 %% channel profiles, comments. The stock auth hook signs any request
-%% carrying the `!' commit flag with a cookie-derived per-user wallet,
+%% carrying the `!' commit flag with a token-derived per-account wallet,
 %% `store-all-signed' persists what it signs, and the match index makes
 %% the writes discoverable through `~query@1.0'. Writes land in the
 %% primary (first) store, which must support `match' (LMDB does).
@@ -63,6 +94,10 @@ upload_opts(Overrides) ->
 
 %% @doc The read-only Odysee source stores.
 odysee_stores(Opts) ->
+    LocalStore = hb_store:scope(
+        maps:get(<<"store">>, Opts, hb_opts:get(store, [], Opts)),
+        local
+    ),
     [
         % Signed inbound messages (uploads, comments) land in the node's
         % `cache-http' store; stacking it makes them readable and
@@ -73,7 +108,8 @@ odysee_stores(Opts) ->
         },
         #{
             <<"store-module">> => hb_store_odysee,
-            <<"name">> => <<"cache-odysee">>
+            <<"name">> => <<"cache-odysee">>,
+            <<"local-store">> => LocalStore
         },
         #{
             <<"store-module">> => hb_store_lbry_claim_output,
@@ -94,14 +130,15 @@ odysee_stores(Opts) ->
     ] ++ hb_opts:get(<<"odysee-extra-stores">>, [], Opts).
 
 %% @doc The node's default `on' hooks, with the `~auth-hook@1.0' request
-%% handler's secret provider swapped to `~cookie@1.0', followed by a
+%% handler's secret provider swapped to `~odysee-auth@1.0', followed by a
 %% `~reply-id@1.0' stage that surfaces the stored message's ID in the
-%% reply. Browsers then receive a stable anonymous identity
-%% automatically: the first commit-flag request mints a cookie-derived
-%% per-user wallet, every subsequent request with that cookie commits as
-%% the same user, and the committed writes (uploads, comments) persist
-%% via the hook's `store-all-signed' handling. Pass the result as the
-%% node's `on' option.
+%% reply. The hook is gated (`when') to requests that carry the `!'
+%% commit flag or an explicit Odysee auth-token header, so anonymous
+%% reads pass through unchallenged. A request that does fire the hook
+%% derives a per-account wallet from the Odysee `auth_token', and the
+%% committed writes (uploads, comments) persist via the hook's
+%% `store-all-signed' handling. Pass the result as the node's `on'
+%% option.
 cookie_auth_hooks(Opts) ->
     Hooks = hb_opts:get(on, #{}, Opts),
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
@@ -112,8 +149,21 @@ cookie_auth_hooks(Opts) ->
                     (Handler = #{ <<"device">> := <<"auth-hook@1.0">> }) ->
                         [
                             Handler#{
+                                <<"when">> => #{
+                                    <<"keys">> =>
+                                        [
+                                            <<"!">>,
+                                            <<"odysee-auth-token">>,
+                                            <<"x-odysee-auth-token">>,
+                                            <<"x-lbry-auth-token">>
+                                        ]
+                                },
                                 <<"secret-provider">> =>
-                                    #{ <<"device">> => <<"cookie@1.0">> }
+                                    #{
+                                        <<"device">> => <<"odysee-auth@1.0">>,
+                                        <<"access-control">> =>
+                                            #{ <<"device">> => <<"odysee-auth@1.0">> }
+                                    }
                             },
                             #{
                                 <<"device">> => <<"reply-id@1.0">>,
@@ -325,7 +375,7 @@ skeleton_descriptor() ->
 
 %%% The write loop: a node built by `upload_opts/1', driven over HTTP the way
 %%% a browser drives it. A POST carrying the `!' commit flag is signed with a
-%%% cookie-derived wallet, persisted, and its signed id returned; everything
+%%% token-derived wallet, persisted, and its signed id returned; everything
 %%% after that is ordinary reads and queries.
 
 upload_node() ->
@@ -333,24 +383,44 @@ upload_node() ->
     Node =
         hb_http_server:start_node(upload_opts(#{
             <<"store">> => [Store],
-            <<"priv-wallet">> => ar_wallet:new()
+            <<"priv-wallet">> => ar_wallet:new(),
+            <<"odysee-auth-allow-unvalidated-tokens">> => true,
+            <<"odysee-auth-pbkdf2-iterations">> => 1,
+            <<"odysee-auth-pbkdf2-key-length">> => 64
         })),
     {Node, #{ <<"store">> => [Store] }}.
 
 %% @doc POST a message with the commit flag. Passing a previous reply reuses
-%% its session cookie, so the request commits as the same user; `none' is a
-%% fresh session and therefore a fresh identity.
+%% its session: the auth token it carried commits as the same user; `none'
+%% is a fresh session (a fresh token) and therefore a fresh identity. The
+%% token is threaded through the returned reply, as the session cookie was
+%% before `~odysee-auth@1.0' made writes token-authenticated.
 commit_post(Node, Msg, PrevReply, Opts) ->
-    Req = Msg#{ <<"path">> => <<"/id?!=true&committers=all">> },
+    Token =
+        case PrevReply of
+            none -> hb_util:encode(crypto:strong_rand_bytes(16));
+            #{ <<"x-odysee-auth-token">> := PrevToken } -> PrevToken
+        end,
+    Req = Msg#{
+        <<"path">> => <<"/id?!=true&committers=all">>,
+        <<"x-odysee-auth-token">> => Token
+    },
     WithCookie =
         case PrevReply of
-            none -> Req;
-            _ -> with_cookie(Req, PrevReply, Opts)
+            PrevMap when is_map(PrevMap) -> with_cookie(Req, PrevReply, Opts);
+            _ -> Req
         end,
     {ok, Reply} = hb_http:post(Node, WithCookie, Opts),
-    ID = hb_maps:get(<<"message-id">>, Reply, not_found, Opts),
+    % A body-only reply collapses to the stored id itself; a message reply
+    % carries it under `message-id'.
+    ID =
+        case Reply of
+            Bin when is_binary(Bin) -> Bin;
+            _ -> hb_maps:get(<<"message-id">>, Reply, not_found, Opts)
+        end,
     ?assert(is_binary(ID)),
-    {Reply, ID}.
+    ReplyMap = if is_map(Reply) -> Reply; true -> #{ <<"body">> => Reply } end,
+    {ReplyMap#{ <<"x-odysee-auth-token">> => Token }, ID}.
 
 %% What a browser does: each `set-cookie' line's `name=value' pair, joined
 %% into one `cookie' header on the next request.

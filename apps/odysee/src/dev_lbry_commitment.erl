@@ -315,7 +315,7 @@ with_ancestry_field(Msg, Ancestry) ->
 
 %% Decode the claim protobuf into a native Odysee-shaped `value' map. Returns
 %% `{Fields, CommittedKeys}' so the caller can both attach the field and extend
-%% its commitment. Empty for non-stream claims (e.g. channels).
+%% its commitment. Empty for claims without a stream or channel body.
 decoded_value_fields(Envelope) when is_map(Envelope) ->
     case dev_lbry_claim_proto:decode_metadata(maps:get(<<"message">>, Envelope, <<>>)) of
         {ok, Value} when map_size(Value) > 0 -> {#{ <<"value">> => Value }, [<<"value">>]};
@@ -358,6 +358,7 @@ channel_output_message(Raw, Nout, Ancestry) ->
         ClaimOp = maps:get(<<"claim-op">>, ClaimMsg),
         Type = claim_commitment_type(ClaimMsg),
         TxIDHex = maps:get(<<"txid">>, ClaimMsg),
+        ValueKeys = value_committed_keys(ClaimMsg),
         Msg = (maps:remove(<<"commitments">>, ClaimMsg))#{
             <<"channel-id">> => ClaimID,
             <<"public-key">> => PublicKeyHex
@@ -370,7 +371,7 @@ channel_output_message(Raw, Nout, Ancestry) ->
                 {<<"outpoint">>, outpoint_bytes(TxIDHex, Nout)},
                 lists:sort(
                     claim_committed_list(Ancestry) ++
-                        [<<"channel-id">>, <<"public-key">>]
+                        [<<"channel-id">>, <<"public-key">>] ++ ValueKeys
                 ),
                 #{
                     <<"claim-id">> => ClaimID,
@@ -404,9 +405,7 @@ stream_claim_message(Raw, Nout, Ancestry) ->
         ClaimOp = maps:get(<<"claim-op">>, ClaimMsg),
         Type = claim_commitment_type(ClaimMsg),
         TxIDHex = maps:get(<<"txid">>, ClaimMsg),
-        % `value' is decoded and committed by claim_output_message above; carry
-        % it into the stream commitment's committed set so it stays verifiable.
-        ValueKeys = case maps:is_key(<<"value">>, ClaimMsg) of true -> [<<"value">>]; false -> [] end,
+        ValueKeys = value_committed_keys(ClaimMsg),
         Msg = ClaimMsg#{
             <<"sd-hash">> => SDHash
         },
@@ -427,6 +426,9 @@ stream_claim_message(Raw, Nout, Ancestry) ->
                 )
             )}
     end.
+
+value_committed_keys(#{ <<"value">> := _ }) -> [<<"value">>];
+value_committed_keys(_) -> [].
 
 %% @doc Set every commitment on a message to the union of all the
 %% commitments' committed key lists. `hb_message:with_only_committed' (and

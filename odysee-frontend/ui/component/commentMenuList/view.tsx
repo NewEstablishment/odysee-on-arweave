@@ -24,6 +24,7 @@ import { selectModerationDelegatorsById, selectModerationDelegatesById } from 'r
 import { selectPlayingUri } from 'redux/selectors/content';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 
 type Props = {
   uri: string | null | undefined;
@@ -80,6 +81,7 @@ function CommentMenuList(props: Props) {
   const dispatch = useAppDispatch();
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const authorClaim = useAppSelector((state) => selectClaimForUri(state, authorUri));
+  const authorPageUri = hyperbeamImmutableUriFromClaim(authorClaim) || authorUri;
   const authorCanonicalUri = (authorClaim && authorClaim.canonical_url) || '';
   const authorId = (authorClaim && authorClaim.claim_id) || '';
   const claimIsMine = useAppSelector((state) => selectClaimIsMine(state, claim));
@@ -214,7 +216,7 @@ function CommentMenuList(props: Props) {
     >
       {(isLiveComment || isUserLabel) && (
         <MenuItem onSelect={(e) => e.preventDefault()}>
-          <NavLink className="comment__menu-option menu__link" to={formatLbryUrlForWeb(authorUri)}>
+          <NavLink className="comment__menu-option menu__link" to={formatLbryUrlForWeb(authorPageUri)}>
             <span className={'button__content'}>
               <Icon aria-hidden icon={ICONS.CHANNEL} className={'icon'} />
               {__('Visit')}

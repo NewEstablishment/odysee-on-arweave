@@ -3,7 +3,7 @@ import { EMPTY_ARRAY, EMPTY_OBJECT } from 'redux/selectors/empty';
 import { SHOW_ADS } from 'config';
 import { selectClaimForId, selectMyChannelClaims, selectStakedLevelForChannelUri } from 'redux/selectors/claims';
 import { hasLegacyOdyseePremium, selectUserEmail, selectUserLocale } from 'redux/selectors/user';
-import { selectDefaultChannelClaim } from 'redux/selectors/settings';
+import { selectDefaultChannelClaim, selectDefaultChannelId } from 'redux/selectors/settings';
 export const selectState = (state) => state.app || EMPTY_OBJECT;
 export const selectPlatform = (state) => selectState(state).platform;
 export const selectUpdateUrl = createSelector(selectPlatform, (platform) => {
@@ -73,11 +73,13 @@ export const selectInterestedInYoutubeSync = (state) => selectState(state).inter
 export const selectSplashAnimationEnabled = (state) => selectState(state).splashAnimationEnabled;
 export const selectActiveChannelId = (state) => selectState(state).activeChannel;
 export const selectActiveChannelClaim = createSelector(
+  selectActiveChannelId,
   (state) => selectClaimForId(state, selectActiveChannelId(state)), // i.e. 'byId[activeChannelId]' specifically, instead of just 'byId'.
   (state) => selectUserEmail(state),
+  selectDefaultChannelId,
   selectDefaultChannelClaim,
   selectMyChannelClaims,
-  (activeChannelClaim, userEmail, defaultChannel, myChannelClaims) => {
+  (activeChannelId, activeChannelClaim, userEmail, defaultChannelId, defaultChannel, myChannelClaims) => {
     // Null: has none. Undefined: not resolved, default state, could have or not
     if (!userEmail || myChannelClaims === null) {
       return null;
@@ -85,6 +87,12 @@ export const selectActiveChannelClaim = createSelector(
       return undefined;
     }
 
+    const selectedChannelId = activeChannelId || defaultChannelId;
+    const ownedSelectedChannel = selectedChannelId
+      ? myChannelClaims.find((claim) => claim.claim_id === selectedChannelId)
+      : undefined;
+
+    if (ownedSelectedChannel) return ownedSelectedChannel;
     if (activeChannelClaim) return activeChannelClaim;
     if (defaultChannel) return defaultChannel;
     const myChannelClaimsByEffectiveAmount = myChannelClaims.slice().sort((a, b) => {

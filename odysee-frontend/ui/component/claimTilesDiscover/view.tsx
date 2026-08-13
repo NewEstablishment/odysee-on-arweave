@@ -26,6 +26,42 @@ import { createNormalizedClaimSearchKey } from 'util/claim';
 import { CsOptHelper } from 'util/claim-search';
 import * as CS from 'constants/claim_search';
 const SHOW_TIMEOUT_MSG = false;
+const HOMEPAGE_HYDRATION_CONCURRENCY = 2;
+const HOMEPAGE_VISIBLE_PRIORITY = 100000;
+type HydrationJob = { key: string; priority: number; run: () => Promise<any> };
+const homepageHydrationJobs = new Map<string, HydrationJob>();
+const activeHomepageHydrationKeys = new Set<string>();
+let activeHomepageHydrations = 0;
+let homepageHydrationTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleHomepageHydration(key: string, priority: number, run: () => Promise<any>) {
+  if (activeHomepageHydrationKeys.has(key)) return;
+  const existing = homepageHydrationJobs.get(key);
+  if (existing) {
+    existing.priority = Math.max(existing.priority, priority);
+    return;
+  }
+  homepageHydrationJobs.set(key, { key, priority, run });
+  if (!homepageHydrationTimer) homepageHydrationTimer = setTimeout(runHomepageHydrationQueue, 25);
+}
+
+function runHomepageHydrationQueue() {
+  homepageHydrationTimer = undefined;
+  if (activeHomepageHydrations >= HOMEPAGE_HYDRATION_CONCURRENCY) return;
+  const job = Array.from(homepageHydrationJobs.values()).sort((left, right) => right.priority - left.priority)[0];
+  if (!job) return;
+  homepageHydrationJobs.delete(job.key);
+  activeHomepageHydrationKeys.add(job.key);
+  activeHomepageHydrations += 1;
+  runHomepageHydrationQueue();
+  Promise.resolve(job.run())
+    .catch(() => null)
+    .finally(() => {
+      activeHomepageHydrations -= 1;
+      activeHomepageHydrationKeys.delete(job.key);
+      runHomepageHydrationQueue();
+    });
+}
 
 function urisEqual(prev: Array<string> | null | undefined, next: Array<string> | null | undefined) {
   if (!prev || !next) {
@@ -50,6 +86,7 @@ type Props = {
     onlyPinForOrder?: string;
   };
   uris?: Array<string>;
+  immutableSigningChannelIds?: Record<string, string>;
   injectedItem?: ListInjectedItem;
   showNoSourceClaims?: boolean;
   renderProperties?: (arg0: Claim) => React.ReactNode | null | undefined;
@@ -78,6 +115,7 @@ type Props = {
   excludeShorts?: boolean;
   sectionTitle?: HomepageTitles;
   isShorts?: boolean;
+  homepageOrder?: number;
 };
 
 /**
@@ -258,6 +296,9 @@ function ClaimTilesDiscover(props: Props) {
     channelIds,
     loading,
     sectionTitle,
+    uris: explicitUris,
+    immutableSigningChannelIds,
+    homepageOrder = 0,
   } = props;
   const dispatch = useAppDispatch();
   // -- redux selectors --
@@ -304,29 +345,44 @@ function ClaimTilesDiscover(props: Props) {
     [dispatch]
   );
   const doResolveUris = React.useCallback(
-    (uris: Array<string>, returnCached: boolean) => dispatch(doResolveUrisAction(uris, returnCached)),
+    (uris: Array<string>, returnCached: boolean, resolveReposts: boolean = true, additionalOptions: any = {}) =>
+      dispatch(doResolveUrisAction(uris, returnCached, resolveReposts, additionalOptions)),
     [dispatch]
   );
   const listRef = React.useRef();
   const findLastVisibleSlot = injectedItem && injectedItem.node && injectedItem.index === undefined;
   const lastVisibleIndex = useGetLastVisibleSlot(listRef, !findLastVisibleSlot);
   const prevUris = React.useRef<string[]>();
-  const claimSearchUris = claimSearchResults || [];
-  const isUnfetchedClaimSearch = claimSearchResults === undefined;
+  const usesExplicitUris = Array.isArray(explicitUris);
+  const orderedHydrationPriority = -homepageOrder;
+  const [hydrationPriority, setHydrationPriority] = React.useState(
+    usesExplicitUris ? orderedHydrationPriority : HOMEPAGE_VISIBLE_PRIORITY
+  );
+  const hydrationScheduleRef = React.useRef<{ key: string; priority: number } | undefined>(undefined);
+  const visibleExplicitUris = React.useMemo(
+    () => (usesExplicitUris ? explicitUris.slice(0, pageSize) : []),
+    [usesExplicitUris, explicitUris, pageSize]
+  );
+  const claimSearchUris = usesExplicitUris ? visibleExplicitUris : claimSearchResults || [];
+  const isUnfetchedClaimSearch = !usesExplicitUris && claimSearchResults === undefined;
   const resolvedPinUris = useResolvePins({
     pins,
     doResolveClaimIds,
     doResolveUris,
   });
   const uriBuffer = useRef([]);
-  const timedOut = claimSearchResults === null;
+  const timedOut = !usesExplicitUris && claimSearchResults === null;
   const shouldPerformSearch =
-    !fetchingClaimSearch && !timedOut && claimSearchUris.length === 0 && !claimSearchLastPageReached;
+    !usesExplicitUris &&
+    !fetchingClaimSearch &&
+    !timedOut &&
+    claimSearchUris.length === 0 &&
+    !claimSearchLastPageReached;
   const uris = (prefixUris || []).concat(claimSearchUris);
   if (prefixUris && prefixUris.length) uris.splice(prefixUris.length * -1, prefixUris.length);
 
   // Treat the embed homepage the same as the main homepage for pin injection.
-  if (window.location.pathname === '/' || window.location.pathname === '/$/embed/home') {
+  if (!usesExplicitUris && (window.location.pathname === '/' || window.location.pathname === '/$/embed/home')) {
     injectPinUrls(uris, pins, resolvedPinUris);
   }
 
@@ -362,10 +418,47 @@ function ClaimTilesDiscover(props: Props) {
   // --------------------------------------------------------------------------
   // --------------------------------------------------------------------------
   React.useEffect(() => {
-    if (channelIds) {
+    if (!usesExplicitUris) {
+      setHydrationPriority(HOMEPAGE_VISIBLE_PRIORITY + orderedHydrationPriority);
+      return;
+    }
+    const element = listRef.current;
+    if (!element || typeof IntersectionObserver === 'undefined') {
+      setHydrationPriority(HOMEPAGE_VISIBLE_PRIORITY + orderedHydrationPriority);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) =>
+        setHydrationPriority(
+          (entries.some((entry) => entry.isIntersecting) ? HOMEPAGE_VISIBLE_PRIORITY : 0) + orderedHydrationPriority
+        ),
+      { rootMargin: '200px 0px' }
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [usesExplicitUris, orderedHydrationPriority]);
+  React.useEffect(() => {
+    if (!usesExplicitUris && channelIds) {
       doFetchOdyseeMembershipForChannelIds(channelIds);
     }
-  }, [channelIds, doFetchOdyseeMembershipForChannelIds]);
+  }, [usesExplicitUris, channelIds, doFetchOdyseeMembershipForChannelIds]);
+  React.useEffect(() => {
+    if (usesExplicitUris && hydrationPriority !== null && visibleExplicitUris.length) {
+      const hydrationKey = visibleExplicitUris
+        .map((uri) => `${uri}:${immutableSigningChannelIds?.[uri] || ''}`)
+        .join('|');
+      const scheduled = hydrationScheduleRef.current;
+      if (scheduled?.key === hydrationKey && scheduled.priority >= hydrationPriority) return;
+      hydrationScheduleRef.current = { key: hydrationKey, priority: hydrationPriority };
+      scheduleHomepageHydration(hydrationKey, hydrationPriority, () =>
+        Promise.resolve(
+          doResolveUris(visibleExplicitUris, false, true, {
+            immutable_signing_channel_ids: immutableSigningChannelIds,
+          })
+        )
+      );
+    }
+  }, [usesExplicitUris, hydrationPriority, visibleExplicitUris, immutableSigningChannelIds, doResolveUris]);
   React.useEffect(() => {
     if (shouldPerformSearch) {
       const searchOptions = JSON.parse(optionsStringified);
@@ -399,7 +492,13 @@ function ClaimTilesDiscover(props: Props) {
     );
   }
 
-  if (!timedOut && finalUris && finalUris.length === 0 && !loading && claimSearchLastPageReached) {
+  if (
+    !timedOut &&
+    finalUris &&
+    finalUris.length === 0 &&
+    !loading &&
+    (usesExplicitUris || claimSearchLastPageReached)
+  ) {
     return <div className="empty empty--centered">{__('No results')}</div>;
   }
 
@@ -479,7 +578,7 @@ function areEqual(prev: Props, next: Props) {
     }
   }
 
-  const ARRAY_KEYS = ['prefixUris', 'channelIds'];
+  const ARRAY_KEYS = ['prefixUris', 'channelIds', 'uris'];
 
   for (let i = 0; i < ARRAY_KEYS.length; ++i) {
     const key = ARRAY_KEYS[i];

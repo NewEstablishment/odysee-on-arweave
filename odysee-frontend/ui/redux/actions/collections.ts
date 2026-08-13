@@ -9,9 +9,11 @@ import {
   doResolveClaimIds,
   doCheckPendingClaims,
 } from 'redux/actions/claims';
+import { fetchNativePlaylistHead, immutableIdForClaim, writeNativePlaylistRevision } from 'util/hyperbeam';
 import {
   selectClaimForClaimId,
   selectClaimForId,
+  selectClaimForUri,
   makeSelectMetadataItemForUri,
   selectHasClaimForId,
   selectResolvingIds,
@@ -390,7 +392,7 @@ export const doRetryCollectionPublish = (collectionId: string) => (dispatch: Dis
 export const doLocalCollectionCreate =
   (params: CollectionLocalCreateParams, cb?: (id: any) => void) => (dispatch: Dispatch, getState: GetState) => {
     const { items, sourceId } = params;
-    const id = uuid(); // start with a uuid, this becomes a claimId after publish
+    const id = params.id || uuid(); // native playlist root id when pre-created, else uuid
 
     if (cb) cb(id);
 
@@ -893,6 +895,19 @@ export const doCollectionEdit =
 
     const isQueue = collectionId === COLS.QUEUE_ID;
     const title = params.title || params.name;
+
+    let nativeHead;
+    if (!isQueue && !isPreview && /^[0-9A-Za-z_-]{43}$/.test(collectionId)) {
+      nativeHead = await dispatch(
+        doWriteNativePlaylistRevision(collectionId, newItems, {
+          title: title || collection.title || collection.name,
+          description: 'description' in params ? params.description : collection.description,
+          thumbnail: params.thumbnail_url || collection.thumbnail?.url,
+        })
+      );
+      if (!nativeHead) return false;
+    }
+
     return new Promise<boolean>((success) => {
       dispatch({
         // -- queue specific action prevents attempting to sync settings and throwing errors on unauth users
@@ -907,6 +922,7 @@ export const doCollectionEdit =
             ...collection,
             items: newItems,
             itemCount: newItems.length,
+            ...(nativeHead ? { nativeHead } : {}),
             // this means pass description even if undefined or null, but not if it's not passed at all, so it can be deleted
             ...('description' in params
               ? {
@@ -940,12 +956,52 @@ export const doCollectionEdit =
         },
       });
 
-      if (!isQueue && !isPreview) {
+      if (!isQueue && !isPreview && !nativeHead) {
         dispatch(doAutoPublishCollectionIfNeeded(collectionId));
       }
 
       success(true);
     });
+  };
+export const doWriteNativePlaylistRevision =
+  (collectionId: string, itemUrls: Array<any>, fields: { title?: string, description?: string, thumbnail?: string }) =>
+  async (dispatch: Dispatch, getState: GetState) => {
+    try {
+      const state = getState();
+      const collection = selectCollectionForId(state, collectionId);
+      if (!collection) return null;
+
+      const itemIds = (itemUrls || [])
+        .map((url) => immutableIdForClaim(selectClaimForUri(state, String(url))))
+        .filter(Boolean);
+      const head =
+        collection.nativeHead ||
+        (await fetchNativePlaylistHead(collectionId).catch(() => null)) ||
+        { message: { revision: 0 }, messageId: collectionId };
+
+      const revisionId = await writeNativePlaylistRevision(collectionId, head, {
+        title: fields.title,
+        description: fields.description,
+        thumbnail: fields.thumbnail,
+        items: itemIds,
+      });
+      return {
+        messageId: revisionId,
+        message: { revision: (head.message?.revision || 0) + 1 },
+      };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('native playlist revision write failed', err);
+      dispatch(
+        doToast({
+          message: __('Native playlist edit failed, nothing was changed: %error%', {
+            error: err?.message || String(err),
+          }),
+          isError: true,
+        })
+      );
+      return null;
+    }
   };
 export const doClearEditsForCollectionId = (id: string) => (dispatch: Dispatch) => {
   if (collectionAutoPublishTimers[id]) {

@@ -29,6 +29,7 @@ import {
 } from 'redux/selectors/collections';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { doResolveClaimId as doResolveClaimIdAction } from 'redux/actions/claims';
+import { fetchHyperbeamClaimsByIds, fetchPlaylistMessage, outpointFromPlaylistRouteId } from 'util/hyperbeam';
 import {
   doCollectionEdit as doCollectionEditAction,
   doFetchItemsInCollection as doFetchItemsInCollectionAction,
@@ -44,7 +45,29 @@ export const CollectionPageContext = React.createContext<any>({});
 const CollectionPage = (props: Props) => {
   const dispatch = useAppDispatch();
   const { collectionId: routeCollectionId = '' } = useParams();
-  const collectionId = props.collectionId || routeCollectionId;
+  const routeOutpoint = outpointFromPlaylistRouteId(routeCollectionId);
+  const routePlaylistId = /^[0-9A-Za-z_-]{43}$/.test(routeCollectionId) ? routeCollectionId : null;
+  const [outpointCollectionId, setOutpointCollectionId] = React.useState('');
+  React.useEffect(() => {
+    if (outpointCollectionId || (!routeOutpoint && !routePlaylistId)) return;
+    if (routePlaylistId) {
+      fetchPlaylistMessage(routePlaylistId)
+        .then((playlist) => {
+          if (!playlist) return;
+          setOutpointCollectionId(String(playlist['legacy-claim-id'] || routePlaylistId));
+        })
+        .catch(() => {});
+      return;
+    }
+    fetchHyperbeamClaimsByIds([routeOutpoint])
+      .then((claims) => {
+        const resolvedId = claims[0]?.claim_id;
+        if (resolvedId) setOutpointCollectionId(String(resolvedId));
+      })
+      .catch(() => {});
+  }, [routeOutpoint, routePlaylistId, outpointCollectionId]);
+  const collectionId =
+    props.collectionId || (routeOutpoint || routePlaylistId ? outpointCollectionId : routeCollectionId);
   const claim = useAppSelector((state) => selectClaimForId(state, collectionId));
   const geoRestriction = useAppSelector((state) => selectGeoRestrictionForUri(state, claim?.permanent_url));
   const hasClaim = useAppSelector((state) => selectHasClaimForId(state, collectionId));
@@ -121,9 +144,9 @@ const CollectionPage = (props: Props) => {
   }
 
   React.useEffect(() => {
-    if (!isPrivate) {
+    if (!isPrivate && collectionId) {
       dispatch(
-        doResolveClaimIdAction(collectionId, true, {
+        doResolveClaimIdAction(collectionId, false, {
           include_is_my_output: true,
         })
       );

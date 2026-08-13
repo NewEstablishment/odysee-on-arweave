@@ -7,6 +7,7 @@ import { useAppSelector } from 'redux/hooks';
 import { selectClaimForUri, selectIsUriResolving } from 'redux/selectors/claims';
 import { selectUserOdyseeMembership } from 'redux/selectors/memberships';
 import { getChannelIdFromClaim } from 'util/claim';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 
 type ChannelInfo = {
   uri: string;
@@ -50,7 +51,7 @@ function resolveState(
       hasChannelData: Boolean(channelClaim),
       isAnonymous: !isChannelSignatureValid && !isChannelClaim,
       channelName: channelClaim?.name,
-      channelLink: isLinkType ? channelClaim?.canonical_url || channelClaim?.permanent_url : false,
+      channelLink: isLinkType ? hyperbeamImmutableUriFromClaim(channelClaim) : false,
       channelTitle:
         channelClaim && channelClaim.value && channelClaim.value.title
           ? channelClaim.value.title
