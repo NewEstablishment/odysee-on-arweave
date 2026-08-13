@@ -1,4 +1,6 @@
 -module(hb_lbry_codec_test).
+
+-ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
 stream_descriptor_roundtrip_test() ->
@@ -139,40 +141,9 @@ sample_channel() ->
     }.
 
 sample_descriptor() ->
-    Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,
-    IV = <<16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31>>,
-    Plaintext = <<"hello verified legacy stream">>,
-    Ciphertext = crypto:crypto_one_time(
-        aes_128_cbc,
-        Key,
-        IV,
-        pkcs7_pad(Plaintext),
-        true
-    ),
-    BlobHash = dev_lbry_stream_descriptor:blob_hash(Ciphertext),
-    Descriptor =
-        #{
-            <<"stream_type">> => <<"lbryfile">>,
-            <<"stream_name">> => hb_util:to_hex(<<"sample.mp4">>),
-            <<"key">> => hb_util:to_hex(Key),
-            <<"suggested_file_name">> => hb_util:to_hex(<<"sample.mp4">>),
-            <<"stream_hash">> => dev_lbry_stream_descriptor:blob_hash(<<"stream hash test">>),
-            <<"blobs">> => [
-                #{
-                    <<"length">> => byte_size(Ciphertext),
-                    <<"blob_num">> => 0,
-                    <<"iv">> => hb_util:to_hex(IV),
-                    <<"blob_hash">> => BlobHash
-                },
-                #{
-                    <<"length">> => 0,
-                    <<"blob_num">> => 1,
-                    <<"iv">> => hb_util:to_hex(<<0:128>>)
-                }
-            ]
-        },
-    Raw = hb_json:encode(Descriptor),
-    {Raw, dev_lbry_stream_descriptor:descriptor_hash(Raw)}.
+    {Raw, SDHash, _BlobHash, _Ciphertext} =
+        hb_lbry_test_fixtures:sample_descriptor(<<"hello verified legacy stream">>),
+    {Raw, SDHash}.
 
 other_descriptor() ->
     {Raw, SDHash} = sample_descriptor(),
@@ -183,12 +154,9 @@ other_descriptor() ->
 minimal_tx() ->
     <<1:32/little-signed, 0, 0, 0:32/little>>.
 
-pkcs7_pad(Plaintext) ->
-    PadLen = 16 - (byte_size(Plaintext) rem 16),
-    <<Plaintext/binary, (binary:copy(<<PadLen>>, PadLen))/binary>>.
-
 reverse(Bin) ->
     list_to_binary(lists:reverse(binary_to_list(Bin))).
 
 opts() ->
     #{}.
+-endif.

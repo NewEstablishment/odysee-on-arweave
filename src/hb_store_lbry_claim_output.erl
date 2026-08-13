@@ -171,7 +171,7 @@ valid_txid(TxID) ->
 read_returns_committed_claim_output_test() ->
     application:ensure_all_started(inets),
     TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
-    {ok, Server, Handle} = proxy_server(dev_lbry_tx:task0_tx_hex()),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:proxy_server(dev_lbry_tx:task0_tx_hex()),
     try
         Store = store(Server),
         {ok, Msg} =
@@ -201,7 +201,7 @@ read_returns_committed_claim_output_test() ->
 read_rejects_non_claim_output_test() ->
     application:ensure_all_started(inets),
     TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
-    {ok, Server, Handle} = proxy_server(dev_lbry_tx:task0_tx_hex()),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:proxy_server(dev_lbry_tx:task0_tx_hex()),
     try
         Store = store(Server),
         ?assertEqual(
@@ -219,7 +219,7 @@ read_rejects_non_claim_output_test() ->
 read_rejects_channel_kind_for_stream_claim_test() ->
     application:ensure_all_started(inets),
     TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
-    {ok, Server, Handle} = proxy_server(dev_lbry_tx:task0_tx_hex()),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:proxy_server(dev_lbry_tx:task0_tx_hex()),
     try
         Store = (store(Server))#{ <<"kind">> => <<"channel">> },
         %% The label matters more than the underlying protobuf reason: callers
@@ -306,15 +306,6 @@ read_degrades_to_asserted_without_ancestry_test() ->
     after
         hb_mock_server:stop(Handle)
     end.
-
-proxy_server(Hex) ->
-    Response =
-        hb_json:encode(#{
-            <<"jsonrpc">> => <<"2.0">>,
-            <<"result">> => #{ <<"hex">> => Hex },
-            <<"id">> => 1
-        }),
-    hb_mock_server:start([{"/api/v1/proxy", proxy, {200, Response}}]).
 
 %% A proxy that serves `transaction_show' for the given raw transactions by
 %% txid, so ancestry walks can fetch multiple parents.

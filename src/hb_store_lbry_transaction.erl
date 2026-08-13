@@ -98,7 +98,7 @@ valid_txid(TxID) ->
 read_returns_committed_transaction_message_test() ->
     application:ensure_all_started(inets),
     TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
-    {ok, Server, Handle} = proxy_server(dev_lbry_tx:task0_tx_hex()),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:proxy_server(dev_lbry_tx:task0_tx_hex()),
     try
         Store = store(Server),
         {ok, Msg} =
@@ -122,7 +122,7 @@ read_rejects_txid_mismatch_test() ->
         <<"0000000000000000000000000000000000000000000000000000000000000000">>,
     ActualTxID =
         <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
-    {ok, Server, Handle} = proxy_server(dev_lbry_tx:task0_tx_hex()),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:proxy_server(dev_lbry_tx:task0_tx_hex()),
     try
         Store = store(Server),
         ?assertEqual(
@@ -136,7 +136,7 @@ read_rejects_txid_mismatch_test() ->
 read_rejects_malformed_raw_transaction_test() ->
     application:ensure_all_started(inets),
     TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
-    {ok, Server, Handle} = proxy_server(<<"deadbeef">>),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:proxy_server(<<"deadbeef">>),
     try
         Store = store(Server),
         ?assertMatch(
@@ -152,15 +152,6 @@ read_rejects_invalid_txid_test() ->
         {error, not_found},
         read(#{}, #{ <<"read">> => <<"not-a-txid">> }, #{})
     ).
-
-proxy_server(Hex) ->
-    Response =
-        hb_json:encode(#{
-            <<"jsonrpc">> => <<"2.0">>,
-            <<"result">> => #{ <<"hex">> => Hex },
-            <<"id">> => 1
-        }),
-    hb_mock_server:start([{"/api/v1/proxy", proxy, {200, Response}}]).
 
 store(Server) ->
     #{
