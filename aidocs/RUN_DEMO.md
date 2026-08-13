@@ -36,7 +36,7 @@ pnpm install
 ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run build:manifest
 
 cd ..
-HB_PORT=18734 rebar3 device local
+HB_PORT=18734 rebar3 device local --device-src apps/odysee/src
 ```
 
 Stop the temporary `device local` node after it publishes
@@ -45,7 +45,7 @@ below explicitly enables arbitrary tokens for local demonstration and reduces
 the PBKDF2 cost so the smoke is fast. Never use either setting in production.
 
 ```sh
-HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'application:ensure_all_started(hackney), application:ensure_all_started(inets), Opts = hb_odysee_node:upload_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"odysee-auth-allow-unvalidated-tokens">> => true, <<"odysee-auth-pbkdf2-iterations">> => 1, <<"odysee-auth-pbkdf2-key-length">> => 64, <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, Manifest} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, Manifest]), receive stop -> ok end.'
+HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'application:ensure_all_started(hackney), application:ensure_all_started(inets), Overrides = #{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"odysee-auth-allow-unvalidated-tokens">> => true, <<"odysee-auth-pbkdf2-iterations">> => 1, <<"odysee-auth-pbkdf2-key-length">> => 64, <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}, Node = hb_odysee_node:start_upload(Overrides), Opts = hb_odysee_node:upload_opts(Overrides), {ok, Manifest} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, Manifest]), receive stop -> ok end.'
 ```
 
 Open the printed manifest ID:
@@ -123,8 +123,8 @@ node --check web/src/fetchStreamUrl.js
 ```
 
 `--with-core` is required for store and HTTP coverage. After changing a device,
-rerun `rebar3 device local` before manual node testing; compilation does not
-republish the local device store.
+rerun `rebar3 device local --device-src apps/odysee/src` before manual node
+testing; compilation does not republish the local device store.
 
 ## Current limitations
 

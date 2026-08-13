@@ -91,6 +91,37 @@ The current UI mutation code must not call `~odysee-upload@1.0`. Some old SSR,
 debug, and routing constants still mention that removed device; they are
 dormant cleanup debt and not authorization to restore it.
 
+## Homepage snapshots
+
+The public homepage is an hourly signed native `odysee-homepage@1.0` snapshot
+per language. Discover snapshots through generic `query@1.0`, then read the
+exact immutable ID and verify both its commitment and expected committer.
+Hydrate snapshot rows through the generic Lua multirequest application in the
+user's effective display order. Following is dynamic per-user data and is not
+part of the public snapshot. Do not restore per-card HTTP reads or the removed
+`odysee/local-object` presence alias.
+
+A language snapshot owns both homepage rows and category first paint. Preserve
+the ordered pre-warmed category reserve as `immutablePoolIds`; homepage rows
+use the `immutableIds` prefix, while category routes use the full pool and the
+same immutable signing-channel map. Do not make category routes repeat browser
+discovery for their initial content. Dynamic Following discovery may cross the
+same-origin public claim-search bridge, which only transports a bounded source
+store query and must not become a second product-data mode.
+
+During materialization, import every selected known legacy outpoint before
+probing native-only IDs. The compatibility import response is completion-aware:
+only verified messages committed to the local HyperBEAM store count as
+available. Retry only unresolved imports with bounded backoff, and do not turn
+a failed legacy import into a remote immutable-ID probe. Require exact local
+read-back of the expected native ID after every compatibility cache write.
+Start with the normal three-row candidate reserve. If verified imports cannot
+fill a category, expand only that category's candidate pages and freshness
+window in bounded rounds. The final round may append a category-tag query after
+the curated channel pool; never reorder it ahead of curated results. Never
+publish an incomplete category or remove the prior snapshot while an expanded
+refresh is running.
+
 ## Comments and search
 
 Native comments are ordinary signed messages discovered with generic

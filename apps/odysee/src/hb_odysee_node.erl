@@ -12,7 +12,15 @@
 %%% peers serves the same content trustlessly. `serving_store/1' returns
 %%% the store stack for that configuration.
 -module(hb_odysee_node).
--export([start_seed/0, start_seed/1, seed_opts/1, upload_opts/1, serving_store/1]).
+-export([
+    start_seed/0,
+    start_seed/1,
+    start_upload/0,
+    start_upload/1,
+    seed_opts/1,
+    upload_opts/1,
+    serving_store/1
+]).
 -export([cookie_auth_hooks/1]).
 
 %% The keys the auth hook must leave out of the signature. The hook's own
@@ -34,7 +42,19 @@ start_seed() ->
 %% @doc Start a seed node, merging the given options over the seed
 %% defaults. Returns the node's base URL.
 start_seed(Overrides) ->
-    hb_http_server:start_node(seed_opts(Overrides)).
+    Opts = seed_opts(Overrides),
+    {ok, _} = hb_odysee_lua:publish(Opts),
+    hb_http_server:start_node(Opts).
+
+%% @doc Start a write-capable seed node and publish the generic Lua
+%% multirequest application into its local store before accepting traffic.
+start_upload() ->
+    start_upload(#{}).
+
+start_upload(Overrides) ->
+    Opts = upload_opts(Overrides),
+    {ok, _} = hb_odysee_lua:publish(Opts),
+    hb_http_server:start_node(Opts).
 
 %% @doc The seed-node option set: the stock option defaults, with the
 %% Odysee source stores appended after the node's own caches so local
@@ -74,6 +94,10 @@ upload_opts(Overrides) ->
 
 %% @doc The read-only Odysee source stores.
 odysee_stores(Opts) ->
+    LocalStore = hb_store:scope(
+        maps:get(<<"store">>, Opts, hb_opts:get(store, [], Opts)),
+        local
+    ),
     [
         % Signed inbound messages (uploads, comments) land in the node's
         % `cache-http' store; stacking it makes them readable and
@@ -84,7 +108,8 @@ odysee_stores(Opts) ->
         },
         #{
             <<"store-module">> => hb_store_odysee,
-            <<"name">> => <<"cache-odysee">>
+            <<"name">> => <<"cache-odysee">>,
+            <<"local-store">> => LocalStore
         },
         #{
             <<"store-module">> => hb_store_lbry_claim_output,

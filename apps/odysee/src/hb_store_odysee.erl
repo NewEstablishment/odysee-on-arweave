@@ -20,6 +20,10 @@
 %%%   <li>`odysee/stream/(uri)': stream claim evidence, carrying the
 %%%       channel attestation commitment when the claim is signed.</li>
 %%%   <li>`odysee/stream-id/(txid:nout)': stream evidence by outpoint.</li>
+%%%   <li>`odysee/source-claims/(encoded-query)': filtered source discovery
+%%%       returning immutable claim outpoints for materialized views.</li>
+%%%   <li>`odysee/source-resolve/(uri)': source resolution metadata used to
+%%%       locate immutable homepage banner outpoints.</li>
 %%%   <li>`odysee/outpoint/(txid)/(nout)' and
 %%%       `odysee/claim-output/(txid)/(nout)': immutable claim-output
 %%%       evidence, trying the stream and channel kinds before the
@@ -189,6 +193,12 @@ read_live(<<"odysee/channel-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts);
 read_live(<<"odysee/channel-claims/", Rest/binary>>, StoreOpts, NodeOpts) ->
     channel_claims_read(Rest, StoreOpts, NodeOpts);
+read_live(<<"odysee/source-claims/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    source_claims_read(Encoded, StoreOpts, NodeOpts);
+read_live(<<"odysee/source-resolve/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    source_resolve_read(Encoded, StoreOpts, NodeOpts);
+read_live(<<"odysee/import-claims/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    import_claims_read(Encoded, StoreOpts, NodeOpts);
 read_live(<<"odysee/playlist/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     playlist_read(Encoded, StoreOpts, NodeOpts);
 read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
@@ -213,8 +223,7 @@ read_live(<<"odysee/claim-json/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, Outpoint} ?= decode_component(Encoded),
         {ok, TxID, Nout} ?= parse_bare_outpoint(Outpoint),
-        {ok, Msg} ?= kind_output(<<"claim">>, TxID, Nout, StoreOpts, NodeOpts),
-        json_evidence_result(Msg, NodeOpts)
+        json_native_outpoint(TxID, Nout, StoreOpts, NodeOpts)
     end;
 read_live(<<"odysee/stream/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
@@ -247,7 +256,7 @@ read_live(<<"odysee/transaction/", Encoded/binary>>, StoreOpts, NodeOpts) ->
         ok ?= require_hex_size(TxID, 64, invalid_txid),
         {ok, Msg} ?=
             hb_store_lbry_transaction:read(
-                StoreOpts,
+                delegated_store_opts(StoreOpts),
                 #{ <<"read">> => TxID },
                 NodeOpts
             ),
@@ -258,7 +267,7 @@ read_live(<<"odysee/descriptor/", Encoded/binary>>, StoreOpts, NodeOpts) ->
         {ok, SDHash} ?= decode_component(Encoded),
         {ok, Msg} ?=
             hb_store_lbry_stream_descriptor:read(
-                StoreOpts,
+                delegated_store_opts(StoreOpts),
                 #{ <<"read">> => SDHash },
                 NodeOpts
             ),
@@ -269,7 +278,7 @@ read_live(<<"odysee/blob/", Encoded/binary>>, StoreOpts, NodeOpts) ->
         {ok, Hash} ?= decode_component(Encoded),
         {ok, Msg} ?=
             hb_store_lbry_blob:read(
-                StoreOpts,
+                delegated_store_opts(StoreOpts),
                 #{ <<"read">> => Hash },
                 NodeOpts
             ),
@@ -360,16 +369,20 @@ outpoint_evidence(Kind, TxID, Nout, StoreOpts, NodeOpts) ->
     kind_output(Kind, TxID, Nout, StoreOpts, NodeOpts).
 
 kind_output(Kind, TxID, Nout, StoreOpts, NodeOpts) ->
+    Store0 = delegated_store_opts(StoreOpts),
     Store =
         case Kind of
-            <<"claim">> -> maps:remove(<<"kind">>, StoreOpts);
-            _ -> maps:put(<<"kind">>, Kind, StoreOpts)
+            <<"claim">> -> maps:remove(<<"kind">>, Store0);
+            _ -> maps:put(<<"kind">>, Kind, Store0)
         end,
     hb_store_lbry_claim_output:read(
         Store,
         #{ <<"read">> => <<TxID/binary, ":", (integer_to_binary(Nout))/binary>> },
         NodeOpts
     ).
+
+delegated_store_opts(StoreOpts) ->
+    maps:without([<<"store-module">>, <<"name">>, <<"fixtures">>], StoreOpts).
 
 %% @doc Bind the channel attestation to a signed stream claim. The channel
 %% is located by the claim envelope's embedded signing-channel id -- never
@@ -422,8 +435,11 @@ read_native_outpoint(TxID, Nout, StoreOpts, NodeOpts) ->
 %% `not_found') for a claim that is perfectly readable a moment later.
 read_native_outpoint(TxID, Nout, [Kind | Rest], StoreOpts, NodeOpts) ->
     case kind_output(Kind, TxID, Nout, StoreOpts, NodeOpts) of
-        {ok, Msg} ->
-            evidence_result(Msg, NodeOpts);
+        {ok, Msg0} ->
+            case maybe_attach_outpoint_attestation(Kind, Msg0, StoreOpts, NodeOpts) of
+                {ok, Msg} -> evidence_result(Msg, NodeOpts);
+                Error -> Error
+            end;
         {error, Label} when Label == not_a_stream_claim;
                             Label == not_a_channel_claim ->
             read_native_outpoint(TxID, Nout, Rest, StoreOpts, NodeOpts);
@@ -432,6 +448,17 @@ read_native_outpoint(TxID, Nout, [Kind | Rest], StoreOpts, NodeOpts) ->
     end;
 read_native_outpoint(_TxID, _Nout, [], _StoreOpts, _NodeOpts) ->
     {error, not_found}.
+
+maybe_attach_outpoint_attestation(<<"stream">>, Msg, StoreOpts, NodeOpts) ->
+    attach_attestation(Msg, StoreOpts, NodeOpts);
+maybe_attach_outpoint_attestation(_Kind, Msg, _StoreOpts, _NodeOpts) ->
+    {ok, Msg}.
+
+json_native_outpoint(TxID, Nout, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Msg} ?= kind_output(<<"claim">>, TxID, Nout, StoreOpts, NodeOpts),
+        json_evidence_result(Msg, NodeOpts)
+    end.
 
 %% @doc Fail closed and narrow: every message leaving the store must carry
 %% verifying native commitments, and only its committed keys. The narrowed
@@ -511,10 +538,14 @@ hydration_value(Msg, TopKeys) ->
 %% @doc The node options, with the store stack narrowed to local scope for
 %% evidence write-back. An empty local stack disables the write cleanly.
 local_write_opts(Opts) ->
-    Opts#{
-        <<"store">> =>
-            hb_store:scope(hb_opts:get(store, [], Opts), local)
-    }.
+    LocalStore =
+        case hb_maps:get(<<"local-store">>, Opts, not_found, Opts) of
+            not_found -> hb_store:scope(hb_opts:get(store, [], Opts), local);
+            false -> [];
+            Stores when is_list(Stores) -> Stores;
+            Store -> [Store]
+        end,
+    Opts#{ <<"store">> => LocalStore }.
 
 require_claim_id(undefined, _Msg) ->
     ok;
@@ -807,6 +838,207 @@ list_live(<<"odysee/channel-id/", Rest/binary>>, Req, StoreOpts, NodeOpts) ->
     end;
 list_live(_Path, _Req, _StoreOpts, _NodeOpts) ->
     {error, not_found}.
+
+source_claims_read(Encoded, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, JSON} ?= decode_component(Encoded),
+        Query = hb_json:decode(JSON),
+        true ?= is_map(Query),
+        source_claims_read_query(Query, StoreOpts, NodeOpts)
+    else
+        _ -> {error, invalid_odysee_store_path}
+    end.
+
+source_resolve_read(Encoded, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, URI} ?= decode_uri_component(Encoded),
+        {ok, Claim} ?= hb_odysee_client:resolve(URI, store_node_opts(StoreOpts, NodeOpts)),
+        {ok, #{
+            <<"content-type">> => <<"application/json">>,
+            <<"body">> => hb_json:encode(Claim)
+        }}
+    end.
+
+import_claims_read(Encoded, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, JSON} ?= decode_component(Encoded),
+        Locators = hb_json:decode(JSON),
+        true ?= is_list(Locators),
+        true ?= length(Locators) =< 24,
+        true ?= lists:all(fun is_bare_outpoint/1, Locators),
+        Imported = import_source_claims(Locators, StoreOpts, NodeOpts),
+        {ok, #{
+            <<"content-type">> => <<"application/json">>,
+            <<"body">> => hb_json:encode(#{ <<"immutable_imports">> => Imported })
+        }}
+    else
+        _ -> {error, invalid_odysee_store_path}
+    end.
+
+source_claims_read_query(Query, StoreOpts, NodeOpts) ->
+    SearchReq = (maps:from_list(
+        lists:filtermap(
+            fun({RequestKey, SourceKey, Kind}) ->
+                source_search_param(RequestKey, SourceKey, Kind, Query, NodeOpts)
+            end,
+            [
+                {<<"channel_ids">>, <<"channel_ids">>, list},
+                {<<"claim_ids">>, <<"claim_ids">>, list},
+                {<<"not_channel_ids">>, <<"not_channel_ids">>, list},
+                {<<"claim_type">>, <<"claim_type">>, list},
+                {<<"any_tags">>, <<"any_tags">>, list},
+                {<<"order_by">>, <<"order_by">>, list},
+                {<<"any_languages">>, <<"any_languages">>, list},
+                {<<"page">>, <<"page">>, integer},
+                {<<"page_size">>, <<"page_size">>, integer},
+                {<<"limit_claims_per_channel">>, <<"limit_claims_per_channel">>, integer},
+                {<<"duration">>, <<"duration">>, scalar},
+                {<<"timestamp">>, <<"timestamp">>, scalar},
+                {<<"release_time">>, <<"release_time">>, scalar},
+                {<<"exclude_shorts">>, <<"exclude_shorts">>, boolean}
+            ]
+        )
+    ))#{<<"no_totals">> => true},
+    maybe
+        {ok, Search} ?=
+            hb_odysee_client:call(
+                <<"claim_search">>,
+                SearchReq,
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        Locators = list_claim_outputs(Search, NodeOpts),
+        {ok, #{
+            <<"content-type">> => <<"application/json">>,
+            <<"body">> => hb_json:encode(Search),
+            <<"locators">> => iolist_to_binary(lists:join(<<",">>, Locators)),
+            <<"page">> => hb_maps:get(<<"page">>, SearchReq, 1, NodeOpts),
+            <<"page-size">> => hb_maps:get(<<"page_size">>, SearchReq, length(Locators), NodeOpts)
+        }}
+    end.
+
+import_source_claims(Locators, StoreOpts, NodeOpts) ->
+    RuntimeOpts = store_node_opts(StoreOpts, NodeOpts),
+    lists:filtermap(
+        fun(Locator) ->
+            case parse_bare_outpoint(Locator) of
+                {ok, TxID, Nout} ->
+                    NativeID =
+                        dev_lbry_commitment:commitment_id(
+                            dev_lbry_commitment:outpoint_bytes(TxID, Nout)
+                        ),
+                    case hb_cache:read(NativeID, local_write_opts(RuntimeOpts)) of
+                        {ok, _} -> {true, Locator};
+                        _ ->
+                            import_source_claim(
+                                Locator,
+                                NativeID,
+                                TxID,
+                                Nout,
+                                StoreOpts,
+                                NodeOpts,
+                                RuntimeOpts
+                            )
+                    end;
+                _ -> false
+            end
+        end,
+        Locators
+    ).
+
+import_source_claim(Locator, NativeID, TxID, Nout, StoreOpts, NodeOpts, RuntimeOpts) ->
+    case kind_output(<<"claim">>, TxID, Nout, StoreOpts, NodeOpts) of
+        {ok, Msg} ->
+            case hb_message:verify(
+                Msg,
+                #{ <<"commitment-ids">> => <<"all">> },
+                RuntimeOpts
+            ) of
+                true ->
+                    case hb_message:with_only_committed(Msg, RuntimeOpts) of
+                        {ok, Narrowed} ->
+                            case queue_cache_write(Narrowed, NativeID, RuntimeOpts) of
+                                ok -> {true, Locator};
+                                _ -> false
+                            end;
+                        NarrowError ->
+                            logger:warning(
+                                "Odysee immutable import narrowing failed for ~s: ~p",
+                                [Locator, NarrowError]
+                            ),
+                            false
+                    end;
+                false ->
+                    logger:warning(
+                        "Odysee immutable import verification failed for ~s",
+                        [Locator]
+                    ),
+                    false
+            end;
+        EvidenceError ->
+            logger:warning(
+                "Odysee immutable import evidence failed for ~s: ~p",
+                [Locator, EvidenceError]
+            ),
+            false
+    end.
+
+queue_cache_write(Msg, ExpectedID, NodeOpts) ->
+    WriteOpts = local_write_opts(NodeOpts),
+    Parent = self(),
+    {Pid, Ref} = spawn_monitor(fun() ->
+        Result =
+            try
+                {ok, _} = hb_cache:write(Msg, WriteOpts),
+                case hb_cache:read(ExpectedID, WriteOpts) of
+                    {ok, _} -> {ok, ExpectedID};
+                    ReadError -> {error, {cache_read_back_failed, ReadError}}
+                end
+            catch
+                Class:Reason:Stack -> {error, {cache_write_exception, Class, Reason, Stack}}
+            end,
+        Parent ! {cache_write_result, self(), Result}
+    end),
+    receive
+        {cache_write_result, Pid, {ok, _ID}} ->
+            erlang:demonitor(Ref, [flush]),
+            ok;
+        {cache_write_result, Pid, Result} ->
+            erlang:demonitor(Ref, [flush]),
+            logger:warning("Odysee immutable import cache write failed: ~p", [Result]),
+            {error, Result};
+        {'DOWN', Ref, process, Pid, Reason} ->
+            logger:warning("Odysee immutable import cache writer exited: ~p", [Reason]),
+            {error, Reason}
+    after 10000 ->
+        exit(Pid, kill),
+        receive
+            {'DOWN', Ref, process, Pid, _Reason} -> ok
+        end,
+        logger:warning("Odysee immutable import cache write timed out"),
+        {error, timeout}
+    end.
+
+source_search_param(RequestKey, SourceKey, Kind, Req, NodeOpts) ->
+    case hb_maps:get(RequestKey, Req, not_found, NodeOpts) of
+        not_found -> false;
+        Value ->
+            case source_search_value(Kind, Value) of
+                not_found -> false;
+                Parsed -> {true, {SourceKey, Parsed}}
+            end
+    end.
+
+source_search_value(list, Value) when is_list(Value) -> Value;
+source_search_value(list, Value) when is_binary(Value) ->
+    [Item || Item <- binary:split(Value, <<",">>, [global]), Item =/= <<>>];
+source_search_value(integer, Value) -> int_param(Value, 0);
+source_search_value(boolean, true) -> true;
+source_search_value(boolean, <<"true">>) -> true;
+source_search_value(boolean, 1) -> true;
+source_search_value(boolean, <<"1">>) -> true;
+source_search_value(boolean, _Value) -> false;
+source_search_value(scalar, Value) when is_binary(Value); is_integer(Value) -> Value;
+source_search_value(_Kind, _Value) -> not_found.
 
 playlist_read(Encoded, StoreOpts, NodeOpts) ->
     maybe
@@ -1775,6 +2007,21 @@ bare_outpoint_warm_cache_links_local_store_test() ->
         ok,
         warm_addresses(Outpoint, Path, ClaimOutput, #{}, #{ <<"store">> => [] })
     ).
+
+local_write_opts_prefers_explicit_local_store_test() ->
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-local">>
+    },
+    RemoteStore = #{
+        <<"store-module">> => ?MODULE,
+        <<"name">> => <<"cache-remote">>
+    },
+    Opts = local_write_opts(#{
+        <<"store">> => [RemoteStore],
+        <<"local-store">> => [LocalStore]
+    }),
+    ?assertEqual([LocalStore], maps:get(<<"store">>, Opts)).
 
 sample_descriptor() ->
     Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,

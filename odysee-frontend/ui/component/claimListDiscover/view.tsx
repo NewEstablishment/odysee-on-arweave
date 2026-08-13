@@ -44,6 +44,7 @@ function resolveHideMembersOnly(global: any, override: any) {
 }
 type Props = {
   uris?: Array<string>;
+  immutableSigningChannelIds?: Record<string, string>;
   prefixUris?: Array<string>;
   pins?: {
     urls?: Array<string>;
@@ -214,6 +215,7 @@ function ClaimListDiscover(props: Props) {
     injectedItem,
     feeAmount,
     uris,
+    immutableSigningChannelIds,
     prefixUris,
     pins,
     tileLayout,
@@ -277,7 +279,8 @@ function ClaimListDiscover(props: Props) {
     [dispatch]
   );
   const doResolveUris = React.useCallback(
-    (u: Array<string>, returnCached: boolean) => dispatch(doResolveUrisAction(u, returnCached)),
+    (u: Array<string>, returnCached: boolean, additionalOptions: any = {}) =>
+      dispatch(doResolveUrisAction(u, returnCached, true, additionalOptions)),
     [dispatch]
   );
   const doFetchThumbnailClaimsForCollectionIds = React.useCallback(
@@ -677,6 +680,7 @@ function ClaimListDiscover(props: Props) {
 
     if (uris) {
       // --- direct uris
+      doResolveUris(uris, false, { immutable_signing_channel_ids: immutableSigningChannelIds });
       const newUris = uris && Array.from(new Set(uris));
       injectPinUrls(newUris, orderParam, pins, resolvedPinUris);
       const newFinalUris = filterExcludedUris(newUris, excludeUris);
@@ -709,6 +713,8 @@ function ClaimListDiscover(props: Props) {
     pins,
     resolvedPinUris,
     uris,
+    immutableSigningChannelIds,
+    doResolveUris,
   ]);
 
   // **************************************************************************

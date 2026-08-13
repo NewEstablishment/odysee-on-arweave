@@ -103,7 +103,7 @@ function ClaimPreviewTile(props: Props) {
   const isLivestreamActive = useAppSelector((state) =>
     isLivestream && uri ? selectIsActiveLivestreamForUri(state, uri) : false
   );
-  const viewCount = useAppSelector((state) => selectViewCountForUri(state, uri));
+  const viewCount = useAppSelector((state) => (uri ? selectViewCountForUri(state, uri) : undefined));
   const effectiveViewCount = isHyperbeamUploadClaim(claim) ? 0 : viewCount;
   const disableShortsView = useAppSelector((state) => selectClientSetting(state, SETTINGS.DISABLE_SHORTS_VIEW));
   const firstCollectionItemUrl = useAppSelector((state) =>
@@ -389,6 +389,7 @@ function ClaimPreviewTile(props: Props) {
                       uri={channelUri || ''}
                       thumbnailPreview={signingChannelThumbnailUrl}
                       xsmall
+                      noLazyLoad
                       checkMembership={false}
                     />
                   </UriIndicator>

@@ -173,6 +173,24 @@ from the removed application-device design. They are not an alternate
 frontend, and new work must not route product data through them. The current
 upload mutation path uses only the generic write bridge.
 
+The public homepage is materialized hourly into one signed immutable
+`odysee-homepage@1.0` message per language. Runtime discovery uses generic
+`query@1.0`, exact immutable reads, commitment verification, and committer
+checks. Homepage rows are hydrated in display order through the generic Lua
+multirequest application. Each language snapshot preserves an ordered,
+pre-warmed category pool: the homepage consumes the configured row prefix and
+the matching category page consumes the larger pool, so category first paint
+does not repeat discovery. Following remains a dynamic per-user query through
+the same source store and ordered hydration boundary.
+The previous signed snapshot remains available while a replacement is built.
+Materialization imports known legacy outpoints first and accepts only verified
+messages committed to the local HyperBEAM store; failed imports never become
+remote immutable-ID probes. If the normal reserve cannot fill a row, only that
+category's candidate pages and freshness window are expanded in bounded
+rounds. The final round appends a semantic category-tag query after an
+exhausted curated channel pool. An incomplete refresh is rejected and the
+previous signed snapshot remains live.
+
 ## Build and run
 
 Prerequisites: Erlang/OTP 27 or newer, `rebar3`, Node.js 22.12 or newer, and
@@ -188,11 +206,15 @@ pnpm install
 ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run build:manifest
 
 cd ..
-HB_PORT=18734 rebar3 device local
+HB_PORT=18734 rebar3 device local --device-src apps/odysee/src
 ```
 
-For normal browser development, start a write-capable node on the desired port
-and run the one SSR frontend:
+The explicit source directory is required because some Forge/rebar working
+directories do not infer umbrella application sources. Confirm the output lists
+`lbry@1.0`, `odysee-auth@1.0`, `reply-id@1.0`, and `search@1.0` before using the
+store. For normal browser development, start a write-capable node with
+`hb_odysee_node:start_upload/1`; it publishes the generic Lua multirequest
+application before accepting traffic. Then run the one SSR frontend:
 
 ```sh
 cd odysee-frontend
@@ -212,8 +234,9 @@ rebar3 device test --with-core
 ```
 
 `--with-core` is required for the store and HTTP integration coverage. Run
-`rebar3 device local` after device changes when manually testing; `rebar3
-compile` alone does not republish the preloaded device store.
+`rebar3 device local --device-src apps/odysee/src` after device changes when
+manually testing; `rebar3 compile` alone does not republish the preloaded device
+store.
 
 Frontend baseline:
 

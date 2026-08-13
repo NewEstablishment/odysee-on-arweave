@@ -124,7 +124,7 @@ video_value(Video) ->
 audio_value(not_found) ->
     not_found;
 audio_value(Audio) ->
-    put_if_present(#{ <<"duration">> => varint_field(Audio, 2) }).
+    put_if_present(#{ <<"duration">> => varint_field(Audio, 1) }).
 
 thumbnail_value(not_found) ->
     not_found;
@@ -360,6 +360,15 @@ decode_metadata_extracts_native_value_shape_test() ->
     VideoValue = maps:get(<<"video">>, Value),
     ?assertEqual(1920, maps:get(<<"width">>, VideoValue)),
     ?assertEqual(42, maps:get(<<"duration">>, VideoValue)).
+
+decode_metadata_extracts_audio_duration_test() ->
+    Source = <<(field(2, <<"audio.mp3">>))/binary, (field(4, <<"audio/mpeg">>))/binary>>,
+    Audio = varint_field_bin(1, 33268),
+    Stream = <<(field(1, Source))/binary, (field(12, Audio))/binary>>,
+    Claim = field(1, Stream),
+    {ok, Value} = decode_metadata(Claim),
+    ?assertEqual(<<"audio">>, maps:get(<<"stream_type">>, Value)),
+    ?assertEqual(33268, maps:get(<<"duration">>, maps:get(<<"audio">>, Value))).
 
 decode_metadata_without_stream_returns_not_found_test() ->
     Channel = field(1, <<2, 1:256>>),
