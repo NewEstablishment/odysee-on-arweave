@@ -229,43 +229,9 @@ store_stack_falls_back_to_blob_for_non_descriptor_hash_test() ->
     ?assertEqual(<<"blob">>, maps:get(<<"evidence">>, Commitment)).
 
 sample_descriptor() ->
-    Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,
-    IV = <<16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31>>,
-    Ciphertext = crypto:crypto_one_time(
-        aes_128_cbc,
-        Key,
-        IV,
-        pkcs7_pad(<<"hello verified legacy stream">>),
-        true
-    ),
-    BlobHash = dev_lbry_stream_descriptor:blob_hash(Ciphertext),
-    Descriptor =
-        #{
-            <<"stream_type">> => <<"lbryfile">>,
-            <<"stream_name">> => hb_util:to_hex(<<"sample.mp4">>),
-            <<"key">> => hb_util:to_hex(Key),
-            <<"suggested_file_name">> => hb_util:to_hex(<<"sample.mp4">>),
-            <<"stream_hash">> => dev_lbry_stream_descriptor:blob_hash(<<"stream hash test">>),
-            <<"blobs">> => [
-                #{
-                    <<"length">> => byte_size(Ciphertext),
-                    <<"blob_num">> => 0,
-                    <<"iv">> => hb_util:to_hex(IV),
-                    <<"blob_hash">> => BlobHash
-                },
-                #{
-                    <<"length">> => 0,
-                    <<"blob_num">> => 1,
-                    <<"iv">> => hb_util:to_hex(<<0:128>>)
-                }
-            ]
-        },
-    Raw = hb_json:encode(Descriptor),
-    {Raw, dev_lbry_stream_descriptor:descriptor_hash(Raw)}.
-
-pkcs7_pad(Data) ->
-    PadLen = 16 - (byte_size(Data) rem 16),
-    <<Data/binary, (binary:copy(<<PadLen>>, PadLen))/binary>>.
+    {Raw, SDHash, _BlobHash, _Ciphertext} =
+        hb_lbry_test_fixtures:sample_descriptor(<<"hello verified legacy stream">>),
+    {Raw, SDHash}.
 
 http_header(Name, Headers) ->
     LowerName = hb_util:bin(string:lowercase(hb_util:bin(Name))),

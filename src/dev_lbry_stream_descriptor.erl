@@ -425,7 +425,9 @@ sample_descriptor() ->
     {hb_json:encode(Descriptor), Plaintext, #{ BlobHash => Ciphertext }}.
 
 encrypt_blob(Key, IV, Plaintext) ->
-    crypto:crypto_one_time(aes_128_cbc, Key, IV, pkcs7_pad(Plaintext), true).
+    crypto:crypto_one_time(
+        aes_128_cbc, Key, IV, hb_lbry_test_fixtures:pkcs7_pad(Plaintext), true
+    ).
 
 old_sort_descriptor() ->
     iolist_to_binary([
@@ -440,9 +442,5 @@ old_sort_descriptor() ->
         <<"\"suggested_file_name\": \"4f62616d6120446f6e6b65792d322e73746c\", ">>,
         <<"\"stream_hash\": \"b43f4b1379780caf60d20aa06ac38fb144df61e514ebfa97537018ba73bce8fe37ae712f473ff0ba0be0eef44e160207\"}">>
     ]).
-
-pkcs7_pad(Plaintext) ->
-    PadLen = 16 - (byte_size(Plaintext) rem 16),
-    <<Plaintext/binary, (binary:copy(<<PadLen>>, PadLen))/binary>>.
 
 -endif.

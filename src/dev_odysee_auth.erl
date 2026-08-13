@@ -23,7 +23,7 @@
 -module(dev_odysee_auth).
 -implements(<<"odysee-auth@1.0">>).
 -export([commit/3, verify/3]).
--export([generate/3, legacy_api_headers/3]).
+-export([generate/3]).
 -include_lib("eunit/include/eunit.hrl").
 
 -define(DEFAULT_SALT, <<"constant:odysee-auth-token">>).
@@ -114,20 +114,6 @@ generate(_Msg, Req, Opts) ->
                         <<"No Odysee auth_token cookie or token header provided.">>
                 }
             }
-    end.
-
-%% @doc Return the sanitized legacy API auth carrier for Odysee API requests.
-%% This intentionally forwards only the Odysee auth cookie shape expected by
-%% the existing API; the token is not placed in request params or persisted.
-legacy_api_headers(Base, Req, Opts) ->
-    case find_token(Req, Opts) of
-        {ok, Token} ->
-            #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
-        {error, not_found} ->
-            case find_token(Base, Opts) of
-                {ok, Token} -> #{ <<"cookie">> => <<"auth_token=", Token/binary>> };
-                {error, not_found} -> #{}
-            end
     end.
 
 find_token(Req, Opts) ->
