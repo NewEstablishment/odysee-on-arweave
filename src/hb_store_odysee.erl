@@ -1512,42 +1512,140 @@ bare_outpoint_warm_cache_links_local_store_test() ->
     ).
 
 sample_descriptor() ->
-    Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,
-    IV = <<16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31>>,
-    Ciphertext = crypto:crypto_one_time(
-        aes_128_cbc,
-        Key,
-        IV,
-        pkcs7_pad(<<"hello verified legacy stream">>),
-        true
-    ),
-    BlobHash = dev_lbry_stream_descriptor:blob_hash(Ciphertext),
-    Descriptor =
-        #{
-            <<"stream_type">> => <<"lbryfile">>,
-            <<"stream_name">> => hb_util:to_hex(<<"sample.mp4">>),
-            <<"key">> => hb_util:to_hex(Key),
-            <<"suggested_file_name">> => hb_util:to_hex(<<"sample.mp4">>),
-            <<"stream_hash">> => dev_lbry_stream_descriptor:blob_hash(<<"stream hash test">>),
-            <<"blobs">> => [
-                #{
-                    <<"length">> => byte_size(Ciphertext),
-                    <<"blob_num">> => 0,
-                    <<"iv">> => hb_util:to_hex(IV),
-                    <<"blob_hash">> => BlobHash
-                },
-                #{
-                    <<"length">> => 0,
-                    <<"blob_num">> => 1,
-                    <<"iv">> => hb_util:to_hex(<<0:128>>)
-                }
-            ]
-        },
-    Raw = hb_json:encode(Descriptor),
-    {Raw, dev_lbry_stream_descriptor:descriptor_hash(Raw), BlobHash, Ciphertext}.
+    hb_lbry_test_fixtures:sample_descriptor(<<"hello verified legacy stream">>).
 
-pkcs7_pad(Data) ->
-    PadLen = 16 - (byte_size(Data) rem 16),
-    <<Data/binary, (binary:copy(<<PadLen>>, PadLen))/binary>>.
+%% Adversarial coverage for the attestation-enforcing stream-id path,
+%% ported from the removed hb_odysee_bridge:verified_stream/2 suite. The
+%% live path must fail closed on forged or misbound signatures and serve
+%% unsigned (anonymous) claims without an attestation commitment.
+stream_id_read_rejects_forged_signature_test() ->
+    application:ensure_all_started(inets),
+    Fixture = hb_lbry_test_fixtures:signed_stream_fixture(<<1:256>>, <<2:256>>),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:fixture_server(Fixture, #{}),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        StreamTxID = maps:get(stream_txid, Fixture),
+        ?assertEqual(
+            {error, #{
+                <<"status">> => 502,
+                <<"body">> => <<"invalid_claim_signature">>
+            }},
+            read(
+                Store,
+                #{ <<"read">> => <<"odysee/stream-id/", StreamTxID/binary, ":0">> },
+                #{ <<"store">> => [] }
+            )
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+stream_id_read_rejects_channel_binding_mismatch_test() ->
+    application:ensure_all_started(inets),
+    FixtureA = hb_lbry_test_fixtures:signed_stream_fixture(<<1:256>>, <<1:256>>),
+    FixtureB = hb_lbry_test_fixtures:signed_stream_fixture(<<2:256>>, <<2:256>>),
+    {ok, Server, Handle} =
+        hb_lbry_test_fixtures:fixture_server(FixtureA, #{
+            channel_txid => maps:get(channel_txid, FixtureB),
+            channel_tx_hex => maps:get(channel_tx_hex, FixtureB)
+        }),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        StreamTxID = maps:get(stream_txid, FixtureA),
+        ?assertEqual(
+            {error, #{
+                <<"status">> => 502,
+                <<"body">> => <<"channel_binding_mismatch">>
+            }},
+            read(
+                Store,
+                #{ <<"read">> => <<"odysee/stream-id/", StreamTxID/binary, ":0">> },
+                #{ <<"store">> => [] }
+            )
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+stream_id_read_serves_unsigned_claim_without_attestation_test() ->
+    application:ensure_all_started(inets),
+    Fixture = hb_lbry_test_fixtures:unsigned_stream_fixture(),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:fixture_server(Fixture, #{}),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        StreamTxID = maps:get(stream_txid, Fixture),
+        {ok, Msg} =
+            read(
+                Store,
+                #{ <<"read">> => <<"odysee/stream-id/", StreamTxID/binary, ":0">> },
+                #{ <<"store">> => [] }
+            ),
+        Kinds =
+            lists:sort([
+                maps:get(<<"evidence">>, Commitment)
+             ||
+                Commitment <- maps:values(maps:get(<<"commitments">>, Msg))
+            ]),
+        ?assertEqual([<<"claim">>, <<"stream">>], Kinds),
+        ?assertEqual(
+            true,
+            hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+claim_id_read_rejects_locator_claim_id_mismatch_test() ->
+    application:ensure_all_started(inets),
+    BadClaimID = <<"0000000000000000000000000000000000000000">>,
+    Claim = #{
+        <<"claim_id">> => BadClaimID,
+        <<"txid">> => <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
+        <<"nout">> => 0
+    },
+    ClaimResponse =
+        hb_lbry_test_fixtures:proxy_result(#{ <<"items">> => [Claim] }),
+    TxResponse =
+        hb_lbry_test_fixtures:proxy_result(#{ <<"hex">> => dev_lbry_tx:task0_tx_hex() }),
+    {ok, Server, Handle} = hb_mock_server:start([
+        {"/api/v1/proxy", proxy, fun(Req) ->
+            case maps:get(<<"qs">>, Req) of
+                <<"m=claim_search">> -> {200, ClaimResponse};
+                <<"m=transaction_show">> -> {200, TxResponse}
+            end
+        end}
+    ]),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        ?assertEqual(
+            {error, #{
+                <<"status">> => 502,
+                <<"body">> => <<"claim_id_mismatch">>
+            }},
+            read(
+                Store,
+                #{ <<"read">> => <<"odysee/claim-id/", BadClaimID/binary>> },
+                #{ <<"store">> => [] }
+            )
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
 
 -endif.
