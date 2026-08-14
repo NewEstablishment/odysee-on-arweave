@@ -12,12 +12,7 @@ import Card from 'component/common/card';
 import Button from 'component/button';
 import Yrbl from 'component/yrbl';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import {
-  selectHasClaimForId,
-  selectClaimForId,
-  selectClaimIsPendingForId,
-  selectGeoRestrictionForUri,
-} from 'redux/selectors/claims';
+import { selectHasClaimForId, selectClaimForId, selectGeoRestrictionForUri } from 'redux/selectors/claims';
 import {
   selectCollectionForId,
   selectBrokenUrlsForCollectionId,
@@ -27,9 +22,8 @@ import {
   selectCollectionHasItemsResolvedForId,
   selectCollectionHasUnsavedEditsForId,
 } from 'redux/selectors/collections';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { isHyperbeamSignedIn } from 'util/hyperbeamAccount';
 import { doResolveClaimId as doResolveClaimIdAction } from 'redux/actions/claims';
-import { fetchHyperbeamClaimsByIds, fetchPlaylistMessage, outpointFromPlaylistRouteId } from 'util/hyperbeam';
 import {
   doCollectionEdit as doCollectionEditAction,
   doFetchItemsInCollection as doFetchItemsInCollectionAction,
@@ -45,29 +39,7 @@ export const CollectionPageContext = React.createContext<any>({});
 const CollectionPage = (props: Props) => {
   const dispatch = useAppDispatch();
   const { collectionId: routeCollectionId = '' } = useParams();
-  const routeOutpoint = outpointFromPlaylistRouteId(routeCollectionId);
-  const routePlaylistId = /^[0-9A-Za-z_-]{43}$/.test(routeCollectionId) ? routeCollectionId : null;
-  const [outpointCollectionId, setOutpointCollectionId] = React.useState('');
-  React.useEffect(() => {
-    if (outpointCollectionId || (!routeOutpoint && !routePlaylistId)) return;
-    if (routePlaylistId) {
-      fetchPlaylistMessage(routePlaylistId)
-        .then((playlist) => {
-          if (!playlist) return;
-          setOutpointCollectionId(String(playlist['legacy-claim-id'] || routePlaylistId));
-        })
-        .catch(() => {});
-      return;
-    }
-    fetchHyperbeamClaimsByIds([routeOutpoint])
-      .then((claims) => {
-        const resolvedId = claims[0]?.claim_id;
-        if (resolvedId) setOutpointCollectionId(String(resolvedId));
-      })
-      .catch(() => {});
-  }, [routeOutpoint, routePlaylistId, outpointCollectionId]);
-  const collectionId =
-    props.collectionId || (routeOutpoint || routePlaylistId ? outpointCollectionId : routeCollectionId);
+  const collectionId = props.collectionId || routeCollectionId;
   const claim = useAppSelector((state) => selectClaimForId(state, collectionId));
   const geoRestriction = useAppSelector((state) => selectGeoRestrictionForUri(state, claim?.permanent_url));
   const hasClaim = useAppSelector((state) => selectHasClaimForId(state, collectionId));
@@ -82,7 +54,7 @@ const CollectionPage = (props: Props) => {
   const collectionHasUnsavedEdits = useAppSelector((state) =>
     selectCollectionHasUnsavedEditsForId(state, collectionId)
   );
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = isHyperbeamSignedIn();
   const navigate = useNavigate();
   const { search, state, pathname } = useLocation();
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
@@ -97,7 +69,6 @@ const CollectionPage = (props: Props) => {
   const publishPage = (editing || publishing) && !forceCollectionView;
   const isBuiltin = COLLECTIONS_CONSTS.BUILTIN_PLAYLISTS.includes(collectionId);
   const isOnPublicView = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLIC;
-  const isClaimPending = useAppSelector((state) => selectClaimIsPendingForId(state, collectionId));
   const isResolvingCollection = hasClaim === undefined;
   const shouldPromptSignIn = IS_WEB && publishPage && !isAuthenticated;
   const collectionHasStoredItems = Boolean(collection?.items?.length);
@@ -144,9 +115,9 @@ const CollectionPage = (props: Props) => {
   }
 
   React.useEffect(() => {
-    if (!isPrivate && collectionId) {
+    if (!isPrivate) {
       dispatch(
-        doResolveClaimIdAction(collectionId, false, {
+        doResolveClaimIdAction(collectionId, true, {
           include_is_my_output: true,
         })
       );
@@ -188,14 +159,6 @@ const CollectionPage = (props: Props) => {
   }
 
   if (!collection && !isResolvingCollection) {
-    if (isClaimPending) {
-      return (
-        <div className="main--empty">
-          <Spinner />
-        </div>
-      );
-    }
-
     return (
       <Page noSideNavigation={isEmbedPath}>
         <div className="main--empty empty">{__('Nothing here')}</div>

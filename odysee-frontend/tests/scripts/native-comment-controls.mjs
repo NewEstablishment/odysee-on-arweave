@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {
   hasNativeCommentControlAuthority,
-  hasNativeCommentControlCommitterAuthority,
   isNativeCommentControlEnabled,
   legacyBlockControlsToImport,
   latestNativeCommentControls,
@@ -177,51 +176,6 @@ assert.equal(
       actor: 'channel-author',
     },
     { target: 'claim-a', owner: 'channel-owner' }
-  ),
-  false
-);
-
-const verifiedOwnerControl = {
-  ...raw,
-  hyperbeam_owner: 'account-owner',
-  hyperbeam_commitment_verification: 'verified',
-};
-assert.equal(
-  hasNativeCommentControlCommitterAuthority(verifiedOwnerControl, {
-    targetOwner: 'account-owner',
-    comment: { ...ownerContext.comment, hyperbeam_owner: 'account-author' },
-  }),
-  true
-);
-assert.equal(
-  hasNativeCommentControlCommitterAuthority(verifiedOwnerControl, {
-    targetOwner: 'attacker',
-    comment: { ...ownerContext.comment, hyperbeam_owner: 'account-author' },
-  }),
-  false
-);
-const verifiedAuthorControl = {
-  ...verifiedOwnerControl,
-  control: 'visibility',
-  action: 'hidden',
-  authority: 'author',
-  actor: 'channel-author',
-  hyperbeam_owner: 'account-author',
-};
-assert.equal(
-  hasNativeCommentControlCommitterAuthority(verifiedAuthorControl, {
-    targetOwner: 'account-owner',
-    comment: { ...ownerContext.comment, hyperbeam_owner: 'account-author' },
-  }),
-  true
-);
-assert.equal(
-  hasNativeCommentControlCommitterAuthority(
-    { ...verifiedAuthorControl, hyperbeam_commitment_verification: 'unverified' },
-    {
-      targetOwner: 'account-owner',
-      comment: { ...ownerContext.comment, hyperbeam_owner: 'account-author' },
-    }
   ),
   false
 );

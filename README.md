@@ -27,8 +27,6 @@ The current implementation follows these decisions:
   reads are store reads; native writes are generic committed messages.
 - [`decisions/single-commitment-device.md`](decisions/single-commitment-device.md):
   one `lbry@1.0` verification device covers all LBRY evidence kinds.
-- [`decisions/homepage-lua-multirequest.md`](decisions/homepage-lua-multirequest.md):
-  batch snapshot materialization as stock AO/Lua computation.
 - [`docs/architecture.md`](docs/architecture.md): full trust, node-role, read,
   and write architecture.
 - [`ARCHITECTURE_READ_PATH.md`](ARCHITECTURE_READ_PATH.md): traced HTTP read
@@ -98,6 +96,8 @@ they are not alternate UI APIs.
 | Legacy claim ID | Mutable locator for the current claim state. |
 | Name or URI | Mutable lookup input, never immutable identity. |
 | Native comment revision | Its own immutable message ID, linked to a logical root comment. |
+| Native reaction revision | Its own immutable message ID, linked through stable logical reaction and version references. |
+| Native playlist | Owner-bound logical `playlist-ref`; every snapshot/revision also has its own immutable message ID and `version-ref`. |
 
 Bare immutable IDs read through the normal message/cache route. Mutable names
 and claim IDs resolve through namespaced store paths before yielding immutable
@@ -133,29 +133,6 @@ POST /id?!=true&committers=all
 The cookie is a request credential and must not be copied into the committed
 message. The reply exposes the stored ID in `message-id`.
 
-## Homepage and categories
-
-The public homepage is represented by one signed immutable
-`odysee-homepage@1.0` snapshot per language. Snapshot discovery uses generic
-`query@1.0`; consumers then hydrate and verify the exact committed message.
-Each category carries an ordered, pre-warmed claim pool. The homepage renders
-the category's configured prefix while the matching category route uses the
-larger pool for first paint, so both views share one source of truth without
-repeating discovery.
-
-Snapshot construction batches same-phase AO requests through the immutable
-generic Lua application at `~lua@5.3a&module=<id>/resolve-many`. The script
-executes each singleton subrequest with `ao(Subreq)` and returns ordered
-per-item results. Legacy claim IDs and outpoints are warmed with ordinary
-locator reads through the store stack; the materializer does not use bespoke
-`source-resolve`, `local-object`, or `import-claims` operations.
-
-Following is personalized and therefore is not stored in the public language
-snapshot. It is queried dynamically through the store-first integration and
-keeps the same locator-first, immutable-hydration boundary. Snapshot refreshes
-must leave the previous committed snapshot available until a complete
-replacement has been built and verified.
-
 ### Uploads
 
 The browser posts raw file bytes directly to `/id?!`. It then writes a generic
@@ -177,11 +154,78 @@ match index, then the frontend hydrates and verifies exact immutable IDs.
 - A revision must be contiguous and owned by the same verified committer.
 - Claimed profile fields never establish authority; the profile message must
   verify under the same committer.
-- Advanced reactions, moderation, and settings remain unsupported until they
-  have native message contracts.
+- Additional emoji reaction types, moderation, and settings remain unsupported
+  until they have native message contracts.
 
 The normal UI does not call Commentron, the legacy LBRY API, or an Odysee SDK
 proxy for comments.
+
+### Reactions
+
+Video and comment likes/dislikes are cookie-signed `odysee-reaction@1.0`
+messages written through the same generic `/id?!` route. One target-wide
+`query@1.0/only` request discovers immutable paths, then the frontend hydrates
+and verifies every commitment and committer before counting it.
+
+- Like, dislike, switch, and remove operations are append-only.
+- Revisions link through signed `reaction-ref`, `version-ref`,
+  `revision-of`, and `previous-version` fields.
+- Only contiguous revisions from the root reaction's verified committer are
+  accepted.
+- Multiple roots from one committer still project to at most one reaction per
+  target, preventing duplicate-message count inflation.
+- Profile IDs and names are display metadata and never grant reaction
+  authority.
+
+There is no reaction application device and the browser does not call the
+legacy reaction API.
+
+### Playlists
+
+Public playlists are cookie-signed `odysee-playlist@1.0` messages. Their
+public route is `/$/playlist/<playlist-ref>`, where `playlist-ref` begins with
+the verified committer address. The frontend uses generic `/id?!` writes,
+`query@1.0/only` discovery, and exact commitment hydration; it does not call
+the LBRY `collection_*` API.
+
+- A root contains a complete ordered snapshot of immutable native IDs and/or
+  legacy `<txid>:<nout>` outpoints.
+- Updates, reorderings, and deletes append contiguous same-owner revisions.
+- Deletes are tombstones. Deleted chains cannot be resurrected.
+- Mutable 40-character claim IDs, names, and URIs are rejected as stored item
+  identity; the integration layer resolves local draft URIs before publish.
+- Duplicate physical store representations are deduplicated by logical
+  playlist/version identity. Gaps, forks, foreign writers, conflicting
+  versions, and invalid profiles fail closed.
+- Queue, Watch Later, Favorites, and unpublished drafts stay local. Publishing
+  a draft creates a new public native root.
+
+Playlist UI retains list, edit, reorder, play, shuffle, share, and delete. It
+has no blockchain channel picker, URL-name reservation, bid/stake, pending
+confirmation, support/tip, report, or abandon-claim flow.
+
+### Subscriptions
+
+Free channel follows are cookie-signed `odysee-subscription@1.0` messages, not
+paid memberships. A deterministic relationship reference binds the verified
+subscriber committer to either a native profile ID or a full legacy channel
+claim ID.
+
+- Follow, notification-preference update, unfollow, and re-follow are
+  append-only contiguous revisions.
+- New follows default notifications off across every UI entry point; an
+  explicit bell opt-in is preserved.
+- Exact query discovers candidate IDs; the frontend hydrates and verifies each
+  commitment, committer, and subscriber profile before projection.
+- Redux and local persistence provide optimistic UI/cache state only. Account
+  load replaces them with the authoritative node projection.
+- The browser does not call the legacy subscription endpoint or wallet sync.
+- A future one-time legacy import may seed relationships that do not already
+  exist. Imported roots carry explicit provenance; all later changes stay on
+  HyperBEAM.
+
+Subscriber counts remain a separate derived aggregation and are not part of
+this slice.
 
 ## Static manifest frontend
 
@@ -218,6 +262,9 @@ pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
 pnpm run test:native-comment-controls
+pnpm run test:native-reactions
+pnpm run test:native-playlists
+pnpm run test:native-subscriptions
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```
@@ -226,6 +273,9 @@ The cookie-owned browser lifecycle can be exercised against a running node:
 
 ```sh
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-reactions
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-playlists
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-subscriptions
 ```
 
 See [`RUN_DEMO.md`](RUN_DEMO.md) for the complete node and manifest launch
@@ -233,8 +283,7 @@ sequence.
 
 ## Current limitations
 
-- Native reactions, view/subscriber counts, and advanced moderation are not
-  implemented.
+- Native view/subscriber counts and advanced moderation are not implemented.
 - Upload edit/delete semantics still need a complete append-only design.
 - Mutable-name currentness still depends on an external locator; the evidence
   proves content integrity, not canonical-chain freshness.

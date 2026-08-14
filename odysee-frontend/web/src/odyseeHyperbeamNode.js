@@ -1,4 +1,4 @@
-const { HYPERBEAM_MULTIREQUEST_MODULE_ID, ODYSEE_HYPERBEAM_NODE_API } = require('../../config.cjs');
+const { ODYSEE_HYPERBEAM_NODE_API } = require('../../config.cjs');
 
 const HYPERBEAM_NODE_TIMEOUT_MS = 15000;
 const SEARCH_HYDRATION_CONCURRENCY = 8;
@@ -53,7 +53,6 @@ function hyperbeamNodeRequestHeaders(extraHeaders) {
     const value = extraHeaders && extraHeaders[key];
     if (value) headers[key] = value;
   });
-  if (extraHeaders?.['accept-bundle']) headers['accept-bundle'] = extraHeaders['accept-bundle'];
   return headers;
 }
 
@@ -84,33 +83,36 @@ async function hyperbeamNodeResolve(params, extraHeaders) {
 }
 
 async function hyperbeamNodeResolveEntries(urls, extraHeaders) {
-  const immutableEntries = await Promise.all(urls.map(async (uri) => [uri, await hyperbeamNodeImmutableResolve(uri)]));
-  const resolved = new Map(immutableEntries.filter(([, claim]) => claim));
-  const unresolved = urls.filter((uri) => !resolved.has(uri));
-  if (unresolved.length) {
-    const responses = await hyperbeamNodeResolveMany(
-      unresolved.map((uri) => {
-        const claimId = claimIdFromUri(uri);
-        return claimId ? locatorReadRequest(claimId) : cacheReadRequest(storePath('odysee/claim', uri));
-      }),
-      { extraHeaders }
-    ).catch(() => []);
-    unresolved.forEach((uri, index) => {
-      const payload = batchResultPayload(responses[index]);
-      const claim = sdkClaimFromHyperbeam((payload && payload[uri]) || payload);
-      if (claim && (claim.claim_id || claim['claim-id'])) resolved.set(uri, claim);
-    });
-  }
+  return Promise.all(
+    urls.map(async (uri) => {
+      const immutableClaim = await hyperbeamNodeImmutableResolve(uri);
+      if (immutableClaim) return [uri, immutableClaim];
 
-  const nativeEntries = await Promise.all(
-    urls
-      .filter((uri) => !resolved.has(uri))
-      .map(async (uri) => [uri, await hyperbeamNodeUploadResolve(uri, extraHeaders)])
+      const storeResult = storeResponsePayload(await hyperbeamNodeFetchStoreJson(storePath('odysee/claim', uri)));
+      const storeClaim = sdkClaimFromHyperbeam((storeResult && storeResult[uri]) || storeResult);
+      if (storeClaim && (storeClaim.claim_id || storeClaim['claim-id'])) return [uri, storeClaim];
+
+      const claimId = claimIdFromUri(uri);
+      if (claimId) {
+        try {
+          const cacheResult = await hyperbeamNodeFetchJson(hyperbeamCacheReadPath(claimId), extraHeaders);
+          const cacheClaim = sdkClaimFromHyperbeam(cacheReadClaim(cacheResult));
+          if (cacheClaim) return [uri, cacheClaim];
+        } catch (e) {
+          void e;
+        }
+      }
+
+      const result = await hyperbeamNodeFetchJson(
+        hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'resolve', { uri }),
+        extraHeaders
+      );
+      const claim = sdkClaimFromHyperbeam((result && result[uri]) || result);
+      if (claim) return [uri, claim];
+
+      return [uri, await hyperbeamNodeUploadResolve(uri, extraHeaders)];
+    })
   );
-  nativeEntries.forEach(([uri, claim]) => {
-    if (claim) resolved.set(uri, claim);
-  });
-  return urls.map((uri) => [uri, resolved.get(uri) || null]);
 }
 
 async function hyperbeamNodeImmutableResolve(uri) {
@@ -206,229 +208,6 @@ async function hyperbeamNodeClaimSearch(params, extraHeaders) {
     await localUploadsPromise,
     params || {}
   );
-}
-
-async function hyperbeamNodeSourceClaimSearch(params, extraHeaders) {
-  const [result] = await hyperbeamNodeSourceClaimSearchMany([params], extraHeaders);
-  return result || null;
-}
-
-async function hyperbeamNodeSourceClaimSearchMany(paramsList, extraHeaders) {
-  if (!hyperbeamNodeConfigured()) return (paramsList || []).map(() => null);
-
-  const requests = (paramsList || []).map((params) =>
-    cacheReadRequest(storePath('odysee/source-claims', JSON.stringify(sourceClaimQuery(params || {}))))
-  );
-  const responses = await hyperbeamNodeResolveMany(requests, { extraHeaders });
-  const decoded = responses.map((response, index) => decodeSourceClaimSearch(response, paramsList[index] || {}));
-  const pendingLocators = Array.from(
-    new Set(decoded.flatMap((entry) => (entry && entry.locators ? entry.locators : [])))
-  );
-  if (!pendingLocators.length) return decoded.map((entry) => entry?.search || null);
-
-  const hydrated = await hyperbeamNodeResolveMany(
-    pendingLocators.map((locator) => cacheReadRequest(storePath('odysee/claim-json', locator))),
-    { extraHeaders }
-  );
-  const claimsByLocator = new Map(
-    pendingLocators
-      .map((locator, index) => [locator, sdkClaimFromHyperbeam(batchResultPayload(hydrated[index]))])
-      .filter(([, claim]) => claim)
-  );
-  return decoded.map((entry) => {
-    if (entry.search) return entry.search;
-    const items = entry.locators.map((locator) => claimsByLocator.get(locator)).filter(Boolean);
-    return claimSearchPage(items, entry.params);
-  });
-}
-
-function decodeSourceClaimSearch(response, params) {
-  const page = Math.max(1, numericValue(value(params, 'page'), 1));
-  const pageSize = Math.max(1, numericValue(value(params, 'page_size', 'page-size'), 20));
-  const result = batchResultPayload(response);
-  const sourceSearch = sdkSearchFromHyperbeam(result);
-  if (sourceSearch && Array.isArray(sourceSearch.items)) return { search: sourceSearch, locators: [], params };
-  const locators = String(value(result || {}, 'locators') || '')
-    .split(',')
-    .map((outpoint) => outpoint.trim())
-    .filter(Boolean);
-  return {
-    search: locators.length ? null : claimSearchPage([], { page, page_size: pageSize }),
-    locators,
-    params: { page, page_size: pageSize },
-  };
-}
-
-function sourceClaimQuery(params) {
-  const keys = [
-    'channel_ids',
-    'claim_ids',
-    'not_channel_ids',
-    'claim_type',
-    'any_tags',
-    'order_by',
-    'any_languages',
-    'page',
-    'page_size',
-    'limit_claims_per_channel',
-    'duration',
-    'timestamp',
-    'release_time',
-    'exclude_shorts',
-  ];
-  return Object.fromEntries(
-    keys
-      .map((key) => {
-        const raw = value(params, key, key.replaceAll('_', '-'));
-        return [key, raw];
-      })
-      .filter(([, item]) => item !== undefined && item !== null && item !== '')
-  );
-}
-
-function claimSearchPage(items, params) {
-  const page = Math.max(1, numericValue(value(params, 'page'), 1));
-  const pageSize = Math.max(1, numericValue(value(params, 'page_size', 'page-size'), items.length || 20));
-  return {
-    items,
-    page,
-    page_size: pageSize,
-    total_items: items.length,
-    total_pages: items.length ? 1 : 0,
-  };
-}
-
-async function hyperbeamNodeWarmImmutableClaim(id) {
-  const [[, present] = []] = await hyperbeamNodeWarmImmutableClaims([id]);
-  return present === true;
-}
-
-async function hyperbeamNodeResolveMany(requests, options = {}) {
-  const base = hyperbeamNodeBase();
-  const moduleId = HYPERBEAM_MULTIREQUEST_MODULE_ID;
-  if (!Array.isArray(requests)) throw new TypeError('HyperBEAM multirequest requires an ordered request array');
-  if (!requests.length) return [];
-  if (!base) throw new Error('HyperBEAM node is not configured');
-  if (!moduleId) throw new Error('HyperBEAM multirequest module is not configured');
-
-  const response = await hyperbeamNodeFetchJson(
-    {
-      url: `${base}/~lua@5.3a&module=${encodeURIComponent(moduleId)}/resolve-many`,
-      body: { requests },
-    },
-    { 'accept-bundle': 'true', ...(options.extraHeaders || {}) }
-  );
-  return requests.map((_, index) => response?.[String(index + 1)] || null);
-}
-
-function cacheReadRequest(read) {
-  return {
-    path: '/~cache@1.0/read',
-    read,
-    'cache-control': ['no-store', 'no-cache'],
-  };
-}
-
-function locatorReadRequest(locator) {
-  const value = String(locator || '').replace(/^\/+/, '');
-  return /^[0-9A-Za-z_-]{42,43}$/.test(value) ? { path: `/${hyperbeamDirectPath(value)}` } : cacheReadRequest(value);
-}
-
-function batchResultPayload(response) {
-  if (value(response, 'status') !== 'ok') return null;
-  const result = value(response, 'result');
-  const body = value(result, 'body');
-  return storeResponsePayload(parseJsonOrValue(body === undefined ? result : body));
-}
-
-async function hyperbeamNodeQueryPaths(selectors) {
-  const [response] = await hyperbeamNodeResolveMany([
-    {
-      path: '/~query@1.0/only',
-      only: selectors,
-      return: 'paths',
-      'cache-control': ['no-store', 'no-cache'],
-    },
-  ]).catch(() => []);
-  if (value(response, 'status') !== 'ok') return [];
-  const payload = value(response, 'result');
-  const decoded = typeof payload?.body === 'string' ? parseJsonOrValue(payload.body) : payload;
-  const paths = Array.isArray(decoded)
-    ? decoded
-    : Array.isArray(decoded?.paths)
-      ? decoded.paths
-      : Object.keys(decoded || {})
-          .filter((key) => /^[1-9]\d*$/.test(key))
-          .sort((left, right) => Number(left) - Number(right))
-          .map((key) => decoded[key]);
-  return Array.from(new Set(paths.map((item) => String(item).replace(/^\/+/, '')).filter(Boolean)));
-}
-
-async function hyperbeamNodeWriteNativeMessage(message, authToken) {
-  const base = hyperbeamNodeBase();
-  if (!base || !authToken) throw new Error('HyperBEAM native writer is not configured');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), HYPERBEAM_NODE_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${base}/id?!=true&committers=all`, {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        'x-odysee-auth-token': authToken,
-      },
-      body: JSON.stringify(message),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    const parsed = parseJsonOrValue(text);
-    if (!response.ok) throw new Error(`HyperBEAM native write failed with ${response.status}`);
-    const id =
-      response.headers.get('message-id') ||
-      response.headers.get('id') ||
-      response.headers.get('path') ||
-      value(parsed, 'message-id', 'id', 'path', 'read-path', 'body');
-    if (!id || typeof id !== 'string') throw new Error('HyperBEAM native write did not return an ID');
-    return id.replace(/^\/+/, '');
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function hyperbeamNodeReadVerifiedMessages(ids, expectedCommitter) {
-  const uniqueIds = Array.from(new Set((ids || []).map(String).filter(isStandaloneImmutableId)));
-  const results = await mapWithConcurrency(uniqueIds, 8, async (id) => {
-    const path = hyperbeamDirectPath(id);
-    const [payload, verificationResponse, committerResponse] = await Promise.all([
-      hyperbeamNodeFetchImmutableJson(id),
-      hyperbeamNodeFetchStorePath(`${path}/verify?commitment-ids=${encodeURIComponent(id)}`, false),
-      hyperbeamNodeFetchStorePath(`${path}/commitments/${path}/committer`, false),
-    ]);
-    const verification = responseScalar(verificationResponse);
-    const committer = responseScalar(committerResponse);
-    if (
-      payload &&
-      verification === true &&
-      typeof committer === 'string' &&
-      (!expectedCommitter || committer === expectedCommitter)
-    ) {
-      return { id, payload, committer };
-    }
-    return null;
-  });
-  return results.filter(Boolean);
-}
-
-async function hyperbeamNodeWarmImmutableClaims(ids, locatorById = new Map()) {
-  const uniqueIds = Array.from(new Set((ids || []).map(String).filter(Boolean)));
-  if (!uniqueIds.length) return [];
-  const results = await hyperbeamNodeResolveMany(
-    uniqueIds.map((id) => {
-      const locator = locatorById.get(id) || id;
-      return locatorReadRequest(locator);
-    })
-  );
-  return uniqueIds.map((id, index) => [id, value(results[index], 'status') === 'ok']);
 }
 
 async function hyperbeamNodeUploadList(params, extraHeaders) {
@@ -557,9 +336,7 @@ const LEGACY_ONLY_SDK_METHODS = new Set([
 async function hyperbeamNodeFetchJson(request, extraHeaders) {
   if (!request) return null;
   const controller = new AbortController();
-  const timeoutMs =
-    typeof request === 'object' ? request.timeoutMs || HYPERBEAM_NODE_TIMEOUT_MS : HYPERBEAM_NODE_TIMEOUT_MS;
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), HYPERBEAM_NODE_TIMEOUT_MS);
   const url = typeof request === 'string' ? request : request.url;
   if (!url) {
     clearTimeout(timeout);
@@ -589,12 +366,8 @@ async function hyperbeamNodeFetchJson(request, extraHeaders) {
   }
 }
 
-async function hyperbeamNodeFetchStoreJson(path, timeoutMs) {
-  const read = String(path).replace(/^\/+/, '');
-  return hyperbeamNodeFetchJson({
-    ...hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CACHE, 'read', { read }),
-    timeoutMs,
-  }).catch(() => null);
+async function hyperbeamNodeFetchStoreJson(path) {
+  return hyperbeamNodeFetchStorePath(path, true);
 }
 
 async function hyperbeamNodeFetchStorePath(path, preferJson = true) {
@@ -636,20 +409,6 @@ function unwrapJsonRpcResult(json) {
 function storeResponsePayload(json) {
   if (!json || json.error) return null;
   return json && Object.prototype.hasOwnProperty.call(json, 'result') ? json.result : json;
-}
-
-function parseJsonOrValue(value) {
-  if (typeof value !== 'string') return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-
-function responseScalar(response) {
-  const raw = value(response, 'body', 'result', 'value');
-  return parseJsonOrValue(raw === undefined ? response : raw);
 }
 
 async function parseStoreResponse(response) {
@@ -1668,12 +1427,4 @@ module.exports = {
   hyperbeamNodeMediaUrl,
   hyperbeamNodeResolve,
   hyperbeamNodeSdkCall,
-  hyperbeamNodeSourceClaimSearch,
-  hyperbeamNodeSourceClaimSearchMany,
-  hyperbeamNodeWarmImmutableClaim,
-  hyperbeamNodeWarmImmutableClaims,
-  hyperbeamNodeResolveMany,
-  hyperbeamNodeQueryPaths,
-  hyperbeamNodeReadVerifiedMessages,
-  hyperbeamNodeWriteNativeMessage,
 };

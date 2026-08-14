@@ -60,6 +60,8 @@ import {
 } from 'redux/actions/memberships';
 import { selectUserHasValidMembershipForCreatorId } from 'redux/selectors/memberships';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 
 const DEBOUNCE_SCROLL_HANDLER_MS = 200;
 const COMMENT_REACTION_REQUEST_CACHE_MS = 30 * 1000;
@@ -302,14 +304,17 @@ export default function CommentList(props: Props) {
       if (!othersReactsById || !myReactsByCommentId) {
         idsForReactionFetch = allCommentIds;
       } else {
+        const nativeAccountId = hyperbeamNodeEnabled() ? getHyperbeamAccount()?.id : undefined;
+        const reactionIdentity = nativeAccountId || activeChannelId;
         idsForReactionFetch = allCommentIds.filter((commentId) => {
-          const key = activeChannelId ? `${commentId}:${activeChannelId}` : commentId;
-          return !othersReactsById[key] || (activeChannelId && !myReactsByCommentId[key]);
+          const key = reactionIdentity ? `${commentId}:${reactionIdentity}` : commentId;
+          return !othersReactsById[key] || (reactionIdentity && !myReactsByCommentId[key]);
         });
       }
 
       if (idsForReactionFetch.length !== 0) {
-        const batchKey = `${activeChannelId || 'anon'}:${idsForReactionFetch.slice().sort().join(',')}`;
+        const reactionIdentity = hyperbeamNodeEnabled() ? getHyperbeamAccount()?.id : activeChannelId;
+        const batchKey = `${reactionIdentity || 'anon'}:${idsForReactionFetch.slice().sort().join(',')}`;
         const now = Date.now();
         const lastRequestedAt = requestedReactionBatchesRef.current[batchKey] || 0;
         if (now - lastRequestedAt < COMMENT_REACTION_REQUEST_CACHE_MS) return;

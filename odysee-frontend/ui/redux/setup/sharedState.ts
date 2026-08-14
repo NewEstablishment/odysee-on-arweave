@@ -4,8 +4,6 @@
 import * as ACTIONS from 'constants/action_types';
 import { buildSharedStateMiddleware } from 'redux/middleware/shared-state';
 export const triggerSharedStateActions = [
-  ACTIONS.CHANNEL_SUBSCRIBE,
-  ACTIONS.CHANNEL_UNSUBSCRIBE,
   ACTIONS.TOGGLE_BLOCK_CHANNEL,
   ACTIONS.ADD_COIN_SWAP,
   ACTIONS.REMOVE_COIN_SWAP,

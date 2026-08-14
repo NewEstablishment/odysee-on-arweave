@@ -352,9 +352,7 @@ verify_lbry_message(Msg) ->
 with_test_devices(Fun) ->
     HBPreloaded = filename:join(code:lib_dir(hb), "src/preloaded"),
     BootstrapOpts = #{
-        % ?FILE keeps the app source dir correct in both flat-src and
-        % apps/<app>/src umbrella layouts.
-        <<"bootstrap-device-src">> => [HBPreloaded, filename:dirname(?FILE)],
+        <<"bootstrap-device-src">> => [HBPreloaded, "src"],
         <<"commitment-device">> => <<"lbry@1.0">>
     },
     hb_forge_seed:with_forge_bootstrap(

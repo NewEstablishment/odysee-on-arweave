@@ -43,7 +43,7 @@ is sent on native writes.
 
 - The node's `cookie@1.0` provider mints identity on the first committed write.
 - Signup asks only for a display name and commits a channel-profile message.
-- The cookie signer owns later uploads and comments.
+- The cookie signer owns later uploads, comments, reactions, playlists, and subscriptions.
 - Local storage holds only the profile ID/name and signed-in display state. It
   is not an authority source.
 - Sign out hides the local profile but retains the cookie so login can restore
@@ -64,18 +64,6 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Mutable reads send `cache-control: no-store, no-cache`.
 - Response parsing must preserve HyperBEAM header/multipart fields and exact
   commitment identity.
-
-## Homepage snapshots
-
-- Use one signed native `odysee-homepage@1.0` snapshot per language.
-- Discover snapshots through generic query and hydrate the exact committed ID.
-- Preserve each category's ordered pre-warmed pool. Homepage rows consume the
-  configured prefix; category routes consume the larger pool for first paint.
-- Following is dynamic per-user data and must not be embedded in the public
-  language snapshot.
-- Continue category pagination after the snapshot pool rather than treating
-  the pool as the complete category history.
-- Production manifest clients must not require an SSR product-data proxy.
 
 ## Uploads and thumbnails
 
@@ -109,8 +97,60 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
   integration layer, not in generic query.
 - Never pass a native profile ID to the LBRY URI parser.
 
-Creator reactions, advanced moderation, delegates, and settings are currently
-unsupported. Fail explicitly instead of falling back to legacy services.
+## Reactions
+
+- Video and comment likes/dislikes are generic `odysee-reaction@1.0` messages
+  written through `/id?!=true&committers=all`.
+- Discover them by target and subject through stock `query@1.0/only`, hydrate
+  exact paths, and verify commitments and committers before projection.
+- A like/dislike switch and removal creates a contiguous append-only revision
+  using stable logical reaction/version references.
+- Count at most one current state per verified committer and target, even when
+  duplicate roots or physical representations exist.
+- Key Redux "my reaction" state by the active native profile so identity
+  changes cannot inherit another account's UI state.
+- Never use claimed profile fields as authority and never call the legacy
+  reaction API or a custom reaction device.
+
+Advanced moderation, delegates, and settings remain unsupported. Fail
+explicitly instead of falling back to legacy services.
+
+## Playlists
+
+- Public playlists are generic `odysee-playlist@1.0` messages written through
+  `/id?!=true&committers=all`; do not call `collection_*` or add a playlist
+  device.
+- `playlist-ref` is the public route identity and is bound to the verified
+  committer. `version-ref` identifies a semantic snapshot even when query
+  returns a different physical store representation.
+- Discover by exact schema/profile or playlist reference, hydrate every path,
+  verify commitments/committers/profile ownership, and project only a
+  contiguous unambiguous chain.
+- Store a complete ordered immutable item list in every revision. Native IDs
+  and legacy outpoints are allowed; mutable claim IDs, names, and URIs are not.
+- Local drafts and builtin lists remain local. Publish creates a native root;
+  update/reorder/delete append revisions, and delete is a tombstone.
+- Preserve Redux collection shape and playback order at the integration
+  boundary. The playlist UI must not expose channel selection, URL names,
+  bids, balances, confirmations, supports, reports, or abandon-claim flows.
+
+## Subscriptions
+
+- Free follows use generic `odysee-subscription@1.0` messages written through
+  `/id?!=true&committers=all`; do not call the legacy `subscription` API,
+  wallet sync, or add a subscription device.
+- Build a deterministic owner/channel `subscription-ref` from the verified
+  committer and a stable native profile ID or full legacy channel claim ID.
+- Follow, bell-preference update, unfollow, and re-follow append contiguous
+  revisions. Hydrate exact IDs and reject gaps, forks, conflicting versions,
+  and foreign committers.
+- A new follow defaults notifications off unless the user explicitly enables
+  the bell; omitted preferences must behave the same from every UI entry point.
+- Redux and persisted subscription arrays are optimistic caches only. Replace
+  them with the verified node projection on account load/change.
+- A future one-time legacy import may create missing roots with explicit
+  provenance. It must not become a fallback or recurring synchronization path.
+- Paid creator memberships are not free follows and are outside this contract.
 
 ## Publish and route guards
 
@@ -131,6 +171,9 @@ pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
 pnpm run test:native-comment-controls
+pnpm run test:native-reactions
+pnpm run test:native-playlists
+pnpm run test:native-subscriptions
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```
@@ -139,16 +182,19 @@ Against a running cookie-auth node:
 
 ```sh
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-reactions
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-playlists
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-subscriptions
 ```
 
 Also verify the actual browser lifecycle: manifest loads, signup mints the
-cookie, raw upload resolves and plays, comments render after reload, and no
+cookie, raw upload resolves and plays, comments, playlists, and subscriptions render after
+reload, and no
 normal-flow request reaches a legacy host.
 
 ## Current limitations
 
-- Native reactions, view/subscriber counts, and advanced moderation are not
-  implemented.
+- Native view/subscriber counts and advanced moderation are not implemented.
 - Upload edit/delete needs a complete append-only native contract.
 - Generic cache range propagation limits seeking for some historical media.
 - The cookie identity is node/browser-local and is not yet portable or

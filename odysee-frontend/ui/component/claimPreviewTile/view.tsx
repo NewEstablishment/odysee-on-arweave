@@ -47,7 +47,6 @@ import { selectStreamingUrlForUri } from 'redux/selectors/file_info';
 import { selectIsActiveLivestreamForUri } from 'redux/selectors/livestream';
 import { selectShowMatureContent, selectClientSetting } from 'redux/selectors/settings';
 import { selectFirstItemUrlForCollection } from 'redux/selectors/collections';
-import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 type Props = {
   uri?: string;
   placeholder?: boolean | string;
@@ -103,7 +102,7 @@ function ClaimPreviewTile(props: Props) {
   const isLivestreamActive = useAppSelector((state) =>
     isLivestream && uri ? selectIsActiveLivestreamForUri(state, uri) : false
   );
-  const viewCount = useAppSelector((state) => (uri ? selectViewCountForUri(state, uri) : undefined));
+  const viewCount = useAppSelector((state) => selectViewCountForUri(state, uri));
   const effectiveViewCount = isHyperbeamUploadClaim(claim) ? 0 : viewCount;
   const disableShortsView = useAppSelector((state) => selectClientSetting(state, SETTINGS.DISABLE_SHORTS_VIEW));
   const firstCollectionItemUrl = useAppSelector((state) =>
@@ -124,13 +123,13 @@ function ClaimPreviewTile(props: Props) {
   const showCollectionContext = isClaimAllowedForCollection(claim);
   const collectionClaimId = isCollection && claim && claim.claim_id;
   const thumbnailUrl = useGetThumbnail(uri, claim, streamingUrl, getFile, !!placeholder);
-  const immutableClaimUri = hyperbeamImmutableUriFromClaim(claim);
+  const canonicalUrl = claim && claim.canonical_url;
   const repostedContentUri = claim && (claim.reposted_claim ? claim.reposted_claim.permanent_url : claim.permanent_url);
   const listId = collectionId || collectionClaimId || '';
   const navigateUrl =
     isCollection && defaultCollectionAction === COLLECTIONS.DEFAULT_ACTION_VIEW
       ? `/$/${PAGES.PLAYLIST}/${listId}`
-      : formatLbryUrlForWeb((claim ? immutableClaimUri : uri) || '/') +
+      : formatLbryUrlForWeb(canonicalUrl || uri || '/') +
         (listId ? generateListSearchUrlParams(listId) : '') +
         (claim && isClaimShort(claim) && !disableShortsView ? '?view=shorts' : '') +
         (fypId ? `${claim && isClaimShort(claim) ? '&' : '?'}${FYP_ID}=${fypId}` : '') +
@@ -141,7 +140,7 @@ function ClaimPreviewTile(props: Props) {
   const navLinkProps = {
     to: navigateUrl,
     onClick: (e) => {
-      if (isPreview || (claim && !immutableClaimUri)) {
+      if (isPreview) {
         e.preventDefault();
         return;
       }
@@ -151,10 +150,7 @@ function ClaimPreviewTile(props: Props) {
   const queryParams = new URLSearchParams(search);
   const signingChannel = claim && claim.signing_channel;
   const isChannel = claim && claim.value_type === 'channel';
-  const channelUri = hyperbeamImmutableUriFromClaim(isChannel ? claim : signingChannel);
-  const signingChannelThumbnail = signingChannel?.value?.thumbnail;
-  const signingChannelThumbnailUrl =
-    typeof signingChannelThumbnail === 'string' ? signingChannelThumbnail : signingChannelThumbnail?.url;
+  const channelUri = !isChannel ? signingChannel && signingChannel.permanent_url : claim && claim.permanent_url;
   const channelTitle = signingChannel && ((signingChannel.value && signingChannel.value.title) || signingChannel.name);
   const isChannelPage = React.useContext(ChannelPageContext);
   const shouldShowViewCount = !(
@@ -223,11 +219,12 @@ function ClaimPreviewTile(props: Props) {
           'data-hyperbeam-claim-txid': claim.txid,
           'data-hyperbeam-claim-nout': claim.nout,
           'data-hyperbeam-claim-sd-hash': claim.value?.source?.sd_hash,
-          'data-hyperbeam-claim-uri': immutableClaimUri,
+          'data-hyperbeam-claim-uri': canonicalUrl || claim.permanent_url || uri,
           'data-hyperbeam-claim-title': title || claim.name,
           'data-hyperbeam-claim-type': claim.value_type,
           'data-hyperbeam-signing-channel-id': claim.signing_channel?.claim_id,
-          'data-hyperbeam-signing-channel-uri': hyperbeamImmutableUriFromClaim(claim.signing_channel),
+          'data-hyperbeam-signing-channel-uri':
+            claim.signing_channel?.canonical_url || claim.signing_channel?.permanent_url,
           'data-hyperbeam-signing-channel-title': channelTitle || claim.signing_channel?.name,
         }
       : {};
@@ -385,13 +382,7 @@ function ClaimPreviewTile(props: Props) {
               ) : (
                 <React.Fragment>
                   <UriIndicator focusable={false} uri={uri} link hideAnonymous external={isEmbed}>
-                    <ChannelThumbnail
-                      uri={channelUri || ''}
-                      thumbnailPreview={signingChannelThumbnailUrl}
-                      xsmall
-                      noLazyLoad
-                      checkMembership={false}
-                    />
+                    <ChannelThumbnail uri={channelUri || ''} xsmall checkMembership={false} />
                   </UriIndicator>
 
                   <div className="claim-tile__about">

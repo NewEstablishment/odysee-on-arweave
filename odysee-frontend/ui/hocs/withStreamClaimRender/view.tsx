@@ -45,7 +45,6 @@ import { doStartFloatingPlayingUri, doClearPlayingUri, doClearPlayingSource } fr
 import { doFileGetForUri } from 'redux/actions/file';
 import { doCheckIfPurchasedClaimId } from 'redux/actions/payments';
 import { doMembershipMine, doMembershipList } from 'redux/actions/memberships';
-import { collectionIdFromLid } from 'util/hyperbeam-route';
 
 // Bounded set to prevent repeated 'isHome' updateClaim calls (avoids loops on homepage)
 const HOME_INIT_FLAGS_MAX_SIZE = 100;
@@ -165,7 +164,7 @@ const withStreamClaimRender = (StreamClaimComponent: FunctionalComponentParam) =
     }
     const forceAutoplayParam = (urlParams && urlParams.get('autoplay')) || false;
     const collectionId =
-      (urlParams && collectionIdFromLid(urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID) || urlParams.get('lid'))) ||
+      (urlParams && (urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID) || urlParams.get('lid'))) ||
       (currentUriPlaying && playingCollectionId) ||
       undefined;
     const livestreamUnplayable = isLivestreamClaim && !isCurrentClaimLive;

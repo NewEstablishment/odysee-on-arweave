@@ -1,5 +1,4 @@
 import React from 'react';
-import analytics from 'analytics';
 import classnames from 'classnames';
 import * as MODALS from 'constants/modal_types';
 import * as ICONS from 'constants/icons';
@@ -19,13 +18,7 @@ import CollectionGeneralTab from './internal/collectionGeneralTab';
 import withCollectionItems from 'hocs/withCollectionItems';
 import ErrorBubble from 'component/common/error-bubble';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import {
-  selectHasClaimForId,
-  selectClaimBidAmountForId,
-  selectClaimIsPendingForId,
-  selectClaimUriForId,
-} from 'redux/selectors/claims';
-import { selectBalance } from 'redux/selectors/wallet';
+import { selectHasClaimForId } from 'redux/selectors/claims';
 import { selectCollectionClaimUploadParamsForId } from 'redux/selectors/publish';
 import {
   selectCollectionForId,
@@ -33,7 +26,6 @@ import {
   selectHasUnavailableClaimIdsForCollectionId,
   selectCollectionHasUnsavedEditsForId,
 } from 'redux/selectors/collections';
-import { selectActiveChannelClaim } from 'redux/selectors/app';
 import {
   doCollectionPublish,
   doCollectionEdit,
@@ -73,8 +65,6 @@ const CollectionPublishForm = (props: Props) => {
   const { search } = useLocation();
   const hasClaim = useAppSelector((state) => selectHasClaimForId(state, collectionId));
   const collectionParams = useAppSelector((state) => selectCollectionClaimUploadParamsForId(state, collectionId));
-  const isClaimPending = useAppSelector((state) => selectClaimIsPendingForId(state, collectionId));
-  const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const collectionHasUnSavedEdits = useAppSelector((state) =>
     selectCollectionHasUnsavedEditsForId(state, collectionId)
@@ -94,7 +84,7 @@ const CollectionPublishForm = (props: Props) => {
   const [formParams, setFormParams] = React.useState(collectionParams);
   const [optimisticTabIndex, setOptimisticTabIndex] = React.useState<number | null>(null);
   const [showItemsSpinner, setShowItemsSpinner] = React.useState(false);
-  const [publishPending, setPublishPending] = React.useState(isClaimPending);
+  const [publishPending, setPublishPending] = React.useState(false);
   const tabIndex = optimisticTabIndex ?? tabIndexFromUrl;
   const { claims } = formParams;
   const hasClaims = claims && claims.length;
@@ -152,13 +142,13 @@ const CollectionPublishForm = (props: Props) => {
   function handlePublish(params) {
     setPublishPending(true);
 
-    const successCb = (pendingClaim) => {
+    const successCb = (playlistClaim) => {
       setPublishPending(false);
 
-      if (pendingClaim) {
-        const claimId = pendingClaim.claim_id;
-        analytics.apiLog.publish(pendingClaim);
-        onDoneForId(claimId);
+      if (playlistClaim) {
+        const playlistRef = playlistClaim.claim_id;
+        if (onDoneForId) onDoneForId(playlistRef);
+        else navigate(`/$/${PAGES.PLAYLIST}/${playlistRef}`, { replace: true });
       }
     };
 
@@ -266,14 +256,6 @@ const CollectionPublishForm = (props: Props) => {
     }
   }, [collectionParams]);
 
-  if (publishing && activeChannelClaim === undefined) {
-    return (
-      <div className="main--empty">
-        <Spinner />
-      </div>
-    );
-  }
-
   return (
     <Form
       className="main--contained collection-publish-form__wrapper"
@@ -359,7 +341,7 @@ const CollectionPublishForm = (props: Props) => {
 
         <p className="help">
           {publishing
-            ? __('After submitting, it will take a few minutes for your changes to be live for everyone.')
+            ? __('After submitting, the signed playlist is available from this HyperBEAM node immediately.')
             : __('After saving, all changes will remain private')}
         </p>
       </CollectionFormContext.Provider>

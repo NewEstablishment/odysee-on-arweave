@@ -148,28 +148,6 @@ are rejected without network I/O.
   `odysee/descriptor/<96hex>`, `odysee/blob/<96hex>` — plus bare-key
   classification: `txid:nout` → claim output, 96-hex → blob, 64-hex →
   transaction, 40-hex → claim ID.
-- **Locator listing**:
-  `odysee/channel-claims/<40hex>[,<40hex>...][/<page>[/<page-size>[/<release-after>[/<release-before>]]]]`
-  returns an *uncommitted* map of globally ordered `txid:nout` locators for
-  one or more channels' current stream claims, via one `claim_search` on the
-  SDK proxy. `release-times` is positionally aligned with `locators`; the
-  optional bounds are forwarded as `release_time: [>N, <N]`. The multi-channel
-  form powers the Following feed without per-subscription request fan-out and
-  does not cap the number of results per channel. Discovery only,
-  same trust class as the mutable namespaces: nothing in the list is served as
-  fact, each locator must be hydrated and verified through its own immutable
-  read, and a dishonest proxy can at worst hide or reorder entries. Mutable at
-  a constant path, so it relies on the node's `no-store` cache policy.
-  Retirement condition: replaced by `~query@1.0`/`~search@1.0` over the common
-  cache once the search index covers legacy channel content.
-- **Verified list hydration**: `odysee/claim-json/<txid>:<nout>` verifies the
-  generic immutable claim-output evidence and returns a bounded plain-JSON
-  projection for list hydration. It includes the immutable locator fields,
-  raw committed claim envelope, decoded claim value, and media metadata, but
-  deliberately excludes recursive commitment/link graphs. This route is not
-  cached as a separate authority; the claim output remains the source of truth.
-  `odysee/channel-json/<claim-id>` applies the same projection after locating
-  and verifying the channel's current immutable output.
 - **Fetches**: for the *mutable* namespaces (`claim-id`, `claim`/URI,
   `channel-id`), a locator lookup via the SDK proxy (`resolve` /
   `claim_search`) to obtain the current outpoint; then delegation to the

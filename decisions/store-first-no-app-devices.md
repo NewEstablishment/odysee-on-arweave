@@ -3,7 +3,7 @@
 ## Issue
 
 The prior work carries ~14 `~odysee-*@1.0` application devices (claim,
-stream, stream-descriptor, comment, account, search, upload, reactions,
+stream, stream-descriptor, comment, account, search, upload, reactions, playlists,
 subscription, file, policy, references, auth, publish-gate). The brief
 for this port: minimize custom devices so any standard HyperBEAM node
 can join the system; talk to stores via `GET /ID` wherever possible.
@@ -24,10 +24,22 @@ inversion that makes the store unusable without the whole device fleet.
   `hb_store_remote_node` pointed at seed peers.
 - **Writes**: the default `~auth-hook@1.0` request hook (`?!=true`
   commit key) signs the user's POST with a node-hosted per-user wallet;
-  uploads and comments are ordinary committed messages written to the
+  uploads, comments, reactions, playlists, and subscriptions are ordinary committed messages written to the
   cache and discovered via `~query@1.0`'s match index — the architecture
   rave/moderation already proved for native comments, with no custom
   device.
+- **Native playlists**: public playlists use owner-bound logical references and
+  append-only full snapshots containing ordered immutable locators. Generic
+  exact query discovers physical representations and the frontend verifies and
+  projects them. The LBRY `collection_*` API and blockchain publish controls
+  are not part of this feature.
+- **Native subscriptions**: free channel follows use deterministic
+  owner/channel relationship references. Follow, notification-preference,
+  unfollow, and re-follow events form a contiguous append-only chain. Local
+  Redux state is only an optimistic cache; the verified node projection is
+  authoritative. A later one-time legacy import may seed missing roots with
+  explicit provenance, but normal operation never calls the legacy
+  subscription API or wallet sync. Paid memberships remain a separate concern.
 - Dropped entirely: the legacy-API bridge devices, the tier-1
   (SDK-attested) verified-stream path, `dev_odysee_claim_proof` /
   `dev_lbry_claim_output` (superseded by `dev_lbry_tx` + `lbry@1.0`),

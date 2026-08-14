@@ -88,7 +88,6 @@ type Props = {
   placeholder?: string;
   showNullPlaceholder?: boolean;
   onHidden?: (arg0: any) => void;
-  trailingPlaceholderCount?: number;
 };
 export default function ClaimList(props: Props) {
   const {
@@ -139,7 +138,6 @@ export default function ClaimList(props: Props) {
     setHasActive,
     isShortFromChannelPage,
     sectionTitle,
-    trailingPlaceholderCount = 0,
   } = props;
   const searchInLanguage = useAppSelector((state) => selectClientSetting(state, SETTINGS.SEARCH_IN_LANGUAGE));
   const isMobile = useIsMobile();
@@ -395,9 +393,6 @@ export default function ClaimList(props: Props) {
               );
             }
           })}
-        {Array.from({ length: trailingPlaceholderCount }, (_, index) => (
-          <ClaimPreviewTile key={`trailing-placeholder:${index}`} placeholder="loading" pulse />
-        ))}
         {!timedOut && urisLength === 0 && !loading && !noEmpty && (
           <div className="empty main--empty">{empty || noResultMsg}</div>
         )}

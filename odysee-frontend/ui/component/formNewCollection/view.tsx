@@ -7,10 +7,7 @@ import { FormField } from 'component/common/form';
 import Button from 'component/button';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doPlaylistAddAndAllowPlaying } from 'redux/actions/content';
-import { doToast } from 'redux/actions/notifications';
 import { selectCollectionForId } from 'redux/selectors/collections';
-import { selectClaimForUri } from 'redux/selectors/claims';
-import { createNativePlaylist, immutableIdForClaim } from 'util/hyperbeam';
 
 type Props = {
   uri?: string;
@@ -26,7 +23,6 @@ function FormNewCollection(props: Props) {
   const sourceCollectionName = useAppSelector((state) =>
     sourceId ? selectCollectionForId(state, sourceId)?.name : undefined
   );
-  const uriClaim = useAppSelector((state) => (uri ? selectClaimForUri(state, uri) : undefined));
 
   const buttonref = React.useRef<any>(null);
   const [newCollectionName, setCollectionName] = React.useState(
@@ -42,30 +38,15 @@ function FormNewCollection(props: Props) {
     setCollectionName(value);
   }
 
-  async function handleAddCollection() {
+  function handleAddCollection() {
     const name = newCollectionName.trim();
     let id;
-
-    let nativeId;
-    try {
-      const itemId = immutableIdForClaim(uriClaim);
-      nativeId = await createNativePlaylist({ title: name, items: itemId ? [itemId] : [] });
-    } catch (error) {
-      dispatch(
-        doToast({
-          message: __('Native playlist write failed — created a local-only playlist instead.'),
-          isError: true,
-        })
-      );
-    }
-
     dispatch(
       doPlaylistAddAndAllowPlaying({
         uri,
         collectionName: name,
         sourceId,
         createNew: true,
-        nativeId,
         createCb: !sourceId
           ? undefined
           : (newId) => {
@@ -73,7 +54,7 @@ function FormNewCollection(props: Props) {
             },
       })
     );
-    closeForm(name, id || nativeId);
+    closeForm(name, id);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<any>) {

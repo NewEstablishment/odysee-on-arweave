@@ -15,7 +15,7 @@ async function getHomepage(ctx, version) {
   const hp = ctx?.request?.query?.hp;
 
   try {
-    const content = await (version === 1 ? getHomepageJsonV1() : getHomepageJsonV2(format, hp));
+    const content = version === 1 ? getHomepageJsonV1() : getHomepageJsonV2(format, hp);
     ctx.set('Content-Type', 'application/json');
     ctx.set('Access-Control-Allow-Origin', '*');
     ctx.body = {

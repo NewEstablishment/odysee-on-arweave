@@ -10,6 +10,7 @@ import { selectHasClaimForId } from 'redux/selectors/claims';
 import { selectCollectionTitleForId, selectCollectionKeyForId } from 'redux/selectors/collections';
 import { doHideModal } from 'redux/actions/app';
 import { doCollectionDelete } from 'redux/actions/collections';
+import { doToast } from 'redux/actions/notifications';
 type Props = {
   collectionId: string;
   simplify?: boolean;
@@ -24,7 +25,7 @@ function ModalRemoveCollection(props: Props) {
   const collectionKey = useAppSelector((state) => selectCollectionKeyForId(state, collectionId));
   const navigate = useNavigate();
   const [confirmName, setConfirmName] = useState('');
-  const [keepPrivate, setKeepPrivate] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   function getBody() {
     if (simplify) {
@@ -51,13 +52,6 @@ function ModalRemoveCollection(props: Props) {
               marginBottom: 'var(--spacing-s)',
             }}
           />
-          <FormField
-            name="keep-private"
-            type="checkbox"
-            label={__('Delete publish but keep private playlist')}
-            checked={keepPrivate}
-            onChange={() => setKeepPrivate((prev) => !prev)}
-          />
         </>
       ) : (
         <I18nMessage
@@ -72,7 +66,7 @@ function ModalRemoveCollection(props: Props) {
   }
 
   return (
-    <Modal isOpen contentLabel={__('Confirm Playlist Unpublish')} type="card" onAborted={() => dispatch(doHideModal())}>
+    <Modal isOpen contentLabel={__('Confirm Playlist Delete')} type="card" onAborted={() => dispatch(doHideModal())}>
       <Card
         title={__('Delete Playlist')}
         body={
@@ -85,12 +79,18 @@ function ModalRemoveCollection(props: Props) {
           <div className="section__actions">
             <Button
               button="primary"
-              label={__('Delete')}
-              disabled={!simplify && hasClaim && collectionName !== confirmName}
-              onClick={() => {
-                if (redirect) navigate(redirect, { replace: true });
-                dispatch(doCollectionDelete(collectionId, hasClaim ? undefined : collectionKey, keepPrivate));
-                dispatch(doHideModal());
+              label={deleting ? __('Deleting...') : __('Delete')}
+              disabled={deleting || (!simplify && hasClaim && collectionName !== confirmName)}
+              onClick={async () => {
+                setDeleting(true);
+                try {
+                  await dispatch(doCollectionDelete(collectionId, hasClaim ? undefined : collectionKey));
+                  if (redirect) navigate(redirect, { replace: true });
+                  dispatch(doHideModal());
+                } catch (error) {
+                  setDeleting(false);
+                  dispatch(doToast({ message: error?.message || __('Failed to delete playlist.'), isError: true }));
+                }
               }}
             />
             <Button button="link" label={__('Cancel')} onClick={() => dispatch(doHideModal())} />

@@ -6,8 +6,6 @@ services:
     stop_grace_period: 15s
     ports:
       - '${FRONTEND_BIND:-127.0.0.1:1338:1337}'
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
     build:
       context: .
       args:
@@ -17,18 +15,10 @@ services:
       WEB_SERVER_PORT: 1337
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-8}
       CUSTOM_HOMEPAGE: 'true'
-      CUSTOM_HOMEPAGE_SNAPSHOT_FILE: /app/runtime/homepage/materialized-homepages-v2.json
       CHAINQUERY_MYSQL_PASSWORD: ${CHAINQUERY_MYSQL_PASSWORD:?set CHAINQUERY_MYSQL_PASSWORD}
       LBRY_WEB_API: ${LBRY_WEB_API:-https://api.odysee.com}
-      ODYSEE_HYPERBEAM_NODE_API: ${ODYSEE_HYPERBEAM_NODE_API:-http://host.docker.internal:18800}
-      HYPERBEAM_MULTIREQUEST_MODULE_ID: ${HYPERBEAM_MULTIREQUEST_MODULE_ID:-rxgzJWaKqkhIve9wVPxGm-ozzztUFvJFBzpnE8VGPRA}
-      HOMEPAGE_HYPERBEAM_AUTH_TOKEN: ${HOMEPAGE_HYPERBEAM_AUTH_TOKEN:-}
-      HOMEPAGE_SNAPSHOT_COMMITTER: ${HOMEPAGE_SNAPSHOT_COMMITTER:-}
-      HOMEPAGE_SNAPSHOT_LOOKBACK_HOURS: ${HOMEPAGE_SNAPSHOT_LOOKBACK_HOURS:-168}
-      HOMEPAGE_MATERIALIZE_INTERVAL_MS: ${HOMEPAGE_MATERIALIZE_INTERVAL_MS:-3600000}
     volumes:
       - ${HOMEPAGES_DIR:-./custom/homepages}:/app/custom/homepages:ro
-      - homepage-snapshot:/app/runtime/homepage
     labels:
       com.centurylinklabs.watchtower.enable: 'true'
       com.centurylinklabs.watchtower.stop-signal: SIGTERM
@@ -50,6 +40,3 @@ services:
       - ${DOCKER_CONFIG_DIR:?set DOCKER_CONFIG_DIR}:/config:ro
     labels:
       com.centurylinklabs.watchtower.enable: 'false'
-
-volumes:
-  homepage-snapshot:

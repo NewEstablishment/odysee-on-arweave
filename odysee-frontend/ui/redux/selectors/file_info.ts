@@ -96,24 +96,14 @@ export const selectDownloadedUris = createSelector(
   (info) => info.slice().map((claim: any) => `lbry://${claim.claim_name}#${claim.claim_id}`)
 );
 export const makeSelectMediaTypeForUri = (uri) =>
-  createSelector(
-    makeSelectFileInfoForUri(uri),
-    makeSelectContentTypeForUri(uri),
-    makeSelectClaimForUri(uri),
-    (fileInfo, contentType, claim) => {
-      const streamType = claim?.value?.stream_type;
-      if (!fileInfo && !contentType && !streamType) {
-        return undefined;
-      }
-
-      if (['audio', 'video', 'image'].includes(streamType)) {
-        return streamType;
-      }
-
-      const fileName = fileInfo && fileInfo.file_name;
-      return Lbry.getMediaType(contentType, fileName);
+  createSelector(makeSelectFileInfoForUri(uri), makeSelectContentTypeForUri(uri), (fileInfo, contentType) => {
+    if (!fileInfo && !contentType) {
+      return undefined;
     }
-  );
+
+    const fileName = fileInfo && fileInfo.file_name;
+    return Lbry.getMediaType(contentType, fileName);
+  });
 export const makeSelectUriIsStreamable = (uri) =>
   createSelector(makeSelectMediaTypeForUri(uri), (mediaType) => {
     const isStreamable = ['audio', 'video', 'image'].indexOf(mediaType) !== -1;

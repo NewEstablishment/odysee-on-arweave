@@ -83,7 +83,6 @@ import { getVideoClaimAspectRatio, isClaimShort as isClaimShortUtil } from 'util
 import { doOpenModal as doOpenModalAction } from 'redux/actions/app';
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
 import { selectShortsSidePanelOpen, selectShortsPlaylist } from 'redux/selectors/shorts';
-import { collectionIdFromLid } from 'util/hyperbeam-route';
 function MiniPlayerPlayButton() {
   const [state, setState] = React.useState('paused');
 
@@ -199,7 +198,7 @@ function VideoRenderFloating(props: Props) {
   const navigate = useNavigate();
   const { search: routerSearch } = useLocation();
   const urlParams = new URLSearchParams(routerSearch);
-  const collectionSidebarId = collectionIdFromLid(urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID));
+  const collectionSidebarId = urlParams.get(COLLECTIONS_CONSTS.COLLECTION_ID);
   const isFloating = useAppSelector(selectIsPlayerFloating);
   const autoplayCountdownUri = useAppSelector(selectAutoplayCountdownUri);
   const playingUri = useAppSelector(selectPlayingUri);

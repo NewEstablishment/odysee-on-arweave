@@ -95,7 +95,6 @@ COPY --from=build --chown=odysee:odysee /app/web/dist web/dist
 
 # Web server code
 COPY --chown=odysee:odysee web/cluster.js web/
-COPY --chown=odysee:odysee web/entrypoint.js web/
 COPY --chown=odysee:odysee web/index.js web/lbry.js web/
 COPY --chown=odysee:odysee web/src web/src
 COPY --chown=odysee:odysee web/middleware web/middleware
@@ -109,7 +108,6 @@ COPY --chown=odysee:odysee ui/util/web.cjs ui/util/
 COPY --chown=odysee:odysee ui/constants/pages.cjs ui/constants/
 COPY --chown=odysee:odysee custom/homepages custom/homepages
 COPY --chown=odysee:odysee static static
-RUN mkdir -p /app/runtime/homepage && chown -R odysee:odysee /app/runtime
 USER odysee
 
 ENV NODE_ENV=production
@@ -119,4 +117,4 @@ EXPOSE 1337
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://localhost:1337').then(r=>{process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"
 
-CMD ["node", "web/entrypoint.js"]
+CMD ["node", "web/cluster.js"]

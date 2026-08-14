@@ -360,7 +360,6 @@ export function doPlaylistAddAndAllowPlaying({
   sourceId,
   createNew,
   createCb,
-  nativeId,
 }: {
   uri?: string;
   collectionName: string;
@@ -368,7 +367,6 @@ export function doPlaylistAddAndAllowPlaying({
   sourceId?: string;
   createNew?: boolean;
   createCb?: (id: string) => void;
-  nativeId?: string;
 }) {
   return async (dispatch: Dispatch, getState: () => any) => {
     const state = getState();
@@ -383,7 +381,6 @@ export function doPlaylistAddAndAllowPlaying({
             items: uri ? [uri] : [],
             type: COL_TYPES.PLAYLIST,
             sourceId,
-            id: nativeId,
           },
           (newId) => {
             collectionId = newId;

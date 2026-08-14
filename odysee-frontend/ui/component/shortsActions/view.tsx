@@ -35,6 +35,7 @@ import {
   DISABLE_REACTIONS_VIDEO_TAG,
 } from 'constants/tags';
 import { doOpenModal } from 'redux/actions/app';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 type Props = {
   hasPlaylist: boolean;
@@ -241,7 +242,7 @@ const ShortsActions = React.memo<Props>(
                 icon={myReaction === REACTION_TYPES.LIKE ? ICONS.FIRE_ACTIVE : ICONS.FIRE}
                 iconSize={16}
                 title={__('I Like This')}
-                requiresAuth
+                requiresAuth={!hyperbeamNodeEnabled()}
                 authSrc="filereaction_like"
                 className={classnames('shorts-page__actions-button button--file-action button-like', {
                   'button--fire': myReaction === REACTION_TYPES.LIKE,
@@ -284,7 +285,7 @@ const ShortsActions = React.memo<Props>(
               }
             >
               <Button
-                requiresAuth
+                requiresAuth={!hyperbeamNodeEnabled()}
                 authSrc={'filereaction_dislike'}
                 title={__('I dislike this')}
                 className={classnames('shorts-page__actions-button button--file-action button-dislike', {

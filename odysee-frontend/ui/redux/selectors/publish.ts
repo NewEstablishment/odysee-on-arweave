@@ -1,12 +1,11 @@
 import { createSelector } from 'reselect';
 import { createCachedSelector } from 're-reselect';
-import { parseURI, buildURI, sanitizeName } from 'util/lbryURI';
+import { parseURI, buildURI } from 'util/lbryURI';
 import {
   selectClaimsById,
   selectMyClaimsWithoutChannels,
   selectResolvingUris,
   selectClaimsByUri,
-  selectCollectionClaimPublishUpdateMetadataForId,
 } from 'redux/selectors/claims';
 import { WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
 import { CHANNEL_ANONYMOUS } from 'constants/claim';
@@ -14,9 +13,6 @@ import { SCHEDULED_LIVESTREAM_TAG } from 'constants/tags';
 import {
   selectCollectionForId,
   selectClaimIdsForCollectionId,
-  selectIsCollectionPrivateForId,
-  selectCollectionHasEditsForId,
-  selectCollectionHasUnsavedEditsForId,
   selectCollectionTitleForId,
 } from 'redux/selectors/collections';
 import { selectActiveChannelClaimId, selectIncognito } from 'redux/selectors/app';
@@ -271,53 +267,21 @@ export const selectActiveUploadActivity = createSelector(
 export const selectIsScheduled = (state: State) =>
   selectState(state).tags.some((t) => t.name === SCHEDULED_LIVESTREAM_TAG);
 export const selectCollectionClaimUploadParamsForId = createCachedSelector(
-  selectIsCollectionPrivateForId,
   selectCollectionForId,
   selectCollectionTitleForId,
   selectClaimIdsForCollectionId,
-  selectActiveChannelClaimId,
-  selectCollectionClaimPublishUpdateMetadataForId,
-  selectCollectionHasEditsForId,
-  selectCollectionHasUnsavedEditsForId,
-  (
-    isPrivate,
-    collection,
-    collectionTitle,
-    collectionClaimIds,
-    activeChannelId,
-    collectionClaimMetadata,
-    hasEdits,
-    hasUnSavedEdits
-  ) => {
+  (collection, collectionTitle, collectionClaimIds) => {
     const claims = collectionClaimIds && collectionClaimIds.filter(Boolean);
-    const privateCollectionParams = {
+    if (!collection) return undefined;
+    return {
+      name: collectionTitle,
       title: collectionTitle,
       description: collection.description,
       thumbnail_url: collection.thumbnail?.url,
       claims,
       tags: collection.tags || [],
+      languages: collection.languages || [],
     };
-
-    if (isPrivate) {
-      const collectionPublishCreateParams: CollectionPublishCreateParams = {
-        ...privateCollectionParams,
-        bid: 0.0001 as any,
-        channel_id: activeChannelId,
-        name: sanitizeName(collectionTitle),
-      };
-      return collectionPublishCreateParams;
-    }
-
-    const collectionClaimUploadParams: CollectionPublishCreateParams & CollectionPublishUpdateParams = {
-      channel_id: activeChannelId,
-      ...collectionClaimMetadata,
-    };
-
-    if (hasEdits || hasUnSavedEdits) {
-      Object.assign(collectionClaimUploadParams, privateCollectionParams);
-    }
-
-    return collectionClaimUploadParams;
   }
 )((state: State, collectionId: string) => collectionId);
 export const selectIsNonPublicVisibilityAllowed = (state: State) => {

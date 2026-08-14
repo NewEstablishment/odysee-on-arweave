@@ -1,6 +1,5 @@
 import { Global } from '@emotion/react';
 import React from 'react';
-import { fetchPlaylistIdForLegacyId, playlistRouteId } from 'util/hyperbeam';
 import classnames from 'classnames';
 import CollectionItemsList from 'component/collectionItemsList';
 import Card from 'component/common/card';
@@ -162,19 +161,6 @@ type PlaylistCardProps = {
 };
 
 const PlaylistCardComponent = (props: PlaylistCardProps) => {
-  const collectionClaim = useAppSelector((state) => selectClaimForClaimId(state, props.id));
-  const [playlistMessageId, setPlaylistMessageId] = React.useState('');
-  React.useEffect(() => {
-    let cancelled = false;
-    fetchPlaylistIdForLegacyId(props.id)
-      .then((nativeId) => {
-        if (!cancelled && nativeId) setPlaylistMessageId(nativeId);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [props.id]);
   const {
     isMyCollection,
     collectionUrls,
@@ -443,7 +429,7 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
           title={
             bodyOnly ? undefined : (
               <NavLink
-                to={`/$/${PAGES.PLAYLIST}/${playlistMessageId || playlistRouteId(id, collectionClaim)}`}
+                to={`/$/${PAGES.PLAYLIST}/${id || ''}`}
                 className={classnames('playlist__title', {
                   'align-end': isFloating,
                 })}

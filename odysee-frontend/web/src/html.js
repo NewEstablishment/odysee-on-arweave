@@ -25,7 +25,6 @@ const { fetchStreamUrl } = require('./fetchStreamUrl');
 const { lbryProxy: Lbry } = require('../lbry');
 
 const { getHomepageJsonV1 } = require('./getHomepageJSON');
-const { homepageSnapshotPath, readHomepageSnapshot } = require('./homepageMaterializer');
 
 const { buildURI, parseURI, normalizeClaimUrl } = require('./lbryURI');
 
@@ -45,7 +44,6 @@ Lbry.setDaemonConnectionString(PROXY_URL);
 const BEGIN_STR = '<!-- VARIABLE_HEAD_BEGIN -->';
 const FINAL_STR = '<!-- VARIABLE_HEAD_END -->';
 const DOUBLE_TAB = '    ';
-let homepageBootstrap = { modified: 0, html: '' };
 
 // ****************************************************************************
 // Helpers
@@ -61,38 +59,6 @@ function insertToHead(fullHtml, htmlToInsert) {
       `${DOUBLE_TAB}` +
       `${fullHtml.slice(finalIndex + FINAL_STR.length)}`
     );
-  }
-}
-
-function injectHomepageBootstrap(fullHtml) {
-  if (process.env.CUSTOM_HOMEPAGE !== 'true') return fullHtml;
-
-  try {
-    const snapshotPath = homepageSnapshotPath();
-    const modified = fs.statSync(snapshotPath).mtimeMs;
-    if (homepageBootstrap.modified !== modified) {
-      const snapshot = readHomepageSnapshot(snapshotPath);
-      const compactData = structuredClone(snapshot?.data || {});
-      Object.values(compactData).forEach((homepage) => {
-        Object.values(homepage?.categories || {}).forEach((category) => {
-          delete category.pinnedClaimIds;
-          delete category.pinnedUrls;
-          delete category.immutableChannelIds;
-          delete category.unresolvedChannelIds;
-        });
-      });
-      const serialized = JSON.stringify(compactData)
-        .replace(/</g, '\\u003c')
-        .replace(/\u2028/g, '\\u2028')
-        .replace(/\u2029/g, '\\u2029');
-      homepageBootstrap = {
-        modified,
-        html: `<script>window.homepages=${serialized};window.__MATERIALIZED_HOMEPAGE__=true;</script>`,
-      };
-    }
-    return fullHtml.replace('</head>', `${homepageBootstrap.html}</head>`);
-  } catch {
-    return fullHtml;
   }
 }
 
@@ -112,8 +78,8 @@ function truncateDescription(description, maxChars = 200) {
   return chars.length > maxChars ? truncated + '...' : truncated;
 }
 
-async function getCategoryMeta(path) {
-  const homepage = await getHomepageJsonV1();
+function getCategoryMeta(path) {
+  const homepage = getHomepageJsonV1();
 
   if (path === `/$/${PAGES.WILD_WEST}` || path === `/$/${PAGES.WILD_WEST}/`) {
     return {
@@ -623,7 +589,7 @@ async function getHtml(ctx) {
       baseUrl: ctx.origin,
       fcActionUrl: homeFcActionUrl,
     });
-    return insertToHead(injectHomepageBootstrap(html), ogMetadata);
+    return insertToHead(html, ogMetadata);
   }
 
   if (ctx?.request?.url) {
@@ -764,7 +730,7 @@ async function getHtml(ctx) {
     return insertToHead(html);
   }
 
-  const categoryMeta = await getCategoryMeta(requestPath);
+  const categoryMeta = getCategoryMeta(requestPath);
 
   if (categoryMeta) {
     return buildCategoryPageHead(html, requestPath, categoryMeta);

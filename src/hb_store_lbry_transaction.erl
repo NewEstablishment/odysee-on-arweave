@@ -25,11 +25,7 @@ read(StoreOpts, #{ <<"read">> := TxID }, NodeOpts) ->
         true ->
             NormalizedTxID = hb_util:to_lower(TxID),
             case hb_store_remote_node:read_local_cache(StoreOpts, TxID, NodeOpts) of
-                {ok, Msg} ->
-                    case verify_cached_transaction(StoreOpts, NormalizedTxID, Msg, NodeOpts) of
-                        {ok, VerifiedMsg} -> {ok, VerifiedMsg};
-                        _ -> fetch_transaction(StoreOpts, NormalizedTxID, NodeOpts, 2)
-                    end;
+                {ok, Msg} -> {ok, Msg};
                 _ -> fetch_transaction(StoreOpts, NormalizedTxID, NodeOpts, 2)
             end;
         false ->
@@ -62,18 +58,6 @@ do_fetch_transaction(StoreOpts, TxID, NodeOpts) ->
         ok ?= matching_txid(TxID, Msg),
         hb_store_remote_node:maybe_cache(StoreOpts, Msg, [TxID]),
         {ok, Msg}
-    end.
-
-verify_cached_transaction(StoreOpts, TxID, Msg, NodeOpts) ->
-    try
-        CacheOpts = hb_odysee_util:local_cache_opts(StoreOpts, NodeOpts),
-        Loaded = hb_cache:ensure_all_loaded(Msg, CacheOpts),
-        {ok, Raw} = dev_lbry_commitment:evidence_decode(maps:get(<<"raw">>, Loaded)),
-        {ok, VerifiedMsg} = dev_lbry_commitment:transaction_message(Raw),
-        ok = matching_txid(TxID, VerifiedMsg),
-        {ok, VerifiedMsg}
-    catch
-        _:_ -> {error, invalid_cached_transaction}
     end.
 
 %% The proxy node and HTTP client may be pinned per-store; otherwise the
@@ -130,34 +114,6 @@ read_returns_committed_transaction_message_test() ->
         ?assert(verify_lbry_message(Msg))
     after
         hb_mock_server:stop(Handle)
-    end.
-
-read_rehydrates_lazy_cached_transaction_test_() ->
-    {timeout, 60, fun() ->
-        with_test_devices(fun read_rehydrates_lazy_cached_transaction/1)
-    end}.
-
-read_rehydrates_lazy_cached_transaction(DeviceOpts) ->
-    application:ensure_all_started(inets),
-    TxID = <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
-    {ok, Server, Handle} = proxy_server(dev_lbry_tx:task0_tx_hex()),
-    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
-    Cache = #{
-        <<"store-module">> => hb_store_volatile,
-        <<"name">> => <<"cache-TEST/lbry-transaction-", Timestamp/binary>>
-    },
-    ok = hb_store:start(Cache),
-    Store = (store(Server))#{ <<"local-store">> => [Cache] },
-    NodeOpts = DeviceOpts#{ <<"http-client">> => httpc, <<"store">> => [Cache] },
-    try
-        {ok, _LiveMsg} = read(Store, #{ <<"read">> => TxID }, NodeOpts),
-        hb_mock_server:stop(Handle),
-        {ok, CachedMsg} = read(Store, #{ <<"read">> => TxID }, NodeOpts),
-        ?assertEqual(TxID, maps:get(<<"txid">>, CachedMsg)),
-        ?assert(is_binary(maps:get(<<"raw">>, CachedMsg))),
-        ?assert(verify_lbry_message(CachedMsg))
-    after
-        hb_store:stop(Cache)
     end.
 
 read_rejects_txid_mismatch_test() ->
@@ -217,23 +173,6 @@ verify_lbry_message(Msg) ->
     lists:all(
         fun(Commitment) -> dev_lbry:verify(Msg, Commitment, #{}) =:= {ok, true} end,
         maps:values(maps:get(<<"commitments">>, Msg))
-    ).
-
-with_test_devices(Fun) ->
-    HBPreloaded = filename:join(code:lib_dir(hb), "src/preloaded"),
-    BootstrapOpts = #{
-        <<"bootstrap-device-src">> => [HBPreloaded, filename:dirname(?FILE)],
-        <<"commitment-device">> => <<"lbry@1.0">>
-    },
-    hb_forge_seed:with_forge_bootstrap(
-        BootstrapOpts,
-        fun(Opts) ->
-            maps:foreach(
-                fun(Ref, Mod) -> erlang:put({hb_device_load, Ref}, Mod) end,
-                maps:get(<<"forge-bootstrap">>, Opts)
-            ),
-            Fun(Opts)
-        end
     ).
 
 -endif.

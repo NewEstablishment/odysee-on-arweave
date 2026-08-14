@@ -29,7 +29,7 @@ type CollectionEditParams = {
 
 type CollectionPublishCreateParams = {
   name: string;
-  bid: string;
+  bid?: string;
   claims: Array<string>;
   title?: string;
   description?: string;
@@ -49,7 +49,6 @@ type CollectionLocalCreateParams = {
   items: Array<string>;
   type: string;
   sourceId?: string;
-  id?: string;
 };
 
 type CollectionType = string;

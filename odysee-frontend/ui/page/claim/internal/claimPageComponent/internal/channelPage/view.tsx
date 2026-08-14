@@ -60,7 +60,6 @@ import { selectMembershipMineFetched, selectUserOdyseeMembership } from 'redux/s
 import { getThumbnailFromClaim, isClaimNsfw } from 'util/claim';
 import { doMembershipMine as doMembershipMineAction } from 'redux/actions/memberships';
 import { PREFERENCE_EMBED } from 'constants/tags';
-import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const HiddenNsfwClaims = lazyImport(
   () =>
     import(
@@ -114,7 +113,9 @@ function ChannelPage(props: Props) {
   const isGlobalMod = Boolean(useAppSelector(selectUser)?.global_mod);
   const hideShorts = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_SHORTS));
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
-  const showClaims = Boolean(claim) && !preferEmbed && !banState.filtered && !banState.blacklisted;
+  const meta = claim?.meta || {};
+  const { claims_in_channel } = meta;
+  const showClaims = Boolean(claims_in_channel) && !preferEmbed && !banState.filtered && !banState.blacklisted;
   const channelIsBlackListed = banState.blacklisted;
   // Show About tab for blacklisted channels (DMCA message) or channels with content
   const hideAboutTab = !showClaims && !isGlobalMod && !channelIsBlackListed;
@@ -134,9 +135,6 @@ function ChannelPage(props: Props) {
   const editing = currentView === CHANNEL_PAGE.VIEWS.EDIT;
   const { channelName } = parseURI(uri);
   const { permanent_url: permanentUrl } = claim;
-  const immutableChannelUri = hyperbeamImmutableUriFromClaim(claim);
-  const immutableChannelPath = formatLbryUrlForWeb(immutableChannelUri || '');
-  const channelPagePath = isEmbedPath ? pathname : immutableChannelPath;
   const claimId = claim.claim_id;
   const compactSubCount = toCompactNotation(subCount, lang, 10000);
   const formattedSubCount = Number(subCount).toLocaleString();
@@ -311,6 +309,8 @@ function ChannelPage(props: Props) {
   }
 
   function onTabChange(newTabIndex: number, keepFilters?: boolean) {
+    const baseUrl = formatLbryUrlForWeb(uri);
+    const url = isEmbedPath ? `/$/embed${baseUrl}` : baseUrl;
     let newSearch = '';
     let nextView = CHANNEL_PAGE.VIEWS.HOME;
     if (!keepFilters) setFilters(undefined);
@@ -373,7 +373,7 @@ function ChannelPage(props: Props) {
     // Replace instead of push to avoid flooding browser history when tabs
     // change programmatically (e.g., from @reach/tabs onChange firing on
     // index prop changes during render).
-    const newFullUrl = `${channelPagePath}${newSearch}`;
+    const newFullUrl = `${url}${newSearch}`;
     const currentFullUrl = `${pathname}${search}`;
 
     if (newFullUrl !== currentFullUrl) {
@@ -397,10 +397,12 @@ function ChannelPage(props: Props) {
   }, [dispatch, myMembershipsFetched]);
   React.useEffect(() => {
     if (hideShorts && currentView === CHANNEL_PAGE.VIEWS.SHORTS) {
+      const baseUrl = formatLbryUrlForWeb(uri);
+      const url = isEmbedPath ? `/$/embed${baseUrl}` : baseUrl;
       const search = `?${CHANNEL_PAGE.QUERIES.VIEW}=${CHANNEL_PAGE.VIEWS.HOME}`;
-      navigate(`${channelPagePath}${search}`);
+      navigate(`${url}${search}`);
     }
-  }, [hideShorts, currentView, channelPagePath, navigate]);
+  }, [hideShorts, currentView, uri, navigate, isEmbedPath]);
 
   if (editing) {
     return <ChannelEdit uri={uri} onDone={() => navigate(-1)} disabled={false} />;

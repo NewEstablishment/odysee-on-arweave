@@ -115,11 +115,7 @@ function FileThumbnail(props: Props) {
   // VOD hover preview: get streaming URL and duration for non-livestream video content
   const claim = useAppSelector((state) => (uri ? selectClaimForUri(state, uri) : undefined));
   const streamingUrl = useAppSelector((state) => (uri ? selectStreamingUrlForUri(state, uri) : undefined));
-  const isVideoContent = Boolean(
-    claim?.value?.stream_type === 'video' ||
-    claim?.value?.video ||
-    claim?.value?.source?.media_type?.startsWith('video')
-  );
+  const isVideoContent = Boolean(claim?.value?.video || claim?.value?.source?.media_type?.startsWith('video'));
   const videoDuration = claim?.value?.video?.duration || 0;
   const canPreviewOnHover =
     videoPreviewsEnabled &&

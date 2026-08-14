@@ -16,7 +16,6 @@ export const HYPERBEAM_DEVICE = {
   search: '~search@1.0',
   stream: '~odysee-stream@1.0',
   streamDescriptor: '~odysee-stream-descriptor@1.0',
-  subscription: '~odysee-account@1.0',
   upload: '~odysee-upload@1.0',
 };
 

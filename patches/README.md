@@ -5,15 +5,6 @@ stock nodes today. Any proposal beyond this list must take the form of a
 terse (<= 20 lines, test + fix) branch on a HyperBEAM worktree, and only
 for defects that are demonstrably HyperBEAM's, not this application's.
 
-## Build compatibility: `hyperbeam-otp29-ei-bitstring.patch`
-
-Current `edge` passes `long *` and `char **` arguments to OTP 29's
-`ei_get_type` and `ei_decode_bitstring` APIs. OTP 29 requires `int *`,
-`const char **`, and `size_t *`, so the native Beamr port does not compile.
-The root build applies this narrow source-compatibility patch idempotently to
-the dependency checkout. It changes no runtime behavior and should be removed
-as soon as the equivalent fix lands upstream.
-
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
 Extend `?IS_ID` to accept 40-character (20-byte hex) LBRY claim IDs, so
@@ -43,8 +34,8 @@ so a seek costs one small fetch, not a whole-video reassembly per request.
 ## 3. `dev-query-match-error-tuple.patch`
 
 `dev_query:match/4` crashes with `case_clause` on every query that has no
-results, so `~query@1.0` returns HTTP 500 rather than a 404 miss (or, for
-`return=boolean`, `{ok, false}`).
+results, so `~query@1.0` returns HTTP 500 rather than a successful empty result
+(or a not-found result for first-item modes).
 `hb_cache:store_match/2` returns `{error, not_found}` on an empty match
 (and `hb_cache:match/2` does the same on the `match@1.0` path), but
 `dev_query:match/4` only has clauses for `{ok, _}` and a bare `not_found`.
@@ -52,6 +43,7 @@ Nothing produces the bare atom, so the miss path is unreachable and every
 miss is a 500. This is independent of configuration: no `match-index`
 setting avoids it, because an empty result is `{error, not_found}` either
 way. Observed on every video page load in this application, where the
-frontend issues a `POST /~query@1.0/only`. The patch adds the two missing
-clauses and leaves the existing ones untouched. Applies cleanly to the
-pinned dep (`git apply --check` verified).
+frontend issues a `POST /~query@1.0/only`. The patch maps misses to `[]`, `0`,
+or `false` according to the requested aggregate type, retains `not_found` for
+first-item modes, and adds focused upstream EUnit assertions. Applies cleanly
+to the pinned dep (`git apply --check` verified).

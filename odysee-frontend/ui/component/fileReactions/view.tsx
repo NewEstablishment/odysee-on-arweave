@@ -17,6 +17,7 @@ import {
   makeSelectTagInClaimOrChannelForUri,
 } from 'redux/selectors/claims';
 import { DISABLE_SLIMES_VIDEO_TAG, DISABLE_SLIMES_ALL_TAG } from 'constants/tags';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 const LIVE_REACTION_FETCH_MS = 1000 * 45;
 type Props = {
   uri: string;
@@ -88,7 +89,7 @@ const LikeButton = (props: ButtonProps) => {
   return (
     <FileActionButton
       title={__('I like this')}
-      requiresAuth
+      requiresAuth={!hyperbeamNodeEnabled()}
       authSrc="filereaction_like"
       className={classnames('button--file-action button-like', {
         'button--fire': myReaction === REACTION_TYPES.LIKE,
@@ -120,7 +121,7 @@ const DislikeButton = (props: ButtonProps) => {
   const { myReaction, reactionCount, onClick } = props;
   return (
     <FileActionButton
-      requiresAuth
+      requiresAuth={!hyperbeamNodeEnabled()}
       authSrc={'filereaction_dislike'}
       title={__('I dislike this')}
       className={classnames('button--file-action button-dislike', {

@@ -86,9 +86,6 @@ cookie_commit_post_replies_with_id_test() ->
             <<"store">> => [Store],
             <<"match-index">> => [Store],
             <<"store-all-signed">> => true,
-            <<"odysee-auth-allow-unvalidated-tokens">> => true,
-            <<"odysee-auth-pbkdf2-iterations">> => 1,
-            <<"odysee-auth-pbkdf2-key-length">> => 64,
             <<"on">> => Hooks
         }),
     {ok, Response} =
@@ -96,18 +93,11 @@ cookie_commit_post_replies_with_id_test() ->
             Node,
             #{
                 <<"path">> => <<"/id?!=true&committers=all">>,
-                <<"x-odysee-auth-token">> => <<"reply-id-probe-token">>,
                 <<"reply-id-test-key">> => <<"reply-id-probe-1">>
             },
             #{}
         ),
-    % A body-only reply collapses to the stored id itself; a message reply
-    % carries it under `message-id'.
-    ID =
-        case Response of
-            Bin when is_binary(Bin) -> Bin;
-            _ -> hb_maps:get(<<"message-id">>, Response, not_found, #{})
-        end,
+    ID = hb_maps:get(<<"message-id">>, Response, not_found, #{}),
     ?assert(is_binary(ID)),
     {ok, ReadBack} = hb_http:get(Node, <<"/", ID/binary>>, #{}),
     ?assertEqual(

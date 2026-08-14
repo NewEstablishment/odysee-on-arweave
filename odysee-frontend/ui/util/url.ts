@@ -5,7 +5,7 @@ import ShortUrl from 'services/shortUrl';
 import * as PAGES from '../constants/pages';
 import { parseURI, buildURI } from '../util/lbryURI';
 import * as COLLECTIONS_CONSTS from '../constants/collections';
-import { hyperbeamImmutableIdFromUri, hyperbeamImmutableWebPath, lidForCollectionId } from './hyperbeam-route';
+import { hyperbeamImmutableIdFromUri, hyperbeamImmutableWebPath } from './hyperbeam-route';
 
 function encodeWithSpecialCharEncode(string: string): string {
   // encodeURIComponent doesn't encode `'` and others
@@ -113,7 +113,7 @@ export const generateEncodedLbryURL = (
   }
 
   if (listId) {
-    urlParams.append(COLLECTIONS_CONSTS.COLLECTION_ID, lidForCollectionId(listId) || listId);
+    urlParams.append(COLLECTIONS_CONSTS.COLLECTION_ID, listId);
   }
 
   const urlParamsString = urlParams.toString();
@@ -137,7 +137,7 @@ export const generateShareUrl = (
   }
 
   if (listId) {
-    urlParams.append(COLLECTIONS_CONSTS.COLLECTION_ID, lidForCollectionId(listId) || listId);
+    urlParams.append(COLLECTIONS_CONSTS.COLLECTION_ID, listId);
   }
 
   if (includeStartTime) {
@@ -268,7 +268,7 @@ export const generateRssUrl = (
 };
 export const generateListSearchUrlParams = (collectionId: string): string => {
   const urlParams = new URLSearchParams();
-  urlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, lidForCollectionId(collectionId) || collectionId);
+  urlParams.set(COLLECTIONS_CONSTS.COLLECTION_ID, collectionId);
   return `?` + urlParams.toString();
 };
 // Google cache url
