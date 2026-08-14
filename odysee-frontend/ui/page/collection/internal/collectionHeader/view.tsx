@@ -11,12 +11,11 @@ import { COL_TYPES } from 'constants/collections';
 import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
 import DateTime from 'component/dateTime';
-import ClaimAuthor from 'component/claimAuthor';
 import CollectionTitle from './internal/collectionTitle';
 import CollectionSubtitle from './internal/collectionSubtitle';
 import AutoPublishCountdown from 'page/playlists/internal/collectionsListMine/internal/collectionPreview/internal/autoPublishCountdown';
 import { useAppSelector } from 'redux/hooks';
-import { selectClaimIsPendingForId, selectClaimForId } from 'redux/selectors/claims';
+import { selectClaimForId } from 'redux/selectors/claims';
 import {
   selectCountForCollectionId,
   selectCollectionHasEditsForId,
@@ -35,7 +34,6 @@ type Props = {
   uri?: any;
   collectionId?: string;
   isBuiltin?: boolean;
-  claimIsPending?: boolean;
   isHeader?: boolean;
 };
 
@@ -45,7 +43,6 @@ const CollectionHeader = (props: Props) => {
   const claim = useAppSelector((state) => collectionId && selectClaimForId(state, collectionId));
   const uri = (claim && (claim.canonical_url || claim.permanent_url)) || null;
   const hasClaim = Boolean(claim);
-  const claimIsPending = useAppSelector((state) => selectClaimIsPendingForId(state, collectionId));
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const autoPublish = useAppSelector((state) => selectCollectionAutoPublishForId(state, collectionId));
   const autoPublishScheduledAt = useAppSelector((state) =>
@@ -88,7 +85,7 @@ const CollectionHeader = (props: Props) => {
           <div className="collection-header__content-top">
             <div className="collection-header__title">
               <h1>{collection.title || collection.name}</h1>
-              {uri && <ClaimAuthor uri={uri} />}
+              {collection.profileName && <span className="collection__subtitle">{collection.profileName}</span>}
             </div>
             <div className="collection-header__actions">
               <CollectionHeaderActions
@@ -97,7 +94,6 @@ const CollectionHeader = (props: Props) => {
                 isBuiltin={isBuiltin}
                 setShowEdit={setShowEdit}
                 showEdit={showEdit}
-                claimIsPending={claimIsPending}
                 isHeader
               />
             </div>
@@ -212,42 +208,6 @@ const CollectionHeader = (props: Props) => {
         setShowEdit={setShowEdit}
         showEdit={showEdit}
       />
-
-      {/* OLD CARD
-      <Card
-       title={<CollectionTitle collectionId={collectionId} />}
-       titleActions={
-         unavailableUris.length > 0 ? (
-           <Button
-             button="secondary"
-             icon={ICONS.DELETE}
-             label={__('Remove all unavailable items')}
-             onClick={() => {
-               doCollectionEdit(collectionId, { uris: unavailableUris, remove: true });
-               setUnavailable([]);
-             }}
-           />
-         ) : (
-           claimIsPending && (
-             <div className="help card__title--help">
-               <Spinner type="small" />
-               {__('Your publish is being confirmed and will be live soon')}
-             </div>
-           )
-         )
-       }
-       subtitle={<CollectionSubtitle collectionId={collectionId} />}
-       body={
-         <CollectionActions
-           uri={uri}
-           collectionId={collectionId}
-           isBuiltin={isBuiltin}
-           setShowEdit={setShowEdit}
-           showEdit={showEdit}
-         />
-       }
-      />
-      */}
     </>
   );
 };

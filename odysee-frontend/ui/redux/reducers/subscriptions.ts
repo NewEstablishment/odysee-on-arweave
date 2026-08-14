@@ -1,6 +1,7 @@
 import * as ACTIONS from 'constants/action_types';
 import { parseURI, normalizeURI, isURIEqual } from 'util/lbryURI';
 import { handleActions } from 'util/redux-utils';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 const defaultState = {
   subscriptions: [],
   // Deprecated
@@ -62,6 +63,7 @@ export default handleActions(
       ...state,
       loading: false,
       subscriptions: action.data,
+      following: action.data.map(({ uri, notificationsDisabled }) => ({ uri, notificationsDisabled })),
     }),
     [ACTIONS.FETCH_LAST_ACTIVE_SUBS_DONE]: (state: SubscriptionState, action): SubscriptionState => {
       const activeChannelClaims = action.data;
@@ -97,6 +99,7 @@ export default handleActions(
         };
       }
     ) => {
+      if (hyperbeamNodeEnabled()) return state;
       const { subscriptions, following } = action.data;
 
       if (!Array.isArray(subscriptions)) {

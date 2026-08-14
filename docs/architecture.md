@@ -216,7 +216,7 @@ Two mitigations, in order of preference today:
 
 ## Writes
 
-There is no custom write device. Uploads, comments, and moderation events are
+There is no custom write device. Uploads, comments, reactions, playlists, subscriptions, and moderation events are
 ordinary committed messages, using stock HyperBEAM machinery end to end:
 
 1. The client sends `POST /<path>?!=true`. The stock `~auth-hook@1.0`
@@ -235,10 +235,22 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    `POST /~query@1.0/only` with equality selectors (schema, type, target,
    author) returns matching message paths — and hydrate them with generic
    `/~cache@1.0/read` calls.
-4. *Ownership* semantics ride inside the message as an LBRY channel signature
-   over a canonical statement, checkable against the channel's committed
-   public key. The node-wallet commitment from step 1 establishes only a
-   stable pseudonymous writer identity; it confers no authority.
+4. Native account ownership is the verified committer established by the
+   cookie-derived node wallet. Claimed profile/channel fields are display
+   metadata only. Product projections such as comment revisions, reactions,
+   playlists, and subscriptions accept only contiguous same-committer chains. Playlist
+   references encode their owner, snapshots contain ordered immutable
+   locators, and ambiguous forks or conflicting versions fail closed.
+   Historical LBRY ownership remains governed by its separately verified
+   source evidence.
+
+Free channel subscriptions use `odysee-subscription@1.0`. A deterministic
+`subscription-ref` combines the verified subscriber committer with a stable
+channel reference (`native:<profile-id>` or `lbry:<full-channel-claim-id>`).
+Follow, notification-preference, unfollow, and re-follow events revise that
+same relationship. A future migration may seed missing roots from a one-time
+legacy export, but imported roots must carry explicit provenance and normal
+browser operation never reads or writes the legacy subscription service.
 5. Peers replicate write traffic the same way they replicate evidence: via
    `hb_store_remote_node` against nodes that accepted the writes.
 

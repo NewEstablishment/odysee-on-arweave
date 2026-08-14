@@ -1,27 +1,15 @@
 import React from 'react';
-import classnames from 'classnames';
 import SUPPORTED_LANGUAGES from 'constants/supported_languages';
 import * as PUBLISH from 'constants/publish';
-import { MINIMUM_PUBLISH_BID } from 'constants/claim';
 import { FormField } from 'component/common/form';
-import { handleBidChange, handleLanguageChange } from 'util/publish';
-import { FormContext } from 'component/common/form-components/form';
+import { handleLanguageChange } from 'util/publish';
 import { CollectionFormContext } from 'page/collection/internal/collectionPublishForm/context';
 import Button from 'component/button';
 import Card from 'component/common/card';
-import PublishBidTab from 'component/publishBidField';
-import { useAppSelector } from 'redux/hooks';
-import { selectClaimBidAmountForId } from 'redux/selectors/claims';
-import { selectBalance } from 'redux/selectors/wallet';
 
 function CollectionPublishAdditionalOptions() {
-  const { collectionId, formParams, updateFormParams } = React.useContext(CollectionFormContext);
-  const amount = useAppSelector((state) => selectClaimBidAmountForId(state, collectionId));
-  const balance = useAppSelector(selectBalance);
-  const { formErrors, updateFormErrors } = React.useContext(FormContext);
+  const { formParams, updateFormParams } = React.useContext(CollectionFormContext);
   const [hideSection, setHideSection] = React.useState(true);
-  const [bidError, setBidError] = React.useState('');
-  const [bidHasExceededDefaultAmount] = React.useState(Boolean(formParams.bid && formParams.bid > MINIMUM_PUBLISH_BID));
   const { languages } = formParams;
   const languageParam = languages || [];
   const primaryLanguage = Array.isArray(languageParam) && languageParam.length && languageParam[0];
@@ -31,29 +19,6 @@ function CollectionPublishAdditionalOptions() {
     setHideSection(!hideSection);
   }
 
-  const isFirstRun = React.useRef(true);
-  React.useEffect(() => {
-    let bid = formParams.bid;
-
-    if (isFirstRun.current) {
-      isFirstRun.current = false;
-
-      if (bid < MINIMUM_PUBLISH_BID) {
-        bid = MINIMUM_PUBLISH_BID;
-      }
-    }
-
-    handleBidChange(
-      parseFloat(bid),
-      amount,
-      balance,
-      (value) => {
-        setBidError(value);
-        updateFormErrors('bid', value);
-      },
-      updateFormParams
-    ); // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount, balance]);
   return (
     <>
       <Card
@@ -63,11 +28,7 @@ function CollectionPublishAdditionalOptions() {
         body={
           <>
             {!hideSection && (
-              <div
-                className={classnames({
-                  'card--disabled': formErrors.name,
-                })}
-              >
+              <div>
                 <div className="publish-row publish-row--no-margin-select">
                   <FormField
                     name="language_select"
@@ -107,27 +68,6 @@ function CollectionPublishAdditionalOptions() {
                       ))}
                   </FormField>
                 </div>
-
-                {bidHasExceededDefaultAmount && (
-                  <div className="publish-row">
-                    <PublishBidTab
-                      params={formParams}
-                      bidError={bidError}
-                      onChange={(event) =>
-                        handleBidChange(
-                          parseFloat(event.target.value),
-                          amount,
-                          balance,
-                          (value) => {
-                            updateFormErrors('bid', value);
-                            setBidError(value);
-                          },
-                          updateFormParams
-                        )
-                      }
-                    />
-                  </div>
-                )}
               </div>
             )}
 

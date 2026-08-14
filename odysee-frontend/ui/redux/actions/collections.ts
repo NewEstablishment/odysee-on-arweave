@@ -1,14 +1,7 @@
 import * as ACTIONS from 'constants/action_types';
 import { batchActions } from 'util/batch-actions';
 import { v4 as uuid } from 'uuid';
-import Lbry from 'lbry';
-import {
-  doAbandonClaim,
-  doResolveUris,
-  doResolveClaimId,
-  doResolveClaimIds,
-  doCheckPendingClaims,
-} from 'redux/actions/claims';
+import { doResolveUris, doResolveClaimId, doResolveClaimIds } from 'redux/actions/claims';
 import {
   selectClaimForClaimId,
   selectClaimForId,
@@ -16,8 +9,7 @@ import {
   selectHasClaimForId,
   selectResolvingIds,
   selectResolvingUris,
-  selectClaimIsPendingForId,
-  selectClaimIdsByUri,
+  selectClaimForUri,
   selectClaimsById,
 } from 'redux/selectors/claims';
 import {
@@ -41,10 +33,13 @@ import {
 import { selectCollectionClaimUploadParamsForId } from 'redux/selectors/publish';
 import * as COLS from 'constants/collections';
 import { resolveAuxParams, resolveCollectionType, getClaimIdsInCollectionClaim } from 'util/collections';
-import { getThumbnailFromClaim } from 'util/claim';
-import { creditsToString } from 'util/format-credits';
-import { normalizeURI } from 'util/lbryURI';
+import { getClaimOutpoint, getThumbnailFromClaim } from 'util/claim';
 import { doToast } from 'redux/actions/notifications';
+import {
+  fetchHyperbeamPlaylistDelete,
+  fetchHyperbeamPlaylistListMine,
+  fetchHyperbeamPlaylistPublish,
+} from 'util/hyperbeam';
 const FETCH_BATCH_SIZE = 50;
 const AUTO_PUBLISH_DEBOUNCE_MS = 15000;
 const collectionAutoPublishTimers: Record<string, TimeoutID> = {};
@@ -61,133 +56,40 @@ export const doFetchCollectionListMine =
       type: ACTIONS.COLLECTION_LIST_MINE_STARTED,
     });
 
-    const failure = (error) =>
-      dispatch({
-        type: ACTIONS.COLLECTION_LIST_MINE_COMPLETE,
-      });
-
-    const autoPaginate = () => {
-      const fullResponseObj: CollectionListResponse = {
-        items: [],
-        page: 0,
-        page_size: options.page_size,
-        total_pages: 0,
-        total_items: 0,
+    try {
+      const firstPage = await fetchHyperbeamPlaylistListMine({ ...options, page: 1 });
+      const remainingPages = await Promise.all(
+        Array.from({ length: Math.max(0, firstPage.total_pages - 1) }, (_, index) =>
+          fetchHyperbeamPlaylistListMine({ ...options, page: index + 2 })
+        )
+      );
+      const result = {
+        ...firstPage,
+        items: firstPage.items.concat(remainingPages.flatMap((page) => page.items)),
       };
-
-      const dispatchResults = () => {
-        if (fullResponseObj.items.length > 0) {
-          dispatch(
-            batchActions(
-              {
-                type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
-                data: {
-                  result: fullResponseObj,
-                },
-              },
-              {
-                type: ACTIONS.COLLECTION_LIST_MINE_COMPLETE,
-              }
-            )
-          );
-        } else {
-          dispatch({ type: ACTIONS.COLLECTION_LIST_MINE_COMPLETE });
-        }
-      };
-
-      const next = async (response: CollectionListResponse) => {
-        const { items, ...rest } = response;
-        const moreData = response.items.length === options.page_size;
-        fullResponseObj.items = fullResponseObj.items.concat(items);
-        Object.assign(fullResponseObj, rest);
-        options.page++;
-
-        if (!moreData) {
-          return dispatchResults();
-        }
-
-        try {
-          const data = await Lbry.collection_list(options);
-          return next(data);
-        } catch (err) {
-          dispatchResults();
-        }
-      };
-
-      return next;
-    };
-
-    return await Lbry.collection_list(options).then(autoPaginate(), failure);
+      dispatch(
+        batchActions(
+          {
+            type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
+            data: { result },
+          },
+          { type: ACTIONS.COLLECTION_LIST_MINE_COMPLETE }
+        )
+      );
+      return result;
+    } catch (error) {
+      dispatch({ type: ACTIONS.COLLECTION_LIST_MINE_COMPLETE });
+      dispatch(doToast({ message: error?.message || __('Failed to load playlists.'), isError: true }));
+      return null;
+    }
   };
 export function doCollectionPublish(options: CollectionPublishCreateParams, collectionId: string, cb?: () => void) {
-  return (dispatch: Dispatch, getState: GetState): Promise<any> => {
+  return async (dispatch: Dispatch, getState: GetState): Promise<any> => {
     const state = getState();
     const isPrivate = selectIsCollectionPrivateForId(state, collectionId);
     const collection = selectCollectionForId(state, collectionId);
-    const publishStartedAt = Math.floor(Date.now() / 1000);
-    const createdAtTimestamp = collection.createdAt || publishStartedAt;
-    const params: Record<string, any> = {
-      channel_id: options.channel_id,
-      bid: creditsToString(options.bid),
-      blocking: true,
-      title: options.title,
-      thumbnail_url: options.thumbnail_url,
-      tags: options.tags ? options.tags.map((tag: any) => (typeof tag === 'string' ? tag : tag.name)) : [],
-      languages: options.languages || [],
-      description: options.description,
-    };
-    const fullParams: Record<string, any> = {};
-
-    if (isPrivate) {
-      const publishParams = {
-        ...params,
-        name: options.name,
-        claims: options.claims,
-      } as CollectionPublishCreateParams;
-      Object.assign(fullParams, publishParams);
-    } else {
-      const updateParams = {
-        ...params,
-        claim_id: collectionId,
-        clear_claims: true,
-        replace: true,
-        claims: options.claims,
-      } as unknown as CollectionPublishUpdateParams;
-      Object.assign(fullParams, updateParams);
-    }
-
-    if (fullParams.description && typeof fullParams.description !== 'string') {
-      delete fullParams.description;
-    }
-
-    // Filter out abandoned/deleted claims and anything not a real hex claim_id
-    // (e.g. in-flight `__preview_` claims). Sending those triggers
-    // "Non-hexadecimal digit found" from the SDK.
-    if (fullParams.claims) {
-      const byUri = selectClaimIdsByUri(state);
-      const byId = selectClaimsById(state);
-      const HEX_CLAIM_ID = /^[a-f0-9]{40}$/i;
-      fullParams.claims = fullParams.claims.filter((ref) => {
-        if (!ref || typeof ref !== 'string') return false;
-        // Could be a URL or a claim ID
-        let claimId;
-        try {
-          claimId = byUri[normalizeURI(ref)];
-        } catch (e) {
-          claimId = byUri[ref];
-        }
-        if (claimId === null) return false; // resolved as abandoned
-
-        if (claimId !== undefined) {
-          // ref was a URL; the value is the real claim_id — must be hex
-          return HEX_CLAIM_ID.test(claimId);
-        }
-
-        // Not in byUri — treat as claim ID; must itself be valid hex
-        if (!HEX_CLAIM_ID.test(ref)) return false;
-        return byId[ref] !== null; // null = abandoned, undefined = not fetched (keep)
-      });
-    }
+    if (!collection) throw new Error('Playlist does not exist');
+    const items = (options.claims || []).filter((item): item is string => typeof item === 'string' && Boolean(item));
 
     dispatch({
       type: ACTIONS.COLLECTION_PUBLISH_START,
@@ -195,119 +97,80 @@ export function doCollectionPublish(options: CollectionPublishCreateParams, coll
         collectionId,
       },
     });
-    return new Promise((resolve, reject) => {
-      const publishFn = isPrivate ? Lbry.collection_create : Lbry.collection_update;
-
-      function success(response: CollectionCreateResponse & { outputs?: Array<Claim> }) {
-        const collectionClaim = response.outputs ? response.outputs[0] : response;
-        const collectionClaimWithMeta = collectionClaim as any;
-        if (!collectionClaimWithMeta.meta) collectionClaimWithMeta.meta = {};
-        if (!collectionClaimWithMeta.meta.creation_timestamp) {
-          collectionClaimWithMeta.meta.creation_timestamp = createdAtTimestamp;
-        }
-        if (!collectionClaimWithMeta.timestamp) collectionClaimWithMeta.timestamp = publishStartedAt;
-        const publishedCollection = {
-          ...collection,
-          id: collectionClaim.claim_id,
-          name: fullParams.title || collection.name,
-          title: fullParams.title || collection.title || collection.name,
-          description: fullParams.description,
-          thumbnail: fullParams.thumbnail_url ? { url: fullParams.thumbnail_url } : collection.thumbnail,
-          tags: fullParams.tags || collection.tags || [],
-          items: fullParams.claims || [],
-          itemCount: fullParams.claims ? fullParams.claims.length : 0,
-          createdAt: collectionClaim.meta?.creation_timestamp || collectionClaim.timestamp,
-          updatedAt: collectionClaim.timestamp || publishStartedAt,
-        };
-        dispatch({
-          type: ACTIONS.DELETE_ID_FROM_LOCAL_COLLECTIONS,
-          data: collectionId,
-        });
-        dispatch({
-          type: ACTIONS.COLLECTION_EDIT,
-          data: {
-            collectionKey: COLS.KEYS.UPDATED,
-            collection: {
-              id: collectionClaim.claim_id,
-              updatedAt: publishStartedAt,
+    try {
+      const collectionClaim = await fetchHyperbeamPlaylistPublish(
+        {
+          title: options.title || collection.title || collection.name,
+          description: typeof options.description === 'string' ? options.description : undefined,
+          thumbnail_url: options.thumbnail_url,
+          tags: (options.tags || []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)).filter(Boolean),
+          languages: options.languages || [],
+          items,
+        },
+        isPrivate ? undefined : collectionId
+      );
+      const publishedCollection = {
+        ...collection,
+        id: collectionClaim.claim_id,
+        name: collectionClaim.value?.title || collection.name,
+        title: collectionClaim.value?.title || collection.title || collection.name,
+        description: collectionClaim.value?.description,
+        thumbnail: collectionClaim.value?.thumbnail,
+        tags: collectionClaim.value?.tags || [],
+        items,
+        itemCount: items.length,
+        createdAt: collectionClaim.meta?.creation_timestamp,
+        updatedAt: collectionClaim.timestamp,
+      };
+      dispatch({
+        type: ACTIONS.DELETE_ID_FROM_LOCAL_COLLECTIONS,
+        data: collectionId,
+      });
+      dispatch({
+        type: ACTIONS.COLLECTION_EDIT,
+        data: {
+          collectionKey: COLS.KEYS.UPDATED,
+          collection: {
+            id: collectionClaim.claim_id,
+            updatedAt: collectionClaim.timestamp,
+          },
+        },
+      });
+      dispatch({
+        type: ACTIONS.COLLECTION_PUBLISH_SUCCESS,
+        data: {
+          collectionId,
+          publishedCollectionId: collectionClaim.claim_id,
+        },
+      });
+      dispatch(
+        batchActions(
+          {
+            type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
+            data: { result: { items: [collectionClaim], page: 1, page_size: 1, total_items: 1, total_pages: 1 } },
+          },
+          {
+            type: ACTIONS.COLLECTION_ITEMS_RESOLVE_SUCCESS,
+            data: {
+              resolvedCollection: publishedCollection,
             },
           },
-        });
-        dispatch({
-          type: ACTIONS.COLLECTION_PUBLISH_SUCCESS,
-          data: {
-            collectionId,
-            publishedCollectionId: collectionClaim.claim_id,
-          },
-        });
-        dispatch(
-          batchActions(
-            {
-              type: ACTIONS.UPDATE_PENDING_CLAIMS,
-              data: {
-                claims: [collectionClaim],
-              },
-            },
-            {
-              type: ACTIONS.COLLECTION_ITEMS_RESOLVE_SUCCESS,
-              data: {
-                resolvedCollection: publishedCollection,
-              },
-            },
-            {
-              type: ACTIONS.COLLECTION_CLAIM_ITEMS_RESOLVE_COMPLETE,
-              data: publishedCollection,
-            },
-            doCheckPendingClaims(() => {}) as any
-          )
-        );
-        return resolve(collectionClaim);
-      }
-
-      function failure(error) {
-        if (cb) cb();
-        dispatch({
-          type: ACTIONS.COLLECTION_PUBLISH_FAIL,
-          data: {
-            collectionId,
-            error: error?.message || error,
-          },
-        });
-        const scriptSizeError = error?.message?.match && error.message.match(/script size ([0-9]+) exceeds limit 8192/);
-        let customMessage = null;
-
-        if (scriptSizeError) {
-          const maxSize = 8192;
-          const itemSizeInTx = 24;
-          const extraBytes = parseInt(scriptSizeError.at(1).toString()) - maxSize;
-          const itemsToDelete = Math.ceil(extraBytes / itemSizeInTx);
-          customMessage =
-            __('Playlist exceeds size limits.') +
-            ' ' +
-            (itemsToDelete > 1
-              ? __('Please remove %itemsToDelete% items', {
-                  itemsToDelete,
-                })
-              : __('Please remove 1 item')) +
-            ' ' +
-            (extraBytes > 1
-              ? __('or %extraBytes% characters of text.', {
-                  extraBytes,
-                })
-              : __('or 1 character of text.'));
-        }
-
-        dispatch(
-          doToast({
-            message: customMessage || error.message || error,
-            isError: true,
-          })
-        );
-        reject(error);
-      }
-
-      return publishFn(fullParams).then(success, failure);
-    });
+          {
+            type: ACTIONS.COLLECTION_CLAIM_ITEMS_RESOLVE_COMPLETE,
+            data: publishedCollection,
+          }
+        )
+      );
+      return collectionClaim;
+    } catch (error) {
+      if (cb) cb();
+      dispatch({
+        type: ACTIONS.COLLECTION_PUBLISH_FAIL,
+        data: { collectionId, error: error?.message || error },
+      });
+      dispatch(doToast({ message: error?.message || error, isError: true }));
+      throw error;
+    }
   };
 }
 
@@ -318,7 +181,6 @@ const doAutoPublishCollectionIfNeeded =
     const isAutoPublishEnabled = selectCollectionAutoPublishForId(state, collectionId);
     const isPrivate = selectIsCollectionPrivateForId(state, collectionId);
     const isMine = selectCollectionIsMine(state, collectionId);
-    const isPending = selectClaimIsPendingForId(state, collectionId);
     const isPublishing = selectCollectionIsPublishingForId(state, collectionId);
     const hasEdits = selectCollectionHasEditsForId(state, collectionId);
     const hasUnsavedEdits = selectCollectionHasUnsavedEditsForId(state, collectionId);
@@ -327,7 +189,6 @@ const doAutoPublishCollectionIfNeeded =
       (!triggerNow && !isAutoPublishEnabled) ||
       isPrivate ||
       !isMine ||
-      isPending ||
       isPublishing ||
       (!hasEdits && !hasUnsavedEdits)
     ) {
@@ -434,43 +295,22 @@ export const doLocalCollectionCreate =
     });
   };
 export const doCollectionDelete =
-  (collectionId: string, collectionKey: string | null | undefined = undefined, keepPrivate: boolean = false) =>
-  (dispatch: Dispatch, getState: GetState) => {
+  (collectionId: string, collectionKey: string | null | undefined = undefined) =>
+  async (dispatch: Dispatch, getState: GetState) => {
     const state = getState();
     const claim = selectClaimForClaimId(state, collectionId);
-    const collection = selectCollectionForId(state, collectionId);
 
-    const collectionDelete = async () => {
-      // -- published collections are stored on claims redux, so there won't be a local key for it
-      // so doAbandonClaim will take care of it.
-      if (collectionKey)
-        dispatch({
-          type: ACTIONS.COLLECTION_DELETE,
-          data: {
-            collectionId,
-            collectionKey,
-          },
-        });
-
-      if (claim && keepPrivate) {
-        const newParams = Object.assign({}, collection);
-        // -- doLocalCollectionCreate will use an uuid instead. otherwise the local collection will use
-        // the same id as the (now deleted) claim id
-        delete newParams.id;
-        dispatch(doLocalCollectionCreate(newParams));
-      }
-
+    if (claim) await fetchHyperbeamPlaylistDelete(collectionId);
+    if (collectionKey) {
       dispatch({
-        type: ACTIONS.DELETE_ID_FROM_LOCAL_COLLECTIONS,
-        data: collectionId,
+        type: ACTIONS.COLLECTION_DELETE,
+        data: { id: collectionId, collectionKey },
       });
-    };
-
-    if (claim) {
-      return dispatch(doAbandonClaim(claim, collectionDelete));
     }
-
-    return collectionDelete();
+    dispatch({
+      type: ACTIONS.DELETE_ID_FROM_LOCAL_COLLECTIONS,
+      data: collectionId,
+    });
   };
 export const doToggleCollectionSavedForId = (collectionId: string) => (dispatch: Dispatch, getState: GetState) => {
   const state = getState();
@@ -500,7 +340,9 @@ const doFetchCollectionItems =
     const sortResults = (resultItems: Array<Claim>) => {
       const newItems: Array<Claim> = [];
       items.forEach((item) => {
-        const index = resultItems.findIndex((i) => [i.canonical_url, i.permanent_url, i.claim_id].includes(item));
+        const index = resultItems.findIndex((i) =>
+          [i.canonical_url, i.permanent_url, i.claim_id, getClaimOutpoint(i)].includes(item)
+        );
         if (index >= 0) newItems.push(resultItems[index]);
       });
       return newItems;
@@ -657,13 +499,15 @@ export const doFetchItemsInCollection =
       const resolvedById: Record<string, any> = {};
       collectionItems.forEach((item: any) => {
         resolvedById[item.claim_id] = item;
+        const locator = getClaimOutpoint(item);
+        if (locator) resolvedById[locator] = item;
       });
 
       claimIds.forEach((claimId) => {
         const collectionItem = resolvedById[claimId];
 
         if (collectionItem) {
-          newItems.push(collectionItem.claim_id);
+          newItems.push(claimId);
           valueTypes.add(collectionItem.value_type);
           if (collectionItem.value && collectionItem.value.stream_type) {
             streamTypes.add(collectionItem.value.stream_type);
@@ -744,12 +588,16 @@ export const doSortCollectionByKey =
     if (!collection?.items) return false;
 
     // Get claims or return the uri/claimId if not resolved
+    const claimsById = selectClaimsById(state);
+    const claimsByLocator = new Map<string, Claim>();
+    Object.values(claimsById || {}).forEach((claim: Claim | null | undefined) => {
+      const locator = getClaimOutpoint(claim);
+      if (locator) claimsByLocator.set(locator, claim);
+    });
     const claimEntries = collection.items.map((item) => {
-      // Item should be either claim_id or permanent url
-      const claimIdMatch = item.match(/[a-f|0-9]{40}$/);
-      const claimId = claimIdMatch ? claimIdMatch[0] : null;
+      const claim = selectClaimForUri(state, item) || selectClaimForClaimId(state, item) || claimsByLocator.get(item);
       return {
-        claim: claimId ? selectClaimForClaimId(state, claimId) : item,
+        claim: claim || item,
         item,
       };
     });

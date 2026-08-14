@@ -10,8 +10,6 @@ import * as PAGES from 'constants/pages';
 import * as ICONS from 'constants/icons';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import FileThumbnail from 'component/fileThumbnail';
-import ChannelThumbnail from 'component/channelThumbnail';
-import UriIndicator from 'component/uriIndicator';
 import DateTime from 'component/dateTime';
 import { formatLbryUrlForWeb, generateListSearchUrlParams } from 'util/url';
 import { getLocalizedNameForCollectionId } from 'util/collections';
@@ -25,13 +23,12 @@ import AutoPublishCountdown from './internal/autoPublishCountdown';
 import { useAppSelector } from 'redux/hooks';
 import {
   selectIsResolvingForId,
-  selectTitleForUri,
   selectClaimIdForUri,
   selectClaimForClaimId,
   selectThumbnailForUri,
-  selectClaimIsPendingForId,
 } from 'redux/selectors/claims';
 import {
+  selectCollectionForId,
   selectCollectionTitleForId,
   selectCountForCollectionId,
   selectAreCollectionItemsFetchingForId,
@@ -49,7 +46,6 @@ import {
   selectCollectionAutoPublishForId,
   selectCollectionAutoPublishScheduledAtForId,
 } from 'redux/selectors/collections';
-import { getChannelFromClaim } from 'util/claim';
 type Props = {
   uri?: string;
   collectionId?: string;
@@ -60,17 +56,8 @@ function CollectionPreview(props: Props) {
   const claimIdFromUri = useAppSelector((state) => (propUri ? selectClaimIdForUri(state, propUri) : undefined));
   const collectionId = propCollectionId || claimIdFromUri || '';
   const claim = useAppSelector((state) => selectClaimForClaimId(state, collectionId));
-  const channel = getChannelFromClaim(claim);
+  const collection = useAppSelector((state) => selectCollectionForId(state, collectionId));
   const uri = propUri || (claim && (claim.canonical_url || claim.permanent_url)) || null;
-  let channelTitle: string | null = null;
-  if (channel) {
-    const { value, name } = channel;
-    if (value && value.title) {
-      channelTitle = value.title;
-    } else {
-      channelTitle = name;
-    }
-  }
   const firstCollectionItemUrl = useAppSelector((state) => selectFirstItemUrlForCollection(state, collectionId));
   const firstPlayableCollectionItemUrl = useAppSelector((state) =>
     selectFirstPlayableUrlForCollectionId(state, collectionId)
@@ -80,8 +67,6 @@ function CollectionPreview(props: Props) {
   const collectionType = useAppSelector((state) => selectCollectionTypeForId(state, collectionId));
   const isFetchingItems = useAppSelector((state) => selectAreCollectionItemsFetchingForId(state, collectionId));
   const isResolvingCollection = useAppSelector((state) => selectIsResolvingForId(state, collectionId));
-  const claimIsPending = useAppSelector((state) => selectClaimIsPendingForId(state, collectionId));
-  const title = useAppSelector((state) => (uri ? selectTitleForUri(state, uri) : undefined));
   const hasClaim = Boolean(claim);
   const collectionUpdatedAt = useAppSelector((state) => selectUpdatedAtForCollectionId(state, collectionId));
   const collectionCreatedAt = useAppSelector((state) => selectCreatedAtForCollectionId(state, collectionId));
@@ -159,17 +144,6 @@ function CollectionPreview(props: Props) {
                 {isBuiltin && <Icon icon={COLLECTIONS_CONSTS.PLAYLIST_ICONS[collectionId]} />}
                 {usedCollectionName}
                 {collectionHasEdits && <Icon icon={ICONS.PUBLISH} />}
-                {claimIsPending && (
-                  <Tooltip
-                    title={__('Your publish is being confirmed and will be live soon')}
-                    arrow={false}
-                    enterDelay={100}
-                  >
-                    <div className="pending-change">
-                      <Spinner />
-                    </div>
-                  </Tooltip>
-                )}
                 {isPublishing && (
                   <Tooltip title={__('Publishing playlist updates in the background')} arrow={false} enterDelay={100}>
                     <div className="pending-change">
@@ -191,14 +165,7 @@ function CollectionPreview(props: Props) {
               </h2>
             </NavLink>
           </div>
-          {hasClaim && (
-            <div className="channel">
-              <UriIndicator focusable={false} uri={channel && channel.permanent_url} link showHiddenAsAnonymous>
-                <ChannelThumbnail uri={channel && channel.permanent_url} xsmall checkMembership={false} />
-                <label>{channelTitle}</label>
-              </UriIndicator>
-            </div>
-          )}
+          {hasClaim && collection?.profileName && <div className="channel">{collection.profileName}</div>}
 
           <div className="info">
             <div className="meta">

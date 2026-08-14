@@ -48,7 +48,7 @@ Static manifest browser
 ```
 
 - Historical Odysee services are locators or byte sources behind stores.
-- Native uploads, profiles, comments, and revisions are generic committed
+- Native uploads, profiles, comments, reactions, playlists, subscriptions, and revisions are generic committed
   messages written through `/id?!` and discovered with `query@1.0`.
 - Production uses the manifest frontend served by the node. Do not introduce a
   required SSR/proxy product path.
@@ -63,7 +63,7 @@ Static manifest browser
 2. **Reads are stores.** Historical resolution and media reads go through the
    configured store stack and generic cache/message routes.
 3. **Writes are generic committed messages.** Do not add application upload,
-   comment, account, reaction, or moderation devices when a signed message plus
+   comment, account, reaction, playlist, subscription, or moderation devices when a signed message plus
    exact query expresses the contract.
 4. **One LBRY commitment device.** `lbry@1.0` verifies every evidence kind.
    Do not restore the old family of per-kind codec devices.
@@ -124,8 +124,49 @@ Comments:
   under the same committer.
 - Do not silently fall back to Commentron or legacy APIs.
 
-Native reactions and moderation are not implemented. When added, they should
-follow the same committed-message/event pattern and explicit authority checks.
+Reactions:
+
+- Video and comment likes/dislikes are generic `odysee-reaction@1.0` messages.
+- Discover paths with exact `query@1.0/only`, then hydrate and verify each
+  immutable message and committer.
+- Treat toggles, switches, and removals as contiguous append-only revisions
+  linked by stable reaction/version references.
+- Project at most one current reaction per verified committer and target;
+  duplicate roots must not inflate counts.
+- Never derive authority from claimed profile or channel fields and never call
+  the legacy reaction API.
+
+Playlists:
+
+- Public playlists are generic `odysee-playlist@1.0` messages, not LBRY
+  collection claims and not a custom device.
+- Bind each logical `playlist-ref` to its verified committer, then accept only
+  contiguous same-owner full-snapshot revisions.
+- Store ordered immutable native IDs or legacy outpoints only. Resolve local
+  draft URIs before publish; never persist mutable claim IDs as item identity.
+- Treat update, reorder, and delete as append-only events. Reject gaps, forks,
+  foreign writers, conflicting semantic duplicates, and resurrection.
+- Keep Queue, Watch Later, Favorites, and unpublished drafts local. Do not
+  restore channel selection, URL names, bids, confirmations, support, or
+  `collection_*` SDK calls.
+
+Subscriptions:
+
+- Free channel follows are generic `odysee-subscription@1.0` messages, not
+  paid memberships and not a custom device.
+- Bind the deterministic `subscription-ref` to the verified cookie committer
+  and a stable native profile ID or full legacy channel claim ID.
+- Follow, notification-preference update, unfollow, and re-follow are
+  contiguous same-owner revisions. Reject gaps, forks, foreign writers, and
+  conflicting semantic duplicates.
+- Redux/local storage is only an optimistic cache; hydrate the authoritative
+  list from exact verified node messages whenever the active account changes.
+- A future one-time legacy import may write roots with explicit import
+  provenance, but normal list/toggle flows must never call the legacy
+  subscription API or wallet sync.
+
+Advanced moderation remains unimplemented and must follow the same generic
+message/event pattern and explicit authority checks.
 
 ## Frontend rules
 
@@ -158,6 +199,9 @@ pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
 pnpm run test:native-comment-controls
+pnpm run test:native-reactions
+pnpm run test:native-playlists
+pnpm run test:native-subscriptions
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```
@@ -167,6 +211,9 @@ uploads, or comments change:
 
 ```sh
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-reactions
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-playlists
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-subscriptions
 ```
 
 Always run `git diff --check`. Report skipped, timed-out, or environment-blocked
