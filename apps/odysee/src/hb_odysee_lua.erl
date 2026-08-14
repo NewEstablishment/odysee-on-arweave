@@ -34,19 +34,13 @@ multirequest_resolves_singleton_messages_test_() ->
     {timeout, 30, fun multirequest_resolves_singleton_messages/0}.
 
 multirequest_resolves_singleton_messages() ->
-    Opts = #{ <<"store">> => [hb_test_utils:test_store()] },
-    First = #{ <<"body">> => <<"first">>, <<"content-type">> => <<"text/plain">> },
-    Second = #{ <<"body">> => <<"second">>, <<"content-type">> => <<"text/plain">> },
-    {ok, _} = hb_cache:write(First, Opts),
-    {ok, _} = hb_cache:write(Second, Opts),
-    FirstID = hb_message:id(First, none, Opts),
-    SecondID = hb_message:id(Second, none, Opts),
+    Opts = #{},
     Request = #{
         <<"path">> => <<"resolve-many">>,
         <<"requests">> => [
-            #{ <<"path">> => <<"/", FirstID/binary>> },
-            #{},
-            #{ <<"path">> => <<"/", SecondID/binary>> }
+            #{ <<"path">> => <<"body">>, <<"body">> => <<"first">> },
+            #{ <<"path">> => <<"missing">> },
+            #{ <<"path">> => <<"body">>, <<"body">> => <<"second">> }
         ]
     },
     {ok, Response} = hb_ao:resolve(
@@ -60,9 +54,9 @@ multirequest_resolves_singleton_messages() ->
     ?assertEqual(3, length(Response)),
     [FirstResult, MissingResult, SecondResult] = Response,
     ?assertEqual(<<"ok">>, hb_ao:get(<<"status">>, FirstResult, Opts)),
-    ?assertEqual(<<"first">>, hb_ao:get(<<"result/body">>, FirstResult, Opts)),
+    ?assertEqual(<<"first">>, hb_ao:get(<<"result">>, FirstResult, Opts)),
     ?assertNotEqual(<<"ok">>, hb_ao:get(<<"status">>, MissingResult, Opts)),
     ?assertEqual(<<"ok">>, hb_ao:get(<<"status">>, SecondResult, Opts)),
-    ?assertEqual(<<"second">>, hb_ao:get(<<"result/body">>, SecondResult, Opts)).
+    ?assertEqual(<<"second">>, hb_ao:get(<<"result">>, SecondResult, Opts)).
 
 -endif.

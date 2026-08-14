@@ -4,8 +4,8 @@ const path = require('node:path');
 
 const {
   hyperbeamNodeResolve,
-  hyperbeamNodeQueueImmutableClaims,
   hyperbeamNodeSourceClaimSearch,
+  hyperbeamNodeSourceClaimSearchMany,
   hyperbeamNodeWarmImmutableClaims,
 } = require('./odyseeHyperbeamNode');
 
@@ -16,8 +16,6 @@ const FALLBACK_WARM_CONCURRENCY = 2;
 const WARM_RETRIES = 5;
 const WARM_RETRY_DELAY_MS = 500;
 const SEARCH_RETRIES = 3;
-const IMPORT_RETRIES = 2;
-const IMPORT_RETRY_DELAY_MS = 1000;
 const RESOLVE_BATCH_SIZE = 24;
 const BANNER_RESOLVE_BATCH_SIZE = 6;
 const CATEGORY_CANDIDATE_MULTIPLIER = 3;
@@ -79,6 +77,8 @@ function sourceLocator(item) {
   const direct =
     item.legacy_outpoint || item['legacy-outpoint'] || item.outpoint || item.immutable_id || item['immutable-id'];
   if (direct) return String(direct);
+  const claimId = item.claim_id || item['claim-id'];
+  if (/^[0-9a-f]{40}$/i.test(String(claimId || ''))) return String(claimId);
   if (item.txid !== undefined && item.nout !== undefined) return `${item.txid}:${item.nout}`;
   return null;
 }
@@ -93,10 +93,6 @@ function nativeIdFromLocator(locator) {
   Buffer.from(outpoint[1], 'hex').copy(nativeId, 0);
   nativeId.writeUInt32BE(nout, 32);
   return crypto.createHash('sha256').update(nativeId).digest('base64url');
-}
-
-function isOutpointId(value) {
-  return /^[0-9a-f]{64}:[0-9]+$/i.test(String(value || ''));
 }
 
 function signingChannelId(item) {
@@ -141,16 +137,14 @@ function mergePinnedIds(ids, pinnedIds, pageSize) {
 }
 
 async function materializeHomepageData(homepageData, dependencies = {}) {
-  const search = dependencies.search || hyperbeamNodeSourceClaimSearch;
+  const searchMany = dependencies.searchMany || (!dependencies.search ? hyperbeamNodeSourceClaimSearchMany : null);
+  const search = dependencies.search || (searchMany ? createBatchedSearch(searchMany) : hyperbeamNodeSourceClaimSearch);
   const resolve = dependencies.resolve || hyperbeamNodeResolve;
   const warmMany =
     dependencies.warmMany ||
     (dependencies.warm
       ? (ids, locatorById) => warmObjects(ids, FALLBACK_WARM_CONCURRENCY, dependencies.warm, 0, 0, locatorById)
       : hyperbeamNodeWarmImmutableClaims);
-  const queueImports = dependencies.queueImports || hyperbeamNodeQueueImmutableClaims;
-  const importRetries = dependencies.importRetries ?? IMPORT_RETRIES;
-  const importRetryDelayMs = dependencies.importRetryDelayMs ?? IMPORT_RETRY_DELAY_MS;
   const searchRetries = dependencies.searchRetries ?? SEARCH_RETRIES;
   const searchRetryDelayMs = dependencies.searchRetryDelayMs ?? 200;
   const nowSeconds = dependencies.nowSeconds || Math.floor(Date.now() / 1000);
@@ -169,82 +163,88 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
     }))
   );
 
-  const selections = await mapWithConcurrency(jobs, QUERY_CONCURRENCY, async (job) => {
-    const pageSize = positiveInteger(job.category.pageSize, DEFAULT_PAGE_SIZE);
-    const selectionKey = `${job.locale}/${job.categoryId}`;
-    const candidatePageCount = candidatePageCounts.get(selectionKey) || 1;
-    const freshnessMultiplier = freshnessMultipliers.get(selectionKey) || 1;
-    const effectiveCategory = {
-      ...job.category,
-      daysOfContent: positiveInteger(job.category.daysOfContent, 30) * freshnessMultiplier,
-    };
-    const searchParams = categorySearchParams(effectiveCategory, nowSeconds);
-    const semanticTags = stringList(job.category.tags).length
-      ? stringList(job.category.tags)
-      : [String(job.categoryId).toLowerCase()];
-    const [dynamicResult, semanticResult, pinnedResult] = await Promise.all([
-      searchCandidatePages(
-        search,
-        searchParams,
-        pageSize * CATEGORY_CANDIDATE_MULTIPLIER,
-        candidatePageCount,
-        searchRetries,
-        searchRetryDelayMs
-      ),
-      semanticFallbacks.has(selectionKey)
-        ? searchCandidatePages(
-            search,
-            { ...searchParams, channel_ids: undefined, any_tags: semanticTags },
-            pageSize * CATEGORY_CANDIDATE_MULTIPLIER,
-            candidatePageCount,
-            searchRetries,
-            searchRetryDelayMs
-          )
-        : Promise.resolve(null),
-      stringList(job.category.pinnedClaimIds).length
-        ? searchWithRetry(
-            search,
-            {
-              claim_ids: stringList(job.category.pinnedClaimIds),
-              page: 1,
-              page_size: stringList(job.category.pinnedClaimIds).length,
-              no_totals: true,
-            },
-            searchRetries,
-            searchRetryDelayMs
-          )
-        : Promise.resolve(null),
-    ]);
-    const dynamicItems = [...(dynamicResult?.items || []), ...(semanticResult?.items || [])].filter((item) =>
-      dynamicItemWithinFreshnessWindow(item, effectiveCategory, nowSeconds)
-    );
-    const pinnedItems = Array.isArray(pinnedResult?.items) ? pinnedResult.items : [];
-    const dynamicIds = Array.from(new Set(dynamicItems.map(immutableId).filter(Boolean)));
-    const pinnedByClaimId = new Map(
-      pinnedItems
-        .map((item) => [String(item.claim_id || item['claim-id'] || ''), immutableId(item)])
-        .filter(([claimId, id]) => claimId && id)
-    );
-    const pinnedIds = stringList(job.category.pinnedClaimIds).map((claimId) => pinnedByClaimId.get(claimId));
-    const signingChannelByMediaId = new Map(
-      [...dynamicItems, ...pinnedItems]
-        .map((item) => [immutableId(item), signingChannelId(item)])
-        .filter(([mediaId, channelClaimId]) => mediaId && channelClaimId)
-    );
-    const sourceLocatorById = new Map(
-      [...dynamicItems, ...pinnedItems]
-        .map((item) => [immutableId(item), sourceLocator(item)])
-        .filter(([id, locator]) => id && locator)
-    );
+  const selections = await Promise.all(
+    jobs.map(async (job) => {
+      const pageSize = positiveInteger(job.category.pageSize, DEFAULT_PAGE_SIZE);
+      const selectionKey = `${job.locale}/${job.categoryId}`;
+      const candidatePageCount = candidatePageCounts.get(selectionKey) || 1;
+      const freshnessMultiplier = freshnessMultipliers.get(selectionKey) || 1;
+      const effectiveCategory = {
+        ...job.category,
+        daysOfContent: positiveInteger(job.category.daysOfContent, 30) * freshnessMultiplier,
+      };
+      const searchParams = categorySearchParams(effectiveCategory, nowSeconds);
+      const semanticTags = stringList(job.category.tags).length
+        ? stringList(job.category.tags)
+        : [String(job.categoryId).toLowerCase()];
+      const [dynamicResult, semanticResult, pinnedResult] = await Promise.all([
+        searchCandidatePages(
+          search,
+          searchParams,
+          pageSize * CATEGORY_CANDIDATE_MULTIPLIER,
+          candidatePageCount,
+          searchRetries,
+          searchRetryDelayMs
+        ),
+        semanticFallbacks.has(selectionKey)
+          ? searchCandidatePages(
+              search,
+              { ...searchParams, channel_ids: undefined, any_tags: semanticTags },
+              pageSize * CATEGORY_CANDIDATE_MULTIPLIER,
+              candidatePageCount,
+              searchRetries,
+              searchRetryDelayMs
+            )
+          : Promise.resolve(null),
+        stringList(job.category.pinnedClaimIds).length
+          ? searchWithRetry(
+              search,
+              {
+                claim_ids: stringList(job.category.pinnedClaimIds),
+                page: 1,
+                page_size: stringList(job.category.pinnedClaimIds).length,
+                no_totals: true,
+              },
+              searchRetries,
+              searchRetryDelayMs
+            )
+          : Promise.resolve(null),
+      ]);
+      const dynamicItems = [...(dynamicResult?.items || []), ...(semanticResult?.items || [])].filter((item) =>
+        dynamicItemWithinFreshnessWindow(item, effectiveCategory, nowSeconds)
+      );
+      const pinnedItems = Array.isArray(pinnedResult?.items) ? pinnedResult.items : [];
+      const dynamicIds = Array.from(new Set(dynamicItems.map(immutableId).filter(Boolean)));
+      const pinnedByClaimId = new Map(
+        pinnedItems
+          .map((item) => [String(item.claim_id || item['claim-id'] || ''), immutableId(item)])
+          .filter(([claimId, id]) => claimId && id)
+      );
+      const pinnedIds = stringList(job.category.pinnedClaimIds).map((claimId) => pinnedByClaimId.get(claimId));
+      const signingChannelByMediaId = new Map(
+        [...dynamicItems, ...pinnedItems]
+          .map((item) => [immutableId(item), signingChannelId(item)])
+          .filter(([mediaId, channelClaimId]) => mediaId && channelClaimId)
+      );
+      const sourceLocatorById = new Map(
+        [...dynamicItems, ...pinnedItems]
+          .map((item) => [immutableId(item), sourceLocator(item)])
+          .filter(([id, locator]) => id && locator)
+      );
 
-    return {
-      ...job,
-      selectedIds: mergePinnedIds(dynamicIds, pinnedIds, pageSize * CATEGORY_CANDIDATE_MULTIPLIER * candidatePageCount),
-      pageSize,
-      signingChannelByMediaId,
-      sourceLocatorById,
-    };
-  });
+      return {
+        ...job,
+        selectedIds: mergePinnedIds(
+          dynamicIds,
+          pinnedIds,
+          pageSize * CATEGORY_CANDIDATE_MULTIPLIER * candidatePageCount
+        ),
+        pageSize,
+        signingChannelByMediaId,
+        sourceLocatorById,
+      };
+    })
+  );
 
   const bannerItems = locales.flatMap(([, homepage]) => homepage?.featured?.items || []);
   const bannerEntries = bannerItems.map((item) => [item, homepageClaimUri(item?.url)]).filter(([, uri]) => uri);
@@ -275,10 +275,8 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
       )
     )
   );
-  const channelResults = await mapWithConcurrency(
-    chunk(channelClaimIds, RESOLVE_BATCH_SIZE),
-    QUERY_CONCURRENCY,
-    (claimIds) =>
+  const channelResults = await Promise.all(
+    chunk(channelClaimIds, RESOLVE_BATCH_SIZE).map((claimIds) =>
       searchWithRetry(
         search,
         {
@@ -290,6 +288,7 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
         searchRetries,
         searchRetryDelayMs
       )
+    )
   );
   const channelItems = channelResults.flatMap((result) => (Array.isArray(result?.items) ? result.items : []));
   const channelIdsByClaimId = new Map(
@@ -326,26 +325,14 @@ async function materializeHomepageData(homepageData, dependencies = {}) {
   const channelLocatorByWarmId = new Map([...channelLocatorById, ...bannerLocatorById]);
   const allWarmIds = [...selectedIds, ...channelWarmIds];
   const locatorByWarmId = new Map([...mediaLocatorById, ...channelLocatorByWarmId]);
-  const importLocators = Array.from(new Set(allWarmIds.map((id) => locatorByWarmId.get(id)).filter(isOutpointId)));
-  const importedLocators = new Set(
-    await importOutpoints(importLocators, queueImports, importRetries, importRetryDelayMs)
-  );
-  const importedIds = new Set(allWarmIds.filter((id) => importedLocators.has(locatorByWarmId.get(id))));
-  const sourceBackedIds = new Set(allWarmIds.filter((id) => isOutpointId(locatorByWarmId.get(id))));
-  const failedImportIds = new Set(Array.from(sourceBackedIds).filter((id) => !importedIds.has(id)));
-  const probeIds = allWarmIds.filter((id) => !sourceBackedIds.has(id));
-  const initialWarmResults = [
-    ...Array.from(importedIds, (id) => [id, true]),
-    ...Array.from(failedImportIds, (id) => [id, false]),
-    ...(await warmObjectBatches(probeIds, warmMany, locatorByWarmId)),
-  ];
+  const initialWarmResults = await warmObjectBatches(allWarmIds, warmMany, locatorByWarmId);
   const initialWarmById = new Map(initialWarmResults);
   const initialMediaWarmResults = selectedIds.map((id) => [id, initialWarmById.get(id) === true]);
   const initialChannelWarmResults = channelWarmIds.map((id) => [id, initialWarmById.get(id) === true]);
   const missingMediaIds = initialMediaWarmResults.filter(([, ok]) => !ok).map(([id]) => id);
   const missingChannelIds = initialChannelWarmResults.filter(([, ok]) => !ok).map(([id]) => id);
   const retriedWarmResults = await retryWarmObjects(
-    [...missingMediaIds, ...missingChannelIds].filter((id) => !sourceBackedIds.has(id)),
+    [...missingMediaIds, ...missingChannelIds],
     warmMany,
     warmRetries,
     warmRetryDelayMs,
@@ -535,26 +522,6 @@ async function warmObjectBatches(ids, warmMany, locatorById = new Map()) {
   return results;
 }
 
-async function importOutpoints(locators, queueImports, retries, retryDelayMs) {
-  let unresolved = Array.from(new Set(locators));
-  const imported = new Set();
-
-  for (let attempt = 0; attempt <= retries && unresolved.length; attempt += 1) {
-    const results = (
-      await mapWithConcurrency(chunk(unresolved, RESOLVE_BATCH_SIZE), QUERY_CONCURRENCY, queueImports)
-    ).flat();
-    results.forEach((locator) => {
-      if (unresolved.includes(locator)) imported.add(locator);
-    });
-    unresolved = unresolved.filter((locator) => !imported.has(locator));
-    if (unresolved.length && attempt < retries && retryDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
-    }
-  }
-
-  return Array.from(imported);
-}
-
 async function retryWarmObjects(ids, warmMany, retries, retryDelayMs, locatorById = new Map()) {
   let unresolved = Array.from(ids);
   const warmed = new Set();
@@ -571,6 +538,29 @@ async function retryWarmObjects(ids, warmMany, retries, retryDelayMs, locatorByI
   }
 
   return ids.map((id) => [id, warmed.has(id)]);
+}
+
+function createBatchedSearch(searchMany) {
+  let pending = [];
+  let scheduled = false;
+
+  return (params) =>
+    new Promise((resolve, reject) => {
+      pending.push({ params, resolve, reject });
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(async () => {
+        const batch = pending;
+        pending = [];
+        scheduled = false;
+        try {
+          const results = await searchMany(batch.map((entry) => entry.params));
+          batch.forEach((entry, index) => entry.resolve(results[index] || null));
+        } catch (error) {
+          batch.forEach((entry) => entry.reject(error));
+        }
+      });
+    });
 }
 
 async function searchWithRetry(search, params, retries, retryDelayMs) {

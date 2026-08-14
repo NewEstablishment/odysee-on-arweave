@@ -7,6 +7,7 @@ process.env.HYPERBEAM_MULTIREQUEST_MODULE_ID = 'lua-module-id';
 const {
   hyperbeamNodeReadVerifiedMessages,
   hyperbeamNodeResolveMany,
+  hyperbeamNodeSourceClaimSearchMany,
   hyperbeamNodeWarmImmutableClaims,
 } = require('./odyseeHyperbeamNode');
 
@@ -48,6 +49,34 @@ test('batch warming preserves input order and reports per-item failures', async 
     ['first', true],
     ['missing', false],
   ]);
+});
+
+test('source discovery sends multiple category queries through one AO request', async () => {
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(
+      JSON.stringify({
+        1: { status: 'ok', result: { body: JSON.stringify({ items: [{ claim_id: 'first' }] }) } },
+        2: { status: 'ok', result: { body: JSON.stringify({ items: [{ claim_id: 'second' }] }) } },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  const results = await hyperbeamNodeSourceClaimSearchMany([
+    { any_tags: ['gaming'], page_size: 24 },
+    { any_tags: ['music'], page_size: 24 },
+  ]);
+
+  assert.equal(calls.length, 1);
+  const request = JSON.parse(calls[0].options.body);
+  assert.equal(request.requests.length, 2);
+  assert.ok(request.requests.every((item) => item.path === '/~cache@1.0/read'));
+  assert.deepEqual(
+    results.map((result) => result.items[0].claim_id),
+    ['first', 'second']
+  );
 });
 
 test('snapshot reads use exact direct verification and committer paths', async () => {

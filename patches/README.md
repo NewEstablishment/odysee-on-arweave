@@ -5,6 +5,15 @@ stock nodes today. Any proposal beyond this list must take the form of a
 terse (<= 20 lines, test + fix) branch on a HyperBEAM worktree, and only
 for defects that are demonstrably HyperBEAM's, not this application's.
 
+## Build compatibility: `hyperbeam-otp29-ei-bitstring.patch`
+
+Current `edge` passes `long *` and `char **` arguments to OTP 29's
+`ei_get_type` and `ei_decode_bitstring` APIs. OTP 29 requires `int *`,
+`const char **`, and `size_t *`, so the native Beamr port does not compile.
+The root build applies this narrow source-compatibility patch idempotently to
+the dependency checkout. It changes no runtime behavior and should be removed
+as soon as the equivalent fix lands upstream.
+
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
 Extend `?IS_ID` to accept 40-character (20-byte hex) LBRY claim IDs, so

@@ -27,6 +27,8 @@ The current implementation follows these decisions:
   reads are store reads; native writes are generic committed messages.
 - [`decisions/single-commitment-device.md`](decisions/single-commitment-device.md):
   one `lbry@1.0` verification device covers all LBRY evidence kinds.
+- [`decisions/homepage-lua-multirequest.md`](decisions/homepage-lua-multirequest.md):
+  batch snapshot materialization as stock AO/Lua computation.
 - [`docs/architecture.md`](docs/architecture.md): full trust, node-role, read,
   and write architecture.
 - [`ARCHITECTURE_READ_PATH.md`](ARCHITECTURE_READ_PATH.md): traced HTTP read
@@ -140,6 +142,13 @@ Each category carries an ordered, pre-warmed claim pool. The homepage renders
 the category's configured prefix while the matching category route uses the
 larger pool for first paint, so both views share one source of truth without
 repeating discovery.
+
+Snapshot construction batches same-phase AO requests through the immutable
+generic Lua application at `~lua@5.3a&module=<id>/resolve-many`. The script
+executes each singleton subrequest with `ao(Subreq)` and returns ordered
+per-item results. Legacy claim IDs and outpoints are warmed with ordinary
+locator reads through the store stack; the materializer does not use bespoke
+`source-resolve`, `local-object`, or `import-claims` operations.
 
 Following is personalized and therefore is not stored in the public language
 snapshot. It is queried dynamically through the store-first integration and

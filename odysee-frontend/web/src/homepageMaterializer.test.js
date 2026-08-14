@@ -179,6 +179,32 @@ test('materialization returns ordered immutable IDs only after warming every sel
   assert.equal(source.en.categories.featured.immutableIds, undefined);
 });
 
+test('materialization batches same-phase category discovery', async () => {
+  const batches = [];
+  const result = await materializeHomepageData(
+    {
+      en: {
+        categories: {
+          gaming: { pageSize: 1, tags: ['gaming'] },
+          music: { pageSize: 1, tags: ['music'] },
+        },
+      },
+    },
+    {
+      searchMany: async (requests) => {
+        batches.push(requests);
+        return requests.map((params) => ({ items: [{ immutable_id: `${params.any_tags[0]}:0` }] }));
+      },
+      warmMany: async (ids) => ids.map((id) => [id, true]),
+    }
+  );
+
+  assert.equal(batches.length, 1);
+  assert.equal(batches[0].length, 2);
+  assert.deepEqual(result.en.categories.gaming.immutableIds, ['gaming:0']);
+  assert.deepEqual(result.en.categories.music.immutableIds, ['music:0']);
+});
+
 test('materialization rejects an incomplete HyperBEAM cache warm', async () => {
   const source = {
     en: {
@@ -308,7 +334,7 @@ test('materialization uses a semantic fallback only after the curated pool is ex
   assert.deepEqual(searches.find((params) => !params.channel_ids).any_tags, ['technology']);
 });
 
-test('materialization retries all missing objects after imports are queued', async () => {
+test('materialization retries all missing objects after the initial locator read', async () => {
   const attempts = new Map();
   const result = await materializeHomepageData(
     {
@@ -334,11 +360,10 @@ test('materialization retries all missing objects after imports are queued', asy
   assert.deepEqual(Object.fromEntries(attempts), { 'first:0': 2, 'second:0': 2 });
 });
 
-test('materialization imports known legacy outpoints before probing immutable IDs', async () => {
+test('materialization warms known legacy outpoints through ordinary locator reads', async () => {
   const outpoint = `${'11'.repeat(32)}:0`;
   const nativeId = nativeIdFromLocator(outpoint);
-  const imports = [];
-  const probes = [];
+  const reads = [];
   const result = await materializeHomepageData(
     {
       en: {
@@ -349,23 +374,18 @@ test('materialization imports known legacy outpoints before probing immutable ID
     },
     {
       search: async () => ({ items: [{ immutable_id: outpoint }] }),
-      queueImports: async (locators) => {
-        imports.push(...locators);
-        return locators;
-      },
-      warmMany: async (ids) => {
-        probes.push(...ids);
+      warmMany: async (ids, locatorById) => {
+        reads.push(...ids.map((id) => locatorById.get(id)));
         return ids.map((id) => [id, true]);
       },
     }
   );
 
-  assert.deepEqual(imports, [outpoint]);
-  assert.deepEqual(probes, []);
+  assert.deepEqual(reads, [outpoint]);
   assert.deepEqual(result.en.categories.featured.immutableIds, [nativeId]);
 });
 
-test('materialization retries only unresolved legacy imports', async () => {
+test('materialization retries only unresolved ordinary locator reads', async () => {
   const first = `${'21'.repeat(32)}:0`;
   const second = `${'22'.repeat(32)}:0`;
   const calls = [];
@@ -379,15 +399,12 @@ test('materialization retries only unresolved legacy imports', async () => {
     },
     {
       search: async () => ({ items: [{ immutable_id: first }, { immutable_id: second }] }),
-      queueImports: async (locators) => {
-        calls.push(locators);
-        return calls.length === 1 ? [first] : locators;
+      warmMany: async (ids, locatorById) => {
+        calls.push(ids.map((id) => locatorById.get(id)));
+        return ids.map((id) => [id, calls.length > 1 || locatorById.get(id) === first]);
       },
-      warmMany: async () => {
-        throw new Error('source-backed imports must not be probed');
-      },
-      importRetries: 1,
-      importRetryDelayMs: 0,
+      warmRetries: 1,
+      warmRetryDelayMs: 0,
     }
   );
 
@@ -398,7 +415,7 @@ test('materialization retries only unresolved legacy imports', async () => {
   ]);
 });
 
-test('materialization does not probe immutable IDs after a legacy import fails', async () => {
+test('materialization rejects a legacy locator that cannot be read', async () => {
   const outpoint = `${'22'.repeat(32)}:0`;
   const probes = [];
 
@@ -413,19 +430,19 @@ test('materialization does not probe immutable IDs after a legacy import fails',
       },
       {
         search: async () => ({ items: [{ immutable_id: outpoint }] }),
-        queueImports: async () => [],
-        warmMany: async (ids) => {
-          probes.push(...ids);
-          return ids.map((id) => [id, true]);
+        warmMany: async (ids, locatorById) => {
+          probes.push(...ids.map((id) => locatorById.get(id)));
+          return ids.map((id) => [id, false]);
         },
         warmRetries: 0,
-        importRetryDelayMs: 0,
+        warmRetryDelayMs: 0,
       }
     ),
     /Failed to cache 1 homepage objects in HyperBEAM/
   );
 
-  assert.deepEqual(probes, []);
+  assert.ok(probes.length >= 1);
+  assert.ok(probes.every((locator) => locator === outpoint));
 });
 
 test('materialization warms the selected immutable objects in one ordered batch', async () => {
