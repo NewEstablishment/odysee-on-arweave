@@ -457,10 +457,7 @@ async function resolveNativePlaylistPaths(paths: Array<string>): Promise<Array<N
 async function fetchNativePlaylistById(id: string): Promise<NativePlaylist | null> {
   if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchCachedStoreJsonOrNull(
-    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
-    false
-  );
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
   const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
   if (!verified) return null;
   const playlist = normalizeNativePlaylist({
@@ -728,10 +725,7 @@ async function resolveNativeSubscriptionPaths(paths: Array<string>): Promise<Arr
 async function fetchNativeSubscriptionById(id: string): Promise<NativeSubscription | null> {
   if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchCachedStoreJsonOrNull(
-    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
-    false
-  );
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
   const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
   if (!verified) return null;
   const subscription = normalizeNativeSubscription({
@@ -970,10 +964,7 @@ async function resolveNativeReactionPaths(paths: Array<string>): Promise<Array<N
 async function fetchNativeReactionById(id: string): Promise<NativeReaction | null> {
   if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchCachedStoreJsonOrNull(
-    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
-    false
-  );
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
   const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
   if (!verified) return null;
   return normalizeNativeReaction({
@@ -1248,10 +1239,7 @@ async function fetchNativeCommentRoot(rootId: string): Promise<any | null> {
 async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
   if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchCachedStoreJsonOrNull(
-    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
-    false
-  );
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
   const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
   const payload = verified?.payload;
   if (!payload || !verified) return null;
@@ -1465,10 +1453,7 @@ async function resolveNativeCommentControlPaths(paths: Array<string>): Promise<A
 async function fetchNativeCommentControlById(id: string): Promise<NativeCommentControl | null> {
   if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchCachedStoreJsonOrNull(
-    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
-    false
-  );
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
   const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
   if (!verified) return null;
   const control = normalizeNativeCommentControl({
@@ -2807,6 +2792,10 @@ async function fetchNativeMessageCommitter(messageId: string): Promise<string | 
 
   try {
     const encodedId = encodeURIComponent(messageId);
+    // Bind authority to the exact verified commitment named by the query
+    // path. `/<id>/committers/1` is shorter, but byte-identical messages may
+    // be co-signed and share a stored content group; selecting the first
+    // group committer could then attribute a record to the wrong owner.
     const response = await fetch(`${baseUrl}/${encodedId}/commitments/${encodedId}/committer`, {
       method: 'GET',
       credentials: hyperbeamFetchCredentials(baseUrl),
@@ -3497,7 +3486,7 @@ async function fetchImmutableJsonOrNull(id: string): Promise<any | null> {
     return fetchStoreJsonOrNull(storePath('odysee/outpoint', id), false);
   }
   if (!isStandaloneImmutableId(id)) return null;
-  return fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false);
+  return fetchStoreJsonOrNull(encodeDataPath(id), false);
 }
 
 function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> {
@@ -3508,7 +3497,7 @@ function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> 
 
   const promise = (
     isOutpointId(id) || isStandaloneImmutableId(id)
-      ? fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false)
+      ? fetchStoreJsonOrNull(encodeDataPath(id), false)
       : fetchStoreJsonOrNull(storePath('odysee/channel', id))
   ).catch((error) => {
     storeReadCache.delete(key);

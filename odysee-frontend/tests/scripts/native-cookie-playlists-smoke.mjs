@@ -234,7 +234,7 @@ async function write(message, cookie) {
 }
 
 async function read(id) {
-  const response = await fetch(`${nodeBase}/~cache@1.0/read?read=${encodeURIComponent(id)}`, {
+  const response = await fetch(`${nodeBase}/${encodeURIComponent(id)}?accept-bundle=true`, {
     headers: { accept: 'application/json' },
   });
   const text = await response.text();

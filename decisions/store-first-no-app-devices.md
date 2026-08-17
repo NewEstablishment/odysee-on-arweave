@@ -33,6 +33,12 @@ inversion that makes the store unusable without the whole device fleet.
   exact query discovers physical representations and the frontend verifies and
   projects them. The LBRY `collection_*` API and blockchain publish controls
   are not part of this feature.
+  The pinned HyperBEAM runtime has no `reference@1.0` or frequency device that
+  supplies an owner-authenticated mutable head. `name@1.0` only delegates to
+  configured resolvers, so using it here would require additional mutable
+  resolver/index state. Until upstream provides a suitable generic contract,
+  `playlist-ref` plus the verified contiguous revision chain remains the
+  current-version mechanism.
 - **Native subscriptions**: free channel follows use deterministic
   owner/channel relationship references. Follow, notification-preference,
   unfollow, and re-follow events form a contiguous append-only chain. Local
