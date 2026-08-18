@@ -113,7 +113,7 @@ export function isNextNativeReactionRevision(
 }
 
 export function collapseNativeReactionStates(reactions: Array<NativeReaction>): Array<NativeReaction> {
-  const unique = uniqueReactions(reactions).filter(isValidNativeReaction);
+  const unique = uniqueReactionVersions(reactions.filter(isValidNativeReaction));
   const roots = unique.filter((reaction) => !reaction.revision_of);
   const revisionsByRoot = new Map<string, Array<NativeReaction>>();
 
@@ -171,7 +171,8 @@ function latestRevision(root: NativeReaction, revisions: Array<NativeReaction>):
       .filter((candidate) => isNextNativeReactionRevision(root, current, candidate))
       .sort(compareReactionEvents);
     if (!candidates.length) return current;
-    current = candidates[candidates.length - 1];
+    if (candidates.length > 1) return current;
+    current = candidates[0];
   }
 }
 
@@ -183,13 +184,35 @@ function compareReactionEvents(left: NativeReaction, right: NativeReaction): num
   return left.message_id.localeCompare(right.message_id);
 }
 
-function uniqueReactions(reactions: Array<NativeReaction>): Array<NativeReaction> {
-  const seen = new Set<string>();
-  return reactions.filter((reaction) => {
+function uniqueReactionVersions(reactions: Array<NativeReaction>): Array<NativeReaction> {
+  const byVersion = new Map<string, Array<NativeReaction>>();
+  reactions.forEach((reaction) => {
     const identity = `${reaction.subject}\u0000${reaction.target}\u0000${reaction.owner}\u0000${reaction.reaction_ref}\u0000${reaction.version_ref}`;
-    if (!reaction.message_id || seen.has(identity)) return false;
-    seen.add(identity);
-    return true;
+    const versions = byVersion.get(identity) || [];
+    versions.push(reaction);
+    byVersion.set(identity, versions);
+  });
+
+  const unique: Array<NativeReaction> = [];
+  byVersion.forEach((versions) => {
+    const semantic = new Set(versions.map(reactionSemantics));
+    if (semantic.size !== 1) return;
+    unique.push(versions.sort(compareReactionEvents)[0]);
+  });
+  return unique;
+}
+
+function reactionSemantics(reaction: NativeReaction): string {
+  return JSON.stringify({
+    reaction: reaction.reaction,
+    state: reaction.state,
+    operation: reaction.operation,
+    revision: reaction.revision,
+    revision_of: reaction.revision_of,
+    previous_version: reaction.previous_version,
+    event_timestamp: reaction.event_timestamp,
+    profile_id: reaction.profile_id,
+    profile_name: reaction.profile_name,
   });
 }
 

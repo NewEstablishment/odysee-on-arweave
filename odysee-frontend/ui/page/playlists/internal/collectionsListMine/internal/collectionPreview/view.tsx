@@ -19,7 +19,6 @@ import ClaimPreviewLoading from 'component/common/claim-preview-loading';
 import Icon from 'component/common/icon';
 import Tooltip from 'component/common/tooltip';
 import Spinner from 'component/spinner';
-import AutoPublishCountdown from './internal/autoPublishCountdown';
 import { useAppSelector } from 'redux/hooks';
 import {
   selectIsResolvingForId,
@@ -43,8 +42,6 @@ import {
   selectCollectionHasEditsForId,
   selectCollectionIsPublishingForId,
   selectCollectionPublishErrorForId,
-  selectCollectionAutoPublishForId,
-  selectCollectionAutoPublishScheduledAtForId,
 } from 'redux/selectors/collections';
 type Props = {
   uri?: string;
@@ -80,10 +77,6 @@ function CollectionPreview(props: Props) {
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const isPublishing = useAppSelector((state) => selectCollectionIsPublishingForId(state, collectionId));
   const publishError = useAppSelector((state) => selectCollectionPublishErrorForId(state, collectionId));
-  const autoPublish = useAppSelector((state) => selectCollectionAutoPublishForId(state, collectionId));
-  const autoPublishScheduledAt = useAppSelector((state) =>
-    selectCollectionAutoPublishScheduledAtForId(state, collectionId)
-  );
   const navigate = useNavigate();
   if (collectionType === 'featuredChannels') return null;
   const previewThumbnail = thumbnail || thumbnailFromSecondaryClaim || thumbnailFromClaim;
@@ -145,7 +138,7 @@ function CollectionPreview(props: Props) {
                 {usedCollectionName}
                 {collectionHasEdits && <Icon icon={ICONS.PUBLISH} />}
                 {isPublishing && (
-                  <Tooltip title={__('Publishing playlist updates in the background')} arrow={false} enterDelay={100}>
+                  <Tooltip title={__('Publishing immutable playlist snapshot')} arrow={false} enterDelay={100}>
                     <div className="pending-change">
                       <Spinner />
                     </div>
@@ -171,23 +164,6 @@ function CollectionPreview(props: Props) {
             <div className="meta">
               <CollectionItemCount collectionId={collectionId} />
               {hasClaim ? <CollectionPublicIcon /> : <CollectionPrivateIcon />}
-
-              {autoPublish && (
-                <div className="auto-publish-badge">
-                  <Icon icon={ICONS.PUBLISH} />
-                  <span>
-                    {isPublishing ? (
-                      __('Publishing...')
-                    ) : autoPublishScheduledAt ? (
-                      <AutoPublishCountdown scheduledAt={autoPublishScheduledAt} />
-                    ) : collectionHasEdits ? (
-                      __('Publish pending')
-                    ) : (
-                      __('Auto-publish')
-                    )}
-                  </span>
-                </div>
-              )}
 
               <div className="create-at">
                 {collectionCreatedAt && (

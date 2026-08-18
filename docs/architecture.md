@@ -238,9 +238,13 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
 4. Native account ownership is the verified committer established by the
    cookie-derived node wallet. Claimed profile/channel fields are display
    metadata only. Product projections such as comment revisions, reactions,
-   playlists, and subscriptions accept only contiguous same-committer chains. Playlist
-   references encode their owner, snapshots contain ordered immutable
-   locators, and ambiguous forks or conflicting versions fail closed.
+   and subscriptions accept only contiguous same-committer chains. Each basic
+   public playlist is instead one independently addressable immutable message:
+   each verified commitment ID is an exact route, its snapshot contains ordered
+   immutable locators, and republishing changes the payload to produce a new
+   snapshot. Query may return another verified commitment locator for the same
+   message. Stable playlist-head semantics wait for the
+   separately loaded generic reference/frequency contract.
    Historical LBRY ownership remains governed by its separately verified
    source evidence.
 

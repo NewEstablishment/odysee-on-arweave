@@ -4,114 +4,74 @@ import {
   NATIVE_PLAYLIST_SCHEMA,
   NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   NATIVE_PLAYLIST_TYPE,
-  activeNativePlaylists,
-  collapseNativePlaylistStates,
-  isNextNativePlaylistRevision,
+  immutableNativePlaylists,
   normalizeNativePlaylist,
   validNativePlaylistItem,
 } from '../../ui/util/nativePlaylists.ts';
 
 const owner = id('o');
-const attacker = id('a');
 const profileId = id('p');
-const playlistRef = `${owner}.playlist-reference`;
-const root = playlist({ id: id('r'), owner, ref: playlistRef, version: 'version-root-0001', updatedAt: 100 });
-const duplicateRoot = { ...root, message_id: id('s') };
-const conflictingRoot = { ...root, title: 'Conflicting content', message_id: id('h') };
-const update = playlist({
-  id: id('u'),
+const first = playlist({ id: id('a'), owner, createdAt: 100, items: [id('1')] });
+const republished = playlist({
+  id: id('b'),
   owner,
-  ref: playlistRef,
-  version: 'version-update-01',
-  revision: 1,
-  previous: root.version_ref,
-  updatedAt: 110,
-  items: [id('1'), `${'a'.repeat(64)}:2`],
-});
-const deletion = playlist({
-  id: id('d'),
-  owner,
-  ref: playlistRef,
-  version: 'version-delete-01',
-  revision: 2,
-  previous: update.version_ref,
-  updatedAt: 120,
-  state: 'deleted',
-  operation: 'delete',
-  items: update.items,
-});
-const foreignRevision = playlist({
-  id: id('f'),
-  owner: attacker,
-  ref: playlistRef,
-  version: 'foreign-version-01',
-  revision: 1,
-  previous: root.version_ref,
-  updatedAt: 115,
-  allowInvalid: true,
+  createdAt: 110,
+  items: [id('2'), `${'a'.repeat(64)}:2`],
+  title: 'Republished snapshot',
 });
 
-assert.equal(isNextNativePlaylistRevision(root, root, update), true);
-assert.equal(foreignRevision, null, 'the owner encoded in the public ref must match the verified committer');
-assert.deepEqual(collapseNativePlaylistStates([deletion, update, duplicateRoot, root]), [deletion]);
 assert.deepEqual(
-  collapseNativePlaylistStates([conflictingRoot, root]),
-  [],
-  'conflicting semantic duplicates fail closed'
+  immutableNativePlaylists([first, republished]),
+  [republished, first],
+  'each complete signed message remains an independently addressable playlist'
 );
-assert.deepEqual(activeNativePlaylists([deletion, update, root]), []);
+assert.deepEqual(
+  immutableNativePlaylists([first, { ...first }]),
+  [first],
+  'duplicate physical reads of the same message ID are collapsed'
+);
+assert.notEqual(first.message_id, republished.message_id);
+assert.deepEqual(first.items, [id('1')], 'republishing cannot mutate the previous snapshot');
 
-const reordered = playlist({
-  id: id('q'),
+const legacyRevision = playlist({
+  id: id('c'),
   owner,
-  ref: playlistRef,
-  version: 'version-reorder-01',
-  revision: 2,
-  previous: update.version_ref,
-  updatedAt: 120,
-  items: [...update.items].reverse(),
+  createdAt: 120,
+  items: [id('3')],
+  extra: {
+    'playlist-ref': `${owner}.old-playlist-reference`,
+    'version-ref': 'old-version-reference',
+    revision: 3,
+    'revision-of': `${owner}.old-playlist-reference`,
+    'previous-version': 'old-previous-version',
+    state: 'active',
+    operation: 'update',
+  },
 });
-assert.deepEqual(collapseNativePlaylistStates([reordered, update, root]), [reordered]);
+assert.deepEqual(
+  immutableNativePlaylists([legacyRevision]),
+  [legacyRevision],
+  'an older active full snapshot remains readable by its immutable message ID without projecting its logical head'
+);
 
-const fork = playlist({
-  id: id('k'),
-  owner,
-  ref: playlistRef,
-  version: 'version-fork-0001',
-  revision: 1,
-  previous: root.version_ref,
-  updatedAt: 111,
-});
-assert.deepEqual(collapseNativePlaylistStates([fork, update, root]), [root], 'ambiguous same-owner forks fail closed');
-
-const skipped = playlist({
-  id: id('j'),
-  owner,
-  ref: playlistRef,
-  version: 'version-skipped-01',
-  revision: 2,
-  previous: root.version_ref,
-  updatedAt: 130,
-});
-assert.deepEqual(collapseNativePlaylistStates([skipped, root]), [root]);
-
-const resurrection = playlist({
-  id: id('z'),
-  owner,
-  ref: playlistRef,
-  version: 'version-revive-001',
-  revision: 3,
-  previous: deletion.version_ref,
-  updatedAt: 130,
-});
-assert.deepEqual(collapseNativePlaylistStates([resurrection, deletion, update, root]), [deletion]);
+assert.equal(
+  playlist({
+    id: id('d'),
+    owner,
+    createdAt: 130,
+    allowInvalid: true,
+    extra: { state: 'deleted', operation: 'delete' },
+  }),
+  null,
+  'a legacy tombstone is not an immutable playlist snapshot'
+);
 
 assert.equal(validNativePlaylistItem(id('i')), true);
 assert.equal(validNativePlaylistItem(`${'b'.repeat(64)}:0`), true);
 assert.equal(validNativePlaylistItem('c'.repeat(40)), false, 'mutable legacy claim IDs are not playlist locators');
 assert.equal(
   normalizeNativePlaylist({
-    ...root,
+    ...first,
     'items-json': JSON.stringify(['d'.repeat(40)]),
     items: undefined,
     item_count: 1,
@@ -120,59 +80,48 @@ assert.equal(
   'mutable IDs must be rejected during normalization'
 );
 assert.equal(
-  normalizeNativePlaylist({ ...root, title: 'x'.repeat(201) }),
+  normalizeNativePlaylist({ ...first, title: 'x'.repeat(201) }),
   null,
   'oversized user input must be rejected'
 );
 assert.equal(
-  normalizeNativePlaylist({ ...root, 'thumbnail-url': 'javascript:alert(1)', thumbnail_url: undefined }),
+  normalizeNativePlaylist({ ...first, 'thumbnail-url': 'javascript:alert(1)', thumbnail_url: undefined }),
   null,
   'unsafe thumbnail schemes must be rejected'
 );
 assert.ok(
-  normalizeNativePlaylist({ ...root, description: 'Markdown\nwith formatting' }),
+  normalizeNativePlaylist({ ...first, description: 'Markdown\nwith formatting' }),
   'ordinary formatted descriptions remain valid'
 );
 
-console.log('native playlist projection tests passed');
+console.log('native immutable playlist snapshot tests passed');
 
 function playlist({
   id: messageId,
   owner: messageOwner,
-  ref,
-  version,
-  revision = 0,
-  previous,
-  updatedAt,
-  state = 'active',
-  operation = revision ? 'update' : 'create',
+  createdAt,
   items = [id('1')],
+  title = 'Native playlist',
+  extra = {},
   allowInvalid = false,
 }) {
   const normalized = normalizeNativePlaylist({
     schema: NATIVE_PLAYLIST_SCHEMA,
     type: NATIVE_PLAYLIST_TYPE,
-    'playlist-ref': ref,
     'profile-id': profileId,
     'profile-name': 'Playlist owner',
-    title: 'Native playlist',
-    description: 'Stored as a signed HyperBEAM message',
+    title,
+    description: 'Stored as a signed immutable HyperBEAM message',
     'thumbnail-url': 'https://example.com/thumbnail.jpg',
     'tags-json': JSON.stringify(['native']),
     'languages-json': JSON.stringify(['en']),
     'items-json': JSON.stringify(items),
     'item-count': items.length,
-    state,
-    operation,
-    revision,
-    'version-ref': version,
-    'revision-of': revision ? ref : undefined,
-    'previous-version': previous,
-    'created-at': 100,
-    'updated-at': updatedAt,
+    'created-at': createdAt,
     'signature-scope': NATIVE_PLAYLIST_SIGNATURE_SCOPE,
     'message-id': messageId,
     'hyperbeam-owner': messageOwner,
+    ...extra,
   });
   if (!allowInvalid) assert.ok(normalized);
   return normalized;

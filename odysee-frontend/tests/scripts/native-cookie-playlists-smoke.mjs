@@ -1,219 +1,158 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
 
 import {
   NATIVE_PLAYLIST_SCHEMA,
   NATIVE_PLAYLIST_SIGNATURE_SCOPE,
-  activeNativePlaylists,
-  collapseNativePlaylistStates,
+  immutableNativePlaylists,
   normalizeNativePlaylist,
 } from '../../ui/util/nativePlaylists.ts';
 
 const nodeBase = String(process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18801').replace(/\/+$/, '');
 const now = Date.now();
-const profileA = await write({ type: 'channel', name: `playlist-a-${now}` });
-const profileB = await write({ type: 'channel', name: `playlist-b-${now}` });
+const profileNameA = `playlist-a-${now}`;
+const profileNameB = `playlist-b-${now}`;
+const profileA = await write({ type: 'channel', name: profileNameA });
+const profileB = await write({ type: 'channel', name: profileNameB });
 const ownerA = await committer(profileA.id);
 const ownerB = await committer(profileB.id);
 assert.notEqual(ownerA, ownerB);
 
-const playlistRefA = `${ownerA}.${randomUUID()}`;
-const rootVersion = randomUUID();
-const root = await write(
+const first = await write(
   playlistMessage({
-    ref: playlistRefA,
     profile: profileA.id,
-    profileName: `playlist-a-${now}`,
-    version: rootVersion,
+    profileName: profileNameA,
+    title: 'First immutable snapshot',
     items: [profileA.id, profileB.id],
     createdAt: now,
-    updatedAt: now,
   }),
   profileA.cookie
 );
-assert.equal(await verified(root.id), true);
-assert.equal(await committer(root.id), ownerA);
+assert.equal(await verified(first.id), true);
+assert.equal(await committer(first.id), ownerA);
 
-const updateVersion = randomUUID();
-const update = await write(
+const republished = await write(
   playlistMessage({
-    ref: playlistRefA,
     profile: profileA.id,
-    profileName: `playlist-a-${now}`,
-    version: updateVersion,
+    profileName: profileNameA,
+    title: 'Republished immutable snapshot',
     items: [profileB.id, profileA.id],
-    revision: 1,
-    previous: rootVersion,
-    createdAt: now,
-    updatedAt: now + 1,
+    createdAt: now + 1,
   }),
   profileA.cookie
 );
-assert.equal(await committer(update.id), ownerA);
+assert.equal(await verified(republished.id), true);
+assert.equal(await committer(republished.id), ownerA);
+assert.notEqual(first.id, republished.id, 'republishing must produce a new immutable playlist ID');
 
-const duplicate = await write(
-  playlistMessage({
-    ref: playlistRefA,
-    profile: profileA.id,
-    profileName: `playlist-a-${now}`,
-    version: updateVersion,
-    items: [profileB.id, profileA.id],
-    revision: 1,
-    previous: rootVersion,
-    createdAt: now,
-    updatedAt: now + 1,
-  }),
-  profileA.cookie
-);
-assert.equal(await committer(duplicate.id), ownerA);
+const firstPayload = unwrap(await read(first.id));
+const republishedPayload = unwrap(await read(republished.id));
+assert.deepEqual(JSON.parse(firstPayload['items-json']), [profileA.id, profileB.id]);
+assert.deepEqual(JSON.parse(republishedPayload['items-json']), [profileB.id, profileA.id]);
+for (const payload of [firstPayload, republishedPayload]) {
+  assert.equal(payload['playlist-ref'], undefined);
+  assert.equal(payload['version-ref'], undefined);
+  assert.equal(payload['revision-of'], undefined);
+  assert.equal(payload['previous-version'], undefined);
+}
 
-const forgedVersion = randomUUID();
 const forged = await write(
   playlistMessage({
-    ref: playlistRefA,
     profile: profileA.id,
-    profileName: `playlist-a-${now}`,
-    version: forgedVersion,
+    profileName: profileNameA,
+    title: 'Foreign signer claiming profile A',
     items: [profileB.id],
-    revision: 2,
-    previous: updateVersion,
-    createdAt: now,
-    updatedAt: now + 2,
+    createdAt: now + 2,
   }),
   profileB.cookie
 );
 assert.equal(await committer(forged.id), ownerB);
 
-const playlistRefB = `${ownerB}.${randomUUID()}`;
-const otherVersion = randomUUID();
 const other = await write(
   playlistMessage({
-    ref: playlistRefB,
     profile: profileB.id,
-    profileName: `playlist-b-${now}`,
-    version: otherVersion,
+    profileName: profileNameB,
+    title: 'Owner B snapshot',
     items: [profileB.id],
-    createdAt: now,
-    updatedAt: now,
+    createdAt: now + 3,
   }),
   profileB.cookie
 );
 
-const pathsA = await queryUntilVersions(
+const pathsA = await queryUntilCreatedAts(
   { schema: NATIVE_PLAYLIST_SCHEMA, type: 'playlist', 'profile-id': profileA.id },
-  [rootVersion, updateVersion, forgedVersion]
+  [now, now + 1, now + 2]
 );
-const recordsA = (await Promise.all(pathsA.map(hydrate))).filter(Boolean);
-const versionsA = new Set(recordsA.map((playlist) => playlist.version_ref));
-assert.ok(versionsA.has(rootVersion));
-assert.ok(versionsA.has(updateVersion));
-assert.equal(
-  recordsA.some((playlist) => playlist.version_ref === forgedVersion),
-  false
-);
+const recordsA = (await Promise.all(pathsA.map(hydrateVerified))).filter(Boolean);
+const snapshotsA = immutableNativePlaylists(recordsA);
 assert.deepEqual(
-  activeNativePlaylists(recordsA).map((playlist) => playlist.playlist_ref),
-  [playlistRefA]
+  snapshotsA.map((playlist) => playlist.created_at),
+  [now + 1, now],
+  'owner listing keeps both immutable snapshots and rejects a foreign signer claiming the profile'
 );
-assert.deepEqual(activeNativePlaylists(recordsA)[0].items, [profileB.id, profileA.id]);
-assert.equal(activeNativePlaylists(recordsA)[0].owner, ownerA);
+assert.deepEqual(snapshotsA[0].items, [profileB.id, profileA.id]);
+assert.deepEqual(snapshotsA[1].items, [profileA.id, profileB.id]);
 
-const pathsB = await queryUntilVersions(
+const pathsB = await queryUntilCreatedAts(
   { schema: NATIVE_PLAYLIST_SCHEMA, type: 'playlist', 'profile-id': profileB.id },
-  [otherVersion]
+  [now + 3]
 );
-const recordsB = (await Promise.all(pathsB.map(hydrate))).filter(Boolean);
+const recordsB = (await Promise.all(pathsB.map(hydrateVerified))).filter(Boolean);
 assert.deepEqual(
-  activeNativePlaylists(recordsB).map((playlist) => playlist.playlist_ref),
-  [playlistRefB]
+  immutableNativePlaylists(recordsB).map((playlist) => playlist.created_at),
+  [now + 3]
 );
-assert.equal(activeNativePlaylists(recordsB)[0].version_ref, otherVersion);
-
-const deleteVersion = randomUUID();
-const deletion = await write(
-  playlistMessage({
-    ref: playlistRefA,
-    profile: profileA.id,
-    profileName: `playlist-a-${now}`,
-    version: deleteVersion,
-    items: [profileB.id, profileA.id],
-    revision: 2,
-    previous: updateVersion,
-    createdAt: now,
-    updatedAt: now + 3,
-    state: 'deleted',
-    operation: 'delete',
-  }),
-  profileA.cookie
-);
-assert.equal(await verified(deletion.id), true);
-const finalPaths = await queryUntilVersions(
-  { schema: NATIVE_PLAYLIST_SCHEMA, type: 'playlist', 'playlist-ref': playlistRefA },
-  [rootVersion, updateVersion, forgedVersion, deleteVersion]
-);
-const finalRecords = (await Promise.all(finalPaths.map(hydrate))).filter(Boolean);
-const [head] = collapseNativePlaylistStates(finalRecords);
-assert.equal(head.version_ref, deleteVersion);
-assert.equal(head.state, 'deleted');
-assert.deepEqual(activeNativePlaylists(finalRecords), []);
 
 console.log(
   JSON.stringify({
-    playlist_ref: playlistRefA,
     owner_a: ownerA,
     owner_b: ownerB,
-    root_message_id: root.id,
-    update_message_id: update.id,
-    duplicate_message_id: duplicate.id,
-    forged_message_id: forged.id,
-    delete_message_id: deletion.id,
-    list_isolation_verified: true,
+    first_playlist_id: first.id,
+    republished_playlist_id: republished.id,
+    forged_playlist_id: forged.id,
+    other_playlist_id: other.id,
+    owner_a_discovery_locators: pathsA,
+    owner_b_discovery_locators: pathsB,
+    immutable_exact_reads_verified: true,
+    owner_listing_verified: true,
   })
 );
 
-function playlistMessage({
-  ref,
-  profile,
-  profileName,
-  version,
-  items,
-  revision = 0,
-  previous,
-  createdAt,
-  updatedAt,
-  state = 'active',
-  operation = revision ? 'update' : 'create',
-}) {
+function playlistMessage({ profile, profileName, title, items, createdAt }) {
   return {
     schema: NATIVE_PLAYLIST_SCHEMA,
     type: 'playlist',
-    'playlist-ref': ref,
     'profile-id': profile,
     'profile-name': profileName,
-    title: 'Native smoke playlist',
-    description: 'Generic signed message path',
+    title,
+    description: 'Generic immutable signed message path',
     'tags-json': JSON.stringify(['native']),
     'languages-json': JSON.stringify(['en']),
     'items-json': JSON.stringify(items),
     'item-count': items.length,
-    state,
-    operation,
-    revision,
-    'version-ref': version,
-    ...(revision ? { 'revision-of': ref, 'previous-version': previous } : {}),
     'created-at': createdAt,
-    'updated-at': updatedAt,
     'signature-scope': NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   };
 }
 
-async function hydrate(id) {
+async function hydrateVerified(id) {
   const payload = unwrap(await read(id));
-  return normalizeNativePlaylist({
+  const playlist = normalizeNativePlaylist({
     ...payload,
     'message-id': id,
     'hyperbeam-owner': await committer(id),
   });
+  if (!playlist) return null;
+
+  const profilePayload = unwrap(await read(playlist.profile_id));
+  const profileOwner = await committer(playlist.profile_id);
+  if (
+    profileOwner !== playlist.owner ||
+    profilePayload.type !== 'channel' ||
+    profilePayload.name !== playlist.profile_name
+  ) {
+    return null;
+  }
+  return playlist;
 }
 
 async function write(message, cookie) {
@@ -267,32 +206,22 @@ async function query(selectors) {
   const text = await response.text();
   assert.equal(response.ok, true, `query failed: ${response.status} ${text.slice(0, 500)}`);
   const payload = unwrap(parse(text));
-  if (Array.isArray(payload)) return payload.map(String);
+  if (Array.isArray(payload)) return payload.map((path) => String(path).replace(/^\/+/, ''));
   return Object.keys(payload || {})
     .filter((key) => /^\d+$/.test(key))
     .sort((left, right) => Number(left) - Number(right))
     .map((key) => String(payload[key]).replace(/^\/+/, ''));
 }
 
-async function queryUntilVersions(selectors, expectedVersions) {
+async function queryUntilCreatedAts(selectors, expectedCreatedAts) {
   let paths = [];
-  let versions = [];
   for (let attempt = 0; attempt < 24; attempt += 1) {
     paths = await query(selectors);
-    versions = (
-      await Promise.all(
-        paths.map(async (id) => {
-          const payload = unwrap(await read(id));
-          return payload?.['version-ref'];
-        })
-      )
-    ).filter(Boolean);
-    if (expectedVersions.every((version) => versions.includes(version))) return paths;
+    const createdAts = await Promise.all(paths.map(async (id) => Number(unwrap(await read(id))['created-at'])));
+    if (expectedCreatedAts.every((createdAt) => createdAts.includes(createdAt))) return paths;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  assert.fail(
-    `query did not discover every version: ${JSON.stringify({ selectors, expectedVersions, versions, paths })}`
-  );
+  assert.fail(`query did not discover every snapshot: ${JSON.stringify({ selectors, expectedCreatedAts, paths })}`);
 }
 
 function cookiePair(setCookie) {

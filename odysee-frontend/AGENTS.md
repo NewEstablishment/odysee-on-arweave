@@ -120,16 +120,18 @@ explicitly instead of falling back to legacy services.
 - Public playlists are generic `odysee-playlist@1.0` messages written through
   `/id?!=true&committers=all`; do not call `collection_*` or add a playlist
   device.
-- `playlist-ref` is the public route identity and is bound to the verified
-  committer. `version-ref` identifies a semantic snapshot even when query
-  returns a different physical store representation.
-- Discover by exact schema/profile or playlist reference, hydrate every path,
-  verify commitments/committers/profile ownership, and project only a
-  contiguous unambiguous chain.
-- Store a complete ordered immutable item list in every revision. Native IDs
+- A committed message ID is an exact public route. Discovery may return another
+  verified commitment locator for the same immutable message. Discover owner
+  lists by exact schema/profile, hydrate each returned locator, and verify both
+  the playlist and claimed profile under the same committer.
+- Store a complete ordered immutable item list in every snapshot. Native IDs
   and legacy outpoints are allowed; mutable claim IDs, names, and URIs are not.
-- Local drafts and builtin lists remain local. Publish creates a native root;
-  update/reorder/delete append revisions, and delete is a tombstone.
+- Local drafts and builtin lists remain local. Editing/reordering a published
+  playlist stays local until an explicit publish creates another immutable
+  snapshot with a new message ID and share URL.
+- Public update/delete, stable-head selection, and auto-publish are deferred
+  until the generic reference/frequency contract is integrated. Do not invent
+  a playlist-specific mutable index or revision projector.
 - Preserve Redux collection shape and playback order at the integration
   boundary. The playlist UI must not expose channel selection, URL names,
   bids, balances, confirmations, supports, reports, or abandon-claim flows.

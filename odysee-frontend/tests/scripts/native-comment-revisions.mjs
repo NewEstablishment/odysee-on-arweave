@@ -37,7 +37,11 @@ assert.equal(latestNativeCommentRevision(root, [revisionTwo, revisionOne]), revi
 assert.equal(isNextNativeCommentRevision(root, revisionTwo, deletion), true);
 assert.equal(isNextNativeCommentRevision(root, deletion, { ...deletion, revision: 4 }), false);
 assert.equal(latestNativeCommentRevision(root, [deletion, revisionTwo, revisionOne]), deletion);
-assert.equal(latestNativeCommentRevision(root, [forkB, forkA]), forkB);
+assert.equal(
+  latestNativeCommentRevision(root, [forkB, forkA]),
+  root,
+  'a fork must stop at the last unambiguous version'
+);
 assert.deepEqual(collapseNativeCommentRevisions([revisionTwo, foreignRevision, root, revisionOne, revisionOne]), [
   revisionTwo,
 ]);

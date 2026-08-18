@@ -17,18 +17,13 @@ import Button from 'component/button';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   selectCollectionIsMine,
-  selectCollectionAutoPublishForId,
   selectCollectionIsPublishingForId,
   selectCollectionPublishErrorForId,
   selectCollectionHasEditsForId,
   selectCollectionSavedForId,
 } from 'redux/selectors/collections';
 import { doOpenModal } from 'redux/actions/app';
-import {
-  doToggleCollectionSavedForId,
-  doSetCollectionAutoPublish,
-  doRetryCollectionPublish,
-} from 'redux/actions/collections';
+import { doToggleCollectionSavedForId, doRetryCollectionPublish } from 'redux/actions/collections';
 import { doToast } from 'redux/actions/notifications';
 type Props = {
   uri?: string;
@@ -43,7 +38,6 @@ function CollectionHeaderActions(props: Props) {
   const { uri, collectionId, isBuiltin, showEdit, setShowEdit } = props;
   const dispatch = useAppDispatch();
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
-  const autoPublish = useAppSelector((state) => selectCollectionAutoPublishForId(state, collectionId));
   const isPublishing = useAppSelector((state) => selectCollectionIsPublishingForId(state, collectionId));
   const publishError = useAppSelector((state) => selectCollectionPublishErrorForId(state, collectionId));
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
@@ -119,17 +113,6 @@ function CollectionHeaderActions(props: Props) {
                   </div>
                 </MenuItem>
               )}
-              {isMyCollection && !isBuiltin && hasPublicPlaylist && (
-                <MenuItem
-                  className="comment__menu-option"
-                  onSelect={() => dispatch(doSetCollectionAutoPublish(collectionId, !autoPublish))}
-                >
-                  <div className="menu__link">
-                    <Icon aria-hidden icon={ICONS.PUBLISH} />
-                    {autoPublish ? __('Disable Auto-publish') : __('Enable Auto-publish')}
-                  </div>
-                </MenuItem>
-              )}
               {isMyCollection && !isBuiltin && hasPublicPlaylist && collectionHasEdits && publishError && (
                 <MenuItem
                   className="comment__menu-option"
@@ -175,7 +158,7 @@ function CollectionHeaderActions(props: Props) {
                   {__('Copy')}
                 </div>
               </MenuItem>
-              {isMyCollection && isNotADefaultList && (
+              {isMyCollection && isNotADefaultList && !hasPublicPlaylist && (
                 <MenuItem
                   className="comment__menu-option"
                   onSelect={() =>

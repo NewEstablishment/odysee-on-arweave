@@ -13,16 +13,9 @@ import Icon from 'component/common/icon';
 import DateTime from 'component/dateTime';
 import CollectionTitle from './internal/collectionTitle';
 import CollectionSubtitle from './internal/collectionSubtitle';
-import AutoPublishCountdown from 'page/playlists/internal/collectionsListMine/internal/collectionPreview/internal/autoPublishCountdown';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimForId } from 'redux/selectors/claims';
-import {
-  selectCountForCollectionId,
-  selectCollectionHasEditsForId,
-  selectCollectionAutoPublishForId,
-  selectCollectionAutoPublishScheduledAtForId,
-  selectCollectionIsPublishingForId,
-} from 'redux/selectors/collections';
+import { selectCountForCollectionId } from 'redux/selectors/collections';
 import './style.scss';
 type Props = {
   collection?: Collection;
@@ -43,12 +36,6 @@ const CollectionHeader = (props: Props) => {
   const claim = useAppSelector((state) => collectionId && selectClaimForId(state, collectionId));
   const uri = (claim && (claim.canonical_url || claim.permanent_url)) || null;
   const hasClaim = Boolean(claim);
-  const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
-  const autoPublish = useAppSelector((state) => selectCollectionAutoPublishForId(state, collectionId));
-  const autoPublishScheduledAt = useAppSelector((state) =>
-    selectCollectionAutoPublishScheduledAtForId(state, collectionId)
-  );
-  const isPublishing = useAppSelector((state) => selectCollectionIsPublishingForId(state, collectionId));
   const isNotADefaultList = collection.id !== 'watchlater' && collection.id !== 'favorites';
   const backgroundImage =
     collection && collection.thumbnail && collection.thumbnail.url
@@ -133,31 +120,6 @@ const CollectionHeader = (props: Props) => {
                     }
                   >
                     <CollectionPrivateIcon />
-                  </div>
-                )}
-                {autoPublish && (
-                  <div
-                    className="collection-header__meta-entry"
-                    style={
-                      backgroundImage && {
-                        backgroundImage: 'url(' + backgroundImage + ')',
-                      }
-                    }
-                  >
-                    <div className="auto-publish-badge">
-                      <Icon icon={ICONS.PUBLISH} />
-                      <span>
-                        {isPublishing ? (
-                          __('Publishing...')
-                        ) : autoPublishScheduledAt ? (
-                          <AutoPublishCountdown scheduledAt={autoPublishScheduledAt} />
-                        ) : collectionHasEdits ? (
-                          __('Publish pending')
-                        ) : (
-                          __('Auto-publish')
-                        )}
-                      </span>
-                    </div>
                   </div>
                 )}
                 {isNotADefaultList && (

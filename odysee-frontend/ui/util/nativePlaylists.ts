@@ -13,13 +13,9 @@ const MAX_TAG_LENGTH = 100;
 const MAX_LANGUAGES = 20;
 const MAX_LANGUAGE_LENGTH = 32;
 
-export type NativePlaylistState = 'active' | 'deleted';
-export type NativePlaylistOperation = 'create' | 'update' | 'delete';
-
 export type NativePlaylist = {
   schema: string;
   type: string;
-  playlist_ref: string;
   profile_id: string;
   profile_name?: string;
   title: string;
@@ -29,12 +25,6 @@ export type NativePlaylist = {
   languages: Array<string>;
   items: Array<string>;
   item_count: number;
-  state: NativePlaylistState;
-  operation: NativePlaylistOperation;
-  revision: number;
-  version_ref: string;
-  revision_of?: string;
-  previous_version?: string;
   created_at: number;
   updated_at: number;
   signature_scope: string;
@@ -43,6 +33,7 @@ export type NativePlaylist = {
   [key: string]: any;
 };
 
+/** Normalize an independently addressable playlist snapshot. */
 export function normalizeNativePlaylist(source: any): NativePlaylist | null {
   const itemsJson = field(source, 'items-json', 'items_json');
   const items = stringArray(itemsJson === undefined ? field(source, 'items') : parseJsonArray(itemsJson));
@@ -50,11 +41,16 @@ export function normalizeNativePlaylist(source: any): NativePlaylist | null {
   const languages = serializedStringArray(field(source, 'languages-json', 'languages_json', 'languages'));
   if (!items || !tags || !languages) return null;
 
+  const createdAt = integer(field(source, 'created-at', 'created_at'), 0);
+  const updatedAt = integer(field(source, 'updated-at', 'updated_at'), createdAt);
+  const state = optionalString(field(source, 'state'));
+  const operation = optionalString(field(source, 'operation'));
+  if (state === 'deleted' || operation === 'delete') return null;
+
   const normalized = {
     ...source,
     schema: String(field(source, 'schema') || ''),
     type: String(field(source, 'type') || ''),
-    playlist_ref: String(field(source, 'playlist-ref', 'playlist_ref') || ''),
     profile_id: String(field(source, 'profile-id', 'profile_id') || ''),
     profile_name: optionalString(field(source, 'profile-name', 'profile_name')),
     title: String(field(source, 'title') || ''),
@@ -64,14 +60,8 @@ export function normalizeNativePlaylist(source: any): NativePlaylist | null {
     languages,
     items,
     item_count: integer(field(source, 'item-count', 'item_count'), -1),
-    state: String(field(source, 'state') || ''),
-    operation: String(field(source, 'operation') || ''),
-    revision: integer(field(source, 'revision'), -1),
-    version_ref: String(field(source, 'version-ref', 'version_ref') || ''),
-    revision_of: optionalString(field(source, 'revision-of', 'revision_of')),
-    previous_version: optionalString(field(source, 'previous-version', 'previous_version')),
-    created_at: integer(field(source, 'created-at', 'created_at'), 0),
-    updated_at: integer(field(source, 'updated-at', 'updated_at'), 0),
+    created_at: createdAt,
+    updated_at: updatedAt,
     signature_scope: String(field(source, 'signature-scope', 'signature_scope') || ''),
     message_id: String(field(source, 'message-id', 'message_id', 'hyperbeam_message_id') || '').replace(/^\/+/, ''),
     owner: String(field(source, 'hyperbeam-owner', 'hyperbeam_owner', 'owner') || ''),
@@ -81,25 +71,11 @@ export function normalizeNativePlaylist(source: any): NativePlaylist | null {
 }
 
 export function isValidNativePlaylist(playlist: NativePlaylist): boolean {
-  const rootIsValid =
-    !playlist.revision_of &&
-    !playlist.previous_version &&
-    playlist.revision === 0 &&
-    playlist.operation === 'create' &&
-    playlist.state === 'active';
-  const revisionIsValid =
-    playlist.revision > 0 &&
-    playlist.revision_of === playlist.playlist_ref &&
-    validReference(playlist.previous_version || '') &&
-    ((playlist.operation === 'update' && playlist.state === 'active') ||
-      (playlist.operation === 'delete' && playlist.state === 'deleted'));
-
   return Boolean(
     playlist.schema === NATIVE_PLAYLIST_SCHEMA &&
     playlist.type === NATIVE_PLAYLIST_TYPE &&
     playlist.signature_scope === NATIVE_PLAYLIST_SIGNATURE_SCOPE &&
-    validPlaylistRef(playlist.playlist_ref, playlist.owner) &&
-    validReference(playlist.version_ref) &&
+    isNativeMessageId(playlist.owner) &&
     isNativeMessageId(playlist.profile_id) &&
     (!playlist.profile_name || boundedText(playlist.profile_name, 200)) &&
     boundedText(playlist.title, NATIVE_PLAYLIST_MAX_TITLE_LENGTH) &&
@@ -111,68 +87,21 @@ export function isValidNativePlaylist(playlist: NativePlaylist): boolean {
     playlist.item_count === playlist.items.length &&
     playlist.created_at > 0 &&
     playlist.updated_at >= playlist.created_at &&
-    isNativeMessageId(playlist.message_id) &&
-    (rootIsValid || revisionIsValid)
+    isNativeMessageId(playlist.message_id)
   );
 }
 
-export function isNextNativePlaylistRevision(
-  root: NativePlaylist,
-  current: NativePlaylist,
-  candidate: NativePlaylist
-): boolean {
-  return Boolean(
-    !root.revision_of &&
-    current.state === 'active' &&
-    candidate.owner === root.owner &&
-    candidate.playlist_ref === root.playlist_ref &&
-    candidate.revision_of === root.playlist_ref &&
-    candidate.previous_version === current.version_ref &&
-    candidate.revision === current.revision + 1 &&
-    candidate.profile_id === root.profile_id &&
-    candidate.created_at === root.created_at &&
-    candidate.updated_at >= current.updated_at
-  );
-}
-
-export function collapseNativePlaylistStates(playlists: Array<NativePlaylist>): Array<NativePlaylist> {
-  const valid = playlists.filter(isValidNativePlaylist);
-  const conflictingRefs = conflictingPlaylistRefs(valid);
-  const unique = uniqueSemanticVersions(valid);
-  const byPlaylistRef = new Map<string, Array<NativePlaylist>>();
-
-  unique.forEach((playlist) => {
-    const versions = byPlaylistRef.get(playlist.playlist_ref) || [];
-    versions.push(playlist);
-    byPlaylistRef.set(playlist.playlist_ref, versions);
+/** Return each verified immutable snapshot once, newest first. */
+export function immutableNativePlaylists(playlists: Array<NativePlaylist>): Array<NativePlaylist> {
+  const byMessageId = new Map<string, NativePlaylist>();
+  playlists.filter(isValidNativePlaylist).forEach((playlist) => {
+    if (!byMessageId.has(playlist.message_id)) byMessageId.set(playlist.message_id, playlist);
   });
-
-  const current: Array<NativePlaylist> = [];
-  byPlaylistRef.forEach((versions) => {
-    if (conflictingRefs.has(versions[0].playlist_ref)) return;
-    const roots = versions.filter((playlist) => !playlist.revision_of);
-    if (roots.length !== 1) return;
-    current.push(
-      latestRevision(
-        roots[0],
-        versions.filter((playlist) => Boolean(playlist.revision_of))
-      )
-    );
-  });
-
-  return current.sort(comparePlaylistHeads);
+  return Array.from(byMessageId.values()).sort(comparePlaylistSnapshots);
 }
 
-export function activeNativePlaylists(playlists: Array<NativePlaylist>): Array<NativePlaylist> {
-  return collapseNativePlaylistStates(playlists).filter((playlist) => playlist.state === 'active');
-}
-
-export function nativePlaylistOwner(playlistRef: string): string | null {
-  const separator = playlistRef.indexOf('.');
-  if (separator <= 0) return null;
-  const owner = playlistRef.slice(0, separator);
-  return isNativeMessageId(owner) ? owner : null;
-}
+// The collection boundary lists immutable snapshots without a mutable head.
+export const activeNativePlaylists = immutableNativePlaylists;
 
 export function validNativePlaylistItem(item: string): boolean {
   return isNativeMessageId(item) || /^[0-9a-fA-F]{64}:\d+$/.test(item);
@@ -183,66 +112,10 @@ export function nativePlaylistItemsJson(items: Array<string>): string {
   return JSON.stringify(items);
 }
 
-function latestRevision(root: NativePlaylist, revisions: Array<NativePlaylist>): NativePlaylist {
-  let current = root;
-  while (true) {
-    const candidates = revisions.filter((candidate) => isNextNativePlaylistRevision(root, current, candidate));
-    if (!candidates.length) return current;
-    if (candidates.length > 1) return current;
-    current = candidates[0];
-  }
-}
-
-function uniqueSemanticVersions(playlists: Array<NativePlaylist>): Array<NativePlaylist> {
-  const byVersion = new Map<string, NativePlaylist>();
-  playlists.forEach((playlist) => {
-    const identity = `${playlist.owner}\u0000${playlist.playlist_ref}\u0000${playlist.version_ref}`;
-    const existing = byVersion.get(identity);
-    if (!existing || playlist.message_id.localeCompare(existing.message_id) < 0) byVersion.set(identity, playlist);
-  });
-  return Array.from(byVersion.values());
-}
-
-function conflictingPlaylistRefs(playlists: Array<NativePlaylist>): Set<string> {
-  const semanticByVersion = new Map<string, string>();
-  const conflicts = new Set<string>();
-  playlists.forEach((playlist) => {
-    const identity = `${playlist.owner}\u0000${playlist.playlist_ref}\u0000${playlist.version_ref}`;
-    const semantic = JSON.stringify({
-      profile_id: playlist.profile_id,
-      profile_name: playlist.profile_name,
-      title: playlist.title,
-      description: playlist.description,
-      thumbnail_url: playlist.thumbnail_url,
-      tags: playlist.tags,
-      languages: playlist.languages,
-      items: playlist.items,
-      state: playlist.state,
-      operation: playlist.operation,
-      revision: playlist.revision,
-      revision_of: playlist.revision_of,
-      previous_version: playlist.previous_version,
-      created_at: playlist.created_at,
-      updated_at: playlist.updated_at,
-    });
-    const existing = semanticByVersion.get(identity);
-    if (existing !== undefined && existing !== semantic) conflicts.add(playlist.playlist_ref);
-    semanticByVersion.set(identity, semantic);
-  });
-  return conflicts;
-}
-
-function comparePlaylistHeads(left: NativePlaylist, right: NativePlaylist): number {
+function comparePlaylistSnapshots(left: NativePlaylist, right: NativePlaylist): number {
   const updatedDifference = right.updated_at - left.updated_at;
   if (updatedDifference) return updatedDifference;
-  return left.playlist_ref.localeCompare(right.playlist_ref);
-}
-
-function validPlaylistRef(playlistRef: string, owner: string): boolean {
-  const prefix = nativePlaylistOwner(playlistRef);
-  if (!prefix || prefix !== owner) return false;
-  const suffix = playlistRef.slice(prefix.length + 1);
-  return /^[0-9A-Za-z_-]{16,64}$/.test(suffix) && playlistRef.length <= 193;
+  return left.message_id.localeCompare(right.message_id);
 }
 
 function validPlaylistItems(items: Array<string>): boolean {
@@ -276,10 +149,6 @@ function validThumbnailUrl(value: string | undefined): boolean {
   } catch {
     return false;
   }
-}
-
-function validReference(reference: string): boolean {
-  return reference.length >= 16 && reference.length <= 193 && !hasControlCharacters(reference);
 }
 
 function hasControlCharacters(source: string): boolean {

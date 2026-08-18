@@ -29,9 +29,7 @@ import {
   NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   NATIVE_PLAYLIST_TYPE,
   activeNativePlaylists,
-  collapseNativePlaylistStates,
   nativePlaylistItemsJson,
-  nativePlaylistOwner,
   normalizeNativePlaylist,
   type NativePlaylist,
 } from 'util/nativePlaylists';
@@ -322,108 +320,35 @@ export async function fetchHyperbeamPlaylistListMine(
   };
 }
 
-export async function fetchHyperbeamPlaylistByRef(playlistRef: string): Promise<Claim | null> {
-  if (!nativePlaylistOwner(playlistRef)) return null;
-  const playlists = collapseNativePlaylistStates(
-    await fetchNativePlaylistCollection({
-      schema: NATIVE_PLAYLIST_SCHEMA,
-      type: NATIVE_PLAYLIST_TYPE,
-      'playlist-ref': playlistRef,
-    })
-  );
-  const playlist = playlists.find((candidate) => candidate.playlist_ref === playlistRef);
-  if (!playlist || playlist.state !== 'active') return null;
+export async function fetchHyperbeamPlaylistById(messageId: string): Promise<Claim | null> {
+  if (!isNativeMessageId(messageId)) return null;
+  const playlist = await fetchNativePlaylistById(messageId);
+  if (!playlist) return null;
   const viewerOwner = await activeHyperbeamAccountOwner();
   return nativePlaylistClaim(playlist, viewerOwner === playlist.owner);
 }
 
-export async function fetchHyperbeamPlaylistPublish(
-  params: NativePlaylistWriteParams,
-  playlistRef?: string
-): Promise<Claim> {
+export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteParams): Promise<Claim> {
   const account = getHyperbeamAccount();
   const owner = await activeHyperbeamAccountOwner();
   if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before publishing');
 
-  const current = playlistRef ? await fetchNativePlaylistHead(playlistRef) : null;
-  if (playlistRef && (!current || current.state !== 'active')) throw new Error('Native playlist was not found');
-  if (current && current.owner !== owner) throw new Error('Only the playlist owner can update it');
-
   const timestamp = Date.now();
-  const nextRef = current?.playlist_ref || `${owner}.${nativeMessageVersionRef()}`;
-  const versionRef = nativeMessageVersionRef();
   const message = nativePlaylistMessage({
     ...params,
-    playlistRef: nextRef,
     profileId: account.id,
     profileName: account.name,
-    versionRef,
-    revision: current ? current.revision + 1 : 0,
-    revisionOf: current?.playlist_ref,
-    previousVersion: current?.version_ref,
-    createdAt: current?.created_at || timestamp,
-    updatedAt: timestamp,
-    state: 'active',
-    operation: current ? 'update' : 'create',
+    createdAt: timestamp,
   });
   validateNativePlaylistWrite(message, owner);
 
   const messageId = await writeNativeMessage(message, 'playlist');
   nativePlaylistQueryCache.clear();
   const written = await fetchNativePlaylistById(messageId);
-  if (!written || written.owner !== owner || written.version_ref !== versionRef) {
+  if (!written || written.owner !== owner || written.message_id !== messageId) {
     throw new Error('HyperBEAM native playlist failed commitment or ownership verification');
   }
   return nativePlaylistClaim(written, true);
-}
-
-export async function fetchHyperbeamPlaylistDelete(playlistRef: string): Promise<void> {
-  const owner = await activeHyperbeamAccountOwner();
-  if (!owner) throw new Error('Sign up or log in with the HyperBEAM account before deleting');
-  const current = await fetchNativePlaylistHead(playlistRef);
-  if (!current || current.state !== 'active') throw new Error('Native playlist was not found');
-  if (current.owner !== owner) throw new Error('Only the playlist owner can delete it');
-
-  const versionRef = nativeMessageVersionRef();
-  const message = nativePlaylistMessage({
-    title: current.title,
-    description: current.description,
-    thumbnail_url: current.thumbnail_url,
-    tags: current.tags,
-    languages: current.languages,
-    items: current.items,
-    playlistRef: current.playlist_ref,
-    profileId: current.profile_id,
-    profileName: current.profile_name,
-    versionRef,
-    revision: current.revision + 1,
-    revisionOf: current.playlist_ref,
-    previousVersion: current.version_ref,
-    createdAt: current.created_at,
-    updatedAt: Date.now(),
-    state: 'deleted',
-    operation: 'delete',
-  });
-  validateNativePlaylistWrite(message, owner);
-
-  const messageId = await writeNativeMessage(message, 'playlist deletion');
-  nativePlaylistQueryCache.clear();
-  const written = await fetchNativePlaylistById(messageId);
-  if (!written || written.owner !== owner || written.state !== 'deleted' || written.version_ref !== versionRef) {
-    throw new Error('HyperBEAM native playlist deletion failed commitment or ownership verification');
-  }
-}
-
-async function fetchNativePlaylistHead(playlistRef: string): Promise<NativePlaylist | null> {
-  if (!nativePlaylistOwner(playlistRef)) return null;
-  const current = collapseNativePlaylistStates(
-    await fetchNativePlaylistCollection({
-      schema: NATIVE_PLAYLIST_SCHEMA,
-      type: NATIVE_PLAYLIST_TYPE,
-      'playlist-ref': playlistRef,
-    })
-  );
-  return current.find((playlist) => playlist.playlist_ref === playlistRef) || null;
 }
 
 async function fetchNativePlaylistCollection(selectors: Record<string, any>): Promise<Array<NativePlaylist>> {
@@ -488,17 +413,9 @@ async function verifiedNativePlaylistProfile(playlist: NativePlaylist): Promise<
 
 function nativePlaylistMessage(
   params: NativePlaylistWriteParams & {
-    playlistRef: string;
     profileId: string;
     profileName?: string;
-    versionRef: string;
-    revision: number;
-    revisionOf?: string;
-    previousVersion?: string;
     createdAt: number;
-    updatedAt: number;
-    state: 'active' | 'deleted';
-    operation: 'create' | 'update' | 'delete';
   }
 ): Record<string, any> {
   const tags = (params.tags || []).map(String);
@@ -506,7 +423,6 @@ function nativePlaylistMessage(
   return compactParams({
     schema: NATIVE_PLAYLIST_SCHEMA,
     type: NATIVE_PLAYLIST_TYPE,
-    'playlist-ref': params.playlistRef,
     'profile-id': params.profileId,
     'profile-name': params.profileName,
     title: params.title,
@@ -516,14 +432,7 @@ function nativePlaylistMessage(
     'languages-json': JSON.stringify(languages),
     'items-json': nativePlaylistItemsJson(params.items),
     'item-count': params.items.length,
-    state: params.state,
-    operation: params.operation,
-    revision: params.revision,
-    'version-ref': params.versionRef,
-    'revision-of': params.revisionOf,
-    'previous-version': params.previousVersion,
     'created-at': params.createdAt,
-    'updated-at': params.updatedAt,
     'signature-scope': NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   });
 }
@@ -540,9 +449,9 @@ function validateNativePlaylistWrite(message: Record<string, any>, owner: string
 function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean): Claim {
   const timestamp = Math.floor(playlist.updated_at / 1000);
   const creationTimestamp = Math.floor(playlist.created_at / 1000);
-  const permanentUrl = `/$/playlist/${encodeURIComponent(playlist.playlist_ref)}`;
+  const permanentUrl = `/$/playlist/${encodeURIComponent(playlist.message_id)}`;
   return {
-    claim_id: playlist.playlist_ref,
+    claim_id: playlist.message_id,
     name: playlist.title,
     normalized_name: playlist.title.toLowerCase(),
     permanent_url: permanentUrl,
@@ -564,14 +473,10 @@ function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean): Claim {
     is_my_output: isMine,
     hyperbeam: {
       schema: playlist.schema,
-      playlist_ref: playlist.playlist_ref,
-      version_ref: playlist.version_ref,
       message_id: playlist.message_id,
-      revision: playlist.revision,
       owner: playlist.owner,
       profile_id: playlist.profile_id,
       profile_name: playlist.profile_name,
-      state: playlist.state,
     },
   } as unknown as Claim;
 }
@@ -2043,9 +1948,9 @@ export async function fetchHyperbeamClaimsByIds(ids: Array<string>): Promise<Arr
 }
 
 async function fetchStoreClaimByAnyId(id: string): Promise<Array<Claim>> {
-  if (nativePlaylistOwner(id)) {
-    const playlist = await fetchHyperbeamPlaylistByRef(id).catch(() => null);
-    return playlist ? [playlist] : [];
+  if (isNativeMessageId(id)) {
+    const playlist = await fetchHyperbeamPlaylistById(id).catch(() => null);
+    if (playlist) return [playlist];
   }
   if (isClaimId(id)) {
     const claim = await fetchStoreClaimById(id).catch(() => null);

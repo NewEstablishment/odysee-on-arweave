@@ -57,6 +57,30 @@ const skippedRevision = reaction({
   previous: rootA.version_ref,
 });
 const duplicateRootA = { ...rootA, message_id: id('g') };
+const forkA = reaction({
+  id: id('h'),
+  owner: ownerA,
+  ref: rootA.reaction_ref,
+  reaction: 'dislike',
+  timestamp: 160,
+  revision: 1,
+  root: rootA.reaction_ref,
+  previous: rootA.version_ref,
+});
+const forkB = reaction({
+  id: id('i'),
+  owner: ownerA,
+  ref: rootA.reaction_ref,
+  timestamp: 170,
+  revision: 1,
+  root: rootA.reaction_ref,
+  previous: rootA.version_ref,
+});
+const conflictingSemanticVersion = {
+  ...dislikeA,
+  message_id: id('j'),
+  reaction: 'like',
+};
 
 assert.equal(isNextNativeReactionRevision(rootA, rootA, dislikeA), true);
 assert.equal(isNextNativeReactionRevision(rootA, rootA, forgedRevision), false);
@@ -65,6 +89,16 @@ assert.deepEqual(collapseNativeReactionStates([removeA, forgedRevision, duplicat
   removeA,
   likeB,
 ]);
+assert.deepEqual(
+  collapseNativeReactionStates([rootA, forkA, forkB]),
+  [rootA],
+  'a revision fork must stop at the last unambiguous version'
+);
+assert.deepEqual(
+  collapseNativeReactionStates([rootA, dislikeA, conflictingSemanticVersion]),
+  [rootA],
+  'conflicting records for one semantic version must be rejected'
+);
 
 const projectedForA = projectNativeReactions([removeA, forgedRevision, rootA, dislikeA, likeB], ownerA);
 assert.deepEqual(projectedForA.my_reactions, {});

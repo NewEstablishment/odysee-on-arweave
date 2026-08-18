@@ -144,12 +144,12 @@ curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
   -H "content-type: application/json" \
   --data-binary '{"schema":"odysee-reaction@1.0","type":"reaction","reaction-ref":"<stable-ref>","version-ref":"<version-ref>","target":"<video-or-comment-id>","subject":"content","reaction":"like","state":"active","operation":"set","revision":0,"event-timestamp":<milliseconds>,"signature-scope":"native-reaction-v1"}'
 
-# Public playlists are full ordered snapshots. The playlist-ref begins with
-# the verified committer returned above; updates add revision-of and
-# previous-version, while deletes use state=deleted and operation=delete.
+# Public playlists are full ordered immutable snapshots. The returned
+# message-id is an exact /$/playlist/<message-id> route. A query can return a
+# different verified commitment locator for the same signed snapshot.
 curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
   -H "content-type: application/json" \
-  --data-binary '{"schema":"odysee-playlist@1.0","type":"playlist","playlist-ref":"<committer>.<stable-ref>","profile-id":"<profile-id>","profile-name":"my channel","title":"My playlist","items-json":"[\"<immutable-video-id>\"]","item-count":1,"tags-json":"[]","languages-json":"[]","state":"active","operation":"create","revision":0,"version-ref":"<version-ref>","created-at":<milliseconds>,"updated-at":<milliseconds>,"signature-scope":"native-playlist-v1"}'
+  --data-binary '{"schema":"odysee-playlist@1.0","type":"playlist","profile-id":"<profile-id>","profile-name":"my channel","title":"My playlist","items-json":"[\"<immutable-video-id>\"]","item-count":1,"tags-json":"[]","languages-json":"[]","created-at":<milliseconds>,"signature-scope":"native-playlist-v1"}'
 
 # Free channel follows use a deterministic owner/channel relationship. Later
 # notification changes and unfollows append revision-of/previous-version.

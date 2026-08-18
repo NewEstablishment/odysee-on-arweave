@@ -97,7 +97,7 @@ they are not alternate UI APIs.
 | Name or URI | Mutable lookup input, never immutable identity. |
 | Native comment revision | Its own immutable message ID, linked to a logical root comment. |
 | Native reaction revision | Its own immutable message ID, linked through stable logical reaction and version references. |
-| Native playlist | Owner-bound logical `playlist-ref`; every snapshot/revision also has its own immutable message ID and `version-ref`. |
+| Native playlist snapshot | Any verified commitment ID for its immutable message. Republished payloads receive new exact-read IDs. |
 
 Bare immutable IDs read through the normal message/cache route. Mutable names
 and claim IDs resolve through namespaced store paths before yielding immutable
@@ -182,26 +182,30 @@ legacy reaction API.
 
 ### Playlists
 
-Public playlists are cookie-signed `odysee-playlist@1.0` messages. Their
-public route is `/$/playlist/<playlist-ref>`, where `playlist-ref` begins with
-the verified committer address. The frontend uses generic `/id?!` writes,
-`query@1.0/only` discovery, and exact commitment hydration; it does not call
-the LBRY `collection_*` API.
+Public playlists are cookie-signed `odysee-playlist@1.0` messages. A committed
+ID gives the public route `/$/playlist/<message-id>`. The frontend uses generic
+`/id?!` writes, `query@1.0/only` owner listing, and exact commitment hydration; it does
+not call the LBRY `collection_*` API.
 
-- A root contains a complete ordered snapshot of immutable native IDs and/or
-  legacy `<txid>:<nout>` outpoints.
-- Updates, reorderings, and deletes append contiguous same-owner revisions.
-- Deletes are tombstones. Deleted chains cannot be resurrected.
+- Every message contains a complete ordered snapshot of immutable native IDs
+  and/or legacy `<txid>:<nout>` outpoints.
+- A republish after editing or reordering creates a new committed message, a
+  new public ID, and a new share URL. The earlier snapshot remains immutable
+  and exactly addressable.
+- Public update/delete and stable-head semantics are deliberately deferred
+  until the generic reference/frequency contract is integrated. The basic flow
+  does not invent a playlist-specific mutable index or revision projection.
 - Mutable 40-character claim IDs, names, and URIs are rejected as stored item
   identity; the integration layer resolves local draft URIs before publish.
-- Duplicate physical store representations are deduplicated by logical
-  playlist/version identity. Gaps, forks, foreign writers, conflicting
-  versions, and invalid profiles fail closed.
+- Duplicate physical reads are deduplicated by their returned locator. The playlist
+  and its claimed profile must verify under the same committer.
 - Queue, Watch Later, Favorites, and unpublished drafts stay local. Publishing
-  a draft creates a new public native root.
+  a draft creates a new public immutable snapshot.
 
-Playlist UI retains list, edit, reorder, play, shuffle, share, and delete. It
-has no blockchain channel picker, URL-name reservation, bid/stake, pending
+Playlist UI retains list, local edit/reorder, explicit snapshot publish, play,
+shuffle, and share. Published delete and auto-publish are hidden until they can
+be expressed honestly through the generic reference contract. It has no
+blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
 
 ### Subscriptions

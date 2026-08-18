@@ -24,25 +24,14 @@ import {
   selectCollectionKeyForId,
   selectCollectionForIdClaimForUriItem,
   selectAreThumbnailClaimsFetchingForCollectionIds,
-  selectCollectionAutoPublishForId,
-  selectCollectionIsPublishingForId,
-  selectCollectionHasEditsForId,
-  selectCollectionHasUnsavedEditsForId,
-  selectCollectionIsMine,
 } from 'redux/selectors/collections';
 import { selectCollectionClaimUploadParamsForId } from 'redux/selectors/publish';
 import * as COLS from 'constants/collections';
 import { resolveAuxParams, resolveCollectionType, getClaimIdsInCollectionClaim } from 'util/collections';
 import { getClaimOutpoint, getThumbnailFromClaim } from 'util/claim';
 import { doToast } from 'redux/actions/notifications';
-import {
-  fetchHyperbeamPlaylistDelete,
-  fetchHyperbeamPlaylistListMine,
-  fetchHyperbeamPlaylistPublish,
-} from 'util/hyperbeam';
+import { fetchHyperbeamPlaylistListMine, fetchHyperbeamPlaylistPublish } from 'util/hyperbeam';
 const FETCH_BATCH_SIZE = 50;
-const AUTO_PUBLISH_DEBOUNCE_MS = 15000;
-const collectionAutoPublishTimers: Record<string, TimeoutID> = {};
 export const doFetchCollectionListMine =
   (
     options: CollectionListOptions = {
@@ -86,7 +75,6 @@ export const doFetchCollectionListMine =
 export function doCollectionPublish(options: CollectionPublishCreateParams, collectionId: string, cb?: () => void) {
   return async (dispatch: Dispatch, getState: GetState): Promise<any> => {
     const state = getState();
-    const isPrivate = selectIsCollectionPrivateForId(state, collectionId);
     const collection = selectCollectionForId(state, collectionId);
     if (!collection) throw new Error('Playlist does not exist');
     const items = (options.claims || []).filter((item): item is string => typeof item === 'string' && Boolean(item));
@@ -98,17 +86,14 @@ export function doCollectionPublish(options: CollectionPublishCreateParams, coll
       },
     });
     try {
-      const collectionClaim = await fetchHyperbeamPlaylistPublish(
-        {
-          title: options.title || collection.title || collection.name,
-          description: typeof options.description === 'string' ? options.description : undefined,
-          thumbnail_url: options.thumbnail_url,
-          tags: (options.tags || []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)).filter(Boolean),
-          languages: options.languages || [],
-          items,
-        },
-        isPrivate ? undefined : collectionId
-      );
+      const collectionClaim = await fetchHyperbeamPlaylistPublish({
+        title: options.title || collection.title || collection.name,
+        description: typeof options.description === 'string' ? options.description : undefined,
+        thumbnail_url: options.thumbnail_url,
+        tags: (options.tags || []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)).filter(Boolean),
+        languages: options.languages || [],
+        items,
+      });
       const publishedCollection = {
         ...collection,
         id: collectionClaim.claim_id,
@@ -174,80 +159,11 @@ export function doCollectionPublish(options: CollectionPublishCreateParams, coll
   };
 }
 
-const doAutoPublishCollectionIfNeeded =
-  (collectionId: string, triggerNow: boolean = false) =>
-  (dispatch: Dispatch, getState: GetState): Promise<void> => {
-    const state = getState();
-    const isAutoPublishEnabled = selectCollectionAutoPublishForId(state, collectionId);
-    const isPrivate = selectIsCollectionPrivateForId(state, collectionId);
-    const isMine = selectCollectionIsMine(state, collectionId);
-    const isPublishing = selectCollectionIsPublishingForId(state, collectionId);
-    const hasEdits = selectCollectionHasEditsForId(state, collectionId);
-    const hasUnsavedEdits = selectCollectionHasUnsavedEditsForId(state, collectionId);
-
-    if (
-      (!triggerNow && !isAutoPublishEnabled) ||
-      isPrivate ||
-      !isMine ||
-      isPublishing ||
-      (!hasEdits && !hasUnsavedEdits)
-    ) {
-      return Promise.resolve();
-    }
-
-    const collectionUploadParams = selectCollectionClaimUploadParamsForId(state, collectionId);
-    const hasItems = collectionUploadParams?.claims && collectionUploadParams.claims.length > 0;
-    if (!hasItems) return Promise.resolve();
-
-    const runPublish = () =>
-      dispatch(doCollectionPublish(collectionUploadParams, collectionId)).catch(() => Promise.resolve());
-
-    if (triggerNow) return runPublish();
-
-    if (collectionAutoPublishTimers[collectionId]) {
-      clearTimeout(collectionAutoPublishTimers[collectionId]);
-    }
-
-    dispatch({
-      type: ACTIONS.COLLECTION_AUTOPUBLISH_SCHEDULED,
-      data: {
-        collectionId,
-        scheduledAt: Date.now() + AUTO_PUBLISH_DEBOUNCE_MS,
-      },
-    });
-    collectionAutoPublishTimers[collectionId] = setTimeout(() => {
-      delete collectionAutoPublishTimers[collectionId];
-      dispatch({
-        type: ACTIONS.COLLECTION_AUTOPUBLISH_SCHEDULED,
-        data: {
-          collectionId,
-          scheduledAt: null,
-        },
-      });
-      dispatch(doAutoPublishCollectionIfNeeded(collectionId, true));
-    }, AUTO_PUBLISH_DEBOUNCE_MS);
-    return Promise.resolve();
-  };
-
-export const doSetCollectionAutoPublish = (collectionId: string, enabled: boolean) => (dispatch: Dispatch) => {
-  dispatch({
-    type: ACTIONS.COLLECTION_AUTOPUBLISH_SET,
-    data: {
-      collectionId,
-      enabled,
-    },
-  });
-  dispatch(
-    doToast({
-      message: enabled
-        ? __('Auto-publish enabled. New playlist edits will publish in the background.')
-        : __('Auto-publish disabled. You can still publish manually.'),
-    })
-  );
-  if (enabled) dispatch(doAutoPublishCollectionIfNeeded(collectionId));
+export const doRetryCollectionPublish = (collectionId: string) => (dispatch: Dispatch, getState: GetState) => {
+  const collectionUploadParams = selectCollectionClaimUploadParamsForId(getState(), collectionId);
+  if (!collectionUploadParams?.claims?.length) return Promise.resolve();
+  return dispatch(doCollectionPublish(collectionUploadParams, collectionId)).catch(() => Promise.resolve());
 };
-export const doRetryCollectionPublish = (collectionId: string) => (dispatch: Dispatch) =>
-  dispatch(doAutoPublishCollectionIfNeeded(collectionId, true));
 export const doLocalCollectionCreate =
   (params: CollectionLocalCreateParams, cb?: (id: any) => void) => (dispatch: Dispatch, getState: GetState) => {
     const { items, sourceId } = params;
@@ -300,7 +216,9 @@ export const doCollectionDelete =
     const state = getState();
     const claim = selectClaimForClaimId(state, collectionId);
 
-    if (claim) await fetchHyperbeamPlaylistDelete(collectionId);
+    if (claim) {
+      throw new Error('Published playlists are immutable and cannot be deleted. Publish a new snapshot instead.');
+    }
     if (collectionKey) {
       dispatch({
         type: ACTIONS.COLLECTION_DELETE,
@@ -788,18 +706,10 @@ export const doCollectionEdit =
         },
       });
 
-      if (!isQueue && !isPreview) {
-        dispatch(doAutoPublishCollectionIfNeeded(collectionId));
-      }
-
       success(true);
     });
   };
 export const doClearEditsForCollectionId = (id: string) => (dispatch: Dispatch) => {
-  if (collectionAutoPublishTimers[id]) {
-    clearTimeout(collectionAutoPublishTimers[id]);
-    delete collectionAutoPublishTimers[id];
-  }
   dispatch({
     type: ACTIONS.COLLECTION_AUTOPUBLISH_SCHEDULED,
     data: {

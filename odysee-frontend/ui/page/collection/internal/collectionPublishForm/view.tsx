@@ -325,7 +325,15 @@ const CollectionPublishForm = (props: Props) => {
             {...({
               button: 'primary',
               disabled: publishingClaimWithNoChanges || publishPending || shouldResolveCollectionItems,
-              label: publishPending ? <BusyIndicator message={__('Submitting')} /> : __(editing ? 'Save' : 'Submit'),
+              label: publishPending ? (
+                <BusyIndicator message={__('Submitting')} />
+              ) : editing ? (
+                __('Save')
+              ) : hasClaim ? (
+                __('Publish Snapshot')
+              ) : (
+                __('Publish')
+              ),
             } as any)}
           />
           <Button button="link" label={__('Cancel')} onClick={handleCancelButton} />
@@ -341,7 +349,9 @@ const CollectionPublishForm = (props: Props) => {
 
         <p className="help">
           {publishing
-            ? __('After submitting, the signed playlist is available from this HyperBEAM node immediately.')
+            ? hasClaim
+              ? __('Publishing creates a new immutable playlist with a new message ID and share URL.')
+              : __('After publishing, the immutable signed playlist is available from this HyperBEAM node immediately.')
             : __('After saving, all changes will remain private')}
         </p>
       </CollectionFormContext.Provider>
