@@ -61,7 +61,24 @@ upload_opts(Overrides) ->
         <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS,
         %% Index product documents only: without this every cache write --
         %% including each published UI asset -- becomes a search document.
-        <<"search-index-markers">> => [<<"schema">>, <<"claim-name">>],
+        %% Naming the schemas rather than matching on the field's presence
+        %% keeps reactions, moderation settings, subscriptions and auth
+        %% records out: they carry a `schema' like everything native, and
+        %% the last two are private to a user.
+        <<"search-index-markers">> =>
+            [
+                #{
+                    <<"field">> => <<"schema">>,
+                    <<"values">> =>
+                        [
+                            <<"odysee-upload@1.0">>,
+                            <<"odysee-channel@1.0">>,
+                            <<"odysee-playlist@1.0">>,
+                            <<"odysee-comment@1.0">>
+                        ]
+                },
+                <<"claim-name">>
+            ],
         %% Claim bookkeeping: ids, hashes and outpoints are not text a
         %% reader searches for. The engine knows the HyperBEAM plumbing;
         %% these names are ours.

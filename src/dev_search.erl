@@ -104,15 +104,32 @@ link_field(_Key) ->
 
 %% Every cache write reaches this hook -- including sub-messages, evidence
 %% fragments and, on a node that publishes its UI, every static asset. The
-%% `search-index-markers' node option names the fields that mark a message
-%% as a document worth indexing (a match on any one qualifies); the empty
+%% `search-index-markers' node option names what marks a message as a
+%% document worth indexing (a match on any one marker qualifies); the empty
 %% default indexes everything, which is rarely what an operator wants.
+%%
+%% A marker is either a field name, which matches on presence alone, or
+%% `#{field => Name, values => [...]}', which additionally requires the
+%% field to hold one of the listed values. Presence is too coarse where one
+%% field names several kinds of record: every native Odysee message carries
+%% a `schema', but a subscription or an auth record has no business in a
+%% search index.
 indexable(Msg, Opts) ->
     case hb_opts:get(<<"search-index-markers">>, [], Opts) of
         [] -> true;
         Markers when is_list(Markers) ->
-            lists:any(fun(Key) -> hb_maps:is_key(Key, Msg, Opts) end, Markers)
+            lists:any(fun(Marker) -> marks(Marker, Msg, Opts) end, Markers)
     end.
+
+marks(Marker, Msg, Opts) when is_map(Marker) ->
+    Field = hb_maps:get(<<"field">>, Marker, undefined, Opts),
+    Values = hb_maps:get(<<"values">>, Marker, [], Opts),
+    is_binary(Field) andalso
+        lists:member(hb_maps:get(Field, Msg, undefined, Opts), Values);
+marks(Field, Msg, Opts) when is_binary(Field) ->
+    hb_maps:is_key(Field, Msg, Opts);
+marks(_Marker, _Msg, _Opts) ->
+    false.
 
 %% The `cache-write' hook delivers the written message under `body' but
 %% no id, so derive it: `hb_cache:write' registers the uncommitted content
@@ -175,6 +192,51 @@ write_derives_missing_id_test() ->
     Req = #{ <<"body">> => Msg },
     ?assertEqual({ok, Req}, write(#{}, Req, Opts)),
     ?assertEqual(hb_message:id(Msg, uncommitted, Opts), message_id(Req, Opts)).
+
+%% Presence markers match any message carrying the field; value markers
+%% narrow that to named kinds, so private records sharing the field stay
+%% out of the index.
+markers_match_on_presence_test() ->
+    Opts = #{ <<"search-index-markers">> => [<<"claim-name">>] },
+    ?assert(indexable(#{ <<"claim-name">> => <<"a-claim">> }, Opts)),
+    ?assertNot(indexable(#{ <<"schema">> => <<"odysee-upload@1.0">> }, Opts)).
+
+markers_match_on_value_test() ->
+    Opts =
+        #{
+            <<"search-index-markers">> =>
+                [#{
+                    <<"field">> => <<"schema">>,
+                    <<"values">> => [<<"odysee-upload@1.0">>]
+                }]
+        },
+    ?assert(indexable(#{ <<"schema">> => <<"odysee-upload@1.0">> }, Opts)),
+    ?assertNot(indexable(#{ <<"schema">> => <<"odysee-auth@1.0">> }, Opts)),
+    ?assertNot(indexable(#{ <<"schema">> => <<"odysee-subscription@1.0">> }, Opts)),
+    ?assertNot(indexable(#{ <<"title">> => <<"no schema at all">> }, Opts)).
+
+%% The node's own configuration is the thing that has to be right.
+node_markers_admit_products_only_test() ->
+    Opts = hb_odysee_node:upload_opts(#{}),
+    Admitted =
+        [
+            #{ <<"schema">> => <<"odysee-upload@1.0">> },
+            #{ <<"schema">> => <<"odysee-channel@1.0">> },
+            #{ <<"schema">> => <<"odysee-playlist@1.0">> },
+            #{ <<"schema">> => <<"odysee-comment@1.0">> },
+            #{ <<"claim-name">> => <<"a-legacy-claim">> }
+        ],
+    Refused =
+        [
+            #{ <<"schema">> => <<"odysee-auth@1.0">> },
+            #{ <<"schema">> => <<"odysee-subscription@1.0">> },
+            #{ <<"schema">> => <<"odysee-reaction@1.0">> },
+            #{ <<"schema">> => <<"odysee-comment-control@1.0">> },
+            #{ <<"content-type">> => <<"application/javascript">> }
+        ],
+    [?assert(indexable(Msg, Opts)) || Msg <- Admitted],
+    [?assertNot(indexable(Msg, Opts)) || Msg <- Refused],
+    ok.
 
 live_write_then_query_test_() ->
     {timeout, 30, fun() ->
