@@ -211,16 +211,20 @@ Meilisearch document must not mutate the underlying object.
 
 ### Playlists
 
-- Public playlists are immutable `odysee-playlist@1.0` snapshots written through
-  the generic committed-message path, not LBRY collection claims or a custom
-  device.
+- Public playlist contents are immutable `odysee-playlist@1.0` snapshots written
+  through the generic committed-message path, not LBRY collection claims or a
+  custom Odysee device.
 - Playlist items are ordered immutable native IDs or legacy outpoints. Resolve
   draft URIs before publishing and reject mutable claim IDs as stored identity.
-- Editing a published playlist remains local until the user explicitly publishes
-  another independent snapshot with a new message ID and share URL.
-- Queue, Watch Later, Favorites, and unpublished drafts remain local. A stable
-  mutable playlist reference is deferred until the canonical reference-device
-  contract is available.
+- The canonical external `reference@1.0` init commitment is the stable playlist
+  ID. Republish creates a new full snapshot and a strictly newer same-owner set
+  message while preserving the public URL.
+- Hydrate and verify every reference candidate and selected snapshot. Authority
+  comes from the init commitment's committer, never profile fields or the query
+  index. Reject foreign writers, stale sets, ambiguous ties, and foreign-owned
+  snapshots.
+- Queue, Watch Later, Favorites, and unpublished drafts remain local. Public
+  deletion is not yet exposed.
 
 ### Follows and subscriptions
 

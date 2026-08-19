@@ -377,18 +377,20 @@ Neither video nor comment reactions call the historical reaction API.
 
 ### Playlists
 
-Public playlists are generic immutable `odysee-playlist@1.0` snapshot messages.
-A snapshot contains ordered immutable native message IDs or legacy
+Public playlist contents are generic immutable `odysee-playlist@1.0` snapshot
+messages. A snapshot contains ordered immutable native message IDs or legacy
 `<txid>:<nout>` outpoints; local draft URIs are resolved before publishing and
 mutable claim IDs are never stored as item identity. Query results are locators
-that are hydrated and verified before a playlist is displayed.
+that are hydrated and commitment-verified before display.
 
-Publishing produces a new message ID and share URL. Editing a published playlist
-changes local state until the user explicitly publishes another independent
-snapshot; it does not mutate, delete, or auto-update the old snapshot. Queue,
-Watch Later, Favorites, and unpublished drafts stay local. Stable mutable
-playlist references remain deferred until the canonical reference-device
-contract is supplied.
+The first publish also creates a canonical `reference@1.0` init message whose
+committed ID is the playlist's stable public ID. A later publish writes a new
+full snapshot followed by an owner-signed reference set pointing to it. The old
+snapshot remains immutable and independently addressable while the playlist URL
+stays unchanged. Reference candidates are exact-query locators; each init/set
+and selected snapshot is hydrated and verified, and only strictly newer updates
+from the init committer are projected. Queue, Watch Later, Favorites, and
+unpublished drafts stay local. Public deletion is not yet exposed.
 
 ### Follows and Subscriptions
 
@@ -764,8 +766,9 @@ store made the call rather than patching the React page.
   implemented; advanced moderation, creator reactions, and mutable comment
   settings remain intentionally unsupported rather than falling back to a
   legacy service.
-- Native video/comment reactions and immutable public playlist snapshots are
-  implemented. Mutable playlist-head/reference behavior remains deferred.
+- Native video/comment reactions and public playlists with immutable snapshots
+  plus stable `reference@1.0` heads are implemented. Public playlist deletion
+  remains deferred.
 - Native free follows and notification preferences are implemented. Legacy
   import, aggregate counts, paid memberships, and the complete Following feed
   remain separate work.

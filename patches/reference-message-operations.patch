@@ -1,0 +1,28 @@
+diff --git a/src/dev_reference.erl b/src/dev_reference.erl
+index 330244f..8905101 100644
+--- a/src/dev_reference.erl
++++ b/src/dev_reference.erl
+@@ -59,7 +59,10 @@
+ info() ->
+     #{
+         default => fun get/4,
+-        excludes => [<<"keys">>, <<"set">>, <<"set-path">>, <<"remove">>]
++        excludes => [
++            <<"id">>, <<"commitments">>, <<"committers">>, <<"committed">>,
++            <<"verify">>, <<"keys">>, <<"set">>, <<"set-path">>, <<"remove">>
++        ]
+     }.
+ 
+ %%%-------------------------------------------------------------------
+@@ -629,6 +632,11 @@ addr(Wallet) -> hb_util:human_id(Wallet).
+ fresh_opts() ->
+     #{ <<"store">> => hb_test_utils:test_store() }.
+ 
++message_operations_remain_message_bound_test() ->
++    Excludes = maps:get(excludes, info()),
++    Reserved = [<<"id">>, <<"commitments">>, <<"committers">>, <<"committed">>, <<"verify">>],
++    ?assert(lists:all(fun(Key) -> lists:member(Key, Excludes) end, Reserved)).
++
+ opts_with_wallet(BaseOpts, Wallet) ->
+     BaseOpts#{ <<"priv-wallet">> => Wallet }.
+ 

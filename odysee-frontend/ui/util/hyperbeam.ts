@@ -34,6 +34,15 @@ import {
   type NativePlaylist,
 } from 'util/nativePlaylists';
 import {
+  NATIVE_PLAYLIST_REFERENCE_TYPE,
+  REFERENCE_DEVICE,
+  nativePlaylistReferenceInitMessage,
+  nativePlaylistReferenceSetMessage,
+  normalizeNativePlaylistReference,
+  projectNativePlaylistReference,
+  type NativePlaylistReference,
+} from 'util/nativePlaylistReferences';
+import {
   NATIVE_SUBSCRIPTION_SCHEMA,
   NATIVE_SUBSCRIPTION_SIGNATURE_SCOPE,
   NATIVE_SUBSCRIPTION_TYPE,
@@ -83,6 +92,10 @@ const nativeCommentControlQueryCache = new Map<
 >();
 const nativeReactionQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativeReaction>> }>();
 const nativePlaylistQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativePlaylist>> }>();
+const nativePlaylistReferenceQueryCache = new Map<
+  string,
+  { expiresAt: number; promise: Promise<Array<NativePlaylistReference>> }
+>();
 const nativeSubscriptionQueryCache = new Map<
   string,
   { expiresAt: number; promise: Promise<Array<NativeSubscription>> }
@@ -292,6 +305,7 @@ export type NativePlaylistWriteParams = {
   tags?: Array<string>;
   languages?: Array<string>;
   items: Array<string>;
+  reference_id?: string;
 };
 
 export async function fetchHyperbeamPlaylistListMine(
@@ -303,25 +317,61 @@ export async function fetchHyperbeamPlaylistListMine(
   const pageSize = Math.max(1, Math.min(100, toNumber(options.page_size, 50)));
   if (!account || !owner) return emptyCollectionList(page, pageSize);
 
-  const playlists = activeNativePlaylists(
+  const snapshots = activeNativePlaylists(
     await fetchNativePlaylistCollection({
       schema: NATIVE_PLAYLIST_SCHEMA,
       type: NATIVE_PLAYLIST_TYPE,
       'profile-id': account.id,
     })
   ).filter((playlist) => playlist.owner === owner);
+  const references = (
+    // `device` is a system key the node's match index does not index, so it
+    // cannot be a query selector; normalizeNativePlaylistReference verifies
+    // the device on every fetched candidate instead.
+    await fetchNativePlaylistReferenceCollection({
+      'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
+      'profile-id': account.id,
+    })
+  ).filter((reference) => reference.is_init && reference.owner === owner);
+  const referenced = (
+    await Promise.all(references.map((reference) => fetchNativePlaylistForReference(reference).catch(() => null)))
+  ).filter(Boolean) as Array<{
+    reference: NativePlaylistReference;
+    playlist: NativePlaylist;
+    snapshotIds: Array<string>;
+  }>;
+  const referencedSnapshotIds = new Set(referenced.flatMap(({ snapshotIds }) => snapshotIds));
+  const items = referenced
+    .map(({ reference, playlist }) => nativePlaylistClaim(playlist, true, reference.reference_id))
+    .concat(
+      snapshots
+        .filter((playlist) => !referencedSnapshotIds.has(playlist.message_id))
+        .map((playlist) => nativePlaylistClaim(playlist, true))
+    )
+    .sort((left, right) => Number(right.timestamp || 0) - Number(left.timestamp || 0));
   const start = (page - 1) * pageSize;
   return {
-    items: playlists.slice(start, start + pageSize).map((playlist) => nativePlaylistClaim(playlist, true)),
+    items: items.slice(start, start + pageSize),
     page,
     page_size: pageSize,
-    total_items: playlists.length,
-    total_pages: playlists.length ? Math.ceil(playlists.length / pageSize) : 0,
+    total_items: items.length,
+    total_pages: items.length ? Math.ceil(items.length / pageSize) : 0,
   };
 }
 
 export async function fetchHyperbeamPlaylistById(messageId: string): Promise<Claim | null> {
   if (!isNativeMessageId(messageId)) return null;
+  const reference = await fetchNativePlaylistReferenceById(messageId);
+  if (reference) {
+    const resolved = await fetchNativePlaylistForReference(reference);
+    if (!resolved) return null;
+    const viewerOwner = await activeHyperbeamAccountOwner();
+    return nativePlaylistClaim(
+      resolved.playlist,
+      viewerOwner === resolved.reference.owner,
+      resolved.reference.reference_id
+    );
+  }
   const playlist = await fetchNativePlaylistById(messageId);
   if (!playlist) return null;
   const viewerOwner = await activeHyperbeamAccountOwner();
@@ -333,12 +383,27 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
   const owner = await activeHyperbeamAccountOwner();
   if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before publishing');
 
-  const timestamp = Date.now();
+  let reference: NativePlaylistReference | null = null;
+  let currentPlaylist: NativePlaylist | null = null;
+  if (params.reference_id) {
+    if (!isNativeMessageId(params.reference_id)) throw new Error('Playlist reference ID is invalid');
+    const current = await fetchNativePlaylistReferenceById(params.reference_id);
+    if (!current || current.owner !== owner || current.profile_id !== account.id) {
+      throw new Error('Playlist reference failed commitment or ownership verification');
+    }
+    const resolved = await fetchNativePlaylistForReference(current);
+    if (!resolved) throw new Error('Playlist reference does not resolve to a verified snapshot');
+    reference = resolved.reference;
+    currentPlaylist = resolved.playlist;
+  }
+
+  const timestamp = Math.max(Date.now(), (reference?.timestamp || 0) + 1);
   const message = nativePlaylistMessage({
     ...params,
     profileId: account.id,
     profileName: account.name,
-    createdAt: timestamp,
+    createdAt: currentPlaylist?.created_at || timestamp,
+    updatedAt: timestamp,
   });
   validateNativePlaylistWrite(message, owner);
 
@@ -348,7 +413,107 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
   if (!written || written.owner !== owner || written.message_id !== messageId) {
     throw new Error('HyperBEAM native playlist failed commitment or ownership verification');
   }
-  return nativePlaylistClaim(written, true);
+
+  const referenceMessage = reference
+    ? nativePlaylistReferenceSetMessage({
+        profileId: account.id,
+        profileName: account.name,
+        referenceId: reference.reference_id,
+        snapshotId: messageId,
+        timestamp,
+      })
+    : nativePlaylistReferenceInitMessage({
+        profileId: account.id,
+        profileName: account.name,
+        snapshotId: messageId,
+        timestamp,
+      });
+  const referenceMessageId = await writeNativeMessage(referenceMessage, 'playlist reference');
+  nativePlaylistReferenceQueryCache.clear();
+  const verifiedReference = await fetchNativePlaylistReferenceMessageById(referenceMessageId);
+  const referenceId = reference?.reference_id || referenceMessageId;
+  if (
+    !verifiedReference ||
+    verifiedReference.owner !== owner ||
+    verifiedReference.profile_id !== account.id ||
+    verifiedReference.reference_id !== referenceId ||
+    verifiedReference.reference_value !== messageId ||
+    verifiedReference.timestamp !== timestamp ||
+    verifiedReference.is_init === Boolean(reference)
+  ) {
+    throw new Error('HyperBEAM playlist reference failed commitment or ownership verification');
+  }
+  return nativePlaylistClaim(written, true, referenceId);
+}
+
+async function fetchNativePlaylistReferenceCollection(
+  selectors: Record<string, any>
+): Promise<Array<NativePlaylistReference>> {
+  const request = nativeQueryRequest(selectors);
+  const key = stableJson(request);
+  return cachedNativeQuery(nativePlaylistReferenceQueryCache, key, async () => {
+    const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+    const references = await Promise.all(paths.map(fetchNativePlaylistReferenceMessageById));
+    return references.filter((reference): reference is NativePlaylistReference => {
+      if (!reference) return false;
+      return Object.entries(selectors).every(([selector, expected]) => {
+        const fieldName = selector.replace(/-([a-z])/g, (_, character) => `_${character}`);
+        return reference[fieldName] === expected;
+      });
+    });
+  });
+}
+
+async function fetchNativePlaylistReferenceMessageById(id: string): Promise<NativePlaylistReference | null> {
+  if (!isNativeMessageId(id)) return null;
+  const normalizedId = id.replace(/^\/+/, '');
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  return normalizeNativePlaylistReference({
+    ...verified.payload,
+    'message-id': normalizedId,
+    'hyperbeam-owner': verified.owner,
+  });
+}
+
+async function fetchNativePlaylistReferenceById(referenceId: string): Promise<NativePlaylistReference | null> {
+  const reference = await fetchNativePlaylistReferenceMessageById(referenceId);
+  return reference?.is_init && reference.reference_id === referenceId ? reference : null;
+}
+
+async function fetchNativePlaylistForReference(
+  init: NativePlaylistReference
+): Promise<{ reference: NativePlaylistReference; playlist: NativePlaylist; snapshotIds: Array<string> } | null> {
+  if (!init.is_init) return null;
+  // `device` stays out of the selectors (unindexed system key); the device is
+  // verified per candidate during normalization.
+  const candidates = await fetchNativePlaylistReferenceCollection({
+    'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
+    'reference-id': init.reference_id,
+  });
+  const reference = projectNativePlaylistReference(init, candidates);
+  const playlist = await fetchNativePlaylistById(reference.reference_value);
+  if (
+    !playlist ||
+    playlist.owner !== init.owner ||
+    playlist.profile_id !== init.profile_id ||
+    (init.profile_name && playlist.profile_name !== init.profile_name)
+  ) {
+    return null;
+  }
+  const snapshotIds = [
+    init.reference_value,
+    ...candidates
+      .filter(
+        (candidate) =>
+          candidate.reference_id === init.reference_id &&
+          candidate.owner === init.owner &&
+          candidate.profile_id === init.profile_id
+      )
+      .map((candidate) => candidate.reference_value),
+  ];
+  return { reference, playlist, snapshotIds: Array.from(new Set(snapshotIds)) };
 }
 
 async function fetchNativePlaylistCollection(selectors: Record<string, any>): Promise<Array<NativePlaylist>> {
@@ -416,6 +581,7 @@ function nativePlaylistMessage(
     profileId: string;
     profileName?: string;
     createdAt: number;
+    updatedAt: number;
   }
 ): Record<string, any> {
   const tags = (params.tags || []).map(String);
@@ -433,6 +599,7 @@ function nativePlaylistMessage(
     'items-json': nativePlaylistItemsJson(params.items),
     'item-count': params.items.length,
     'created-at': params.createdAt,
+    'updated-at': params.updatedAt,
     'signature-scope': NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   });
 }
@@ -446,12 +613,13 @@ function validateNativePlaylistWrite(message: Record<string, any>, owner: string
   if (!candidate) throw new Error('Native playlist fields are invalid or exceed their limits');
 }
 
-function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean): Claim {
+function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean, referenceId?: string): Claim {
   const timestamp = Math.floor(playlist.updated_at / 1000);
   const creationTimestamp = Math.floor(playlist.created_at / 1000);
-  const permanentUrl = `/$/playlist/${encodeURIComponent(playlist.message_id)}`;
+  const publicId = referenceId || playlist.message_id;
+  const permanentUrl = `/$/playlist/${encodeURIComponent(publicId)}`;
   return {
-    claim_id: playlist.message_id,
+    claim_id: publicId,
     name: playlist.title,
     normalized_name: playlist.title.toLowerCase(),
     permanent_url: permanentUrl,
@@ -474,6 +642,7 @@ function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean): Claim {
     hyperbeam: {
       schema: playlist.schema,
       message_id: playlist.message_id,
+      reference_id: referenceId,
       owner: playlist.owner,
       profile_id: playlist.profile_id,
       profile_name: playlist.profile_name,
@@ -1543,7 +1712,16 @@ async function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
   } catch (error) {
     const status = Number(error?.status);
     const responseBody = String(error?.responseBody || '');
-    if (status === 404 || (status === 500 && responseBody.includes('not_found'))) return [];
+    // No-match responses vary by node build: stock nodes 500 with a
+    // `not_found` case_clause, patched nodes 404, and the bare-atom
+    // `not_found` store result surfaces as a 400 whose body is "not-found".
+    if (
+      status === 404 ||
+      (status === 400 && responseBody.includes('not-found')) ||
+      (status === 500 && responseBody.includes('not_found'))
+    ) {
+      return [];
+    }
     throw error;
   }
 }
@@ -1957,7 +2135,13 @@ async function fetchStoreClaimByAnyId(id: string): Promise<Array<Claim>> {
     return claim ? [claim] : [];
   }
   if (!isOutpointId(id) && !isStandaloneImmutableId(id)) return [];
-  return fetchHyperbeamImmutableClaim(id);
+  const claims = await fetchHyperbeamImmutableClaim(id);
+  if (claims.length) return claims;
+  // Native upload records serve their media bytes at `GET /<id>` with the
+  // claim fields in headers, so the JSON-body read above yields nothing.
+  // Fall back to the headers-aware immutable-route builder.
+  const nativeClaim = await resolveImmutableClaimById(id).catch(() => null);
+  return nativeClaim ? [nativeClaim] : [];
 }
 
 async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Claim>> {

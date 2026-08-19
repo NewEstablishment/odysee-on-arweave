@@ -64,16 +64,20 @@ It must not call Commentron or an LBRY API directly.
 
 ## Playlists
 
-- Public playlists use generic immutable `odysee-playlist@1.0` snapshot messages.
-  Do not call `collection_*`, create an application device, or publish an LBRY
-  collection claim.
+- Public playlist contents use generic immutable `odysee-playlist@1.0`
+  snapshots. Do not call `collection_*`, create an application device, or
+  publish an LBRY collection claim.
 - Persist only ordered immutable native IDs or legacy outpoints. Draft URIs must
   resolve before publish.
-- Each explicit publish creates a new message ID and share URL. Published
-  snapshots cannot be updated or deleted; local edits may be published as a new
-  snapshot.
-- Built-in lists and unpublished drafts stay local. Mutable reference behavior
-  is deferred until its canonical device contract is confirmed.
+- The canonical external `reference@1.0` init ID is the stable public playlist
+  ID. Republish writes a new full snapshot and then a strictly newer same-owner
+  reference set; it never mutates an earlier snapshot.
+- Hydrate and verify every init, set, and selected snapshot. Bind the reference
+  to the init commitment's committer; profile fields are discovery/display only.
+  Reject foreign updates, stale timestamps, ambiguous equal-timestamp updates,
+  and snapshots owned by another committer.
+- Built-in lists and unpublished drafts stay local. Public deletion is not yet
+  exposed.
 
 ## Follows And Subscriptions
 

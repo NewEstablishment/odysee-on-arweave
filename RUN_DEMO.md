@@ -11,13 +11,14 @@ byte was hash-checked on the way through.
 
 ## What it is
 
-**Four devices and five stores.** No application devices.
+**Five devices and five stores.** No application devices.
 
 | | |
 |---|---|
 | `lbry@1.0` | verification only, proves LBRY evidence |
 | `odysee-auth@1.0` | session to account to signing key |
 | `search@1.0`, `reply-id@1.0` | generic full-text, write-reply shim |
+| `reference@1.0` | generic stable identity above immutable playlist snapshots |
 | `hb_store_odysee` | the compatibility boundary: classify a legacy id, fetch, verify, cache |
 | 4 x `hb_store_lbry_*` | transaction, claim output, stream descriptor, blob |
 
@@ -27,7 +28,7 @@ that can read a HyperBEAM store can read Odysee content: `~query@1.0`, a peer
 node, a router such as weave.space.
 
 Why that matters operationally: every custom device must be trust-pinned by
-every node operator who wants to serve your content. Four pins is a different
+every node operator who wants to serve your content. Five pins is a different
 proposition from twenty-five.
 
 ## The flow
@@ -76,8 +77,8 @@ corepack enable && corepack prepare pnpm@10.33.0 --activate
 pnpm install
 ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run build:manifest
 
-# 2. Build the preloaded device store, once.
-cd .. && HB_PORT=18734 rebar3 device local     # ctrl-C twice once it boots
+# 2. Build the preloaded device store, including the pinned reference device.
+cd .. && HB_PORT=18734 rebar3 odysee-local     # ctrl-C twice once it boots
 
 # 3. Start the node and publish the UI into it.
 #    One line. rebar3 shell ignores multi-line --eval and races EOF, hence the sleep.
@@ -98,10 +99,9 @@ mutable locators at constant addresses and stale claims get served.
 ### Tests
 
 ```sh
-rebar3 device test --with-core        # 258 tests. --with-core is required,
-                                      # plain `device test` runs 91 and skips
-                                      # the whole store layer
-ODYSEE_LIVE=1 rebar3 device test --with-core   # adds live-infrastructure test
+rebar3 eunit-all                      # core plus every packaged device,
+                                      # including canonical reference tests
+ODYSEE_LIVE=1 rebar3 eunit-all        # adds live-infrastructure test
 ```
 
 ## What works

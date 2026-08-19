@@ -1,9 +1,11 @@
 # Proposed upstream HyperBEAM changes
 
-Nothing in this repository depends on these landing; the system runs on
-stock nodes today. Any proposal beyond this list must take the form of a
-terse (<= 20 lines, test + fix) branch on a HyperBEAM worktree, and only
-for defects that are demonstrably HyperBEAM's, not this application's.
+The HyperBEAM proposals below are optional and the system runs on stock nodes.
+The canonical reference-device correction is applied to its pinned external
+dependency during compilation and must land upstream before that build hook can
+be removed. Any proposal beyond this list must take the form of a terse
+(<= 20 lines, test + fix) upstream branch, and only for defects that are
+demonstrably upstream rather than application behavior.
 
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
@@ -46,3 +48,14 @@ way. Observed on every video page load in this application, where the
 frontend issues a `POST /~query@1.0/only`. The patch adds the two missing
 clauses and leaves the existing ones untouched. Applies cleanly to the
 pinned dep (`git apply --check` verified).
+
+## 4. `reference-message-operations.patch`
+
+The canonical `reference@1.0` default resolver dereferences unknown keys to the
+current value. Its exclude list omitted reserved `message@1.0` operations, so
+`/<reference-id>/verify` verified the pointed-at snapshot and exact committer
+lookup could not reach the init/set commitment. The patch binds `id`,
+`commitments`, `committers`, `committed`, and `verify` to `message@1.0` and adds
+a regression assertion. `rebar3 compile` applies it idempotently to the pinned
+external dependency. The canonical 21-test suite and the cookie playlist
+lifecycle pass with the patch.

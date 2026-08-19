@@ -253,11 +253,19 @@ authority. The end user, as always, trusts the TEE-terminated serving node rathe
 than verifying in the browser.
 
 Comments, reactions, and subscriptions model changes as contiguous append-only
-revisions.
-Public playlists currently use a simpler contract: each publish is an
-independent immutable full snapshot containing ordered native IDs or legacy
-outpoints. A mutable playlist head is intentionally deferred until the canonical
-reference-device contract is available.
+revisions. Public playlists separate identity from content: each publish writes
+an immutable full `odysee-playlist@1.0` snapshot containing ordered native IDs or
+legacy outpoints, while the canonical external `reference@1.0` device supplies
+the stable public identity. The init message's committed ID is the playlist ID;
+later same-authority set messages replace the full snapshot pointer without
+mutating prior content. Exact query discovers init/set locators, then readers
+hydrate and verify each commitment before applying the strictly monotonic
+reference projection. Index order is never authority.
+
+The reference source is an external pinned OTP dependency. A narrow tracked
+upstream patch keeps reserved `message@1.0` operations (`verify`, `committers`,
+and commitments) bound to the signed reference record instead of allowing the
+mutable default resolver to dereference them first.
 
 Legacy-only interactive surfaces with no verifiable representation — fuzzy
 text search, view counts, subscription counts, legacy comment writes — are
