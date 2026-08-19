@@ -97,10 +97,14 @@ legacy mode and must not bypass an existing device contract.
 10. **Native state changes are append-only.** Comment edits, comment controls,
     upload metadata updates, deletes, and mutable references create signed new
     state or revisions; they do not mutate immutable messages.
-11. **Compatibility sourcing remains observable.** Weaker player-proxy or
+11. **Native social writes use generic messages.** Comments, reactions, public
+    playlists, and follows/subscriptions are committed through `/id?!` and
+    discovered with `query@1.0`; do not add product write devices or legacy API
+    fallbacks for these flows.
+12. **Compatibility sourcing remains observable.** Weaker player-proxy or
     legacy-source boundaries must be represented honestly in response metadata
     and diagnostics.
-12. **Observed diagnostics report reality.** Debug graph activity, call counts,
+13. **Observed diagnostics report reality.** Debug graph activity, call counts,
     edges, backends, and stores must come from actual request events. Never add
     fictitious nodes, inferred calls, or hardcoded active paths.
 
@@ -195,6 +199,43 @@ Meilisearch document must not mutate the underlying object.
 - Historical comments and controls remain behind `odysee-comment@1.0`; browser
   code must not call Commentron directly.
 
+### Reactions
+
+- Video and comment reactions are generic `odysee-reaction@1.0` messages.
+- Query only returns locators. Hydrate and verify each exact message and derive
+  ownership from its selected commitment's committer.
+- Toggle, switch, and removal operations are contiguous append-only revisions.
+  Reject forks and conflicting semantic duplicates, and project at most one
+  active reaction per committer and target.
+- Browser actions must not call the legacy reaction API.
+
+### Playlists
+
+- Public playlists are immutable `odysee-playlist@1.0` snapshots written through
+  the generic committed-message path, not LBRY collection claims or a custom
+  device.
+- Playlist items are ordered immutable native IDs or legacy outpoints. Resolve
+  draft URIs before publishing and reject mutable claim IDs as stored identity.
+- Editing a published playlist remains local until the user explicitly publishes
+  another independent snapshot with a new message ID and share URL.
+- Queue, Watch Later, Favorites, and unpublished drafts remain local. A stable
+  mutable playlist reference is deferred until the canonical reference-device
+  contract is available.
+
+### Follows and subscriptions
+
+- Free channel follows are generic `odysee-subscription@1.0` messages written
+  through the generic committed-message path, not the legacy subscription API
+  or a custom device.
+- Follow, notification-preference updates, unfollow, and re-follow form one
+  contiguous same-owner append-only revision chain bound to a stable channel
+  reference.
+- Query results are locators. Hydrate and verify each exact message, derive the
+  owner from its commitment committer, and accept profile display metadata only
+  when the profile verifies under that same committer.
+- Legacy subscription import, aggregate subscriber counts, paid memberships,
+  and Following-feed aggregation are separate contracts.
+
 ### Uploads and thumbnails
 
 - `odysee-upload@1.0` owns authenticated chunks, manifests, metadata records,
@@ -212,8 +253,9 @@ Meilisearch document must not mutate the underlying object.
 - Same-origin SSR bridges exist where browser cookies cannot cross origins or a
   server-held signer is required. They are transport/security boundaries, not a
   second data mode.
-- `odysee-subscription@1.0` is an internal compatibility implementation. The
-  public/frontend subscription-count surface is `odysee-account@1.0`.
+- The internal compatibility subscription implementation is not the native
+  follow write path. The public/frontend subscription-count surface remains
+  `odysee-account@1.0`; native follows are generic committed messages.
 
 ## Local Services
 
@@ -307,6 +349,9 @@ pnpm run test:hyperbeam-upload-smoke
 pnpm run test:hyperbeam-query-comment-smoke
 pnpm run test:native-comment-revisions
 pnpm run test:native-comment-controls
+pnpm run test:native-reactions
+pnpm run test:native-playlists
+pnpm run test:native-subscriptions
 pnpm run test:static-manifest
 ```
 

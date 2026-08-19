@@ -4,15 +4,12 @@ import { FF_MAX_CHARS_IN_DESCRIPTION } from 'constants/form-field';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { COLLECTION_PAGE } from 'constants/urlParams';
 import * as TAGS from 'constants/tags';
-import { FormField, FormUrlName } from 'component/common/form';
+import { FormField } from 'component/common/form';
 import { FormContext } from 'component/common/form-components/form';
 import TagsSelect from 'component/tagsSelect';
 import Card from 'component/common/card';
-import ChannelSelector from 'component/channelSelector';
 import CollectionPublishAdditionalOptions from './internal/additionalOptions';
 import { lazyImport } from 'util/lazyImport';
-import { useAppSelector } from 'redux/hooks';
-import { selectHasClaimForId, selectNameForClaimId } from 'redux/selectors/claims';
 import './style.scss';
 const SelectThumbnail = lazyImport(
   () =>
@@ -36,9 +33,7 @@ type Props = {
 
 function CollectionGeneralTab(props: Props) {
   const { collectionId, formParams, setThumbnailError, updateFormParams } = props;
-  const { channel_id: collectionChannelId, name, title, description, thumbnail_url: thumbnailUrl, tags } = formParams;
-  const hasClaim = useAppSelector((state) => selectHasClaimForId(state, collectionId));
-  const collectionChannelName = useAppSelector((state) => selectNameForClaimId(state, collectionChannelId));
+  const { title, description, thumbnail_url: thumbnailUrl, tags } = formParams;
   const { updateFormErrors } = React.useContext(FormContext);
   const { search } = useLocation();
   const urlParams = new URLSearchParams(search);
@@ -87,41 +82,6 @@ function CollectionGeneralTab(props: Props) {
   }, [setThumbnailError, thumbError, thumbStatus]);
   return (
     <div className="card card--background collection-edit__wrapper">
-      {publishing && (
-        <>
-          <ChannelSelector
-            autoSet
-            channelToSet={collectionChannelId}
-            onChannelSelect={(id) =>
-              updateFormParams({
-                channel_id: id,
-              })
-            }
-          />
-
-          <div className="collection__name-wrapper">
-            <h2>{__('Name')}</h2>
-            <div className="collection__name">
-              <FormUrlName
-                channelName={collectionChannelName}
-                name={name}
-                {...({
-                  autoFocus: !hasClaim,
-                  disabled: hasClaim,
-                  onChange: (e: any) => updateFormParams({ name: e.target.value || '' }),
-                } as any)}
-              />
-
-              <span className="form-field__help">
-                {!hasClaim
-                  ? __("This won't be able to be changed in the future.")
-                  : __('This field cannot be changed.')}
-              </span>
-            </div>
-          </div>
-        </>
-      )}
-
       <div className="collection__title">
         <h2>{__('Title')}</h2>
         <FormField

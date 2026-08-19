@@ -1,15 +1,14 @@
 import * as ACTIONS from 'constants/action_types';
 import { MS } from 'constants/date-time';
 import { SIDEBAR_SUBS_DISPLAYED } from 'constants/subscriptions';
-import REWARDS from 'rewards';
-import { Lbryio } from 'lbryinc';
 import { doClaimSearch, doResolveUris } from 'redux/actions/claims';
-import { doClaimRewardType } from 'redux/actions/rewards';
 import { getChannelFromClaim } from 'util/claim';
-import { parseURI } from 'util/lbryURI';
-import { doAlertWaitingForSync } from 'redux/actions/app';
 import { doToast } from 'redux/actions/notifications';
 import { selectSubscriptionIds, selectSubscriptionUris } from 'redux/selectors/subscriptions';
+import { fetchHyperbeamSubscriptions, fetchHyperbeamSubscriptionUpdate } from 'util/hyperbeam';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { nativeSubscriptionNotificationsDisabled } from 'util/nativeSubscriptions';
 type SubscriptionArgs = {
   channelName: string;
   uri: string;
@@ -22,52 +21,47 @@ export function doToggleSubscription(
   followToast: boolean,
   isSubscribed: boolean = false
 ) {
-  return async (dispatch: Dispatch, getState: GetState) => {
-    const {
-      settings: { daemonSettings },
-      sync: { prefsReady: ready },
-    } = getState();
-
-    if (!ready) {
-      return dispatch(doAlertWaitingForSync());
+  return async (dispatch: Dispatch) => {
+    if (hyperbeamNodeEnabled() && !getHyperbeamAccount()) {
+      dispatch(
+        doToast({
+          isError: true,
+          message: __('Create a HyperBEAM account before following channels.'),
+        })
+      );
+      return;
     }
 
-    const { share_usage_data: shareSetting } = daemonSettings;
-    const isSharingData = shareSetting || IS_WEB;
-
-    if (!isSubscribed) {
-      const subscriptionUri = subscription.uri;
-
-      if (!subscriptionUri.startsWith('lbry://')) {
-        throw Error(`Subscription uris must include the "lbry://" prefix.\nTried to subscribe to ${subscriptionUri}`);
-      }
-    }
+    const normalizedSubscription = {
+      ...subscription,
+      notificationsDisabled: nativeSubscriptionNotificationsDisabled(subscription.notificationsDisabled),
+    };
 
     dispatch({
       type: !isSubscribed ? ACTIONS.CHANNEL_SUBSCRIBE : ACTIONS.CHANNEL_UNSUBSCRIBE,
-      data: subscription,
+      data: normalizedSubscription,
     });
 
-    // if the user isn't sharing data, keep the subscriptions entirely in the app
-    if (isSharingData || IS_WEB) {
-      const { channelClaimId } = parseURI(subscription.uri);
-
-      if (!isSubscribed) {
-        // They are sharing data, we can store their subscriptions in our internal database
-        Lbryio.call('subscription', 'new', {
-          channel_name: subscription.channelName,
-          claim_id: channelClaimId,
-          notifications_disabled: subscription.notificationsDisabled,
+    if (hyperbeamNodeEnabled()) {
+      try {
+        const subscriptions = await fetchHyperbeamSubscriptionUpdate(normalizedSubscription, isSubscribed);
+        dispatch({
+          type: ACTIONS.FETCH_SUBSCRIPTIONS_SUCCESS,
+          data: subscriptions,
         });
+      } catch (error) {
+        dispatch({ type: ACTIONS.FETCH_SUBSCRIPTIONS_FAIL, data: error });
+        try {
+          const subscriptions = await fetchHyperbeamSubscriptions();
+          dispatch({ type: ACTIONS.FETCH_SUBSCRIPTIONS_SUCCESS, data: subscriptions });
+        } catch {}
         dispatch(
-          doClaimRewardType(REWARDS.TYPE_SUBSCRIPTION, {
-            failSilently: true,
+          doToast({
+            isError: true,
+            message: __('Unable to update this follow. Please try again.'),
           })
         );
-      } else {
-        Lbryio.call('subscription', 'delete', {
-          claim_id: channelClaimId,
-        });
+        return;
       }
     }
 
@@ -83,6 +77,19 @@ export function doToggleSubscription(
 
     // Reset last-fetch counter
     activeSubsLastFetchedTime = 0;
+  };
+}
+export function doFetchSubscriptions() {
+  return async (dispatch: Dispatch) => {
+    dispatch({ type: ACTIONS.FETCH_SUBSCRIPTIONS_START });
+    try {
+      const subscriptions = await fetchHyperbeamSubscriptions();
+      dispatch({ type: ACTIONS.FETCH_SUBSCRIPTIONS_SUCCESS, data: subscriptions });
+      return subscriptions;
+    } catch (error) {
+      dispatch({ type: ACTIONS.FETCH_SUBSCRIPTIONS_FAIL, data: error });
+      return [];
+    }
   };
 }
 export function doChannelSubscribe(subscription: SubscriptionArgs, followToast: boolean = true) {

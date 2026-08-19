@@ -33,7 +33,6 @@ import { doRemovePersonalRecommendation } from 'redux/actions/search';
 import {
   selectCollectionForIdHasClaimUrl,
   selectCollectionIsMine,
-  selectCollectionHasEditsForId,
   selectCollectionIsEmptyForId,
   makeSelectClaimMenuCollectionsForUrl,
 } from 'redux/selectors/collections';
@@ -161,7 +160,6 @@ function ClaimMenuListInner(props: Props) {
   );
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
   const isUnlisted = useAppSelector((state) => selectIsUriUnlisted(state, uri));
-  const hasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const isAuthenticated = Boolean(useAppSelector(selectUserVerifiedEmail));
   const collectionEmpty = useAppSelector((state) => selectCollectionIsEmptyForId(state, collectionId));
   const isContentProtectedAndLocked = useAppSelector((state) =>
@@ -603,7 +601,7 @@ function ClaimMenuListInner(props: Props) {
                           >
                             <div className="menu__link">
                               <Icon aria-hidden iconColor={'red'} icon={ICONS.PUBLISH} />
-                              {hasEdits ? __('Publish') : __('Update')}
+                              {__('Publish Snapshot')}
                             </div>
                           </MenuItem>
                         )}
@@ -616,19 +614,6 @@ function ClaimMenuListInner(props: Props) {
                           <div className="menu__link">
                             <Icon aria-hidden icon={ICONS.EDIT} />
                             {__('Edit')}
-                          </div>
-                        </MenuItem>
-                        <MenuItem
-                          className="comment__menu-option"
-                          onSelect={() =>
-                            openModal(MODALS.COLLECTION_DELETE, {
-                              collectionId,
-                            })
-                          }
-                        >
-                          <div className="menu__link">
-                            <Icon aria-hidden icon={ICONS.DELETE} />
-                            {__('Delete Playlist')}
                           </div>
                         </MenuItem>
                       </>

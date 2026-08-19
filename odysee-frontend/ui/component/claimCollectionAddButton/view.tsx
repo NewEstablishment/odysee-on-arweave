@@ -8,6 +8,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doOpenModal as doOpenModalAction } from 'redux/actions/app';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectClaimSavedForUrl } from 'redux/selectors/collections';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 type Props = {
   uri: string;
   isShortsPage?: boolean;
@@ -36,7 +37,7 @@ function ClaimCollectionAddButton(props: Props) {
           title={__('Add this video to a playlist')}
           icon={!isSaved ? ICONS.PLAYLIST_ADD : ICONS.PLAYLIST_FILLED}
           iconSize={16}
-          requiresAuth
+          requiresAuth={!hyperbeamNodeEnabled()}
           onClick={() =>
             doOpenModal(MODALS.COLLECTION_ADD, {
               uri,
@@ -54,7 +55,7 @@ function ClaimCollectionAddButton(props: Props) {
       label={label}
       icon={!isSaved ? ICONS.PLAYLIST_ADD : ICONS.PLAYLIST_FILLED}
       iconSize={20}
-      requiresAuth
+      requiresAuth={!hyperbeamNodeEnabled()}
       onClick={() =>
         doOpenModal(MODALS.COLLECTION_ADD, {
           uri,

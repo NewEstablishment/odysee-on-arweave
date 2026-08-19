@@ -6,8 +6,8 @@ import React, { useEffect, useState } from 'react';
 import { AppContext } from 'contexts/app';
 export { AppContext };
 import { isEmbedPath } from 'util/embed';
-import { isHyperbeamSignedIn } from 'util/hyperbeamAccount';
-import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount, isHyperbeamSignedIn } from 'util/hyperbeamAccount';
+import { hyperbeamNodeEnabled, hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import LivestreamPublishProvider from 'component/livestreamPublishProvider';
 import { lazyImport } from 'util/lazyImport';
 import { tusUnlockAndNotify, tusHandleTabUpdates } from 'util/tus';
@@ -69,6 +69,7 @@ import {
 } from 'redux/actions/settings';
 import { doToast } from 'redux/actions/notifications';
 import { doSyncLoop } from 'redux/actions/sync';
+import { doFetchSubscriptions } from 'redux/actions/subscriptions';
 import HyperbeamDebugConsole from 'component/hyperbeamDebugConsole';
 import {
   doSignIn,
@@ -267,6 +268,7 @@ function App() {
   const fromLbrytvParam = urlParams.get('sunset');
   const sanitizedReferrerParam = rawReferrerParam && rawReferrerParam.replace(':', '#');
   const embedPath = isEmbedPath(pathname);
+  const hyperbeamAccountId = getHyperbeamAccount()?.id;
   const shouldHideNag = embedPath || pathname.startsWith(`/$/${PAGES.AUTH_VERIFY}`);
   const userId = user && user.id;
   const hasMyChannels = myChannelClaimIds && myChannelClaimIds.length > 0;
@@ -428,6 +430,10 @@ function App() {
       } catch (e) {}
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (embedPath || !hyperbeamNodeEnabled()) return;
+    dispatch(doFetchSubscriptions());
+  }, [dispatch, embedPath, hyperbeamAccountId]);
   useEffect(() => {
     if (userId) {
       analytics.setUser(userId);

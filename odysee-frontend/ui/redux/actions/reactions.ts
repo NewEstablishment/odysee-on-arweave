@@ -1,25 +1,20 @@
-import { Lbryio } from 'lbryinc';
 import * as ACTIONS from 'constants/action_types';
 import * as REACTION_TYPES from 'constants/reactions';
 import { selectMyReactionForUri } from 'redux/selectors/reactions';
 import { makeSelectClaimForUri } from 'redux/selectors/claims';
-const LEGACY_CLAIM_ID_RE = /^[0-9a-f]{40}$/i;
+import { fetchHyperbeamFileReactionList, fetchHyperbeamFileReactionReact } from 'util/hyperbeam';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
+import { doToast } from 'redux/actions/notifications';
 
-function emptyReactions(claimId: string) {
-  return {
-    my_reactions: {
-      [claimId]: {
-        [REACTION_TYPES.LIKE]: 0,
-        [REACTION_TYPES.DISLIKE]: 0,
-      },
-    },
-    others_reactions: {
-      [claimId]: {
-        [REACTION_TYPES.LIKE]: 0,
-        [REACTION_TYPES.DISLIKE]: 0,
-      },
-    },
-  };
+function requireNativeReactionAccount(dispatch: Dispatch): boolean {
+  if (getHyperbeamAccount()) return true;
+  dispatch(
+    doToast({
+      isError: true,
+      message: __('Create a HyperBEAM account before reacting.'),
+    })
+  );
+  return false;
 }
 
 export const doFetchReactions = (claimId: string) => (dispatch: Dispatch) => {
@@ -27,22 +22,8 @@ export const doFetchReactions = (claimId: string) => (dispatch: Dispatch) => {
     type: ACTIONS.REACTIONS_LIST_STARTED,
   });
 
-  if (!LEGACY_CLAIM_ID_RE.test(claimId)) {
-    dispatch({
-      type: ACTIONS.REACTIONS_LIST_COMPLETED,
-      data: {
-        claimId,
-        reactions: emptyReactions(claimId),
-      },
-    });
-    return Promise.resolve();
-  }
-
-  const params = {
-    claim_ids: claimId,
-  };
-  return Lbryio.call('reaction', 'list', params, 'post')
-    .then((reactions: Array<number>) => {
+  return fetchHyperbeamFileReactionList(claimId)
+    .then((reactions) => {
       dispatch({
         type: ACTIONS.REACTIONS_LIST_COMPLETED,
         data: {
@@ -59,80 +40,72 @@ export const doFetchReactions = (claimId: string) => (dispatch: Dispatch) => {
     });
 };
 export const doReactionLike = (uri: string) => (dispatch: Dispatch, getState: GetState) => {
+  if (!requireNativeReactionAccount(dispatch)) return Promise.resolve();
   const state = getState();
   const myReaction = selectMyReactionForUri(state, uri);
   const claim = makeSelectClaimForUri(uri)(state);
-  const claimId = claim.claim_id;
-  if (!LEGACY_CLAIM_ID_RE.test(claimId)) return Promise.resolve();
+  const claimId = claim?.claim_id;
+  if (!claimId) return Promise.resolve();
 
   const shouldRemove = myReaction === REACTION_TYPES.LIKE;
-  return Lbryio.call(
-    'reaction',
-    'react',
-    {
-      claim_ids: claimId,
-      type: REACTION_TYPES.LIKE,
-      clear_types: REACTION_TYPES.DISLIKE,
-      ...(shouldRemove
-        ? {
-            remove: true,
-          }
-        : {}),
-    },
-    'post'
-  )
-    .then(() => {
+  dispatch({
+    type: ACTIONS.REACTIONS_LIKE_COMPLETED,
+    data: { claimId, shouldRemove },
+  });
+  return fetchHyperbeamFileReactionReact({
+    target: claimId,
+    reaction: REACTION_TYPES.LIKE,
+  })
+    .then((reactions) => {
       dispatch({
-        type: ACTIONS.REACTIONS_LIKE_COMPLETED,
+        type: ACTIONS.REACTIONS_LIST_COMPLETED,
         data: {
           claimId,
-          shouldRemove,
+          reactions,
         },
       });
     })
     .catch((error) => {
+      dispatch(doToast({ isError: true, message: __('Unable to save your reaction. Please try again.') }));
       dispatch({
         type: ACTIONS.REACTIONS_NEW_FAILED,
         data: error,
       });
+      return dispatch(doFetchReactions(claimId));
     });
 };
 export const doReactionDislike = (uri: string) => (dispatch: Dispatch, getState: GetState) => {
+  if (!requireNativeReactionAccount(dispatch)) return Promise.resolve();
   const state = getState();
   const myReaction = selectMyReactionForUri(state, uri);
   const claim = makeSelectClaimForUri(uri)(state);
-  const claimId = claim.claim_id;
-  if (!LEGACY_CLAIM_ID_RE.test(claimId)) return Promise.resolve();
+  const claimId = claim?.claim_id;
+  if (!claimId) return Promise.resolve();
 
   const shouldRemove = myReaction === REACTION_TYPES.DISLIKE;
-  return Lbryio.call(
-    'reaction',
-    'react',
-    {
-      claim_ids: claimId,
-      type: REACTION_TYPES.DISLIKE,
-      clear_types: REACTION_TYPES.LIKE,
-      ...(shouldRemove
-        ? {
-            remove: true,
-          }
-        : {}),
-    },
-    'post'
-  )
-    .then(() => {
+  dispatch({
+    type: ACTIONS.REACTIONS_DISLIKE_COMPLETED,
+    data: { claimId, shouldRemove },
+  });
+  return fetchHyperbeamFileReactionReact({
+    target: claimId,
+    reaction: REACTION_TYPES.DISLIKE,
+  })
+    .then((reactions) => {
       dispatch({
-        type: ACTIONS.REACTIONS_DISLIKE_COMPLETED,
+        type: ACTIONS.REACTIONS_LIST_COMPLETED,
         data: {
           claimId,
-          shouldRemove,
+          reactions,
         },
       });
     })
     .catch((error) => {
+      dispatch(doToast({ isError: true, message: __('Unable to save your reaction. Please try again.') }));
       dispatch({
         type: ACTIONS.REACTIONS_NEW_FAILED,
         data: error,
       });
+      return dispatch(doFetchReactions(claimId));
     });
 };

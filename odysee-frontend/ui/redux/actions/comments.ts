@@ -37,6 +37,7 @@ import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
 import { getStripeEnvironment } from 'util/stripe';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 const stripeEnvironment = getStripeEnvironment();
 const FETCH_API_FAILED_TO_FETCH = 'Failed to fetch';
 const PROMISE_FULFILLED = 'fulfilled';
@@ -546,6 +547,8 @@ export function doCommentReactList(commentIds: Array<string>) {
   return async (dispatch: Dispatch, getState: GetState) => {
     const state = getState();
     const activeChannelClaim = selectActiveChannelClaim(state);
+    const nativeMode = hyperbeamNodeEnabled();
+    const nativeAccount = nativeMode ? getHyperbeamAccount() : null;
     dispatch({
       type: ACTIONS.COMMENT_REACTION_LIST_STARTED,
     });
@@ -553,7 +556,7 @@ export function doCommentReactList(commentIds: Array<string>) {
       comment_ids: commentIds.join(','),
     };
 
-    if (activeChannelClaim) {
+    if (activeChannelClaim && !nativeMode) {
       const signatureData = await ChannelSign.sign(activeChannelClaim.claim_id, activeChannelClaim.name, true);
 
       if (!signatureData) {
@@ -579,7 +582,7 @@ export function doCommentReactList(commentIds: Array<string>) {
           data: {
             myReactions,
             othersReactions,
-            channelId: activeChannelClaim ? activeChannelClaim.claim_id : undefined,
+            channelId: nativeMode ? nativeAccount?.id : activeChannelClaim?.claim_id,
             commentIds,
           },
         });
@@ -664,11 +667,13 @@ export function doCommentReact(commentId: string, type: string) {
   return async (dispatch: Dispatch, getState: GetState) => {
     const state = getState();
     const activeChannelClaim = selectActiveChannelClaim(state);
+    const nativeMode = hyperbeamNodeEnabled();
+    const nativeAccount = nativeMode ? getHyperbeamAccount() : null;
     const pendingReacts = selectPendingCommentReacts(state);
     const notification = makeSelectNotificationForCommentId(commentId)(state);
 
-    if (!activeChannelClaim) {
-      console.error('Unable to react to comment. No activeChannel is set.'); // eslint-disable-line
+    if ((nativeMode && !nativeAccount) || (!nativeMode && !activeChannelClaim)) {
+      console.error('Unable to react to comment. No active identity is set.'); // eslint-disable-line
 
       return;
     }
@@ -687,14 +692,17 @@ export function doCommentReact(commentId: string, type: string) {
       return;
     }
 
-    const reactKey = `${commentId}:${activeChannelClaim.claim_id}`;
+    const reactKey = `${commentId}:${nativeMode ? nativeAccount.id : activeChannelClaim.claim_id}`;
     const myReacts = (selectMyReactsForComment(state, reactKey) || []).slice();
+    const previousMyReacts = myReacts.slice();
     const othersReacts = selectOthersReactsForComment(state, reactKey) || {};
     let checkIfAlreadyReacted = false;
     let rejectReaction = false;
-    const signatureData = await ChannelSign.sign(activeChannelClaim.claim_id, activeChannelClaim.name, true);
+    const signatureData = nativeMode
+      ? null
+      : await ChannelSign.sign(activeChannelClaim.claim_id, activeChannelClaim.name, true);
 
-    if (!signatureData) {
+    if (!nativeMode && !signatureData) {
       return dispatch(
         doToast({
           isError: true,
@@ -705,10 +713,10 @@ export function doCommentReact(commentId: string, type: string) {
 
     const params: ReactionReactParams = {
       comment_ids: commentId,
-      channel_name: activeChannelClaim.name,
-      channel_id: activeChannelClaim.claim_id,
-      signature: signatureData.signature,
-      signing_ts: signatureData.signing_ts,
+      channel_name: nativeAccount?.name || activeChannelClaim?.name,
+      channel_id: nativeAccount?.id || activeChannelClaim?.claim_id,
+      signature: signatureData?.signature,
+      signing_ts: signatureData?.signing_ts,
       type: type,
     };
 
@@ -728,7 +736,7 @@ export function doCommentReact(commentId: string, type: string) {
           // It's not a mutually-exclusive toggle, so check if we've already
           // reacted from another channel. But the verification could take some
           // time if we have lots of channels, so update the GUI first.
-          checkIfAlreadyReacted = true;
+          checkIfAlreadyReacted = !nativeMode;
         }
       }
     }
@@ -784,7 +792,7 @@ export function doCommentReact(commentId: string, type: string) {
       }
     }
 
-    new Promise((res, rej) => (rejectReaction ? rej('') : res(true)))
+    return new Promise((res, rej) => (rejectReaction ? rej('') : res(true)))
       .then(() => {
         return Comments.reaction_react(params);
       })
@@ -793,18 +801,17 @@ export function doCommentReact(commentId: string, type: string) {
           type: ACTIONS.COMMENT_REACT_COMPLETED,
           data: commentId + type,
         });
+        return dispatch(doCommentReactList([commentId]));
       })
       .catch((error) => {
         dispatch({
           type: ACTIONS.COMMENT_REACT_FAILED,
           data: commentId + type,
         });
-        const myRevertedReactsObj = myReacts
-          .filter((el) => el !== type)
-          .reduce((acc, el) => {
-            acc[el] = 1;
-            return acc;
-          }, {});
+        const myRevertedReactsObj = previousMyReacts.reduce((acc, el) => {
+          acc[el] = 1;
+          return acc;
+        }, {});
         dispatch({
           type: ACTIONS.COMMENT_REACTION_LIST_COMPLETED,
           data: {

@@ -26,6 +26,9 @@ behind HyperBEAM devices and stores. They are not an alternate browser mode.
   - [Playback and Media](#playback-and-media)
   - [Search](#search)
   - [Comments, Revisions, and Moderation](#comments-revisions-and-moderation)
+  - [Reactions](#reactions)
+  - [Playlists](#playlists)
+  - [Follows and Subscriptions](#follows-and-subscriptions)
   - [Uploads and Thumbnails](#uploads-and-thumbnails)
   - [Authentication](#authentication)
   - [Static Manifest Publishing](#static-manifest-publishing)
@@ -172,7 +175,7 @@ under `hyperbeam/src/preloaded/odysee/` unless noted otherwise.
 | `odysee-comment@1.0` | `list`, `super-list`, `by-id`, `create`, `edit`, `pin`, `abandon`, `reaction-react`, setting/moderation methods, `normalize`, `verify-signature`, `verify-claim-signature` | Historical Commentron compatibility, normalized comment rows, and LBRY channel-signature checks. Native comments themselves are generic signed messages discovered with `query@1.0`. |
 | `odysee-file@1.0` | `view-count`, `normalize` | Reads and normalizes file view counts through the Odysee API compatibility boundary. |
 | `odysee-file-reaction@1.0` | `list`, `normalize` | Reads and normalizes file reactions. |
-| `odysee-reaction@1.0` | `list`, `normalize` | Reads and normalizes comment reactions from the historical service. |
+| `odysee-reaction@1.0` | `list`, `normalize` | Historical reaction compatibility only. Native browser reactions are generic committed messages and do not call this device. |
 | `owned-reference@1.0` | `point`, `current`, `resolve` | Owner-gated mutable pointer above immutable objects. Ownership is tied to authenticated authority rather than arbitrary first-writer state. Source: `src/preloaded/odysee/dev_odysee_owned_reference.erl`. |
 | `odysee-reference@1.0` | `point`, `current`, `resolve` | Operator-gated mutable reference used for compatibility and controlled pointer updates. |
 | `odysee-policy@1.0` | `evaluate`, `enforce` | Evaluates signed policy rules against request/message fields and can reject disallowed playback or delivery. |
@@ -358,6 +361,53 @@ The current native lifecycle covers roots, replies, edits, and author deletes.
 Pinning, creator reactions, channel blocking, delegates, and mutable comment
 settings remain unsupported until they have cookie-committer-native contracts;
 they do not fall back to Commentron.
+
+### Reactions
+
+Video and comment likes/dislikes are generic `odysee-reaction@1.0` messages
+written through `POST /id?!=true&committers=all`. Exact `query@1.0/only`
+selectors discover locators; the frontend then hydrates and verifies each exact
+message and derives its owner from the selected commitment's committer.
+
+Each committer has at most one projected reaction per target and subject.
+Switches, removals, and toggles are append-only revisions linked by stable
+reaction and version references. Projection accepts only contiguous same-owner
+chains, stops at forks, and rejects conflicting copies of one semantic version.
+Neither video nor comment reactions call the historical reaction API.
+
+### Playlists
+
+Public playlists are generic immutable `odysee-playlist@1.0` snapshot messages.
+A snapshot contains ordered immutable native message IDs or legacy
+`<txid>:<nout>` outpoints; local draft URIs are resolved before publishing and
+mutable claim IDs are never stored as item identity. Query results are locators
+that are hydrated and verified before a playlist is displayed.
+
+Publishing produces a new message ID and share URL. Editing a published playlist
+changes local state until the user explicitly publishes another independent
+snapshot; it does not mutate, delete, or auto-update the old snapshot. Queue,
+Watch Later, Favorites, and unpublished drafts stay local. Stable mutable
+playlist references remain deferred until the canonical reference-device
+contract is supplied.
+
+### Follows and Subscriptions
+
+Free channel follows are generic `odysee-subscription@1.0` messages written
+through `POST /id?!=true&committers=all`. The relationship identity combines
+the verified cookie committer with a stable native channel ID or full legacy
+channel claim ID.
+
+Follow, notification-preference update, unfollow, and re-follow operations are
+append-only revisions linked by `revision-of`, `previous-version`, and a
+monotonic revision number. Discovery uses exact `query@1.0/only` selectors;
+each locator is hydrated by immutable ID, commitment-verified, and attributed
+to its exact committer. Forks, gaps, foreign writers, conflicting semantic
+duplicates, and unverifiable profile claims fail closed. The browser does not
+call the legacy subscription API.
+
+New follows default to notifications off unless the user explicitly enables
+the bell. A one-time legacy import, aggregate subscriber counts, paid
+memberships, and Following-feed content aggregation are separate contracts.
 
 ### Uploads and Thumbnails
 
@@ -663,6 +713,9 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
 pnpm run test:native-message-verification
 pnpm run test:native-comment-revisions
 pnpm run test:native-comment-controls
+pnpm run test:native-reactions
+pnpm run test:native-playlists
+pnpm run test:native-subscriptions
 pnpm run test:static-manifest
 ```
 
@@ -711,6 +764,11 @@ store made the call rather than patching the React page.
   implemented; advanced moderation, creator reactions, and mutable comment
   settings remain intentionally unsupported rather than falling back to a
   legacy service.
+- Native video/comment reactions and immutable public playlist snapshots are
+  implemented. Mutable playlist-head/reference behavior remains deferred.
+- Native free follows and notification preferences are implemented. Legacy
+  import, aggregate counts, paid memberships, and the complete Following feed
+  remain separate work.
 - Complete mutable-name and claim-ID migration to owner-controlled reference
   messages is not finished.
 - Claim-output transaction verification alone does not prove inclusion in the

@@ -30,7 +30,11 @@ function DateTimeInner({
 }: Props) {
   const clock24h = useAppSelector((state) => selectClientSetting(state, SETTINGS.CLOCK_24H));
   const dateFromUri = useAppSelector((state) => (uri ? selectDateForUri(state, uri) : undefined));
-  const date = dateProp || dateFromUri;
+  const rawDate = dateProp || dateFromUri;
+  // An invalid Date renders as "NaN seconds ago"; legacy claims carry no
+  // release time, so treat unparseable dates as absent.
+  const date =
+    rawDate instanceof Date ? (Number.isNaN(rawDate.getTime()) ? undefined : rawDate) : rawDate;
 
   const lastRenderTimeRef = useRef(new Date());
 

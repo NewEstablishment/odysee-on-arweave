@@ -12,6 +12,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectIsSubscribedForUri } from 'redux/selectors/subscriptions';
 import { selectPermanentUrlForUri, selectChannelForClaimUri, selectClaimIsMineForUri } from 'redux/selectors/claims';
 import { doChannelSubscribe, doChannelUnsubscribe } from 'redux/actions/subscriptions';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 type Props = {
   uri: string;
@@ -120,7 +121,7 @@ const MobileActions = (props: Props) => {
             icon={isFireActive ? ICONS.FIRE_ACTIVE : ICONS.FIRE}
             iconSize={16}
             title={__('I Like This')}
-            requiresAuth
+            requiresAuth={!hyperbeamNodeEnabled()}
             authSrc="filereaction_like"
             className={classnames('shorts-mobile-panel__action-button button--file-action button-like', {
               'button--fire': isFireActive,
@@ -149,7 +150,7 @@ const MobileActions = (props: Props) => {
 
         <div className="shorts-mobile-panel__action-item">
           <Button
-            requiresAuth
+            requiresAuth={!hyperbeamNodeEnabled()}
             authSrc={'filereaction_dislike'}
             title={__('I dislike this')}
             className={classnames('shorts-mobile-panel__action-button button--file-action button-dislike', {

@@ -23,6 +23,7 @@ import {
 } from 'redux/actions/subscriptions';
 import { selectPermanentUrlForUri, makeSelectTagInClaimOrChannelForUri } from 'redux/selectors/claims';
 import * as SETTINGS from 'constants/settings';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 import {
   DISABLE_SLIMES_VIDEO_TAG,
   DISABLE_SLIMES_ALL_TAG,
@@ -138,7 +139,7 @@ const FloatingShortsActions = ({
             }}
             icon={isFireActive ? ICONS.FIRE_ACTIVE : ICONS.FIRE}
             iconSize={14}
-            requiresAuth
+            requiresAuth={!hyperbeamNodeEnabled()}
             authSrc="filereaction_like"
             className={classnames('button--file-action button-like', {
               'button--fire': isFireActive,
@@ -189,7 +190,7 @@ const FloatingShortsActions = ({
             }}
             icon={isSlimeActive ? ICONS.SLIME_ACTIVE : ICONS.SLIME}
             iconSize={14}
-            requiresAuth
+            requiresAuth={!hyperbeamNodeEnabled()}
             authSrc="filereaction_dislike"
             className={classnames('button--file-action button-dislike', {
               'button--slime': isSlimeActive,

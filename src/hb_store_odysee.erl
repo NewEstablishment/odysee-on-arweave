@@ -162,6 +162,8 @@ read_live(<<"odysee/media/descriptor/", SDHash/binary>>, Req, StoreOpts, NodeOpt
 read_live(Path, _Req, StoreOpts, NodeOpts) ->
     read_live(Path, StoreOpts, NodeOpts).
 
+read_live(<<"odysee/claim-meta/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    claim_meta_read(Encoded, StoreOpts, NodeOpts);
 read_live(<<"odysee/claim/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, URI} ?= decode_uri_component(Encoded),
@@ -268,6 +270,34 @@ claim_evidence(Claim, RequiredClaimID, StoreOpts, NodeOpts) ->
 
 %% @doc Read a channel by claim id or `lbry://' URI. The channel-output
 %% constructor fails closed when the located output is not a channel claim.
+%% Display metadata that is not derivable from the claim bytes: the block
+%% timestamp (legacy claims record no release time) and chain height.
+%% Compatibility data, so it is served as a plain uncommitted message on
+%% its own path and never folded into verified claim evidence.
+claim_meta_read(Encoded, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Decoded} ?= decode_component(Encoded),
+        ClaimID = normalize_hex(Decoded),
+        ok ?= require_hex_size(ClaimID, 40, invalid_claim_id),
+        {ok, Claim} ?=
+            hb_odysee_client:claim_search(
+                ClaimID,
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        {ok,
+            maps:filter(
+                fun(_K, V) -> V =/= not_found end,
+                #{
+                    <<"claim-id">> => ClaimID,
+                    <<"timestamp">> =>
+                        first_found([<<"timestamp">>], Claim, not_found, NodeOpts),
+                    <<"height">> =>
+                        first_found([<<"height">>], Claim, not_found, NodeOpts),
+                    <<"source">> => <<"legacy-compatibility">>
+                }
+            )}
+    end.
+
 channel_read(Decoded, StoreOpts, NodeOpts) ->
     ChannelID = normalize_hex(Decoded),
     case valid_hex_size(ChannelID, 20) of

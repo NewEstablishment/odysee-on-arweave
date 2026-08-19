@@ -186,20 +186,28 @@ export const doSearch =
     const count = Number(size) || 20;
 
     fetchSearchIds(query, start + count)
-      .then((ids) => {
-        const uris = uniqueUris(ids.map((id) => hyperbeamImmutableUri(id)).filter(Boolean)).slice(start);
-        dispatch(doResolveUris(uris));
-        dispatch({
-          type: ACTIONS.SEARCH_SUCCESS,
-          data: {
-            query: queryWithOptions,
-            from: from,
-            size: size,
-            uris,
-            poweredBy: 'HyperBEAM',
-            uuid: '',
-          },
-        });
+      .then(async (ids) => {
+        const candidates = uniqueUris(ids.map((id) => hyperbeamImmutableUri(id)).filter(Boolean)).slice(start);
+        const publish = (uris: Array<string>) =>
+          dispatch({
+            type: ACTIONS.SEARCH_SUCCESS,
+            data: {
+              query: queryWithOptions,
+              from: from,
+              size: size,
+              uris,
+              poweredBy: 'HyperBEAM',
+              uuid: '',
+            },
+          });
+
+        // Publish the hits straight away so the list renders its loading
+        // cards while the claims arrive, then republish once resolution is
+        // done: an id whose claim never arrives would otherwise leave a
+        // loading card that never settles.
+        publish(candidates);
+        const resolved = await dispatch(doResolveUris(candidates)).catch(() => null);
+        publish(filterToResolved(candidates, resolved));
       })
       .catch(() => {
         dispatch({
@@ -207,6 +215,27 @@ export const doSearch =
         });
       });
   };
+// `doResolveUris` answers with the raw resolve response: a map keyed by uri
+// whose values are the claims themselves, with `{error}` in place of the ones
+// that could not be resolved. A claim that never arrives renders as a loading
+// card that never settles, so keep only the uris that came back with a claim.
+// If nothing at all resolved the node is having a bad day rather than every
+// result being dead, so fall back to showing the candidates.
+function filterToResolved(candidates: Array<string>, resolved: any): Array<string> {
+  if (!resolved || typeof resolved !== 'object') return candidates;
+
+  const alive = new Set(
+    Object.keys(resolved).filter((uri) => {
+      const entry = resolved[uri];
+      if (!entry || typeof entry !== 'object' || entry.error) return false;
+      return Boolean(entry.claim_id || entry.stream || entry.channel || entry.collection || entry.claim);
+    })
+  );
+
+  if (!alive.size) return candidates;
+  return candidates.filter((uri) => alive.has(uri));
+}
+
 export const doUpdateSearchOptions =
   (newOptions: SearchOptions, additionalOptions: SearchOptions) => (dispatch: Dispatch, getState: GetState) => {
     const state = getState();

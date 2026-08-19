@@ -1,52 +1,28 @@
 import React from 'react';
 import * as PAGES from 'constants/pages';
 import * as ICONS from 'constants/icons';
-import { getFormattedCreditsAmount } from 'util/format-credits';
-import ClaimDescription from 'component/claimDescription';
-import ClaimAuthor from 'component/claimAuthor';
+import MarkdownPreview from 'component/common/markdown-preview';
 import CollectionPrivateIcon from 'component/common/collection-private-icon';
 import Skeleton from '@mui/material/Skeleton';
 import Button from 'component/button';
-import LbcSymbol from 'component/common/lbc-symbol';
-import FileValues from 'component/fileValues';
-import FileDetails from 'component/fileDetails';
-import ClaimTags from 'component/claimTags';
-import ClaimSupportsLiquidateButton from 'component/claimSupportsLiquidateButton';
 import { useAppSelector } from 'redux/hooks';
-import { selectClaimForId, selectHasClaimForId, selectTotalStakedAmountForUri } from 'redux/selectors/claims';
 import {
   selectCollectionDescriptionForId,
+  selectCollectionForId,
   selectCountForCollectionId,
-  selectCollectionHasEditsForId,
   selectSourceIdForCollectionId,
 } from 'redux/selectors/collections';
-const EXPAND = {
-  NONE: 'none',
-  CREDIT_DETAILS: 'credit_details',
-  FILE_DETAILS: 'file_details',
-};
+
 type Props = {
   collectionId: string;
 };
 
-const CollectionTitle = (props: Props) => {
+const CollectionSubtitle = (props: Props) => {
   const { collectionId } = props;
-  const claim = useAppSelector((state) => collectionId && selectClaimForId(state, collectionId));
-  const uri = (claim && (claim.canonical_url || claim.permanent_url)) || null;
+  const collection = useAppSelector((state) => selectCollectionForId(state, collectionId));
   const collectionDescription = useAppSelector((state) => selectCollectionDescriptionForId(state, collectionId));
   const collectionCount = useAppSelector((state) => selectCountForCollectionId(state, collectionId));
   const sourceId = useAppSelector((state) => selectSourceIdForCollectionId(state, collectionId));
-  const hasClaim = useAppSelector((state) => selectHasClaimForId(state, collectionId));
-  const claimAmount = useAppSelector((state) => selectTotalStakedAmountForUri(state, uri));
-  const [expand, setExpand] = React.useState(EXPAND.NONE);
-
-  function handleExpand(newExpand) {
-    if (expand === newExpand) {
-      setExpand(EXPAND.NONE);
-    } else {
-      setExpand(newExpand);
-    }
-  }
 
   return (
     <div>
@@ -68,49 +44,20 @@ const CollectionTitle = (props: Props) => {
             : __('%collectionCount% items', {
                 collectionCount,
               })}
-
-          {hasClaim && (
-            <div className="collection-subtitle__info">
-              <Button
-                button="link"
-                className="dim"
-                icon={ICONS.INFO}
-                aria-label={__('View claim details')}
-                onClick={() => handleExpand(EXPAND.FILE_DETAILS)}
-              />
-
-              <Button button="link" className="dim" onClick={() => handleExpand(EXPAND.CREDIT_DETAILS)}>
-                <LbcSymbol
-                  postfix={expand === EXPAND.CREDIT_DETAILS ? __('Hide') : getFormattedCreditsAmount(claimAmount)}
-                />
-              </Button>
-
-              <ClaimSupportsLiquidateButton uri={uri} />
-            </div>
-          )}
         </span>
       ) : (
         <Skeleton variant="text" animation="wave" className="header__navigationItem--balanceLoading" />
       )}
 
-      <ClaimDescription uri={uri} description={collectionDescription} />
+      <MarkdownPreview content={collectionDescription} />
 
-      {expand === EXPAND.CREDIT_DETAILS && (
-        <div className="section post__info--credit-details">
-          <FileValues uri={uri} />
-        </div>
+      {collection?.profileName ? (
+        <span className="collection__subtitle">{collection.profileName}</span>
+      ) : (
+        <CollectionPrivateIcon />
       )}
-
-      {expand === EXPAND.FILE_DETAILS && (
-        <div className="section post__info--credit-details">
-          <ClaimTags uri={uri} type="large" />
-          <FileDetails uri={uri} />
-        </div>
-      )}
-
-      {uri ? <ClaimAuthor uri={uri} /> : <CollectionPrivateIcon />}
     </div>
   );
 };
 
-export default CollectionTitle;
+export default CollectionSubtitle;

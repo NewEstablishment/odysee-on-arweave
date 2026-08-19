@@ -115,7 +115,10 @@ function ChannelPage(props: Props) {
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
   const meta = claim?.meta || {};
   const { claims_in_channel } = meta;
-  const showClaims = Boolean(claims_in_channel) && !preferEmbed && !banState.filtered && !banState.blacklisted;
+  // The store does not carry a claim count, so an absent value means "unknown",
+  // not "empty" - only hide the content tabs when the count is known to be zero.
+  const channelHasContent = claims_in_channel === undefined || Boolean(claims_in_channel);
+  const showClaims = channelHasContent && !preferEmbed && !banState.filtered && !banState.blacklisted;
   const channelIsBlackListed = banState.blacklisted;
   // Show About tab for blacklisted channels (DMCA message) or channels with content
   const hideAboutTab = !showClaims && !isGlobalMod && !channelIsBlackListed;

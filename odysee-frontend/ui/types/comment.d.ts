@@ -133,10 +133,10 @@ type ReactionReactParams = {
   comment_ids: string;
   type: string;
   clear_types?: string;
-  channel_id: string;
-  channel_name: string;
-  signature: string;
-  signing_ts: string;
+  channel_id?: string;
+  channel_name?: string;
+  signature?: string;
+  signing_ts?: string;
   remove?: boolean;
 };
 

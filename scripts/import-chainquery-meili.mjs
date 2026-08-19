@@ -872,17 +872,19 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
     ],
     distinctAttribute: 'search_group',
     rankingRules: [
-      // Relevance decides first (a title match beats a description match),
-      // then quality breaks ties among equally relevant hits.
+      // A card the user cannot see is worse than a weaker match, so
+      // claims with a thumbnail and a channel come first; within them,
+      // where the term matched decides (a title hit beats a tag hit),
+      // and recency only breaks the remaining ties.
       'words',
       'typo',
+      'has_thumbnail:desc',
+      'has_channel:desc',
       'attribute',
       'exactness',
-      'proximity',
-      'has_channel:desc',
-      'has_thumbnail:desc',
       'has_release_time:desc',
       'search_rank:desc',
+      'proximity',
       'sort',
     ],
   };

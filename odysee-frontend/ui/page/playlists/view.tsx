@@ -40,7 +40,7 @@ const PlaylistsPage = () => {
 
   if (!hasCollections) {
     if (isFetchingCollections) {
-      // Fetching collection_list
+      // Fetch the signed native playlists owned by this HyperBEAM account.
       return (
         <Wrapper>
           <div className="main--empty empty">

@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch();
+const p = await b.newPage();
+await p.goto('http://localhost:9090/PTtlp9c6nTteQlCskdbqYI9qSs6ZGUHZQ_PKYon5Y7g/#/$/search?q=test', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await p.waitForTimeout(25000);
+await p.mouse.wheel(0, 1200); await p.waitForTimeout(4000);
+const thumbs = await p.$$eval('.claim-preview__wrapper img, .media__thumb img, [class*="thumbnail"] img', (els) => els.map((e) => e.currentSrc || e.src).map((s) => s.includes('spaceman') ? 'FALLBACK' : s.slice(-60)).slice(0, 10));
+const skeletons = await p.$$eval('.claim-preview__wrapper', (els) => els.filter((e) => (e.textContent || '').trim() === '').length);
+const titles = await p.$$eval('.claim-preview__title', (e) => e.map((x) => x.textContent.trim().slice(0, 45)));
+console.log('THUMBS', JSON.stringify(thumbs, null, 1));
+console.log('EMPTY_CARDS', skeletons);
+console.log('TITLES', JSON.stringify(titles.slice(0, 8), null, 1));
+await b.close();
