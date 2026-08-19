@@ -21,6 +21,8 @@ import {
   DISABLE_REACTIONS_COMMENTS_TAG,
 } from 'constants/tags';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount, isHyperbeamSignedIn } from 'util/hyperbeamAccount';
 
 type Props = {
   commentId: string;
@@ -46,9 +48,12 @@ export default function CommentReactions(props: Props) {
   const { commentId, uri, hideCreatorLike } = props;
 
   const dispatch = useAppDispatch();
+  const nativeMode = hyperbeamNodeEnabled();
+  const nativeSignedIn = nativeMode && isHyperbeamSignedIn();
   const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
   const activeChannelId = activeChannelClaim && activeChannelClaim.claim_id;
-  const reactionKey = activeChannelId ? `${commentId}:${activeChannelId}` : commentId;
+  const reactionIdentity = nativeMode ? getHyperbeamAccount()?.id : activeChannelId;
+  const reactionKey = reactionIdentity ? `${commentId}:${reactionIdentity}` : commentId;
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const disableReactions = useAppSelector(
     (state) =>
@@ -64,7 +69,7 @@ export default function CommentReactions(props: Props) {
   const myReacts = useAppSelector((state) => selectMyReactsForComment(state, reactionKey));
   const othersReacts = useAppSelector((state) => selectOthersReactsForComment(state, reactionKey));
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const isMobile = useIsMobile();
   React.useEffect(() => {
     if (!claim) {
@@ -88,7 +93,7 @@ export default function CommentReactions(props: Props) {
   const dislikeIcon = myReacts && myReacts.includes(REACTION_TYPES.DISLIKE) ? ICONS.SLIME_ACTIVE : ICONS.SLIME;
 
   function handleCommentLike() {
-    if (activeChannelId) {
+    if (nativeSignedIn || activeChannelId) {
       dispatch(doCommentReact(commentId, REACTION_TYPES.LIKE));
     } else {
       promptForChannel();
@@ -96,7 +101,7 @@ export default function CommentReactions(props: Props) {
   }
 
   function handleCommentDislike() {
-    if (activeChannelId) {
+    if (nativeSignedIn || activeChannelId) {
       dispatch(doCommentReact(commentId, REACTION_TYPES.DISLIKE));
     } else {
       promptForChannel();
@@ -104,10 +109,16 @@ export default function CommentReactions(props: Props) {
   }
 
   function promptForChannel() {
-    navigate(`/$/${PAGES.CHANNEL_NEW}?redirect=${pathname}&lc=${commentId}`);
+    navigate(
+      nativeMode
+        ? `/$/${PAGES.AUTH}?redirect=${encodeURIComponent(`${pathname}${search}`)}`
+        : `/$/${PAGES.CHANNEL_NEW}?redirect=${pathname}&lc=${commentId}`
+    );
     dispatch(
       doToast({
-        message: __('A channel is required to throw fire and slime'),
+        message: nativeMode
+          ? __('Create a HyperBEAM account to throw fire and slime')
+          : __('A channel is required to throw fire and slime'),
       })
     );
   }
@@ -117,7 +128,7 @@ export default function CommentReactions(props: Props) {
       {!disableReactions && (
         <>
           <Button
-            requiresAuth={IS_WEB}
+            requiresAuth={IS_WEB && !nativeMode}
             title={__('Upvote')}
             icon={likeIcon}
             iconSize={isMobile && 12}
@@ -133,7 +144,7 @@ export default function CommentReactions(props: Props) {
           />
           {!disableSlimes && (
             <Button
-              requiresAuth={IS_WEB}
+              requiresAuth={IS_WEB && !nativeMode}
               title={__('Downvote')}
               icon={dislikeIcon}
               iconSize={isMobile && 12}
@@ -154,7 +165,7 @@ export default function CommentReactions(props: Props) {
       {!shouldHide && ENABLE_CREATOR_REACTIONS && (canCreatorReact || creatorLiked) && (
         <Button
           disabled={!canCreatorReact || !claimIsMine}
-          requiresAuth={IS_WEB}
+          requiresAuth={IS_WEB && !nativeMode}
           title={claimIsMine ? __('You loved this') : __('Creator loved this')}
           icon={creatorLiked ? ICONS.CREATOR_LIKE : ICONS.SUBSCRIBE}
           className={classnames('comment__action comment__action--creator-like')}

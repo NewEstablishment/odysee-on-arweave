@@ -396,16 +396,21 @@ async function fetchHyperbeamClaimIdChunk(dispatch: Dispatch, claimIds: Array<st
     data.items.forEach((claim: Claim) => {
       const claimUrl = claim.canonical_url || claim.permanent_url || claim.short_url || claim.claim_id;
       const immutableUri = hyperbeamImmutableUriFromClaim(claim);
-      const claimIdUrl = buildURI(
-        claim.value_type === 'channel'
-          ? { channelName: claim.name, channelClaimId: claim.claim_id }
-          : { streamName: claim.name, streamClaimId: claim.claim_id },
-        true
-      );
+      const claimIdUrl =
+        claim.value_type === 'collection'
+          ? claimUrl
+          : buildURI(
+              claim.value_type === 'channel'
+                ? { channelName: claim.name, channelClaimId: claim.claim_id }
+                : { streamName: claim.name, streamClaimId: claim.claim_id },
+              true
+            );
       const resolvedClaim =
         claim.value_type === 'channel'
           ? { channel: claim, claimsInChannel: claim.meta?.claims_in_channel || 0 }
-          : { stream: claim };
+          : claim.value_type === 'collection'
+            ? { collection: claim }
+            : { stream: claim };
       resolveInfo[claimUrl] = resolvedClaim;
       resolveInfo[claimIdUrl] = resolvedClaim;
       if (immutableUri) resolveInfo[immutableUri] = resolvedClaim;

@@ -29,7 +29,7 @@ type CollectionEditParams = {
 
 type CollectionPublishCreateParams = {
   name: string;
-  bid: string;
+  bid?: string;
   claims: Array<string>;
   title?: string;
   description?: string;

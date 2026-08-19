@@ -11,10 +11,8 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   selectCollectionTitleForId,
   selectIsCollectionBuiltInForId,
-  selectPublishedCollectionNotEditedForId,
   selectCollectionIsEmptyForId,
   selectCollectionIsMine,
-  selectCollectionAutoPublishForId,
   selectCollectionHasEditsForId,
   selectCollectionPublishErrorForId,
   selectCollectionSavedForId,
@@ -22,11 +20,7 @@ import {
 import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { doOpenModal } from 'redux/actions/app';
 import { doEnableCollectionShuffle } from 'redux/actions/content';
-import {
-  doSetCollectionAutoPublish,
-  doRetryCollectionPublish,
-  doToggleCollectionSavedForId,
-} from 'redux/actions/collections';
+import { doRetryCollectionPublish, doToggleCollectionSavedForId } from 'redux/actions/collections';
 
 type Props = {
   inline?: boolean;
@@ -41,10 +35,8 @@ function CollectionMenuList(props: Props) {
   const collectionName = useAppSelector((state) => selectCollectionTitleForId(state, collectionId));
   const claimId = useAppSelector((state) => (selectClaimForClaimId(state, collectionId) || {}).claim_id);
   const isBuiltin = useAppSelector((state) => selectIsCollectionBuiltInForId(state, collectionId));
-  const publishedNotEdited = useAppSelector((state) => selectPublishedCollectionNotEditedForId(state, collectionId));
   const collectionEmpty = useAppSelector((state) => selectCollectionIsEmptyForId(state, collectionId));
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
-  const autoPublish = useAppSelector((state) => selectCollectionAutoPublishForId(state, collectionId));
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const publishError = useAppSelector((state) => selectCollectionPublishErrorForId(state, collectionId));
   const collectionSavedForId = useAppSelector((state) => selectCollectionSavedForId(state, collectionId));
@@ -105,7 +97,7 @@ function CollectionMenuList(props: Props) {
                   >
                     <div className="menu__link">
                       <Icon aria-hidden iconColor={'red'} icon={ICONS.PUBLISH} />
-                      {publishedNotEdited ? __('Update') : __('Publish')}
+                      {claimId ? __('Publish Snapshot') : __('Publish')}
                     </div>
                   </MenuItem>
                 )}
@@ -118,17 +110,6 @@ function CollectionMenuList(props: Props) {
                     {__('Edit')}
                   </div>
                 </MenuItem>
-                {claimId && (
-                  <MenuItem
-                    className="comment__menu-option"
-                    onSelect={() => dispatch(doSetCollectionAutoPublish(collectionId, !autoPublish))}
-                  >
-                    <div className="menu__link">
-                      <Icon aria-hidden icon={ICONS.PUBLISH} />
-                      {autoPublish ? __('Disable Auto-publish') : __('Enable Auto-publish')}
-                    </div>
-                  </MenuItem>
-                )}
                 {claimId && collectionHasEdits && publishError && (
                   <MenuItem
                     className="comment__menu-option"
@@ -140,21 +121,23 @@ function CollectionMenuList(props: Props) {
                     </div>
                   </MenuItem>
                 )}
-                <MenuItem
-                  className="comment__menu-option"
-                  onSelect={() =>
-                    dispatch(
-                      doOpenModal(MODALS.COLLECTION_DELETE, {
-                        collectionId,
-                      })
-                    )
-                  }
-                >
-                  <div className="menu__link">
-                    <Icon aria-hidden icon={ICONS.DELETE} />
-                    {__('Delete')}
-                  </div>
-                </MenuItem>
+                {!claimId && (
+                  <MenuItem
+                    className="comment__menu-option"
+                    onSelect={() =>
+                      dispatch(
+                        doOpenModal(MODALS.COLLECTION_DELETE, {
+                          collectionId,
+                        })
+                      )
+                    }
+                  >
+                    <div className="menu__link">
+                      <Icon aria-hidden icon={ICONS.DELETE} />
+                      {__('Delete')}
+                    </div>
+                  </MenuItem>
+                )}
               </>
             )}
             {!isBuiltin && !isMyCollection && collectionSavedForId && (

@@ -235,19 +235,26 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    `POST /~query@1.0/only` with equality selectors (schema, type, target,
    author) returns matching message paths — and hydrate them with generic
    `/~cache@1.0/read` calls.
-4. *Ownership* semantics ride inside the message as an LBRY channel signature
-   over a canonical statement, checkable against the channel's committed
-   public key. The node-wallet commitment from step 1 establishes only a
-   stable pseudonymous writer identity; it confers no authority.
+4. Native social ownership is the committer of the exact verified commitment
+   selected by the discovered locator. Profile fields are display metadata and
+   are accepted only when the profile message verifies under that same
+   committer. LBRY channel signatures remain relevant only to legacy evidence;
+   they do not authorize cookie-native comments, reactions, or playlists.
 5. Peers replicate write traffic the same way they replicate evidence: via
    `hb_store_remote_node` against nodes that accepted the writes.
 
 As with reads, authenticity checks are a *between-node* concern: a replicating
-peer re-filters query results against their selectors and re-verifies the
-channel signature before caching a write, so `~query@1.0` stays a dumb index
-and no node is trusted for write authenticity by its peers. The end user, as
-always, trusts the TEE-terminated serving node rather than verifying in the
-browser.
+peer re-filters query results against their selectors, verifies each exact
+commitment, and derives native ownership from that commitment's committer before
+caching a write. `~query@1.0` remains a dumb locator index rather than an
+authority. The end user, as always, trusts the TEE-terminated serving node rather
+than verifying in the browser.
+
+Comments and reactions model changes as contiguous append-only revisions.
+Public playlists currently use a simpler contract: each publish is an
+independent immutable full snapshot containing ordered native IDs or legacy
+outpoints. A mutable playlist head is intentionally deferred until the canonical
+reference-device contract is available.
 
 Legacy-only interactive surfaces with no verifiable representation — fuzzy
 text search, view counts, subscription counts, legacy comment writes — are

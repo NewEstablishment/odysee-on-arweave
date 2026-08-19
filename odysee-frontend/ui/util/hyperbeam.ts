@@ -12,6 +12,27 @@ import {
   verifyNativeMessage,
   type VerifiedNativeMessage,
 } from 'util/nativeMessageVerification';
+import {
+  NATIVE_REACTION_SCHEMA,
+  NATIVE_REACTION_SIGNATURE_SCOPE,
+  NATIVE_REACTION_TYPE,
+  nativeReactionToggleRemoves,
+  normalizeNativeReaction,
+  projectNativeReactions,
+  validNativeReactionTarget,
+  type NativeReaction,
+  type NativeReactionKind,
+  type NativeReactionSubject,
+} from 'util/nativeReactions';
+import {
+  NATIVE_PLAYLIST_SCHEMA,
+  NATIVE_PLAYLIST_SIGNATURE_SCOPE,
+  NATIVE_PLAYLIST_TYPE,
+  activeNativePlaylists,
+  nativePlaylistItemsJson,
+  normalizeNativePlaylist,
+  type NativePlaylist,
+} from 'util/nativePlaylists';
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 import {
   hasNativeCommentControlAuthority,
@@ -46,6 +67,8 @@ const nativeCommentControlQueryCache = new Map<
   string,
   { expiresAt: number; promise: Promise<Array<NativeCommentControl>> }
 >();
+const nativeReactionQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativeReaction>> }>();
+const nativePlaylistQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativePlaylist>> }>();
 const nativeCommentTargetOwnerCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
 let activeAccountOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
 
@@ -242,6 +265,361 @@ async function writeNativeMessage(message: Record<string, any>, label: string): 
   const commentId = nativeWriteId(result);
   if (!commentId) throw new Error(`HyperBEAM native ${label} write did not return an ID`);
   return commentId;
+}
+
+export type NativePlaylistWriteParams = {
+  title: string;
+  description?: string;
+  thumbnail_url?: string;
+  tags?: Array<string>;
+  languages?: Array<string>;
+  items: Array<string>;
+};
+
+export async function fetchHyperbeamPlaylistListMine(
+  options: CollectionListOptions = {}
+): Promise<CollectionListResponse> {
+  const account = getHyperbeamAccount();
+  const owner = await activeHyperbeamAccountOwner();
+  const page = Math.max(1, toNumber(options.page, 1));
+  const pageSize = Math.max(1, Math.min(100, toNumber(options.page_size, 50)));
+  if (!account || !owner) return emptyCollectionList(page, pageSize);
+
+  const playlists = activeNativePlaylists(
+    await fetchNativePlaylistCollection({
+      schema: NATIVE_PLAYLIST_SCHEMA,
+      type: NATIVE_PLAYLIST_TYPE,
+      'profile-id': account.id,
+    })
+  ).filter((playlist) => playlist.owner === owner);
+  const start = (page - 1) * pageSize;
+  return {
+    items: playlists.slice(start, start + pageSize).map((playlist) => nativePlaylistClaim(playlist, true)),
+    page,
+    page_size: pageSize,
+    total_items: playlists.length,
+    total_pages: playlists.length ? Math.ceil(playlists.length / pageSize) : 0,
+  };
+}
+
+export async function fetchHyperbeamPlaylistById(messageId: string): Promise<Claim | null> {
+  if (!isNativeMessageId(messageId)) return null;
+  const playlist = await fetchNativePlaylistById(messageId);
+  if (!playlist) return null;
+  const viewerOwner = await activeHyperbeamAccountOwner();
+  return nativePlaylistClaim(playlist, viewerOwner === playlist.owner);
+}
+
+export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteParams): Promise<Claim> {
+  const account = getHyperbeamAccount();
+  const owner = await activeHyperbeamAccountOwner();
+  if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before publishing');
+
+  const timestamp = Date.now();
+  const message = nativePlaylistMessage({
+    ...params,
+    profileId: account.id,
+    profileName: account.name,
+    createdAt: timestamp,
+  });
+  validateNativePlaylistWrite(message, owner);
+
+  const messageId = await writeNativeMessage(message, 'playlist');
+  nativePlaylistQueryCache.clear();
+  const written = await fetchNativePlaylistById(messageId);
+  if (!written || written.owner !== owner || written.message_id !== messageId) {
+    throw new Error('HyperBEAM native playlist failed commitment or ownership verification');
+  }
+  return nativePlaylistClaim(written, true);
+}
+
+async function fetchNativePlaylistCollection(selectors: Record<string, any>): Promise<Array<NativePlaylist>> {
+  const request = nativeQueryRequest(selectors);
+  const key = stableJson(request);
+  return cachedNativeQuery(nativePlaylistQueryCache, key, async () => {
+    const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+    const playlists = await resolveNativePlaylistPaths(paths);
+    return playlists.filter((playlist) =>
+      Object.entries(selectors).every(([selector, expected]) => {
+        const fieldName = selector.replace(/-([a-z])/g, (_, character) => `_${character}`);
+        return playlist[fieldName] === expected;
+      })
+    );
+  });
+}
+
+async function resolveNativePlaylistPaths(paths: Array<string>): Promise<Array<NativePlaylist>> {
+  const playlists: Array<NativePlaylist | null> = Array.from({ length: paths.length }, () => null);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(paths.length, NATIVE_COMMENT_READ_CONCURRENCY) }, async () => {
+    while (cursor < paths.length) {
+      const index = cursor++;
+      playlists[index] = await fetchNativePlaylistById(paths[index]);
+    }
+  });
+  await Promise.all(workers);
+  return playlists.filter((playlist): playlist is NativePlaylist => Boolean(playlist));
+}
+
+async function fetchNativePlaylistById(id: string): Promise<NativePlaylist | null> {
+  if (!isNativeMessageId(id)) return null;
+  const normalizedId = id.replace(/^\/+/, '');
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  const playlist = normalizeNativePlaylist({
+    ...verified.payload,
+    'message-id': normalizedId,
+    'hyperbeam-owner': verified.owner,
+  });
+  if (!playlist) return null;
+  const profile = await verifiedNativePlaylistProfile(playlist);
+  return profile ? { ...playlist, profile_name: profile.name } : null;
+}
+
+async function verifiedNativePlaylistProfile(playlist: NativePlaylist): Promise<{ name: string } | null> {
+  const verified = await fetchVerifiedNativeMessage(playlist.profile_id);
+  const name = value(verified?.payload || {}, 'name');
+  if (
+    !verified ||
+    verified.owner !== playlist.owner ||
+    value(verified.payload, 'type') !== 'channel' ||
+    typeof name !== 'string' ||
+    !name.trim() ||
+    (playlist.profile_name && playlist.profile_name !== name)
+  ) {
+    return null;
+  }
+  return { name };
+}
+
+function nativePlaylistMessage(
+  params: NativePlaylistWriteParams & {
+    profileId: string;
+    profileName?: string;
+    createdAt: number;
+  }
+): Record<string, any> {
+  const tags = (params.tags || []).map(String);
+  const languages = (params.languages || []).map(String);
+  return compactParams({
+    schema: NATIVE_PLAYLIST_SCHEMA,
+    type: NATIVE_PLAYLIST_TYPE,
+    'profile-id': params.profileId,
+    'profile-name': params.profileName,
+    title: params.title,
+    description: params.description,
+    'thumbnail-url': params.thumbnail_url,
+    'tags-json': JSON.stringify(tags),
+    'languages-json': JSON.stringify(languages),
+    'items-json': nativePlaylistItemsJson(params.items),
+    'item-count': params.items.length,
+    'created-at': params.createdAt,
+    'signature-scope': NATIVE_PLAYLIST_SIGNATURE_SCOPE,
+  });
+}
+
+function validateNativePlaylistWrite(message: Record<string, any>, owner: string) {
+  const candidate = normalizeNativePlaylist({
+    ...message,
+    'message-id': 'v'.repeat(43),
+    'hyperbeam-owner': owner,
+  });
+  if (!candidate) throw new Error('Native playlist fields are invalid or exceed their limits');
+}
+
+function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean): Claim {
+  const timestamp = Math.floor(playlist.updated_at / 1000);
+  const creationTimestamp = Math.floor(playlist.created_at / 1000);
+  const permanentUrl = `/$/playlist/${encodeURIComponent(playlist.message_id)}`;
+  return {
+    claim_id: playlist.message_id,
+    name: playlist.title,
+    normalized_name: playlist.title.toLowerCase(),
+    permanent_url: permanentUrl,
+    canonical_url: permanentUrl,
+    short_url: permanentUrl,
+    type: 'claim',
+    value_type: 'collection',
+    value: {
+      title: playlist.title,
+      description: playlist.description,
+      thumbnail: playlist.thumbnail_url ? { url: playlist.thumbnail_url } : undefined,
+      tags: playlist.tags,
+      languages: playlist.languages,
+      claims: playlist.items,
+    },
+    meta: { creation_timestamp: creationTimestamp },
+    timestamp,
+    confirmations: 1,
+    is_my_output: isMine,
+    hyperbeam: {
+      schema: playlist.schema,
+      message_id: playlist.message_id,
+      owner: playlist.owner,
+      profile_id: playlist.profile_id,
+      profile_name: playlist.profile_name,
+    },
+  } as unknown as Claim;
+}
+
+function emptyCollectionList(page: number, pageSize: number): CollectionListResponse {
+  return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
+}
+
+type NativeFileReactionParams = {
+  target: string;
+  reaction: NativeReactionKind;
+};
+
+export async function fetchHyperbeamFileReactionList(claimIds: string | Array<string>): Promise<ReactionListResponse> {
+  return nativeReactionList(stringList(claimIds), 'content');
+}
+
+export async function fetchHyperbeamFileReactionReact(
+  params: NativeFileReactionParams
+): Promise<ReactionReactResponse> {
+  return writeNativeReaction({ ...params, subject: 'content', toggle: true });
+}
+
+async function nativeReactionList(
+  targets: Array<string>,
+  subject: NativeReactionSubject
+): Promise<ReactionListResponse> {
+  const validTargets = Array.from(new Set(targets.filter(validNativeReactionTarget)));
+  const [collections, viewerOwner] = await Promise.all([
+    Promise.all(validTargets.map((target) => fetchNativeReactionCollection(target, subject))),
+    activeHyperbeamAccountOwner(),
+  ]);
+  const projected = projectNativeReactions(collections.flat(), viewerOwner);
+  return reactionListResponse(validTargets, projected.my_reactions, projected.others_reactions);
+}
+
+async function writeNativeReaction(params: {
+  target: string;
+  subject: NativeReactionSubject;
+  reaction: NativeReactionKind;
+  remove?: boolean;
+  toggle?: boolean;
+}): Promise<ReactionReactResponse> {
+  if (!validNativeReactionTarget(params.target)) throw new Error('A valid native reaction target is required');
+  if (params.reaction !== 'like' && params.reaction !== 'dislike') {
+    throw new Error('This native reaction type is not implemented');
+  }
+
+  const [owner, existing] = await Promise.all([
+    activeHyperbeamAccountOwner(),
+    fetchNativeReactionCollection(params.target, params.subject),
+  ]);
+  if (!owner) throw new Error('Sign up or log in with the HyperBEAM account before reacting');
+
+  const current = projectNativeReactions(existing, owner).current.find((reaction) => reaction.owner === owner);
+  const shouldRemove = Boolean(
+    params.remove || (params.toggle && nativeReactionToggleRemoves(current, params.reaction))
+  );
+  if (shouldRemove && (!current || current.state !== 'active' || current.reaction !== params.reaction)) {
+    return { success: true, ...(await nativeReactionList([params.target], params.subject)) };
+  }
+
+  const profile = getHyperbeamAccount();
+  const eventTimestamp = Date.now();
+  const operation = shouldRemove ? 'remove' : 'set';
+  const message = compactParams({
+    schema: NATIVE_REACTION_SCHEMA,
+    type: NATIVE_REACTION_TYPE,
+    'reaction-ref': current?.reaction_ref || nativeMessageVersionRef(),
+    target: params.target,
+    subject: params.subject,
+    reaction: params.reaction,
+    state: shouldRemove ? 'removed' : 'active',
+    operation,
+    revision: current ? current.revision + 1 : 0,
+    'version-ref': nativeMessageVersionRef(),
+    'revision-of': current ? current.reaction_ref : undefined,
+    'previous-version': current?.version_ref,
+    'event-timestamp': eventTimestamp,
+    author: profile?.id,
+    'profile-id': profile?.id,
+    'profile-name': profile?.name,
+    'signature-scope': NATIVE_REACTION_SIGNATURE_SCOPE,
+  });
+  const messageId = await writeNativeMessage(message, `${params.subject} reaction`);
+  nativeReactionQueryCache.clear();
+  const written = await fetchNativeReactionById(messageId);
+  if (!written || written.owner !== owner) {
+    throw new Error('HyperBEAM native reaction failed commitment or ownership verification');
+  }
+
+  return {
+    success: true,
+    'message-id': messageId,
+    ...(await nativeReactionList([params.target], params.subject)),
+  };
+}
+
+async function fetchNativeReactionCollection(
+  target: string,
+  subject: NativeReactionSubject
+): Promise<Array<NativeReaction>> {
+  const selectors = {
+    schema: NATIVE_REACTION_SCHEMA,
+    type: NATIVE_REACTION_TYPE,
+    target,
+    subject,
+  };
+  const request = nativeQueryRequest(selectors);
+  const key = stableJson(request);
+  return cachedNativeQuery(nativeReactionQueryCache, key, async () => {
+    const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+    const reactions = await resolveNativeReactionPaths(paths);
+    return reactions.filter(
+      (reaction) =>
+        reaction.schema === selectors.schema &&
+        reaction.type === selectors.type &&
+        reaction.target === target &&
+        reaction.subject === subject
+    );
+  });
+}
+
+async function resolveNativeReactionPaths(paths: Array<string>): Promise<Array<NativeReaction>> {
+  const reactions: Array<NativeReaction | null> = Array.from({ length: paths.length }, () => null);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(paths.length, NATIVE_COMMENT_READ_CONCURRENCY) }, async () => {
+    while (cursor < paths.length) {
+      const index = cursor++;
+      reactions[index] = await fetchNativeReactionById(paths[index]);
+    }
+  });
+  await Promise.all(workers);
+  return reactions.filter((reaction): reaction is NativeReaction => Boolean(reaction));
+}
+
+async function fetchNativeReactionById(id: string): Promise<NativeReaction | null> {
+  if (!isNativeMessageId(id)) return null;
+  const normalizedId = id.replace(/^\/+/, '');
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  return normalizeNativeReaction({
+    ...verified.payload,
+    'message-id': normalizedId,
+    'hyperbeam-owner': verified.owner,
+  });
+}
+
+function reactionListResponse(
+  targets: Array<string>,
+  myReactions: ReactionListResponse['my_reactions'],
+  othersReactions: ReactionListResponse['others_reactions']
+): ReactionListResponse {
+  const my = { ...myReactions };
+  const others = { ...othersReactions };
+  targets.forEach((target) => {
+    my[target] ||= { like: 0, dislike: 0 };
+    others[target] ||= { like: 0, dislike: 0 };
+  });
+  return { my_reactions: my, others_reactions: others };
 }
 
 type CommentSource = {
@@ -495,10 +873,7 @@ async function fetchNativeCommentRoot(rootId: string): Promise<any | null> {
 async function fetchNativeCommentVersionById(id: string): Promise<any | null> {
   if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchCachedStoreJsonOrNull(
-    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
-    false
-  );
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
   const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
   const payload = verified?.payload;
   if (!payload || !verified) return null;
@@ -712,10 +1087,7 @@ async function resolveNativeCommentControlPaths(paths: Array<string>): Promise<A
 async function fetchNativeCommentControlById(id: string): Promise<NativeCommentControl | null> {
   if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchCachedStoreJsonOrNull(
-    `${CACHE_DEVICE}/read?read=${encodeURIComponent(normalizedId)}`,
-    false
-  );
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
   const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
   if (!verified) return null;
   const control = normalizeNativeCommentControl({
@@ -1090,7 +1462,6 @@ export async function fetchHyperbeamCommentAbandon(
 }
 
 export async function fetchHyperbeamReactionReact(params: ReactionReactParams): Promise<ReactionReactResponse | null> {
-  if (params.type !== 'creator_like') throw new Error('This native reaction type is not implemented');
   const ids = stringList(params.comment_ids);
   const comments = await Promise.all(ids.map(fetchNativeCommentByIdRaw));
   const native = comments.filter(Boolean);
@@ -1098,10 +1469,28 @@ export async function fetchHyperbeamReactionReact(params: ReactionReactParams): 
 
   const legacyIds = ids.filter((_, index) => !comments[index]);
   if (legacyIds.length) throw new Error('Reactions can only target native comments');
+  if (params.type === 'like' || params.type === 'dislike') {
+    const results = await Promise.all(
+      native.map((comment) =>
+        writeNativeReaction({
+          target: comment.comment_id,
+          subject: 'comment',
+          reaction: params.type as NativeReactionKind,
+          remove: params.remove,
+        })
+      )
+    );
+    return { success: true, items: results };
+  }
+  if (params.type !== 'creator_like') throw new Error('This native reaction type is not implemented');
+
+  const activeOwner = await activeHyperbeamAccountOwner();
+  const account = getHyperbeamAccount();
+  if (!activeOwner || !account) throw new Error('A HyperBEAM account is required for a creator heart');
   await Promise.all(
     native.map(async (comment) => {
       const owner = await nativeCommentTargetOwner(comment.claim_id);
-      if (!owner || params.channel_id !== owner) {
+      if (!owner || activeOwner !== owner) {
         throw new Error('Only the content owner can add a creator heart to this native comment');
       }
       await writeNativeCommentControl(
@@ -1111,8 +1500,8 @@ export async function fetchHyperbeamReactionReact(params: ReactionReactParams): 
           authority: 'owner',
           target: comment.claim_id,
           owner,
-          actor: params.channel_id,
-          actorName: params.channel_name,
+          actor: activeOwner,
+          actorName: account.name,
           commentId: comment.comment_id,
         }),
         params.remove ? 'creator heart removal' : 'creator heart'
@@ -1196,16 +1585,17 @@ export async function fetchHyperbeamModerationAmI(_params: ModerationAmIParams):
 
 export async function fetchHyperbeamReactionList(params: ReactionListParams): Promise<ReactionListResponse | null> {
   const ids = stringList(params.comment_ids);
-  const native = await nativeCreatorHeartReactions(ids, params.channel_id);
+  const [basic, viewerOwner] = await Promise.all([nativeReactionList(ids, 'comment'), activeHyperbeamAccountOwner()]);
+  const native = await nativeCreatorHeartReactions(ids, viewerOwner || undefined);
   return {
-    my_reactions: native?.my_reactions || {},
-    others_reactions: native?.others_reactions || {},
+    my_reactions: mergeReactionCounts(basic.my_reactions, native?.my_reactions),
+    others_reactions: mergeReactionCounts(basic.others_reactions, native?.others_reactions),
   };
 }
 
 async function nativeCreatorHeartReactions(
   ids: Array<string>,
-  viewerChannelId?: string
+  viewerOwner?: string
 ): Promise<(ReactionListResponse & { native_ids: Array<string> }) | null> {
   const comments = (await Promise.all(ids.map(fetchNativeCommentByIdRaw))).filter(Boolean);
   if (!comments.length) return null;
@@ -1214,7 +1604,7 @@ async function nativeCreatorHeartReactions(
   const othersReactions: Record<string, any> = {};
   projected.items.forEach((comment) => {
     if (!comment.creator_liked) return;
-    const destination = viewerChannelId && viewerChannelId === comment.native_owner_id ? myReactions : othersReactions;
+    const destination = viewerOwner && viewerOwner === comment.native_owner_id ? myReactions : othersReactions;
     destination[comment.comment_id] = { creator_like: 1 };
   });
   return {
@@ -1222,6 +1612,18 @@ async function nativeCreatorHeartReactions(
     others_reactions: othersReactions,
     native_ids: comments.map((comment) => comment.comment_id),
   };
+}
+
+function mergeReactionCounts(left: any = {}, right: any = {}): Record<string, any> {
+  const merged: Record<string, any> = {};
+  new Set([...Object.keys(left), ...Object.keys(right)]).forEach((target) => {
+    const names = new Set([...Object.keys(left[target] || {}), ...Object.keys(right[target] || {})]);
+    merged[target] = {};
+    names.forEach((name) => {
+      merged[target][name] = toNumber(left[target]?.[name], 0) + toNumber(right[target]?.[name], 0);
+    });
+  });
+  return merged;
 }
 
 // The store has no general claim-search surface: targeted claim-id lookups
@@ -1275,6 +1677,10 @@ export async function fetchHyperbeamClaimsByIds(ids: Array<string>): Promise<Arr
 }
 
 async function fetchStoreClaimByAnyId(id: string): Promise<Array<Claim>> {
+  if (isNativeMessageId(id)) {
+    const playlist = await fetchHyperbeamPlaylistById(id).catch(() => null);
+    if (playlist) return [playlist];
+  }
   if (isClaimId(id)) {
     const claim = await fetchStoreClaimById(id).catch(() => null);
     return claim ? [claim] : [];
@@ -1900,8 +2306,11 @@ function value(source: any, ...keys: string[]): any {
 }
 
 function stringList(source: any): Array<string> {
-  if (Array.isArray(source)) return source.map(String).filter(Boolean);
-  return source ? [String(source)] : [];
+  const values = Array.isArray(source) ? source : source ? [source] : [];
+  return values
+    .flatMap((entry) => String(entry).split(','))
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function isObject(source: any): boolean {
@@ -2017,6 +2426,10 @@ async function fetchNativeMessageCommitter(messageId: string): Promise<string | 
 
   try {
     const encodedId = encodeURIComponent(messageId);
+    // Bind authority to the exact verified commitment named by the query
+    // path. `/<id>/committers/1` is shorter, but byte-identical messages may
+    // be co-signed and share a stored content group; selecting the first
+    // group committer could then attribute a record to the wrong owner.
     const response = await fetch(`${baseUrl}/${encodedId}/commitments/${encodedId}/committer`, {
       method: 'GET',
       credentials: hyperbeamFetchCredentials(baseUrl),
@@ -2707,7 +3120,7 @@ async function fetchImmutableJsonOrNull(id: string): Promise<any | null> {
     return fetchStoreJsonOrNull(storePath('odysee/outpoint', id), false);
   }
   if (!isStandaloneImmutableId(id)) return null;
-  return fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false);
+  return fetchStoreJsonOrNull(encodeDataPath(id), false);
 }
 
 function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> {
@@ -2718,7 +3131,7 @@ function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> 
 
   const promise = (
     isOutpointId(id) || isStandaloneImmutableId(id)
-      ? fetchStoreJsonOrNull(`${encodeDataPath(id)}?accept-bundle=true`, false)
+      ? fetchStoreJsonOrNull(encodeDataPath(id), false)
       : fetchStoreJsonOrNull(storePath('odysee/channel', id))
   ).catch((error) => {
     storeReadCache.delete(key);

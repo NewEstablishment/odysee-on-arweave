@@ -97,10 +97,14 @@ legacy mode and must not bypass an existing device contract.
 10. **Native state changes are append-only.** Comment edits, comment controls,
     upload metadata updates, deletes, and mutable references create signed new
     state or revisions; they do not mutate immutable messages.
-11. **Compatibility sourcing remains observable.** Weaker player-proxy or
+11. **Native social writes use generic messages.** Comments, reactions, and
+    public playlists are committed through `/id?!` and discovered with
+    `query@1.0`; do not add product write devices or legacy API fallbacks for
+    these flows.
+12. **Compatibility sourcing remains observable.** Weaker player-proxy or
     legacy-source boundaries must be represented honestly in response metadata
     and diagnostics.
-12. **Observed diagnostics report reality.** Debug graph activity, call counts,
+13. **Observed diagnostics report reality.** Debug graph activity, call counts,
     edges, backends, and stores must come from actual request events. Never add
     fictitious nodes, inferred calls, or hardcoded active paths.
 
@@ -194,6 +198,29 @@ Meilisearch document must not mutate the underlying object.
   authorized control state.
 - Historical comments and controls remain behind `odysee-comment@1.0`; browser
   code must not call Commentron directly.
+
+### Reactions
+
+- Video and comment reactions are generic `odysee-reaction@1.0` messages.
+- Query only returns locators. Hydrate and verify each exact message and derive
+  ownership from its selected commitment's committer.
+- Toggle, switch, and removal operations are contiguous append-only revisions.
+  Reject forks and conflicting semantic duplicates, and project at most one
+  active reaction per committer and target.
+- Browser actions must not call the legacy reaction API.
+
+### Playlists
+
+- Public playlists are immutable `odysee-playlist@1.0` snapshots written through
+  the generic committed-message path, not LBRY collection claims or a custom
+  device.
+- Playlist items are ordered immutable native IDs or legacy outpoints. Resolve
+  draft URIs before publishing and reject mutable claim IDs as stored identity.
+- Editing a published playlist remains local until the user explicitly publishes
+  another independent snapshot with a new message ID and share URL.
+- Queue, Watch Later, Favorites, and unpublished drafts remain local. A stable
+  mutable playlist reference is deferred until the canonical reference-device
+  contract is available.
 
 ### Uploads and thumbnails
 
@@ -307,6 +334,8 @@ pnpm run test:hyperbeam-upload-smoke
 pnpm run test:hyperbeam-query-comment-smoke
 pnpm run test:native-comment-revisions
 pnpm run test:native-comment-controls
+pnpm run test:native-reactions
+pnpm run test:native-playlists
 pnpm run test:static-manifest
 ```
 

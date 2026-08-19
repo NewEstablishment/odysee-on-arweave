@@ -52,6 +52,29 @@ It must not call Commentron or an LBRY API directly.
   unsupported until native cookie-committer contracts exist. Do not silently
   fall back to legacy services.
 
+## Reactions
+
+- Video and comment reactions use generic `odysee-reaction@1.0` committed
+  messages, exact query discovery, immutable hydration, and committer authority.
+- A toggle or switch appends a contiguous same-owner revision. Reject forks and
+  conflicting semantic duplicates and count at most one active reaction per
+  verified committer and target.
+- HyperBEAM cookie accounts must not be redirected into legacy authentication,
+  and reaction actions must not call legacy reaction endpoints.
+
+## Playlists
+
+- Public playlists use generic immutable `odysee-playlist@1.0` snapshot messages.
+  Do not call `collection_*`, create an application device, or publish an LBRY
+  collection claim.
+- Persist only ordered immutable native IDs or legacy outpoints. Draft URIs must
+  resolve before publish.
+- Each explicit publish creates a new message ID and share URL. Published
+  snapshots cannot be updated or deleted; local edits may be published as a new
+  snapshot.
+- Built-in lists and unpublished drafts stay local. Mutable reference behavior
+  is deferred until its canonical device contract is confirmed.
+
 ## Search
 
 There are two distinct surfaces:
@@ -104,6 +127,8 @@ Validation for integration changes:
 ```sh
 pnpm run typecheck:tsc
 pnpm run fmt:check
+pnpm run test:native-reactions
+pnpm run test:native-playlists
 node --check web/src/odyseeHyperbeamNode.js
 node --check web/src/fetchStreamUrl.js
 ```
