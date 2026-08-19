@@ -97,10 +97,10 @@ legacy mode and must not bypass an existing device contract.
 10. **Native state changes are append-only.** Comment edits, comment controls,
     upload metadata updates, deletes, and mutable references create signed new
     state or revisions; they do not mutate immutable messages.
-11. **Native social writes use generic messages.** Comments, reactions, and
-    public playlists are committed through `/id?!` and discovered with
-    `query@1.0`; do not add product write devices or legacy API fallbacks for
-    these flows.
+11. **Native social writes use generic messages.** Comments, reactions, public
+    playlists, and follows/subscriptions are committed through `/id?!` and
+    discovered with `query@1.0`; do not add product write devices or legacy API
+    fallbacks for these flows.
 12. **Compatibility sourcing remains observable.** Weaker player-proxy or
     legacy-source boundaries must be represented honestly in response metadata
     and diagnostics.
@@ -222,6 +222,20 @@ Meilisearch document must not mutate the underlying object.
   mutable playlist reference is deferred until the canonical reference-device
   contract is available.
 
+### Follows and subscriptions
+
+- Free channel follows are generic `odysee-subscription@1.0` messages written
+  through the generic committed-message path, not the legacy subscription API
+  or a custom device.
+- Follow, notification-preference updates, unfollow, and re-follow form one
+  contiguous same-owner append-only revision chain bound to a stable channel
+  reference.
+- Query results are locators. Hydrate and verify each exact message, derive the
+  owner from its commitment committer, and accept profile display metadata only
+  when the profile verifies under that same committer.
+- Legacy subscription import, aggregate subscriber counts, paid memberships,
+  and Following-feed aggregation are separate contracts.
+
 ### Uploads and thumbnails
 
 - `odysee-upload@1.0` owns authenticated chunks, manifests, metadata records,
@@ -239,8 +253,9 @@ Meilisearch document must not mutate the underlying object.
 - Same-origin SSR bridges exist where browser cookies cannot cross origins or a
   server-held signer is required. They are transport/security boundaries, not a
   second data mode.
-- `odysee-subscription@1.0` is an internal compatibility implementation. The
-  public/frontend subscription-count surface is `odysee-account@1.0`.
+- The internal compatibility subscription implementation is not the native
+  follow write path. The public/frontend subscription-count surface remains
+  `odysee-account@1.0`; native follows are generic committed messages.
 
 ## Local Services
 
@@ -336,6 +351,7 @@ pnpm run test:native-comment-revisions
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
+pnpm run test:native-subscriptions
 pnpm run test:static-manifest
 ```
 

@@ -62,6 +62,8 @@
     "test:native-cookie-reactions": "node --experimental-strip-types tests/scripts/native-cookie-reactions-smoke.mjs",
     "test:native-playlists": "node --experimental-strip-types tests/scripts/native-playlists.mjs",
     "test:native-cookie-playlists": "node --experimental-strip-types tests/scripts/native-cookie-playlists-smoke.mjs",
+    "test:native-subscriptions": "node --experimental-strip-types tests/scripts/native-subscriptions.mjs",
+    "test:native-cookie-subscriptions": "node --experimental-strip-types tests/scripts/native-cookie-subscriptions-smoke.mjs",
     "test:static-manifest": "node --test build/static-manifest.test.mjs"
   },
   "dependencies": {

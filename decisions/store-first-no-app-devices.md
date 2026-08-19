@@ -24,8 +24,9 @@ inversion that makes the store unusable without the whole device fleet.
   `hb_store_remote_node` pointed at seed peers.
 - **Writes**: the default `~auth-hook@1.0` request hook (`?!=true`
   commit key) signs the user's POST with a node-hosted per-user wallet;
-  uploads and comments are ordinary committed messages written to the
-  cache and discovered via `~query@1.0`'s match index — the architecture
+  uploads, comments, reactions, public playlists, and subscriptions are
+  ordinary committed messages written to the cache and discovered via
+  `~query@1.0`'s match index — the architecture
   rave/moderation already proved for native comments, with no custom
   device.
 - Dropped entirely: the legacy-API bridge devices, the tier-1

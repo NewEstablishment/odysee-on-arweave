@@ -75,6 +75,20 @@ It must not call Commentron or an LBRY API directly.
 - Built-in lists and unpublished drafts stay local. Mutable reference behavior
   is deferred until its canonical device contract is confirmed.
 
+## Follows And Subscriptions
+
+- Free follows use generic `odysee-subscription@1.0` committed messages, exact
+  query discovery, immutable hydration, and committer authority.
+- Follow, bell-preference changes, unfollow, and re-follow are contiguous
+  same-owner append-only revisions. Stop at forks and reject conflicting
+  semantic duplicates.
+- Bind relationships to a stable native channel ID or full legacy channel claim
+  ID. Names and mutable URIs are display/lookup data, not authority.
+- Cookie accounts must not be redirected into legacy authentication, and
+  subscription actions must never call the legacy subscription API.
+- One-time legacy import, aggregate counts, paid memberships, and Following-feed
+  aggregation are separate contracts.
+
 ## Search
 
 There are two distinct surfaces:
@@ -129,6 +143,7 @@ pnpm run typecheck:tsc
 pnpm run fmt:check
 pnpm run test:native-reactions
 pnpm run test:native-playlists
+pnpm run test:native-subscriptions
 node --check web/src/odyseeHyperbeamNode.js
 node --check web/src/fetchStreamUrl.js
 ```
@@ -137,6 +152,8 @@ Use the focused native comment, control, upload, static-manifest, and browser sm
 For the cookie-owned comment lifecycle, run
 `HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments`
 against the configured local node.
+Run `test:native-cookie-subscriptions` against the same configured node when
+follow persistence or account ownership changes.
 
 ## Current State And Limitations
 

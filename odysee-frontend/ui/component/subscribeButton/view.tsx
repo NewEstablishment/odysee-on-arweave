@@ -23,6 +23,7 @@ import { doOpenModal } from 'redux/actions/app';
 import { selectUser } from 'redux/selectors/user';
 import { doToast } from 'redux/actions/notifications';
 import { PREFERENCE_EMBED } from 'constants/tags';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 type Props = {
   uri: string;
   shrinkOnMobile?: boolean;
@@ -105,7 +106,7 @@ export default function SubscribeButton(props: Props) {
           largestLabel={isMobile && shrinkOnMobile ? '' : subscriptionLabel}
           icon={ICONS.UNSUBSCRIBE}
           button={'alt'}
-          requiresAuth={IS_WEB}
+          requiresAuth={!hyperbeamNodeEnabled()}
           label={label}
           title={titlePrefix}
           href={isEmbed && `${PAGES.AUTH_SIGNIN}?redirect=${encodeURIComponent(formatLbryUrlForWeb(uri))}`}
@@ -156,7 +157,7 @@ export default function SubscribeButton(props: Props) {
               : ICONS.SUBSCRIBE
         }
         button={'alt'}
-        requiresAuth={IS_WEB}
+        requiresAuth={!hyperbeamNodeEnabled()}
         label={label}
         title={titlePrefix}
         href={isEmbed && `/$/${PAGES.AUTH_SIGNIN}?redirect=${encodeURIComponent(formatLbryUrlForWeb(uri))}`}

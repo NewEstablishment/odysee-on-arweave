@@ -216,7 +216,8 @@ Two mitigations, in order of preference today:
 
 ## Writes
 
-There is no custom write device. Uploads, comments, and moderation events are
+There is no custom write device. Uploads, comments, reactions, playlists,
+subscriptions, and moderation events are
 ordinary committed messages, using stock HyperBEAM machinery end to end:
 
 1. The client sends `POST /<path>?!=true`. The stock `~auth-hook@1.0`
@@ -239,7 +240,8 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    selected by the discovered locator. Profile fields are display metadata and
    are accepted only when the profile message verifies under that same
    committer. LBRY channel signatures remain relevant only to legacy evidence;
-   they do not authorize cookie-native comments, reactions, or playlists.
+   they do not authorize cookie-native comments, reactions, playlists, or
+   subscriptions.
 5. Peers replicate write traffic the same way they replicate evidence: via
    `hb_store_remote_node` against nodes that accepted the writes.
 
@@ -250,7 +252,8 @@ caching a write. `~query@1.0` remains a dumb locator index rather than an
 authority. The end user, as always, trusts the TEE-terminated serving node rather
 than verifying in the browser.
 
-Comments and reactions model changes as contiguous append-only revisions.
+Comments, reactions, and subscriptions model changes as contiguous append-only
+revisions.
 Public playlists currently use a simpler contract: each publish is an
 independent immutable full snapshot containing ordered native IDs or legacy
 outpoints. A mutable playlist head is intentionally deferred until the canonical

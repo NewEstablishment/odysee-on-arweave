@@ -28,6 +28,7 @@ behind HyperBEAM devices and stores. They are not an alternate browser mode.
   - [Comments, Revisions, and Moderation](#comments-revisions-and-moderation)
   - [Reactions](#reactions)
   - [Playlists](#playlists)
+  - [Follows and Subscriptions](#follows-and-subscriptions)
   - [Uploads and Thumbnails](#uploads-and-thumbnails)
   - [Authentication](#authentication)
   - [Static Manifest Publishing](#static-manifest-publishing)
@@ -389,6 +390,25 @@ Watch Later, Favorites, and unpublished drafts stay local. Stable mutable
 playlist references remain deferred until the canonical reference-device
 contract is supplied.
 
+### Follows and Subscriptions
+
+Free channel follows are generic `odysee-subscription@1.0` messages written
+through `POST /id?!=true&committers=all`. The relationship identity combines
+the verified cookie committer with a stable native channel ID or full legacy
+channel claim ID.
+
+Follow, notification-preference update, unfollow, and re-follow operations are
+append-only revisions linked by `revision-of`, `previous-version`, and a
+monotonic revision number. Discovery uses exact `query@1.0/only` selectors;
+each locator is hydrated by immutable ID, commitment-verified, and attributed
+to its exact committer. Forks, gaps, foreign writers, conflicting semantic
+duplicates, and unverifiable profile claims fail closed. The browser does not
+call the legacy subscription API.
+
+New follows default to notifications off unless the user explicitly enables
+the bell. A one-time legacy import, aggregate subscriber counts, paid
+memberships, and Following-feed content aggregation are separate contracts.
+
 ### Uploads and Thumbnails
 
 Large files are split into chunks by the browser/SSR upload bridge. Each chunk is
@@ -695,6 +715,7 @@ pnpm run test:native-comment-revisions
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
+pnpm run test:native-subscriptions
 pnpm run test:static-manifest
 ```
 
@@ -745,6 +766,9 @@ store made the call rather than patching the React page.
   legacy service.
 - Native video/comment reactions and immutable public playlist snapshots are
   implemented. Mutable playlist-head/reference behavior remains deferred.
+- Native free follows and notification preferences are implemented. Legacy
+  import, aggregate counts, paid memberships, and the complete Following feed
+  remain separate work.
 - Complete mutable-name and claim-ID migration to owner-controlled reference
   messages is not finished.
 - Claim-output transaction verification alone does not prove inclusion in the
