@@ -38,6 +38,10 @@
        {ref,"73f16ed9856972ced3fb8f4168004fffe742d5b2"}},
   1},
  {<<"ranch">>,{pkg,<<"ranch">>,<<"2.2.0">>},1},
+ {<<"reference_1_0">>,
+  {git,"https://github.com/samcamwilliams/reference-1.0.git",
+       {ref,"ca16e256af4eb2bf96406c41048d0e44851ce950"}},
+  0},
  {<<"ssl_verify_fun">>,{pkg,<<"ssl_verify_fun">>,<<"1.1.7">>},2},
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.7.1">>},2}]}.
 [

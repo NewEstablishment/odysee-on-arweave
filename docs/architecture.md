@@ -259,11 +259,20 @@ browser operation never reads or writes the legacy subscription service.
    `hb_store_remote_node` against nodes that accepted the writes.
 
 As with reads, authenticity checks are a *between-node* concern: a replicating
-peer re-filters query results against their selectors and re-verifies the
-channel signature before caching a write, so `~query@1.0` stays a dumb index
-and no node is trusted for write authenticity by its peers. The end user, as
-always, trusts the TEE-terminated serving node rather than verifying in the
-browser.
+peer re-filters query results against their selectors, verifies each exact
+commitment, and derives native ownership from that commitment's committer
+before caching a write. `~query@1.0` remains a dumb locator index rather than
+an authority. The end user trusts the TEE-terminated serving node rather than
+verifying in the browser.
+
+Comments, reactions, and subscriptions model changes as contiguous append-only
+revisions. Public playlists separate identity from content: each publish writes
+an immutable full `odysee-playlist@1.0` snapshot, while the pinned external
+`reference@1.0` device supplies the stable public identity. Its init commitment
+is the playlist ID; later same-authority set messages point to new snapshots
+without mutating earlier content. Readers hydrate and verify every candidate,
+derive authority from the init committer, and select only a strictly newer
+unambiguous set. Query order is never authority.
 
 Legacy-only interactive surfaces with no verifiable representation — fuzzy
 text search, view counts, subscription counts, legacy comment writes — are

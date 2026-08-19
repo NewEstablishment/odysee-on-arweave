@@ -140,19 +140,17 @@ Playlists:
 
 - Public playlists are generic `odysee-playlist@1.0` messages, not LBRY
   collection claims and not a custom device.
-- A committed playlist ID is an exact-read public route. Discovery may return
-  another verified commitment locator for the same immutable message. Every
-  distinct published payload is an independent immutable full snapshot.
 - Store ordered immutable native IDs or legacy outpoints only. Resolve local
   draft URIs before publish; never persist mutable claim IDs as item identity.
-- Editing or reordering stays local until the user explicitly publishes a new
-  snapshot, which receives a new ID and URL. Do not emulate mutable update,
-  delete, or current-head semantics before the generic reference/frequency
-  contract is integrated.
-- Verify the snapshot and its claimed profile under the same committer.
+- The pinned external `reference@1.0` init commitment supplies the stable
+  public playlist ID. Republish writes a new immutable full snapshot and a
+  strictly newer same-owner set message while preserving the public URL.
+- Hydrate and verify every init, set, and selected snapshot. Authority comes
+  from the init commitment's committer; reject foreign writers, stale or tied
+  updates, and snapshots owned by another committer.
 - Keep Queue, Watch Later, Favorites, and unpublished drafts local. Do not
   restore channel selection, URL names, bids, confirmations, support, or
-  `collection_*` SDK calls.
+  `collection_*` SDK calls. Public deletion remains deferred.
 
 Subscriptions:
 

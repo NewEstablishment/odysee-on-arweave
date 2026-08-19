@@ -120,18 +120,15 @@ explicitly instead of falling back to legacy services.
 - Public playlists are generic `odysee-playlist@1.0` messages written through
   `/id?!=true&committers=all`; do not call `collection_*` or add a playlist
   device.
-- A committed message ID is an exact public route. Discovery may return another
-  verified commitment locator for the same immutable message. Discover owner
-  lists by exact schema/profile, hydrate each returned locator, and verify both
-  the playlist and claimed profile under the same committer.
 - Store a complete ordered immutable item list in every snapshot. Native IDs
   and legacy outpoints are allowed; mutable claim IDs, names, and URIs are not.
-- Local drafts and builtin lists remain local. Editing/reordering a published
-  playlist stays local until an explicit publish creates another immutable
-  snapshot with a new message ID and share URL.
-- Public update/delete, stable-head selection, and auto-publish are deferred
-  until the generic reference/frequency contract is integrated. Do not invent
-  a playlist-specific mutable index or revision projector.
+- The pinned external `reference@1.0` init commitment is the stable public
+  playlist ID. Republish writes a new full snapshot and then a strictly newer
+  same-owner reference set; it never mutates an earlier snapshot.
+- Hydrate and verify every init, set, and selected snapshot. Bind authority to
+  the init committer, never profile fields or query order. Reject foreign
+  writers, stale or tied updates, and foreign-owned snapshots.
+- Local drafts and builtin lists remain local. Public deletion is not exposed.
 - Preserve Redux collection shape and playback order at the integration
   boundary. The playlist UI must not expose channel selection, URL names,
   bids, balances, confirmations, supports, reports, or abandon-claim flows.

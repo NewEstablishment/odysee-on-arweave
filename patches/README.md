@@ -1,9 +1,10 @@
 # Proposed upstream HyperBEAM changes
 
-Nothing in this repository depends on these landing; the system runs on
-stock nodes today. Any proposal beyond this list must take the form of a
-terse (<= 20 lines, test + fix) branch on a HyperBEAM worktree, and only
-for defects that are demonstrably HyperBEAM's, not this application's.
+These narrow fixes are applied idempotently to pinned dependencies during
+compilation and should land upstream before their hooks are removed. Any
+proposal beyond this list must take the form of a terse (<= 20 lines, test +
+fix) branch on a dependency worktree, and only for defects demonstrably owned
+by that dependency rather than this application.
 
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
@@ -47,3 +48,13 @@ frontend issues a `POST /~query@1.0/only`. The patch maps misses to `[]`, `0`,
 or `false` according to the requested aggregate type, retains `not_found` for
 first-item modes, and adds focused upstream EUnit assertions. Applies cleanly
 to the pinned dep (`git apply --check` verified).
+
+## 4. `reference-message-operations.patch`
+
+The canonical `reference@1.0` default resolver dereferences unknown keys to the
+current value. Its exclude list omitted reserved `message@1.0` operations, so
+`/<reference-id>/verify` verified the pointed-at snapshot and exact committer
+lookup could not reach the init/set commitment. The patch keeps `id`,
+`commitments`, `committers`, `committed`, and `verify` bound to `message@1.0`
+and adds a regression assertion. It is applied idempotently to the pinned
+external dependency during compilation.

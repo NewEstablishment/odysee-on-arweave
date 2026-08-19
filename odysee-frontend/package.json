@@ -61,7 +61,7 @@
     "test:native-comment-controls": "node --experimental-strip-types tests/scripts/native-comment-controls.mjs",
     "test:native-reactions": "node --experimental-strip-types tests/scripts/native-reactions.mjs",
     "test:native-cookie-reactions": "node --experimental-strip-types tests/scripts/native-cookie-reactions-smoke.mjs",
-    "test:native-playlists": "node --experimental-strip-types tests/scripts/native-playlists.mjs",
+    "test:native-playlists": "node --experimental-strip-types tests/scripts/native-playlists.mjs && node --experimental-strip-types tests/scripts/native-playlist-references.mjs",
     "test:native-cookie-playlists": "node --experimental-strip-types tests/scripts/native-cookie-playlists-smoke.mjs",
     "test:native-subscriptions": "node --experimental-strip-types tests/scripts/native-subscriptions.mjs",
     "test:native-cookie-subscriptions": "node --experimental-strip-types tests/scripts/native-cookie-subscriptions-smoke.mjs",

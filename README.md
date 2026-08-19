@@ -182,19 +182,20 @@ legacy reaction API.
 
 ### Playlists
 
-Public playlists are cookie-signed `odysee-playlist@1.0` messages. A committed
-ID gives the public route `/$/playlist/<message-id>`. The frontend uses generic
-`/id?!` writes, `query@1.0/only` owner listing, and exact commitment hydration; it does
-not call the LBRY `collection_*` API.
+Public playlists pair cookie-signed immutable `odysee-playlist@1.0` snapshots
+with the pinned generic `reference@1.0` device. The reference init commitment
+is the stable public route `/$/playlist/<reference-id>`. The frontend uses
+generic `/id?!` writes, `query@1.0/only` discovery, and exact commitment
+hydration; it does not call the LBRY `collection_*` API.
 
 - Every message contains a complete ordered snapshot of immutable native IDs
   and/or legacy `<txid>:<nout>` outpoints.
-- A republish after editing or reordering creates a new committed message, a
-  new public ID, and a new share URL. The earlier snapshot remains immutable
-  and exactly addressable.
-- Public update/delete and stable-head semantics are deliberately deferred
-  until the generic reference/frequency contract is integrated. The basic flow
-  does not invent a playlist-specific mutable index or revision projection.
+- A republish after editing or reordering writes a new full snapshot and a
+  strictly newer same-owner reference set while keeping the share URL stable.
+  Earlier snapshots remain immutable and exactly addressable.
+- Readers hydrate and verify every discovered init/set commitment and the
+  selected snapshot. The init committer is the authority; foreign writers,
+  stale or tied updates, and foreign-owned snapshots are rejected.
 - Mutable 40-character claim IDs, names, and URIs are rejected as stored item
   identity; the integration layer resolves local draft URIs before publish.
 - Duplicate physical reads are deduplicated by their returned locator. The playlist
@@ -203,8 +204,8 @@ not call the LBRY `collection_*` API.
   a draft creates a new public immutable snapshot.
 
 Playlist UI retains list, local edit/reorder, explicit snapshot publish, play,
-shuffle, and share. Published delete and auto-publish are hidden until they can
-be expressed honestly through the generic reference contract. It has no
+shuffle, and share. Published delete remains hidden until it has an honest
+append-only contract. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
 
