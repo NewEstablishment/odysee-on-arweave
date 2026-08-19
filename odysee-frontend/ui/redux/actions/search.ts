@@ -5,7 +5,7 @@ import { doOpenModal } from 'redux/actions/app';
 import { doToast } from 'redux/actions/notifications';
 import { selectClientSetting, selectLanguage, selectShowMatureContent } from 'redux/selectors/settings';
 import { selectClaimForUri, selectClaimIdForUri, selectClaimIsNsfwForUri } from 'redux/selectors/claims';
-import { doClaimSearch, doResolveClaimIds, doResolveUris } from 'redux/actions/claims';
+import { doClaimSearch, doResolveUris } from 'redux/actions/claims';
 import { buildURI, isURIValid } from 'util/lbryURI';
 import {
   makeSelectSearchUrisForQuery,
@@ -14,15 +14,15 @@ import {
   selectSearchValue,
 } from 'redux/selectors/search';
 import { selectUser } from 'redux/selectors/user';
-import handleFetchResponse from 'util/handle-fetch';
 import { getSearchQueryString } from 'util/query-params';
 import { getRecommendationSearchOptions, getShortsRecommendationSearchOptions } from 'util/search';
-import { SEARCH_SERVER_API, SEARCH_SERVER_API_ALT, RECSYS_FYP_ENDPOINT } from 'config';
+import { fetchSearchIds } from 'util/hyperbeam';
+import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
+import { RECSYS_FYP_ENDPOINT } from 'config';
 import { SEARCH_OPTIONS } from 'constants/search';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import { getAuthToken } from 'util/saved-passwords';
 import { LocalStorage, LS } from 'util/storage';
-const isDev = process.env.NODE_ENV !== 'production';
 // ****************************************************************************
 // FYP
 // ****************************************************************************
@@ -104,40 +104,11 @@ type SearchOptions = {
   // for fyp only
   uuid?: string; // for fyp only
 };
-let lighthouse = {
-  CONNECTION_STRING: SEARCH_SERVER_API,
-  user_id: '',
-  uid: '',
-  search: (queryString: string) => {
-    if (lighthouse.uid) {
-      return fetch(`${lighthouse.CONNECTION_STRING}?${queryString}${lighthouse.uid}`).then(handleFetchResponse);
-    } else {
-      return fetch(`${lighthouse.CONNECTION_STRING}?${queryString}`).then(handleFetchResponse);
-    }
-  },
-  searchRecommendations: (queryString: string) => {
-    if (lighthouse.user_id) {
-      return fetch(`${SEARCH_SERVER_API_ALT}?${queryString}${lighthouse.user_id}${lighthouse.uid}`).then(
-        handleFetchResponse
-      );
-    } else {
-      return fetch(`${SEARCH_SERVER_API_ALT}?${queryString}`).then(handleFetchResponse);
-    }
-  },
-};
-export const setSearchApi = (endpoint: string) => {
-  lighthouse.CONNECTION_STRING = endpoint.replace(/\/*$/, '/'); // exactly one slash at the end;
-};
-export const setSearchUserId = (userId: string | null | undefined) => {
-  lighthouse.user_id = userId ? `&user_id=${userId}` : '';
-  lighthouse.uid = userId ? `&uid=${userId}` : '';
-};
-
 /**
- * Processes a lighthouse-formatted search result to an array of uris.
+ * Processes a search-service-formatted result to an array of uris.
  * @param results
  */
-const processLighthouseResults = (results: Array<any>) => {
+const processSearchResults = (results: Array<any>) => {
   const uris = [];
   results.forEach((item) => {
     if (item) {
@@ -190,62 +161,51 @@ export const doSearch =
 
     dispatch({
       type: ACTIONS.SEARCH_START,
+      // The reducer keys the in-flight request by query: without it the
+      // request registers under '' and no completion can ever clear it,
+      // leaving the results spinner running forever.
+      data: { query: queryWithOptions },
     });
-    const isSearchingRecommendations = searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO);
-    const cmd = isSearchingRecommendations && !isDev ? lighthouse.searchRecommendations : lighthouse.search;
 
-    const finishSearch = (uris: Array<string>, poweredBy?: string, uuid?: string, returnCachedClaims?: boolean) => {
-      dispatch(doResolveUris(uris, returnCachedClaims));
+    if (searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO)) {
       dispatch({
         type: ACTIONS.SEARCH_SUCCESS,
         data: {
           query: queryWithOptions,
           from: from,
           size: size,
-          uris,
-          poweredBy,
-          uuid,
+          uris: [],
+          poweredBy: '',
+          uuid: '',
         },
       });
-    };
+      return;
+    }
 
-    const fetchLighthouseResults = () =>
-      cmd(queryWithOptions).then((data: SearchResults) => {
-        const { body: result, poweredBy, uuid } = data;
-        return { result, poweredBy, uuid, uris: processLighthouseResults(result) };
-      });
+    const start = Number(from) || 0;
+    const count = Number(size) || 20;
 
-    const runLighthouseSearch = () =>
-      fetchLighthouseResults()
-        .then(({ result, poweredBy, uuid, uris }) => {
-          if (isSearchingRecommendations) {
-            // Temporarily resolve using `claim_search` until the SDK bug is fixed.
-            const claimIds = result.map((x) => x.claimId);
-            dispatch(doResolveClaimIds(claimIds)).finally(() => {
-              dispatch({
-                type: ACTIONS.SEARCH_SUCCESS,
-                data: {
-                  query: queryWithOptions,
-                  from: from,
-                  size: size,
-                  uris,
-                  poweredBy,
-                  uuid,
-                },
-              });
-            });
-            return;
-          }
-
-          finishSearch(uniqueUris(uris), poweredBy, uuid);
-        })
-        .catch(() => {
-          dispatch({
-            type: ACTIONS.SEARCH_FAIL,
-          });
+    fetchSearchIds(query, start + count)
+      .then((ids) => {
+        const uris = uniqueUris(ids.map((id) => hyperbeamImmutableUri(id)).filter(Boolean)).slice(start);
+        dispatch(doResolveUris(uris));
+        dispatch({
+          type: ACTIONS.SEARCH_SUCCESS,
+          data: {
+            query: queryWithOptions,
+            from: from,
+            size: size,
+            uris,
+            poweredBy: 'HyperBEAM',
+            uuid: '',
+          },
         });
-
-    runLighthouseSearch();
+      })
+      .catch(() => {
+        dispatch({
+          type: ACTIONS.SEARCH_FAIL,
+        });
+      });
   };
 export const doUpdateSearchOptions =
   (newOptions: SearchOptions, additionalOptions: SearchOptions) => (dispatch: Dispatch, getState: GetState) => {
@@ -368,7 +328,7 @@ export const doFetchPersonalRecommendations = () => (dispatch: Dispatch, getStat
       const { gid, recs } = data;
 
       if (gid && recs) {
-        const uris = processLighthouseResults(recs);
+        const uris = processSearchResults(recs);
         dispatch(
           doClaimSearch({
             claim_ids: recs.map((r) => r.claimId),
@@ -434,4 +394,4 @@ export const doRemovePersonalRecommendation = (uri: string) => (dispatch: Dispat
     })
   );
 };
-export { lighthouse, recsysFyp };
+export { recsysFyp };

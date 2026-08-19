@@ -1,0 +1,32 @@
+diff --git a/src/core/resolver/hb_cache.erl b/src/core/resolver/hb_cache.erl
+index 59e972a2..6d2c0a71 100644
+--- a/src/core/resolver/hb_cache.erl
++++ b/src/core/resolver/hb_cache.erl
+@@ -271,11 +271,22 @@ write(RawMsg, Opts) when is_map(RawMsg) ->
+     TABM = hb_message:convert(Msg, tabm, <<"structured@1.0">>, Opts),
+     ?event_debug(debug_cache, {writing_full_message, {msg, TABM}}),
+     try
+-        do_write_message(
+-            TABM,
+-            hb_opts:get(store, no_viable_store, Opts),
+-            Opts
+-        )
++        WriteResult =
++            do_write_message(
++                TABM,
++                hb_opts:get(store, no_viable_store, Opts),
++                Opts
++            ),
++        case WriteResult of
++            {ok, WrittenID} ->
++                hb_hook:on(
++                    <<"cache/write">>,
++                    #{ <<"id">> => WrittenID, <<"body">> => Msg },
++                    Opts
++                );
++            _ -> ok
++        end,
++        WriteResult
+     catch
+         Type:Reason:Stacktrace ->
+             ?event(error,

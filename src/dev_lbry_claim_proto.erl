@@ -1,5 +1,6 @@
 -module(dev_lbry_claim_proto).
 -export([stream_sd_hash/1, channel_public_key/1, decode_metadata/1]).
+-export([legacy_publisher_signature/1]).
 
 %% @doc Decode a stream claim protobuf message into a native, Odysee-shaped
 %% `value' map (title/description/thumbnail/tags/source/video/...), matching the
@@ -9,14 +10,88 @@
 %% stream body (e.g. channel claims). Field numbers mirror the LBRY claim
 %% protobuf schema.
 decode_metadata(Message) when is_binary(Message) ->
+    case legacy_metadata(Message) of
+        {ok, Value} -> {ok, Value};
+        _ -> decode_current_metadata(Message)
+    end;
+decode_metadata(_) ->
+    not_found.
+
+%% Claims published before the 2019 schema change carry a different
+%% protobuf: `Claim{version=1, claimType=2, stream=3}' with the text in
+%% `Stream.metadata' and the source in `Stream.source'. The current schema
+%% puts the stream body in field 1, so the two are told apart by field 1's
+%% wire type: a varint version means legacy. Without this, every pre-2019
+%% claim resolves with no title, description or thumbnail.
+legacy_metadata(Message) ->
+    case find_field(Message, 1) of
+        {ok, 0, _Version} ->
+            maybe
+                {ok, Stream} ?= length_field(Message, 3),
+                {ok, Meta} ?= length_field(Stream, 2),
+                Source = optional_field(Stream, 3),
+                MediaType = string_field(Source, 4),
+                Value = put_if_present(#{
+                    <<"title">> => string_field(Meta, 3),
+                    <<"description">> => string_field(Meta, 4),
+                    <<"author">> => string_field(Meta, 5),
+                    <<"license">> => string_field(Meta, 6),
+                    <<"thumbnail">> => legacy_thumbnail(string_field(Meta, 9)),
+                    <<"languages">> => [],
+                    <<"stream_type">> => stream_type(MediaType),
+                    <<"source">> => legacy_source(Source, MediaType)
+                }),
+                case map_size(Value) of
+                    0 -> not_found;
+                    _ -> {ok, Value}
+                end
+            end;
+        _ ->
+            not_found
+    end.
+
+%% @doc The signing channel id bytes and signature of a pre-2019 claim,
+%% taken from
+%% `Claim.publisherSignature' (field 5: `signature' 3, `certificateId' 4).
+%% The certificate id is stored in claim-id order already, unlike the
+%% modern envelope's reversed channel hash.
+legacy_publisher_signature(Message) when is_binary(Message) ->
+    case find_field(Message, 1) of
+        {ok, 0, _Version} ->
+            maybe
+                {ok, Sig} ?= length_field(Message, 5),
+                {ok, Signature} ?= length_field(Sig, 3),
+                {ok, CertificateID} ?= length_field(Sig, 4),
+                ok ?= require_size(CertificateID, 20),
+                {ok, CertificateID, Signature}
+            end;
+        _ ->
+            not_found
+    end;
+legacy_publisher_signature(_) ->
+    not_found.
+
+require_size(Bin, Size) when byte_size(Bin) =:= Size -> ok;
+require_size(_Bin, _Size) -> {error, invalid_certificate_id}.
+
+legacy_thumbnail(not_found) -> not_found;
+legacy_thumbnail(Url) -> #{ <<"url">> => Url }.
+
+legacy_source(not_found, _MediaType) ->
+    not_found;
+legacy_source(Source, MediaType) ->
+    put_if_present(#{
+        <<"sd_hash">> => hex_field(Source, 3),
+        <<"media_type">> => MediaType
+    }).
+
+decode_current_metadata(Message) ->
     case length_field(Message, 1) of
         {ok, Stream} ->
             {ok, stream_value(Message, Stream)};
         _ ->
             not_found
-    end;
-decode_metadata(_) ->
-    not_found.
+    end.
 
 stream_value(Claim, Stream) ->
     Source = optional_field(Stream, 1),
@@ -160,12 +235,32 @@ read_field(Message) ->
     end.
 
 stream_sd_hash(Message) when is_binary(Message) ->
-    maybe
-        {ok, Stream} ?= length_field(Message, 1),
-        {ok, Source} ?= length_field(Stream, 1),
-        {ok, SDHash} ?= length_field(Source, 6),
-        ok ?= valid_hash(SDHash),
-        {ok, hb_util:to_hex(SDHash)}
+    case legacy_sd_hash(Message) of
+        {ok, SDHash} ->
+            {ok, SDHash};
+        _ ->
+            maybe
+                {ok, Stream} ?= length_field(Message, 1),
+                {ok, Source} ?= length_field(Stream, 1),
+                {ok, SDHash} ?= length_field(Source, 6),
+                ok ?= valid_hash(SDHash),
+                {ok, hb_util:to_hex(SDHash)}
+            end
+    end.
+
+%% Legacy claims put the descriptor hash in `Stream.source.source'.
+legacy_sd_hash(Message) ->
+    case find_field(Message, 1) of
+        {ok, 0, _Version} ->
+            maybe
+                {ok, Stream} ?= length_field(Message, 3),
+                {ok, Source} ?= length_field(Stream, 3),
+                {ok, SDHash} ?= length_field(Source, 3),
+                ok ?= valid_hash(SDHash),
+                {ok, hb_util:to_hex(SDHash)}
+            end;
+        _ ->
+            not_found
     end.
 
 %% @doc Extract the raw channel public key bytes from a channel claim
@@ -173,10 +268,30 @@ stream_sd_hash(Message) when is_binary(Message) ->
 %% legacy channels store DER/SPKI-wrapped keys, which the caller must
 %% normalize before use.
 channel_public_key(Message) when is_binary(Message) ->
-    maybe
-        {ok, Channel} ?= length_field(Message, 2),
-        {ok, PublicKey} ?= length_field(Channel, 1),
-        {ok, PublicKey}
+    case legacy_channel_public_key(Message) of
+        {ok, PublicKey} ->
+            {ok, PublicKey};
+        _ ->
+            maybe
+                {ok, Channel} ?= length_field(Message, 2),
+                {ok, PublicKey} ?= length_field(Channel, 1),
+                {ok, PublicKey}
+            end
+    end.
+
+%% Pre-2019 channels are `Claim{claimType=2, certificate=4}' with the key
+%% in `Certificate.publicKey' (field 4), rather than the current
+%% `Claim.channel.public_key'.
+legacy_channel_public_key(Message) ->
+    case find_field(Message, 1) of
+        {ok, 0, _Version} ->
+            maybe
+                {ok, Certificate} ?= length_field(Message, 4),
+                {ok, PublicKey} ?= length_field(Certificate, 4),
+                {ok, PublicKey}
+            end;
+        _ ->
+            not_found
     end.
 
 length_field(Message, FieldNum) ->

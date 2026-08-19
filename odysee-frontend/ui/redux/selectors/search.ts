@@ -48,7 +48,7 @@ export const makeSelectHasReachedMaxResultsLength = (query: string) =>
   });
 
 /**
- * Raw Lighthouse recommendation results for the given uri.
+ * Raw search recommendation results for the given uri.
  */
 export const selectRecommendedContentRawForUri = createCachedSelector(
   selectClaimForUri,

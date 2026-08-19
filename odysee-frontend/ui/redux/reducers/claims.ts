@@ -293,7 +293,7 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
       updateIfValueChanged(state.claimsByUri, byUriDelta, url, stream.claim_id);
       // If url isn't a canonical_url, make sure that is added too
       updateIfValueChanged(state.claimsByUri, byUriDelta, stream.canonical_url, stream.claim_id);
-      // Also add the permanent_url here until lighthouse returns canonical_url for search results
+      // Also add the permanent_url here until the search service returns canonical_url for search results
       updateIfValueChanged(state.claimsByUri, byUriDelta, stream.permanent_url, stream.claim_id);
       newResolvingUrls.delete(stream.canonical_url);
       newResolvingUrls.delete(stream.permanent_url);

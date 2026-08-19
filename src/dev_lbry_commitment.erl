@@ -236,9 +236,14 @@ claim_output_message(Raw, Nout, Ancestry) when is_binary(Raw), is_integer(Nout) 
         % one identical codepath. Committed (deterministic, derived from the
         % already-committed `claim') so it survives caching and stays verifiable.
         {ValueFields, ValueKeys} = decoded_value_fields(Envelope),
+        %% The signing channel is part of the claim's own evidence: without
+        %% it a reader cannot attribute the claim when the attestation is
+        %% unavailable (legacy claims sign differently and cannot produce
+        %% one), and the content renders as anonymous.
+        {ChannelFields, ChannelKeys} = signing_channel_fields(Envelope),
         Msg = with_ancestry_field(
             maps:merge(
-                ValueFields,
+                maps:merge(ValueFields, ChannelFields),
                 #{
                     <<"claim-id">> => ClaimID,
                     <<"claim-op">> => ClaimOp,
@@ -259,7 +264,7 @@ claim_output_message(Raw, Nout, Ancestry) when is_binary(Raw), is_integer(Nout) 
                 <<"claim">>,
                 Type,
                 {<<"outpoint">>, outpoint_bytes(TxIDHex, Nout)},
-                lists:sort(claim_committed_list(Ancestry) ++ ValueKeys),
+                lists:sort(claim_committed_list(Ancestry) ++ ValueKeys ++ ChannelKeys),
                 #{
                     <<"claim-id">> => ClaimID,
                     <<"claim-op">> => ClaimOp,
@@ -322,6 +327,19 @@ decoded_value_fields(Envelope) when is_map(Envelope) ->
         _ -> {#{}, []}
     end;
 decoded_value_fields(_Envelope) ->
+    {#{}, []}.
+
+%% The signing channel id as recorded by the claim envelope (modern
+%% prefix) or the legacy publisher signature. Deterministic from the
+%% committed claim bytes, so it is committed alongside them.
+signing_channel_fields(Envelope) when is_map(Envelope) ->
+    case maps:get(<<"signing-channel-id">>, Envelope, not_found) of
+        ChannelID when is_binary(ChannelID) ->
+            {#{ <<"signing-channel-id">> => ChannelID }, [<<"signing-channel-id">>]};
+        _ ->
+            {#{}, []}
+    end;
+signing_channel_fields(_Envelope) ->
     {#{}, []}.
 
 claim_committed_list(undefined) ->
@@ -862,7 +880,7 @@ claim_evidence_keys() ->
     [
         <<"claim">>, <<"claim-ancestry">>, <<"claim-id">>, <<"claim-name">>,
         <<"claim-op">>, <<"claim-proof-strength">>, <<"nout">>,
-        <<"raw-transaction">>, <<"txid">>, <<"value">>
+        <<"raw-transaction">>, <<"signing-channel-id">>, <<"txid">>, <<"value">>
     ].
 
 %% The claim commitment legitimately lives on claim, channel, and stream

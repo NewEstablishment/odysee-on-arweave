@@ -8,7 +8,7 @@ import classnames from 'classnames';
 import Icon from 'component/common/icon';
 import { isURIValid, normalizeURI, parseURI } from 'util/lbryURI';
 import { Combobox, ComboboxInput, ComboboxPopover, ComboboxList, ComboboxOption } from 'component/common/combobox';
-import useLighthouse from 'effects/use-lighthouse';
+import useSearch from 'effects/use-search';
 import { Form } from 'component/common/form';
 import Button from 'component/button';
 import WunderbarTopSuggestion from 'component/wunderbarTopSuggestion';
@@ -16,7 +16,7 @@ import WunderbarSuggestion from 'component/wunderbarSuggestion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { formatLbryUrlForWeb } from 'util/url';
 import Yrbl from 'component/yrbl';
-import { LIGHTHOUSE_MIN_CHARACTERS, SEARCH_OPTIONS } from 'constants/search';
+import { SEARCH_MIN_CHARACTERS, SEARCH_OPTIONS } from 'constants/search';
 import Spinner from 'component/spinner';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClientSetting, selectLanguage, selectShowMatureContent } from 'redux/selectors/settings';
@@ -74,7 +74,7 @@ export default function WunderBarSuggestions(props: Props) {
   const [debouncedTerm, setDebouncedTerm] = React.useState('');
   const searchSize = isMobile ? 20 : 5;
   const additionalOptions = getAdditionalOptions(channelsOnly, searchInLanguage ? languageSetting : null);
-  const { results, loading } = useLighthouse(debouncedTerm, showMature, searchSize, additionalOptions, 0);
+  const { results, loading } = useSearch(debouncedTerm, showMature, searchSize, additionalOptions, 0);
   const noResults = debouncedTerm && !loading && results && results.length === 0;
   const nameFromQuery = debouncedTerm && debouncedTerm.trim().replace(/\s+/g, '').replace(/:/g, '#');
   const uriFromQuery = `lbry://${nameFromQuery}`;
@@ -180,7 +180,7 @@ export default function WunderBarSuggestions(props: Props) {
   React.useEffect(() => {
     const timer = setTimeout(() => {
       if (debouncedTerm !== term) {
-        setDebouncedTerm(term.length < LIGHTHOUSE_MIN_CHARACTERS ? '' : term);
+        setDebouncedTerm(term.length < SEARCH_MIN_CHARACTERS ? '' : term);
       }
     }, WUNDERBAR_INPUT_DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -369,7 +369,7 @@ export default function WunderBarSuggestions(props: Props) {
                 {subscriptionResults.length > 0 &&
                   subscriptionResults.map((uri) => <WunderbarSuggestion key={uri} uri={uri} />)}
 
-                {showPlaceholder && term.length > LIGHTHOUSE_MIN_CHARACTERS ? <Spinner type="small" /> : null}
+                {showPlaceholder && term.length > SEARCH_MIN_CHARACTERS ? <Spinner type="small" /> : null}
 
                 {!showPlaceholder && results
                   ? results

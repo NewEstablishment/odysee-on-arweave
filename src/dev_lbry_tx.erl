@@ -226,14 +226,39 @@ parse_claim_envelope(<<"{", _/binary>> = Raw) ->
         <<"message">> => Raw
     }};
 parse_claim_envelope(Raw) when is_binary(Raw), byte_size(Raw) > 0 ->
-    {ok, #{
-        <<"raw">> => Raw,
-        <<"encoding">> => <<"v1-protobuf">>,
-        <<"signed">> => false,
-        <<"message">> => Raw
-    }};
+    %% Pre-2019 claims carry no envelope prefix: the publisher signature
+    %% lives inside the protobuf (`Claim.publisherSignature'), with the
+    %% signing channel in its `certificateId' -- stored unreversed, unlike
+    %% the modern envelope hash. Surfacing it here lets channel resolution
+    %% work for legacy claims instead of rendering them as anonymous.
+    {ok,
+        maps:merge(
+            #{
+                <<"raw">> => Raw,
+                <<"encoding">> => <<"v1-protobuf">>,
+                <<"signed">> => false,
+                <<"message">> => Raw
+            },
+            legacy_signature_fields(Raw)
+        )};
 parse_claim_envelope(_) ->
     {error, invalid_claim_envelope}.
+
+legacy_signature_fields(Raw) ->
+    case dev_lbry_claim_proto:legacy_publisher_signature(Raw) of
+        {ok, CertificateID, Signature} ->
+            %% The legacy certificate id is already in claim-id order;
+            %% `signing-channel-hash' keeps the modern (reversed) byte
+            %% convention so downstream verification treats both alike.
+            #{
+                <<"signed">> => true,
+                <<"signing-channel-hash">> => reverse(CertificateID),
+                <<"signing-channel-id">> => hb_util:to_hex(CertificateID),
+                <<"claim-signature">> => Signature
+            };
+        _ ->
+            #{}
+    end.
 
 read_push(<<Len:8, Rest/binary>>) when Len > 0, Len < ?OP_PUSHDATA1 ->
     take(Len, Rest);

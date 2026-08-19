@@ -33,6 +33,9 @@ const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
+const SEARCH_DEVICE = '~search@1.0';
+const SEARCH_MAX_LIMIT = 100;
+const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
 const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
 // Native writes POST straight to the node; `!` is the auth-hook commit flag,
 // so the node's configured auth hook decides whether the write is committed.
@@ -113,21 +116,66 @@ async function fetchStoreClaimById(claimId: string): Promise<any | null> {
 async function fetchStoreChannelClaimForUri(uri: string): Promise<any | null> {
   const claimId = claimIdFromChannelUri(uri);
   const result = await fetchCachedStoreJsonOrNull(storePath('odysee/channel', claimId || uri)).catch(() => null);
-  return storeClaimFromHyperbeam(storePayload(result));
+  return storeClaimFromHyperbeam(await expandLinkedFields(storePayload(result)));
 }
 
 // A claim evidence message names its signing channel inside the raw
 // claim-envelope; enrich the claim with the channel evidence message so the
 // UI can render channel name/title/thumbnail without a device round-trip.
 async function storeClaimEntry(result: any): Promise<any | null> {
-  const payload = storePayload(result);
+  const payload = await expandLinkedFields(storePayload(result));
   if (!payload) return null;
 
   const decoded = decodeClaimMetadata(payload);
-  const channelResult = decoded?.signedChannelId
-    ? await fetchCachedStoreJsonOrNull(storePath('odysee/channel', decoded.signedChannelId)).catch(() => null)
+  const channelId =
+    value(payload, 'signing-channel-id', 'signing_channel_id') ||
+    decoded?.signedChannelId ||
+    channelIdFromEvidence(payload);
+  const channelResult = channelId
+    ? await fetchCachedStoreJsonOrNull(storePath('odysee/channel', channelId)).catch(() => null)
     : null;
-  return storeClaimFromHyperbeam(payload, storePayload(channelResult));
+  return storeClaimFromHyperbeam(payload, await expandLinkedFields(storePayload(channelResult)));
+}
+
+
+// Evidence messages carry their metadata in linked sub-messages: `value`
+// (title, description, thumbnail, tags) and `channel-evidence` arrive as
+// `<field>+link` ids rather than inline maps. Without dereferencing them a
+// claim renders as an anonymous, untitled, thumbnail-less card even though
+// the node holds all of it.
+function channelIdFromEvidence(payload: any): string | null {
+  const evidence = value(payload || {}, 'channel-evidence', 'channel_evidence');
+  const id = isObject(evidence) ? value(evidence, 'channel-id', 'claim-id') : null;
+  return typeof id === 'string' && isClaimId(id) ? id : null;
+}
+
+async function expandLinkedFields(payload: any): Promise<any> {
+  if (!isObject(payload)) return payload;
+
+  const linkKeys = Object.keys(payload).filter((key) => key.endsWith('+link'));
+  if (!linkKeys.length) return payload;
+
+  const resolved = await Promise.all(
+    linkKeys.map(async (key) => {
+      const id = payload[key];
+      if (!isStandaloneImmutableId(id)) return null;
+      const sub = await fetchCachedImmutableJsonOrNull(String(id))
+        .then(responsePayload)
+        .catch(() => null);
+      if (!isObject(sub)) return null;
+      // One more level: `value` links its own `thumbnail`, `tags`, `source`.
+      const nested = await expandLinkedFields(sub);
+      return [key.slice(0, -'+link'.length), nested] as const;
+    })
+  );
+
+  const expanded = { ...payload };
+  for (const entry of resolved) {
+    if (!entry) continue;
+    const [field, value] = entry;
+    expanded[field] = value;
+  }
+  return expanded;
 }
 
 function isChannelUri(uri: string): boolean {
@@ -1226,8 +1274,8 @@ async function nativeCreatorHeartReactions(
 
 // The store has no general claim-search surface: targeted claim-id lookups
 // resolve through the claim-id/immutable store routes, everything else
-// degrades to an empty result set (fuzzy search goes direct to lighthouse
-// at the redux layer).
+// degrades to an empty result set (fuzzy search goes through `~search@1.0`
+// via `fetchSearchIds` at the redux layer).
 export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   const claimIds = paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id');
   if (claimIds.length) return fetchHyperbeamResolveClaimIds({ ...params, claim_ids: claimIds });
@@ -1240,6 +1288,74 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     total_items: 0,
     total_pages: 0,
   };
+}
+
+// Full-text search against `~search@1.0`: `q` and `limit` in, ranked message
+// ids out (`decisions/search-engine.md`). Large id lists arrive as a
+// `ids+link` cache pointer and are dereferenced through `~cache@1.0/read`.
+// The device is not directly reachable from the browser except when the app
+// is served by the node itself, so requests go through the same-origin
+// public-device proxy that the dev and production web servers expose.
+export async function fetchSearchIds(query: string, limit: number): Promise<Array<string>> {
+  const trimmed = String(query || '').trim();
+  if (!trimmed) return [];
+  const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, {
+    q: trimmed,
+    limit: Math.max(1, Math.min(SEARCH_MAX_LIMIT, toNumber(limit, 20))),
+  });
+  const ids = await searchResultIds(responsePayload(response));
+  return ids.map(String).filter(Boolean);
+}
+
+async function searchResultIds(result: any): Promise<Array<any>> {
+  if (Array.isArray(result)) return result.map(searchHitId).filter(Boolean);
+  if (!isObject(result)) return [];
+  if (Array.isArray(result.ids)) return result.ids;
+  const inline = indexedValues(result.ids);
+  if (inline.length) return inline;
+  const rootIndexed = indexedValues(result);
+  if (rootIndexed.length) return rootIndexed.map(searchHitId).filter(Boolean);
+  const link = value(result, 'ids+link', 'ids-link');
+  if (typeof link !== 'string' || !link) return [];
+  const linked = responsePayload(await fetchSearchDeviceJson(`${CACHE_DEVICE}/read`, { read: link }));
+  const linkedIds = Array.isArray(linked) ? linked : indexedValues(linked);
+  return linkedIds.map(searchHitId).filter(Boolean);
+}
+
+function searchHitId(hit: any): string | null {
+  if (typeof hit === 'string') return hit;
+  if (!isObject(hit)) return null;
+  const id = value(hit, 'message+link', 'message-link', 'message', 'id');
+  return typeof id === 'string' && id ? id : null;
+}
+
+async function fetchSearchDeviceJson(path: string, body: Record<string, any>): Promise<any> {
+  if (isServedFromManifest()) return fetchPublicDeviceJson(path, body);
+  const response = await fetch(`${HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE}/${path}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`HyperBEAM ${path} failed with ${response.status}`);
+    Object.assign(error, { status: response.status, responseBody: text });
+    throw error;
+  }
+  return parseDeviceJson(text);
+}
+
+function indexedValues(source: any): Array<any> {
+  if (!isObject(source)) return [];
+  return Object.keys(source)
+    .filter((key) => /^[1-9]\d*$/.test(key))
+    .sort((left, right) => Number(left) - Number(right))
+    .map((key) => source[key]);
 }
 
 // List the node's native uploads as claims, for the "your uploads" page. The
@@ -1788,7 +1904,10 @@ function storeClaimFromHyperbeam(payload: any, channelPayload?: any, fallbackNam
   const txid = value(payload, 'txid');
   const nout = value(payload, 'nout');
   const outpoint = claimOutpoint(txid, nout);
-  const claimValue = isObject(value(payload, 'value')) ? value(payload, 'value') : {};
+  const claimValue = withDecodedTextFields(
+    isObject(value(payload, 'value')) ? value(payload, 'value') : {},
+    payload
+  );
   const source = isObject(value(claimValue, 'source')) ? value(claimValue, 'source') : {};
   const sdHash = value(payload, 'sd-hash', 'sd_hash') || value(source, 'sd_hash', 'sd-hash');
   const mediaType = value(source, 'media_type', 'media-type');
@@ -1944,9 +2063,16 @@ async function fetchHyperbeamImmutableResolve(uri: string): Promise<any | null> 
 // immutable-id route and the upload name bridge.
 async function resolveImmutableClaimById(immutableId: string, name?: string): Promise<any | null> {
   const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
-  const decodedClaim = decodeClaimMetadata(storePayload(result));
-  const signingChannel = decodedClaim?.signedChannelId
-    ? await fetchCachedImmutableChannelJsonOrNull(decodedClaim.signedChannelId)
+  const payload = storePayload(result);
+  // Legacy claims sign inside the protobuf, so the envelope decode finds
+  // nothing; the node commits the channel id on the evidence itself.
+  const signedChannelId =
+    value(payload || {}, 'signing-channel-id', 'signing_channel_id') ||
+    decodeClaimMetadata(payload)?.signedChannelId ||
+    commitmentSignedChannelId(payload);
+  const decodedClaim = signedChannelId ? { signedChannelId } : null;
+  const signingChannel = signedChannelId
+    ? await fetchCachedImmutableChannelJsonOrNull(signedChannelId)
         .then(responsePayload)
         .catch(() => null)
     : null;
@@ -1954,6 +2080,19 @@ async function resolveImmutableClaimById(immutableId: string, name?: string): Pr
   if (!claim) return null;
 
   return !name || claim.name === name ? claim : null;
+}
+
+// The claim protobuf is sometimes served as a link rather than inline bytes;
+// the lbry attestation commitment carries the signing channel id in the
+// clear, so use it when the envelope cannot be decoded.
+function commitmentSignedChannelId(payload: any): string | undefined {
+  if (!isObject(payload)) return undefined;
+  const commitments = isObject(payload.commitments) ? Object.values(payload.commitments) : [];
+  for (const commitment of commitments) {
+    const id = value(commitment, 'channel-id', 'channel_id');
+    if (isClaimId(id) && id !== value(payload, 'claim-id', 'claim_id')) return String(id);
+  }
+  return undefined;
 }
 
 function fetchCachedImmutableJsonOrNull(id: string): Promise<any | null> {
@@ -2080,7 +2219,10 @@ function immutableClaimFromHyperbeam(
   const decodedValue: Record<string, any> = {};
   const decodedSource: Record<string, any> = {};
   const channelPayload = storePayload(channelResult);
-  const channelClaim = sdkClaimFromHyperbeam(channelPayload) || channelPayload;
+  const channelClaim = withDecodedChannelValue(
+    sdkClaimFromHyperbeam(channelPayload) || channelPayload,
+    channelPayload
+  );
   const claim = sdkClaimFromHyperbeam(payload) || payload;
   const existingValue = isObject(value(claim, 'value')) ? value(claim, 'value') : {};
   const payloadSource = isObject(value(payload, 'source')) ? value(payload, 'source') : {};
@@ -2520,7 +2662,7 @@ function decodeClaimMetadata(payload: any): DecodedClaimMetadata | null {
   }
 
   const claimHex = value(payload, 'claim', 'claim-envelope', 'claim_envelope', 'claim-value-hex', 'claim_value_hex');
-  const bytes = hexToBytes(claimHex);
+  const bytes = hexToBytes(claimHex) || base64UrlToBytes(claimHex);
   if (!bytes) return null;
 
   try {
@@ -2554,10 +2696,127 @@ function hexToBytes(value: any): Uint8Array | null {
   return bytes;
 }
 
+function base64UrlToBytes(value: any): Uint8Array | null {
+  if (typeof value !== 'string' || !value || !/^[0-9A-Za-z_+/-]+={0,2}$/.test(value)) return null;
+  try {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(normalized);
+    const bytes = new Uint8Array(decoded.length);
+    for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
 function bytesToHex(value: Uint8Array | Array<number>): string {
   return Array.from(value)
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
+}
+
+function readProtoVarint(bytes: Uint8Array, pos: number): { value: number; next: number } | null {
+  let result = 0;
+  let shift = 0;
+  while (pos < bytes.length && shift < 35) {
+    const byte = bytes[pos];
+    result |= (byte & 0x7f) << shift;
+    pos += 1;
+    if ((byte & 0x80) === 0) return { value: result >>> 0, next: pos };
+    shift += 7;
+  }
+  return null;
+}
+
+function protoField(bytes: Uint8Array | null, fieldNum: number): Uint8Array | null {
+  if (!bytes) return null;
+  let pos = 0;
+  while (pos < bytes.length) {
+    const key = readProtoVarint(bytes, pos);
+    if (!key) return null;
+    const num = key.value >>> 3;
+    const wire = key.value & 7;
+    pos = key.next;
+    if (wire === 0) {
+      const varint = readProtoVarint(bytes, pos);
+      if (!varint) return null;
+      pos = varint.next;
+    } else if (wire === 2) {
+      const len = readProtoVarint(bytes, pos);
+      if (!len) return null;
+      const end = len.next + len.value;
+      if (end > bytes.length) return null;
+      if (num === fieldNum) return bytes.slice(len.next, end);
+      pos = end;
+    } else if (wire === 5) {
+      pos += 4;
+    } else if (wire === 1) {
+      pos += 8;
+    } else {
+      return null;
+    }
+  }
+  return null;
+}
+
+function protoString(bytes: Uint8Array | null, fieldNum: number): string | null {
+  const field = protoField(bytes, fieldNum);
+  if (!field) return null;
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(field);
+  } catch {
+    return null;
+  }
+}
+
+// The evidence's raw `claim' protobuf carries the human fields the node does
+// not decode for channels (title/thumbnail/cover). Field numbers mirror the
+// LBRY claim schema: Claim{stream=1, channel=2, title=8, description=9,
+// thumbnail=10}, Channel{cover=4}, Source{url=5|1}.
+function decodedClaimTextFields(payload: any): Record<string, any> | null {
+  const raw = value(payload, 'claim', 'claim-envelope', 'claim_envelope', 'claim-value-hex', 'claim_value_hex');
+  const bytes = typeof raw === 'string' ? hexToBytes(raw) || base64UrlToBytes(raw) : null;
+  if (!bytes) return null;
+  const message = claimEnvelope(bytes).message;
+  const thumbnailUrl = protoString(protoField(message, 10), 5) || protoString(protoField(message, 10), 1);
+  const channelMessage = protoField(message, 2);
+  const coverField = channelMessage ? protoField(channelMessage, 4) : null;
+  const coverUrl = protoString(coverField, 5) || protoString(coverField, 1);
+  const decoded = compactParams({
+    title: protoString(message, 8) || undefined,
+    description: protoString(message, 9) || undefined,
+    thumbnail: thumbnailUrl ? { url: thumbnailUrl } : undefined,
+    cover: coverUrl ? { url: coverUrl } : undefined,
+  });
+  return Object.keys(decoded).length ? decoded : null;
+}
+
+function withDecodedTextFields(claimValue: Record<string, any>, payload: any): Record<string, any> {
+  const thumbnail = claimValue.thumbnail;
+  const hasThumbnail = isObject(thumbnail) ? Boolean(thumbnail.url) : Boolean(thumbnail);
+  if (claimValue.title && hasThumbnail) return claimValue;
+  const decoded = decodedClaimTextFields(payload);
+  if (!decoded) return claimValue;
+  return { ...decoded, ...compactParams(claimValue) };
+}
+
+function withDecodedChannelValue(claim: any, payload: any): any {
+  if (!isObject(claim)) return claim;
+  const claimValue = isObject(claim.value) ? claim.value : {};
+  const merged = withDecodedTextFields(claimValue, payload);
+  const name = claim.name || value(payload, 'claim-name', 'claim_name');
+  const claimId = value(claim, 'claim_id', 'claim-id') || value(payload, 'claim-id', 'claim_id');
+  const url =
+    !claim.permanent_url && name && isClaimId(claimId) ? claimUrl(String(name), String(claimId)) : undefined;
+  if (merged === claimValue && !url) return claim;
+  return compactParams({
+    ...claim,
+    name: claim.name || name,
+    claim_id: value(claim, 'claim_id', 'claim-id') || claimId,
+    value_type: claim.value_type || 'channel',
+    ...(url ? { canonical_url: claim.canonical_url || url, permanent_url: url } : {}),
+    value: merged,
+  });
 }
 
 function safeClaimName(name: any): string {

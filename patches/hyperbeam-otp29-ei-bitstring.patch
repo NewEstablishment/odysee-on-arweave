@@ -1,0 +1,28 @@
+diff --git a/native/hb_beamr/hb_beamr.c b/native/hb_beamr/hb_beamr.c
+index 9afe52a..1c0fbf8 100644
+--- a/native/hb_beamr/hb_beamr.c
++++ b/native/hb_beamr/hb_beamr.c
+@@ -169,16 +169,17 @@ static void hb_beamr_output(ErlDrvData handle, char *buff, ErlDrvSizeT bufflen)
+         }
+     } else if (strcmp(command, "write") == 0) {
+         DRV_DEBUG("Write received");
+-        long ptr, size;
++        long ptr;
++        int size;
+         int type;
+         ei_decode_tuple_header(buff, &index, &arity);
+         ei_decode_long(buff, &index, &ptr);
+         ei_get_type(buff, &index, &type, &size);
+-        long size_l = (long)size;
+-        char* wasm_binary;
+-        int res = ei_decode_bitstring(buff, &index, &wasm_binary, NULL, &size_l);
+-        DRV_DEBUG("Decoded binary. Res: %d. Size (bits): %ld", res, size_l);
+-        long size_bytes = size_l / 8;
++        size_t size_bits = (size_t)size;
++        const char* wasm_binary;
++        int res = ei_decode_bitstring(buff, &index, &wasm_binary, NULL, &size_bits);
++        DRV_DEBUG("Decoded binary. Res: %d. Size (bits): %zu", res, size_bits);
++        long size_bytes = (long)(size_bits / 8);
+         DRV_DEBUG("Write received. Ptr: %ld. Bytes: %ld", ptr, size_bytes);
+         long memory_size = get_memory_size(proc);
+         if(ptr + size_bytes > memory_size) {

@@ -14,8 +14,6 @@ interface Config {
   LBRY_WEB_BUFFER_API: string | undefined;
   ODYSEE_HYPERBEAM_NODE_API: string | undefined;
   COMMENT_SERVER_API: string | undefined;
-  SEARCH_SERVER_API: string | undefined;
-  SEARCH_SERVER_API_ALT: string | undefined;
   LIVESTREAM_SERVER_API: string | undefined;
   LIVESTREAM_INGEST_HOST: string | undefined;
   LIVESTREAM_WEBRTC_PORT: string | undefined;
@@ -88,7 +86,7 @@ interface Config {
   ENABLE_MATURE: boolean;
   CUSTOM_HOMEPAGE: boolean;
   SHOW_TAGS_INTRO: boolean;
-  LIGHTHOUSE_DEFAULT_TYPES: string | undefined;
+  SEARCH_DEFAULT_TYPES: string | undefined;
   BRANDED_SITE: string | undefined;
   ENABLE_STRIPE: string | undefined;
   ENABLE_ARCONNECT: string | undefined;

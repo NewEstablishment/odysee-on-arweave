@@ -58,7 +58,10 @@ upload_opts(Overrides) ->
         <<"on">> => cookie_auth_hooks(Opts),
         <<"store-all-signed">> => true,
         <<"match-index">> => [hd(Stores)],
-        <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS
+        <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS,
+        %% Index product documents only: without this every cache write --
+        %% including each published UI asset -- becomes a search document.
+        <<"search-index-markers">> => [<<"schema">>, <<"claim-name">>]
     }.
 
 %% @doc The read-only Odysee source stores.
@@ -106,6 +109,10 @@ cookie_auth_hooks(Opts) ->
     Hooks = hb_opts:get(on, #{}, Opts),
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
     Hooks#{
+        %% Every cache write is offered to the search index; the handler is
+        %% transparent and asynchronous, so it cannot fail or slow a write.
+        <<"cache-write">> =>
+            [#{ <<"device">> => <<"search@1.0">>, <<"path">> => <<"write">> }],
         <<"request">> =>
             lists:flatmap(
                 fun
@@ -173,6 +180,8 @@ skeleton_node(Fixtures) ->
                 }
             ],
             <<"priv-wallet">> => ar_wallet:new(),
+            %% Tests must never write into an operator's search index.
+            <<"search-backend-url">> => <<"http://127.0.0.1:1">>,
             %% A mutable value at a constant address must not come from the
             %% resolution cache, or an alias never refreshes.
             <<"http-extra-opts">> => #{
@@ -333,6 +342,8 @@ upload_node() ->
     Node =
         hb_http_server:start_node(upload_opts(#{
             <<"store">> => [Store],
+            %% Tests must never write into an operator's search index.
+            <<"search-backend-url">> => <<"http://127.0.0.1:1">>,
             <<"priv-wallet">> => ar_wallet:new()
         })),
     {Node, #{ <<"store">> => [Store] }}.

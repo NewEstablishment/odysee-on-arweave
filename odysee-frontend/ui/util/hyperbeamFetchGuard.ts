@@ -1,23 +1,14 @@
 // In HyperBEAM mode the node is the only backend. Non-Lbryio legacy clients
-// (recsys, search, geo, legal, blocklists) still fetch external hosts that
+// (recsys, geo, legal, blocklists) still fetch external hosts that
 // CORS-fail; blocking by host neutralizes them all in one place, resolving an
 // empty array so callers neither crash nor toast. Node and asset (arweave,
 // fonts) requests are untouched. The SDK proxy and comment server are left
 // alone (they do not fire here and a real flow could need them).
-import {
-  ODYSEE_HYPERBEAM_NODE_API,
-  LBRY_API_URL,
-  SEARCH_SERVER_API,
-  SEARCH_SERVER_API_ALT,
-  RECSYS_ENDPOINT,
-  RECSYS_FYP_ENDPOINT,
-} from 'config';
+import { ODYSEE_HYPERBEAM_NODE_API, LBRY_API_URL, RECSYS_ENDPOINT, RECSYS_FYP_ENDPOINT } from 'config';
 
 if (ODYSEE_HYPERBEAM_NODE_API && typeof window !== 'undefined' && typeof window.fetch === 'function') {
   const legacyHosts = [
     LBRY_API_URL,
-    SEARCH_SERVER_API,
-    SEARCH_SERVER_API_ALT,
     RECSYS_ENDPOINT,
     RECSYS_FYP_ENDPOINT,
     'https://api.lbry.com',

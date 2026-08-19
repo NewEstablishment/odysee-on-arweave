@@ -2,10 +2,10 @@ import * as ACTIONS from 'constants/action_types';
 import { handleActions } from 'util/redux-utils';
 import { SEARCH_OPTIONS, SEARCH_PAGE_SIZE } from 'constants/search';
 import { createNormalizedSearchKey } from 'util/search';
-import { LIGHTHOUSE_DEFAULT_TYPES } from 'config';
+import { SEARCH_DEFAULT_TYPES } from 'config';
 import { LocalStorage, LS } from 'util/storage';
 
-const defaultSearchTypes = (LIGHTHOUSE_DEFAULT_TYPES && LIGHTHOUSE_DEFAULT_TYPES.split(',')) || [];
+const defaultSearchTypes = (SEARCH_DEFAULT_TYPES && SEARCH_DEFAULT_TYPES.split(',')) || [];
 
 const baseSearchOptions = {
   [SEARCH_OPTIONS.RESULT_COUNT]: SEARCH_PAGE_SIZE,

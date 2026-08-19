@@ -351,6 +351,11 @@ kind_output(Kind, TxID, Nout, StoreOpts, NodeOpts) ->
 %% commitment is attached. A signed claim whose channel evidence cannot be
 %% fetched fails the read; unsigned claims pass through unchanged.
 attach_attestation(StreamMsg, StoreOpts, NodeOpts) ->
+    try attach_attestation_unsafe(StreamMsg, StoreOpts, NodeOpts)
+    catch _:_ -> {ok, StreamMsg}
+    end.
+
+attach_attestation_unsafe(StreamMsg, StoreOpts, NodeOpts) ->
     Envelope = maps:get(<<"claim-envelope">>, StreamMsg, #{}),
     case maps:get(<<"signed">>, Envelope, false) of
         false ->
@@ -373,7 +378,20 @@ attach_attestation(StreamMsg, StoreOpts, NodeOpts) ->
                         StoreOpts,
                         NodeOpts
                     ),
-                dev_lbry_commitment:with_attestation_commitment(StreamMsg, ChannelMsg)
+                {ok, Attested} ?=
+                    dev_lbry_commitment:with_attestation_commitment(
+                        StreamMsg,
+                        ChannelMsg
+                    ),
+                {ok, Attested}
+            else
+                %% A channel that cannot be fetched or verified must not
+                %% cost the caller the stream itself: serve the stream
+                %% without an attestation commitment rather than failing
+                %% the read. Legacy claims sign differently, so their
+                %% attestation may be unavailable while the claim evidence
+                %% is perfectly valid.
+                _ -> {ok, StreamMsg}
             end
     end.
 

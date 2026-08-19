@@ -22,6 +22,15 @@ export function isServedFromManifest(): boolean {
   return detectedPrefix !== '';
 }
 
+// An in-app path as a URL the browser can open directly. Under a path
+// manifest the app is hash-routed beneath /<ManifestID>, so a bare app
+// path (`/$/id/...`) would leave the manifest and 404 on the node.
+export function appHref(appPath: string): string {
+  if (!detectedPrefix) return appPath;
+  const path = appPath.startsWith('/') ? appPath : `/${appPath}`;
+  return `${detectedPrefix}/#${path}`;
+}
+
 export function manifestAssetPath(assetPath: string): string {
   return `${detectedPrefix}/${assetPath.replace(/^\/+/, '')}`;
 }
