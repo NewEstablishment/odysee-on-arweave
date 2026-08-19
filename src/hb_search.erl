@@ -46,7 +46,7 @@ ensure_index(Conf = #{ <<"index">> := Index }) ->
 %% binaries. Documents are keyed by `Id', so re-indexing replaces the
 %% prior document.
 index(Conf = #{ <<"index">> := Index }, Id, Fields, Schema) ->
-    Indexable = indexable_fields(Fields, Schema),
+    Indexable = indexable_fields(Fields, Schema, extra_skip_fields(Conf)),
     Content = content(Indexable),
     case string:trim(Content) of
         <<>> ->
@@ -200,16 +200,31 @@ terminate(_Reason, _State) ->
 %% of nested text (`value/title', tag lists, ...) so evidence messages
 %% index their human-readable content rather than their plumbing; a schema
 %% list restricts to named fields.
-indexable_fields(Fields, all) ->
+indexable_fields(Fields, Schema) ->
+    indexable_fields(Fields, Schema, []).
+
+indexable_fields(Fields, all, Skip) ->
     case ordered_list_message(Fields) of
         true -> #{};
-        false -> indexable_all(Fields)
+        false -> indexable_all(Fields, Skip)
     end;
-indexable_fields(Fields, Schema) when is_list(Schema) ->
+indexable_fields(Fields, Schema, _Skip) when is_list(Schema) ->
     maps:filter(
         fun(K, V) -> is_binary(V) andalso lists:member(K, Schema) end,
         Fields
     ).
+
+%% The fields a message keeps for its own bookkeeping differ per domain:
+%% a claim's `txid' or `sd-hash' is noise here, but the engine cannot know
+%% that. Operators name theirs through `search-skip-fields'; the engine
+%% only knows the HyperBEAM plumbing every message carries.
+extra_skip_fields(#{ <<"opts">> := Opts }) ->
+    case hb_opts:get(<<"search-skip-fields">>, [], Opts) of
+        Fields when is_list(Fields) -> Fields;
+        _ -> []
+    end;
+extra_skip_fields(_Conf) ->
+    [].
 
 %% Ordered lists encode as messages whose keys are all indices; their
 %% values are structural (key names, ids), not searchable text.
@@ -221,14 +236,14 @@ ordered_list_message(Fields) when map_size(Fields) > 0 ->
 ordered_list_message(_Fields) ->
     false.
 
-indexable_all(Fields) ->
+indexable_all(Fields, Skip) ->
     maps:filter(
         fun(_K, V) -> is_binary(V) end,
         maps:fold(
             fun(K, V, Acc) ->
-                case skip_field(K) of
+                case skip_field(K, Skip) of
                     true -> Acc;
-                    false -> flatten_field(K, V, Acc)
+                    false -> flatten_field(K, V, Acc, Skip)
                 end
             end,
             #{},
@@ -236,30 +251,30 @@ indexable_all(Fields) ->
         )
     ).
 
-flatten_field(K, V, Acc) when is_binary(V) ->
+flatten_field(K, V, Acc, _Skip) when is_binary(V) ->
     case identifier_shaped(V) of
         true -> Acc;
         false -> Acc#{ K => V }
     end;
-flatten_field(K, V, Acc) when is_map(V) ->
+flatten_field(K, V, Acc, Skip) when is_map(V) ->
     maps:fold(
         fun(SubK, SubV, InnerAcc) ->
-            case skip_field(SubK) of
+            case skip_field(SubK, Skip) of
                 true -> InnerAcc;
                 false ->
-                    flatten_field(<<K/binary, "/", SubK/binary>>, SubV, InnerAcc)
+                    flatten_field(<<K/binary, "/", SubK/binary>>, SubV, InnerAcc, Skip)
             end
         end,
         Acc,
         V
     );
-flatten_field(K, V, Acc) when is_list(V) ->
+flatten_field(K, V, Acc, _Skip) when is_list(V) ->
     Text = [Item || Item <- V, is_binary(Item), not identifier_shaped(Item)],
     case Text of
         [] -> Acc;
         _ -> Acc#{ K => iolist_to_binary(lists:join(<<" ">>, Text)) }
     end;
-flatten_field(_K, _V, Acc) ->
+flatten_field(_K, _V, Acc, _Skip) ->
     Acc.
 
 %% Identifier-shaped strings (hashes, ids, signatures, keys) are noise in a
@@ -270,6 +285,11 @@ identifier_shaped(V) when byte_size(V) >= 32 ->
 identifier_shaped(_V) ->
     false.
 
+skip_field(Key, Skip) ->
+    lists:member(Key, Skip) orelse skip_field(Key).
+
+%% Structural fields every HyperBEAM message carries. Domain fields belong
+%% in `search-skip-fields', not here.
 skip_field(<<"commitments">>) -> true;
 skip_field(<<"priv">>) -> true;
 skip_field(<<"id">>) -> true;
@@ -279,27 +299,13 @@ skip_field(<<"signature-input">>) -> true;
 skip_field(<<"public-key">>) -> true;
 skip_field(<<"keyid">>) -> true;
 skip_field(<<"hashpath">>) -> true;
-skip_field(<<"raw-transaction">>) -> true;
-skip_field(<<"claim">>) -> true;
-skip_field(<<"claim-envelope">>) -> true;
 skip_field(<<"committed">>) -> true;
 skip_field(<<"commitment-device">>) -> true;
-skip_field(<<"native-id">>) -> true;
-skip_field(<<"native-id-type">>) -> true;
-skip_field(<<"sd-hash">>) -> true;
-skip_field(<<"txid">>) -> true;
-skip_field(<<"claim-id">>) -> true;
-skip_field(<<"channel-id">>) -> true;
-skip_field(<<"claim-op">>) -> true;
-skip_field(<<"claim-proof-strength">>) -> true;
-skip_field(<<"claim-ancestry">>) -> true;
-skip_field(<<"evidence">>) -> true;
 skip_field(<<"type">>) -> true;
 skip_field(<<"status">>) -> true;
 skip_field(<<"device">>) -> true;
 skip_field(<<"content-type">>) -> true;
 skip_field(<<"ao-types">>) -> true;
-skip_field(<<"nout">>) -> true;
 skip_field(K) -> binary:part(K, 0, min(5, byte_size(K))) =:= <<"priv.">>.
 
 content(Indexable) ->
@@ -345,6 +351,24 @@ indexable_fields_selects_text_test() ->
     ?assertNotEqual(nomatch, binary:match(Content, <<"verify">>)),
     ?assertEqual(nomatch, binary:match(Content, <<"secret">>)),
     ?assertEqual(nomatch, binary:match(Content, <<0, 1, 2, 255>>)).
+
+operator_skip_fields_are_dropped_test() ->
+    Fields =
+        #{ <<"title">> => <<"real words here">>,
+           <<"nout">> => <<"0">>,
+           <<"claim-op">> => <<"create">> },
+    %% The engine keeps domain fields it was not told about...
+    ?assertEqual(
+        [<<"claim-op">>, <<"nout">>, <<"title">>],
+        lists:sort(maps:keys(indexable_fields(Fields, all)))
+    ),
+    %% ...and drops exactly the ones the operator named.
+    ?assertEqual(
+        [<<"title">>],
+        maps:keys(
+            indexable_fields(Fields, all, [<<"nout">>, <<"claim-op">>])
+        )
+    ).
 
 schema_restricts_indexed_fields_test() ->
     Indexable =

@@ -61,7 +61,27 @@ upload_opts(Overrides) ->
         <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS,
         %% Index product documents only: without this every cache write --
         %% including each published UI asset -- becomes a search document.
-        <<"search-index-markers">> => [<<"schema">>, <<"claim-name">>]
+        <<"search-index-markers">> => [<<"schema">>, <<"claim-name">>],
+        %% Claim bookkeeping: ids, hashes and outpoints are not text a
+        %% reader searches for. The engine knows the HyperBEAM plumbing;
+        %% these names are ours.
+        <<"search-skip-fields">> =>
+            [
+                <<"claim">>,
+                <<"claim-ancestry">>,
+                <<"claim-envelope">>,
+                <<"claim-id">>,
+                <<"claim-op">>,
+                <<"claim-proof-strength">>,
+                <<"channel-id">>,
+                <<"evidence">>,
+                <<"native-id">>,
+                <<"native-id-type">>,
+                <<"nout">>,
+                <<"raw-transaction">>,
+                <<"sd-hash">>,
+                <<"txid">>
+            ]
     }.
 
 %% @doc The read-only Odysee source stores.
