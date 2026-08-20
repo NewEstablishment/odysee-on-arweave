@@ -3,6 +3,7 @@ import * as ICONS from 'constants/icons';
 import * as CS from 'constants/claim_search';
 import { toCapitalCase } from 'util/string';
 import { CUSTOM_HOMEPAGE } from 'config';
+import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
 export type HomepageCat = {
   id?: string;
   name: string;
@@ -28,6 +29,11 @@ export type HomepageCat = {
   exclude_shorts?: boolean;
   mixIn?: Array<string>;
   hideByDefault?: boolean;
+  immutableIds?: Array<string>;
+  immutablePoolIds?: Array<string>;
+  immutableChannelIds?: Array<string>;
+  immutableSigningChannelIds?: Record<string, string>;
+  unresolvedChannelIds?: Array<string>;
 };
 
 function getLimitPerChannel(size, isChannel) {
@@ -143,6 +149,16 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
     title: cat.label,
     pinnedUrls: cat.pinnedUrls,
     pinnedClaimIds: cat.pinnedClaimIds,
+    uris: (cat.immutableIds || []).map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri)),
+    categoryUris: (cat.immutablePoolIds || cat.immutableIds || [])
+      .map(hyperbeamImmutableUri)
+      .filter((uri): uri is string => Boolean(uri)),
+    immutableSigningChannelIds: Object.fromEntries(
+      Object.entries(cat.immutableSigningChannelIds || {}).map(([mediaId, channelId]) => [
+        hyperbeamImmutableUri(mediaId) || mediaId,
+        channelId,
+      ])
+    ),
     hideByDefault: cat.hideByDefault,
     hideSort: cat.hideSort,
     options: {
@@ -193,6 +209,7 @@ export function GetLinksData(
       hideSort: false,
       options: {
         orderBy: CS.ORDER_BY_NEW,
+        claimType: ['stream', 'repost'],
         releaseTime:
           subscribedChannelIds.length > 20
             ? `>${getRelativeUnixTimestamp(9, 'months', 'week')}`

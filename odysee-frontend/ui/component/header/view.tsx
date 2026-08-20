@@ -11,7 +11,7 @@ import Logo from 'component/logo';
 import NotificationBubble from 'component/notificationBubble';
 import React from 'react';
 import { lazyImport } from 'util/lazyImport';
-import { getHyperbeamAccount, signOutHyperbeam, logInHyperbeam } from 'util/hyperbeamAccount';
+import { getHyperbeamAccount, signOutHyperbeam } from 'util/hyperbeamAccount';
 import Skeleton from '@mui/material/Skeleton';
 import SkipNavigationButton from 'component/skipNavigationButton';
 import Tooltip from 'component/common/tooltip';
@@ -245,17 +245,7 @@ const Header = (props: Props) => {
               <Button
                 button="link"
                 label={__('Log In')}
-                onClick={() => {
-                  // The cookie is the identity. If it is still present, restore
-                  // the account; otherwise there is nothing to log into, so go
-                  // to sign up.
-                  if (logInHyperbeam()) {
-                    window.location.hash = '#/';
-                    window.location.reload();
-                  } else {
-                    navigate(`/$/${PAGES.AUTH}${authRedirectParam}`);
-                  }
-                }}
+                onClick={() => navigate(`/$/${PAGES.AUTH_SIGNIN}${authRedirectParam}`)}
               />
               <Button navigate={`/$/${PAGES.AUTH}${authRedirectParam}`} button="primary" label={__('Sign Up')} />
             </div>

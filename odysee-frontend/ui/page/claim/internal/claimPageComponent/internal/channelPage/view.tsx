@@ -115,7 +115,12 @@ function ChannelPage(props: Props) {
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
   const meta = claim?.meta || {};
   const { claims_in_channel } = meta;
-  const showClaims = Boolean(claims_in_channel) && !preferEmbed && !banState.filtered && !banState.blacklisted;
+  const channelContentAvailabilityUnknown = claims_in_channel === undefined || claims_in_channel === null;
+  const showClaims =
+    (channelContentAvailabilityUnknown || Number(claims_in_channel) > 0) &&
+    !preferEmbed &&
+    !banState.filtered &&
+    !banState.blacklisted;
   const channelIsBlackListed = banState.blacklisted;
   // Show About tab for blacklisted channels (DMCA message) or channels with content
   const hideAboutTab = !showClaims && !isGlobalMod && !channelIsBlackListed;

@@ -49,7 +49,7 @@ function hyperbeamNodeJsonPath(device, key, value) {
 function hyperbeamNodeRequestHeaders(extraHeaders) {
   const headers = { accept: 'application/json' };
 
-  ['X-Lbry-Auth-Token', 'X-Odysee-User-Id', 'Authorization'].forEach((key) => {
+  ['X-Lbry-Auth-Token', 'X-Odysee-User-Id', 'Authorization', 'Cache-Control'].forEach((key) => {
     const value = extraHeaders && extraHeaders[key];
     if (value) headers[key] = value;
   });
@@ -103,13 +103,6 @@ async function hyperbeamNodeResolveEntries(urls, extraHeaders) {
         }
       }
 
-      const result = await hyperbeamNodeFetchJson(
-        hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'resolve', { uri }),
-        extraHeaders
-      );
-      const claim = sdkClaimFromHyperbeam((result && result[uri]) || result);
-      if (claim) return [uri, claim];
-
       return [uri, await hyperbeamNodeUploadResolve(uri, extraHeaders)];
     })
   );
@@ -157,27 +150,7 @@ async function hyperbeamNodeClaimIdChannelEntries(urls, extraHeaders) {
     })
   );
   const resolvedEntries = storeEntries.filter(Boolean);
-  const resolvedUris = new Set(resolvedEntries.map(([uri]) => uri));
-  const unresolvedClaimIds = Array.from(uriByClaimId.entries())
-    .filter(([, uri]) => !resolvedUris.has(uri))
-    .map(([claimId]) => claimId);
-  if (!unresolvedClaimIds.length) return resolvedEntries;
-
-  const result = await hyperbeamNodeFetchJson(
-    hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CLAIM, 'search', { claim_ids: unresolvedClaimIds }),
-    extraHeaders
-  );
-  const search = sdkSearchFromHyperbeam(result);
-  const items = Array.isArray(search && search.items) ? search.items : [];
-
-  return items
-    .map((item) => {
-      const claim = sdkClaimFromHyperbeam(item);
-      const claimId = claim && (claim.claim_id || claim['claim-id']);
-      const uri = claimId && uriByClaimId.get(String(claimId).toLowerCase());
-      return uri ? [uri, claim] : null;
-    })
-    .filter(Boolean);
+  return resolvedEntries;
 }
 
 async function hyperbeamNodeClaimSearch(params, extraHeaders) {
@@ -208,6 +181,99 @@ async function hyperbeamNodeClaimSearch(params, extraHeaders) {
     await localUploadsPromise,
     params || {}
   );
+}
+
+// Server-side homepage discovery. The source store only returns mutable
+// locator metadata; the materializer hydrates every selected outpoint through
+// an exact immutable read before publishing it to a snapshot.
+async function hyperbeamNodeSourceClaimSearch(params) {
+  if (!hyperbeamNodeConfigured()) return null;
+  const query = sourceClaimQuery(params || {});
+  const response = await hyperbeamNodeFetchStoreJson(storePath('odysee/source-claims', JSON.stringify(query)));
+  const payload = storePayload(response);
+  const search = sdkSearchFromHyperbeam(payload);
+  return search && Array.isArray(search.items) ? search : claimSearchPage([], params || {});
+}
+
+async function hyperbeamNodeSourceClaimSearchMany(paramsList) {
+  return mapWithConcurrency(paramsList || [], 2, (params) => hyperbeamNodeSourceClaimSearch(params));
+}
+
+function sourceClaimQuery(params) {
+  const keys = [
+    'channel_ids',
+    'claim_ids',
+    'not_channel_ids',
+    'claim_type',
+    'any_tags',
+    'order_by',
+    'any_languages',
+    'page',
+    'page_size',
+    'limit_claims_per_channel',
+    'duration',
+    'timestamp',
+    'release_time',
+    'exclude_shorts',
+  ];
+  return Object.fromEntries(
+    keys
+      .map((key) => [key, value(params, key, key.replaceAll('_', '-'))])
+      .filter(([, item]) => item !== undefined && item !== null && item !== '')
+  );
+}
+
+function claimSearchPage(items, params) {
+  const page = Math.max(1, numericValue(value(params, 'page'), 1));
+  const pageSize = Math.max(1, numericValue(value(params, 'page_size', 'page-size'), items.length || 20));
+  return {
+    items,
+    page,
+    page_size: pageSize,
+    total_items: items.length,
+    total_pages: items.length ? 1 : 0,
+  };
+}
+
+async function hyperbeamNodeWarmImmutableClaim(id, locator) {
+  const [[, present] = []] = await hyperbeamNodeWarmImmutableClaims([id], new Map([[id, locator || id]]));
+  return present === true;
+}
+
+async function hyperbeamNodeWarmImmutableClaims(ids, locatorById = new Map()) {
+  const uniqueIds = Array.from(new Set((ids || []).map(String).filter(Boolean)));
+  return mapWithConcurrency(uniqueIds, 6, async (id) => {
+    const locator = locatorById.get(id) || id;
+    const result = await hyperbeamNodeFetchImmutableJson(locator);
+    return [id, Boolean(storeResponsePayload(result))];
+  });
+}
+
+async function hyperbeamNodeWarmImmutableChannels(ids) {
+  const uniqueIds = Array.from(new Set((ids || []).map(String).filter(Boolean)));
+  return mapWithConcurrency(uniqueIds, 6, async (id) => {
+    const payload = storeResponsePayload(await hyperbeamNodeFetchImmutableJson(id));
+    return [id, isHydratedChannelEvidence(payload)];
+  });
+}
+
+function isHydratedChannelEvidence(payload) {
+  if (!payload || typeof payload !== 'object') return false;
+  const channelId = value(payload, 'channel-id', 'channel_id', 'public-key', 'public_key');
+  const channelValue = value(payload, 'value');
+  return Boolean(channelId && channelValue && typeof channelValue === 'object');
+}
+
+async function hyperbeamNodeQueueImmutableClaims(ids) {
+  const outpoints = Array.from(new Set((ids || []).map(String).filter(isOutpointId))).slice(0, 24);
+  const results = await mapWithConcurrency(outpoints, 6, async (outpoint) => {
+    const [txid, nout] = outpoint.split(':');
+    const evidence = await hyperbeamNodeFetchStoreJson(`odysee/claim-output/${txid}/${nout}`, 120000, {
+      'Cache-Control': 'no-store, no-cache',
+    });
+    return storeResponsePayload(evidence) ? outpoint : null;
+  });
+  return results.filter(Boolean);
 }
 
 async function hyperbeamNodeUploadList(params, extraHeaders) {
@@ -336,7 +402,11 @@ const LEGACY_ONLY_SDK_METHODS = new Set([
 async function hyperbeamNodeFetchJson(request, extraHeaders) {
   if (!request) return null;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), HYPERBEAM_NODE_TIMEOUT_MS);
+  const timeoutMs =
+    typeof request === 'object' && Number.isFinite(Number(request.timeoutMs))
+      ? Number(request.timeoutMs)
+      : HYPERBEAM_NODE_TIMEOUT_MS;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const url = typeof request === 'string' ? request : request.url;
   if (!url) {
     clearTimeout(timeout);
@@ -366,8 +436,15 @@ async function hyperbeamNodeFetchJson(request, extraHeaders) {
   }
 }
 
-async function hyperbeamNodeFetchStoreJson(path) {
-  return hyperbeamNodeFetchStorePath(path, true);
+async function hyperbeamNodeFetchStoreJson(path, timeoutMs, extraHeaders) {
+  const read = String(path).replace(/^\/+/, '');
+  return hyperbeamNodeFetchJson(
+    {
+      ...hyperbeamNodeJsonPath(HYPERBEAM_DEVICE_CACHE, 'read', { read }),
+      timeoutMs,
+    },
+    extraHeaders
+  ).catch(() => null);
 }
 
 async function hyperbeamNodeFetchStorePath(path, preferJson = true) {
@@ -393,9 +470,13 @@ async function hyperbeamNodeFetchStorePath(path, preferJson = true) {
 async function hyperbeamNodeFetchImmutableJson(id) {
   if (!isOutpointId(id) && !isStandaloneImmutableId(id)) return null;
   // `accept-bundle` inlines the node-decoded native `value` sub-message so
-  // legacy and native content parse through one shape. Bare `GET /<id>` store
-  // fall-through (with node-side cache warming) serves legacy outpoints too.
-  return hyperbeamNodeFetchStorePath(`${encodeDataPath(id)}?accept-bundle=true`, false);
+  // legacy and native content parse through one shape. Legacy outpoints enter
+  // through the generic cache read so the store stack can verify the evidence
+  // and link its native immutable ID; native IDs use their exact root route.
+  const path = isOutpointId(id)
+    ? `~cache@1.0/read?read=${encodeURIComponent(id)}&accept-bundle=true`
+    : `${encodeDataPath(id)}?accept-bundle=true`;
+  return hyperbeamNodeFetchStorePath(path, false);
 }
 
 function unwrapJsonRpcResult(json) {
@@ -582,7 +663,10 @@ function hyperbeamLocalSdkResult(method, params) {
 
 function sdkClaimFromHyperbeam(result) {
   if (!result) return null;
-  const claim = result.claim || result;
+  // Store responses expose the serialized LBRY claim bytes as `claim` while
+  // the verified decoded metadata lives at the top level. Only unwrap
+  // `claim` when it is itself a structured message.
+  const claim = isObject(result.claim) ? result.claim : result;
   const claimId = claim.claim_id || claim['claim-id'];
   if (!claim || !claimId) return claim;
   const txid = claim.txid || claim['tx-id'];
@@ -913,6 +997,9 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
   const title = value(existingValue, 'title') || value(payload, 'title') || rawName || name;
   const description = value(existingValue, 'description') || value(payload, 'description') || '';
   const device = value(payload, 'device');
+  const isChannelEvidence = Boolean(
+    value(payload, 'channel-id', 'channel_id') || value(payload, 'public-key', 'public_key')
+  );
   const sdHash =
     value(payload, 'sd_hash', 'sd-hash') ||
     value(payloadSource, 'sd_hash', 'sd-hash') ||
@@ -961,7 +1048,7 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
   const valueType =
     value(claim, 'value_type', 'value-type') ||
     value(payload, 'value_type', 'value-type') ||
-    (device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' ? 'channel' : 'stream');
+    (isChannelEvidence || device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' ? 'channel' : 'stream');
 
   return compactParams({
     ...claim,
@@ -1426,5 +1513,11 @@ module.exports = {
   hyperbeamNodeClaimSearch,
   hyperbeamNodeMediaUrl,
   hyperbeamNodeResolve,
+  hyperbeamNodeQueueImmutableClaims,
   hyperbeamNodeSdkCall,
+  hyperbeamNodeSourceClaimSearch,
+  hyperbeamNodeSourceClaimSearchMany,
+  hyperbeamNodeWarmImmutableClaim,
+  hyperbeamNodeWarmImmutableClaims,
+  hyperbeamNodeWarmImmutableChannels,
 };

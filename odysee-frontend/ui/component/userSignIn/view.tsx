@@ -6,8 +6,59 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectUser, selectUserIsPending, selectEmailToVerify, selectPasswordExists } from 'redux/selectors/user';
 import { doUserSignIn } from 'redux/actions/user';
+import Button from 'component/button';
+import Card from 'component/common/card';
+import { logInHyperbeam, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
-function UserSignIn() {
+function HyperbeamSignIn() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const redirect = new URLSearchParams(location.search).get('redirect') || '/';
+  const [isPending, setIsPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function handleLogin() {
+    setError(null);
+    setIsPending(true);
+    try {
+      const account = logInHyperbeam() || (await recoverHyperbeamAccount());
+      if (!account) {
+        setError(__('No account is associated with this browser session.'));
+        return;
+      }
+      navigate(redirect, { replace: true });
+      window.location.reload();
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : __('Unable to log in.'));
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  return (
+    <div className="main--contained">
+      <Card
+        title={__('Log In')}
+        actions={
+          <div>
+            {error && <p className="error__text">{error}</p>}
+            <div className="section__actions">
+              <Button
+                button="primary"
+                label={isPending ? __('Logging In...') : __('Log In')}
+                disabled={isPending}
+                onClick={handleLogin}
+              />
+            </div>
+          </div>
+        }
+      />
+    </div>
+  );
+}
+
+function LegacySignIn() {
   const location = useLocation();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
@@ -49,4 +100,24 @@ function UserSignIn() {
     </section>
   );
 }
+
+function UserSignIn() {
+  const [useBrowserSession, setUseBrowserSession] = React.useState(false);
+
+  if (!hyperbeamNodeEnabled()) return <LegacySignIn />;
+
+  return (
+    <>
+      {useBrowserSession ? <HyperbeamSignIn /> : <LegacySignIn />}
+      <div className="section__actions section__actions--centered">
+        <Button
+          button="link"
+          label={useBrowserSession ? __('Use email and password') : __('Use HyperBEAM browser session')}
+          onClick={() => setUseBrowserSession((current) => !current)}
+        />
+      </div>
+    </>
+  );
+}
+
 export default UserSignIn;

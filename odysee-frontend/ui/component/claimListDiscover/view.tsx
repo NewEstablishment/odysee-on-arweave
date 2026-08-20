@@ -44,6 +44,7 @@ function resolveHideMembersOnly(global: any, override: any) {
 }
 type Props = {
   uris?: Array<string>;
+  immutableSigningChannelIds?: Record<string, string>;
   prefixUris?: Array<string>;
   pins?: {
     urls?: Array<string>;
@@ -214,6 +215,7 @@ function ClaimListDiscover(props: Props) {
     injectedItem,
     feeAmount,
     uris,
+    immutableSigningChannelIds,
     prefixUris,
     pins,
     tileLayout,
@@ -250,7 +252,8 @@ function ClaimListDiscover(props: Props) {
   const claimSearchByQueryLastPageReached = useAppSelector(selectClaimSearchByQueryLastPageReached);
   const claimsByUri = useAppSelector(selectClaimsByUri);
   const claimsById = useAppSelector(selectById);
-  const loading = props.loading !== undefined ? props.loading : useAppSelector(selectFetchingClaimSearch);
+  const fetchingClaimSearch = useAppSelector(selectFetchingClaimSearch);
+  const loading = props.loading !== undefined ? props.loading : uris ? false : fetchingClaimSearch;
   const showNsfw = useAppSelector(selectShowMatureContent);
   const hideMembersOnly = resolveHideMembersOnly(
     useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_MEMBERS_ONLY_CONTENT)),
@@ -277,7 +280,8 @@ function ClaimListDiscover(props: Props) {
     [dispatch]
   );
   const doResolveUris = React.useCallback(
-    (u: Array<string>, returnCached: boolean) => dispatch(doResolveUrisAction(u, returnCached)),
+    (u: Array<string>, returnCached: boolean, additionalOptions: any = {}) =>
+      dispatch(doResolveUrisAction(u, returnCached, true, additionalOptions)),
     [dispatch]
   );
   const doFetchThumbnailClaimsForCollectionIds = React.useCallback(
@@ -679,7 +683,7 @@ function ClaimListDiscover(props: Props) {
       // --- direct uris
       const newUris = uris && Array.from(new Set(uris));
       injectPinUrls(newUris, orderParam, pins, resolvedPinUris);
-      const newFinalUris = filterExcludedUris(newUris, excludeUris);
+      const newFinalUris = filterExcludedUris(newUris, excludeUris).slice(0, dynamicPageSize * page);
       setFinalUris(newFinalUris);
     } else if (claimSearchResult) {
       // --- searched uris
@@ -709,6 +713,8 @@ function ClaimListDiscover(props: Props) {
     pins,
     resolvedPinUris,
     uris,
+    dynamicPageSize,
+    page,
   ]);
 
   // **************************************************************************
@@ -728,8 +734,10 @@ function ClaimListDiscover(props: Props) {
     }
 
     if (!loading && infiniteScroll) {
-      if (claimSearchResult && !claimSearchResultLastPageReached) {
-        setPage(page + 1);
+      if (uris && page * dynamicPageSize < uris.length) {
+        setPage((currentPage) => currentPage + 1);
+      } else if (claimSearchResult && !claimSearchResultLastPageReached) {
+        setPage((currentPage) => currentPage + 1);
       }
     }
   }
@@ -771,6 +779,13 @@ function ClaimListDiscover(props: Props) {
 
   // **************************************************************************
   // **************************************************************************
+  React.useEffect(() => {
+    if (uris && finalUris?.length) {
+      doResolveUris(finalUris, true, {
+        immutable_signing_channel_ids: immutableSigningChannelIds || {},
+      });
+    }
+  }, [uris, finalUris, immutableSigningChannelIds, doResolveUris]);
   React.useEffect(() => {
     if (channelIds) {
       doFetchOdyseeMembershipForChannelIds(channelIds);
@@ -827,7 +842,7 @@ function ClaimListDiscover(props: Props) {
     />
   );
   const claimListLoading =
-    loading || (channelIdsParam && channelIdsParam.length > 0 && claimSearchResult === undefined);
+    loading || (!uris && channelIdsParam && channelIdsParam.length > 0 && claimSearchResult === undefined);
   return (
     <React.Fragment>
       {headerLabel}

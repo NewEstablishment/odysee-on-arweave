@@ -9,6 +9,7 @@ import * as ACTIONS from 'constants/action_types';
 import mergeClaim from 'util/merge-claim';
 import { getChannelIdFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import { claimToStoredCollection } from 'util/collections';
+import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const reducers = {};
 const defaultState: ClaimsState = {
   byId: {},
@@ -284,6 +285,8 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
     const repostSrcChannel = stream && stream.reposted_claim ? stream.reposted_claim.signing_channel : null;
 
     if (stream) {
+      const streamImmutableUri = hyperbeamImmutableUriFromClaim(stream);
+
       if (pendingById[stream.claim_id]) {
         byIdDelta[stream.claim_id] = mergeClaim(stream, state.byId[stream.claim_id]);
       } else {
@@ -295,6 +298,7 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
       updateIfValueChanged(state.claimsByUri, byUriDelta, stream.canonical_url, stream.claim_id);
       // Also add the permanent_url here until lighthouse returns canonical_url for search results
       updateIfValueChanged(state.claimsByUri, byUriDelta, stream.permanent_url, stream.claim_id);
+      updateIfValueChanged(state.claimsByUri, byUriDelta, streamImmutableUri, stream.claim_id);
       newResolvingUrls.delete(stream.canonical_url);
       newResolvingUrls.delete(stream.permanent_url);
       newFailedToResolveUrls.delete(stream.canonical_url);
@@ -317,6 +321,8 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
     }
 
     if (channel && channel.claim_id) {
+      const channelImmutableUri = hyperbeamImmutableUriFromClaim(channel);
+
       if (!stream) {
         updateIfValueChanged(state.claimsByUri, byUriDelta, url, channel.claim_id);
       }
@@ -334,6 +340,7 @@ function handleClaimAction(state: ClaimsState, action: any): ClaimsState {
 
       updateIfValueChanged(state.claimsByUri, byUriDelta, channel.permanent_url, channel.claim_id);
       updateIfValueChanged(state.claimsByUri, byUriDelta, channel.canonical_url, channel.claim_id);
+      updateIfValueChanged(state.claimsByUri, byUriDelta, channelImmutableUri, channel.claim_id);
       newResolvingUrls.delete(channel.canonical_url);
       newResolvingUrls.delete(channel.permanent_url);
       newFailedToResolveUrls.delete(channel.canonical_url);

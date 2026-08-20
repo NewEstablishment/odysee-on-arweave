@@ -1,11 +1,18 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {
+  homepageSnapshotPath,
+  materializeHomepageData,
+  readHomepageSnapshot,
+  writeHomepageSnapshot,
+} = require('./homepageMaterializer');
 
 const memo = {};
 const FORMAT = {
   ROKU: 'roku',
 };
+const DEFAULT_CATEGORY_POOL_SIZE = 180;
 
 function walkFiles(dir, handler) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -102,20 +109,50 @@ function loadHomepageData() {
   }
 }
 
+function currentHomepageData() {
+  loadHomepageData();
+  return readHomepageSnapshot(homepageSnapshotPath())?.data || memo.homepageData || {};
+}
+
+async function getMaterializedHomepageData(forceRefresh = false) {
+  loadHomepageData();
+  if (!memo.homepageData) return {};
+
+  const snapshotPath = homepageSnapshotPath();
+  const previous = readHomepageSnapshot(snapshotPath)?.data || {};
+  if (!forceRefresh && Object.keys(previous).length) return previous;
+
+  const requestedLanguages = String(process.env.HOMEPAGE_LANGUAGES || '')
+    .split(',')
+    .map((language) => language.trim())
+    .filter(Boolean);
+  const source = requestedLanguages.length
+    ? Object.fromEntries(
+        requestedLanguages
+          .filter((language) => memo.homepageData[language])
+          .map((language) => [language, memo.homepageData[language]])
+      )
+    : memo.homepageData;
+  const categoryPoolSize = Number(process.env.HOMEPAGE_CATEGORY_POOL_SIZE) || DEFAULT_CATEGORY_POOL_SIZE;
+  const refreshed = await materializeHomepageData(source, { categoryPoolSize });
+  const data = { ...previous, ...refreshed };
+  writeHomepageSnapshot(snapshotPath, data);
+  return data;
+}
+
 // ****************************************************************************
 // v1
 // ****************************************************************************
 const getHomepageJsonV1 = () => {
-  loadHomepageData();
-
-  if (!memo.homepageData) {
+  const homepageData = currentHomepageData();
+  if (!Object.keys(homepageData).length) {
     return {};
   }
 
   const v1 = {};
-  const homepageKeys = Object.keys(memo.homepageData);
+  const homepageKeys = Object.keys(homepageData);
   homepageKeys.forEach((hp) => {
-    v1[hp] = memo.homepageData[hp].categories;
+    v1[hp] = homepageData[hp].categories;
   });
   return v1;
 };
@@ -142,27 +179,26 @@ const reformatV2Categories = (categories, format) => {
  * @returns {{}}
  */
 const getHomepageJsonV2 = (format, lang) => {
-  loadHomepageData();
-
-  if (!memo.homepageData) {
+  const homepageData = currentHomepageData();
+  if (!Object.keys(homepageData).length) {
     return {};
   }
 
   const v2 = {};
-  const homepageKeys = Object.keys(memo.homepageData);
+  const homepageKeys = Object.keys(homepageData);
   homepageKeys.forEach((hp) => {
     if (!lang || lang === hp) {
       v2[hp] = {
-        categories: reformatV2Categories(memo.homepageData[hp].categories, format),
-        portals: memo.homepageData[hp].portals,
-        featured: memo.homepageData[hp].featured,
-        meme: memo.homepageData[hp].meme,
-        meme_android: memo.homepageData[hp].meme_android,
-        meme_android_apk: memo.homepageData[hp].meme_android_apk,
-        meme_android_google: memo.homepageData[hp].meme_android_google,
-        discover: memo.homepageData[hp].discover,
-        discoverNew: memo.homepageData[hp]?.discoverNew,
-        customBanners: memo.homepageData[hp]?.customBanners,
+        categories: reformatV2Categories(homepageData[hp].categories, format),
+        portals: homepageData[hp].portals,
+        featured: homepageData[hp].featured,
+        meme: homepageData[hp].meme,
+        meme_android: homepageData[hp].meme_android,
+        meme_android_apk: homepageData[hp].meme_android_apk,
+        meme_android_google: homepageData[hp].meme_android_google,
+        discover: homepageData[hp].discover,
+        discoverNew: homepageData[hp]?.discoverNew,
+        customBanners: homepageData[hp]?.customBanners,
         announcement: memo.announcements[hp],
       };
     } else {
@@ -173,6 +209,7 @@ const getHomepageJsonV2 = (format, lang) => {
 };
 
 module.exports = {
+  getMaterializedHomepageData,
   getHomepageJsonV1,
   getHomepageJsonV2,
 };
