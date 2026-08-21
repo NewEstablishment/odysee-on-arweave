@@ -65,7 +65,7 @@
     "test:native-cookie-playlists": "node --experimental-strip-types tests/scripts/native-cookie-playlists-smoke.mjs",
     "test:native-subscriptions": "node --experimental-strip-types tests/scripts/native-subscriptions.mjs",
     "test:native-cookie-subscriptions": "node --experimental-strip-types tests/scripts/native-cookie-subscriptions-smoke.mjs",
-    "test:static-manifest": "node --test build/static-manifest.test.mjs"
+    "test:static-manifest": "node --experimental-strip-types tests/scripts/hyperbeam-node-routing.mjs && node --test build/static-manifest.test.mjs"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.2",

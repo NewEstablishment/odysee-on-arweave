@@ -55,7 +55,7 @@ const signedRawRevision = {
   parent: 'root',
   state: 'active',
   author: 'channel-a',
-  comment: 'first edit',
+  body: 'first edit',
   timestamp: 100,
   'revision-of': 'root-id',
   'previous-version': 'root-id',
@@ -96,7 +96,7 @@ const signedRawRoot = {
   parent: 'root',
   state: 'active',
   author: 'channel-a',
-  comment: 'original',
+  body: 'original',
   timestamp: 100,
   'signature-scope': 'native-comment-v1',
 };

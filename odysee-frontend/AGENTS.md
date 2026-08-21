@@ -42,6 +42,8 @@ is sent on native writes.
 ## Identity and account UI
 
 - The node's `cookie@1.0` provider mints identity on the first committed write.
+- Its private non-volatile wallet store lets the same cookie recover the same
+  committer across node restarts.
 - Signup asks only for a display name and commits a channel-profile message.
 - The cookie signer owns later uploads, comments, reactions, playlists, and subscriptions.
 - Local storage holds only the profile ID/name and signed-in display state. It
@@ -91,6 +93,8 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
   the same committer.
 - Edits and author deletes are append-only revisions linked to the logical root
   and previous version.
+- Store new comment text in `body`; readers may accept historical `comment` or
+  `text` fields.
 - Accept only a contiguous same-owner chain; a deleted comment cannot be
   edited again.
 - Build hierarchy, counts, sorting, pagination, and projection in the

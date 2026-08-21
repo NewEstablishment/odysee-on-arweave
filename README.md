@@ -121,8 +121,10 @@ no-store, no-cache`; immutable ID reads may be cached indefinitely.
 ## Native account and writes
 
 The node's `auth-hook@1.0` uses `cookie@1.0`. The first committed write mints a
-`secret-*` cookie; later writes reuse the same signer. There is no email,
-password, browser wallet, or Web2 account.
+`secret-*` cookie; later writes reuse the same signer. Hosted wallets use the
+private non-volatile store, so the same valid cookie recovers the same
+committer after a node restart. There is no email, password, browser wallet,
+or Web2 account.
 
 All native writes use the generic committed-ID route:
 

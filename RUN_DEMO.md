@@ -82,7 +82,8 @@ cd .. && HB_PORT=18734 rebar3 odysee-local     # ctrl-C twice once it boots
 
 # 3. Start the configured cookie-auth node and publish the UI into its store.
 #    config.json owns port 18801, the writable store/match index, and the
-#    auth/reply-id/manifest hooks. Keep this shell running while testing.
+#    auth/reply-id/manifest hooks and persistent hosted cookie wallets. Keep
+#    this shell running while testing.
 HB_CONFIG=config.json HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval '{ok, Config} = hb_opts:load("config.json", hb_opts:default_message_with_env()), [_, Writable | _] = maps:get(<<"store">>, Config), PublishOpts = Config#{<<"store">> => [Writable], <<"match-index">> => [Writable]}, {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", PublishOpts), io:format("~n=== MANIFEST ~s~n", [M]), receive stop -> ok end.'
 ```
 

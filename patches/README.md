@@ -58,3 +58,17 @@ lookup could not reach the init/set commitment. The patch keeps `id`,
 `commitments`, `committers`, `committed`, and `verify` bound to `message@1.0`
 and adds a regression assertion. It is applied idempotently to the pinned
 external dependency during compilation.
+
+## 5. `secret-default-persist.patch`
+
+`secret@1.0` otherwise hard-codes new hosted wallets to `in-memory`, so a valid
+browser cookie can resolve to another wallet after a restart. The patch adds a
+generic `secret-default-persist` node option; `config.json` selects
+`non-volatile`, while upstream behavior remains unchanged unless configured.
+Recovered wallets are warmed in memory so the same cookie keeps the same
+committer.
+
+The patch also removes the application `body` from credential verification.
+The cookie is verified first and the complete application message is then
+signed, preventing ordinary document bodies such as comment text from being
+interpreted as verifier messages.

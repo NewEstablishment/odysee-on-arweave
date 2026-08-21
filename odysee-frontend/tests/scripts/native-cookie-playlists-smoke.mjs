@@ -8,7 +8,6 @@ import {
 } from '../../ui/util/nativePlaylists.ts';
 import {
   NATIVE_PLAYLIST_REFERENCE_TYPE,
-  REFERENCE_DEVICE,
   nativePlaylistReferenceInitMessage,
   nativePlaylistReferenceSetMessage,
   normalizeNativePlaylistReference,
@@ -93,7 +92,6 @@ assert.equal(await committer(forgedReferenceUpdate.id), ownerB);
 
 const referencePaths = await queryUntilTimestamps(
   {
-    device: REFERENCE_DEVICE,
     'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
     'profile-id': profileA.id,
   },

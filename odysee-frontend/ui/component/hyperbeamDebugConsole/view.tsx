@@ -7,7 +7,7 @@ import {
   sanitizeHyperbeamDebugUrl,
   type HyperbeamDebugEvent,
 } from 'util/hyperbeamDebug';
-import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 import ClaimTrace, { type TraceFocus } from './claimTrace';
 
 const MAX_EVENTS = 1200;
@@ -239,7 +239,7 @@ export default function HyperbeamDebugConsole() {
     const text = JSON.stringify(
       {
         type: 'odysee_request_events',
-        node: String(ODYSEE_HYPERBEAM_NODE_API).replace(/\/+$/, ''),
+        node: hyperbeamNodeBase(),
         generatedAt: new Date().toISOString(),
         events: relevantEvents(events),
       },
@@ -358,7 +358,7 @@ export default function HyperbeamDebugConsole() {
         <>
           <div style={{ padding: '8px 9px 0' }}>
             <div style={{ overflowWrap: 'anywhere', marginBottom: 8, color: 'rgba(255,255,255,0.72)' }}>
-              {String(ODYSEE_HYPERBEAM_NODE_API).replace(/\/+$/, '')}
+              {hyperbeamNodeBase()}
             </div>
           </div>
           <div

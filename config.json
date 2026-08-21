@@ -1,6 +1,7 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "secret-default-persist": "non-volatile",
   "search-backend-url": "http://127.0.0.1:7700",
   "search-index": "odysee_claims",
   "search-index-markers": [

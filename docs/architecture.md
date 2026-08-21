@@ -238,13 +238,10 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
 4. Native account ownership is the verified committer established by the
    cookie-derived node wallet. Claimed profile/channel fields are display
    metadata only. Product projections such as comment revisions, reactions,
-   and subscriptions accept only contiguous same-committer chains. Each basic
-   public playlist is instead one independently addressable immutable message:
-   each verified commitment ID is an exact route, its snapshot contains ordered
-   immutable locators, and republishing changes the payload to produce a new
-   snapshot. Query may return another verified commitment locator for the same
-   message. Stable playlist-head semantics wait for the
-   separately loaded generic reference/frequency contract.
+   and subscriptions accept only contiguous same-committer chains. Public
+   playlist content is an independently addressable immutable full snapshot;
+   the pinned generic `reference@1.0` init commitment supplies its stable route
+   and same-owner set messages select later snapshots.
    Historical LBRY ownership remains governed by its separately verified
    source evidence.
 
@@ -264,6 +261,14 @@ commitment, and derives native ownership from that commitment's committer
 before caching a write. `~query@1.0` remains a dumb locator index rather than
 an authority. The end user trusts the TEE-terminated serving node rather than
 verifying in the browser.
+
+The configured cookie deployment persists hosted wallets in the node's private
+store and warms recovered wallets in memory. A valid cookie therefore maps to
+the same committer after a process restart. Credential verification excludes
+the application `body`; only after the cookie is verified is the complete
+message signed. Native comment text can consequently live in `body`, making an
+exact immutable read the comment document while older `comment`/`text` fields
+remain read-compatible.
 
 Comments, reactions, and subscriptions model changes as contiguous append-only
 revisions. Public playlists separate identity from content: each publish writes

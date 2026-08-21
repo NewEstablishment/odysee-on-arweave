@@ -1,5 +1,6 @@
-import { HYPERBEAM_BASE_URL, HYPERBEAM_PLAYBACK_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { HYPERBEAM_PLAYBACK_URL } from 'config';
 import { fetchStoreStreamEvidenceForUri, hyperbeamStoreReadPath } from 'util/hyperbeam';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 const HYPERBEAM_TIMEOUT_MS = 5000;
 
@@ -27,7 +28,7 @@ export function buildHyperbeamPlaybackUrl(uri: string): string {
 }
 
 function hyperbeamNode() {
-  return String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  return hyperbeamNodeBase();
 }
 
 export async function fetchHyperbeamPlaybackUrl(uri: string): Promise<string> {
