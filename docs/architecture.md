@@ -225,8 +225,10 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    flag, derives a per-user secret via its secret provider (HTTP Basic by
    default; a cookie provider for anonymous-but-stable identity), obtains the
    user's node-hosted wallet from `~secret@1.0`, and signs both the request
-   and the `!`-marked message with real RSA-PSS commitments. The user never
-   handles key material.
+   and the `!`-marked message with real RSA-PSS commitments. The configured
+   cookie deployment stores hosted wallets in the node's private store and
+   warms them in memory, so the same cookie recovers the same committer after
+   a process restart. The user never handles key material.
 2. The node persists verified signed inbound messages to a dedicated
    `cache-http` filesystem store (`store-all-signed`, default on); every
    cache write also populates the `~match@1.0` reverse index in its target
@@ -261,6 +263,12 @@ later same-authority set messages replace the full snapshot pointer without
 mutating prior content. Exact query discovers init/set locators, then readers
 hydrate and verify each commitment before applying the strictly monotonic
 reference projection. Index order is never authority.
+
+Native comment text is the committed message `body`. Authentication verifies
+the cookie credential independently of that application body, then signs the
+complete comment message. Older `comment`/`text` fields remain read-compatible,
+but new roots and revisions use `body` so an exact immutable read is also the
+comment document.
 
 The reference source is an external pinned OTP dependency. A narrow tracked
 upstream patch keeps reserved `message@1.0` operations (`verify`, `committers`,

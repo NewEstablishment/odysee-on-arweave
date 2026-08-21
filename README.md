@@ -334,6 +334,9 @@ Native comments are structured messages written through the same generic
 `cookie@1.0` identity commits each write; comments do not call Commentron or
 require an LBRY channel signature. Their stable selectors include
 `type=comment`, `target`, `parent`, and `schema=odysee-comment@1.0`.
+New comment text is stored in the message `body`, so reading the immutable
+message ID returns the comment document directly. Readers still accept the
+older `comment` and `text` fields for compatibility.
 
 One target-wide `query@1.0/only` request discovers native comment IDs. Product
 logic then hydrates messages and performs:
@@ -569,16 +572,19 @@ stores, but this is the minimum config needed.
 ```
 
 ```bash
-cd hyperbeam
-HOME=/tmp/odysee-hb-home rebar3 as hyperbeam compile
-HOME=/tmp/odysee-hb-home HB_CONFIG=config.json HB_PORT=18785 rebar3 device local
+rebar3 compile
+HB_CONFIG=config.json rebar3 odysee-local
 ```
+
+When the config contains `port`, that value is authoritative. Use a copied
+config with a different `port` for parallel nodes; `HB_PORT` does not override
+the JSON value.
 
 Keep the device process attached to a TTY during normal development. Confirm the
 listener before starting the frontend:
 
 ```bash
-curl http://127.0.0.1:18785/~meta@1.0/info
+curl http://127.0.0.1:18801/~meta@1.0/info
 ```
 
 ### 3. Install and start the frontend
@@ -588,7 +594,7 @@ cd odysee-frontend
 corepack enable
 corepack prepare pnpm@10.33.0 --activate
 pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18785 pnpm run dev:web-server
+ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18801 pnpm run dev:web-server
 ```
 
 Open `http://localhost:9090`. The development command runs the asset watcher and
@@ -679,17 +685,14 @@ checkpoint/staging flow.
 Compile the runtime:
 
 ```bash
-cd hyperbeam
-HOME=/tmp/odysee-hb-home rebar3 as hyperbeam compile
+rebar3 compile
 ```
 
 Run focused device tests with an ephemeral port:
 
 ```bash
-HOME=/tmp/odysee-hb-home HB_PORT=0 rebar3 device test -d dev_odysee_claim
-HOME=/tmp/odysee-hb-home HB_PORT=0 rebar3 device test -d dev_odysee_comment
-HOME=/tmp/odysee-hb-home HB_PORT=0 rebar3 device test -d dev_odysee_stream
-HOME=/tmp/odysee-hb-home HB_PORT=0 rebar3 device test -d dev_odysee_upload
+HB_PORT=0 rebar3 eunit
+rebar3 device test --with-core
 ```
 
 LBRY codec/store changes should also run the relevant EUnit modules in

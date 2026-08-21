@@ -2,6 +2,7 @@ import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { SORT_BY } from 'constants/comment';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { allowHyperbeamCompatibilityReads } from 'util/hyperbeamMode';
+import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
@@ -324,10 +325,10 @@ export async function fetchHyperbeamPlaylistListMine(
       'profile-id': account.id,
     })
   ).filter((playlist) => playlist.owner === owner);
+  // `device` is a system key the node's match index does not index, so it
+  // cannot be a query selector; normalizeNativePlaylistReference verifies
+  // the device on every fetched candidate instead.
   const references = (
-    // `device` is a system key the node's match index does not index, so it
-    // cannot be a query selector; normalizeNativePlaylistReference verifies
-    // the device on every fetched candidate instead.
     await fetchNativePlaylistReferenceCollection({
       'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
       'profile-id': account.id,
@@ -1205,7 +1206,7 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
     parent: params.parent_id || target,
     state: 'active',
     author: profile?.id,
-    comment,
+    body: comment,
     'claim-id': target,
     'parent-id': params.parent_id,
     'profile-id': profile?.id,
@@ -1238,7 +1239,7 @@ function nativeCommentRevisionMessage(
     parent: root.parent_id || root.claim_id,
     state: operation === 'delete' ? 'deleted' : 'active',
     author: root.hyperbeam_profile_id,
-    comment,
+    body: comment,
     'claim-id': root.claim_id,
     'parent-id': root.parent_id,
     'profile-id': root.hyperbeam_profile_id,
@@ -2372,13 +2373,11 @@ function isFetchTimeoutOrNetworkError(error: any) {
 }
 
 function hyperbeamBaseUrl(): string {
-  const configured = String(HYPERBEAM_BASE_URL || '').replace(/\/+$/, '');
-  if (configured) return configured;
-  // Served from a HyperBEAM node via the Arweave path manifest: the node that
-  // serves the app is the node to talk to, so default to same-origin. The
-  // HYPERBEAM_BASE_URL config override above still wins when set.
-  if (isServedFromManifest()) return window.location.origin;
-  return String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  return resolveHyperbeamNodeBase({
+    manifestOrigin: typeof window !== 'undefined' && isServedFromManifest() ? window.location.origin : '',
+    baseUrl: HYPERBEAM_BASE_URL,
+    nodeApi: ODYSEE_HYPERBEAM_NODE_API,
+  });
 }
 
 function buildDeviceUrl(baseUrl: string, path: string): string {

@@ -1,9 +1,9 @@
 # Proposed upstream HyperBEAM changes
 
-The HyperBEAM proposals below are optional and the system runs on stock nodes.
-The canonical reference-device correction is applied to its pinned external
-dependency during compilation and must land upstream before that build hook can
-be removed. Any proposal beyond this list must take the form of a terse
+Most compatibility patches below are optional. The reference correction and
+cookie identity correction are applied to their pinned dependencies during
+compilation and must land upstream before those build hooks can be removed.
+Any proposal beyond this list must take the form of a terse
 (<= 20 lines, test + fix) upstream branch, and only for defects that are
 demonstrably upstream rather than application behavior.
 
@@ -59,3 +59,18 @@ lookup could not reach the init/set commitment. The patch binds `id`,
 a regression assertion. `rebar3 compile` applies it idempotently to the pinned
 external dependency. The canonical 21-test suite and the cookie playlist
 lifecycle pass with the patch.
+
+## 5. `secret-default-persist.patch`
+
+`~secret@1.0` hard-codes new hosted wallets to `in-memory`, so a valid browser
+cookie resolves to a different wallet after every node restart. The patch adds
+the generic `secret-default-persist` node option; `config.json` selects
+`non-volatile`, while upstream behavior remains `in-memory` unless configured.
+Non-volatile registrations are also warmed into the hosted-wallet map so the
+first HTTP response can emit `Set-Cookie` normally. On recovery, the wallet is
+loaded from the private store and the same cookie signs with the same committer.
+
+The same patch removes an application `body` from the credential-verification
+request. The cookie is verified first and the complete application message is
+then signed, which prevents ordinary document bodies (including native comment
+text) from being misinterpreted as verifier message maps.

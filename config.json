@@ -1,6 +1,7 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "secret-default-persist": "non-volatile",
   "http-extra-opts": {
     "force-message": true,
     "cache-control": [

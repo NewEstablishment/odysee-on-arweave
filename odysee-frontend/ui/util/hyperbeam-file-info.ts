@@ -1,4 +1,4 @@
-import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 export function localHyperbeamUploadFileInfo(
   claim: Claim | null | undefined,
@@ -50,6 +50,6 @@ export function localHyperbeamUploadFileInfo(
 
 // Native uploads read straight from the node's message store by immutable id.
 function uploadReadUrl(uploadId: string | null | undefined) {
-  const node = String(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  const node = hyperbeamNodeBase();
   return node && uploadId ? `${node}/${encodeURIComponent(uploadId)}` : '';
 }

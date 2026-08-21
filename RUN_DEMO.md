@@ -67,30 +67,32 @@ not an oracle.
 
 Needs Erlang/OTP 27+, rebar3, node >= 22.12, and network access to Odysee.
 
+In terminal 1, start the configured node. `config.json` is required: it enables
+cookie auth, persistent hosted identities, the match index, stores, and the
+manifest hook.
+
 ```sh
-# 1. Build the UI from the tracked odysee-frontend/, which carries the
-#    store-first data layer. The node API must be baked in at BUILD time,
-#    and the manifest profile (relative base, node-safe asset names) is
-#    required for serving from the node.
+rebar3 compile
+HB_CONFIG=config.json rebar3 odysee-local
+```
+
+The `port` in `config.json` is authoritative. For a parallel node, copy the
+config and change that field rather than relying on `HB_PORT`.
+
+In terminal 2, build and publish the manifest through generic committed writes:
+
+```sh
 cd odysee-frontend
 corepack enable && corepack prepare pnpm@10.33.0 --activate
 pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run build:manifest
-
-# 2. Build the preloaded device store, including the pinned reference device.
-cd .. && HB_PORT=18734 rebar3 odysee-local     # ctrl-C twice once it boots
-
-# 3. Start the node and publish the UI into it.
-#    One line. rebar3 shell ignores multi-line --eval and races EOF, hence the sleep.
-#    hackney must be started first: hb_sup starts hb_http_client, which calls
-#    hackney_pool before the app is up, and the node dies during boot without it.
-HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'application:ensure_all_started(hackney), application:ensure_all_started(inets), Opts = hb_odysee_node:seed_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, M]), receive stop -> ok end.' < <(sleep 100000)
+ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18801 pnpm run build:manifest
+node build/static-manifest.mjs --node http://127.0.0.1:18801
 ```
 
 Then open, using the manifest id it prints:
 
 ```
-http://127.0.0.1:18800/<MANIFEST>/#/@conculturepodcast:c/what-if-anakin-won-star-wars-alternate:b
+http://127.0.0.1:18801/<MANIFEST>/#/@conculturepodcast:c/what-if-anakin-won-star-wars-alternate:b
 ```
 
 `cache-control => no-store` is required. Without it the resolution cache pins

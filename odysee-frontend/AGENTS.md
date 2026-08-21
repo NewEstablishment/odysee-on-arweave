@@ -24,8 +24,9 @@ Search and query responses are ordered locators, not claim objects. Hydrate each
 
 The manifest frontend and HyperBEAM node are normally same-origin. The node's
 `cookie@1.0` provider mints a browser identity on the first committed write;
-later account, upload, and comment writes reuse that cookie without email,
-password, an Odysee auth token, or an LBRY channel signature.
+the configured private wallet store lets later account, upload, and comment
+writes reuse the same committer across node restarts without email, password,
+an Odysee auth token, or an LBRY channel signature.
 
 The SSR routes are transport/auth/upload/thumbnail bridges, not a second data mode. Production should use same-origin HyperBEAM where possible, while preserving these routes where browser cookie or server-held signer boundaries require them.
 
@@ -40,6 +41,8 @@ It must not call Commentron or an LBRY API directly.
 - Product logic performs deduplication, revision-chain selection, hierarchy construction, counts, sorting, moderation projection, and pagination.
 - Root comments and replies are generic committed messages. Edits and author
   deletes are append-only revisions; never mutate a stored comment.
+- Store new comment text in `body`. Readers may accept historical `comment` or
+  `text` fields, but writers must produce an exact-readable document body.
 - Require the local HyperBEAM account before creation. Its cookie committer,
   not its local-storage fields, owns the resulting comment.
 - Accept a version only after verifying its exact commitment and deriving its
@@ -121,6 +124,11 @@ The console reports the single HyperBEAM request path. Its graph always shows kn
 
 `pnpm run build:manifest` builds and validates a path-manifest-compatible frontend. Manifest builds use hash routing and relative assets. Normal SSR builds continue to use `index-web.html` and BrowserRouter. Authenticated features still need equivalent same-origin proxy/node contracts.
 
+When running from a node-served manifest, every browser helper must use the
+manifest origin at runtime. A build-time node URL is only a non-manifest
+fallback and must not split auth, playback, file reads, or diagnostics across
+origins.
+
 Release checks:
 
 ```sh
@@ -135,10 +143,10 @@ pnpm run build:manifest
 corepack enable
 corepack prepare pnpm@10.33.0 --activate
 pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18785 pnpm run dev:web-server
+ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18801 pnpm run dev:web-server
 ```
 
-The local SSR server normally listens on `9090`. Meilisearch normally listens on `127.0.0.1:7700`; HyperBEAM normally listens on `18785`.
+The local SSR server normally listens on `9090`. Meilisearch normally listens on `127.0.0.1:7700`; the checked-in HyperBEAM configuration listens on `18801`.
 
 Validation for integration changes:
 
