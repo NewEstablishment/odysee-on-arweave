@@ -963,8 +963,14 @@ classify_channel_claims_list_path(<<ChannelID:40/binary, "/claims">>) ->
 classify_channel_claims_list_path(_Path) ->
     not_found.
 
+%% `ao:' ids are immutable only: outpoints, txids, and content hashes. A
+%% claim id is a mutable locator (its current claim changes on update), so
+%% it is never an `ao:' id; resolve it to an outpoint first.
 classify_native_path(<<"ao:", Rest/binary>>) ->
-    classify_native_path(Rest);
+    case classify_native_path(Rest) of
+        {ok, <<"odysee/claim-id/", _/binary>>} -> not_found;
+        Classified -> Classified
+    end;
 classify_native_path(<<TxID:64/binary, ":", Nout/binary>>) ->
     case valid_hex_size(TxID, 32) andalso valid_uint(Nout) of
         true -> {ok, <<"odysee/claim-output/", TxID/binary, "/", Nout/binary>>};
@@ -1023,7 +1029,7 @@ restore_uri_scheme(URI) -> URI.
 
 %% An `ao:'-prefixed key resolves exactly like its bare form: the prefix is
 %% stripped and the remainder classifies onto the same canonical path, so
-%% claim ids, outpoints, txids, and hashes need no alias or index scheme.
+%% outpoints, txids, and hashes need no alias or index scheme.
 ao_prefixed_key_resolves_like_bare_test() ->
     Bytes = <<"ao addressed blob payload">>,
     Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
@@ -1040,6 +1046,15 @@ ao_prefixed_key_resolves_like_bare_test() ->
     ?assertEqual(
         true,
         hb_message:verify(Loaded, #{ <<"commitment-ids">> => <<"all">> }, Opts)
+    ).
+
+%% `ao:' ids are immutable: a claim id is a mutable locator, never an id.
+ao_prefixed_claim_id_is_not_an_id_test() ->
+    ClaimID = binary:copy(<<"c">>, 40),
+    ?assertEqual(not_found, classify_native_path(<<"ao:", ClaimID/binary>>)),
+    ?assertEqual(
+        {ok, <<"odysee/claim-id/", ClaimID/binary>>},
+        classify_native_path(ClaimID)
     ).
 
 %% A transport failure must NOT be mistaken for "this claim is not a stream".
