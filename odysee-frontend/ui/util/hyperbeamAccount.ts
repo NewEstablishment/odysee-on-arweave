@@ -20,7 +20,7 @@ const ACCOUNT_KEY = 'hyperbeam-account';
 const SAVED_KEY = 'hyperbeam-account-saved';
 const COOKIE_PREFIX = 'secret-';
 
-export type HyperbeamAccount = { name: string, id: string };
+export type HyperbeamAccount = { name: string; id: string };
 
 function read(key: string): HyperbeamAccount | null {
   if (typeof localStorage === 'undefined') return null;
@@ -70,7 +70,7 @@ export async function signUpHyperbeam(name: string): Promise<HyperbeamAccount> {
 
   clearNodeCookies();
 
-  const response = await fetch(`${base}/id?!=true&committers=all`, {
+  const response = await fetch(`${base}/id?0.%21=true&committers=all`, {
     method: 'POST',
     credentials: 'include',
     headers: { accept: 'application/json', type: 'channel', name: trimmed },

@@ -68,7 +68,7 @@ test('publishes assets and the manifest through generic signed writes', async (t
     const record = { headers, body, url: `${target.pathname}${target.search}` };
     requests.push(record);
     assert.equal(options.method, 'POST');
-    assert.equal(record.url, '/id?!=true&committers=all');
+    assert.equal(record.url, '/id?0.%21=true&committers=all');
     assert.equal(headers.get('x-odysee-auth-token'), 'test-token');
 
     if (headers.get('content-type') === MANIFEST_CONTENT_TYPE) {
@@ -101,4 +101,40 @@ test('publishes assets and the manifest through generic signed writes', async (t
   assert(manifestRequest);
   const manifest = JSON.parse(manifestRequest.body.toString('utf8'));
   assert.deepEqual(Object.keys(manifest.paths), ['assets/app.js', 'img/pixel.png', 'index.html']);
+});
+
+test('retries transient write failures without losing manifest progress', async (t) => {
+  const directory = await temporaryBuild(t);
+  const expectedIndex = await fs.readFile(path.join(directory, 'index.html'));
+  const manifestId = testId(220);
+  let attempts = 0;
+  let successfulWrites = 0;
+
+  const fetchImpl = async (_url, options = {}) => {
+    if (!options.method || options.method === 'GET') {
+      return new Response(expectedIndex, { headers: { 'content-type': 'text/html' } });
+    }
+
+    attempts += 1;
+    if (attempts === 1) throw new TypeError('fetch failed');
+    if (attempts === 2) return new Response('busy', { status: 503 });
+
+    const headers = new Headers(options.headers);
+    if (headers.get('content-type') === MANIFEST_CONTENT_TYPE) {
+      return new Response('{}', { headers: { 'message-id': manifestId } });
+    }
+    successfulWrites += 1;
+    return new Response('{}', { headers: { 'message-id': testId(successfulWrites) } });
+  };
+
+  const result = await publishStaticManifest({
+    directory,
+    nodeUrl: 'http://manifest.test',
+    concurrency: 1,
+    fetchImpl,
+  });
+
+  assert.equal(result.id, manifestId);
+  assert.equal(result.fileCount, 3);
+  assert.equal(attempts, 6);
 });

@@ -222,7 +222,7 @@ async function genericStoreWriteResponse(file: Blob) {
   const base = hyperbeamNodeBase();
   if (!base) return null;
 
-  return fetch(`${base}/id?!=true&committers=all`, {
+  return fetch(`${base}/id?0.%21=true&committers=all`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -233,9 +233,9 @@ async function genericStoreWriteResponse(file: Blob) {
   });
 }
 
-// The index record is a plain native message: `POST /id?!=true` commits it
-// with the caller's auth-hook identity and the node persists it, exactly
-// like a comment. The resolver's immutable-id route reads it back.
+// The index record is a plain native message. Stage 0 is committed with the
+// caller's auth-hook identity and persisted exactly like a comment; the
+// trailing `id` stage only resolves that immutable identity.
 async function indexUploadResponse(dataId: string, uploadPayload: Record<string, any>, authToken?: string) {
   const base = hyperbeamNodeBase();
   if (!base) return null;
@@ -264,7 +264,7 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     Object.entries(message).filter(([, value]) => value !== undefined && value !== null && value !== '')
   );
 
-  return fetch(`${base}/id?!=true&committers=all`, {
+  return fetch(`${base}/id?0.%21=true&committers=all`, {
     method: 'POST',
     credentials: 'include',
     headers: {

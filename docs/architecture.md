@@ -124,8 +124,8 @@ The UI talks to nodes over two channels:
   the browser parses the multipart/header encoding, extracts the `lbry@1.0`
   commitments, and re-runs the verification recipes in JavaScript. The node
   is a transport, not an oracle.
-- **Writes** are `POST` requests carrying `?!=true` (or an inline `&!` path
-  flag), which the stock `~auth-hook@1.0` request hook intercepts and signs
+- **Writes** are `POST` requests carrying the stage-scoped
+  `?0.!=true&committers=all` flag, which the stock `~auth-hook@1.0` request hook intercepts and signs
   with a node-hosted per-user wallet. See "Writes" below.
 
 ## Node roles
@@ -220,12 +220,18 @@ There is no custom write device. Uploads, comments, reactions, playlists,
 subscriptions, and moderation events are
 ordinary committed messages, using stock HyperBEAM machinery end to end:
 
-1. The client sends `POST /<path>?!=true`. The stock `~auth-hook@1.0`
+1. The client sends `POST /id?0.!=true&committers=all`. Scoping `!` to stage
+   zero commits the application document once; a global `!` can commit
+   intermediate resolver stages and expose more than one locator for one
+   semantic write. The stock `~auth-hook@1.0`
    request hook (in the default `on/request` pipeline) matches the `!` commit
    flag, derives a per-user secret via its secret provider (HTTP Basic by
    default; a cookie provider for anonymous-but-stable identity), obtains the
-   user's node-hosted wallet from `~secret@1.0`, and signs both the request
-   and the `!`-marked message with real RSA-PSS commitments. The configured
+   user's node-hosted wallet from `~secret@1.0`, and signs the `!`-marked
+   application message with a real RSA-PSS commitment. Transport and credential
+   fields (`cookie`, `authorization`, `path`, `method`, browser fetch headers,
+   and commit controls) are request-only and are removed before the application
+   commitment. The configured
    cookie deployment stores hosted wallets in the node's private store and
    warms them in memory, so the same cookie recovers the same committer after
    a process restart. The user never handles key material.
@@ -237,7 +243,12 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
 3. Readers discover writes via `~query@1.0`'s exact-match index —
    `POST /~query@1.0/only` with equality selectors (schema, type, target,
    author) returns matching message paths — and hydrate them with generic
-   `/~cache@1.0/read` calls.
+   exact immutable reads. Query selectors contain only committed application
+   fields, never request-only transport headers. If authentication and
+   application signing indexed multiple locators for one semantic message,
+   query deduplication prefers an exact locator whose named commitment
+   verifies. Other legitimate commitments in the same content group remain
+   available for membership checks; one co-signer does not invalidate another.
 4. Native social ownership is the committer of the exact verified commitment
    selected by the discovered locator. Profile fields are display metadata and
    are accepted only when the profile message verifies under that same
@@ -268,7 +279,9 @@ Native comment text is the committed message `body`. Authentication verifies
 the cookie credential independently of that application body, then signs the
 complete comment message. Older `comment`/`text` fields remain read-compatible,
 but new roots and revisions use `body` so an exact immutable read is also the
-comment document.
+comment document. HTTPSig encodes a scalar root body as an unnamed inline
+multipart part; the browser preserves that part as `body` during cold
+hydration, so comment text is not lost after refresh.
 
 The reference source is an external pinned OTP dependency. A narrow tracked
 upstream patch keeps reserved `message@1.0` operations (`verify`, `committers`,

@@ -98,7 +98,8 @@ legacy mode and must not bypass an existing device contract.
     upload metadata updates, deletes, and mutable references create signed new
     state or revisions; they do not mutate immutable messages.
 11. **Native social writes use generic messages.** Comments, reactions, public
-    playlists, and follows/subscriptions are committed through `/id?!` and
+    playlists, and follows/subscriptions are committed through the stage-scoped
+    `/id?0.!=true&committers=all` write and
     discovered with `query@1.0`; do not add product write devices or legacy API
     fallbacks for these flows.
 12. **Compatibility sourcing remains observable.** Weaker player-proxy or

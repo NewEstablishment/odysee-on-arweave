@@ -330,7 +330,7 @@ post-filtering in React changes pagination and ranking.
 ### Comments, Revisions, and Moderation
 
 Native comments are structured messages written through the same generic
-`POST /id?!=true&committers=all` path as native uploads. The node's
+`POST /id?0.%21=true&committers=all` path as native uploads. The node's
 `cookie@1.0` identity commits each write; comments do not call Commentron or
 require an LBRY channel signature. Their stable selectors include
 `type=comment`, `target`, `parent`, and `schema=odysee-comment@1.0`.
@@ -368,7 +368,7 @@ they do not fall back to Commentron.
 ### Reactions
 
 Video and comment likes/dislikes are generic `odysee-reaction@1.0` messages
-written through `POST /id?!=true&committers=all`. Exact `query@1.0/only`
+written through `POST /id?0.%21=true&committers=all`. Exact `query@1.0/only`
 selectors discover locators; the frontend then hydrates and verifies each exact
 message and derives its owner from the selected commitment's committer.
 
@@ -398,7 +398,7 @@ unpublished drafts stay local. Public deletion is not yet exposed.
 ### Follows and Subscriptions
 
 Free channel follows are generic `odysee-subscription@1.0` messages written
-through `POST /id?!=true&committers=all`. The relationship identity combines
+through `POST /id?0.%21=true&committers=all`. The relationship identity combines
 the verified cookie committer with a stable native channel ID or full legacy
 channel claim ID.
 
@@ -408,7 +408,8 @@ monotonic revision number. Discovery uses exact `query@1.0/only` selectors;
 each locator is hydrated by immutable ID, commitment-verified, and attributed
 to its exact committer. Forks, gaps, foreign writers, conflicting semantic
 duplicates, and unverifiable profile claims fail closed. The browser does not
-call the legacy subscription API.
+call the legacy subscription API. Provenance is committed as `source-system`
+rather than `origin`, because HTTP `Origin` is request-only transport metadata.
 
 New follows default to notifications off unless the user explicitly enables
 the bell. A one-time legacy import, aggregate subscriber counts, paid

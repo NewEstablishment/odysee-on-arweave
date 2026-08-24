@@ -122,7 +122,7 @@ browser needs no wallet. No new devices; the whole plane is node options.
 
 ```sh
 # Upload a video. The reply's message-id is its permanent address.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: video/mp4" -H "type: stream" -H "title: my video" \
   --data-binary @video.mp4
 
@@ -130,7 +130,7 @@ curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
 #   GET /<message-id>
 
 # Who am I? The profile's commitment names its committer:
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "type: channel" -H "name: my channel"          # -> <profile-id>
 curl "$NODE/<profile-id>/commitments/<profile-id>/committer"   # -> <address>
 
@@ -139,7 +139,7 @@ curl -X POST "$NODE/~query@1.0/only" -H "type: stream" \
   -H "channel: <address>" -H "only: type,channel" -H "return: paths"
 
 # Comments reference the video id:
-curl -X POST "$NODE/id?!=true&committers=all" \
+curl -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "type: comment" -H "parent: <video-id>" --data-binary "nice one"
 ```
 

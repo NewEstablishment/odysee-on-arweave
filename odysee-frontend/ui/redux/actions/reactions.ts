@@ -6,6 +6,8 @@ import { fetchHyperbeamFileReactionList, fetchHyperbeamFileReactionReact } from 
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 import { doToast } from 'redux/actions/notifications';
 
+const nativeReactionWritesInFlight = new Map<string, Promise<any>>();
+
 function requireNativeReactionAccount(dispatch: Dispatch): boolean {
   if (getHyperbeamAccount()) return true;
   dispatch(
@@ -46,13 +48,16 @@ export const doReactionLike = (uri: string) => (dispatch: Dispatch, getState: Ge
   const claim = makeSelectClaimForUri(uri)(state);
   const claimId = claim?.claim_id;
   if (!claimId) return Promise.resolve();
+  const inFlight = nativeReactionWritesInFlight.get(claimId);
+  if (inFlight) return inFlight;
 
   const shouldRemove = myReaction === REACTION_TYPES.LIKE;
   dispatch({
     type: ACTIONS.REACTIONS_LIKE_COMPLETED,
     data: { claimId, shouldRemove },
   });
-  return fetchHyperbeamFileReactionReact({
+  let request: Promise<any>;
+  request = fetchHyperbeamFileReactionReact({
     target: claimId,
     reaction: REACTION_TYPES.LIKE,
   })
@@ -72,7 +77,12 @@ export const doReactionLike = (uri: string) => (dispatch: Dispatch, getState: Ge
         data: error,
       });
       return dispatch(doFetchReactions(claimId));
+    })
+    .finally(() => {
+      if (nativeReactionWritesInFlight.get(claimId) === request) nativeReactionWritesInFlight.delete(claimId);
     });
+  nativeReactionWritesInFlight.set(claimId, request);
+  return request;
 };
 export const doReactionDislike = (uri: string) => (dispatch: Dispatch, getState: GetState) => {
   if (!requireNativeReactionAccount(dispatch)) return Promise.resolve();
@@ -81,13 +91,16 @@ export const doReactionDislike = (uri: string) => (dispatch: Dispatch, getState:
   const claim = makeSelectClaimForUri(uri)(state);
   const claimId = claim?.claim_id;
   if (!claimId) return Promise.resolve();
+  const inFlight = nativeReactionWritesInFlight.get(claimId);
+  if (inFlight) return inFlight;
 
   const shouldRemove = myReaction === REACTION_TYPES.DISLIKE;
   dispatch({
     type: ACTIONS.REACTIONS_DISLIKE_COMPLETED,
     data: { claimId, shouldRemove },
   });
-  return fetchHyperbeamFileReactionReact({
+  let request: Promise<any>;
+  request = fetchHyperbeamFileReactionReact({
     target: claimId,
     reaction: REACTION_TYPES.DISLIKE,
   })
@@ -107,5 +120,10 @@ export const doReactionDislike = (uri: string) => (dispatch: Dispatch, getState:
         data: error,
       });
       return dispatch(doFetchReactions(claimId));
+    })
+    .finally(() => {
+      if (nativeReactionWritesInFlight.get(claimId) === request) nativeReactionWritesInFlight.delete(claimId);
     });
+  nativeReactionWritesInFlight.set(claimId, request);
+  return request;
 };

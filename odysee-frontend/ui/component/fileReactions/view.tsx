@@ -25,6 +25,8 @@ type Props = {
 export default function FileReactions(props: Props) {
   const { uri } = props;
   const dispatch = useAppDispatch();
+  const [reactionPending, setReactionPending] = React.useState(false);
+  const reactionPendingRef = React.useRef(false);
 
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const claimId = claim?.claim_id;
@@ -39,8 +41,17 @@ export default function FileReactions(props: Props) {
       makeSelectTagInClaimOrChannelForUri(uri, DISABLE_SLIMES_VIDEO_TAG)(state)
   );
 
-  const doReactionLike_ = (...args: Parameters<typeof doReactionLike>) => dispatch(doReactionLike(...args));
-  const doReactionDislike_ = (...args: Parameters<typeof doReactionDislike>) => dispatch(doReactionDislike(...args));
+  const runReaction = React.useCallback((request: () => any) => {
+    if (reactionPendingRef.current) return;
+    reactionPendingRef.current = true;
+    setReactionPending(true);
+    Promise.resolve()
+      .then(request)
+      .finally(() => {
+        reactionPendingRef.current = false;
+        setReactionPending(false);
+      });
+  }, []);
   React.useEffect(() => {
     function fetchReactions() {
       dispatch(doFetchReactions(claimId));
@@ -69,9 +80,19 @@ export default function FileReactions(props: Props) {
         'ratio-wrapper--no-slime': disableSlimes,
       })}
     >
-      <LikeButton myReaction={myReaction} reactionCount={likeCount} onClick={() => doReactionLike_(uri)} />
+      <LikeButton
+        disabled={reactionPending}
+        myReaction={myReaction}
+        reactionCount={likeCount}
+        onClick={() => runReaction(() => dispatch(doReactionLike(uri)))}
+      />
       {!disableSlimes && (
-        <DislikeButton myReaction={myReaction} reactionCount={dislikeCount} onClick={() => doReactionDislike_(uri)} />
+        <DislikeButton
+          disabled={reactionPending}
+          myReaction={myReaction}
+          reactionCount={dislikeCount}
+          onClick={() => runReaction(() => dispatch(doReactionDislike(uri)))}
+        />
       )}
       <RatioBar likeCount={likeCount} dislikeCount={disableSlimes ? 0 : dislikeCount} />
     </div>
@@ -79,15 +100,17 @@ export default function FileReactions(props: Props) {
 }
 const Placeholder = <Skeleton variant="text" animation="wave" className="reaction-count-placeholder" />;
 type ButtonProps = {
+  disabled: boolean;
   myReaction: string | null | undefined;
   reactionCount: number;
   onClick: () => void;
 };
 
 const LikeButton = (props: ButtonProps) => {
-  const { myReaction, reactionCount, onClick } = props;
+  const { disabled, myReaction, reactionCount, onClick } = props;
   return (
     <FileActionButton
+      disabled={disabled}
       title={__('I like this')}
       requiresAuth={!hyperbeamNodeEnabled()}
       authSrc="filereaction_like"
@@ -118,9 +141,10 @@ const LikeButton = (props: ButtonProps) => {
 };
 
 const DislikeButton = (props: ButtonProps) => {
-  const { myReaction, reactionCount, onClick } = props;
+  const { disabled, myReaction, reactionCount, onClick } = props;
   return (
     <FileActionButton
+      disabled={disabled}
       requiresAuth={!hyperbeamNodeEnabled()}
       authSrc={'filereaction_dislike'}
       title={__('I dislike this')}

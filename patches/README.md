@@ -1,7 +1,7 @@
 # Proposed upstream HyperBEAM changes
 
-Most compatibility patches below are optional. The reference correction and
-cookie identity correction are applied to their pinned dependencies during
+Most compatibility patches below are optional. The query, reference, and
+cookie identity corrections are applied to their pinned dependencies during
 compilation and must land upstream before those build hooks can be removed.
 Any proposal beyond this list must take the form of a terse
 (<= 20 lines, test + fix) upstream branch, and only for defects that are
@@ -36,18 +36,24 @@ so a seek costs one small fetch, not a whole-video reassembly per request.
 ## 3. `dev-query-match-error-tuple.patch`
 
 `dev_query:match/4` crashes with `case_clause` on every query that has no
-results, so `~query@1.0` returns HTTP 500 rather than a 404 miss (or, for
-`return=boolean`, `{ok, false}`).
+results, so `~query@1.0` returns HTTP 500 rather than the empty value for the
+requested return type.
 `hb_cache:store_match/2` returns `{error, not_found}` on an empty match
 (and `hb_cache:match/2` does the same on the `match@1.0` path), but
 `dev_query:match/4` only has clauses for `{ok, _}` and a bare `not_found`.
 Nothing produces the bare atom, so the miss path is unreachable and every
-miss is a 500. This is independent of configuration: no `match-index`
-setting avoids it, because an empty result is `{error, not_found}` either
-way. Observed on every video page load in this application, where the
-frontend issues a `POST /~query@1.0/only`. The patch adds the two missing
-clauses and leaves the existing ones untouched. Applies cleanly to the
-pinned dep (`git apply --check` verified).
+miss is a 500. The patch maps the tuple miss to empty paths/messages/counts,
+`false`, or `not_found` according to the requested return type.
+
+The same query can also find more than one commitment locator for one
+semantic message after authentication and application signing. The existing
+dedupe selected the first locator even when its exact commitment did not
+verify. The patch keeps discovery order but prefers a locator whose named
+commitment verifies, falling back to the first locator for unsigned indexed
+messages. `src/dev_reply_id.erl` asserts that a generic write's returned ID is
+the same verifiable ID returned by discovery. The browser social lifecycle
+then survives a cold refresh instead of intermittently dropping comments or
+reactions. `rebar3 compile` applies the patch idempotently to the pinned dep.
 
 ## 4. `reference-message-operations.patch`
 
