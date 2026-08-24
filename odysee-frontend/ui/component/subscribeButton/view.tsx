@@ -70,7 +70,8 @@ export default function SubscribeButton(props: Props) {
       prevWidthRef.current = null;
 
       if (prevWidth !== newWidth) {
-        const anim = btn.animate(
+        const anim = animateIfSupported(
+          btn,
           [
             {
               width: prevWidth + 'px',
@@ -85,9 +86,11 @@ export default function SubscribeButton(props: Props) {
           }
         );
 
-        anim.onfinish = () => {
-          if (buttonRef.current) buttonRef.current.style.width = '';
-        };
+        if (anim) {
+          anim.onfinish = () => {
+            if (buttonRef.current) buttonRef.current.style.width = '';
+          };
+        }
       }
     }
   }, [isSubscribed]);
@@ -170,8 +173,48 @@ export default function SubscribeButton(props: Props) {
                   prevWidthRef.current = buttonRef.current.getBoundingClientRect().width;
                 }
 
+                // Start the product action before optional visual effects.
+                // A missing or partially-supported Web Animations API must
+                // never make Follow inert or prevent the native /id write.
+                if (isSubscribed) {
+                  dispatch(
+                    doOpenModal(MODALS.CONFIRM, {
+                      title: __('Unfollow %channel%?', {
+                        channel: channelTitle || claimName,
+                      }),
+                      onConfirm: (closeModal) => {
+                        dispatch(
+                          doChannelUnsubscribe(
+                            {
+                              channelName: claimName,
+                              uri: permanentUrl,
+                              notificationsDisabled: true,
+                            },
+                            true
+                          )
+                        );
+                        closeModal();
+                      },
+                      labelOk: __('Unfollow'),
+                    })
+                  );
+                  return;
+                }
+
+                dispatch(
+                  doChannelSubscribe(
+                    {
+                      channelName: claimName,
+                      uri: permanentUrl,
+                      notificationsDisabled: true,
+                    },
+                    true
+                  )
+                );
+
                 if (!isSubscribed && buttonRef.current) {
-                  buttonRef.current.animate(
+                  animateIfSupported(
+                    buttonRef.current,
                     [
                       {
                         boxShadow: 'inset 0 0 0 999px transparent',
@@ -219,41 +262,6 @@ export default function SubscribeButton(props: Props) {
                       }
                     }
                   }
-                }
-
-                if (isSubscribed) {
-                  dispatch(
-                    doOpenModal(MODALS.CONFIRM, {
-                      title: __('Unfollow %channel%?', {
-                        channel: channelTitle || claimName,
-                      }),
-                      onConfirm: (closeModal) => {
-                        dispatch(
-                          doChannelUnsubscribe(
-                            {
-                              channelName: claimName,
-                              uri: permanentUrl,
-                              notificationsDisabled: true,
-                            },
-                            true
-                          )
-                        );
-                        closeModal();
-                      },
-                      labelOk: __('Unfollow'),
-                    })
-                  );
-                } else {
-                  dispatch(
-                    doChannelSubscribe(
-                      {
-                        channelName: claimName,
-                        uri: permanentUrl,
-                        notificationsDisabled: true,
-                      },
-                      true
-                    )
-                  );
                 }
               }
             : undefined
@@ -309,4 +317,17 @@ export default function SubscribeButton(props: Props) {
       {pushErrorModal()}
     </div>
   ) : null;
+}
+
+function animateIfSupported(
+  element: HTMLElement | null,
+  keyframes: Array<Keyframe>,
+  options: KeyframeAnimationOptions
+): Animation | null {
+  if (!element || typeof element.animate !== 'function') return null;
+  try {
+    return element.animate(keyframes, options);
+  } catch (_error) {
+    return null;
+  }
 }

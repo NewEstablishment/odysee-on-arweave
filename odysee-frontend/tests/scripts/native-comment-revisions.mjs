@@ -3,6 +3,7 @@ import {
   collapseNativeCommentRevisions,
   isNextNativeCommentRevision,
   latestNativeCommentRevision,
+  nativeCommentBody,
   nativeCommentSignatureData,
 } from '../../ui/util/nativeCommentRevisions.ts';
 
@@ -35,6 +36,17 @@ assert.equal(isNextNativeCommentRevision(root, root, foreignRevision), false);
 assert.equal(isNextNativeCommentRevision(root, root, skippedRevision), false);
 assert.equal(latestNativeCommentRevision(root, [revisionTwo, revisionOne]), revisionTwo);
 assert.equal(isNextNativeCommentRevision(root, revisionTwo, deletion), true);
+assert.equal(nativeCommentBody(deletion), '');
+assert.equal(
+  nativeCommentBody({ ...deletion, comment: undefined }),
+  '',
+  'an omitted zero-length HTTPSig tombstone body must normalize back to an empty string'
+);
+assert.equal(
+  nativeCommentBody({ ...revisionOne, comment: undefined }),
+  undefined,
+  'an active comment without content must not be accepted as an empty body'
+);
 assert.equal(isNextNativeCommentRevision(root, deletion, { ...deletion, revision: 4 }), false);
 assert.equal(latestNativeCommentRevision(root, [deletion, revisionTwo, revisionOne]), deletion);
 assert.equal(

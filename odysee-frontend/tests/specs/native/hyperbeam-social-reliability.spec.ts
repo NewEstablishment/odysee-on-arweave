@@ -5,11 +5,20 @@ const manifestUrl = String(process.env.HYPERBEAM_MANIFEST_URL || '').replace(/\/
 test.describe('native manifest social reliability', () => {
   test.skip(!manifestUrl, 'Set HYPERBEAM_MANIFEST_URL to a node-served manifest URL.');
 
-  test('signup, video reaction toggle, comment, and refresh stay usable', async ({ page }) => {
+  test('signup, video reaction toggle, comment lifecycle, and refresh stay usable', async ({ page }) => {
     const suffix = Date.now().toString(36);
     const profileName = `ui-reliability-${suffix}`;
     const uploadName = `ui-reliability-video-${suffix}`;
     const commentText = `UI reliability comment ${suffix}`;
+    const legacyChannelId = 'fb364ef587872515f545a5b4b3182b58073f230f';
+
+    // Product actions must not depend on optional decorative browser APIs.
+    await page.addInitScript(() => {
+      Object.defineProperty(HTMLElement.prototype, 'animate', {
+        configurable: true,
+        value: undefined,
+      });
+    });
 
     await page.goto(`${manifestUrl}/#/$/signup`);
     await page.locator('input[name="hyperbeam_name"]').fill(profileName);
@@ -126,5 +135,45 @@ test.describe('native manifest social reliability', () => {
     await expect(page.getByText('Native UI reliability video', { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.button-like').first()).toHaveClass(/button--fire/, { timeout: 20_000 });
     await expect(page.getByText(commentText, { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    const comment = page.locator(`li.comment[id="${commentId}"]`);
+    await comment.locator('.comment__menu .menu__button').click();
+    await comment.getByText('Remove', { exact: true }).click();
+    const deleteWritePromise = page.waitForResponse((response) => {
+      const request = response.request();
+      const body = String(request.postData() || '');
+      return (
+        request.method() === 'POST' &&
+        new URL(response.url()).pathname === '/id' &&
+        body.includes('odysee-comment@1.0') &&
+        body.includes('"operation":"delete"')
+      );
+    });
+    await page.getByRole('button', { name: 'Remove', exact: true }).last().click();
+    const deleteWrite = await deleteWritePromise;
+    expect(deleteWrite.status()).toBe(200);
+    await expect(page.getByText(commentText, { exact: true })).not.toBeVisible({ timeout: 20_000 });
+
+    await page.reload();
+    await expect(page.getByText('Native UI reliability video', { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(commentText, { exact: true })).not.toBeVisible({ timeout: 20_000 });
+
+    await page.goto(`${manifestUrl}/#/@veritasium:${legacyChannelId}`);
+    const followButton = page.getByRole('button', { name: 'Follow', exact: true }).first();
+    await expect(followButton).toBeVisible({ timeout: 30_000 });
+    const followWritePromise = page.waitForResponse((response) => {
+      const request = response.request();
+      const body = String(request.postData() || '');
+      return (
+        request.method() === 'POST' &&
+        new URL(response.url()).pathname === '/id' &&
+        body.includes('odysee-subscription@1.0') &&
+        body.includes(`lbry:${legacyChannelId}`)
+      );
+    });
+    await followButton.click();
+    const followWrite = await followWritePromise;
+    expect(followWrite.status()).toBe(200);
+    await expect(page.getByRole('button', { name: /Following/ }).first()).toBeVisible({ timeout: 20_000 });
   });
 });
