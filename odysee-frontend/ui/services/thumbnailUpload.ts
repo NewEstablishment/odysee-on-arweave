@@ -20,7 +20,12 @@ export default async function uploadThumbnail(data: FormData): Promise<any> {
     body: file,
   });
 
-  const id = response.headers.get('message-id') || '';
+  let id = response.headers.get('message-id') || '';
+  if (response.ok && !id) {
+    try {
+      id = String((await response.json())['message-id'] || '');
+    } catch (e) {}
+  }
   if (!response.ok || !id) {
     throw new Error(`Thumbnail upload failed (${response.status}).`);
   }

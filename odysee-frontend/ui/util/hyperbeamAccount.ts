@@ -75,7 +75,12 @@ export async function signUpHyperbeam(name: string): Promise<HyperbeamAccount> {
     credentials: 'include',
     headers: { accept: 'application/json', type: 'channel', name: trimmed },
   });
-  const id = response.headers.get('message-id') || '';
+  let id = response.headers.get('message-id') || '';
+  if (response.ok && !id) {
+    try {
+      id = String((await response.json())['message-id'] || '');
+    } catch (e) {}
+  }
   if (!response.ok || !id) {
     throw new Error(`Sign up failed (${response.status}).`);
   }
