@@ -7,52 +7,58 @@ import { useIsMobile } from 'effects/use-screensize';
 import * as PAGES from 'constants/pages';
 import { COLLECTION_PAGE } from 'constants/urlParams';
 import { useNavigate } from 'react-router-dom';
-import ClaimSupportButton from 'component/claimSupportButton';
-import ClaimShareButton from 'component/claimShareButton';
 // import { ENABLE_FILE_REACTIONS } from 'config';
 // import ClaimRepostButton from 'component/claimRepostButton';
 import CollectionPublishButton from 'page/collection/internal/collectionActions/internal/publishButton';
 // import CollectionSubtitle from '../collectionSubtitle';
 import Tooltip from 'component/common/tooltip';
 import Spinner from 'component/spinner';
+import Button from 'component/button';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { selectClaimForUri } from 'redux/selectors/claims';
 import {
   selectCollectionIsMine,
-  selectCollectionAutoPublishForId,
   selectCollectionIsPublishingForId,
   selectCollectionPublishErrorForId,
   selectCollectionHasEditsForId,
   selectCollectionSavedForId,
 } from 'redux/selectors/collections';
 import { doOpenModal } from 'redux/actions/app';
-import {
-  doToggleCollectionSavedForId,
-  doSetCollectionAutoPublish,
-  doRetryCollectionPublish,
-} from 'redux/actions/collections';
+import { doToggleCollectionSavedForId, doRetryCollectionPublish } from 'redux/actions/collections';
+import { doToast } from 'redux/actions/notifications';
 type Props = {
   uri?: string;
   collectionId: string;
   showEdit?: boolean;
   setShowEdit?: (arg0: boolean) => void;
   isBuiltin?: boolean;
-  claimIsPending?: boolean;
   isHeader?: boolean;
 };
 
 function CollectionHeaderActions(props: Props) {
-  const { uri, collectionId, isBuiltin, claimIsPending, showEdit, setShowEdit } = props;
+  const { uri, collectionId, isBuiltin, showEdit, setShowEdit } = props;
   const dispatch = useAppDispatch();
-  const claimId = useAppSelector((state) => selectClaimForUri(state, uri))?.claim_id;
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
-  const autoPublish = useAppSelector((state) => selectCollectionAutoPublishForId(state, collectionId));
   const isPublishing = useAppSelector((state) => selectCollectionIsPublishingForId(state, collectionId));
   const publishError = useAppSelector((state) => selectCollectionPublishErrorForId(state, collectionId));
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const collectionSavedForId = useAppSelector((state) => selectCollectionSavedForId(state, collectionId));
   const navigate = useNavigate();
+  const hasPublicPlaylist = Boolean(uri);
   const isNotADefaultList = collectionId !== 'watchlater' && collectionId !== 'favorites';
+
+  async function sharePlaylist() {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: document.title, url });
+      } else {
+        await navigator.clipboard.writeText(url);
+        dispatch(doToast({ message: __('Playlist link copied.') }));
+      }
+    } catch (error) {
+      if (error?.name !== 'AbortError') dispatch(doToast({ message: __('Could not share playlist.'), isError: true }));
+    }
+  }
   return (
     <>
       <div>
@@ -62,17 +68,6 @@ function CollectionHeaderActions(props: Props) {
               {isMyCollection && <CollectionPublishButton uri={uri} collectionId={collectionId} showEdit={showEdit} />}
               {uri && (
                 <>
-                  {claimIsPending && (
-                    <Tooltip
-                      title={__('Your publish is being confirmed and will be live soon')}
-                      arrow={false}
-                      enterDelay={100}
-                    >
-                      <div className="pending-change">
-                        <Spinner />
-                      </div>
-                    </Tooltip>
-                  )}
                   {isPublishing && (
                     <Tooltip title={__('Publishing playlist updates in the background')} arrow={false} enterDelay={100}>
                       <div className="pending-change">
@@ -87,9 +82,7 @@ function CollectionHeaderActions(props: Props) {
                       </div>
                     </Tooltip>
                   )}
-                  {<ClaimSupportButton uri={uri} fileAction />}
-                  {/* <ClaimRepostButton uri={uri} /> */}
-                  <ClaimShareButton uri={uri} collectionId={collectionId} fileAction webShareable />
+                  <Button button="alt" icon={ICONS.SHARE} aria-label={__('Share playlist')} onClick={sharePlaylist} />
                 </>
               )}
             </>
@@ -120,18 +113,7 @@ function CollectionHeaderActions(props: Props) {
                   </div>
                 </MenuItem>
               )}
-              {isMyCollection && !isBuiltin && claimId && (
-                <MenuItem
-                  className="comment__menu-option"
-                  onSelect={() => dispatch(doSetCollectionAutoPublish(collectionId, !autoPublish))}
-                >
-                  <div className="menu__link">
-                    <Icon aria-hidden icon={ICONS.PUBLISH} />
-                    {autoPublish ? __('Disable Auto-publish') : __('Enable Auto-publish')}
-                  </div>
-                </MenuItem>
-              )}
-              {isMyCollection && !isBuiltin && claimId && collectionHasEdits && publishError && (
+              {isMyCollection && !isBuiltin && hasPublicPlaylist && collectionHasEdits && publishError && (
                 <MenuItem
                   className="comment__menu-option"
                   onSelect={() => dispatch(doRetryCollectionPublish(collectionId))}
@@ -142,10 +124,10 @@ function CollectionHeaderActions(props: Props) {
                   </div>
                 </MenuItem>
               )}
-              {!isMyCollection && claimId && (
+              {!isMyCollection && hasPublicPlaylist && (
                 <MenuItem
                   className="comment__menu-option"
-                  onSelect={() => dispatch(doToggleCollectionSavedForId(claimId))}
+                  onSelect={() => dispatch(doToggleCollectionSavedForId(collectionId))}
                 >
                   <div className="menu__link">
                     <Icon aria-hidden icon={collectionSavedForId ? ICONS.PLAYLIST_FILLED : ICONS.PLAYLIST_ADD} />
@@ -176,7 +158,7 @@ function CollectionHeaderActions(props: Props) {
                   {__('Copy')}
                 </div>
               </MenuItem>
-              {isMyCollection && isNotADefaultList && (
+              {isMyCollection && isNotADefaultList && !hasPublicPlaylist && (
                 <MenuItem
                   className="comment__menu-option"
                   onSelect={() =>
@@ -192,17 +174,6 @@ function CollectionHeaderActions(props: Props) {
                   <div className="menu__link">
                     <Icon aria-hidden icon={ICONS.DELETE} />
                     {__('Delete')}
-                  </div>
-                </MenuItem>
-              )}
-              {!isMyCollection && claimId && (
-                <MenuItem
-                  className="comment__menu-option"
-                  onSelect={() => navigate(`/$/${PAGES.REPORT_CONTENT}?claimId=${claimId}`)}
-                >
-                  <div className="menu__link">
-                    <Icon aria-hidden icon={ICONS.REPORT} />
-                    {__('Report')}
                   </div>
                 </MenuItem>
               )}

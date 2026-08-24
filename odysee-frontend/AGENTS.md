@@ -97,8 +97,44 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
   integration layer, not in generic query.
 - Never pass a native profile ID to the LBRY URI parser.
 
-Creator reactions, advanced moderation, delegates, and settings are currently
-unsupported. Fail explicitly instead of falling back to legacy services.
+## Reactions
+
+- Video and comment reactions use generic `odysee-reaction@1.0` committed
+  messages, exact query discovery, immutable hydration, and committer authority.
+- A toggle or switch appends a contiguous same-owner revision. Reject forks and
+  conflicting semantic duplicates and count at most one active reaction per
+  verified committer and target.
+- HyperBEAM cookie accounts must not be redirected into legacy authentication,
+  and reaction actions must not call legacy reaction endpoints.
+
+## Playlists
+
+- Public playlists use generic immutable `odysee-playlist@1.0` snapshot messages.
+  Do not call `collection_*`, create an application device, or publish an LBRY
+  collection claim.
+- Persist only ordered immutable native IDs or legacy outpoints. Draft URIs must
+  resolve before publish.
+- Each explicit publish creates a new message ID and share URL. Published
+  snapshots cannot be updated or deleted; local edits may be published as a new
+  snapshot.
+- Built-in lists and unpublished drafts stay local. Mutable reference behavior
+  is deferred until its canonical device contract is confirmed.
+
+## Follows And Subscriptions
+
+- Free follows use generic `odysee-subscription@1.0` committed messages, exact
+  query discovery, immutable hydration, and committer authority.
+- Follow, bell-preference changes, unfollow, and re-follow are contiguous
+  same-owner append-only revisions. Stop at forks and reject conflicting
+  semantic duplicates.
+- Bind relationships to a stable native channel ID or full legacy channel claim
+  ID. Names and mutable URIs are display/lookup data, not authority.
+- Cookie accounts must not be redirected into legacy authentication, and
+  subscription actions must never call the legacy subscription API.
+- One-time legacy import, aggregate counts, paid memberships, and Following-feed
+  aggregation are separate contracts.
+
+## Search
 
 ## Publish and route guards
 
@@ -135,12 +171,31 @@ normal-flow request reaches a legacy host.
 
 ## Current limitations
 
-- Native reactions, view/subscriber counts, and advanced moderation are not
-  implemented.
-- Upload edit/delete needs a complete append-only native contract.
-- Generic cache range propagation limits seeking for some historical media.
-- The cookie identity is node/browser-local and is not yet portable or
-  recoverable.
+```sh
+pnpm run typecheck:tsc
+pnpm run fmt:check
+pnpm run test:native-reactions
+pnpm run test:native-playlists
+pnpm run test:native-subscriptions
+node --check web/src/odyseeHyperbeamNode.js
+node --check web/src/fetchStreamUrl.js
+```
 
-Update this guide whenever the manifest, account, upload, comment, playback,
-or browser-routing contract changes.
+Use the focused native comment, control, upload, static-manifest, and browser smoke scripts when their surfaces change.
+For the cookie-owned comment lifecycle, run
+`HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments`
+against the configured local node.
+Run `test:native-cookie-subscriptions` against the same configured node when
+follow persistence or account ownership changes.
+
+## Current State And Limitations
+
+- The browser-side legacy wiring switch and compatibility-read toggle are retired.
+- Search and query produce locators and hydrate separately; do not regress to passing backend search documents directly into Redux.
+- Comments are node-native only. Root, reply, edit, and author-delete flows are
+  implemented; advanced moderation and settings remain unsupported.
+- Meilisearch must be running and populated for fuzzy search. It is not a source of truth.
+- The normal SSR deployment remains necessary for local auth bridges and server-held cache signing.
+- Recommendations and local wallet operations have separate contracts and should not be mislabeled as normal search or browser legacy mode.
+
+Update this file whenever routing ownership, integration contracts, environment variables, validation, or known limitations change.

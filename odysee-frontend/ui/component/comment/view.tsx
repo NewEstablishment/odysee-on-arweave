@@ -71,6 +71,7 @@ import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { getChannelIdFromClaim } from 'util/claim';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 
 const CommentCreate = lazyImport(
   () =>
@@ -147,7 +148,8 @@ function CommentView(props: Props) {
   const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
   const activeChannelId = activeChannelClaim && activeChannelClaim.claim_id;
   const hyperbeamEnabled = hyperbeamNodeEnabled();
-  const reactionKey = activeChannelId ? `${commentId}:${activeChannelId}` : commentId;
+  const reactionIdentity = hyperbeamEnabled ? getHyperbeamAccount()?.id : activeChannelId;
+  const reactionKey = reactionIdentity ? `${commentId}:${reactionIdentity}` : commentId;
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const creatorId = getChannelIdFromClaim(claim);
   const channelAge = useAppSelector((state) => selectDateForUri(state, channelUrl));

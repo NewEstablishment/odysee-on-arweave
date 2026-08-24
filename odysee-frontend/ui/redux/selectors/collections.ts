@@ -22,7 +22,8 @@ import {
   selectCanPlaybackFileForUri,
 } from 'redux/selectors/content';
 import { getItemCountForCollection } from 'util/collections';
-import { isPermanentUrl, isCanonicalUrl } from 'util/claim';
+import { getClaimOutpoint, isPermanentUrl, isCanonicalUrl } from 'util/claim';
+import { validNativePlaylistItem } from 'util/nativePlaylists';
 import { EMPTY_OBJECT } from 'redux/selectors/empty';
 
 const selectState = (state: State) => state.collections || EMPTY_OBJECT;
@@ -239,15 +240,19 @@ export const selectCollectionForId = createSelector(
 export const selectIsCollectionBuiltInForId = (state: State, id: string) => selectBuiltinCollections(state)[id];
 export const selectClaimSavedForUrl = createSelector(
   (state, url) => url,
+  (state, url) => selectClaimForUri(state, url),
   selectBuiltinCollections,
   selectMyPublicLocalCollections,
   selectMyUnpublishedCollections,
   selectMyEditedCollections,
-  (url, bLists, myRLists, uLists, eLists) => {
+  (url, claim, bLists, myRLists, uLists, eLists) => {
     const collections = [bLists, uLists, eLists, myRLists];
     const claimId = url.match(/[a-f0-9]{40}/)?.[0];
+    const locator = getClaimOutpoint(claim);
     return collections.some((list) =>
-      Object.values(list).some(({ items }) => items?.some((item) => item === url || item === claimId))
+      Object.values(list).some(({ items }) =>
+        items?.some((item) => item === url || item === claimId || item === locator)
+      )
     );
   }
 );
@@ -267,6 +272,7 @@ export const makeSelectClaimMenuCollectionsForUrl = () =>
       selectMyEditedCollections,
       selectMyCollectionClaimIds,
       (state, url) => url,
+      (state, url) => selectClaimForUri(state, url),
     ],
     (
       lastUsedCollectionIds,
@@ -275,9 +281,13 @@ export const makeSelectClaimMenuCollectionsForUrl = () =>
       unpublishedCollections,
       editedCollections,
       myPublishedIds,
-      url
+      url,
+      claim
     ) => {
       const claimId = url.match(/[a-f0-9]{40}/)?.[0];
+      const locator = getClaimOutpoint(claim);
+      const includesClaim = (items: Array<string> | undefined) =>
+        items?.some((item) => item === url || item === claimId || item === locator);
       // Determine which collection IDs belong to the user
       const builtinIds = Object.keys(builtinCollections || {});
       const unpublishedIds = Object.keys(unpublishedCollections || {});
@@ -290,7 +300,7 @@ export const makeSelectClaimMenuCollectionsForUrl = () =>
           return collection
             ? {
                 ...collection,
-                hasClaim: collection.items?.some((item) => item === url || item === claimId),
+                hasClaim: includesClaim(collection.items),
               }
             : null;
         })
@@ -299,7 +309,7 @@ export const makeSelectClaimMenuCollectionsForUrl = () =>
         .filter(
           ([id, collection]: [string, any]) =>
             myCollectionIds.has(id) && // Only include my collections
-            collection.items?.some((item: any) => item === url || item === claimId) &&
+            includesClaim(collection.items) &&
             !lastUsedCollections.some((lastUsedCollection: any) => lastUsedCollection.id === collection.id)
         )
         .map(([id, collection]: [string, any]) => ({ ...collection, hasClaim: true }));
@@ -331,7 +341,7 @@ export const selectFirstItemUrlForCollection = (state: State, id: string) => {
   const firstItem = items && items[0];
   if (!firstItem) return null;
   if (isPermanentUrl(firstItem) || isCanonicalUrl(firstItem)) return firstItem;
-  const claim = selectClaimForClaimId(state, firstItem);
+  const claim = selectClaimForClaimId(state, firstItem) || selectClaimsByImmutableLocator(state)[firstItem];
   return claim ? claim.permanent_url || claim.canonical_url || null : null;
 };
 export const selectCollectionLengthForId = (state: State, id: string) => {
@@ -422,15 +432,19 @@ export const selectCollectionSyncStatusForId = (state: State, id: string) => {
   if (selectIsMyCollectionPublishedForId(state, id)) return SYNC_STATUS.PUBLIC_SYNCED;
   return SYNC_STATUS.UNKNOWN;
 };
-const HEX_CLAIM_ID = /^[a-f0-9]{40}$/i;
 export const selectClaimIdsForCollectionId = createSelector(
   selectHasPrivateCollectionForId,
   selectItemsForCollectionId,
   selectClaimIdsByUri,
-  (isPrivate, items, byUri) => {
+  selectClaimsById,
+  (isPrivate, items, byUri, byId) => {
     if (!items || !isPrivate) return items;
     const ids = new Set<string | null>();
     const notFetched = items.some((item) => {
+      if (validNativePlaylistItem(item)) {
+        ids.add(item);
+        return false;
+      }
       const claimId = byUri[normalizeURI(item)];
 
       if (claimId === undefined) {
@@ -442,13 +456,8 @@ export const selectClaimIdsForCollectionId = createSelector(
         return false;
       }
 
-      // Skip in-flight preview claims and anything that isn't a real hex claim_id —
-      // the SDK rejects those with "Non-hexadecimal digit found".
-      if (typeof claimId !== 'string' || !HEX_CLAIM_ID.test(claimId)) {
-        return false;
-      }
-
-      ids.add(claimId);
+      const locator = getClaimOutpoint(byId[claimId]);
+      ids.add(locator && validNativePlaylistItem(locator) ? locator : null);
     });
     if (notFetched) return undefined;
     return Array.from(ids);
@@ -459,12 +468,21 @@ export const selectHasUnavailableClaimIdsForCollectionId = createSelector(
   (claimIds) => claimIds && claimIds.includes(null)
 );
 const _prevCollectionUrls = new Map<string, Array<string>>();
+const selectClaimsByImmutableLocator = createSelector(selectClaimsById, (claimsById) => {
+  const claimsByLocator: Record<string, Claim> = {};
+  Object.values(claimsById || {}).forEach((claim: Claim | null | undefined) => {
+    const locator = getClaimOutpoint(claim);
+    if (locator) claimsByLocator[locator] = claim;
+  });
+  return claimsByLocator;
+});
 export const selectUrlsForCollectionId = createCachedSelector(
   (state, collectionId) => collectionId,
   (state, collectionId, itemCount) => itemCount,
   selectItemsForCollectionId,
   selectClaimsById,
-  (collectionId, itemCount, items, claimsById) => {
+  selectClaimsByImmutableLocator,
+  (collectionId, itemCount, items, claimsById, claimsByLocator) => {
     if (!items) return items;
     const uris: string[] = [];
     let notFetched;
@@ -472,7 +490,7 @@ export const selectUrlsForCollectionId = createCachedSelector(
       if (isPermanentUrl(item) || isCanonicalUrl(item)) {
         uris.push(item);
       } else {
-        const claim = claimsById[item];
+        const claim = claimsById[item] || claimsByLocator[item];
 
         if (claim) {
           const uri = claim.permanent_url || claim.canonical_url;
@@ -534,6 +552,8 @@ export const selectCollectionForIdClaimForUriItem = createCachedSelector(
     if (items.includes(permanentUri)) return permanentUri;
     const canonicalUri = claim.canonical_url;
     if (items.includes(canonicalUri)) return canonicalUri;
+    const locator = getClaimOutpoint(claim);
+    if (locator && items.includes(locator)) return locator;
 
     try {
       const { streamClaimId: claimId } = parseURI(uri);

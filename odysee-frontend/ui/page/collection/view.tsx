@@ -12,12 +12,7 @@ import Card from 'component/common/card';
 import Button from 'component/button';
 import Yrbl from 'component/yrbl';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import {
-  selectHasClaimForId,
-  selectClaimForId,
-  selectClaimIsPendingForId,
-  selectGeoRestrictionForUri,
-} from 'redux/selectors/claims';
+import { selectHasClaimForId, selectClaimForId, selectGeoRestrictionForUri } from 'redux/selectors/claims';
 import {
   selectCollectionForId,
   selectBrokenUrlsForCollectionId,
@@ -27,7 +22,7 @@ import {
   selectCollectionHasItemsResolvedForId,
   selectCollectionHasUnsavedEditsForId,
 } from 'redux/selectors/collections';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { isHyperbeamSignedIn } from 'util/hyperbeamAccount';
 import { doResolveClaimId as doResolveClaimIdAction } from 'redux/actions/claims';
 import {
   doCollectionEdit as doCollectionEditAction,
@@ -59,7 +54,7 @@ const CollectionPage = (props: Props) => {
   const collectionHasUnsavedEdits = useAppSelector((state) =>
     selectCollectionHasUnsavedEditsForId(state, collectionId)
   );
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = isHyperbeamSignedIn();
   const navigate = useNavigate();
   const { search, state, pathname } = useLocation();
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
@@ -74,7 +69,6 @@ const CollectionPage = (props: Props) => {
   const publishPage = (editing || publishing) && !forceCollectionView;
   const isBuiltin = COLLECTIONS_CONSTS.BUILTIN_PLAYLISTS.includes(collectionId);
   const isOnPublicView = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLIC;
-  const isClaimPending = useAppSelector((state) => selectClaimIsPendingForId(state, collectionId));
   const isResolvingCollection = hasClaim === undefined;
   const shouldPromptSignIn = IS_WEB && publishPage && !isAuthenticated;
   const collectionHasStoredItems = Boolean(collection?.items?.length);
@@ -165,14 +159,6 @@ const CollectionPage = (props: Props) => {
   }
 
   if (!collection && !isResolvingCollection) {
-    if (isClaimPending) {
-      return (
-        <div className="main--empty">
-          <Spinner />
-        </div>
-      );
-    }
-
     return (
       <Page noSideNavigation={isEmbedPath}>
         <div className="main--empty empty">{__('Nothing here')}</div>

@@ -4,11 +4,9 @@ import { COLLECTION_PAGE as CP } from 'constants/urlParams';
 import React from 'react';
 import FileActionButton from 'component/common/file-action-button';
 import { useAppSelector } from 'redux/hooks';
-import { selectClaimIsPendingForId } from 'redux/selectors/claims';
 import {
   selectCollectionHasEditsForId,
   selectCollectionLengthForId,
-  selectCollectionAutoPublishForId,
   selectCollectionIsPublishingForId,
   selectCollectionPublishErrorForId,
 } from 'redux/selectors/collections';
@@ -19,24 +17,19 @@ type Props = {
 };
 
 function CollectionPublishButton(props: Props) {
-  const { collectionId, showEdit } = props;
-  const claimIsPending = useAppSelector((state) => selectClaimIsPendingForId(state, collectionId));
+  const { uri, collectionId, showEdit } = props;
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const collectionLength = useAppSelector((state) => selectCollectionLengthForId(state, collectionId));
-  const autoPublish = useAppSelector((state) => selectCollectionAutoPublishForId(state, collectionId));
   const isPublishing = useAppSelector((state) => selectCollectionIsPublishingForId(state, collectionId));
   const publishError = useAppSelector((state) => selectCollectionPublishErrorForId(state, collectionId));
   const navigate = useNavigate();
   if (collectionLength === 0) return null;
-  if (autoPublish && !collectionHasEdits && !isPublishing && !publishError) return null;
   const label = isPublishing
     ? __('Publishing...')
     : publishError && collectionHasEdits
       ? __('Retry Publish')
-      : collectionHasEdits
-        ? autoPublish
-          ? __('Auto-publish On')
-          : __('Publish Updates')
+      : uri
+        ? __('Publish Snapshot')
         : __('Publish');
   return (
     <FileActionButton
@@ -46,7 +39,7 @@ function CollectionPublishButton(props: Props) {
       onClick={() => navigate(`?${CP.QUERIES.VIEW}=${CP.VIEWS.PUBLISH}`)}
       icon={ICONS.PUBLISH}
       iconSize={18}
-      disabled={claimIsPending || showEdit || isPublishing}
+      disabled={showEdit || isPublishing}
     />
   );
 }

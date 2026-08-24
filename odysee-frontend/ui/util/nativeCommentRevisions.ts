@@ -69,7 +69,8 @@ export function latestNativeCommentRevision(
       .filter((revision) => isNextNativeCommentRevision(root, current, revision))
       .sort(compareRevisionCandidates);
     if (!candidates.length) return current;
-    current = candidates[candidates.length - 1];
+    if (candidates.length > 1) return current;
+    current = candidates[0];
   }
 }
 
