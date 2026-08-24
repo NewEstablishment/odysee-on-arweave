@@ -82,12 +82,10 @@ const SEARCH_DEVICE = '~search@1.0';
 const SEARCH_MAX_LIMIT = 100;
 const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
 const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
-// Native writes POST straight to the node; `!` is the auth-hook commit flag,
-// so the node's configured auth hook decides whether the write is committed.
-// The commit flag signs the request via the node's auth hook; committers=all
-// makes /id resolve to the signed ID (the bare id key recalculates the
-// unsigned ID over uncommitted keys too, which nothing registers).
-const HYPERBEAM_NATIVE_WRITE_PATH = 'id?!=true&committers=all';
+// Scope the auth-hook commit flag to stage 0 (the posted message). A global
+// `!` also commits resolver stages, producing multiple locators for one
+// semantic write and nondeterministic discovery.
+const HYPERBEAM_NATIVE_WRITE_PATH = 'id?0.%21=true&committers=all';
 const storeReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
 const nativeCommentQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<any>> }>();
 const nativeCommentControlQueryCache = new Map<
@@ -95,6 +93,7 @@ const nativeCommentControlQueryCache = new Map<
   { expiresAt: number; promise: Promise<Array<NativeCommentControl>> }
 >();
 const nativeReactionQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativeReaction>> }>();
+const recentNativeReactionWrites = new Map<string, Map<string, NativeReaction>>();
 const nativePlaylistQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativePlaylist>> }>();
 const nativePlaylistReferenceQueryCache = new Map<
   string,
@@ -942,7 +941,7 @@ function nativeSubscriptionMessage(params: {
     'notifications-disabled': params.notificationsDisabled,
     state: params.state,
     operation: params.operation,
-    origin: params.origin,
+    'source-system': params.origin,
     'imported-at': params.importedAt,
     revision: params.revision,
     'version-ref': params.versionRef,
@@ -1053,11 +1052,17 @@ async function writeNativeReaction(params: {
   if (!written || written.owner !== owner) {
     throw new Error('HyperBEAM native reaction failed commitment or ownership verification');
   }
+  rememberNativeReactionWrite(written);
+
+  // The committed message is already exact-read and verified above. Project
+  // it immediately instead of requiring the match index to expose it in the
+  // same event-loop turn. Query remains discovery only, never authority.
+  const projected = projectNativeReactions(mergeNativeReactionEvents(existing, [written]), owner);
 
   return {
     success: true,
     'message-id': messageId,
-    ...(await nativeReactionList([params.target], params.subject)),
+    ...reactionListResponse([params.target], projected.my_reactions, projected.others_reactions),
   };
 }
 
@@ -1073,7 +1078,7 @@ async function fetchNativeReactionCollection(
   };
   const request = nativeQueryRequest(selectors);
   const key = stableJson(request);
-  return cachedNativeQuery(nativeReactionQueryCache, key, async () => {
+  const discovered = await cachedNativeQuery(nativeReactionQueryCache, key, async () => {
     const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
     const reactions = await resolveNativeReactionPaths(paths);
     return reactions.filter(
@@ -1084,6 +1089,32 @@ async function fetchNativeReactionCollection(
         reaction.subject === subject
     );
   });
+  return mergeNativeReactionEvents(discovered, recentNativeReactionWritesFor(target, subject));
+}
+
+function nativeReactionCollectionKey(target: string, subject: NativeReactionSubject): string {
+  return `${subject}\u0000${target}`;
+}
+
+function recentNativeReactionWritesFor(target: string, subject: NativeReactionSubject): Array<NativeReaction> {
+  return Array.from(recentNativeReactionWrites.get(nativeReactionCollectionKey(target, subject))?.values() || []);
+}
+
+function rememberNativeReactionWrite(reaction: NativeReaction): void {
+  const key = nativeReactionCollectionKey(reaction.target, reaction.subject);
+  const recent = recentNativeReactionWrites.get(key) || new Map<string, NativeReaction>();
+  recent.set(reaction.message_id, reaction);
+  while (recent.size > 100) recent.delete(recent.keys().next().value);
+  recentNativeReactionWrites.set(key, recent);
+}
+
+function mergeNativeReactionEvents(
+  discovered: Array<NativeReaction>,
+  recent: Array<NativeReaction>
+): Array<NativeReaction> {
+  const byId = new Map<string, NativeReaction>();
+  [...discovered, ...recent].forEach((reaction) => byId.set(reaction.message_id, reaction));
+  return Array.from(byId.values());
 }
 
 async function resolveNativeReactionPaths(paths: Array<string>): Promise<Array<NativeReaction>> {
@@ -1546,7 +1577,7 @@ function uniquePaths(paths: Array<string>): Array<string> {
 function nativeQueryRequest(selectors: Record<string, any>): Record<string, any> {
   return {
     ...selectors,
-    only: [...Object.keys(selectors), 'accept'],
+    only: Object.keys(selectors),
     return: 'paths',
     'cache-control': ['no-store', 'no-cache'],
   };
@@ -3484,7 +3515,18 @@ function parseMultipartBytes(body: Uint8Array, contentType: string): Record<stri
     const separator = segment.indexOf('\r\n\r\n');
     const rawHeaders = separator === -1 ? segment : segment.slice(0, separator);
     const name = rawHeaders.match(/name="([^"]+)"/i)?.[1];
-    if (!name || isBundleHousekeepingPart(name)) continue;
+    if (!name) {
+      // Flat messages with a scalar root body (comments are the important
+      // example) encode it as an unnamed `content-disposition: inline` part.
+      // Dropping this part makes the message verify but strips its content on
+      // a cold read, so a newly-created comment disappears after refresh.
+      if (separator !== -1 && /content-disposition:\s*inline/i.test(rawHeaders)) {
+        const partBody = segment.slice(separator + 4).replace(/\r\n$/, '');
+        result.body = latin1ToUtf8(partBody);
+      }
+      continue;
+    }
+    if (isBundleHousekeepingPart(name)) continue;
 
     const path = name.split('/').filter(Boolean);
     const fields = parsePartHeaderFields(rawHeaders);

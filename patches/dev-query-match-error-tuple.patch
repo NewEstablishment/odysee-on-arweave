@@ -1,9 +1,7 @@
+diff --git a/src/preloaded/query/dev_query.erl b/src/preloaded/query/dev_query.erl
 --- a/src/preloaded/query/dev_query.erl
 +++ b/src/preloaded/query/dev_query.erl
-@@ -174,6 +174,15 @@
-                     ?event({matched, {paths, Matches}}),
-                     {ok, length(Matches) > 0}
-             end;
+@@ -176,0 +177,9 @@ match(UserSpec, _Base, Req, Opts) ->
 +        {error, not_found} when ReturnType == <<"count">> ->
 +            {ok, 0};
 +        {error, not_found}
@@ -13,16 +11,52 @@
 +            {ok, false};
 +        {error, not_found} ->
 +            {error, not_found};
-         not_found when ReturnType == <<"boolean">> ->
-             {ok, false};
-         not_found ->
-@@ -353,4 +362,9 @@ return_types_test() ->
-             Opts
-         )
-     ),
+@@ -184 +193 @@ dedupe_query_matches(Matches, Opts) ->
+-    {_, DedupedRev} =
++    {OrderRev, Groups} =
+@@ -186 +195 @@ dedupe_query_matches(Matches, Opts) ->
+-            fun(Path, {Seen, Acc}) ->
++            fun(Path, {Order, Acc}) ->
+@@ -188,5 +197,5 @@ dedupe_query_matches(Matches, Opts) ->
+-                case maps:is_key(Key, Seen) of
+-                    true ->
+-                        {Seen, Acc};
+-                    false ->
+-                        {maps:put(Key, true, Seen), [Path | Acc]}
++                case maps:find(Key, Acc) of
++                    {ok, _} ->
++                        {Order, maps:update_with(Key, fun(Paths) -> [Path | Paths] end, Acc)};
++                    error ->
++                        {[Key | Order], Acc#{ Key => [Path] }}
+@@ -195 +204 @@ dedupe_query_matches(Matches, Opts) ->
+-            {#{}, []},
++            {[], #{}},
+@@ -198 +207,21 @@ dedupe_query_matches(Matches, Opts) ->
+-    lists:reverse(DedupedRev).
++    [preferred_query_match(maps:get(Key, Groups), Opts) || Key <- lists:reverse(OrderRev)].
++
++preferred_query_match(Paths, Opts) ->
++    InOrder = lists:reverse(Paths),
++    case lists:dropwhile(fun(Path) -> not query_match_verifies(Path, Opts) end, InOrder) of
++        [Verified | _] -> Verified;
++        [] -> hd(InOrder)
++    end.
++
++query_match_verifies(Path, Opts) ->
++    try
++        case hb_cache:read(Path, Opts) of
++            {ok, Msg} when is_map(Msg) ->
++                Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
++                hb_message:verify(Loaded, #{ <<"commitment-ids">> => [Path] }, Opts);
++            _ ->
++                false
++        end
++    catch
++        _:_ -> false
++    end.
+@@ -355,0 +387,5 @@ return_types_test() ->
 +    ?assertEqual({ok, []}, hb_ao:resolve(<<"~query@1.0/all?missing=value&return=paths">>, Opts)),
 +    ?assertEqual({ok, []}, hb_ao:resolve(<<"~query@1.0/all?missing=value&return=messages">>, Opts)),
 +    ?assertEqual({ok, 0}, hb_ao:resolve(<<"~query@1.0/all?missing=value&return=count">>, Opts)),
 +    ?assertEqual({ok, false}, hb_ao:resolve(<<"~query@1.0/all?missing=value&return=boolean">>, Opts)),
 +    ?assertEqual({error, not_found}, hb_ao:resolve(<<"~query@1.0/all?missing=value&return=first">>, Opts)),
-     ok.

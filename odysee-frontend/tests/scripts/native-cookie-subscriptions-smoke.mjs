@@ -153,7 +153,7 @@ function subscriptionMessage({
     'notifications-disabled': notificationsDisabled,
     state,
     operation,
-    origin: 'native',
+    'source-system': 'native',
     revision,
     'version-ref': version,
     ...(revision ? { 'revision-of': subscriptionRef } : {}),
@@ -165,7 +165,7 @@ function subscriptionMessage({
 }
 
 async function write(message, cookie) {
-  const response = await fetch(`${nodeBase}/id?!=true&committers=all`, {
+  const response = await fetch(`${nodeBase}/id?0.%21=true&committers=all`, {
     method: 'POST',
     headers: {
       accept: 'application/json',
@@ -210,7 +210,7 @@ async function query(selectors) {
   const response = await fetch(`${nodeBase}/~query@1.0/only`, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ ...selectors, only: [...Object.keys(selectors), 'accept'], return: 'paths' }),
+    body: JSON.stringify({ ...selectors, only: Object.keys(selectors), return: 'paths' }),
   });
   const text = await response.text();
   assert.equal(response.ok, true, `query failed: ${response.status} ${text.slice(0, 500)}`);

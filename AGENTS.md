@@ -48,8 +48,9 @@ Static manifest browser
 ```
 
 - Historical Odysee services are locators or byte sources behind stores.
-- Native uploads, profiles, comments, reactions, playlists, subscriptions, and revisions are generic committed
-  messages written through `/id?!` and discovered with `query@1.0`.
+- Native uploads, profiles, comments, reactions, playlists, subscriptions, and
+  revisions are generic committed messages written through the stage-scoped
+  `/id?0.%21=true&committers=all` route and discovered with `query@1.0`.
 - Production uses the manifest frontend served by the node. Do not introduce a
   required SSR/proxy product path.
 - Browser product code must not call Commentron, Lbryio, the SDK proxy,
@@ -106,7 +107,7 @@ metadata only and grants no authority.
 
 Uploads:
 
-- Post raw bytes to `/id?!=true&committers=all`.
+- Post raw bytes to `/id?0.%21=true&committers=all`.
 - Write a generic `odysee-upload@1.0` index message linking metadata to the
   immutable data ID.
 - Resolve/list uploads through the match index and exact immutable reads.

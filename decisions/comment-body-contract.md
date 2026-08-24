@@ -17,11 +17,14 @@ the store.
 Cookie credential verification strips the application body from its internal
 verification request. After credential verification, the auth hook signs the
 complete application message, including `body`, through the normal committed
-`POST /id?!=true&committers=all` flow.
+`POST /id?0.%21=true&committers=all` flow.
 
 ## Consequences
 
 - `GET /<comment-message-id>` exposes the comment as the document body.
 - Comment content remains covered by the resulting RSA-PSS commitment.
+- HTTPSig multipart hydration preserves the unnamed inline root part as
+  `body`; otherwise a comment can appear after its write and disappear on a
+  cold page refresh even though its commitment verifies.
 - No comment device, Commentron fallback, or body-specific frontend transport
   is introduced.

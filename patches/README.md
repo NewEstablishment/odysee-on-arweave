@@ -45,9 +45,15 @@ miss is a 500. This is independent of configuration: no `match-index`
 setting avoids it, because an empty result is `{error, not_found}` either
 way. Observed on every video page load in this application, where the
 frontend issues a `POST /~query@1.0/only`. The patch maps misses to `[]`, `0`,
-or `false` according to the requested aggregate type, retains `not_found` for
-first-item modes, and adds focused upstream EUnit assertions. Applies cleanly
-to the pinned dep (`git apply --check` verified).
+or `false` according to the requested aggregate type and retains `not_found`
+for first-item modes.
+
+The same semantic message may have more than one commitment locator after
+authentication and application signing. The expanded patch preserves discovery
+order but prefers a locator whose named commitment verifies, falling back to
+the first locator only for unsigned indexed messages. This keeps query generic
+while ensuring a stale resolver-stage locator does not hide the exact committed
+application message.
 
 ## 4. `reference-message-operations.patch`
 

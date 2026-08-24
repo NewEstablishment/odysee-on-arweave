@@ -70,7 +70,7 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 ## Uploads and thumbnails
 
 - HyperBEAM mode posts raw bytes directly to
-  `/id?!=true&committers=all` with cookie credentials.
+  `/id?0.%21=true&committers=all` with cookie credentials.
 - It writes a generic `odysee-upload@1.0` record after the data write.
 - The uploads page queries those records rather than `claim_list`.
 - Do not run legacy TUS token, transcode, transmux, optimizer, bitrate, or file
@@ -104,7 +104,7 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 ## Reactions
 
 - Video and comment likes/dislikes are generic `odysee-reaction@1.0` messages
-  written through `/id?!=true&committers=all`.
+  written through `/id?0.%21=true&committers=all`.
 - Discover them by target and subject through stock `query@1.0/only`, hydrate
   exact paths, and verify commitments and committers before projection.
 - A like/dislike switch and removal creates a contiguous append-only revision
@@ -122,7 +122,7 @@ explicitly instead of falling back to legacy services.
 ## Playlists
 
 - Public playlists are generic `odysee-playlist@1.0` messages written through
-  `/id?!=true&committers=all`; do not call `collection_*` or add a playlist
+  `/id?0.%21=true&committers=all`; do not call `collection_*` or add a playlist
   device.
 - Store a complete ordered immutable item list in every snapshot. Native IDs
   and legacy outpoints are allowed; mutable claim IDs, names, and URIs are not.
@@ -140,7 +140,7 @@ explicitly instead of falling back to legacy services.
 ## Subscriptions
 
 - Free follows use generic `odysee-subscription@1.0` messages written through
-  `/id?!=true&committers=all`; do not call the legacy `subscription` API,
+  `/id?0.%21=true&committers=all`; do not call the legacy `subscription` API,
   wallet sync, or add a subscription device.
 - Build a deterministic owner/channel `subscription-ref` from the verified
   committer and a stable native profile ID or full legacy channel claim ID.

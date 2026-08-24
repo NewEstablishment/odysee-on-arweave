@@ -120,7 +120,7 @@ browser needs no wallet. No new devices; the whole plane is node options.
 
 ```sh
 # Upload a video. The reply's message-id is its permanent address.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: video/mp4" -H "type: stream" -H "title: my video" \
   --data-binary @video.mp4
 
@@ -128,7 +128,7 @@ curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
 #   GET /<message-id>
 
 # Who am I? The profile's commitment names its committer:
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "type: channel" -H "name: my channel"          # -> <profile-id>
 curl "$NODE/<profile-id>/commitments/<profile-id>/committer"   # -> <address>
 
@@ -137,24 +137,24 @@ curl -X POST "$NODE/~query@1.0/only" -H "type: stream" \
   -H "channel: <address>" -H "only: type,channel" -H "return: paths"
 
 # Comments reference the video id:
-curl -X POST "$NODE/id?!=true&committers=all" \
+curl -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "type: comment" -H "parent: <video-id>" --data-binary "nice one"
 
 # Likes and dislikes are generic committed reaction messages:
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: application/json" \
   --data-binary '{"schema":"odysee-reaction@1.0","type":"reaction","reaction-ref":"<stable-ref>","version-ref":"<version-ref>","target":"<video-or-comment-id>","subject":"content","reaction":"like","state":"active","operation":"set","revision":0,"event-timestamp":<milliseconds>,"signature-scope":"native-reaction-v1"}'
 
 # Public playlists are full ordered immutable snapshots. The returned
 # message-id is an exact /$/playlist/<message-id> route. A query can return a
 # different verified commitment locator for the same signed snapshot.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: application/json" \
   --data-binary '{"schema":"odysee-playlist@1.0","type":"playlist","profile-id":"<profile-id>","profile-name":"my channel","title":"My playlist","items-json":"[\"<immutable-video-id>\"]","item-count":1,"tags-json":"[]","languages-json":"[]","created-at":<milliseconds>,"signature-scope":"native-playlist-v1"}'
 
 # Free channel follows use a deterministic owner/channel relationship. Later
 # notification changes and unfollows append revision-of/previous-version.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: application/json" \
   --data-binary '{"schema":"odysee-subscription@1.0","type":"subscription","subscription-ref":"<committer>.lbry:<full-channel-claim-id>","channel-ref":"lbry:<full-channel-claim-id>","channel-uri":"lbry://@channel#<full-channel-claim-id>","channel-name":"@channel","profile-id":"<profile-id>","profile-name":"my profile","notifications-disabled":true,"state":"active","operation":"follow","origin":"native","revision":0,"version-ref":"<version-ref>","created-at":<milliseconds>,"updated-at":<milliseconds>,"signature-scope":"native-subscription-v1"}'
 ```

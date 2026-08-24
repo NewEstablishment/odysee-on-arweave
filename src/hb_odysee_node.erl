@@ -24,7 +24,12 @@
     <<"secret">>, <<"cookie">>, <<"set-cookie">>, <<"path">>,
     <<"method">>, <<"authorization">>, <<"!">>,
     <<"accept">>, <<"accept-bundle">>, <<"ao-peer">>, <<"ao-peer-port">>,
-    <<"committers">>, <<"host">>, <<"user-agent">>
+    <<"committers">>, <<"host">>, <<"user-agent">>, <<"origin">>,
+    <<"referer">>, <<"connection">>, <<"accept-language">>,
+    <<"accept-encoding">>, <<"sec-fetch-dest">>, <<"sec-fetch-mode">>,
+    <<"sec-fetch-site">>, <<"sec-ch-ua">>, <<"sec-ch-ua-mobile">>,
+    <<"sec-ch-ua-platform">>, <<"odysee-auth-token">>,
+    <<"x-odysee-auth-token">>, <<"x-lbry-auth-token">>
 ]).
 
 %% @doc Start a seed node on an OS-assigned port with default options.
@@ -46,8 +51,9 @@ seed_opts(Overrides) ->
     Base = maps:merge(#{ <<"port">> => 0 }, maps:remove(<<"store">>, Overrides)),
     Base#{ <<"store">> => Stores }.
 
-%% @doc Seed-node options that also accept committed writes: uploads,
-%% channel profiles, comments. The stock auth hook signs any request
+%% @doc Seed-node options that also accept committed native writes: uploads,
+%% channel profiles, comments, reactions, playlists, and subscriptions. The
+%% stock auth hook signs any request
 %% carrying the `!' commit flag with a cookie-derived per-user wallet,
 %% `store-all-signed' persists what it signs, and the match index makes
 %% the writes discoverable through `~query@1.0'. Writes land in the
@@ -363,7 +369,7 @@ upload_node() ->
 %% its session cookie, so the request commits as the same user; `none' is a
 %% fresh session and therefore a fresh identity.
 commit_post(Node, Msg, PrevReply, Opts) ->
-    Req = Msg#{ <<"path">> => <<"/id?!=true&committers=all">> },
+    Req = Msg#{ <<"path">> => <<"/id?0.!=true&committers=all">> },
     WithCookie =
         case PrevReply of
             none -> Req;
@@ -450,10 +456,11 @@ match_paths(Reply, Opts) ->
 %% content id: anyone can upload byte-identical content and have their
 %% commitment coalesced into the same group. Demanding the channel be the
 %% ONLY signer would let an attacker censor a genuine upload by re-uploading
-%% its public bytes, adding a second signer. So verify the channel's OWN
-%% commitments and ignore any others: a spoof (content the channel never
-%% signed) has no such commitment and is rejected; an attacker's extra
-%% commitment on genuine content changes nothing.
+%% its public bytes, adding a second signer. Verify the channel's exact
+%% commitments independently and require at least one valid commitment: a
+%% resolver-stage duplicate that does not verify must not invalidate a valid
+%% application commitment by the same signer, while a spoof has no valid
+%% channel commitment at all.
 verified_channel_entry(Path, Channel, Opts) ->
     {ok, Msg} = hb_cache:read(Path, Opts),
     Loaded =
@@ -462,20 +469,19 @@ verified_channel_entry(Path, Channel, Opts) ->
             Opts
         ),
     Commitments = hb_maps:get(<<"commitments">>, Loaded, #{}, Opts),
-    ByChannel =
+    VerifiedByChannel =
         [
             ID
         ||
             {ID, C} <- hb_maps:to_list(Commitments, Opts),
-            hb_maps:get(<<"committer">>, C, none, Opts) =:= Channel
-        ],
-    Genuine =
-        ByChannel =/= [] andalso
+            hb_maps:get(<<"committer">>, C, none, Opts) =:= Channel,
             hb_message:verify(
                 Loaded,
-                #{ <<"commitment-ids">> => ByChannel },
+                #{ <<"commitment-ids">> => [ID] },
                 Opts
-            ),
+            )
+        ],
+    Genuine = VerifiedByChannel =/= [],
     case Genuine of
         true -> {true, hb_maps:get(<<"title">>, Loaded, not_found, Opts)};
         false -> false

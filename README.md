@@ -129,7 +129,7 @@ or Web2 account.
 All native writes use the generic committed-ID route:
 
 ```text
-POST /id?!=true&committers=all
+POST /id?0.%21=true&committers=all
 ```
 
 The cookie is a request credential and must not be copied into the committed
@@ -137,7 +137,8 @@ message. The reply exposes the stored ID in `message-id`.
 
 ### Uploads
 
-The browser posts raw file bytes directly to `/id?!`. It then writes a generic
+The browser posts raw file bytes directly to the same stage-scoped `/id` write.
+It then writes a generic
 `odysee-upload@1.0` index record that links the name and metadata to the
 immutable data ID. Bare `lbry://<name>` resolution queries that record and
 hydrates the immutable object. The uploads page queries the same records.
@@ -165,7 +166,7 @@ proxy for comments.
 ### Reactions
 
 Video and comment likes/dislikes are cookie-signed `odysee-reaction@1.0`
-messages written through the same generic `/id?!` route. One target-wide
+messages written through the same generic stage-scoped `/id` route. One target-wide
 `query@1.0/only` request discovers immutable paths, then the frontend hydrates
 and verifies every commitment and committer before counting it.
 
@@ -187,7 +188,7 @@ legacy reaction API.
 Public playlists pair cookie-signed immutable `odysee-playlist@1.0` snapshots
 with the pinned generic `reference@1.0` device. The reference init commitment
 is the stable public route `/$/playlist/<reference-id>`. The frontend uses
-generic `/id?!` writes, `query@1.0/only` discovery, and exact commitment
+generic stage-scoped `/id` writes, `query@1.0/only` discovery, and exact commitment
 hydration; it does not call the LBRY `collection_*` API.
 
 - Every message contains a complete ordered snapshot of immutable native IDs

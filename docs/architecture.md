@@ -216,16 +216,21 @@ Two mitigations, in order of preference today:
 
 ## Writes
 
-There is no custom write device. Uploads, comments, reactions, playlists, subscriptions, and moderation events are
-ordinary committed messages, using stock HyperBEAM machinery end to end:
+There is no custom write device. Uploads, comments, reactions, playlists,
+subscriptions, and moderation events are ordinary committed messages, using
+stock HyperBEAM machinery end to end:
 
-1. The client sends `POST /<path>?!=true`. The stock `~auth-hook@1.0`
+1. The client sends `POST /id?0.%21=true&committers=all`. Scoping `!` to stage
+   zero commits the application document once; a global `!` can also commit
+   intermediate resolver stages and expose multiple locators for one semantic
+   write. The stock `~auth-hook@1.0`
    request hook (in the default `on/request` pipeline) matches the `!` commit
    flag, derives a per-user secret via its secret provider (HTTP Basic by
    default; a cookie provider for anonymous-but-stable identity), obtains the
-   user's node-hosted wallet from `~secret@1.0`, and signs both the request
-   and the `!`-marked message with real RSA-PSS commitments. The user never
-   handles key material.
+   user's node-hosted wallet from `~secret@1.0`, and signs the `!`-marked
+   application message with a real RSA-PSS commitment. Transport, credential,
+   browser fetch, and commit-control fields are removed before that commitment.
+   The user never handles key material.
 2. The node persists verified signed inbound messages to a dedicated
    `cache-http` filesystem store (`store-all-signed`, default on); every
    cache write also populates the `~match@1.0` reverse index in its target
@@ -233,8 +238,11 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    `match-index` stacks.
 3. Readers discover writes via `~query@1.0`'s exact-match index —
    `POST /~query@1.0/only` with equality selectors (schema, type, target,
-   author) returns matching message paths — and hydrate them with generic
-   `/~cache@1.0/read` calls.
+   author) returns matching message paths — and hydrate them with exact
+   immutable reads. Query selectors contain only committed application fields.
+   If older writes produced multiple locators for one semantic message,
+   deduplication preserves discovery order but prefers a locator whose exact
+   named commitment verifies.
 4. Native account ownership is the verified committer established by the
    cookie-derived node wallet. Claimed profile/channel fields are display
    metadata only. Product projections such as comment revisions, reactions,
