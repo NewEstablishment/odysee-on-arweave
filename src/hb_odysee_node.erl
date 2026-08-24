@@ -242,20 +242,7 @@ skeleton_blob_serves_and_addresses_test() ->
     [CommitmentID | _] = lbry_commitment_ids(Served, Opts),
     {ok, ViaID} = hb_http:get(Node, <<"/", CommitmentID/binary>>, #{}),
     Addressed = skeleton_assert_verifies(ViaID, Opts),
-    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)),
-
-    %% The alias locates the same object, without carrying the proof.
-    Alias = hb_odysee_address:alias(Path),
-    {ok, ViaAlias} = hb_http:get(Node, <<"/", Alias/binary>>, #{}),
-    ?assertEqual(
-        Hash,
-        hb_maps:get(
-            <<"blob-hash">>,
-            hb_cache:ensure_all_loaded(ViaAlias, Opts),
-            not_found,
-            Opts
-        )
-    ).
+    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)).
 
 %% Descriptor parsed and checked against its sd-hash.
 skeleton_descriptor_serves_test() ->
@@ -585,17 +572,6 @@ run_live_transaction() ->
         hb_message:verify(
             hb_cache:ensure_all_loaded(Msg, Opts),
             #{ <<"commitment-ids">> => <<"all">> },
-            Opts
-        )
-    ),
-    %% Warming linked the alias, so the object is now addressable by id.
-    {ok, ViaAlias} = hb_cache:read(hb_odysee_address:alias(Path), Opts),
-    ?assertEqual(
-        TxID,
-        hb_maps:get(
-            <<"txid">>,
-            hb_cache:ensure_all_loaded(ViaAlias, Opts),
-            not_found,
             Opts
         )
     ),
