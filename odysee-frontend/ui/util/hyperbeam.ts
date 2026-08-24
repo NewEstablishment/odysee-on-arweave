@@ -6,7 +6,11 @@ import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
-import { collapseNativeCommentRevisions, isNextNativeCommentRevision } from 'util/nativeCommentRevisions';
+import {
+  collapseNativeCommentRevisions,
+  isNextNativeCommentRevision,
+  nativeCommentBody,
+} from 'util/nativeCommentRevisions';
 import {
   isNativeMessageId,
   nativeMessageVersionRef,
@@ -1795,7 +1799,7 @@ function isNativeComment(message: any): boolean {
     String(value(message, 'method') || '').toUpperCase() !== 'GET' &&
     message.type === 'comment' &&
     message.schema === 'odysee-comment@1.0' &&
-    typeof value(message, 'comment', 'body', 'text') === 'string' &&
+    nativeCommentBody(message) !== undefined &&
     typeof value(message, 'target', 'claim-id', 'claim_id') === 'string' &&
     Boolean(nativeCommentId(message))
   );
@@ -2650,6 +2654,9 @@ function commentFromHyperbeam(comment: any): any {
   const revisionOf = value(comment, 'revision-of', 'revision_of');
   const revision = value(comment, 'revision');
   const revisionTimestamp = value(comment, 'revision-timestamp', 'revision_timestamp');
+  const operation = value(comment, 'operation');
+  const state = value(comment, 'state');
+  const body = nativeCommentBody(comment);
   return compactParams({
     ...comment.source,
     schema: value(comment, 'schema'),
@@ -2663,9 +2670,12 @@ function commentFromHyperbeam(comment: any): any {
     revision: revision === undefined || revision === null ? undefined : toNumber(revision, 0),
     revision_timestamp:
       revisionTimestamp === undefined || revisionTimestamp === null ? undefined : toNumber(revisionTimestamp, 0),
-    operation: value(comment, 'operation'),
-    state: value(comment, 'state'),
-    comment: value(comment, 'comment', 'body', 'text'),
+    operation,
+    state,
+    // Normalize an omitted zero-length tombstone body back to the authored
+    // empty string. This keeps transport encoding details out of revision
+    // validation and projection.
+    comment: body,
     claim_id: target,
     parent_id: parentId === 'root' ? undefined : parentId,
     channel_id: channelId,

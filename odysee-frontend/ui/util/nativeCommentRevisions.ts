@@ -17,6 +17,17 @@ export type NativeCommentRevision = {
   [key: string]: any;
 };
 
+export function nativeCommentBody(comment: NativeCommentRevision): string | undefined {
+  const body = field(comment, 'comment', 'body', 'text');
+  if (typeof body === 'string') return body;
+
+  // HTTPSig multipart encoding may omit a zero-length scalar part. Native
+  // author tombstones deliberately use an empty body, so restore that value
+  // only for the explicit delete/deleted shape. Active comments still fail
+  // closed when their body is missing.
+  return comment.operation === 'delete' && comment.state === 'deleted' ? '' : undefined;
+}
+
 export function nativeCommentSignatureData(comment: NativeCommentRevision): string {
   if (field(comment, 'signature-scope', 'signature_scope') !== 'native-comment-v1') {
     return String(field(comment, 'comment', 'body', 'text') || '');
@@ -31,7 +42,7 @@ export function nativeCommentSignatureData(comment: NativeCommentRevision): stri
       parent: field(comment, 'parent', 'parent-id', 'parent_id') || 'root',
       state: field(comment, 'state'),
       author: field(comment, 'author', 'channel-id', 'channel_id'),
-      comment: field(comment, 'comment', 'body', 'text'),
+      comment: nativeCommentBody(comment),
       timestamp: numberField(comment, 'timestamp'),
       'revision-of': field(comment, 'revision-of', 'revision_of'),
       'previous-version': field(comment, 'previous-version', 'previous_version'),
