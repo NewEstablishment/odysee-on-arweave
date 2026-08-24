@@ -645,25 +645,27 @@ integer_or_undefined(_Value) ->
 %% committer, so the id cannot be recomputed independently of the write),
 %% then the request key is linked to it. A warming failure never breaks
 %% the read.
-%% Link a freshly-read message to the addresses that should resolve to it:
-%% the canonical path's alias id, plus the request key itself when it is a
-%% bare outpoint (immutable, so the shortcut cannot go stale). The message is
-%% written first to obtain its cache id; `lbry@1.0' commitments carry no
-%% committer, so the id cannot be recomputed independently of the write.
-%% Locator aliases re-link on each live read, so a node serving them needs
-%% `cache-control => [no-store]' or a cached result hides the store and the
-%% alias never refreshes. Warming failure never breaks the read.
-warm_addresses(BareKey, Path, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
+%% Link a freshly-read message to its direct addresses: the bare outpoint
+%% (immutable, so the shortcut cannot go stale) and, when the read used the
+%% `ao:' form, that literal key as well. The message is written first to
+%% obtain its cache id; `lbry@1.0' commitments carry no committer, so the id
+%% cannot be recomputed independently of the write. Mutable locators are
+%% never linked: they re-resolve through the store on every read. Warming
+%% failure never breaks the read.
+warm_addresses(BareKey, _Path, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
+    Direct = strip_ao_prefix(BareKey),
     Keys =
-        [hb_odysee_address:alias(Path)] ++
-        case is_bare_outpoint(BareKey) of
-            true -> [BareKey];
+        case is_bare_outpoint(Direct) of
+            true -> lists:usort([BareKey, Direct]);
             false -> []
         end,
     catch link_local(Keys, Msg, local_stores(StoreOpts, NodeOpts), NodeOpts),
     ok;
 warm_addresses(_BareKey, _Path, _Msg, _StoreOpts, _NodeOpts) ->
     ok.
+
+strip_ao_prefix(<<"ao:", Rest/binary>>) -> Rest;
+strip_ao_prefix(Key) -> Key.
 
 link_local(_Keys, _Msg, [], _Opts) ->
     ok;
@@ -961,6 +963,8 @@ classify_channel_claims_list_path(<<ChannelID:40/binary, "/claims">>) ->
 classify_channel_claims_list_path(_Path) ->
     not_found.
 
+classify_native_path(<<"ao:", Rest/binary>>) ->
+    classify_native_path(Rest);
 classify_native_path(<<TxID:64/binary, ":", Nout/binary>>) ->
     case valid_hex_size(TxID, 32) andalso valid_uint(Nout) of
         true -> {ok, <<"odysee/claim-output/", TxID/binary, "/", Nout/binary>>};
@@ -1017,14 +1021,12 @@ restore_uri_scheme(URI) -> URI.
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-%% The property the alias scheme exists for: an object materialized from a
-%% canonical `odysee/' path is afterwards reachable by a plain `?IS_ID'-shaped
-%% id, with no device call and no knowledge of the path, and it still verifies.
-%% This is what lets `~query@1.0', a peer, or a router address Odysee content.
-alias_address_resolves_to_the_same_message_test() ->
-    Bytes = <<"aliased blob payload">>,
+%% An `ao:'-prefixed key resolves exactly like its bare form: the prefix is
+%% stripped and the remainder classifies onto the same canonical path, so
+%% claim ids, outpoints, txids, and hashes need no alias or index scheme.
+ao_prefixed_key_resolves_like_bare_test() ->
+    Bytes = <<"ao addressed blob payload">>,
     Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
-    Path = <<"odysee/blob/", Hash/binary>>,
     Store = hb_test_utils:test_store(),
     Opts = #{ <<"store">> => [Store] },
     SourceStore = #{
@@ -1032,14 +1034,8 @@ alias_address_resolves_to_the_same_message_test() ->
         <<"fixtures">> => #{ <<"lbry/blob/", Hash/binary>> => Bytes },
         <<"local-store">> => [Store]
     },
-    {ok, Msg} = read(SourceStore, #{ <<"read">> => Path }, Opts),
-    %% Fixtures short-circuit `read_live', so warm explicitly here; a live
-    %% read reaches this through `read/3'.
-    ok = warm_addresses(Path, Path, Msg, SourceStore, Opts),
-    Alias = hb_odysee_address:alias(Path),
-    ?assertEqual(43, byte_size(Alias)),
-    {ok, ViaAlias} = hb_cache:read(Alias, Opts),
-    Loaded = hb_cache:ensure_all_loaded(ViaAlias, Opts),
+    {ok, Msg} = read(SourceStore, #{ <<"read">> => <<"ao:", Hash/binary>> }, Opts),
+    Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
     ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Loaded, not_found, Opts)),
     ?assertEqual(
         true,
@@ -1412,17 +1408,15 @@ bare_outpoint_warm_cache_links_local_store_test() ->
         maps:get(<<"claim-id">>, ClaimOutput),
         hb_maps:get(<<"claim-id">>, Cached, not_found, Opts)
     ),
-    %% The same object is reachable by the canonical path's alias id, which
-    %% needs no knowledge of the path or of LBRY identifier shapes.
-    {ok, ViaAlias0} = hb_cache:read(hb_odysee_address:alias(Path), Opts),
-    ViaAlias = hb_cache:ensure_all_loaded(ViaAlias0, Opts),
-    ?assertEqual(TxID, hb_maps:get(<<"txid">>, ViaAlias, not_found, Opts)),
-    %% A non-outpoint key does not warm the bare key (only the alias), so a
-    %% mutable locator string never becomes a direct address.
+    %% An `ao:'-form read warms both the literal `ao:' key and the bare
+    %% outpoint, so either address hits the cache afterwards.
+    AoKey = <<"ao:", Outpoint/binary>>,
+    ok = warm_addresses(AoKey, Path, ClaimOutput, #{}, Opts),
+    ?assertMatch({ok, _}, hb_cache:read(AoKey, Opts)),
+    %% A mutable locator never becomes a direct address: nothing is linked.
     LocatorPath = <<"odysee/claim/x">>,
     ok = warm_addresses(LocatorPath, LocatorPath, ClaimOutput, #{}, Opts),
     ?assertMatch({error, not_found}, hb_cache:read(LocatorPath, Opts)),
-    ?assertMatch({ok, _}, hb_cache:read(hb_odysee_address:alias(LocatorPath), Opts)),
     %% Warming without local stores is a harmless no-op.
     ?assertEqual(
         ok,
