@@ -48,8 +48,9 @@ Static manifest browser
 ```
 
 - Historical Odysee services are locators or byte sources behind stores.
-- Native uploads, profiles, comments, reactions, playlists, subscriptions, and revisions are generic committed
-  messages written through `/id?!` and discovered with `query@1.0`.
+- Native uploads, profiles, comments, reactions, playlists, subscriptions, and
+  revisions are generic committed messages written through the stage-scoped
+  `/id?0.%21=true&committers=all` route and discovered with `query@1.0`.
 - Production uses the manifest frontend served by the node. Do not introduce a
   required SSR/proxy product path.
 - Browser product code must not call Commentron, Lbryio, the SDK proxy,
@@ -83,6 +84,9 @@ Static manifest browser
     committed messages and verified source evidence remain authoritative.
 12. **Observed diagnostics report reality.** Do not fabricate devices, calls,
     backends, or verification state.
+13. **Search controls stay server-side.** Product filters, sort order, limit,
+    and offset are mapped in the frontend integration layer and sent through
+    generic `search@1.0`; never post-filter ranked pages in React.
 
 1. **Immutable reads are ID-first.** A read for an immutable ID returns that
    exact object. It must never silently resolve to an unrelated current claim
@@ -149,7 +153,7 @@ metadata only and grants no authority.
 
 Uploads:
 
-- Post raw bytes to `/id?!=true&committers=all`.
+- Post raw bytes to `/id?0.%21=true&committers=all`.
 - Write a generic `odysee-upload@1.0` index message linking metadata to the
   immutable data ID.
 - Resolve/list uploads through the match index and exact immutable reads.
@@ -183,19 +187,17 @@ Playlists:
 
 - Public playlists are generic `odysee-playlist@1.0` messages, not LBRY
   collection claims and not a custom device.
-- A committed playlist ID is an exact-read public route. Discovery may return
-  another verified commitment locator for the same immutable message. Every
-  distinct published payload is an independent immutable full snapshot.
 - Store ordered immutable native IDs or legacy outpoints only. Resolve local
   draft URIs before publish; never persist mutable claim IDs as item identity.
-- Editing or reordering stays local until the user explicitly publishes a new
-  snapshot, which receives a new ID and URL. Do not emulate mutable update,
-  delete, or current-head semantics before the generic reference/frequency
-  contract is integrated.
-- Verify the snapshot and its claimed profile under the same committer.
+- The pinned external `reference@1.0` init commitment supplies the stable
+  public playlist ID. Republish writes a new immutable full snapshot and a
+  strictly newer same-owner set message while preserving the public URL.
+- Hydrate and verify every init, set, and selected snapshot. Authority comes
+  from the init commitment's committer; reject foreign writers, stale or tied
+  updates, and snapshots owned by another committer.
 - Keep Queue, Watch Later, Favorites, and unpublished drafts local. Do not
   restore channel selection, URL names, bids, confirmations, support, or
-  `collection_*` SDK calls.
+  `collection_*` SDK calls. Public deletion remains deferred.
 
 Subscriptions:
 

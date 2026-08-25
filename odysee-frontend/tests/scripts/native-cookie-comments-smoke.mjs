@@ -27,7 +27,7 @@ const root = await write(
     author: profile.id,
     'profile-id': profile.id,
     'profile-name': profileName,
-    comment: 'root comment',
+    body: 'root comment',
     'claim-id': profile.id,
     timestamp: Math.floor(Date.now() / 1000),
   },
@@ -46,7 +46,7 @@ const reply = await write(
     parent: rootRef,
     'parent-id': rootRef,
     state: 'active',
-    comment: 'reply comment',
+    body: 'reply comment',
     'claim-id': profile.id,
     timestamp: Math.floor(Date.now() / 1000),
   },
@@ -64,7 +64,7 @@ const revision = await write(
     target: profile.id,
     parent: profile.id,
     state: 'active',
-    comment: 'edited root comment',
+    body: 'edited root comment',
     'claim-id': profile.id,
     timestamp: 1,
     'revision-of': rootRef,
@@ -87,7 +87,7 @@ const forged = await write(
     target: profile.id,
     parent: profile.id,
     state: 'active',
-    comment: 'forged edit',
+    body: 'forged edit',
     'claim-id': profile.id,
     timestamp: 1,
     'revision-of': rootRef,
@@ -109,7 +109,7 @@ const deletion = await write(
     target: profile.id,
     parent: profile.id,
     state: 'deleted',
-    comment: '',
+    body: '',
     'claim-id': profile.id,
     timestamp: 1,
     'revision-of': rootRef,
@@ -130,15 +130,15 @@ const discovered = await Promise.all(
       ({ payload }) =>
         payload?.schema === schema &&
         payload?.['claim-id'] === profile.id &&
-        typeof payload?.comment === 'string' &&
+        typeof payload?.body === 'string' &&
         typeof payload?.['version-ref'] === 'string'
     )
     .map(async (entry) => ({ ...entry, owner: await committer(entry.id) }))
 );
 const rootEntry = discovered.find(({ payload }) => payload['comment-ref'] === rootRef && !payload['revision-of']);
-const replyEntry = discovered.find(({ payload }) => payload.comment === 'reply comment');
+const replyEntry = discovered.find(({ payload }) => payload.body === 'reply comment');
 const revisionEntry = discovered.find(({ payload }) => payload['version-ref'] === revisionVersion);
-const forgedEntry = discovered.find(({ payload }) => payload.comment === 'forged edit');
+const forgedEntry = discovered.find(({ payload }) => payload.body === 'forged edit');
 const deletionEntry = discovered.find(({ payload }) => payload.operation === 'delete');
 for (const entry of [rootEntry, replyEntry, revisionEntry, forgedEntry, deletionEntry]) {
   assert.ok(
@@ -148,7 +148,7 @@ for (const entry of [rootEntry, replyEntry, revisionEntry, forgedEntry, deletion
         id,
         schema: payload?.schema,
         claim: payload?.['claim-id'],
-        comment: payload?.comment,
+        body: payload?.body,
         operation: payload?.operation,
         kind: typeof payload,
         sample: typeof payload === 'string' ? payload.slice(0, 160) : undefined,
@@ -187,7 +187,7 @@ console.log(
 );
 
 async function write(message, cookie) {
-  const response = await fetch(`${nodeBase}/id?!=true&committers=all`, {
+  const response = await fetch(`${nodeBase}/id?0.%21=true&committers=all`, {
     method: 'POST',
     headers: {
       accept: 'application/json',
@@ -235,7 +235,7 @@ async function query(selectors) {
   const response = await fetch(`${nodeBase}/~query@1.0/only`, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ ...selectors, only: [...Object.keys(selectors), 'accept'], return: 'paths' }),
+    body: JSON.stringify({ ...selectors, only: Object.keys(selectors), return: 'paths' }),
   });
   const text = await response.text();
   assert.equal(response.ok, true, `query failed: ${response.status} ${text.slice(0, 500)}`);

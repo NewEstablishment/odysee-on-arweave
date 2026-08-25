@@ -12,7 +12,6 @@ import LivestreamPublishProvider from 'component/livestreamPublishProvider';
 import { lazyImport } from 'util/lazyImport';
 import { tusUnlockAndNotify, tusHandleTabUpdates } from 'util/tus';
 import analytics from 'analytics';
-import { setSearchUserId } from 'redux/actions/search';
 import { parseURI, buildURI } from 'util/lbryURI';
 import { generateGoogleCacheUrl } from 'util/url';
 import ReactModal from 'react-modal';
@@ -438,7 +437,6 @@ function App() {
   useEffect(() => {
     if (userId) {
       analytics.setUser(userId);
-      setSearchUserId(userId);
     }
   }, [userId]);
   useEffect(() => {

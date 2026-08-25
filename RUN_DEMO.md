@@ -11,13 +11,14 @@ byte was hash-checked on the way through.
 
 ## What it is
 
-**Four devices and five stores.** No application devices.
+**Five devices and five stores.** No application devices.
 
 | | |
 |---|---|
 | `lbry@1.0` | verification only, proves LBRY evidence |
 | `odysee-auth@1.0` | session to account to signing key |
 | `search@1.0`, `reply-id@1.0` | generic full-text, write-reply shim |
+| `reference@1.0` | generic stable identity above immutable playlist snapshots |
 | `hb_store_odysee` | the compatibility boundary: classify a legacy id, fetch, verify, cache |
 | 4 x `hb_store_lbry_*` | transaction, claim output, stream descriptor, blob |
 
@@ -27,7 +28,7 @@ that can read a HyperBEAM store can read Odysee content: `~query@1.0`, a peer
 node, a router such as weave.space.
 
 Why that matters operationally: every custom device must be trust-pinned by
-every node operator who wants to serve your content. Four pins is a different
+every node operator who wants to serve your content. Five pins is a different
 proposition from twenty-five.
 
 ## The flow
@@ -76,12 +77,13 @@ corepack enable && corepack prepare pnpm@10.33.0 --activate
 pnpm install
 ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18801 pnpm run build:manifest
 
-# 2. Build the preloaded device store, once.
-cd .. && HB_PORT=18734 rebar3 device local     # ctrl-C twice once it boots
+# 2. Build the preloaded device store, including the pinned reference device.
+cd .. && HB_PORT=18734 rebar3 odysee-local     # ctrl-C twice once it boots
 
 # 3. Start the configured cookie-auth node and publish the UI into its store.
 #    config.json owns port 18801, the writable store/match index, and the
-#    auth/reply-id/manifest hooks. Keep this shell running while testing.
+#    auth/reply-id/manifest hooks and persistent hosted cookie wallets. Keep
+#    this shell running while testing.
 HB_CONFIG=config.json HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval '{ok, Config} = hb_opts:load("config.json", hb_opts:default_message_with_env()), [_, Writable | _] = maps:get(<<"store">>, Config), PublishOpts = Config#{<<"store">> => [Writable], <<"match-index">> => [Writable]}, {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", PublishOpts), io:format("~n=== MANIFEST ~s~n", [M]), receive stop -> ok end.'
 ```
 
@@ -97,10 +99,9 @@ mutable locators at constant addresses and stale claims get served.
 ### Tests
 
 ```sh
-rebar3 device test --with-core        # 258 tests. --with-core is required,
-                                      # plain `device test` runs 91 and skips
-                                      # the whole store layer
-ODYSEE_LIVE=1 rebar3 device test --with-core   # adds live-infrastructure test
+rebar3 eunit-all                      # core plus every packaged device,
+                                      # including canonical reference tests
+ODYSEE_LIVE=1 rebar3 eunit-all        # adds live-infrastructure test
 ```
 
 ## What works
@@ -119,7 +120,7 @@ browser needs no wallet. No new devices; the whole plane is node options.
 
 ```sh
 # Upload a video. The reply's message-id is its permanent address.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: video/mp4" -H "type: stream" -H "title: my video" \
   --data-binary @video.mp4
 
@@ -127,7 +128,7 @@ curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
 #   GET /<message-id>
 
 # Who am I? The profile's commitment names its committer:
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "type: channel" -H "name: my channel"          # -> <profile-id>
 curl "$NODE/<profile-id>/commitments/<profile-id>/committer"   # -> <address>
 
@@ -136,24 +137,24 @@ curl -X POST "$NODE/~query@1.0/only" -H "type: stream" \
   -H "channel: <address>" -H "only: type,channel" -H "return: paths"
 
 # Comments reference the video id:
-curl -X POST "$NODE/id?!=true&committers=all" \
+curl -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "type: comment" -H "parent: <video-id>" --data-binary "nice one"
 
 # Likes and dislikes are generic committed reaction messages:
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: application/json" \
   --data-binary '{"schema":"odysee-reaction@1.0","type":"reaction","reaction-ref":"<stable-ref>","version-ref":"<version-ref>","target":"<video-or-comment-id>","subject":"content","reaction":"like","state":"active","operation":"set","revision":0,"event-timestamp":<milliseconds>,"signature-scope":"native-reaction-v1"}'
 
 # Public playlists are full ordered immutable snapshots. The returned
 # message-id is an exact /$/playlist/<message-id> route. A query can return a
 # different verified commitment locator for the same signed snapshot.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: application/json" \
   --data-binary '{"schema":"odysee-playlist@1.0","type":"playlist","profile-id":"<profile-id>","profile-name":"my channel","title":"My playlist","items-json":"[\"<immutable-video-id>\"]","item-count":1,"tags-json":"[]","languages-json":"[]","created-at":<milliseconds>,"signature-scope":"native-playlist-v1"}'
 
 # Free channel follows use a deterministic owner/channel relationship. Later
 # notification changes and unfollows append revision-of/previous-version.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+curl -b jar -c jar -X POST "$NODE/id?0.%21=true&committers=all" \
   -H "content-type: application/json" \
   --data-binary '{"schema":"odysee-subscription@1.0","type":"subscription","subscription-ref":"<committer>.lbry:<full-channel-claim-id>","channel-ref":"lbry:<full-channel-claim-id>","channel-uri":"lbry://@channel#<full-channel-claim-id>","channel-name":"@channel","profile-id":"<profile-id>","profile-name":"my profile","notifications-disabled":true,"state":"active","operation":"follow","origin":"native","revision":0,"version-ref":"<version-ref>","created-at":<milliseconds>,"updated-at":<milliseconds>,"signature-scope":"native-subscription-v1"}'
 ```

@@ -19,6 +19,11 @@ is the store-first HyperBEAM node; the manifest build is the production shape.
 Legacy services may still source historical bytes behind backend stores. That
 does not authorize a direct browser fallback.
 
+Full-text search calls generic `search@1.0` through `ui/util/hyperbeam.ts`.
+`ui/util/hyperbeamSearch.ts` maps product options to bounded generic filters,
+sort, limit, and offset. Hydrate the ordered immutable locators afterward;
+never implement ranking-affecting filters or pagination in a page component.
+
 ## Static manifest
 
 `pnpm run build:manifest` is the production build contract:
@@ -42,6 +47,8 @@ is sent on native writes.
 ## Identity and account UI
 
 - The node's `cookie@1.0` provider mints identity on the first committed write.
+- Its private non-volatile wallet store lets the same cookie recover the same
+  committer across node restarts.
 - Signup asks only for a display name and commits a channel-profile message.
 - The cookie signer owns later uploads, comments, reactions, playlists, and subscriptions.
 - Local storage holds only the profile ID/name and signed-in display state. It
@@ -68,7 +75,7 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 ## Uploads and thumbnails
 
 - HyperBEAM mode posts raw bytes directly to
-  `/id?!=true&committers=all` with cookie credentials.
+  `/id?0.%21=true&committers=all` with cookie credentials.
 - It writes a generic `odysee-upload@1.0` record after the data write.
 - The uploads page queries those records rather than `claim_list`.
 - Do not run legacy TUS token, transcode, transmux, optimizer, bitrate, or file
@@ -91,6 +98,8 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
   the same committer.
 - Edits and author deletes are append-only revisions linked to the logical root
   and previous version.
+- Store new comment text in `body`; readers may accept historical `comment` or
+  `text` fields.
 - Accept only a contiguous same-owner chain; a deleted comment cannot be
   edited again.
 - Build hierarchy, counts, sorting, pagination, and projection in the
@@ -100,7 +109,7 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 ## Reactions
 
 - Video and comment likes/dislikes are generic `odysee-reaction@1.0` messages
-  written through `/id?!=true&committers=all`.
+  written through `/id?0.%21=true&committers=all`.
 - Discover them by target and subject through stock `query@1.0/only`, hydrate
   exact paths, and verify commitments and committers before projection.
 - A like/dislike switch and removal creates a contiguous append-only revision
@@ -118,20 +127,17 @@ explicitly instead of falling back to legacy services.
 ## Playlists
 
 - Public playlists are generic `odysee-playlist@1.0` messages written through
-  `/id?!=true&committers=all`; do not call `collection_*` or add a playlist
+  `/id?0.%21=true&committers=all`; do not call `collection_*` or add a playlist
   device.
-- A committed message ID is an exact public route. Discovery may return another
-  verified commitment locator for the same immutable message. Discover owner
-  lists by exact schema/profile, hydrate each returned locator, and verify both
-  the playlist and claimed profile under the same committer.
 - Store a complete ordered immutable item list in every snapshot. Native IDs
   and legacy outpoints are allowed; mutable claim IDs, names, and URIs are not.
-- Local drafts and builtin lists remain local. Editing/reordering a published
-  playlist stays local until an explicit publish creates another immutable
-  snapshot with a new message ID and share URL.
-- Public update/delete, stable-head selection, and auto-publish are deferred
-  until the generic reference/frequency contract is integrated. Do not invent
-  a playlist-specific mutable index or revision projector.
+- The pinned external `reference@1.0` init commitment is the stable public
+  playlist ID. Republish writes a new full snapshot and then a strictly newer
+  same-owner reference set; it never mutates an earlier snapshot.
+- Hydrate and verify every init, set, and selected snapshot. Bind authority to
+  the init committer, never profile fields or query order. Reject foreign
+  writers, stale or tied updates, and foreign-owned snapshots.
+- Local drafts and builtin lists remain local. Public deletion is not exposed.
 - Preserve Redux collection shape and playback order at the integration
   boundary. The playlist UI must not expose channel selection, URL names,
   bids, balances, confirmations, supports, reports, or abandon-claim flows.
@@ -139,7 +145,7 @@ explicitly instead of falling back to legacy services.
 ## Subscriptions
 
 - Free follows use generic `odysee-subscription@1.0` messages written through
-  `/id?!=true&committers=all`; do not call the legacy `subscription` API,
+  `/id?0.%21=true&committers=all`; do not call the legacy `subscription` API,
   wallet sync, or add a subscription device.
 - Build a deterministic owner/channel `subscription-ref` from the verified
   committer and a stable native profile ID or full legacy channel claim ID.

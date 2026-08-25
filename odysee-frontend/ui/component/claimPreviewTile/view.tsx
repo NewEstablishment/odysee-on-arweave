@@ -47,6 +47,7 @@ import { selectStreamingUrlForUri } from 'redux/selectors/file_info';
 import { selectIsActiveLivestreamForUri } from 'redux/selectors/livestream';
 import { selectShowMatureContent, selectClientSetting } from 'redux/selectors/settings';
 import { selectFirstItemUrlForCollection } from 'redux/selectors/collections';
+import { appHref } from 'util/manifest-prefix';
 type Props = {
   uri?: string;
   placeholder?: boolean | string;
@@ -177,11 +178,20 @@ function ClaimPreviewTile(props: Props) {
   }
 
   if (!shouldHide && !placeholder) {
+    // A claim that resolved but has no title, thumbnail or channel shows
+    // the user nothing but a bare name: treat it like an unresolved claim.
+    const unrenderable = Boolean(
+      claim &&
+      !claim.value?.title &&
+      !claim.value?.thumbnail?.url &&
+      !claim.signing_channel &&
+      claim.value_type !== 'channel'
+    );
     shouldHide =
       banState.blacklisted ||
       banState.filtered ||
       (!showHiddenByUser && (banState.muted || banState.blocked)) ||
-      (isAbandoned && !showUnresolvedClaims);
+      ((isAbandoned || unrenderable) && !showUnresolvedClaims);
   }
 
   // Filter empty reposts
@@ -288,7 +298,7 @@ function ClaimPreviewTile(props: Props) {
           } else {
             e.stopPropagation();
             if (isEmbed) {
-              window.open(navigateUrl, '_blank');
+              window.open(appHref(navigateUrl), '_blank');
             } else {
               const previewTime = (window as any).__previewCurrentTime;
               const previewUnmuted = (window as any).__previewMuted === false;
@@ -303,7 +313,7 @@ function ClaimPreviewTile(props: Props) {
         onAuxClick={(e: React.MouseEvent) => {
           if (e.button === 1 && navigateUrl && !isPreview) {
             e.preventDefault();
-            window.open(navigateUrl, '_blank');
+            window.open(appHref(navigateUrl), '_blank');
           }
         }}
         style={{ cursor: isPreview ? 'default' : 'pointer' }}

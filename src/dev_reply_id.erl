@@ -1,7 +1,7 @@
 %%% @doc `reply-id@1.0': deliver the stored message's ID to commit-flag
 %%% callers on cookie-auth nodes.
 %%%
-%%% A `POST /id?!&committers=all' resolves to the committed message's
+%%% A `POST /id?0.!=true&committers=all' resolves to the committed message's
 %%% signed ID, but the `~cookie@1.0' secret provider appends a `set'
 %%% message to the sequence (to fold its `set-cookie' into the reply), so
 %%% the final result is the loaded message rather than the ID -- the
@@ -92,7 +92,7 @@ cookie_commit_post_replies_with_id_test() ->
         hb_http:post(
             Node,
             #{
-                <<"path">> => <<"/id?!=true&committers=all">>,
+                <<"path">> => <<"/id?0.!=true&committers=all">>,
                 <<"reply-id-test-key">> => <<"reply-id-probe-1">>
             },
             #{}
@@ -115,6 +115,6 @@ cookie_commit_post_replies_with_id_test() ->
             },
             #{}
         ),
-    ?assert(is_binary(hb_maps:get(<<"1">>, Paths, not_found, #{}))).
+    ?assertEqual(ID, hb_maps:get(<<"1">>, Paths, not_found, #{})).
 
 -endif.

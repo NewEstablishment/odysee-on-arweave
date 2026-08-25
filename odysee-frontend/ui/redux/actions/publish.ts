@@ -8,7 +8,6 @@ import * as PUBLISH_TYPES from 'constants/publish_types';
 import { batchActions } from 'util/batch-actions';
 import { THUMBNAIL_CDN_SIZE_LIMIT_BYTES, WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
 import { doCheckPendingClaims, doResolveClaimIds } from 'redux/actions/claims';
-import { lighthouse } from 'redux/actions/search';
 import { selectProtectedContentMembershipsForContentClaimId } from 'redux/selectors/memberships';
 import { doSaveMembershipRestrictionsForContent, doMembershipContentforStreamClaimId } from 'redux/actions/memberships';
 import {
@@ -21,7 +20,7 @@ import {
   makeSelectMetadataItemForUri,
 } from 'redux/selectors/claims';
 import { makeSelectFileRenderModeForUri } from 'redux/selectors/content';
-import { selectDefaultChannelClaim, selectShowMatureContent } from 'redux/selectors/settings';
+import { selectDefaultChannelClaim } from 'redux/selectors/settings';
 import {
   selectPublishFormValue,
   selectPublishFormValues,
@@ -1005,7 +1004,6 @@ export const doPrepareEdit = (claim: StreamClaim, uri: string, claimType: string
 // Copy from Previous Upload — search helper
 // ---------------------------------------------------------------------------
 const RECENT_PAGE_SIZE = 100;
-const SEARCH_PAGE_SIZE_PER_CHANNEL = 24;
 
 function sortClaimsByNewest(claims: Array<StreamClaim>): Array<StreamClaim> {
   return claims
@@ -1042,14 +1040,6 @@ function clientTitleFilter(claims: Array<StreamClaim>, term: string): Array<Stre
   return claims.filter((c) => (c?.value?.title || c?.name || '').toLowerCase().includes(lower));
 }
 
-function getLighthouseClaimId(item: any): string | null | undefined {
-  if (!item || typeof item !== 'object') return null;
-  const rawClaimId = item.claimId || item.claim_id || item.claimID || item.claimid || item.id;
-  if (!rawClaimId) return null;
-  const claimId = String(rawClaimId).trim();
-  return claimId || null;
-}
-
 async function hydrateClaimsInStore(dispatch: Dispatch, claims: Array<StreamClaim>): Promise<Array<StreamClaim>> {
   if (!Array.isArray(claims) || claims.length === 0) return [];
   const claimIds = [...new Set(claims.map((claim) => claim?.claim_id).filter(Boolean))];
@@ -1080,15 +1070,13 @@ async function hydrateClaimsInStore(dispatch: Dispatch, claims: Array<StreamClai
  * @param searchTerm - Text query
  * @param filter - Optional visibility filter: 'all' (default) or 'unlisted'
  *
- * For 'all': short queries use claim_list; 3+ char queries use Lighthouse.
- * For 'unlisted': uses claim_search with any_tags for the unlisted tag,
- *   since Lighthouse does not index unlisted content.
+ * For 'all': title-filtered claim_list.
+ * For 'unlisted': uses claim_search with any_tags for the unlisted tag.
  */
 export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all') => {
   return async (dispatch: Dispatch, getState: GetState) => {
     const term = searchTerm.trim();
     const state = getState();
-    const showMature = selectShowMatureContent(state);
     const myChannelIds = selectMyChannelClaimIds(state) || [];
 
     // ── Unlisted filter: use claim_search with any_tags ──
@@ -1149,50 +1137,17 @@ export const doSearchMyUploads = (searchTerm: string = '', filter: string = 'all
       };
     }
 
-    // ── All uploads: no channels → title-filtered recent ──
-    if (myChannelIds.length === 0) {
-      const result = await Lbry.claim_list({
-        page: 1,
-        page_size: RECENT_PAGE_SIZE,
-        resolve: true,
-        claim_type: ['stream'],
-      });
-      const claims = clientTitleFilter(sortClaimsByNewest(extractStreamClaims(result)), term);
-      const hydratedClaims = await hydrateClaimsInStore(dispatch, claims);
-      return {
-        claims: hydratedClaims,
-      };
-    }
-
-    // ── All uploads: Lighthouse search across user's channels ──
-    const channelIdsCsv = myChannelIds.join(',');
-    const queryBase = `from=0&s=${encodeURIComponent(term)}&sort_by=release_time&nsfw=${
-      showMature ? 'true' : 'false'
-    }&size=${SEARCH_PAGE_SIZE_PER_CHANNEL}`;
-    const response = await lighthouse.search(`${queryBase}&channel_id=${encodeURIComponent(channelIdsCsv)}`);
-    const claimIds = [];
-
-    if (Array.isArray(response?.body)) {
-      response.body.forEach((item) => {
-        const claimId = getLighthouseClaimId(item);
-        if (claimId) claimIds.push(claimId);
-      });
-    }
-
-    const uniqueClaimIds = [...new Set(claimIds)];
-    const resolveInfo = uniqueClaimIds.length > 0 ? await dispatch(doResolveClaimIds(uniqueClaimIds, true)) : {};
-    const resolvedClaims: Array<StreamClaim> = [];
-
-    if (resolveInfo && typeof resolveInfo === 'object') {
-      const resolveValues: Array<any> = Object.values(resolveInfo);
-      resolveValues.forEach((info) => {
-        const stream: StreamClaim | null | undefined = info && typeof info === 'object' ? info.stream : null;
-        if (stream && stream.claim_id && stream.value_type === 'stream') resolvedClaims.push(stream);
-      });
-    }
-
+    // ── All uploads: title-filtered recent ──
+    const result = await Lbry.claim_list({
+      page: 1,
+      page_size: RECENT_PAGE_SIZE,
+      resolve: true,
+      claim_type: ['stream'],
+    });
+    const claims = clientTitleFilter(sortClaimsByNewest(extractStreamClaims(result)), term);
+    const hydratedClaims = await hydrateClaimsInStore(dispatch, claims);
     return {
-      claims: sortClaimsByNewest(resolvedClaims),
+      claims: hydratedClaims,
     };
   };
 };

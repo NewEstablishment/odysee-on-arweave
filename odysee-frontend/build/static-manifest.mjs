@@ -198,12 +198,33 @@ function requestHeaders(contentType, authToken) {
 }
 
 async function writeStoredMessage(nodeUrl, body, contentType, authToken, fetchImpl) {
-  const response = await fetchImpl(`${nodeUrl}/id?!=true&committers=all`, {
-    method: 'POST',
-    headers: requestHeaders(contentType, authToken),
-    body,
-  });
-  return storedIdFromResponse(response);
+  const maxAttempts = 4;
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(`${nodeUrl}/id?0.%21=true&committers=all`, {
+        method: 'POST',
+        headers: requestHeaders(contentType, authToken),
+        body,
+        signal:
+          typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+            ? AbortSignal.timeout(30_000)
+            : undefined,
+      });
+      const retryableStatus = [408, 425, 429].includes(response.status) || response.status >= 500;
+      if (!retryableStatus || attempt === maxAttempts) return storedIdFromResponse(response);
+      await response.body?.cancel();
+      lastError = new Error(`HyperBEAM write temporarily returned ${response.status}`);
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts) throw error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** (attempt - 1)));
+  }
+
+  throw lastError;
 }
 
 async function verifyManifestIndex(nodeUrl, manifestId, expectedIndex, fetchImpl) {
@@ -219,7 +240,7 @@ export async function publishStaticManifest({
   directory,
   nodeUrl,
   authToken = '',
-  concurrency = 4,
+  concurrency = 1,
   verify = true,
   fetchImpl = globalThis.fetch,
   onProgress = () => {},
@@ -281,7 +302,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help')) {
     process.stdout.write(
-      'Usage: pnpm publish:manifest [-- --dir web/dist/public --node http://127.0.0.1:10000 --concurrency 4 --no-verify]\n' +
+      'Usage: pnpm publish:manifest [-- --dir web/dist/public --node http://127.0.0.1:10000 --concurrency 1 --no-verify]\n' +
         'Environment: HYPERBEAM_BASE_URL or ODYSEE_HYPERBEAM_NODE_API, and optional ODYSEE_AUTH_TOKEN.\n'
     );
     return;
@@ -293,7 +314,7 @@ async function main() {
     '--node',
     process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || ''
   );
-  const concurrency = Number(argumentValue(args, '--concurrency', '4'));
+  const concurrency = Number(argumentValue(args, '--concurrency', '1'));
   const authToken = process.env.ODYSEE_AUTH_TOKEN || process.env.LBRY_AUTH_TOKEN || '';
   let lastReported = 0;
 

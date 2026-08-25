@@ -121,13 +121,15 @@ no-store, no-cache`; immutable ID reads may be cached indefinitely.
 ## Native account and writes
 
 The node's `auth-hook@1.0` uses `cookie@1.0`. The first committed write mints a
-`secret-*` cookie; later writes reuse the same signer. There is no email,
-password, browser wallet, or Web2 account.
+`secret-*` cookie; later writes reuse the same signer. Hosted wallets use the
+private non-volatile store, so the same valid cookie recovers the same
+committer after a node restart. There is no email, password, browser wallet,
+or Web2 account.
 
 All native writes use the generic committed-ID route:
 
 ```text
-POST /id?!=true&committers=all
+POST /id?0.%21=true&committers=all
 ```
 
 The cookie is a request credential and must not be copied into the committed
@@ -135,7 +137,8 @@ message. The reply exposes the stored ID in `message-id`.
 
 ### Uploads
 
-The browser posts raw file bytes directly to `/id?!`. It then writes a generic
+The browser posts raw file bytes directly to the same stage-scoped `/id` write.
+It then writes a generic
 `odysee-upload@1.0` index record that links the name and metadata to the
 immutable data ID. Bare `lbry://<name>` resolution queries that record and
 hydrates the immutable object. The uploads page queries the same records.
@@ -163,7 +166,7 @@ proxy for comments.
 ### Reactions
 
 Video and comment likes/dislikes are cookie-signed `odysee-reaction@1.0`
-messages written through the same generic `/id?!` route. One target-wide
+messages written through the same generic stage-scoped `/id` route. One target-wide
 `query@1.0/only` request discovers immutable paths, then the frontend hydrates
 and verifies every commitment and committer before counting it.
 
@@ -182,19 +185,20 @@ legacy reaction API.
 
 ### Playlists
 
-Public playlists are cookie-signed `odysee-playlist@1.0` messages. A committed
-ID gives the public route `/$/playlist/<message-id>`. The frontend uses generic
-`/id?!` writes, `query@1.0/only` owner listing, and exact commitment hydration; it does
-not call the LBRY `collection_*` API.
+Public playlists pair cookie-signed immutable `odysee-playlist@1.0` snapshots
+with the pinned generic `reference@1.0` device. The reference init commitment
+is the stable public route `/$/playlist/<reference-id>`. The frontend uses
+generic stage-scoped `/id` writes, `query@1.0/only` discovery, and exact commitment
+hydration; it does not call the LBRY `collection_*` API.
 
 - Every message contains a complete ordered snapshot of immutable native IDs
   and/or legacy `<txid>:<nout>` outpoints.
-- A republish after editing or reordering creates a new committed message, a
-  new public ID, and a new share URL. The earlier snapshot remains immutable
-  and exactly addressable.
-- Public update/delete and stable-head semantics are deliberately deferred
-  until the generic reference/frequency contract is integrated. The basic flow
-  does not invent a playlist-specific mutable index or revision projection.
+- A republish after editing or reordering writes a new full snapshot and a
+  strictly newer same-owner reference set while keeping the share URL stable.
+  Earlier snapshots remain immutable and exactly addressable.
+- Readers hydrate and verify every discovered init/set commitment and the
+  selected snapshot. The init committer is the authority; foreign writers,
+  stale or tied updates, and foreign-owned snapshots are rejected.
 - Mutable 40-character claim IDs, names, and URIs are rejected as stored item
   identity; the integration layer resolves local draft URIs before publish.
 - Duplicate physical reads are deduplicated by their returned locator. The playlist
@@ -203,8 +207,8 @@ not call the LBRY `collection_*` API.
   a draft creates a new public immutable snapshot.
 
 Playlist UI retains list, local edit/reorder, explicit snapshot publish, play,
-shuffle, and share. Published delete and auto-publish are hidden until they can
-be expressed honestly through the generic reference contract. It has no
+shuffle, and share. Published delete remains hidden until it has an honest
+append-only contract. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
 

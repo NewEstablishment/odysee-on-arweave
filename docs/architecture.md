@@ -216,16 +216,21 @@ Two mitigations, in order of preference today:
 
 ## Writes
 
-There is no custom write device. Uploads, comments, reactions, playlists, subscriptions, and moderation events are
-ordinary committed messages, using stock HyperBEAM machinery end to end:
+There is no custom write device. Uploads, comments, reactions, playlists,
+subscriptions, and moderation events are ordinary committed messages, using
+stock HyperBEAM machinery end to end:
 
-1. The client sends `POST /<path>?!=true`. The stock `~auth-hook@1.0`
+1. The client sends `POST /id?0.%21=true&committers=all`. Scoping `!` to stage
+   zero commits the application document once; a global `!` can also commit
+   intermediate resolver stages and expose multiple locators for one semantic
+   write. The stock `~auth-hook@1.0`
    request hook (in the default `on/request` pipeline) matches the `!` commit
    flag, derives a per-user secret via its secret provider (HTTP Basic by
    default; a cookie provider for anonymous-but-stable identity), obtains the
-   user's node-hosted wallet from `~secret@1.0`, and signs both the request
-   and the `!`-marked message with real RSA-PSS commitments. The user never
-   handles key material.
+   user's node-hosted wallet from `~secret@1.0`, and signs the `!`-marked
+   application message with a real RSA-PSS commitment. Transport, credential,
+   browser fetch, and commit-control fields are removed before that commitment.
+   The user never handles key material.
 2. The node persists verified signed inbound messages to a dedicated
    `cache-http` filesystem store (`store-all-signed`, default on); every
    cache write also populates the `~match@1.0` reverse index in its target
@@ -233,18 +238,18 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    `match-index` stacks.
 3. Readers discover writes via `~query@1.0`'s exact-match index —
    `POST /~query@1.0/only` with equality selectors (schema, type, target,
-   author) returns matching message paths — and hydrate them with generic
-   `/~cache@1.0/read` calls.
+   author) returns matching message paths — and hydrate them with exact
+   immutable reads. Query selectors contain only committed application fields.
+   If older writes produced multiple locators for one semantic message,
+   deduplication preserves discovery order but prefers a locator whose exact
+   named commitment verifies.
 4. Native account ownership is the verified committer established by the
    cookie-derived node wallet. Claimed profile/channel fields are display
    metadata only. Product projections such as comment revisions, reactions,
-   and subscriptions accept only contiguous same-committer chains. Each basic
-   public playlist is instead one independently addressable immutable message:
-   each verified commitment ID is an exact route, its snapshot contains ordered
-   immutable locators, and republishing changes the payload to produce a new
-   snapshot. Query may return another verified commitment locator for the same
-   message. Stable playlist-head semantics wait for the
-   separately loaded generic reference/frequency contract.
+   and subscriptions accept only contiguous same-committer chains. Public
+   playlist content is an independently addressable immutable full snapshot;
+   the pinned generic `reference@1.0` init commitment supplies its stable route
+   and same-owner set messages select later snapshots.
    Historical LBRY ownership remains governed by its separately verified
    source evidence.
 
@@ -259,11 +264,28 @@ browser operation never reads or writes the legacy subscription service.
    `hb_store_remote_node` against nodes that accepted the writes.
 
 As with reads, authenticity checks are a *between-node* concern: a replicating
-peer re-filters query results against their selectors and re-verifies the
-channel signature before caching a write, so `~query@1.0` stays a dumb index
-and no node is trusted for write authenticity by its peers. The end user, as
-always, trusts the TEE-terminated serving node rather than verifying in the
-browser.
+peer re-filters query results against their selectors, verifies each exact
+commitment, and derives native ownership from that commitment's committer
+before caching a write. `~query@1.0` remains a dumb locator index rather than
+an authority. The end user trusts the TEE-terminated serving node rather than
+verifying in the browser.
+
+The configured cookie deployment persists hosted wallets in the node's private
+store and warms recovered wallets in memory. A valid cookie therefore maps to
+the same committer after a process restart. Credential verification excludes
+the application `body`; only after the cookie is verified is the complete
+message signed. Native comment text can consequently live in `body`, making an
+exact immutable read the comment document while older `comment`/`text` fields
+remain read-compatible.
+
+Comments, reactions, and subscriptions model changes as contiguous append-only
+revisions. Public playlists separate identity from content: each publish writes
+an immutable full `odysee-playlist@1.0` snapshot, while the pinned external
+`reference@1.0` device supplies the stable public identity. Its init commitment
+is the playlist ID; later same-authority set messages point to new snapshots
+without mutating earlier content. Readers hydrate and verify every candidate,
+derive authority from the init committer, and select only a strictly newer
+unambiguous set. Query order is never authority.
 
 Legacy-only interactive surfaces with no verifiable representation — fuzzy
 text search, view counts, subscription counts, legacy comment writes — are

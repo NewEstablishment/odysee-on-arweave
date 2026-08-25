@@ -1,5 +1,5 @@
-import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { isHyperbeamPublicReadDevice } from 'util/hyperbeamRouting';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 export type HyperbeamDebugLevel = 'info' | 'ok' | 'warn' | 'error';
 
@@ -85,7 +85,7 @@ export function addHyperbeamDebugListener(listener: (event: HyperbeamDebugEvent)
 export function installHyperbeamFetchDebug() {
   if (installed || typeof window === 'undefined' || typeof fetch !== 'function') return;
 
-  const nodeBase = String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  const nodeBase = hyperbeamNodeBase();
 
   installed = true;
   const nativeFetch = window.fetch.bind(window);

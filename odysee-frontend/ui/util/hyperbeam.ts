@@ -2,10 +2,16 @@ import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { SORT_BY } from 'constants/comment';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { allowHyperbeamCompatibilityReads } from 'util/hyperbeamMode';
+import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 import { isServedFromManifest } from 'util/manifest-prefix';
+import type { HyperbeamSearchRequest } from 'util/hyperbeamSearch';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
-import { collapseNativeCommentRevisions, isNextNativeCommentRevision } from 'util/nativeCommentRevisions';
+import {
+  collapseNativeCommentRevisions,
+  isNextNativeCommentRevision,
+  nativeCommentBody,
+} from 'util/nativeCommentRevisions';
 import {
   isNativeMessageId,
   nativeMessageVersionRef,
@@ -33,6 +39,15 @@ import {
   normalizeNativePlaylist,
   type NativePlaylist,
 } from 'util/nativePlaylists';
+import {
+  NATIVE_PLAYLIST_REFERENCE_TYPE,
+  REFERENCE_DEVICE,
+  nativePlaylistReferenceInitMessage,
+  nativePlaylistReferenceSetMessage,
+  normalizeNativePlaylistReference,
+  projectNativePlaylistReference,
+  type NativePlaylistReference,
+} from 'util/nativePlaylistReferences';
 import {
   NATIVE_SUBSCRIPTION_SCHEMA,
   NATIVE_SUBSCRIPTION_SIGNATURE_SCOPE,
@@ -68,13 +83,14 @@ const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
+const SEARCH_DEVICE = '~search@1.0';
+const SEARCH_MAX_LIMIT = 100;
+const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
 const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
-// Native writes POST straight to the node; `!` is the auth-hook commit flag,
-// so the node's configured auth hook decides whether the write is committed.
-// The commit flag signs the request via the node's auth hook; committers=all
-// makes /id resolve to the signed ID (the bare id key recalculates the
-// unsigned ID over uncommitted keys too, which nothing registers).
-const HYPERBEAM_NATIVE_WRITE_PATH = 'id?!=true&committers=all';
+// Scope the auth-hook commit flag to stage 0 (the posted message). A global
+// `!` also commits resolver stages, producing multiple locators for one
+// semantic write and nondeterministic discovery.
+const HYPERBEAM_NATIVE_WRITE_PATH = 'id?0.%21=true&committers=all';
 const storeReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
 const nativeCommentQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<any>> }>();
 const nativeCommentControlQueryCache = new Map<
@@ -82,7 +98,12 @@ const nativeCommentControlQueryCache = new Map<
   { expiresAt: number; promise: Promise<Array<NativeCommentControl>> }
 >();
 const nativeReactionQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativeReaction>> }>();
+const recentNativeReactionWrites = new Map<string, Map<string, NativeReaction>>();
 const nativePlaylistQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativePlaylist>> }>();
+const nativePlaylistReferenceQueryCache = new Map<
+  string,
+  { expiresAt: number; promise: Promise<Array<NativePlaylistReference>> }
+>();
 const nativeSubscriptionQueryCache = new Map<
   string,
   { expiresAt: number; promise: Promise<Array<NativeSubscription>> }
@@ -352,6 +373,7 @@ export type NativePlaylistWriteParams = {
   tags?: Array<string>;
   languages?: Array<string>;
   items: Array<string>;
+  reference_id?: string;
 };
 
 export async function fetchHyperbeamPlaylistListMine(
@@ -363,25 +385,61 @@ export async function fetchHyperbeamPlaylistListMine(
   const pageSize = Math.max(1, Math.min(100, toNumber(options.page_size, 50)));
   if (!account || !owner) return emptyCollectionList(page, pageSize);
 
-  const playlists = activeNativePlaylists(
+  const snapshots = activeNativePlaylists(
     await fetchNativePlaylistCollection({
       schema: NATIVE_PLAYLIST_SCHEMA,
       type: NATIVE_PLAYLIST_TYPE,
       'profile-id': account.id,
     })
   ).filter((playlist) => playlist.owner === owner);
+  const references = // `device` is a system key the node's match index does not index, so it
+    // cannot be a query selector; normalizeNativePlaylistReference verifies
+    // the device on every fetched candidate instead.
+    (
+      await fetchNativePlaylistReferenceCollection({
+        'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
+        'profile-id': account.id,
+      })
+    ).filter((reference) => reference.is_init && reference.owner === owner);
+  const referenced = (
+    await Promise.all(references.map((reference) => fetchNativePlaylistForReference(reference).catch(() => null)))
+  ).filter(Boolean) as Array<{
+    reference: NativePlaylistReference;
+    playlist: NativePlaylist;
+    snapshotIds: Array<string>;
+  }>;
+  const referencedSnapshotIds = new Set(referenced.flatMap(({ snapshotIds }) => snapshotIds));
+  const items = referenced
+    .map(({ reference, playlist }) => nativePlaylistClaim(playlist, true, reference.reference_id))
+    .concat(
+      snapshots
+        .filter((playlist) => !referencedSnapshotIds.has(playlist.message_id))
+        .map((playlist) => nativePlaylistClaim(playlist, true))
+    )
+    .sort((left, right) => Number(right.timestamp || 0) - Number(left.timestamp || 0));
   const start = (page - 1) * pageSize;
   return {
-    items: playlists.slice(start, start + pageSize).map((playlist) => nativePlaylistClaim(playlist, true)),
+    items: items.slice(start, start + pageSize),
     page,
     page_size: pageSize,
-    total_items: playlists.length,
-    total_pages: playlists.length ? Math.ceil(playlists.length / pageSize) : 0,
+    total_items: items.length,
+    total_pages: items.length ? Math.ceil(items.length / pageSize) : 0,
   };
 }
 
 export async function fetchHyperbeamPlaylistById(messageId: string): Promise<Claim | null> {
   if (!isNativeMessageId(messageId)) return null;
+  const reference = await fetchNativePlaylistReferenceById(messageId);
+  if (reference) {
+    const resolved = await fetchNativePlaylistForReference(reference);
+    if (!resolved) return null;
+    const viewerOwner = await activeHyperbeamAccountOwner();
+    return nativePlaylistClaim(
+      resolved.playlist,
+      viewerOwner === resolved.reference.owner,
+      resolved.reference.reference_id
+    );
+  }
   const playlist = await fetchNativePlaylistById(messageId);
   if (!playlist) return null;
   const viewerOwner = await activeHyperbeamAccountOwner();
@@ -393,12 +451,27 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
   const owner = await activeHyperbeamAccountOwner();
   if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before publishing');
 
-  const timestamp = Date.now();
+  let reference: NativePlaylistReference | null = null;
+  let currentPlaylist: NativePlaylist | null = null;
+  if (params.reference_id) {
+    if (!isNativeMessageId(params.reference_id)) throw new Error('Playlist reference ID is invalid');
+    const current = await fetchNativePlaylistReferenceById(params.reference_id);
+    if (!current || current.owner !== owner || current.profile_id !== account.id) {
+      throw new Error('Playlist reference failed commitment or ownership verification');
+    }
+    const resolved = await fetchNativePlaylistForReference(current);
+    if (!resolved) throw new Error('Playlist reference does not resolve to a verified snapshot');
+    reference = resolved.reference;
+    currentPlaylist = resolved.playlist;
+  }
+
+  const timestamp = Math.max(Date.now(), (reference?.timestamp || 0) + 1);
   const message = nativePlaylistMessage({
     ...params,
     profileId: account.id,
     profileName: account.name,
-    createdAt: timestamp,
+    createdAt: currentPlaylist?.created_at || timestamp,
+    updatedAt: timestamp,
   });
   validateNativePlaylistWrite(message, owner);
 
@@ -408,7 +481,107 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
   if (!written || written.owner !== owner || written.message_id !== messageId) {
     throw new Error('HyperBEAM native playlist failed commitment or ownership verification');
   }
-  return nativePlaylistClaim(written, true);
+
+  const referenceMessage = reference
+    ? nativePlaylistReferenceSetMessage({
+        profileId: account.id,
+        profileName: account.name,
+        referenceId: reference.reference_id,
+        snapshotId: messageId,
+        timestamp,
+      })
+    : nativePlaylistReferenceInitMessage({
+        profileId: account.id,
+        profileName: account.name,
+        snapshotId: messageId,
+        timestamp,
+      });
+  const referenceMessageId = await writeNativeMessage(referenceMessage, 'playlist reference');
+  nativePlaylistReferenceQueryCache.clear();
+  const verifiedReference = await fetchNativePlaylistReferenceMessageById(referenceMessageId);
+  const referenceId = reference?.reference_id || referenceMessageId;
+  if (
+    !verifiedReference ||
+    verifiedReference.owner !== owner ||
+    verifiedReference.profile_id !== account.id ||
+    verifiedReference.reference_id !== referenceId ||
+    verifiedReference.reference_value !== messageId ||
+    verifiedReference.timestamp !== timestamp ||
+    verifiedReference.is_init === Boolean(reference)
+  ) {
+    throw new Error('HyperBEAM playlist reference failed commitment or ownership verification');
+  }
+  return nativePlaylistClaim(written, true, referenceId);
+}
+
+async function fetchNativePlaylistReferenceCollection(
+  selectors: Record<string, any>
+): Promise<Array<NativePlaylistReference>> {
+  const request = nativeQueryRequest(selectors);
+  const key = stableJson(request);
+  return cachedNativeQuery(nativePlaylistReferenceQueryCache, key, async () => {
+    const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+    const references = await Promise.all(paths.map(fetchNativePlaylistReferenceMessageById));
+    return references.filter((reference): reference is NativePlaylistReference => {
+      if (!reference) return false;
+      return Object.entries(selectors).every(([selector, expected]) => {
+        const fieldName = selector.replace(/-([a-z])/g, (_, character) => `_${character}`);
+        return reference[fieldName] === expected;
+      });
+    });
+  });
+}
+
+async function fetchNativePlaylistReferenceMessageById(id: string): Promise<NativePlaylistReference | null> {
+  if (!isNativeMessageId(id)) return null;
+  const normalizedId = id.replace(/^\/+/, '');
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  return normalizeNativePlaylistReference({
+    ...verified.payload,
+    'message-id': normalizedId,
+    'hyperbeam-owner': verified.owner,
+  });
+}
+
+async function fetchNativePlaylistReferenceById(referenceId: string): Promise<NativePlaylistReference | null> {
+  const reference = await fetchNativePlaylistReferenceMessageById(referenceId);
+  return reference?.is_init && reference.reference_id === referenceId ? reference : null;
+}
+
+async function fetchNativePlaylistForReference(
+  init: NativePlaylistReference
+): Promise<{ reference: NativePlaylistReference; playlist: NativePlaylist; snapshotIds: Array<string> } | null> {
+  if (!init.is_init) return null;
+  // `device` stays out of the selectors (unindexed system key); the device is
+  // verified per candidate during normalization.
+  const candidates = await fetchNativePlaylistReferenceCollection({
+    'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
+    'reference-id': init.reference_id,
+  });
+  const reference = projectNativePlaylistReference(init, candidates);
+  const playlist = await fetchNativePlaylistById(reference.reference_value);
+  if (
+    !playlist ||
+    playlist.owner !== init.owner ||
+    playlist.profile_id !== init.profile_id ||
+    (init.profile_name && playlist.profile_name !== init.profile_name)
+  ) {
+    return null;
+  }
+  const snapshotIds = [
+    init.reference_value,
+    ...candidates
+      .filter(
+        (candidate) =>
+          candidate.reference_id === init.reference_id &&
+          candidate.owner === init.owner &&
+          candidate.profile_id === init.profile_id
+      )
+      .map((candidate) => candidate.reference_value),
+  ];
+  return { reference, playlist, snapshotIds: Array.from(new Set(snapshotIds)) };
 }
 
 async function fetchNativePlaylistCollection(selectors: Record<string, any>): Promise<Array<NativePlaylist>> {
@@ -476,6 +649,7 @@ function nativePlaylistMessage(
     profileId: string;
     profileName?: string;
     createdAt: number;
+    updatedAt: number;
   }
 ): Record<string, any> {
   const tags = (params.tags || []).map(String);
@@ -493,6 +667,7 @@ function nativePlaylistMessage(
     'items-json': nativePlaylistItemsJson(params.items),
     'item-count': params.items.length,
     'created-at': params.createdAt,
+    'updated-at': params.updatedAt,
     'signature-scope': NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   });
 }
@@ -506,12 +681,13 @@ function validateNativePlaylistWrite(message: Record<string, any>, owner: string
   if (!candidate) throw new Error('Native playlist fields are invalid or exceed their limits');
 }
 
-function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean): Claim {
+function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean, referenceId?: string): Claim {
   const timestamp = Math.floor(playlist.updated_at / 1000);
   const creationTimestamp = Math.floor(playlist.created_at / 1000);
-  const permanentUrl = `/$/playlist/${encodeURIComponent(playlist.message_id)}`;
+  const publicId = referenceId || playlist.message_id;
+  const permanentUrl = `/$/playlist/${encodeURIComponent(publicId)}`;
   return {
-    claim_id: playlist.message_id,
+    claim_id: publicId,
     name: playlist.title,
     normalized_name: playlist.title.toLowerCase(),
     permanent_url: permanentUrl,
@@ -534,6 +710,7 @@ function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean): Claim {
     hyperbeam: {
       schema: playlist.schema,
       message_id: playlist.message_id,
+      reference_id: referenceId,
       owner: playlist.owner,
       profile_id: playlist.profile_id,
       profile_name: playlist.profile_name,
@@ -769,7 +946,7 @@ function nativeSubscriptionMessage(params: {
     'notifications-disabled': params.notificationsDisabled,
     state: params.state,
     operation: params.operation,
-    origin: params.origin,
+    'source-system': params.origin,
     'imported-at': params.importedAt,
     revision: params.revision,
     'version-ref': params.versionRef,
@@ -880,11 +1057,17 @@ async function writeNativeReaction(params: {
   if (!written || written.owner !== owner) {
     throw new Error('HyperBEAM native reaction failed commitment or ownership verification');
   }
+  rememberNativeReactionWrite(written);
+
+  // The committed message is already exact-read and verified above. Project
+  // it immediately instead of requiring the match index to expose it in the
+  // same event-loop turn. Query remains discovery only, never authority.
+  const projected = projectNativeReactions(mergeNativeReactionEvents(existing, [written]), owner);
 
   return {
     success: true,
     'message-id': messageId,
-    ...(await nativeReactionList([params.target], params.subject)),
+    ...reactionListResponse([params.target], projected.my_reactions, projected.others_reactions),
   };
 }
 
@@ -900,7 +1083,7 @@ async function fetchNativeReactionCollection(
   };
   const request = nativeQueryRequest(selectors);
   const key = stableJson(request);
-  return cachedNativeQuery(nativeReactionQueryCache, key, async () => {
+  const discovered = await cachedNativeQuery(nativeReactionQueryCache, key, async () => {
     const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
     const reactions = await resolveNativeReactionPaths(paths);
     return reactions.filter(
@@ -911,6 +1094,32 @@ async function fetchNativeReactionCollection(
         reaction.subject === subject
     );
   });
+  return mergeNativeReactionEvents(discovered, recentNativeReactionWritesFor(target, subject));
+}
+
+function nativeReactionCollectionKey(target: string, subject: NativeReactionSubject): string {
+  return `${subject}\u0000${target}`;
+}
+
+function recentNativeReactionWritesFor(target: string, subject: NativeReactionSubject): Array<NativeReaction> {
+  return Array.from(recentNativeReactionWrites.get(nativeReactionCollectionKey(target, subject))?.values() || []);
+}
+
+function rememberNativeReactionWrite(reaction: NativeReaction): void {
+  const key = nativeReactionCollectionKey(reaction.target, reaction.subject);
+  const recent = recentNativeReactionWrites.get(key) || new Map<string, NativeReaction>();
+  recent.set(reaction.message_id, reaction);
+  while (recent.size > 100) recent.delete(recent.keys().next().value);
+  recentNativeReactionWrites.set(key, recent);
+}
+
+function mergeNativeReactionEvents(
+  discovered: Array<NativeReaction>,
+  recent: Array<NativeReaction>
+): Array<NativeReaction> {
+  const byId = new Map<string, NativeReaction>();
+  [...discovered, ...recent].forEach((reaction) => byId.set(reaction.message_id, reaction));
+  return Array.from(byId.values());
 }
 
 async function resolveNativeReactionPaths(paths: Array<string>): Promise<Array<NativeReaction>> {
@@ -1096,7 +1305,7 @@ function nativeCommentMessage(params: CommentCreateParams): Record<string, any> 
     parent: params.parent_id || target,
     state: 'active',
     author: profile?.id,
-    comment,
+    body: comment,
     'claim-id': target,
     'parent-id': params.parent_id,
     'profile-id': profile?.id,
@@ -1129,7 +1338,7 @@ function nativeCommentRevisionMessage(
     parent: root.parent_id || root.claim_id,
     state: operation === 'delete' ? 'deleted' : 'active',
     author: root.hyperbeam_profile_id,
-    comment,
+    body: comment,
     'claim-id': root.claim_id,
     'parent-id': root.parent_id,
     'profile-id': root.hyperbeam_profile_id,
@@ -1373,7 +1582,7 @@ function uniquePaths(paths: Array<string>): Array<string> {
 function nativeQueryRequest(selectors: Record<string, any>): Record<string, any> {
   return {
     ...selectors,
-    only: [...Object.keys(selectors), 'accept'],
+    only: Object.keys(selectors),
     return: 'paths',
     'cache-control': ['no-store', 'no-cache'],
   };
@@ -1591,7 +1800,7 @@ function isNativeComment(message: any): boolean {
     String(value(message, 'method') || '').toUpperCase() !== 'GET' &&
     message.type === 'comment' &&
     message.schema === 'odysee-comment@1.0' &&
-    typeof value(message, 'comment', 'body', 'text') === 'string' &&
+    nativeCommentBody(message) !== undefined &&
     typeof value(message, 'target', 'claim-id', 'claim_id') === 'string' &&
     Boolean(nativeCommentId(message))
   );
@@ -1603,7 +1812,16 @@ async function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
   } catch (error) {
     const status = Number(error?.status);
     const responseBody = String(error?.responseBody || '');
-    if (status === 404 || (status === 500 && responseBody.includes('not_found'))) return [];
+    // No-match responses vary by node build: stock nodes 500 with a
+    // `not_found` case_clause, patched nodes 404, and the bare-atom
+    // `not_found` store result surfaces as a 400 whose body is "not-found".
+    if (
+      status === 404 ||
+      (status === 400 && responseBody.includes('not-found')) ||
+      (status === 500 && responseBody.includes('not_found'))
+    ) {
+      return [];
+    }
     throw error;
   }
 }
@@ -1959,8 +2177,8 @@ function mergeReactionCounts(left: any = {}, right: any = {}): Record<string, an
 
 // The store has no general claim-search surface: targeted claim-id lookups
 // resolve through the claim-id/immutable store routes, everything else
-// degrades to an empty result set (fuzzy search goes direct to lighthouse
-// at the redux layer).
+// degrades to an empty result set (fuzzy search goes through `~search@1.0`
+// at the Redux layer).
 export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   const claimIds = paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id');
   if (claimIds.length) return fetchHyperbeamResolveClaimIds({ ...params, claim_ids: claimIds });
@@ -1976,6 +2194,72 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     total_items: 0,
     total_pages: 0,
   };
+}
+
+export async function fetchSearchIds(query: string, options: number | HyperbeamSearchRequest): Promise<Array<string>> {
+  const trimmed = String(query || '').trim();
+  if (!trimmed) return [];
+  const request = typeof options === 'number' ? { limit: options } : options;
+  const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, {
+    q: trimmed,
+    limit: Math.max(1, Math.min(SEARCH_MAX_LIMIT, toNumber(request.limit, 20))),
+    ...(request.offset ? { offset: Math.max(0, Math.min(10000, toNumber(request.offset, 0))) } : {}),
+    ...(request.filter ? { filter: request.filter } : {}),
+    ...(request.sort?.length ? { sort: request.sort } : {}),
+  });
+  const ids = await searchResultIds(responsePayload(response));
+  return ids.map(String).filter(Boolean);
+}
+
+async function searchResultIds(result: any): Promise<Array<any>> {
+  if (Array.isArray(result)) return result.map(searchHitId).filter(Boolean);
+  if (!isObject(result)) return [];
+  if (Array.isArray(result.ids)) return result.ids;
+  const inline = searchIndexedValues(result.ids);
+  if (inline.length) return inline;
+  const rootIndexed = searchIndexedValues(result);
+  if (rootIndexed.length) return rootIndexed.map(searchHitId).filter(Boolean);
+  const link = value(result, 'ids+link', 'ids-link');
+  if (typeof link !== 'string' || !link) return [];
+  const linked = responsePayload(await fetchSearchDeviceJson(`${CACHE_DEVICE}/read`, { read: link }));
+  const linkedIds = Array.isArray(linked) ? linked : searchIndexedValues(linked);
+  return linkedIds.map(searchHitId).filter(Boolean);
+}
+
+function searchHitId(hit: any): string | null {
+  if (typeof hit === 'string') return hit;
+  if (!isObject(hit)) return null;
+  const id = value(hit, 'message+link', 'message-link', 'message', 'id');
+  return typeof id === 'string' && id ? id : null;
+}
+
+async function fetchSearchDeviceJson(path: string, body: Record<string, any>): Promise<any> {
+  if (isServedFromManifest()) return fetchPublicDeviceJson(path, body);
+  const response = await fetch(`${HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE}/${path}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`HyperBEAM ${path} failed with ${response.status}`);
+    Object.assign(error, { status: response.status, responseBody: text });
+    throw error;
+  }
+  return parseDeviceJson(text);
+}
+
+function searchIndexedValues(source: any): Array<any> {
+  if (!isObject(source)) return [];
+  return Object.keys(source)
+    .filter((key) => /^[1-9]\d*$/.test(key))
+    .sort((left, right) => Number(left) - Number(right))
+    .map((key) => source[key]);
 }
 
 async function fetchHyperbeamSourceClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse> {
@@ -2066,7 +2350,13 @@ async function fetchStoreClaimByAnyId(id: string): Promise<Array<Claim>> {
     return claim ? [claim] : [];
   }
   if (!isOutpointId(id) && !isStandaloneImmutableId(id)) return [];
-  return fetchHyperbeamImmutableClaim(id);
+  const claims = await fetchHyperbeamImmutableClaim(id);
+  if (claims.length) return claims;
+  // Native upload records serve their media bytes at `GET /<id>` with the
+  // claim fields in headers, so the JSON-body read above yields nothing.
+  // Fall back to the headers-aware immutable-route builder.
+  const nativeClaim = await resolveImmutableClaimById(id).catch(() => null);
+  return nativeClaim ? [nativeClaim] : [];
 }
 
 async function fetchHyperbeamImmutableClaim(claimId: string): Promise<Array<Claim>> {
@@ -2319,13 +2609,11 @@ function isFetchTimeoutOrNetworkError(error: any) {
 }
 
 function hyperbeamBaseUrl(): string {
-  const configured = String(HYPERBEAM_BASE_URL || '').replace(/\/+$/, '');
-  if (configured) return configured;
-  // Served from a HyperBEAM node via the Arweave path manifest: the node that
-  // serves the app is the node to talk to, so default to same-origin. The
-  // HYPERBEAM_BASE_URL config override above still wins when set.
-  if (isServedFromManifest()) return window.location.origin;
-  return String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  return resolveHyperbeamNodeBase({
+    manifestOrigin: typeof window !== 'undefined' && isServedFromManifest() ? window.location.origin : '',
+    baseUrl: HYPERBEAM_BASE_URL,
+    nodeApi: ODYSEE_HYPERBEAM_NODE_API,
+  });
 }
 
 function buildDeviceUrl(baseUrl: string, path: string): string {
@@ -2371,6 +2659,9 @@ function commentFromHyperbeam(comment: any): any {
   const revisionOf = value(comment, 'revision-of', 'revision_of');
   const revision = value(comment, 'revision');
   const revisionTimestamp = value(comment, 'revision-timestamp', 'revision_timestamp');
+  const operation = value(comment, 'operation');
+  const state = value(comment, 'state');
+  const body = nativeCommentBody(comment);
   return compactParams({
     ...comment.source,
     schema: value(comment, 'schema'),
@@ -2384,9 +2675,12 @@ function commentFromHyperbeam(comment: any): any {
     revision: revision === undefined || revision === null ? undefined : toNumber(revision, 0),
     revision_timestamp:
       revisionTimestamp === undefined || revisionTimestamp === null ? undefined : toNumber(revisionTimestamp, 0),
-    operation: value(comment, 'operation'),
-    state: value(comment, 'state'),
-    comment: value(comment, 'comment', 'body', 'text'),
+    operation,
+    state,
+    // Normalize an omitted zero-length tombstone body back to the authored
+    // empty string. This keeps transport encoding details out of revision
+    // validation and projection.
+    comment: body,
     claim_id: target,
     parent_id: parentId === 'root' ? undefined : parentId,
     channel_id: channelId,
@@ -2769,10 +3063,33 @@ async function resolveImmutableClaimById(
         .then(responsePayload)
         .catch(() => null)
     : null;
-  const claim = immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name, signingChannelId);
+  const claim = await withCompatibilityDate(
+    immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name, signingChannelId)
+  );
   if (!claim) return null;
 
   return !name || claim.name === name ? claim : null;
+}
+
+// Pre-2019 claims may have no release time in their verified claim bytes. The
+// compatibility timestamp is display metadata only and stays outside the
+// immutable evidence object served by the claim path.
+async function withCompatibilityDate(claim: any): Promise<any> {
+  if (!claim || claim.value?.release_time || claim.timestamp) return claim;
+  const claimId = claim.claim_id;
+  if (!isClaimId(claimId)) return claim;
+
+  const meta = storePayload(
+    await fetchCachedStoreJsonOrNull(storePath('odysee/claim-meta', String(claimId))).catch(() => null)
+  );
+  const timestamp = toNumber(value(meta || {}, 'timestamp'), 0);
+  if (!timestamp) return claim;
+
+  return {
+    ...claim,
+    timestamp,
+    meta: { ...claim.meta, creation_timestamp: timestamp },
+  };
 }
 
 function fetchCachedImmutableJsonOrNull(id: string): Promise<any | null> {
@@ -3224,6 +3541,8 @@ function responseHeadersObject(response: Response): Record<string, any> {
   return headers;
 }
 
+const BINARY_PART_NAMES = new Set(['claim', 'claim-envelope', 'raw-transaction']);
+
 function parseMultipartBytes(body: Uint8Array, contentType: string): Record<string, any> {
   const boundary = contentType.match(/boundary="?([^";]+)"?/i)?.[1];
   if (!boundary) return { body: new TextDecoder().decode(body) };
@@ -3236,7 +3555,18 @@ function parseMultipartBytes(body: Uint8Array, contentType: string): Record<stri
     const separator = segment.indexOf('\r\n\r\n');
     const rawHeaders = separator === -1 ? segment : segment.slice(0, separator);
     const name = rawHeaders.match(/name="([^"]+)"/i)?.[1];
-    if (!name || isBundleHousekeepingPart(name)) continue;
+    if (!name) {
+      // Flat messages with a scalar root body (comments are the important
+      // example) encode it as an unnamed `content-disposition: inline` part.
+      // Dropping this part makes the message verify but strips its content on
+      // a cold read, so a newly-created comment disappears after refresh.
+      if (separator !== -1 && /content-disposition:\s*inline/i.test(rawHeaders)) {
+        const partBody = segment.slice(separator + 4).replace(/\r\n$/, '');
+        result.body = latin1ToUtf8(partBody);
+      }
+      continue;
+    }
+    if (isBundleHousekeepingPart(name)) continue;
 
     const path = name.split('/').filter(Boolean);
     const fields = parsePartHeaderFields(rawHeaders);
@@ -3244,9 +3574,11 @@ function parseMultipartBytes(body: Uint8Array, contentType: string): Record<stri
       // Scalar fields live in the part headers; reconstruct the nested object.
       Object.assign(ensureNestedObject(result, path), fields);
     } else if (separator !== -1) {
-      // A binary blob part: keep its body.
+      // Known evidence parts stay hex. Other named bodies may simply be text
+      // that could not fit in a header, such as a multiline description.
       const partBody = segment.slice(separator + 4).replace(/\r\n$/, '');
-      setNestedValue(result, path, latin1ToHex(partBody));
+      const text = BINARY_PART_NAMES.has(path[path.length - 1]) ? null : utf8FromLatin1(partBody);
+      setNestedValue(result, path, text === null ? latin1ToHex(partBody) : text);
     }
   }
 
@@ -3340,6 +3672,17 @@ function bytesToBinaryString(bytes: Uint8Array): string {
     result += String.fromCharCode(...bytes.slice(index, index + chunkSize));
   }
   return result;
+}
+
+function utf8FromLatin1(value: string): string | null {
+  const bytes = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index += 1) bytes[index] = value.charCodeAt(index) & 0xff;
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 function latin1ToHex(value: string): string {

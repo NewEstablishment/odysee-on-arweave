@@ -374,6 +374,42 @@ function postDevHyperbeamJson(url: string, body: Record<string, any>, headers: R
   });
 }
 
+// Mirrors `web/src/routes.js` `/$/api/content/v2/get` (homepage JSON) for
+// plain `vp dev`, where the express server is not running.
+function devHomepageRoutePlugin() {
+  return {
+    name: 'dev-homepage-route',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const requestUrl = new URL(req.url || '/', 'http://localhost');
+        if (requestUrl.pathname !== '/$/api/content/v2/get' || req.method !== 'GET') return next();
+
+        const { CUSTOM_HOMEPAGE } = require('./config.cjs');
+        res.setHeader('Content-Type', 'application/json');
+        if (!CUSTOM_HOMEPAGE) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ message: 'Not Found' }));
+          return;
+        }
+
+        try {
+          const { getHomepageJsonV2 } = require('./web/src/getHomepageJSON');
+          const content = await getHomepageJsonV2(
+            requestUrl.searchParams.get('format') || undefined,
+            requestUrl.searchParams.get('hp') || undefined
+          );
+          res.statusCode = 200;
+          res.end(JSON.stringify({ status: 'success', data: content }));
+        } catch (err) {
+          res.statusCode = err?.statusCode || err?.status || 500;
+          res.end(JSON.stringify({ message: err?.message || 'homepage route failed' }));
+        }
+      });
+    },
+  };
+}
+
 function devHyperbeamAuthRoutesPlugin() {
   return {
     name: 'dev-hyperbeam-auth-routes',
@@ -1170,6 +1206,7 @@ export default defineConfig({
     uiModuleResolverPlugin(),
     preprocessPlugin(),
     devRssRoutesPlugin(),
+    devHomepageRoutePlugin(),
     devHyperbeamAuthRoutesPlugin(),
     providePlugin(),
     mediabunnyPausePatchPlugin(),
