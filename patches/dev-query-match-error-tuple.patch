@@ -54,7 +54,7 @@ diff --git a/src/preloaded/query/dev_query.erl b/src/preloaded/query/dev_query.e
 +    catch
 +        _:_ -> false
 +    end.
-@@ -355,0 +387,5 @@ return_types_test() ->
+@@ -355,0 +385,5 @@ return_types_test() ->
 +    ?assertEqual({ok, []}, hb_ao:resolve(<<"~query@1.0/all?missing=value&return=paths">>, Opts)),
 +    ?assertEqual({ok, []}, hb_ao:resolve(<<"~query@1.0/all?missing=value&return=messages">>, Opts)),
 +    ?assertEqual({ok, 0}, hb_ao:resolve(<<"~query@1.0/all?missing=value&return=count">>, Opts)),
