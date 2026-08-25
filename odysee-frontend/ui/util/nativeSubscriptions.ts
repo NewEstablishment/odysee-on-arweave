@@ -1,3 +1,17 @@
+import {
+  booleanField,
+  boundedText,
+  field,
+  hasControlCharacters,
+  integer,
+  isNativeMessageId,
+  normalizeMessageId,
+  optionalInteger,
+  optionalString,
+  validReference,
+} from './nativeMessageFields.ts';
+import { collapseChains, type CollapseSpec } from './revisionedMessage.ts';
+
 export const NATIVE_SUBSCRIPTION_SCHEMA = 'odysee-subscription@1.0';
 export const NATIVE_SUBSCRIPTION_TYPE = 'subscription';
 export const NATIVE_SUBSCRIPTION_SIGNATURE_SCOPE = 'native-subscription-v1';
@@ -33,7 +47,7 @@ export type NativeSubscription = {
 };
 
 export function normalizeNativeSubscription(source: any): NativeSubscription | null {
-  const notificationsDisabled = boolean(field(source, 'notifications-disabled', 'notifications_disabled'));
+  const notificationsDisabled = booleanField(field(source, 'notifications-disabled', 'notifications_disabled'));
   if (notificationsDisabled === null) return null;
 
   const normalized = {
@@ -58,7 +72,7 @@ export function normalizeNativeSubscription(source: any): NativeSubscription | n
     created_at: integer(field(source, 'created-at', 'created_at'), 0),
     updated_at: integer(field(source, 'updated-at', 'updated_at'), 0),
     signature_scope: String(field(source, 'signature-scope', 'signature_scope') || ''),
-    message_id: String(field(source, 'message-id', 'message_id', 'hyperbeam_message_id') || '').replace(/^\/+/, ''),
+    message_id: normalizeMessageId(field(source, 'message-id', 'message_id', 'hyperbeam_message_id')),
     owner: String(field(source, 'hyperbeam-owner', 'hyperbeam_owner', 'owner') || ''),
   } as NativeSubscription;
 
@@ -123,32 +137,38 @@ export function isNextNativeSubscriptionRevision(
   );
 }
 
+const subscriptionChainSpec: CollapseSpec<NativeSubscription> = {
+  rootRef: (subscription) => subscription.subscription_ref,
+  revisionOf: (subscription) => subscription.revision_of,
+  isNext: isNextNativeSubscriptionRevision,
+  versionIdentity: (subscription) =>
+    `${subscription.owner}\u0000${subscription.subscription_ref}\u0000${subscription.version_ref}`,
+  versionSemantics: (subscription) =>
+    JSON.stringify({
+      channel_ref: subscription.channel_ref,
+      channel_uri: subscription.channel_uri,
+      channel_name: subscription.channel_name,
+      profile_id: subscription.profile_id,
+      profile_name: subscription.profile_name,
+      notifications_disabled: subscription.notifications_disabled,
+      state: subscription.state,
+      operation: subscription.operation,
+      origin: subscription.origin,
+      imported_at: subscription.imported_at,
+      revision: subscription.revision,
+      revision_of: subscription.revision_of,
+      previous_version: subscription.previous_version,
+      created_at: subscription.created_at,
+      updated_at: subscription.updated_at,
+    }),
+  equivocation: 'poison-ref',
+  compare: (left, right) => left.message_id.localeCompare(right.message_id),
+};
+
 export function collapseNativeSubscriptionStates(subscriptions: Array<NativeSubscription>): Array<NativeSubscription> {
-  const valid = subscriptions.filter(isValidNativeSubscription);
-  const conflictingRefs = conflictingSubscriptionRefs(valid);
-  const unique = uniqueSemanticVersions(valid);
-  const bySubscriptionRef = new Map<string, Array<NativeSubscription>>();
-
-  unique.forEach((subscription) => {
-    const versions = bySubscriptionRef.get(subscription.subscription_ref) || [];
-    versions.push(subscription);
-    bySubscriptionRef.set(subscription.subscription_ref, versions);
-  });
-
-  const current: Array<NativeSubscription> = [];
-  bySubscriptionRef.forEach((versions, subscriptionRef) => {
-    if (conflictingRefs.has(subscriptionRef)) return;
-    const roots = versions.filter((subscription) => !subscription.revision_of);
-    if (roots.length !== 1) return;
-    current.push(
-      latestRevision(
-        roots[0],
-        versions.filter((subscription) => Boolean(subscription.revision_of))
-      )
-    );
-  });
-
-  return current.sort(compareSubscriptionHeads);
+  return collapseChains(subscriptions.filter(isValidNativeSubscription), subscriptionChainSpec).sort(
+    compareSubscriptionHeads
+  );
 }
 
 export function activeNativeSubscriptions(subscriptions: Array<NativeSubscription>): Array<NativeSubscription> {
@@ -179,57 +199,6 @@ export function nativeSubscriptionNotificationsDisabled(value?: boolean): boolea
   return value ?? true;
 }
 
-function latestRevision(root: NativeSubscription, revisions: Array<NativeSubscription>): NativeSubscription {
-  let current = root;
-  while (true) {
-    const candidates = revisions.filter((candidate) => isNextNativeSubscriptionRevision(root, current, candidate));
-    if (!candidates.length) return current;
-    if (candidates.length > 1) return current;
-    current = candidates[0];
-  }
-}
-
-function uniqueSemanticVersions(subscriptions: Array<NativeSubscription>): Array<NativeSubscription> {
-  const byVersion = new Map<string, NativeSubscription>();
-  subscriptions.forEach((subscription) => {
-    const identity = `${subscription.owner}\u0000${subscription.subscription_ref}\u0000${subscription.version_ref}`;
-    const existing = byVersion.get(identity);
-    if (!existing || subscription.message_id.localeCompare(existing.message_id) < 0) {
-      byVersion.set(identity, subscription);
-    }
-  });
-  return Array.from(byVersion.values());
-}
-
-function conflictingSubscriptionRefs(subscriptions: Array<NativeSubscription>): Set<string> {
-  const semanticByVersion = new Map<string, string>();
-  const conflicts = new Set<string>();
-  subscriptions.forEach((subscription) => {
-    const identity = `${subscription.owner}\u0000${subscription.subscription_ref}\u0000${subscription.version_ref}`;
-    const semantic = JSON.stringify({
-      channel_ref: subscription.channel_ref,
-      channel_uri: subscription.channel_uri,
-      channel_name: subscription.channel_name,
-      profile_id: subscription.profile_id,
-      profile_name: subscription.profile_name,
-      notifications_disabled: subscription.notifications_disabled,
-      state: subscription.state,
-      operation: subscription.operation,
-      origin: subscription.origin,
-      imported_at: subscription.imported_at,
-      revision: subscription.revision,
-      revision_of: subscription.revision_of,
-      previous_version: subscription.previous_version,
-      created_at: subscription.created_at,
-      updated_at: subscription.updated_at,
-    });
-    const existing = semanticByVersion.get(identity);
-    if (existing !== undefined && existing !== semantic) conflicts.add(subscription.subscription_ref);
-    semanticByVersion.set(identity, semantic);
-  });
-  return conflicts;
-}
-
 function compareSubscriptionHeads(left: NativeSubscription, right: NativeSubscription): number {
   const nameDifference = left.channel_name.localeCompare(right.channel_name);
   if (nameDifference) return nameDifference;
@@ -250,50 +219,4 @@ function validChannelRef(channelRef: string): boolean {
 
 function validChannelUri(channelUri: string): boolean {
   return channelUri.startsWith('lbry://') && channelUri.length <= 4096 && !hasControlCharacters(channelUri);
-}
-
-function validReference(reference: string): boolean {
-  return reference.length >= 16 && reference.length <= 193 && !hasControlCharacters(reference);
-}
-
-function boundedText(value: string, maxLength: number): boolean {
-  return value.trim().length > 0 && value.length <= maxLength && !hasControlCharacters(value);
-}
-
-function hasControlCharacters(source: string): boolean {
-  return Array.from(source).some((character) => {
-    const code = character.charCodeAt(0);
-    return code < 32 || code === 127;
-  });
-}
-
-function field(source: any, ...keys: Array<string>): any {
-  for (const key of keys) {
-    if (source?.[key] !== undefined && source?.[key] !== null) return source[key];
-  }
-}
-
-function optionalString(source: any): string | undefined {
-  return typeof source === 'string' && source ? source : undefined;
-}
-
-function boolean(source: any): boolean | null {
-  if (source === true || source === 'true' || source === 1 || source === '1') return true;
-  if (source === false || source === 'false' || source === 0 || source === '0') return false;
-  return null;
-}
-
-function optionalInteger(source: any): number | undefined {
-  if (source === undefined || source === null || source === '') return undefined;
-  const parsed = Math.floor(Number(source));
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function integer(source: any, fallback: number): number {
-  const parsed = Math.floor(Number(source));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function isNativeMessageId(messageId: any): boolean {
-  return /^[0-9A-Za-z_-]{41,128}$/.test(String(messageId || ''));
 }

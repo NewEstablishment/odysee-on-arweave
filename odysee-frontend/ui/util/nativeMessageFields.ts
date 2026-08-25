@@ -69,8 +69,15 @@ export function validTarget(target: string): boolean {
   return target.length > 0 && target.length <= 1024 && !hasControlCharacters(target);
 }
 
-export function compact(source: Record<string, any>): Record<string, any> {
-  return Object.fromEntries(Object.entries(source).filter(([, sourceValue]) => sourceValue !== undefined));
+export function compact<T extends Record<string, any>>(source: T): T {
+  return Object.fromEntries(Object.entries(source).filter(([, sourceValue]) => sourceValue !== undefined)) as T;
+}
+
+export function numberField(source: Record<string, any> | undefined, ...keys: Array<string>): number | undefined {
+  const sourceValue = field(source, ...keys);
+  if (sourceValue === undefined) return undefined;
+  const parsed = Number(sourceValue);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 export function stableJson(source: any): string {

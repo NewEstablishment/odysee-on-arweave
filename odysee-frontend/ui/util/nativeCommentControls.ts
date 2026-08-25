@@ -1,3 +1,5 @@
+import { compact, field, numberField, stableJson } from './nativeMessageFields.ts';
+
 export const NATIVE_COMMENT_CONTROL_SCHEMA = 'odysee-comment-control@1.0';
 export const NATIVE_COMMENT_CONTROL_TYPE = 'comment-control';
 export const NATIVE_COMMENT_CONTROL_SIGNATURE_SCOPE = 'native-comment-control-v1';
@@ -250,21 +252,6 @@ function compareNativeCommentControls(left: NativeCommentControl, right: NativeC
   return String(left.hyperbeam_message_id || '').localeCompare(String(right.hyperbeam_message_id || ''));
 }
 
-function field(source: Record<string, any> | undefined, ...keys: Array<string>): any {
-  if (!source) return undefined;
-  for (const key of keys) {
-    if (source[key] !== undefined && source[key] !== null) return source[key];
-  }
-  return undefined;
-}
-
-function numberField(source: NativeCommentControl, ...keys: Array<string>): number | undefined {
-  const sourceValue = field(source, ...keys);
-  if (sourceValue === undefined) return undefined;
-  const parsed = Number(sourceValue);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
 function legacyBlockExpiresAt(entry: Record<string, any>, now: number): number | undefined {
   const nowSeconds = Math.floor(now / 1000);
   const remaining = Number(entry?.ban_remaining);
@@ -281,15 +268,3 @@ function legacyBlockExpiresAt(entry: Record<string, any>, now: number): number |
   return Number.isFinite(parsed) ? Math.floor(parsed / 1000) + duration : undefined;
 }
 
-function compact<T extends Record<string, any>>(source: T): T {
-  return Object.fromEntries(Object.entries(source).filter(([, sourceValue]) => sourceValue !== undefined)) as T;
-}
-
-function stableJson(source: any): string {
-  if (!source || typeof source !== 'object') return JSON.stringify(source);
-  if (Array.isArray(source)) return `[${source.map(stableJson).join(',')}]`;
-  return `{${Object.keys(source)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableJson(source[key])}`)
-    .join(',')}}`;
-}
