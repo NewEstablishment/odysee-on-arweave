@@ -1,13 +1,13 @@
 import { EMOTES_48px as EMOTES, TWEMOTENAMES } from 'constants/emotes';
 import { matchSorter } from 'match-sorter';
-import { LIGHTHOUSE_MIN_CHARACTERS, SEARCH_OPTIONS } from 'constants/search';
+import { SEARCH_MIN_CHARACTERS, SEARCH_OPTIONS } from 'constants/search';
 import * as KEYCODES from 'constants/keycodes';
 import Autocomplete from '@mui/material/Autocomplete';
 import BusyIndicator from 'component/common/busy-indicator';
 // import EMOJIS from 'emoji-dictionary';
 import Popper from '@mui/material/Popper';
 import React from 'react';
-import useLighthouse from 'effects/use-lighthouse';
+import useSearch from 'effects/use-search';
 import useThrottle from 'effects/use-throttle';
 import { parseURI } from 'util/lbryURI';
 import TextareaSuggestionsOption from './render-option';
@@ -127,12 +127,12 @@ export default function TextareaWithSuggestions(props: Props) {
     isBackgroundSearch: false,
     [SEARCH_OPTIONS.CLAIM_TYPE]: SEARCH_OPTIONS.INCLUDE_CHANNELS,
   };
-  const { results, loading } = useLighthouse(debouncedTerm, false, SEARCH_SIZE, additionalOptions, 0) as {
+  const { results, loading } = useSearch(debouncedTerm, false, SEARCH_SIZE, additionalOptions, 0) as {
     results: string[] | undefined;
     loading: boolean;
   };
   const stringifiedResults = JSON.stringify(results);
-  const hasMinLength = suggestionTerm && isMention && suggestionTerm.length >= LIGHTHOUSE_MIN_CHARACTERS;
+  const hasMinLength = suggestionTerm && isMention && suggestionTerm.length >= SEARCH_MIN_CHARACTERS;
   const isTyping = isMention && debouncedTerm !== suggestionTerm;
   const showPlaceholder =
     isMention && !invalidTerm && (isTyping || loading || (results && results.length > 0 && !hasNewResolvedResults));

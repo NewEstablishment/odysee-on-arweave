@@ -91,7 +91,7 @@ export const getSearchQueryString = (query: string, options: SearchQueryOptions 
       queryParams.push(`claimType=${claimType}`);
 
       /*
-       * Due to limitations in lighthouse, we can't pass the mediaType parameter
+       * Due to limitations in the search service, we can't pass the mediaType parameter
        * when searching for channels or "everything".
        */
       if (!claimType.includes(SEARCH_OPTIONS.INCLUDE_CHANNELS)) {

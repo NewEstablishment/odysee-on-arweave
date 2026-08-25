@@ -2,8 +2,8 @@ import React from 'react';
 import ClaimList from 'component/claimList';
 import { DEBOUNCE_WAIT_DURATION_MS, SEARCH_OPTIONS } from 'constants/search';
 import * as CS from 'constants/claim_search';
-import * as SETTINGS from 'constants/settings';
-import { lighthouse } from 'redux/actions/search';
+import { fetchSearchIds } from 'util/hyperbeam';
+import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
 import { normalizeURI } from 'util/lbryURI';
 type Props = {
   searchQuery: string;
@@ -50,10 +50,10 @@ export function SearchResults(props: Props) {
   const [isSearchingState, setIsSearchingState] = React.useState(false);
   const isSearching = React.useRef(false);
   const noMoreResults = React.useRef(false);
-  // Map contentType from ClaimListDiscover to lighthouse mediaType param
+  // Map contentType from ClaimListDiscover to the search service mediaType param
   const mediaTypeParam = React.useMemo(() => {
     if (!contentType || contentType === CS.CONTENT_ALL) return '';
-    // Map claim_search file types to lighthouse media types
+    // Map claim_search file types to the search service media types
     const typeMap = {
       [CS.FILE_VIDEO]: SEARCH_OPTIONS.MEDIA_VIDEO,
       [CS.FILE_AUDIO]: SEARCH_OPTIONS.MEDIA_AUDIO,
@@ -65,7 +65,7 @@ export function SearchResults(props: Props) {
     const mapped = typeMap[contentType];
     return mapped ? `&mediaType=${mapped}` : '';
   }, [contentType]);
-  // Map freshness to lighthouse time_filter
+  // Map freshness to the search service time_filter
   const timeFilterParam = React.useMemo(() => {
     if (!freshness || freshness === CS.FRESH_ALL) return '';
     const freshnessMap = {
@@ -77,7 +77,7 @@ export function SearchResults(props: Props) {
     const mapped = freshnessMap[freshness];
     return mapped ? `&time_filter=${mapped}` : '';
   }, [freshness]);
-  // Map duration filter to lighthouse min_duration/max_duration (in seconds)
+  // Map duration filter to the search service min_duration/max_duration (in seconds)
   const SHORT_DURATION_SECONDS = 240; // 4 minutes
 
   const LONG_DURATION_SECONDS = 1200; // 20 minutes
@@ -143,31 +143,11 @@ export function SearchResults(props: Props) {
       }
 
       setIsSearchingState(true);
-      lighthouse
-        .search(
-          `from=${SEARCH_PAGE_SIZE * (page - 1)}` +
-            `&s=${encodeURIComponent(searchQuery)}` +
-            `&channel_id=${encodeURIComponent(claimId)}` +
-            sortBy +
-            `&nsfw=${showMature ? 'true' : 'false'}` +
-            (effectiveMinDuration ? `&${SEARCH_OPTIONS.MIN_DURATION}=${effectiveMinDuration}` : '') +
-            (effectiveMaxDuration ? `&${SEARCH_OPTIONS.MAX_DURATION}=${effectiveMaxDuration}` : '') +
-            `&size=${SEARCH_PAGE_SIZE}` +
-            mediaTypeParam +
-            timeFilterParam +
-            (maxAspectRatio ? `&${SEARCH_OPTIONS.MAX_ASPECT_RATIO}=${maxAspectRatio}` : '') +
-            (hideShorts ? `&${SEARCH_OPTIONS.EXCLUDE_SHORTS}=true` : '') +
-            (hideShorts
-              ? `&${SEARCH_OPTIONS.EXCLUDE_SHORTS_ASPECT_RATIO_LTE}=${SETTINGS.SHORTS_ASPECT_RATIO_LTE}`
-              : '') +
-            (hideShorts ? `&${SEARCH_OPTIONS.EXCLUDE_SHORTS_DURATION_LTE}=${SETTINGS.SHORTS_DURATION_LTE}` : '')
-        )
-        .then(({ body: results }) => {
+      fetchSearchIds(searchQuery, SEARCH_PAGE_SIZE * page)
+        .then((ids) => {
           if (canceled) return;
 
-          const urls = results.map(({ name, claimId }) => {
-            return `lbry://${name}#${claimId}`;
-          });
+          const urls = ids.map((id) => hyperbeamImmutableUri(id)).filter(Boolean);
           // Batch-resolve the urls before calling 'setSearchResults', as the
           // latter will immediately cause the tiles to resolve, ending up
           // calling doResolveUri one by one before the batched one.
@@ -184,15 +164,17 @@ export function SearchResults(props: Props) {
 
                   const resolveResult = resolveResponse[normalizedUrl] || resolveResponse[url];
 
-                  return !resolveResult || !('error' in resolveResult);
+                  if (!resolveResult) return true;
+                  if ('error' in resolveResult) return false;
+                  const stream = resolveResult.stream;
+                  return !stream || stream.signing_channel?.claim_id === claimId;
                 })
               : urls;
 
-            // De-dup (LH will return some duplicates) and concat results
             setSearchResults((prev) =>
               page === 1 ? resolvedUrls : Array.from(new Set((prev || []).concat(resolvedUrls)))
             );
-            noMoreResults.current = !urls || urls.length < SEARCH_PAGE_SIZE;
+            noMoreResults.current = !ids || ids.length < SEARCH_PAGE_SIZE * page;
           });
         })
         .catch(() => {

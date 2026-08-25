@@ -58,7 +58,38 @@ upload_opts(Overrides) ->
         <<"on">> => cookie_auth_hooks(Opts),
         <<"store-all-signed">> => true,
         <<"match-index">> => [hd(Stores)],
-        <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS
+        <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS,
+        <<"search-index-markers">> =>
+            [
+                #{
+                    <<"field">> => <<"schema">>,
+                    <<"values">> =>
+                        [
+                            <<"odysee-upload@1.0">>,
+                            <<"odysee-channel@1.0">>,
+                            <<"odysee-playlist@1.0">>,
+                            <<"odysee-comment@1.0">>
+                        ]
+                },
+                <<"claim-name">>
+            ],
+        <<"search-skip-fields">> =>
+            [
+                <<"claim">>,
+                <<"claim-ancestry">>,
+                <<"claim-envelope">>,
+                <<"claim-id">>,
+                <<"claim-op">>,
+                <<"claim-proof-strength">>,
+                <<"channel-id">>,
+                <<"evidence">>,
+                <<"native-id">>,
+                <<"native-id-type">>,
+                <<"nout">>,
+                <<"raw-transaction">>,
+                <<"sd-hash">>,
+                <<"txid">>
+            ]
     }.
 
 %% @doc The read-only Odysee source stores.
@@ -106,6 +137,8 @@ cookie_auth_hooks(Opts) ->
     Hooks = hb_opts:get(on, #{}, Opts),
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
     Hooks#{
+        <<"cache-write">> =>
+            [#{ <<"device">> => <<"search@1.0">>, <<"path">> => <<"write">> }],
         <<"request">> =>
             lists:flatmap(
                 fun
@@ -173,6 +206,7 @@ skeleton_node(Fixtures) ->
                 }
             ],
             <<"priv-wallet">> => ar_wallet:new(),
+            <<"search-backend-url">> => <<"http://127.0.0.1:1">>,
             %% A mutable value at a constant address must not come from the
             %% resolution cache, or an alias never refreshes.
             <<"http-extra-opts">> => #{
@@ -320,6 +354,7 @@ upload_node() ->
     Node =
         hb_http_server:start_node(upload_opts(#{
             <<"store">> => [Store],
+            <<"search-backend-url">> => <<"http://127.0.0.1:1">>,
             <<"priv-wallet">> => ar_wallet:new()
         })),
     {Node, #{ <<"store">> => [Store] }}.

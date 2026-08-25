@@ -153,7 +153,13 @@ export const makeSelectClaimIdIsPending = (claimId: string) =>
   createSelector(selectPendingClaimsById, (pendingById) => {
     return Boolean(pendingById[claimId]);
   });
-export const selectClaimIdForUri = (state: State, uri: string) => selectClaimIdsByUri(state)[normalizeURI(uri)];
+export const selectClaimIdForUri = (state: State, uri: string) => {
+  try {
+    return selectClaimIdsByUri(state)[normalizeURI(uri)];
+  } catch {
+    return undefined;
+  }
+};
 export const selectReflectingById = (state: State) => selectState(state).reflectingById;
 // OBSOLETE: use selectClaimForClaimId instead
 export const makeSelectClaimForClaimId = (claimId: string) => createSelector(selectClaimsById, (byId) => byId[claimId]);

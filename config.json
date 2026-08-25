@@ -1,6 +1,36 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "search-backend-url": "http://127.0.0.1:7700",
+  "search-index": "odysee_claims",
+  "search-index-markers": [
+    {
+      "field": "schema",
+      "values": [
+        "odysee-upload@1.0",
+        "odysee-channel@1.0",
+        "odysee-playlist@1.0",
+        "odysee-comment@1.0"
+      ]
+    },
+    "claim-name"
+  ],
+  "search-skip-fields": [
+    "claim",
+    "claim-ancestry",
+    "claim-envelope",
+    "claim-id",
+    "claim-op",
+    "claim-proof-strength",
+    "channel-id",
+    "evidence",
+    "native-id",
+    "native-id-type",
+    "nout",
+    "raw-transaction",
+    "sd-hash",
+    "txid"
+  ],
   "http-extra-opts": {
     "force-message": true,
     "cache-control": [
@@ -63,6 +93,12 @@
     }
   ],
   "on": {
+    "cache-write": [
+      {
+        "device": "search@1.0",
+        "path": "write"
+      }
+    ],
     "request": [
       {
         "device": "rate-limit@1.0"

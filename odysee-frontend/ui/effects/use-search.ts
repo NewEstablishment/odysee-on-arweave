@@ -1,9 +1,9 @@
 import React from 'react';
-import { lighthouse } from 'redux/actions/search';
-import { getSearchQueryString } from 'util/query-params';
+import { fetchSearchIds } from 'util/hyperbeam';
+import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
 import { isURIValid } from 'util/lbryURI';
 import useThrottle from './use-throttle';
-export default function useLighthouse(
+export default function useSearch(
   query: string,
   showMature: boolean,
   size: number = 5,
@@ -12,25 +12,20 @@ export default function useLighthouse(
 ) {
   const [results, setResults] = React.useState<Array<string> | null>();
   const [loading, setLoading] = React.useState<boolean>();
-  const queryString = query
-    ? getSearchQueryString(query, {
-        nsfw: showMature,
-        size,
-        ...additionalOptions,
-      })
-    : '';
-  const throttledQuery = useThrottle(queryString, throttleMs);
+  const throttledQuery = useThrottle(query ? query.trim() : '', throttleMs);
   React.useEffect(() => {
     if (throttledQuery) {
       setLoading(true);
       setResults(null);
       let isSubscribed = true;
-      lighthouse
-        .search(throttledQuery)
-        .then(({ body: results }) => {
+      fetchSearchIds(throttledQuery, size)
+        .then((ids) => {
           if (isSubscribed) {
             setResults(
-              results.map((result) => `lbry://${result.name}#${result.claimId}`).filter((uri) => isURIValid(uri))
+              ids
+                .map((id) => hyperbeamImmutableUri(id))
+                .filter(Boolean)
+                .filter((uri) => isURIValid(uri))
             );
             setLoading(false);
           }
@@ -42,7 +37,7 @@ export default function useLighthouse(
         isSubscribed = false;
       };
     }
-  }, [throttledQuery]);
+  }, [throttledQuery, size]);
   return {
     results,
     loading,

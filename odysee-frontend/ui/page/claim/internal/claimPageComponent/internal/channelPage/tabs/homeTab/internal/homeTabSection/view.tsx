@@ -6,7 +6,8 @@ import { DEBOUNCE_WAIT_DURATION_MS, SEARCH_PAGE_SIZE } from 'constants/search';
 import ChannelSection from 'component/channelSections/Section';
 import UpcomingClaims from 'component/upcomingClaims';
 import ClaimPreviewTile from 'component/claimPreviewTile';
-import { lighthouse } from 'redux/actions/search';
+import { fetchSearchIds } from 'util/hyperbeam';
+import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
 import * as CS from 'constants/claim_search';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
@@ -176,16 +177,20 @@ function HomeTabSection(props: Props) {
       }
 
       setIsSearching(true);
-      lighthouse
-        .search(
-          `&s=${encodeURIComponent(searchQuery)}` +
-            `&channel_id=${encodeURIComponent(channelClaimId)}` +
-            '&nsfw=false' +
-            '&resolve=true' +
-            `&size=${SEARCH_PAGE_SIZE}`
-        )
-        .then(({ body: results }) => {
-          setSearchResults(results);
+      fetchSearchIds(searchQuery, SEARCH_PAGE_SIZE)
+        .then((ids) => {
+          const urls = ids.map((id) => hyperbeamImmutableUri(id)).filter(Boolean);
+          return Promise.resolve(dispatch(doResolveUrisAction(urls, true))).then((resolveResponse) => {
+            const results = urls
+              .map((url) => {
+                const entry = resolveResponse && resolveResponse[url];
+                const stream = entry && !('error' in entry) ? entry.stream : null;
+                if (!stream || stream.signing_channel?.claim_id !== channelClaimId) return null;
+                return { claimId: stream.claim_id, title: stream.value?.title || stream.name };
+              })
+              .filter(Boolean);
+            setSearchResults(results);
+          });
         })
         .catch(() => {
           setSearchResults(null);

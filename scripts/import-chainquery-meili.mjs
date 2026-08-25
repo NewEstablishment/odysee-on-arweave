@@ -582,6 +582,9 @@ function normalizeDoc(doc) {
     ...doc,
     id: docId,
     search_id: searchId(docId),
+    // One result per publisher: a channel's claims share its id as the
+    // group; unchanneled claims group by themselves.
+    search_group: String(doc.channel_claim_id || docId),
     tags,
     media_type: mediaType(doc.content_type),
     fee: Number(doc.fee || 0),
@@ -683,7 +686,7 @@ function normalizeNativeDoc(doc) {
   const immutableId = String(recordId || doc.immutable_id || docId);
   return {
     ...doc,
-    ...(docId ? { doc_id: docId, search_id: searchId(docId) } : {}),
+    ...(docId ? { doc_id: docId, search_id: searchId(docId), search_group: String(doc.channel_claim_id || docId) } : {}),
     ...(recordId ? { immutable_id: recordId } : {}),
     ...(immutableId ? { id: immutableId } : {}),
   };
@@ -691,7 +694,18 @@ function normalizeNativeDoc(doc) {
 
 function activeLegacyDocument(doc) {
   const state = String(doc.bid_state || '').toLowerCase();
-  return state !== 'spent' && state !== 'expired';
+  if (state === 'spent' || state === 'expired') return false;
+  return renderableDocument(doc);
+}
+
+// A result the UI cannot render is noise: no title to show, or neither a
+// channel nor a thumbnail (the anonymous, artless long tail of the early
+// chain). Keeping these out of the index is cheaper than ranking around
+// them, and they can never be a useful search hit.
+function renderableDocument(doc) {
+  const title = String(doc.title || '').trim();
+  if (!title) return false;
+  return Boolean(doc.has_channel) || Boolean(doc.has_thumbnail);
 }
 
 function meiliString(value) {
@@ -788,16 +802,19 @@ function mediaType(contentType) {
 async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
   const settings = {
     searchableAttributes: [
+      // Order is match importance: a title hit outranks a description hit.
       'title',
-      'tags',
-      'name',
-      'source_name',
       'searchable_name',
+      'name',
       'stripped_name',
+      'source_name',
       'channel_name',
       'description',
+      'tags',
     ],
     filterableAttributes: [
+      'has_channel',
+      'has_thumbnail',
       'search_id',
       'doc_id',
       'claim_id',
@@ -853,15 +870,21 @@ async function configureIndex(meiliUrl, index, waitForTasks, waitTimeoutMs) {
       'transaction_time',
       'duration',
     ],
+    distinctAttribute: 'search_group',
     rankingRules: [
+      // A card the user cannot see is worse than a weaker match, so
+      // claims with a thumbnail and a channel come first; within them,
+      // where the term matched decides (a title hit beats a tag hit),
+      // and recency only breaks the remaining ties.
       'words',
-      'has_thumbnail:desc',
-      'has_release_time:desc',
       'typo',
-      'proximity',
+      'has_thumbnail:desc',
+      'has_channel:desc',
       'attribute',
-      'search_rank:desc',
       'exactness',
+      'has_release_time:desc',
+      'search_rank:desc',
+      'proximity',
       'sort',
     ],
   };

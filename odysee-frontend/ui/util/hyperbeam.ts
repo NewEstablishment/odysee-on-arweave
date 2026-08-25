@@ -68,6 +68,9 @@ const NATIVE_COMMENT_TARGET_OWNER_CACHE_MS = 30 * 1000;
 const NATIVE_COMMENT_READ_CONCURRENCY = 4;
 const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
+const SEARCH_DEVICE = '~search@1.0';
+const SEARCH_MAX_LIMIT = 100;
+const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
 const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
 // Native writes POST straight to the node; `!` is the auth-hook commit flag,
 // so the node's configured auth hook decides whether the write is committed.
@@ -1959,8 +1962,8 @@ function mergeReactionCounts(left: any = {}, right: any = {}): Record<string, an
 
 // The store has no general claim-search surface: targeted claim-id lookups
 // resolve through the claim-id/immutable store routes, everything else
-// degrades to an empty result set (fuzzy search goes direct to lighthouse
-// at the redux layer).
+// degrades to an empty result set (fuzzy search goes through `~search@1.0`
+// at the Redux layer).
 export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse | null> {
   const claimIds = paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id');
   if (claimIds.length) return fetchHyperbeamResolveClaimIds({ ...params, claim_ids: claimIds });
@@ -1976,6 +1979,68 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     total_items: 0,
     total_pages: 0,
   };
+}
+
+export async function fetchSearchIds(query: string, limit: number): Promise<Array<string>> {
+  const trimmed = String(query || '').trim();
+  if (!trimmed) return [];
+  const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, {
+    q: trimmed,
+    limit: Math.max(1, Math.min(SEARCH_MAX_LIMIT, toNumber(limit, 20))),
+  });
+  const ids = await searchResultIds(responsePayload(response));
+  return ids.map(String).filter(Boolean);
+}
+
+async function searchResultIds(result: any): Promise<Array<any>> {
+  if (Array.isArray(result)) return result.map(searchHitId).filter(Boolean);
+  if (!isObject(result)) return [];
+  if (Array.isArray(result.ids)) return result.ids;
+  const inline = searchIndexedValues(result.ids);
+  if (inline.length) return inline;
+  const rootIndexed = searchIndexedValues(result);
+  if (rootIndexed.length) return rootIndexed.map(searchHitId).filter(Boolean);
+  const link = value(result, 'ids+link', 'ids-link');
+  if (typeof link !== 'string' || !link) return [];
+  const linked = responsePayload(await fetchSearchDeviceJson(`${CACHE_DEVICE}/read`, { read: link }));
+  const linkedIds = Array.isArray(linked) ? linked : searchIndexedValues(linked);
+  return linkedIds.map(searchHitId).filter(Boolean);
+}
+
+function searchHitId(hit: any): string | null {
+  if (typeof hit === 'string') return hit;
+  if (!isObject(hit)) return null;
+  const id = value(hit, 'message+link', 'message-link', 'message', 'id');
+  return typeof id === 'string' && id ? id : null;
+}
+
+async function fetchSearchDeviceJson(path: string, body: Record<string, any>): Promise<any> {
+  if (isServedFromManifest()) return fetchPublicDeviceJson(path, body);
+  const response = await fetch(`${HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE}/${path}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`HyperBEAM ${path} failed with ${response.status}`);
+    Object.assign(error, { status: response.status, responseBody: text });
+    throw error;
+  }
+  return parseDeviceJson(text);
+}
+
+function searchIndexedValues(source: any): Array<any> {
+  if (!isObject(source)) return [];
+  return Object.keys(source)
+    .filter((key) => /^[1-9]\d*$/.test(key))
+    .sort((left, right) => Number(left) - Number(right))
+    .map((key) => source[key]);
 }
 
 async function fetchHyperbeamSourceClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse> {
