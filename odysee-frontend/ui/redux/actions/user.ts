@@ -335,7 +335,8 @@ export function doAuthenticate(
           dispatch({
             type: ACTIONS.AUTHENTICATION_SUCCESS,
             data: {
-              user,
+              // Neutralized account API can resolve undefined; the app gate blocks until user !== undefined.
+              user: user || null,
               accessToken: token,
             },
           });
@@ -372,7 +373,7 @@ export function doUserFetch() {
           dispatch({
             type: ACTIONS.USER_FETCH_SUCCESS,
             data: {
-              user,
+              user: user || null,
             },
           });
           resolve(user);
@@ -392,7 +393,7 @@ export function doUserCheckEmailVerified() {
   // This will happen in the background so we don't need loading booleans
   return (dispatch) => {
     callOdyseeAccountApi('user', 'me').then((user) => {
-      if (user.has_verified_email) {
+      if (user?.has_verified_email) {
         dispatch(doRewardList());
         dispatch({
           type: ACTIONS.USER_FETCH_SUCCESS,
