@@ -80,16 +80,12 @@ index(Conf = #{ <<"index">> := Index }, Id, Fields, Schema) ->
             end
     end.
 
-%% @doc Full-text query. Returns `[{Id, Rank}]' ordered best-first. Rank
-%% is Meilisearch's ranking score where available (higher is better), or
-%% the hit's position otherwise; callers only rely on the ordering.
-query(Conf = #{ <<"index">> := Index }, QueryString, Limit) ->
-    Body = #{
-        <<"q">> => QueryString,
-        <<"limit">> => Limit,
-        <<"attributesToRetrieve">> => [<<"id">>],
-        <<"showRankingScore">> => true
-    },
+%% @doc Full-text query. Returns `[{Id, Rank}]' ordered best-first. The
+%% third argument is either a legacy integer limit or a validated search-options
+%% map. Rank is Meilisearch's ranking score where available (higher is better),
+%% or the hit's position otherwise; callers only rely on the ordering.
+query(Conf = #{ <<"index">> := Index }, QueryString, QuerySpec) ->
+    Body = query_body(QueryString, QuerySpec),
     case
         request(Conf, <<"POST">>, <<"/indexes/", Index/binary, "/search">>, Body)
     of
@@ -104,6 +100,21 @@ query(Conf = #{ <<"index">> := Index }, QueryString, Limit) ->
         _ ->
             []
     end.
+
+query_body(QueryString, QuerySpec) ->
+    Params = normalize_query_spec(QuerySpec),
+    maps:merge(Params, #{
+        <<"q">> => QueryString,
+        <<"attributesToRetrieve">> => [<<"id">>],
+        <<"showRankingScore">> => true
+    }).
+
+normalize_query_spec(Limit) when is_integer(Limit) ->
+    #{ <<"limit">> => Limit };
+normalize_query_spec(Spec) when is_map(Spec) ->
+    maps:with([<<"limit">>, <<"offset">>, <<"filter">>, <<"sort">>], Spec);
+normalize_query_spec(_Spec) ->
+    #{ <<"limit">> => 20 }.
 
 close(_Conf) ->
     ok.
@@ -174,8 +185,8 @@ node_index(Id, Fields, Schema) ->
     gen_server:cast(?SERVER, {index, Id, Fields, Schema}).
 
 %% @doc Query the node's index, returning `[{Id, Rank}]' best-first.
-node_query(QueryString, Limit, _Opts) ->
-    gen_server:call(?SERVER, {query, QueryString, Limit}).
+node_query(QueryString, QuerySpec, _Opts) ->
+    gen_server:call(?SERVER, {query, QueryString, QuerySpec}).
 
 start_link(Opts) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Opts, []).
@@ -188,8 +199,8 @@ handle_cast({index, Id, Fields, Schema}, State = #{ <<"conn">> := C }) ->
     catch index(C, Id, Fields, Schema),
     {noreply, State}.
 
-handle_call({query, QueryString, Limit}, _From, State = #{ <<"conn">> := C }) ->
-    Result = try query(C, QueryString, Limit) catch _:_ -> [] end,
+handle_call({query, QueryString, QuerySpec}, _From, State = #{ <<"conn">> := C }) ->
+    Result = try query(C, QueryString, QuerySpec) catch _:_ -> [] end,
     {reply, Result, State}.
 
 terminate(_Reason, _State) ->
@@ -200,9 +211,6 @@ terminate(_Reason, _State) ->
 %% of nested text (`value/title', tag lists, ...) so evidence messages
 %% index their human-readable content rather than their plumbing; a schema
 %% list restricts to named fields.
-indexable_fields(Fields, Schema) ->
-    indexable_fields(Fields, Schema, []).
-
 indexable_fields(Fields, all, Skip) ->
     case ordered_list_message(Fields) of
         true -> #{};
@@ -335,7 +343,8 @@ indexable_fields_selects_text_test() ->
                <<"commitments">> => #{ <<"x">> => <<"y">> },
                <<"raw">> => <<0, 1, 2, 255>>,
                <<"priv">> => <<"secret">> },
-            all
+            all,
+            []
         ),
     %% Structural and private fields are dropped at selection; non-UTF8
     %% payloads survive selection but are excluded from indexed content.
@@ -356,7 +365,7 @@ operator_skip_fields_are_dropped_test() ->
     %% The engine keeps domain fields it was not told about...
     ?assertEqual(
         [<<"claim-op">>, <<"nout">>, <<"title">>],
-        lists:sort(maps:keys(indexable_fields(Fields, all)))
+        lists:sort(maps:keys(indexable_fields(Fields, all, [])))
     ),
     %% ...and drops exactly the ones the operator named.
     ?assertEqual(
@@ -370,7 +379,8 @@ schema_restricts_indexed_fields_test() ->
     Indexable =
         indexable_fields(
             #{ <<"title">> => <<"visible">>, <<"description">> => <<"hidden">> },
-            [<<"title">>]
+            [<<"title">>],
+            []
         ),
     ?assertEqual([<<"title">>], maps:keys(Indexable)),
     ?assertEqual(<<"visible">>, content(Indexable)).
@@ -381,13 +391,27 @@ identifier_fields_are_not_indexed_test() ->
             #{ <<"title">> => <<"real words here">>,
                <<"locator">> =>
                    <<"be2fccad7acac782af0acafd90f474329e05dee6e03ce20cb5c7763a0ea3d237">> },
-            all
+            all,
+            []
         ),
     ?assertEqual([<<"title">>], maps:keys(Indexable)).
 
 field_name_is_backend_safe_test() ->
     ?assertEqual(<<"value_title">>, field_name(<<"value/title">>)),
     ?assertEqual(<<"claim_name">>, field_name(<<"claim-name">>)).
+
+query_body_forwards_generic_controls_test() ->
+    Body = query_body(<<"search terms">>, #{
+        <<"limit">> => 20,
+        <<"offset">> => 40,
+        <<"filter">> => [<<"claim_type = stream">>],
+        <<"sort">> => [<<"release_time:desc">>],
+        <<"ignored">> => <<"value">>
+    }),
+    ?assertEqual(40, maps:get(<<"offset">>, Body)),
+    ?assertEqual([<<"claim_type = stream">>], maps:get(<<"filter">>, Body)),
+    ?assertEqual([<<"release_time:desc">>], maps:get(<<"sort">>, Body)),
+    ?assertNot(maps:is_key(<<"ignored">>, Body)).
 
 live_index_and_query_test_() ->
     {timeout, 30, fun() ->

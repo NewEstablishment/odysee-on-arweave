@@ -55,13 +55,27 @@ indexed instead of their link IDs.
 ## Query and hydration
 
 ```text
-GET /~search@1.0/query?q=<terms>&limit=<n>
+POST /~search@1.0/query
+{
+  "q": "<terms>",
+  "limit": 20,
+  "offset": 0,
+  "filter": ["claim_type IN [\"stream\", \"repost\"]", "nsfw = 0"],
+  "sort": ["release_time:desc"]
+}
 ```
 
-The response is a ranked list of immutable IDs. Browser code calls this
-through the SDK-shaped HyperBEAM integration, hydrates each locator through
-the normal read path, preserves backend order, and then ingests the normalized
-claims into Redux. A search hit is never the source of truth for the object.
+`q`, bounded `limit`/`offset`, generic Meilisearch filters, and sortable-field
+orders reach the device. The device validates their shape and size before the
+engine forwards them. Product-specific option mapping stays in the frontend
+integration boundary; the generic device does not know Odysee claim types or
+ranking policy.
+
+The response is a ranked list of immutable IDs. Browser code hydrates each
+locator through the normal read path, preserves backend order, and then ingests
+the normalized claims into Redux. A search hit is never the source of truth for
+the object. Applying filters and pagination in the backend prevents browser
+post-filtering from corrupting ranking or page boundaries.
 
 ## Operations
 

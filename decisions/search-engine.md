@@ -36,6 +36,10 @@ use rather than an aspirational alternative.
   `search_id` primary-key convention.
 - Browser product calls go through the HyperBEAM integration boundary, not a
   direct Lighthouse or Meilisearch client.
+- The frontend integration maps product search options to generic filter,
+  sort, limit, and offset controls. The device validates and forwards them;
+  React hydrates the returned immutable locators without post-filtering ranked
+  pages.
 
 ## Consequences
 

@@ -26,7 +26,8 @@
 %%% == Querying ==
 %%%
 %%% `GET /~search@1.0/query?q=<terms>&limit=<n>' runs a Meilisearch query and
-%%% returns the matching message ids in backend ranking order.
+%%% returns the matching message ids in backend ranking order. Generic
+%%% `offset', `filter', and `sort' options are forwarded after validation.
 %%% Callers hydrate the ids with `~cache@1.0/read', exactly as they do
 %%% with `~query@1.0' path results.
 %%%
@@ -159,9 +160,47 @@ message_id(Req, Opts) ->
 query(_Base, Req, Opts) ->
     hb_search:ensure_started(Opts),
     QueryString = hb_maps:get(<<"q">>, Req, <<>>, Opts),
-    Limit = hb_util:int(hb_maps:get(<<"limit">>, Req, <<"20">>, Opts)),
-    Hits = hb_search:node_query(QueryString, Limit, Opts),
+    SearchParams = search_params(Req, Opts),
+    Hits = hb_search:node_query(QueryString, SearchParams, Opts),
     {ok, [Id || {Id, _Rank} <- Hits]}.
+
+search_params(Req, Opts) ->
+    Base = #{
+        <<"limit">> => bounded_int(hb_maps:get(<<"limit">>, Req, 20, Opts), 20, 1, 100),
+        <<"offset">> => bounded_int(hb_maps:get(<<"offset">>, Req, 0, Opts), 0, 0, 10000)
+    },
+    WithFilter = maybe_put(<<"filter">>, safe_filter(hb_maps:get(<<"filter">>, Req, undefined, Opts)), Base),
+    maybe_put(<<"sort">>, safe_sort(hb_maps:get(<<"sort">>, Req, undefined, Opts)), WithFilter).
+
+bounded_int(Value, Default, Min, Max) ->
+    try
+        Parsed = hb_util:int(Value),
+        min(Max, max(Min, Parsed))
+    catch
+        _:_ -> Default
+    end.
+
+safe_filter(Value) when is_binary(Value), byte_size(Value) =< 4096 -> Value;
+safe_filter(Value) when is_list(Value), length(Value) =< 20 ->
+    case lists:all(fun(Item) -> is_binary(Item) andalso byte_size(Item) =< 512 end, Value) of
+        true -> Value;
+        false -> undefined
+    end;
+safe_filter(_Value) -> undefined.
+
+safe_sort(Value) when is_list(Value), length(Value) =< 5 ->
+    case lists:all(fun valid_sort/1, Value) of
+        true -> Value;
+        false -> undefined
+    end;
+safe_sort(_Value) -> undefined.
+
+valid_sort(Value) when is_binary(Value), byte_size(Value) =< 128 ->
+    re:run(Value, <<"^[a-zA-Z0-9_]+:(asc|desc)$">>, [{capture, none}]) =:= match;
+valid_sort(_Value) -> false.
+
+maybe_put(_Key, undefined, Map) -> Map;
+maybe_put(Key, Value, Map) -> Map#{ Key => Value }.
 
 %% The node's field schema: a list of field names, or `all' when unset.
 schema(Opts) ->
@@ -227,6 +266,22 @@ node_markers_admit_products_only_test() ->
     [?assert(indexable(Msg, Opts)) || Msg <- Admitted],
     [?assertNot(indexable(Msg, Opts)) || Msg <- Refused],
     ok.
+
+query_options_are_bounded_and_validated_test() ->
+    Params = search_params(
+        #{
+            <<"limit">> => 999,
+            <<"offset">> => -2,
+            <<"filter">> => [<<"claim_type = stream">>],
+            <<"sort">> => [<<"release_time:desc">>]
+        },
+        #{}
+    ),
+    ?assertEqual(100, maps:get(<<"limit">>, Params)),
+    ?assertEqual(0, maps:get(<<"offset">>, Params)),
+    ?assertEqual([<<"claim_type = stream">>], maps:get(<<"filter">>, Params)),
+    ?assertEqual([<<"release_time:desc">>], maps:get(<<"sort">>, Params)),
+    ?assertNot(maps:is_key(<<"sort">>, search_params(#{ <<"sort">> => [<<"bad field:desc">>] }, #{}))).
 
 live_write_then_query_test_() ->
     {timeout, 30, fun() ->

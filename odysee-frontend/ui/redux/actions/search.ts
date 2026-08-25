@@ -18,6 +18,7 @@ import { getSearchQueryString } from 'util/query-params';
 import { getRecommendationSearchOptions, getShortsRecommendationSearchOptions } from 'util/search';
 import { fetchSearchIds } from 'util/hyperbeam';
 import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
+import { hyperbeamSearchRequest } from 'util/hyperbeamSearch';
 import { RECSYS_FYP_ENDPOINT } from 'config';
 import { SEARCH_OPTIONS } from 'constants/search';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
@@ -185,9 +186,13 @@ export const doSearch =
     const start = Number(from) || 0;
     const count = Number(size) || 20;
 
-    fetchSearchIds(query, start + count)
+    const searchQuery = searchOptions[SEARCH_OPTIONS.EXACT]
+      ? `"${query.replace(/["\\]/g, (character) => `\\${character}`)}"`
+      : query;
+
+    fetchSearchIds(searchQuery, hyperbeamSearchRequest(searchOptions, start, count))
       .then(async (ids) => {
-        const candidates = uniqueUris(ids.map((id) => hyperbeamImmutableUri(id)).filter(Boolean)).slice(start);
+        const candidates = uniqueUris(ids.map((id) => hyperbeamImmutableUri(id)).filter(Boolean));
         const publish = (uris: Array<string>) =>
           dispatch({
             type: ACTIONS.SEARCH_SUCCESS,
@@ -198,6 +203,7 @@ export const doSearch =
               uris,
               poweredBy: 'HyperBEAM',
               uuid: '',
+              sourceResultCount: ids.length,
             },
           });
 
@@ -212,6 +218,7 @@ export const doSearch =
       .catch(() => {
         dispatch({
           type: ACTIONS.SEARCH_FAIL,
+          data: { query: queryWithOptions },
         });
       });
   };

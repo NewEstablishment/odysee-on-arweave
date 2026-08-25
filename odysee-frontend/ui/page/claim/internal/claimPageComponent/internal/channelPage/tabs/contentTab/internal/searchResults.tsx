@@ -4,6 +4,7 @@ import { DEBOUNCE_WAIT_DURATION_MS, SEARCH_OPTIONS } from 'constants/search';
 import * as CS from 'constants/claim_search';
 import { fetchSearchIds } from 'util/hyperbeam';
 import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
+import { earliestReleaseTime, hyperbeamChannelSearchRequest } from 'util/hyperbeamSearch';
 import { normalizeURI } from 'util/lbryURI';
 type Props = {
   searchQuery: string;
@@ -50,10 +51,8 @@ export function SearchResults(props: Props) {
   const [isSearchingState, setIsSearchingState] = React.useState(false);
   const isSearching = React.useRef(false);
   const noMoreResults = React.useRef(false);
-  // Map contentType from ClaimListDiscover to the search service mediaType param
-  const mediaTypeParam = React.useMemo(() => {
-    if (!contentType || contentType === CS.CONTENT_ALL) return '';
-    // Map claim_search file types to the search service media types
+  const mediaType = React.useMemo(() => {
+    if (!contentType || contentType === CS.CONTENT_ALL) return null;
     const typeMap = {
       [CS.FILE_VIDEO]: SEARCH_OPTIONS.MEDIA_VIDEO,
       [CS.FILE_AUDIO]: SEARCH_OPTIONS.MEDIA_AUDIO,
@@ -62,20 +61,17 @@ export function SearchResults(props: Props) {
       [CS.FILE_BINARY]: SEARCH_OPTIONS.MEDIA_APPLICATION,
       [CS.FILE_MODEL]: SEARCH_OPTIONS.MEDIA_APPLICATION,
     };
-    const mapped = typeMap[contentType];
-    return mapped ? `&mediaType=${mapped}` : '';
+    return typeMap[contentType] || null;
   }, [contentType]);
-  // Map freshness to the search service time_filter
-  const timeFilterParam = React.useMemo(() => {
-    if (!freshness || freshness === CS.FRESH_ALL) return '';
+  const releaseTimeFloor = React.useMemo(() => {
+    if (!freshness || freshness === CS.FRESH_ALL) return null;
     const freshnessMap = {
-      [CS.FRESH_DAY]: 'today',
-      [CS.FRESH_WEEK]: 'thisweek',
-      [CS.FRESH_MONTH]: 'thismonth',
-      [CS.FRESH_YEAR]: 'thisyear',
+      [CS.FRESH_DAY]: SEARCH_OPTIONS.TIME_FILTER_TODAY,
+      [CS.FRESH_WEEK]: SEARCH_OPTIONS.TIME_FILTER_THIS_WEEK,
+      [CS.FRESH_MONTH]: SEARCH_OPTIONS.TIME_FILTER_THIS_MONTH,
+      [CS.FRESH_YEAR]: SEARCH_OPTIONS.TIME_FILTER_THIS_YEAR,
     };
-    const mapped = freshnessMap[freshness];
-    return mapped ? `&time_filter=${mapped}` : '';
+    return earliestReleaseTime(freshnessMap[freshness], Math.floor(Date.now() / 1000));
   }, [freshness]);
   // Map duration filter to the search service min_duration/max_duration (in seconds)
   const SHORT_DURATION_SECONDS = 240; // 4 minutes
@@ -96,14 +92,9 @@ export function SearchResults(props: Props) {
     if (durationParam === CS.DURATION.CUSTOM && customMaxMinutes) return customMaxMinutes * 60;
     return null;
   }, [durationParam, customMaxMinutes]);
-  // Build sort_by param: handle ascending (oldest first = ^release_time)
   const isOldestFirst = sortByParam === CS.SORT_BY.OLDEST.key;
-  const sortBy =
-    !orderBy || orderBy === CS.ORDER_BY_NEW
-      ? `&sort_by=${isOldestFirst ? '^' : ''}${CS.ORDER_BY_NEW_VALUE[0]}`
-      : orderBy === CS.ORDER_BY_TOP
-        ? `&sort_by=${CS.ORDER_BY_TOP_VALUE[0]}`
-        : ``;
+  const sortField =
+    !orderBy || orderBy === CS.ORDER_BY_NEW ? 'release_time' : orderBy === CS.ORDER_BY_TOP ? 'effective_amount' : null;
   // Combine prop-based duration (e.g. shorts) with filter-based duration using intersection
   const effectiveMinDuration =
     durationMinParam != null && minDuration != null
@@ -125,7 +116,7 @@ export function SearchResults(props: Props) {
     noMoreResults.current = false;
     setSearchResults(null);
     setPage(1);
-  }, [searchQuery, sortBy, mediaTypeParam, timeFilterParam, effectiveMinDuration, effectiveMaxDuration]);
+  }, [searchQuery, sortField, isOldestFirst, mediaType, releaseTimeFloor, effectiveMinDuration, effectiveMaxDuration]);
   React.useEffect(() => {
     if (onResults) {
       onResults(searchResults);
@@ -143,7 +134,21 @@ export function SearchResults(props: Props) {
       }
 
       setIsSearchingState(true);
-      fetchSearchIds(searchQuery, SEARCH_PAGE_SIZE * page)
+      fetchSearchIds(
+        searchQuery,
+        hyperbeamChannelSearchRequest({
+          channelId: claimId,
+          showMature,
+          mediaType,
+          earliestReleaseTime: releaseTimeFloor,
+          minDuration: effectiveMinDuration,
+          maxDuration: effectiveMaxDuration,
+          sortField,
+          sortAscending: isOldestFirst,
+          offset: SEARCH_PAGE_SIZE * (page - 1),
+          limit: SEARCH_PAGE_SIZE,
+        })
+      )
         .then((ids) => {
           if (canceled) return;
 
@@ -174,7 +179,7 @@ export function SearchResults(props: Props) {
             setSearchResults((prev) =>
               page === 1 ? resolvedUrls : Array.from(new Set((prev || []).concat(resolvedUrls)))
             );
-            noMoreResults.current = !ids || ids.length < SEARCH_PAGE_SIZE * page;
+            noMoreResults.current = !ids || ids.length < SEARCH_PAGE_SIZE;
           });
         })
         .catch(() => {
@@ -201,13 +206,14 @@ export function SearchResults(props: Props) {
     page,
     showMature,
     doResolveUris,
-    sortBy,
+    sortField,
+    isOldestFirst,
     effectiveMinDuration,
     effectiveMaxDuration,
     maxAspectRatio,
     hideShorts,
-    mediaTypeParam,
-    timeFilterParam,
+    mediaType,
+    releaseTimeFloor,
   ]);
 
   if (!searchResults) {

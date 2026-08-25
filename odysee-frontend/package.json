@@ -55,6 +55,7 @@
     "test:e2e:auth": "playwright test --project=chromium:auth tests/specs/authenticated",
     "test:hyperbeam-upload-smoke": "node tests/scripts/hyperbeam-upload-smoke.mjs",
     "test:hyperbeam-query-comment-smoke": "node --experimental-strip-types tests/scripts/hyperbeam-query-comment-smoke.mjs",
+    "test:hyperbeam-search-options": "node --experimental-strip-types tests/scripts/hyperbeam-search-options.mjs",
     "test:native-comment-revisions": "node --experimental-strip-types tests/scripts/native-comment-revisions.mjs",
     "test:native-message-verification": "node --experimental-strip-types tests/scripts/native-message-verification.mjs",
     "test:native-cookie-comments": "node --experimental-strip-types tests/scripts/native-cookie-comments-smoke.mjs",

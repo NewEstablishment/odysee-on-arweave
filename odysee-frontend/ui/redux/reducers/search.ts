@@ -60,7 +60,7 @@ export default handleActions(
       };
     },
     [ACTIONS.SEARCH_SUCCESS]: (state: SearchState, action: SearchSuccess): SearchState => {
-      const { query, uris, from, size, poweredBy: recsys, uuid, requestId } = action.data;
+      const { query, uris, from, size, poweredBy: recsys, uuid, requestId, sourceResultCount } = action.data;
       const normalizedQuery = createNormalizedSearchKey(query);
       const activeRequestIdsByQuery = state.activeRequestIdsByQuery || {};
       if (requestId && activeRequestIdsByQuery[normalizedQuery] !== requestId) return state;
@@ -73,7 +73,7 @@ export default handleActions(
       }
 
       // The returned number of urls is less than the page size, so we're on the last page
-      const noMoreResults = size && uris.length < size;
+      const noMoreResults = size && Number(sourceResultCount ?? uris.length) < size;
       const results = {
         uris: newUris,
         recsys,

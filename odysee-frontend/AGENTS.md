@@ -19,6 +19,11 @@ is the store-first HyperBEAM node; the manifest build is the production shape.
 Legacy services may still source historical bytes behind backend stores. That
 does not authorize a direct browser fallback.
 
+Full-text search calls generic `search@1.0` through `ui/util/hyperbeam.ts`.
+`ui/util/hyperbeamSearch.ts` maps product options to bounded generic filters,
+sort, limit, and offset. Hydrate the ordered immutable locators afterward;
+never implement ranking-affecting filters or pagination in a page component.
+
 ## Static manifest
 
 `pnpm run build:manifest` is the production build contract:

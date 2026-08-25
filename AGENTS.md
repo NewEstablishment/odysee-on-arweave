@@ -84,6 +84,9 @@ Static manifest browser
     committed messages and verified source evidence remain authoritative.
 12. **Observed diagnostics report reality.** Do not fabricate devices, calls,
     backends, or verification state.
+13. **Search controls stay server-side.** Product filters, sort order, limit,
+    and offset are mapped in the frontend integration layer and sent through
+    generic `search@1.0`; never post-filter ranked pages in React.
 
 ## Change ownership
 

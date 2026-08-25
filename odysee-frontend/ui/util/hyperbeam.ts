@@ -4,6 +4,7 @@ import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { allowHyperbeamCompatibilityReads } from 'util/hyperbeamMode';
 import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 import { isServedFromManifest } from 'util/manifest-prefix';
+import type { HyperbeamSearchRequest } from 'util/hyperbeamSearch';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
 import {
@@ -2195,12 +2196,16 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   };
 }
 
-export async function fetchSearchIds(query: string, limit: number): Promise<Array<string>> {
+export async function fetchSearchIds(query: string, options: number | HyperbeamSearchRequest): Promise<Array<string>> {
   const trimmed = String(query || '').trim();
   if (!trimmed) return [];
+  const request = typeof options === 'number' ? { limit: options } : options;
   const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, {
     q: trimmed,
-    limit: Math.max(1, Math.min(SEARCH_MAX_LIMIT, toNumber(limit, 20))),
+    limit: Math.max(1, Math.min(SEARCH_MAX_LIMIT, toNumber(request.limit, 20))),
+    ...(request.offset ? { offset: Math.max(0, Math.min(10000, toNumber(request.offset, 0))) } : {}),
+    ...(request.filter ? { filter: request.filter } : {}),
+    ...(request.sort?.length ? { sort: request.sort } : {}),
   });
   const ids = await searchResultIds(responsePayload(response));
   return ids.map(String).filter(Boolean);
@@ -3083,7 +3088,7 @@ async function withCompatibilityDate(claim: any): Promise<any> {
   return {
     ...claim,
     timestamp,
-    meta: { ...(claim.meta || {}), creation_timestamp: timestamp },
+    meta: { ...claim.meta, creation_timestamp: timestamp },
   };
 }
 
