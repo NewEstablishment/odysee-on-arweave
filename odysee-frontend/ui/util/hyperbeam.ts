@@ -3058,10 +3058,33 @@ async function resolveImmutableClaimById(
         .then(responsePayload)
         .catch(() => null)
     : null;
-  const claim = immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name, signingChannelId);
+  const claim = await withCompatibilityDate(
+    immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name, signingChannelId)
+  );
   if (!claim) return null;
 
   return !name || claim.name === name ? claim : null;
+}
+
+// Pre-2019 claims may have no release time in their verified claim bytes. The
+// compatibility timestamp is display metadata only and stays outside the
+// immutable evidence object served by the claim path.
+async function withCompatibilityDate(claim: any): Promise<any> {
+  if (!claim || claim.value?.release_time || claim.timestamp) return claim;
+  const claimId = claim.claim_id;
+  if (!isClaimId(claimId)) return claim;
+
+  const meta = storePayload(
+    await fetchCachedStoreJsonOrNull(storePath('odysee/claim-meta', String(claimId))).catch(() => null)
+  );
+  const timestamp = toNumber(value(meta || {}, 'timestamp'), 0);
+  if (!timestamp) return claim;
+
+  return {
+    ...claim,
+    timestamp,
+    meta: { ...(claim.meta || {}), creation_timestamp: timestamp },
+  };
 }
 
 function fetchCachedImmutableJsonOrNull(id: string): Promise<any | null> {
@@ -3513,6 +3536,8 @@ function responseHeadersObject(response: Response): Record<string, any> {
   return headers;
 }
 
+const BINARY_PART_NAMES = new Set(['claim', 'claim-envelope', 'raw-transaction']);
+
 function parseMultipartBytes(body: Uint8Array, contentType: string): Record<string, any> {
   const boundary = contentType.match(/boundary="?([^";]+)"?/i)?.[1];
   if (!boundary) return { body: new TextDecoder().decode(body) };
@@ -3544,9 +3569,11 @@ function parseMultipartBytes(body: Uint8Array, contentType: string): Record<stri
       // Scalar fields live in the part headers; reconstruct the nested object.
       Object.assign(ensureNestedObject(result, path), fields);
     } else if (separator !== -1) {
-      // A binary blob part: keep its body.
+      // Known evidence parts stay hex. Other named bodies may simply be text
+      // that could not fit in a header, such as a multiline description.
       const partBody = segment.slice(separator + 4).replace(/\r\n$/, '');
-      setNestedValue(result, path, latin1ToHex(partBody));
+      const text = BINARY_PART_NAMES.has(path[path.length - 1]) ? null : utf8FromLatin1(partBody);
+      setNestedValue(result, path, text === null ? latin1ToHex(partBody) : text);
     }
   }
 
@@ -3640,6 +3667,17 @@ function bytesToBinaryString(bytes: Uint8Array): string {
     result += String.fromCharCode(...bytes.slice(index, index + chunkSize));
   }
   return result;
+}
+
+function utf8FromLatin1(value: string): string | null {
+  const bytes = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index += 1) bytes[index] = value.charCodeAt(index) & 0xff;
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 function latin1ToHex(value: string): string {
