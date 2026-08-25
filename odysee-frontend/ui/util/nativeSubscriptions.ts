@@ -63,7 +63,10 @@ export function normalizeNativeSubscription(source: any): NativeSubscription | n
     notifications_disabled: notificationsDisabled,
     state: String(field(source, 'state') || ''),
     operation: String(field(source, 'operation') || ''),
-    origin: String(field(source, 'origin') || ''),
+    // `origin` is an HTTP transport header and is intentionally excluded
+    // from committed application messages. New writes use `source-system`;
+    // retain `origin` last for records created before that separation.
+    origin: String(field(source, 'source-system', 'source_system', 'subscription-origin', 'origin') || ''),
     imported_at: optionalInteger(field(source, 'imported-at', 'imported_at')),
     revision: integer(field(source, 'revision'), -1),
     version_ref: String(field(source, 'version-ref', 'version_ref') || ''),
