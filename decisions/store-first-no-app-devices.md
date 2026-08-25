@@ -3,7 +3,7 @@
 ## Issue
 
 The prior work carries ~14 `~odysee-*@1.0` application devices (claim,
-stream, stream-descriptor, comment, account, search, upload, reactions,
+stream, stream-descriptor, comment, account, search, upload, reactions, playlists,
 subscription, file, policy, references, auth, publish-gate). The brief
 for this port: minimize custom devices so any standard HyperBEAM node
 can join the system; talk to stores via `GET /ID` wherever possible.
@@ -24,11 +24,30 @@ inversion that makes the store unusable without the whole device fleet.
   `hb_store_remote_node` pointed at seed peers.
 - **Writes**: the default `~auth-hook@1.0` request hook (`?!=true`
   commit key) signs the user's POST with a node-hosted per-user wallet;
-  uploads, comments, reactions, public playlists, and subscriptions are
-  ordinary committed messages written to the cache and discovered via
-  `~query@1.0`'s match index — the architecture
+  uploads, comments, reactions, playlists, and subscriptions are ordinary committed messages written to the
+  cache and discovered via `~query@1.0`'s match index — the architecture
   rave/moderation already proved for native comments, with no custom
   device.
+- **Native playlists**: each public playlist is one independently addressable,
+  immutable full-snapshot message containing ordered immutable locators. Any
+  verified commitment ID is an exact route to that message; discovery may
+  return another commitment locator for the same snapshot. Exact query lists
+  snapshots by verified owner/profile; exact message reads hydrate them.
+  Editing or reordering and republishing changes the payload and creates a new
+  immutable snapshot and URL while the prior
+  snapshot remains addressable. The LBRY `collection_*` API and blockchain
+  publish controls are not part of this feature.
+  Stable mutable playlist heads, update, and delete require the separate
+  generic reference/frequency contract described by the core team. Until that
+  artifact is obtained and reviewed, the application does not substitute an
+  application-specific `playlist-ref`, revision projector, or mutable index.
+- **Native subscriptions**: free channel follows use deterministic
+  owner/channel relationship references. Follow, notification-preference,
+  unfollow, and re-follow events form a contiguous append-only chain. Local
+  Redux state is only an optimistic cache; the verified node projection is
+  authoritative. A later one-time legacy import may seed missing roots with
+  explicit provenance, but normal operation never calls the legacy
+  subscription API or wallet sync. Paid memberships remain a separate concern.
 - Dropped entirely: the legacy-API bridge devices, the tier-1
   (SDK-attested) verified-stream path, `dev_odysee_claim_proof` /
   `dev_lbry_claim_output` (superseded by `dev_lbry_tx` + `lbry@1.0`),

@@ -4,10 +4,11 @@ import { CHANNEL_PAGE } from 'constants/urlParams';
 import { parseURI } from 'util/lbryURI';
 import { useAppSelector } from 'redux/hooks';
 import { selectIsMarkdownPostForUri } from 'redux/selectors/content';
-import { selectIsStreamPlaceholderForUri, selectChannelClaimIdForUri } from 'redux/selectors/claims';
+import { selectClaimForUri, selectIsStreamPlaceholderForUri, selectChannelClaimIdForUri } from 'redux/selectors/claims';
 import { selectCommentsDisabledSettingForChannelId } from 'redux/selectors/comments';
 import Page from 'component/page';
 import ClaimPageComponent from './internal/claimPageComponent';
+import { hyperbeamImmutableIdFromUri } from 'util/hyperbeam-route';
 
 type Props = {
   uri: string;
@@ -18,11 +19,14 @@ type Props = {
 const ClaimPage = (props: Props) => {
   const { uri, latestContentPath, liveContentPath } = props;
   const isMarkdownPost = useAppSelector((state) => selectIsMarkdownPostForUri(state, uri));
+  const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const isLivestreamClaim = useAppSelector((state) => selectIsStreamPlaceholderForUri(state, uri));
   const channelClaimId = useAppSelector((state) => selectChannelClaimIdForUri(state, uri));
   const chatDisabled = useAppSelector((state) => selectCommentsDisabledSettingForChannelId(state, channelClaimId));
 
-  const { isChannel } = parseURI(uri);
+  const { isChannel: uriIsChannel } = parseURI(uri);
+  const isChannel = uriIsChannel || claim?.value_type === 'channel';
+  const isUnresolvedImmutable = Boolean(hyperbeamImmutableIdFromUri(uri) && claim === undefined);
   const { search, pathname } = useLocation();
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
   const ClaimRenderWrapper = React.useMemo(
@@ -57,6 +61,20 @@ const ClaimPage = (props: Props) => {
       ),
     [isEmbedPath]
   );
+
+  const ImmutableLoadingWrapper = React.useMemo(
+    () =>
+      ({ children }: { children: any }) => (
+        <Page noFooter fullWidthPage noSideNavigation={isEmbedPath}>
+          {children}
+        </Page>
+      ),
+    [isEmbedPath]
+  );
+
+  if (isUnresolvedImmutable) {
+    return <ClaimPageComponent uri={uri} ClaimRenderWrapper={ImmutableLoadingWrapper} Wrapper={Page} />;
+  }
 
   if (isChannel) {
     const urlParams = new URLSearchParams(search);

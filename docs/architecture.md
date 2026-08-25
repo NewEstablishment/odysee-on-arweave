@@ -216,8 +216,7 @@ Two mitigations, in order of preference today:
 
 ## Writes
 
-There is no custom write device. Uploads, comments, reactions, playlists,
-subscriptions, and moderation events are
+There is no custom write device. Uploads, comments, reactions, playlists, subscriptions, and moderation events are
 ordinary committed messages, using stock HyperBEAM machinery end to end:
 
 1. The client sends `POST /<path>?!=true`. The stock `~auth-hook@1.0`
@@ -236,28 +235,35 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    `POST /~query@1.0/only` with equality selectors (schema, type, target,
    author) returns matching message paths — and hydrate them with generic
    `/~cache@1.0/read` calls.
-4. Native social ownership is the committer of the exact verified commitment
-   selected by the discovered locator. Profile fields are display metadata and
-   are accepted only when the profile message verifies under that same
-   committer. LBRY channel signatures remain relevant only to legacy evidence;
-   they do not authorize cookie-native comments, reactions, playlists, or
-   subscriptions.
+4. Native account ownership is the verified committer established by the
+   cookie-derived node wallet. Claimed profile/channel fields are display
+   metadata only. Product projections such as comment revisions, reactions,
+   and subscriptions accept only contiguous same-committer chains. Each basic
+   public playlist is instead one independently addressable immutable message:
+   each verified commitment ID is an exact route, its snapshot contains ordered
+   immutable locators, and republishing changes the payload to produce a new
+   snapshot. Query may return another verified commitment locator for the same
+   message. Stable playlist-head semantics wait for the
+   separately loaded generic reference/frequency contract.
+   Historical LBRY ownership remains governed by its separately verified
+   source evidence.
+
+Free channel subscriptions use `odysee-subscription@1.0`. A deterministic
+`subscription-ref` combines the verified subscriber committer with a stable
+channel reference (`native:<profile-id>` or `lbry:<full-channel-claim-id>`).
+Follow, notification-preference, unfollow, and re-follow events revise that
+same relationship. A future migration may seed missing roots from a one-time
+legacy export, but imported roots must carry explicit provenance and normal
+browser operation never reads or writes the legacy subscription service.
 5. Peers replicate write traffic the same way they replicate evidence: via
    `hb_store_remote_node` against nodes that accepted the writes.
 
 As with reads, authenticity checks are a *between-node* concern: a replicating
-peer re-filters query results against their selectors, verifies each exact
-commitment, and derives native ownership from that commitment's committer before
-caching a write. `~query@1.0` remains a dumb locator index rather than an
-authority. The end user, as always, trusts the TEE-terminated serving node rather
-than verifying in the browser.
-
-Comments, reactions, and subscriptions model changes as contiguous append-only
-revisions.
-Public playlists currently use a simpler contract: each publish is an
-independent immutable full snapshot containing ordered native IDs or legacy
-outpoints. A mutable playlist head is intentionally deferred until the canonical
-reference-device contract is available.
+peer re-filters query results against their selectors and re-verifies the
+channel signature before caching a write, so `~query@1.0` stays a dumb index
+and no node is trusted for write authenticity by its peers. The end user, as
+always, trusts the TEE-terminated serving node rather than verifying in the
+browser.
 
 Legacy-only interactive surfaces with no verifiable representation — fuzzy
 text search, view counts, subscription counts, legacy comment writes — are

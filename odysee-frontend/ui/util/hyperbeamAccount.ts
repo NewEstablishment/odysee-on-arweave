@@ -33,21 +33,22 @@ function read(key: string): HyperbeamAccount | null {
 }
 
 export function getHyperbeamAccount(): HyperbeamAccount | null {
-  return read(ACCOUNT_KEY);
+  const account = read(ACCOUNT_KEY);
+  if (account && typeof localStorage !== 'undefined') {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(account));
+  }
+  return account;
 }
 
 export function isHyperbeamSignedIn(): boolean {
   return Boolean(getHyperbeamAccount());
 }
 
-// True when the node identity cookie is present in this browser.
-export function hasNodeCookie(): boolean {
-  return typeof document !== 'undefined' && document.cookie.includes(COOKIE_PREFIX);
-}
-
-// True when a signed-out account can be logged back in (cookie still present).
+// The node cookie may be HttpOnly, so JavaScript cannot use document.cookie
+// to determine whether it is present. The saved profile is the browser's
+// signed-out-session marker; the node remains the authority on the next write.
 export function canLogInHyperbeam(): boolean {
-  return hasNodeCookie() && Boolean(read(SAVED_KEY));
+  return Boolean(read(SAVED_KEY));
 }
 
 function clearNodeCookies(): void {
@@ -87,18 +88,26 @@ export async function signUpHyperbeam(name: string): Promise<HyperbeamAccount> {
 
   const account = { name: trimmed, id };
   localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
-  localStorage.removeItem(SAVED_KEY);
+  localStorage.setItem(SAVED_KEY, JSON.stringify(account));
   return account;
 }
 
-// Log back in with the existing cookie: restore the saved account. Returns null
-// if there is no cookie (identity gone) or nothing to restore.
+// Log back in with the existing cookie by restoring the saved display profile.
+// The browser sends the opaque node cookie and the node validates it.
 export function logInHyperbeam(): HyperbeamAccount | null {
-  if (!hasNodeCookie()) return null;
   const saved = read(SAVED_KEY);
   if (!saved) return null;
   localStorage.setItem(ACCOUNT_KEY, JSON.stringify(saved));
   return saved;
+}
+
+export async function recoverHyperbeamAccount(): Promise<HyperbeamAccount | null> {
+  const { recoverHyperbeamAccountProfile } = await import('util/hyperbeam');
+  const account = await recoverHyperbeamAccountProfile();
+  if (!account) return null;
+  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
+  localStorage.setItem(SAVED_KEY, JSON.stringify(account));
+  return account;
 }
 
 // Sign out without destroying the identity: hide the account but keep the

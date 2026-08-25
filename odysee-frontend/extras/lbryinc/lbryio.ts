@@ -35,11 +35,11 @@ Lbryio.setLocalApi = (endpoint) => {
 };
 
 Lbryio.call = (resource, action, params = {}, method = 'post') => {
-  // In HyperBEAM mode there is no legacy LBRY.io/Odysee backend. Resolve every
-  // legacy call with an empty array: it is object-and-array shaped, so no
-  // consumer crashes, and because it resolves, no `.catch' fires an error
-  // toast. This neutralizes all legacy web2 calls at the single chokepoint.
-  if (ODYSEE_HYPERBEAM_NODE_API) {
+  // HyperBEAM owns content and product data. Keep the existing Odysee account
+  // endpoints available so users can still authenticate with email/password;
+  // every unrelated legacy Web2 call remains neutralized here.
+  const isAccountRequest = resource === 'user' || resource === 'user_email';
+  if (ODYSEE_HYPERBEAM_NODE_API && !isAccountRequest) {
     return Promise.resolve([]);
   }
 

@@ -25,6 +25,7 @@
     "dev:usagi-local": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development USE_LOCAL_USAGI=true vp dev",
     "dev:ssr": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development node scripts/dev-web-server.mjs",
     "dev:ssr:usagi-local": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development USE_LOCAL_USAGI=true node scripts/dev-web-server.mjs",
+    "materialize:homepage": "node web/src/materializeHomepage.js",
     "build": "vp build",
     "build:manifest": "cross-env NODE_ENV=production HYPERBEAM_STATIC_MANIFEST=true vp build && node build/check-static-manifest.mjs",
     "build:usagi-local": "cross-env USE_LOCAL_USAGI=true vp build",

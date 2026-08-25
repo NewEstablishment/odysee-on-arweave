@@ -5,12 +5,12 @@ import * as ICONS from 'constants/icons';
 import { NavLink } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { selectClaimForUri, selectClaimSearchByQuery } from 'redux/selectors/claims';
-import { doClaimSearch, doResolveUri } from 'redux/actions/claims';
-import { createNormalizedClaimSearchKey } from 'util/claim';
+import { selectClaimForUri } from 'redux/selectors/claims';
+import { doResolveUri, doResolveUris } from 'redux/actions/claims';
 import ClaimPreviewTile from 'component/claimPreviewTile';
 import ChannelThumbnail from 'component/channelThumbnail';
 import SubscribeButton from 'component/subscribeButton';
+import { hyperbeamImmutableUri, hyperbeamImmutableWebPath } from 'util/hyperbeam-route';
 import './style.lazy.scss';
 
 type Props = {
@@ -35,27 +35,23 @@ function getChannelUri(itemUrl: string): string | null {
   }
 }
 
-function BannerLatestClaims({ channelUri, count }: { channelUri: string; count: number }) {
+function BannerLatestClaims({ item, count }: { item: any; count: number }) {
   const dispatch = useAppDispatch();
+  const channelUri = hyperbeamImmutableUri(item.immutableId) || getChannelUri(item.url);
+  const resultUris = React.useMemo(
+    () => (item.immutableIds || []).slice(0, count).map(hyperbeamImmutableUri).filter(Boolean) as string[],
+    [item.immutableIds, count]
+  );
+  const immutableSigningChannelIds = React.useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(item.immutableSigningChannelIds || {})
+          .map(([mediaId, channelId]) => [hyperbeamImmutableUri(mediaId), channelId])
+          .filter(([mediaUri]) => Boolean(mediaUri))
+      ),
+    [item.immutableSigningChannelIds]
+  );
   const channelClaim = useAppSelector((state) => selectClaimForUri(state, channelUri));
-  const channelClaimId = channelClaim?.claim_id;
-
-  const searchOptions = React.useMemo(() => {
-    if (!channelClaimId) return null;
-    return {
-      channel_ids: [channelClaimId],
-      page_size: count,
-      page: 1,
-      order_by: ['release_time'],
-      no_totals: true,
-      stream_types: ['video'],
-      exclude_shorts: true,
-    };
-  }, [channelClaimId, count]);
-
-  const searchKey = searchOptions ? createNormalizedClaimSearchKey(searchOptions) : null;
-  const searchResult = useAppSelector((state) => (searchKey ? selectClaimSearchByQuery(state)[searchKey] : undefined));
-  const resultUris: string[] = searchResult && Array.isArray(searchResult) ? searchResult.slice(0, count) : [];
 
   React.useEffect(() => {
     if (channelUri) {
@@ -64,10 +60,10 @@ function BannerLatestClaims({ channelUri, count }: { channelUri: string; count: 
   }, [channelUri, dispatch]);
 
   React.useEffect(() => {
-    if (searchOptions && !searchResult) {
-      dispatch(doClaimSearch(searchOptions));
+    if (resultUris.length) {
+      dispatch(doResolveUris(resultUris, false, true, { immutable_signing_channel_ids: immutableSigningChannelIds }));
     }
-  }, [searchOptions, searchResult, dispatch]);
+  }, [dispatch, resultUris, immutableSigningChannelIds]);
 
   const channelName = channelClaim?.value?.title || channelClaim?.name?.replace('@', '') || '';
 
@@ -76,7 +72,7 @@ function BannerLatestClaims({ channelUri, count }: { channelUri: string; count: 
   return (
     <div className="banner-latest-claims" onClick={(e) => e.preventDefault()}>
       <div className="banner-latest-claims__header">
-        <NavLink to={channelUri.replace('lbry://', '/')} className="banner-latest-claims__channel-link">
+        <NavLink to={hyperbeamImmutableWebPath(item.immutableId) || '/'} className="banner-latest-claims__channel-link">
           <ChannelThumbnail uri={channelUri} xsmall />
           <span className="banner-latest-claims__name" title={channelName}>
             {channelName}
@@ -196,7 +192,7 @@ export default function FeaturedBanner(props: Props) {
                 <NavLink
                   className="featured-banner-image"
                   onClick={(e) => handleAnchor(e, item.url)}
-                  to={getUriTo(item.url)}
+                  to={hyperbeamImmutableWebPath(item.immutableId) || getUriTo(item.url)}
                   target={!item.url.includes('odysee.com') ? '_blank' : undefined}
                   title={item.label}
                 >
@@ -205,8 +201,8 @@ export default function FeaturedBanner(props: Props) {
                     style={{ width: width }}
                   />
                 </NavLink>
-                {getChannelUri(item.url) && (
-                  <BannerLatestClaims channelUri={getChannelUri(item.url)} count={latestClaimCount} />
+                {(item.immutableId || getChannelUri(item.url)) && (
+                  <BannerLatestClaims item={item} count={latestClaimCount} />
                 )}
               </div>
             );

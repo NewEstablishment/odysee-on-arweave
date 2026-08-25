@@ -74,22 +74,21 @@ Needs Erlang/OTP 27+, rebar3, node >= 22.12, and network access to Odysee.
 cd odysee-frontend
 corepack enable && corepack prepare pnpm@10.33.0 --activate
 pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18800 pnpm run build:manifest
+ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18801 pnpm run build:manifest
 
 # 2. Build the preloaded device store, once.
 cd .. && HB_PORT=18734 rebar3 device local     # ctrl-C twice once it boots
 
-# 3. Start the node and publish the UI into it.
-#    One line. rebar3 shell ignores multi-line --eval and races EOF, hence the sleep.
-#    hackney must be started first: hb_sup starts hb_http_client, which calls
-#    hackney_pool before the app is up, and the node dies during boot without it.
-HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval 'application:ensure_all_started(hackney), application:ensure_all_started(inets), Opts = hb_odysee_node:seed_opts(#{<<"port">> => 18800, <<"priv-wallet">> => ar_wallet:new(), <<"http-extra-opts">> => #{<<"force-message">> => true, <<"cache-control">> => [<<"no-store">>]}}), Node = hb_http_server:start_node(Opts), {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", Opts), io:format("~n=== NODE ~s~n=== MANIFEST ~s~n", [Node, M]), receive stop -> ok end.' < <(sleep 100000)
+# 3. Start the configured cookie-auth node and publish the UI into its store.
+#    config.json owns port 18801, the writable store/match index, and the
+#    auth/reply-id/manifest hooks. Keep this shell running while testing.
+HB_CONFIG=config.json HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval '{ok, Config} = hb_opts:load("config.json", hb_opts:default_message_with_env()), [_, Writable | _] = maps:get(<<"store">>, Config), PublishOpts = Config#{<<"store">> => [Writable], <<"match-index">> => [Writable]}, {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", PublishOpts), io:format("~n=== MANIFEST ~s~n", [M]), receive stop -> ok end.'
 ```
 
 Then open, using the manifest id it prints:
 
 ```
-http://127.0.0.1:18800/<MANIFEST>/#/@conculturepodcast:c/what-if-anakin-won-star-wars-alternate:b
+http://127.0.0.1:18801/<MANIFEST>/#/@conculturepodcast:c/what-if-anakin-won-star-wars-alternate:b
 ```
 
 `cache-control => no-store` is required. Without it the resolution cache pins
@@ -110,7 +109,7 @@ Claims, channels, streams, transactions, descriptors, blobs, video playback,
 auth, search. All cryptographically verified, cached locally after first
 fetch, and addressable by a plain HyperBEAM id.
 
-## Writes: uploads, channels, comments
+## Writes: uploads, channels, comments, reactions, playlists, subscriptions
 
 Native content never touches LBRY. Boot the node with
 `hb_odysee_node:upload_opts/1` instead of `seed_opts/1` and the stock auth
@@ -139,6 +138,24 @@ curl -X POST "$NODE/~query@1.0/only" -H "type: stream" \
 # Comments reference the video id:
 curl -X POST "$NODE/id?!=true&committers=all" \
   -H "type: comment" -H "parent: <video-id>" --data-binary "nice one"
+
+# Likes and dislikes are generic committed reaction messages:
+curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+  -H "content-type: application/json" \
+  --data-binary '{"schema":"odysee-reaction@1.0","type":"reaction","reaction-ref":"<stable-ref>","version-ref":"<version-ref>","target":"<video-or-comment-id>","subject":"content","reaction":"like","state":"active","operation":"set","revision":0,"event-timestamp":<milliseconds>,"signature-scope":"native-reaction-v1"}'
+
+# Public playlists are full ordered immutable snapshots. The returned
+# message-id is an exact /$/playlist/<message-id> route. A query can return a
+# different verified commitment locator for the same signed snapshot.
+curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+  -H "content-type: application/json" \
+  --data-binary '{"schema":"odysee-playlist@1.0","type":"playlist","profile-id":"<profile-id>","profile-name":"my channel","title":"My playlist","items-json":"[\"<immutable-video-id>\"]","item-count":1,"tags-json":"[]","languages-json":"[]","created-at":<milliseconds>,"signature-scope":"native-playlist-v1"}'
+
+# Free channel follows use a deterministic owner/channel relationship. Later
+# notification changes and unfollows append revision-of/previous-version.
+curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
+  -H "content-type: application/json" \
+  --data-binary '{"schema":"odysee-subscription@1.0","type":"subscription","subscription-ref":"<committer>.lbry:<full-channel-claim-id>","channel-ref":"lbry:<full-channel-claim-id>","channel-uri":"lbry://@channel#<full-channel-claim-id>","channel-name":"@channel","profile-id":"<profile-id>","profile-name":"my profile","notifications-disabled":true,"state":"active","operation":"follow","origin":"native","revision":0,"version-ref":"<version-ref>","created-at":<milliseconds>,"updated-at":<milliseconds>,"signature-scope":"native-subscription-v1"}'
 ```
 
 The query is convention; the proof is the commitment. A listing reader keeps
@@ -151,17 +168,16 @@ of this over HTTP, both the spoof and the censorship attempt.
 
 ## What does not
 
-- **Reactions, view and subscriber counts, moderation.** Not rebuilt.
-- **Frontend for writes.** The write plane is HTTP-only for now; the UI
-  still renders legacy content. Integration comes after battletesting.
+- **View and subscriber counts, advanced moderation.** Not rebuilt.
 - **Homepage tiles.** Claims resolve, but the frontend wants decoded display
   metadata that evidence messages do not carry.
 - **Seeking.** `dev_cache` drops the request, so Range headers never reach the
   store. Whole-object playback only.
 - **Account banner.** Expected, there is no account backend.
-- **Search.** `~query@1.0` returns HTTP 500 on any query with no results, an
-  upstream `case_clause` in `dev_query:match/4`. Fixed by
-  `patches/dev-query-match-error-tuple.patch`; unpatched nodes still 500.
+- **Zero-result query handling.** Unpatched nodes return HTTP 500 when
+  `~query@1.0` has no results because of an upstream `case_clause` in
+  `dev_query:match/4`. `patches/dev-query-match-error-tuple.patch` returns
+  type-correct empty aggregates and retains `not_found` for first-item modes.
 
 By design, not a bug: `GET /<alias>` returns the bytes but no commitments.
 An alias is a hash of a *path*, so it has no cryptographic relationship to

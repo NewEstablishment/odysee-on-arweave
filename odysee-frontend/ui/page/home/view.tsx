@@ -14,24 +14,18 @@ import ClaimTilesDiscover from 'component/claimTilesDiscover';
 import ClaimList from 'component/claimList';
 import ClaimPreviewTile from 'component/claimPreviewTile';
 import Icon from 'component/common/icon';
+import Spinner from 'component/spinner';
 import WaitUntilOnPage from 'component/common/wait-until-on-page';
 import RecommendedPersonal from 'component/recommendedPersonal';
 import Yrbl from 'component/yrbl';
 import { useIsSmallScreen, useIsMediumScreen, useIsLargeScreen } from 'effects/use-screensize';
 import { GetLinksData } from 'util/buildHomepage';
-import { filterActiveLivestreamUris } from 'util/livestream';
 import UpcomingClaims from 'component/upcomingClaims';
 import Meme from 'web/component/meme';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doOpenModal } from 'redux/actions/app';
-import { doFetchAllActiveLivestreamsForQuery } from 'redux/actions/livestream';
 import { doFetchItemsInCollection } from 'redux/actions/collections';
-import {
-  selectIsFetchingActiveLivestreams,
-  selectActiveLivestreamByCreatorId,
-  selectViewersById,
-} from 'redux/selectors/livestream';
 import { selectFollowedTags } from 'redux/selectors/tags';
 import { selectHomepageFetched, selectUserVerifiedEmail } from 'redux/selectors/user';
 import { selectSubscriptionIds } from 'redux/selectors/subscriptions';
@@ -114,19 +108,11 @@ function HomePage() {
   const subscribedChannelIds = useAppSelector(selectSubscriptionIds);
   const authenticated = useAppSelector(selectUserVerifiedEmail);
   const showNsfw = useAppSelector(selectShowMatureContent);
-  const homepageData = useAppSelector(selectHomepageData) || {};
+  const selectedHomepageData = useAppSelector(selectHomepageData);
+  const homepageData = selectedHomepageData || {};
   const homepageMeme = useAppSelector(selectHomepageMeme);
   const homepageFetched = useAppSelector(selectHomepageFetched);
-  const fetchingActiveLivestreams = useAppSelector(selectIsFetchingActiveLivestreams);
-  const hideLivestreams = useAppSelector((state) =>
-    selectClientSetting(state, SETTINGS.HIDE_LIVESTREAMS_IN_CATEGORIES)
-  );
-  const hideScheduledLivestreams = useAppSelector((state) =>
-    selectClientSetting(state, SETTINGS.HIDE_SCHEDULED_LIVESTREAMS)
-  );
   const homepageOrder: HomepageOrder = useAppSelector((state) => selectClientSetting(state, SETTINGS.HOMEPAGE_ORDER));
-  const al = useAppSelector(selectActiveLivestreamByCreatorId);
-  const lv = useAppSelector(selectViewersById);
   const homepageCustomBanners: Array<CustomBanners> = useAppSelector(selectHomepageCustomBanners);
   const prefsReady = useAppSelector(selectPrefsReady);
   const watchLaterRawCount = useAppSelector((state) => selectCountForCollectionId(state, COLLECTIONS.WATCH_LATER_ID));
@@ -187,13 +173,10 @@ function HomePage() {
     () => sortedRowData.filter((row: RowDataItem) => row.id !== 'WATCH_LATER' || showWatchLaterSection),
     [showWatchLaterSection, sortedRowData]
   );
-  type CacheLivestreamEntry = {
-    livestreamUris: Array<string> | null | undefined;
-  };
   type Cache = {
     topGrid: number;
     hasBanner: boolean;
-  } & Record<string, CacheLivestreamEntry>;
+  };
   const cache: Cache = React.useMemo(() => {
     const cache: Cache = {
       topGrid: -1,
@@ -206,26 +189,11 @@ function HomePage() {
         if (cache.topGrid === -1 && Boolean(row.title) && row.id !== 'UPCOMING') {
           cache.topGrid = index;
         }
-
-        // -- Find livestreams related to the category:
-        const rowChannelIds = row.options?.channelIds;
-        const rowExcludedChannelIds = row.options?.excludedChannelIds;
-        const isFollowing = row.id === 'FOLLOWING';
-        const hideLivestreamsInCategories = hideLivestreams && !isFollowing;
-        cache[row.id] = {
-          livestreamUris: hideLivestreamsInCategories
-            ? null
-            : isFollowing
-              ? filterActiveLivestreamUris(subscribedChannelIds, rowExcludedChannelIds, al, lv)
-              : rowChannelIds
-                ? filterActiveLivestreamUris(rowChannelIds, rowExcludedChannelIds, al, lv)
-                : null,
-        };
       });
     }
 
     return cache;
-  }, [homepageFetched, visibleSortedRowData, subscribedChannelIds, al, lv, hideLivestreams]);
+  }, [homepageFetched, visibleSortedRowData]);
   const hasWatchLaterSection = React.useMemo(
     () => sortedRowData.some((row: RowDataItem) => row.id === 'WATCH_LATER'),
     [sortedRowData]
@@ -249,7 +217,20 @@ function HomePage() {
     dispatch(doOpenModal(MODALS.CUSTOMIZE_HOMEPAGE));
   }
 
-  function getRowElements(id, title, route, link, icon, help, options, index, pinUrls, pinnedClaimIds) {
+  function getRowElements(
+    id,
+    title,
+    route,
+    link,
+    icon,
+    help,
+    options,
+    index,
+    pinUrls,
+    pinnedClaimIds,
+    uris,
+    immutableSigningChannelIds
+  ) {
     if (id === 'BANNER') {
       if (index === undefined) {
         return <FeaturedBanner homepageData={homepageData} authenticated={authenticated} />;
@@ -265,8 +246,8 @@ function HomePage() {
             name="homepage_following"
             channelIds={subscribedChannelIds}
             tileLayout
-            liveUris={cache[id].livestreamUris}
-            loading={fetchingActiveLivestreams}
+            liveUris={null}
+            loading={false}
             showHideSetting={false}
           />
         </>
@@ -303,16 +284,22 @@ function HomePage() {
       ) : (
         <ClaimTilesDiscover
           {...options}
+          homepageOrder={index}
+          uris={uris}
+          immutableSigningChannelIds={immutableSigningChannelIds}
           showNoSourceClaims={ENABLE_NO_SOURCE_CLAIMS}
           hideMembersOnly={id !== 'FOLLOWING'}
           hasSource
-          prefixUris={cache[id].livestreamUris}
-          pins={{
-            urls: pinUrls,
-            claimIds: pinnedClaimIds,
-          }}
+          pins={
+            uris
+              ? undefined
+              : {
+                  urls: pinUrls,
+                  claimIds: pinnedClaimIds,
+                }
+          }
           forceShowReposts={id !== 'FOLLOWING'}
-          loading={id === 'FOLLOWING' ? fetchingActiveLivestreams : false}
+          loading={false}
           fetchViewCount
           sectionTitle={title}
         />
@@ -367,9 +354,6 @@ function HomePage() {
   }
 
   React.useEffect(() => {
-    dispatch(doFetchAllActiveLivestreamsForQuery()); // eslint-disable-next-line react-hooks/exhaustive-deps -- on mount only
-  }, []);
-  React.useEffect(() => {
     if (authenticated && hasWatchLaterSection && !hasFetchedWatchLaterItemsRef.current) {
       hasFetchedWatchLaterItemsRef.current = true;
       dispatch(
@@ -379,6 +363,23 @@ function HomePage() {
       );
     }
   }, [authenticated, dispatch, hasWatchLaterSection]);
+
+  const hasMaterializedHomepage = Object.values(selectedHomepageData?.categories || {}).some((category: any) =>
+    Array.isArray(category?.immutableIds)
+  );
+  const waitForMaterializedHomepage =
+    process.env.NODE_ENV === 'production' && process.env.CUSTOM_HOMEPAGE === 'true' && !hasMaterializedHomepage;
+
+  if (waitForMaterializedHomepage) {
+    return (
+      <Page className="homePage-wrapper" fullWidthPage>
+        <div className="main--empty">
+          <Spinner text={__('Loading homepage...')} />
+        </div>
+      </Page>
+    );
+  }
+
   return (
     <Page className="homePage-wrapper" fullWidthPage>
       {visibleSortedRowData.length === 0 && authenticated && homepageFetched && (
@@ -398,18 +399,48 @@ function HomePage() {
           {},
           undefined,
           undefined,
+          undefined,
+          undefined,
           undefined
         )}
 
       {homepageFetched &&
         visibleSortedRowData.map(
-          ({ id, title, route, link, icon, help, pinnedUrls: pinUrls, pinnedClaimIds, options = {} }, index) => {
+          (
+            {
+              id,
+              title,
+              route,
+              link,
+              icon,
+              help,
+              pinnedUrls: pinUrls,
+              pinnedClaimIds,
+              uris,
+              immutableSigningChannelIds,
+              options = {},
+            },
+            index
+          ) => {
             // Check if there is a banner that should appear in this position
             const bannerForPosition =
               homepageCustomBanners?.find && homepageCustomBanners.find((banner) => banner.position === index);
             return (
               <React.Fragment key={`${id}-${index}`}>
-                {getRowElements(id, title, route, link, icon, help, options, index, pinUrls, pinnedClaimIds)}
+                {getRowElements(
+                  id,
+                  title,
+                  route,
+                  link,
+                  icon,
+                  help,
+                  options,
+                  index,
+                  pinUrls,
+                  pinnedClaimIds,
+                  uris,
+                  immutableSigningChannelIds
+                )}
                 {bannerForPosition && (
                   <CustomBanner
                     key={`custom-banner-${bannerForPosition.position}`}

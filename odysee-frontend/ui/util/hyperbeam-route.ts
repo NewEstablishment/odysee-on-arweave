@@ -45,7 +45,6 @@ export function hyperbeamImmutableUri(immutableId?: string | null): string | und
 }
 
 export function hyperbeamImmutableUriFromClaim(claim?: Claim | null): string | undefined {
-  if (claim?.value_type === 'channel') return undefined;
   return hyperbeamImmutableUri(hyperbeamImmutableIdFromClaim(claim));
 }
 

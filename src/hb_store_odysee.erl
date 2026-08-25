@@ -29,6 +29,9 @@
 %%%   <li>`odysee/blob/(blob-hash)': encrypted blob evidence.</li>
 %%%   <li>`odysee/media/...': range-capable decrypted media reads over a
 %%%       stream's descriptor, served through `hb_odysee_bridge'.</li>
+%%%   <li>`odysee/source-claims/(encoded-query)': bounded legacy discovery
+%%%       for server-side materializers. Results are locators only; callers
+%%%       must hydrate the returned outpoints through immutable reads.</li>
 %%% </ul>
 -module(hb_store_odysee).
 -export([start/3, stop/3, reset/3, scope/1]).
@@ -183,6 +186,8 @@ read_live(<<"odysee/claim-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     end;
 read_live(<<"odysee/channel-id/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts);
+read_live(<<"odysee/source-claims/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    source_claims_read(Encoded, StoreOpts, NodeOpts);
 read_live(<<"odysee/channel/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, Decoded} ?= decode_component(Encoded),
@@ -724,6 +729,83 @@ list_live(<<"odysee/channel-id/", Rest/binary>>, Req, StoreOpts, NodeOpts) ->
     end;
 list_live(_Path, _Req, _StoreOpts, _NodeOpts) ->
     {error, not_found}.
+
+%% Discovery is deliberately separate from evidence hydration. The SDK proxy
+%% may locate current claims, but every selected outpoint is subsequently read
+%% through the immutable store path and verified before it enters a snapshot.
+source_claims_read(Encoded, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, JSON} ?= decode_component(Encoded),
+        Query = hb_json:decode(JSON),
+        true ?= is_map(Query),
+        source_claims_read_query(Query, StoreOpts, NodeOpts)
+    else
+        _ -> {error, invalid_odysee_store_path}
+    end.
+
+source_claims_read_query(Query, StoreOpts, NodeOpts) ->
+    SearchReq = (maps:from_list(
+        lists:filtermap(
+            fun({RequestKey, SourceKey, Kind}) ->
+                source_search_param(RequestKey, SourceKey, Kind, Query, NodeOpts)
+            end,
+            [
+                {<<"channel_ids">>, <<"channel_ids">>, list},
+                {<<"claim_ids">>, <<"claim_ids">>, list},
+                {<<"not_channel_ids">>, <<"not_channel_ids">>, list},
+                {<<"claim_type">>, <<"claim_type">>, list},
+                {<<"any_tags">>, <<"any_tags">>, list},
+                {<<"order_by">>, <<"order_by">>, list},
+                {<<"any_languages">>, <<"any_languages">>, list},
+                {<<"page">>, <<"page">>, integer},
+                {<<"page_size">>, <<"page_size">>, integer},
+                {<<"limit_claims_per_channel">>, <<"limit_claims_per_channel">>, integer},
+                {<<"duration">>, <<"duration">>, scalar},
+                {<<"timestamp">>, <<"timestamp">>, scalar},
+                {<<"release_time">>, <<"release_time">>, scalar},
+                {<<"exclude_shorts">>, <<"exclude_shorts">>, boolean}
+            ]
+        )
+    ))#{<<"no_totals">> => true},
+    maybe
+        {ok, Search} ?=
+            hb_odysee_client:call(
+                <<"claim_search">>,
+                SearchReq,
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        Locators = list_claim_outputs(Search, NodeOpts),
+        {ok, #{
+            <<"content-type">> => <<"application/json">>,
+            <<"cache-control">> => [<<"no-store">>, <<"no-cache">>],
+            <<"body">> => hb_json:encode(Search),
+            <<"locators">> => iolist_to_binary(lists:join(<<",">>, Locators)),
+            <<"page">> => hb_maps:get(<<"page">>, SearchReq, 1, NodeOpts),
+            <<"page-size">> => hb_maps:get(<<"page_size">>, SearchReq, length(Locators), NodeOpts)
+        }}
+    end.
+
+source_search_param(RequestKey, SourceKey, Kind, Req, NodeOpts) ->
+    case hb_maps:get(RequestKey, Req, not_found, NodeOpts) of
+        not_found -> false;
+        Value ->
+            case source_search_value(Kind, Value) of
+                not_found -> false;
+                Parsed -> {true, {SourceKey, Parsed}}
+            end
+    end.
+
+source_search_value(list, Value) when is_list(Value) -> Value;
+source_search_value(list, Value) when is_binary(Value) ->
+    [Item || Item <- binary:split(Value, <<",">>, [global]), Item =/= <<>>];
+source_search_value(integer, Value) -> int_param(Value, 0);
+source_search_value(boolean, true) -> true;
+source_search_value(boolean, <<"true">>) -> true;
+source_search_value(boolean, 1) -> true;
+source_search_value(boolean, <<"1">>) -> true;
+source_search_value(boolean, _Value) -> false;
+source_search_value(scalar, Value) when is_binary(Value); is_integer(Value) -> Value;
+source_search_value(_Kind, _Value) -> not_found.
 
 list_channel_search(Encoded, Req, StoreOpts, NodeOpts, Project) ->
     maybe

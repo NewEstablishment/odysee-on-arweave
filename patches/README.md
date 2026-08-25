@@ -34,8 +34,8 @@ so a seek costs one small fetch, not a whole-video reassembly per request.
 ## 3. `dev-query-match-error-tuple.patch`
 
 `dev_query:match/4` crashes with `case_clause` on every query that has no
-results, so `~query@1.0` returns HTTP 500 rather than a 404 miss (or, for
-`return=boolean`, `{ok, false}`).
+results, so `~query@1.0` returns HTTP 500 rather than a successful empty result
+(or a not-found result for first-item modes).
 `hb_cache:store_match/2` returns `{error, not_found}` on an empty match
 (and `hb_cache:match/2` does the same on the `match@1.0` path), but
 `dev_query:match/4` only has clauses for `{ok, _}` and a bare `not_found`.
@@ -43,6 +43,7 @@ Nothing produces the bare atom, so the miss path is unreachable and every
 miss is a 500. This is independent of configuration: no `match-index`
 setting avoids it, because an empty result is `{error, not_found}` either
 way. Observed on every video page load in this application, where the
-frontend issues a `POST /~query@1.0/only`. The patch adds the two missing
-clauses and leaves the existing ones untouched. Applies cleanly to the
-pinned dep (`git apply --check` verified).
+frontend issues a `POST /~query@1.0/only`. The patch maps misses to `[]`, `0`,
+or `false` according to the requested aggregate type, retains `not_found` for
+first-item modes, and adds focused upstream EUnit assertions. Applies cleanly
+to the pinned dep (`git apply --check` verified).
