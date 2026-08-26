@@ -520,23 +520,72 @@ full_media_response(Source, Opts) ->
         SDHash = hb_maps:get(<<"sd-hash">>, Source, not_found, Opts),
         {ok, Result} ?= hb_odysee_bridge:reassemble_stream(SDHash, Opts),
         Body = maps:get(<<"bytes">>, Result),
+        ContentType =
+            hb_maps:get(
+                <<"content-type">>,
+                Source,
+                <<"application/octet-stream">>,
+                Opts
+            ),
+        LowerSDHash = hb_util:to_lower(SDHash),
         {ok,
             maps:merge(
-                #{
-                    <<"status">> => 200,
-                    <<"content-type">> =>
-                        hb_maps:get(
-                            <<"content-type">>,
-                            Source,
-                            <<"application/octet-stream">>,
-                            Opts
-                        ),
-                    <<"content-length">> => byte_size(Body),
-                    <<"sd-hash">> => hb_util:to_lower(SDHash),
-                    <<"body">> => Body
-                },
-                media_metadata(Source, byte_size(Body))
+                maps:merge(
+                    #{
+                        <<"status">> => 200,
+                        <<"content-type">> => ContentType,
+                        <<"content-length">> => byte_size(Body),
+                        <<"sd-hash">> => LowerSDHash,
+                        <<"body">> => Body
+                    },
+                    media_metadata(Source, byte_size(Body))
+                ),
+                media_attestation(LowerSDHash, Body, ContentType, Opts)
             )}
+    end.
+
+%% @doc Operator attestation for decrypted media. The lbry commitment chain
+%% hashes only ciphertext, so the plaintext served here is outside it; the
+%% node binds the plaintext hash to the sd-hash in a message committed by
+%% the operator wallet, and the id rides the response as `media-attestation'.
+%% Lookup-first: RSA-PSS signatures are randomized, so recommitting identical
+%% content would mint a new commitment id every read. Best-effort: without a
+%% wallet, or on any failure, the media is served without the header.
+media_attestation(SDHash, Body, ContentType, Opts) ->
+    try
+        Spec = #{
+            <<"schema">> => <<"odysee-media-attestation@1.0">>,
+            <<"sd-hash">> => SDHash
+        },
+        case hb_cache:match(Spec, Opts) of
+            {ok, [ID | _]} -> #{ <<"media-attestation">> => ID };
+            _ -> write_media_attestation(Spec, Body, ContentType, Opts)
+        end
+    catch
+        _:_ -> #{}
+    end.
+
+write_media_attestation(Spec, Body, ContentType, Opts) ->
+    case hb_opts:get(priv_wallet, no_viable_wallet, Opts) of
+        no_viable_wallet -> #{};
+        _ ->
+            Committed =
+                hb_message:commit(
+                    Spec#{
+                        <<"type">> => <<"media-attestation">>,
+                        <<"plaintext-sha-384">> =>
+                            hb_util:encode(crypto:hash(sha384, Body)),
+                        <<"content-type">> => ContentType,
+                        <<"byte-size">> => byte_size(Body)
+                    },
+                    Opts
+                ),
+            {ok, UncommittedID} =
+                hb_cache:write(Committed, local_write_opts(Opts)),
+            #{
+                <<"media-attestation">> =>
+                    commitment_target(Committed, UncommittedID, Opts)
+            }
     end.
 
 ranged_media_response(Source, Start, End, Opts) ->
@@ -1459,6 +1508,62 @@ media_sd_hash_range_read_returns_partial_content_test() ->
     ?assertEqual(<<"hello ">>, maps:get(<<"body">>, Msg)),
     ?assertEqual(<<"bytes 0-5/*">>, maps:get(<<"content-range">>, Msg)),
     ?assertEqual(SDHash, maps:get(<<"sd-hash">>, Msg)).
+
+%% Decrypted plaintext leaves the lbry commitment chain, so a full media
+%% read binds it back with an operator-committed attestation message.
+full_media_read_attaches_operator_attestation_test() ->
+    {Raw, SDHash, BlobHash, Ciphertext} = sample_descriptor(),
+    Store = #{
+        <<"store-module">> => ?MODULE,
+        <<"lbry-blob-store">> => #{
+            <<"fixtures">> => #{
+                SDHash => Raw,
+                BlobHash => Ciphertext
+            }
+        }
+    },
+    Timestamp = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+    LocalStore = #{
+        <<"store-module">> => hb_store_fs,
+        <<"name">> => <<"cache-TEST/odysee-attest-", Timestamp/binary>>
+    },
+    hb_store:reset(LocalStore),
+    Wallet = ar_wallet:new(),
+    Opts = #{ <<"store">> => [LocalStore], <<"priv-wallet">> => Wallet },
+    {ok, Msg} =
+        read(
+            Store,
+            #{ <<"read">> => <<"odysee/media/sd-hash/", SDHash/binary>> },
+            Opts
+        ),
+    ?assertEqual(200, maps:get(<<"status">>, Msg)),
+    AttestationID = maps:get(<<"media-attestation">>, Msg),
+    {ok, Attestation0} = hb_cache:read(AttestationID, Opts),
+    Attestation = hb_cache:ensure_all_loaded(Attestation0, Opts),
+    ?assert(
+        hb_message:verify(
+            Attestation,
+            #{ <<"commitment-ids">> => <<"all">> },
+            Opts
+        )
+    ),
+    ?assertEqual(
+        hb_util:encode(crypto:hash(sha384, maps:get(<<"body">>, Msg))),
+        hb_maps:get(<<"plaintext-sha-384">>, Attestation, not_found, Opts)
+    ),
+    ?assertEqual(
+        [hb_util:human_id(ar_wallet:to_address(Wallet))],
+        hb_message:signers(Attestation, Opts)
+    ),
+    %% Without a wallet the media is served cleanly with no attestation.
+    {ok, Bare} =
+        read(
+            Store,
+            #{ <<"read">> => <<"odysee/media/sd-hash/", SDHash/binary>> },
+            #{ <<"store">> => [] }
+        ),
+    ?assertEqual(200, maps:get(<<"status">>, Bare)),
+    ?assertEqual(error, maps:find(<<"media-attestation">>, Bare)).
 
 bare_channel_id_claims_list_returns_claim_ids_test() ->
     ChannelID = <<"fb364ef587872515f545a5b4b3182b58073f230f">>,
