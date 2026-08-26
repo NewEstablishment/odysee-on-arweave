@@ -87,17 +87,26 @@ function resendVerificationEmail(email: string) {
   });
 }
 
-function authenticateOdyseeAccount(domain: string, language: string, dispatch: Dispatch) {
+function authenticateOdyseeAccount(
+  domain: string,
+  language: string,
+  dispatch: Dispatch,
+  onStage: (stage: string) => void = () => {}
+) {
+  onStage('get-auth-token');
   return Lbryio.getAuthToken()
     .then((token) => {
       if (!token || token.length > 60) return false;
+      onStage('user-me');
       return callOdyseeAccountApi('user', 'me').catch(() => false);
     })
     .then((user) => {
       if (user) return user;
 
+      onStage('sdk-status');
       return Lbry.status()
         .then((status) => {
+          onStage('user-new');
           return callOdyseeAccountApi('user', 'new', {
             auth_token: '',
             language,
@@ -114,6 +123,7 @@ function authenticateOdyseeAccount(domain: string, language: string, dispatch: D
               },
             });
           }
+          onStage('user-me-fallback');
           return newUser || callOdyseeAccountApi('user', 'me');
         });
     });
@@ -324,15 +334,39 @@ export function doAuthenticate(
     dispatch({
       type: ACTIONS.AUTHENTICATION_STARTED,
     });
+    // The app gate blocks until user !== undefined, so this chain MUST reach a
+    // terminal action. The neutralized account API can never mint a real user,
+    // so if any step stalls, fail over to signed-out rather than hang the boot.
+    // The watchdog outlives checkAuthBusy's own 10s wait so it never cuts ahead
+    // of a legitimate cross-tab wait; `stage` names the stall for the debug log.
+    let settled = false;
+    let stage = 'check-auth-busy';
+    const finish = (action) => {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(watchdog);
+      dispatch(action);
+      return true;
+    };
+    const watchdog = setTimeout(() => {
+      finish({
+        type: ACTIONS.AUTHENTICATION_FAILURE,
+        data: { error: new Error(`authentication stalled at ${stage}`) },
+      });
+    }, AUTH_WAIT_TIMEOUT + 5000);
     checkAuthBusy()
       .then(() => {
         dispatch(doFetchGeoBlockedList());
-        return authenticateOdyseeAccount(DOMAIN, getDefaultLanguage(), dispatch);
+        stage = 'authenticate-account';
+        return authenticateOdyseeAccount(DOMAIN, getDefaultLanguage(), dispatch, (s) => {
+          stage = s;
+        });
       })
       .then((user) => {
         LocalStorage.removeItem(LS.AUTH_IN_PROGRESS);
+        stage = 'final-auth-token';
         Lbryio.getAuthToken().then((token) => {
-          dispatch({
+          const won = finish({
             type: ACTIONS.AUTHENTICATION_SUCCESS,
             data: {
               // Neutralized account API can resolve undefined; the app gate blocks until user !== undefined.
@@ -340,6 +374,7 @@ export function doAuthenticate(
               accessToken: token,
             },
           });
+          if (!won) return;
           dispatch(doMembershipMine());
 
           if (shareUsageData) {
@@ -353,7 +388,7 @@ export function doAuthenticate(
       })
       .catch((error) => {
         LocalStorage.removeItem(LS.AUTH_IN_PROGRESS);
-        dispatch({
+        finish({
           type: ACTIONS.AUTHENTICATION_FAILURE,
           data: {
             error,
