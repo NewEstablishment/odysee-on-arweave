@@ -100,11 +100,16 @@ it does not supply authoritative objects.
 ### 2. Show playback as a normal browser experience
 
 Play the selected video, seek forward and backward, and enter/exit fullscreen.
+Point out the displayed view total. If you want to demonstrate a new qualified
+view, use media longer than 30 seconds and keep it actively playing beyond the
+configured threshold before refreshing the count.
 
 What to say: immutable native media and verified historical media support
 single HTTP byte ranges, so browser seeking receives `206 Partial Content`.
 The partial response is a delivery representation; the whole immutable object
-remains the commitment-verification surface.
+remains the commitment-verification surface. The view total combines an
+owner-imported historical baseline with qualified, deduplicated native
+`analytics@1.0` engagement.
 
 ### 3. Show the cookie-native account and channel
 
@@ -184,7 +189,9 @@ and ranges should target `127.0.0.1:18801`.
 
 ```sh
 rebar3 compile
-rebar3 device test --with-core
+rebar3 eunit-all
+node --test scripts/export-legacy-analytics-baseline.test.mjs \
+  scripts/import-analytics-baseline.test.mjs
 
 cd odysee-frontend
 pnpm run fmt:check
@@ -214,8 +221,11 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:hyperbeam-upload-smoke
 
 ## Honest limitations
 
-- Native aggregate view/subscriber counts, moderation delegates, and
-  blocked-word settings are not implemented.
+- View totals are implemented, but the Odysee application does not include an
+  analytics dashboard. Historical totals require a one-time owner-signed
+  baseline import.
+- Native aggregate subscriber counts, moderation delegates, and blocked-word
+  settings are not implemented.
 - Upload metadata edit/delete still needs a complete append-only contract.
 - Browser identity is local to this node/browser and is not yet portable or
   recoverable on another deployment.
