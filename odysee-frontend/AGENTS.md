@@ -202,7 +202,11 @@ normal-flow request reaches a legacy host.
 
 ## Current limitations
 
-- Native view/subscriber counts and advanced moderation are not implemented.
+- View totals combine an owner-imported historical baseline with qualified
+  generic `analytics@1.0` engagement. The device does not serve a dashboard;
+  the upstream dashboard is an independently hosted frontend. An Odysee-owned
+  dashboard is not yet implemented.
+- Native subscriber counts and advanced moderation are not implemented.
 - Upload edit/delete needs a complete append-only native contract.
 - Generic cache range propagation limits seeking for some historical media.
 - The cookie identity is node/browser-local and is not yet portable or

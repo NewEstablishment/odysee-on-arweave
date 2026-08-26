@@ -1,6 +1,20 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "analytics-sites": [
+    {
+      "key": "odysee",
+      "name": "Odysee",
+      "owner": "6MtoDlONgReycEzF5WU9n7ZWCvNA6mIZLvYKNHfh6qg",
+      "users": [
+        "kMxC5YAS2TsZDiJ5Ei8cQEFMjqa6Y3z00Hyqwv8TEco"
+      ],
+      "origins": [],
+      "visitor-id-mode": "persistent",
+      "engagement-threshold-ms": 30000,
+      "engagement-dedupe-window-ms": 86400000
+    }
+  ],
   "secret-default-persist": "non-volatile",
   "hook-auth-ignored-keys": [
     "secret",
