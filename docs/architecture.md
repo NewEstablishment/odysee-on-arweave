@@ -17,7 +17,8 @@ have altered.
 Companion documents: [lbry-data-model.md](lbry-data-model.md) (the byte-level
 verification recipes), [data-sourcing.md](data-sourcing.md) (legacy endpoints
 and per-store trust classification), [node-operators.md](node-operators.md)
-(configuration recipes).
+(configuration recipes), [content-restrictions.md](content-restrictions.md)
+(node content-policy enforcement and offline country resolution).
 
 ## AO-Core in brief
 
@@ -195,6 +196,36 @@ their trust comes from the TEE-terminated connection.
 Both points protect node caches and peers from each other. The commitment
 layer is what lets an operator trust a peer's bytes without trusting the peer;
 the TEE layer is what lets an end user trust a serving node.
+
+## Content-policy boundary
+
+Content policy is an upstream HyperBEAM concern, not an Odysee application
+device and not a browser authority. The generic `blacklist@1.0` device runs in
+both the HTTP request and response hooks. Request evaluation catches an
+identifier in a route before resolution; response evaluation catches typed
+identifiers revealed by a store read, including LBRY claim and signing-channel
+IDs committed by `lbry@1.0` evidence.
+
+Geographic rules derive the client IP from the private direct-socket field.
+Only an explicitly trusted proxy may replace it with `X-Real-IP`. The node
+looks the address up in a local MMDB database and retains country data only for
+the duration of the request. Policy snapshots contain content subjects and
+geographic conditions, never viewer data. Signed immutable policy snapshots,
+local databases, and node-selected configuration avoid a mandatory central
+policy or geolocation service.
+
+Operators may split policy into a main global provider set and ISO-code-keyed
+country providers. The device refreshes every configured source into one
+atomic local generation. For a candidate subject, it checks the global rules,
+resolves the country only if needed, and then evaluates matching country-bound
+and structured geographic rules. Provider retrieval is never in the request
+path.
+
+The response hook is also the media enforcement point. Stream media responses
+carry the committed claim and signing-channel identities; direct hash-only
+media routes are disabled when policy providers are active because they lack
+that relationship. The static frontend only turns `451` and affected
+`503 location-unavailable` responses into unavailable placeholders.
 
 ### The bare-claim-id caveat (`?IS_ID`)
 

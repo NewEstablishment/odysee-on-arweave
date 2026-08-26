@@ -1,9 +1,8 @@
 import dayjs from 'util/dayjs';
 import { CHANNEL_CREATION_LIMIT } from 'config';
 import { normalizeURI, parseURI, isURIValid, buildURI } from 'util/lbryURI';
-import { selectGeoBlockLists } from 'redux/selectors/blocked';
 import { selectArweaveTipDataForId } from 'redux/selectors/payments';
-import { selectUserLocale, selectYoutubeChannels } from 'redux/selectors/user';
+import { selectYoutubeChannels } from 'redux/selectors/user';
 import { selectSupportsByOutpoint } from 'redux/selectors/wallet';
 import { createSelector } from 'reselect';
 import { createCachedSelector } from 're-reselect';
@@ -1076,17 +1075,8 @@ export const selectIsMyChannelCountOverLimit = createSelector(
   }
 );
 
-/**
- * selectGeoRestrictionForUri
- * @returns {undefined|null|GeoConfig} undefined = pending fetch; null = no restrictions; GeoConfig = blocked reason
- */
-export const selectGeoRestrictionForUri = createCachedSelector(
-  selectClaimForUri,
-  selectGeoBlockLists,
-  selectUserLocale,
-  (claim, geoBlockLists, locale: LocaleInfo) => {
-    return getGeoRestrictionForClaim(claim, locale, geoBlockLists);
-  }
+export const selectGeoRestrictionForUri = createCachedSelector(selectClaimForUri, (claim) =>
+  getGeoRestrictionForClaim(claim)
 )((state, uri) => String(uri));
 export const selectClaimRepostedAmountForUri = (state: State, uri: string) => {
   const claim = selectClaimForUri(state, uri);

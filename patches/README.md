@@ -1,9 +1,11 @@
 # Proposed upstream HyperBEAM changes
 
-Nothing in this repository depends on these landing; the system runs on
-stock nodes today. Any proposal beyond this list must take the form of a
-terse (<= 20 lines, test + fix) branch on a HyperBEAM worktree, and only
-for defects that are demonstrably HyperBEAM's, not this application's.
+Application behavior remains usable on the pinned stock node unless a section
+explicitly documents a feature that activates only after its patch lands.
+Defect fixes should remain terse and test-focused. Deliberately accepted
+upstream features may be larger when they are generic HyperBEAM capabilities,
+preserve backward compatibility, and include their complete dependency and
+test surface.
 
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
@@ -47,3 +49,26 @@ frontend issues a `POST /~query@1.0/only`. The patch maps misses to `[]`, `0`,
 or `false` according to the requested aggregate type, retains `not_found` for
 first-item modes, and adds focused upstream EUnit assertions. Applies cleanly
 to the pinned dep (`git apply --check` verified).
+
+## 4. `blacklist-content-restrictions.patch`
+
+Expand upstream `blacklist@1.0` from a request-only newline-ID blacklist into a
+backward-compatible generic content-policy device. Structured policy snapshots
+support typed subjects, global/country/continent/country-group denies, optional
+trusted signers and expiry, atomic replacement, and request plus response
+enforcement. The existing newline-delimited HyperBEAM ID format is unchanged.
+Global sources are checked before location resolution. ISO-code-keyed country
+providers support separate signed sources and compact JSON entries containing
+`id`, optional `type`, optional `country`, and `reason`.
+
+Country attributes are resolved locally from an operator-supplied MMDB through
+Locus. The HTTP layer supplies the private direct socket peer; `X-Real-IP` is
+used only for an explicit trusted proxy. DB-IP's EU membership field is exposed
+as the `EU` country group and remains distinct from the European continent.
+
+The patch compiles on the pinned dependency and its upstream device suite
+covers legacy compatibility, country rules, EU membership, unavailable
+locations, country-source selection, global short-circuiting, trusted-proxy
+handling, generation replacement, and one-million-rule parsing. The feature is
+not activated in `config.json` until upstream merges it and this repository
+pins the merged revision.

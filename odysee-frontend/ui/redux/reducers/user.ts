@@ -36,7 +36,6 @@ const defaultState: UserState = {
   hasLegacyOdyseePremium: false,
   isCheckingLegacyOdyseePremium: false,
   locale: undefined,
-  localeFailed: undefined,
   homepageFetched: false,
   userDeletionPending: undefined,
 };
@@ -413,17 +412,6 @@ reducers[ACTIONS.USER_DELETION_STARTED] = (state) =>
 reducers[ACTIONS.USER_DELETION_COMPLETED] = (state) =>
   Object.assign({}, state, {
     userDeletionPending: false,
-  });
-
-reducers[ACTIONS.USER_FETCH_LOCALE_DONE] = (state, action) =>
-  Object.assign({}, state, {
-    locale: action.data,
-    localeFailed: false,
-  });
-
-reducers[ACTIONS.USER_FETCH_LOCALE_FAILED] = (state, action) =>
-  Object.assign({}, state, {
-    localeFailed: true,
   });
 
 reducers[ACTIONS.FETCH_HOMEPAGES_DONE] = (state) =>

@@ -159,9 +159,9 @@ read_live(<<"odysee/media/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpt
 read_live(<<"odysee/media/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
     media_from_stream_path(<<"odysee/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
 read_live(<<"odysee/media/sd-hash/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
-    media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
+    direct_media_hash_response(SDHash, Req, StoreOpts, NodeOpts);
 read_live(<<"odysee/media/descriptor/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
-    media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
+    direct_media_hash_response(SDHash, Req, StoreOpts, NodeOpts);
 read_live(Path, _Req, StoreOpts, NodeOpts) ->
     read_live(Path, StoreOpts, NodeOpts).
 
@@ -451,6 +451,27 @@ media_from_stream_path(Path, Req, StoreOpts, NodeOpts) ->
         media_response(Source, Req, store_node_opts(StoreOpts, NodeOpts))
     end.
 
+direct_media_hash_response(SDHash, Req, StoreOpts, NodeOpts) ->
+    case content_policy_configured(NodeOpts) of
+        false ->
+            media_response(
+                #{ <<"sd-hash">> => SDHash },
+                Req,
+                store_node_opts(StoreOpts, NodeOpts)
+            );
+        true -> {error, not_found}
+    end.
+
+content_policy_configured(Opts) ->
+    configured_provider_value(hb_opts:get(blacklist_providers, false, Opts))
+        orelse configured_provider_value(hb_opts:get(blacklist_country_providers, false, Opts)).
+
+configured_provider_value(false) -> false;
+configured_provider_value(undefined) -> false;
+configured_provider_value([]) -> false;
+configured_provider_value(Value) when is_map(Value) -> map_size(Value) > 0;
+configured_provider_value(_) -> true.
+
 %% @doc Extract the media source locator from committed stream evidence: the
 %% signed `sd-hash' plus the size, media type, and file name from the
 %% committed claim `value'.
@@ -468,6 +489,8 @@ stream_media_source(Stream, Opts) ->
             <<"content-type">> =>
                 hb_maps:get(<<"media_type">>, Source, undefined, Opts),
             <<"claim-id">> => hb_maps:get(<<"claim-id">>, Stream, undefined, Opts),
+            <<"signing-channel-id">> =>
+                hb_maps:get(<<"signing-channel-id">>, Stream, undefined, Opts),
             <<"filename">> => hb_maps:get(<<"name">>, Source, undefined, Opts)
         },
         {ok, maps:filter(fun(_Key, Value) -> present_optional(Value) end, Source0)}
@@ -611,6 +634,8 @@ media_metadata(Source, Total) ->
         {Key, Value} <- [
             {<<"byte-size">>, Total},
             {<<"claim-id">>, hb_maps:get(<<"claim-id">>, Source, undefined, #{})},
+            {<<"signing-channel-id">>,
+                hb_maps:get(<<"signing-channel-id">>, Source, undefined, #{})},
             {<<"filename">>, hb_maps:get(<<"filename">>, Source, undefined, #{})}
         ],
         present_optional(Value)
@@ -1419,6 +1444,41 @@ media_sd_hash_range_read_returns_partial_content_test() ->
     ?assertEqual(<<"hello ">>, maps:get(<<"body">>, Msg)),
     ?assertEqual(<<"bytes 0-5/*">>, maps:get(<<"content-range">>, Msg)),
     ?assertEqual(SDHash, maps:get(<<"sd-hash">>, Msg)).
+
+direct_media_hash_is_disabled_with_policy_providers_test() ->
+    SDHash = <<"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef">>,
+    Store = #{ <<"store-module">> => ?MODULE },
+    ?assertEqual(
+        {error, not_found},
+        read(
+            Store,
+            #{ <<"read">> => <<"odysee/media/sd-hash/", SDHash/binary>> },
+            #{ <<"blacklist-providers">> => [<<"policy-id">>] }
+        )
+    ),
+    ?assertEqual(
+        {error, not_found},
+        read(
+            Store,
+            #{ <<"read">> => <<"odysee/media/sd-hash/", SDHash/binary>> },
+            #{
+                <<"blacklist-country-providers">> =>
+                    #{ <<"DE">> => [<<"policy-id">>] }
+            }
+        )
+    ).
+
+signed_stream_media_metadata_includes_channel_test() ->
+    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
+    {ok, Stream} = dev_lbry_commitment:stream_claim_message(Raw, 0),
+    {ok, CommittedStream} = hb_message:with_only_committed(Stream, #{}),
+    {ok, Source} = stream_media_source(CommittedStream, #{}),
+    ChannelID = maps:get(<<"signing-channel-id">>, CommittedStream),
+    ?assertEqual(ChannelID, maps:get(<<"signing-channel-id">>, Source)),
+    ?assertEqual(
+        ChannelID,
+        maps:get(<<"signing-channel-id">>, media_metadata(Source, 1))
+    ).
 
 bare_channel_id_claims_list_returns_claim_ids_test() ->
     ChannelID = <<"fb364ef587872515f545a5b4b3182b58073f230f">>,

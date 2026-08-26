@@ -83,6 +83,10 @@ Static manifest browser
     committed messages and verified source evidence remain authoritative.
 12. **Observed diagnostics report reality.** Do not fabricate devices, calls,
     backends, or verification state.
+13. **Content restrictions are node policy.** Use upstream `blacklist@1.0`
+    request and response hooks with local country data. The browser renders
+    decisions; it does not fetch policy lists or viewer location. Check global
+    providers before ISO-code-keyed country providers.
 
 ## Change ownership
 
@@ -94,6 +98,7 @@ Static manifest browser
 | Generic local full-text behavior | `src/dev_search.erl` and `src/hb_search.erl`. |
 | Browser routing, hydration, upload/comment messages, and SDK-shaped Redux adaptation | `odysee-frontend/ui/lbry.ts`, `ui/util/hyperbeam.ts`, and related services. |
 | Rendering only | React components. |
+| Global or geographic content-policy evaluation | Upstream `blacklist@1.0`; keep an accepted patch under `patches/` until its merged revision is pinned. |
 
 Do not fix a store or identity defect in a page component. Search for existing
 helpers before creating another transport or normalization path.
@@ -183,6 +188,8 @@ message/event pattern and explicit authority checks.
   hydration.
 - Cookie-sensitive writes must use the same site/origin as the manifest.
 - Keep account signup name-only: no email, password, or Web2 account call.
+- Do not fetch viewer locale or content-restriction lists in the browser.
+  Render the enforcing node's `451` and `503 location-unavailable` results.
 
 ## Validation
 

@@ -3,7 +3,6 @@ import Lbry from 'lbry';
 import { doFetchChannelListMine } from 'redux/actions/claims';
 import { batchActions } from 'util/batch-actions';
 import * as ACTIONS from 'constants/action_types';
-import { doFetchGeoBlockedList } from 'redux/actions/blocked';
 import { doClaimRewardType, doRewardList } from 'redux/actions/rewards';
 import {
   selectEmailToVerify,
@@ -17,7 +16,7 @@ import { selectIsRewardApproved } from 'redux/selectors/rewards';
 import { doToast } from 'redux/actions/notifications';
 import rewards from 'rewards';
 import { Lbryio } from 'lbryinc';
-import { DOMAIN, LOCALE_API } from 'config';
+import { DOMAIN } from 'config';
 import { getDefaultLanguage } from 'util/default-languages';
 import { LocalStorage, LS } from 'util/storage';
 import { doMembershipMine } from 'redux/actions/memberships';
@@ -326,7 +325,6 @@ export function doAuthenticate(
     });
     checkAuthBusy()
       .then(() => {
-        dispatch(doFetchGeoBlockedList());
         return authenticateOdyseeAccount(DOMAIN, getDefaultLanguage(), dispatch);
       })
       .then((user) => {
@@ -1126,40 +1124,6 @@ export function doCheckYoutubeTransfer() {
         dispatch({
           type: ACTIONS.USER_YOUTUBE_IMPORT_FAILURE,
           data: String(error),
-        });
-      });
-  };
-}
-export function doFetchUserLocale(isRetry = false) {
-  return (dispatch) => {
-    fetch(LOCALE_API)
-      .then(async (res) => {
-        let json: Record<string, any> = {};
-
-        try {
-          json = await res.json();
-        } catch (e) {}
-
-        const locale = json.data || {}; // [flow] local: LocaleInfo
-
-        dispatch({
-          type: ACTIONS.USER_FETCH_LOCALE_DONE,
-          data: locale,
-        });
-      })
-      .catch((e) => {
-        if (!isRetry) {
-          // If failed, retry one more time after N seconds. This removes the
-          // need to fetch at each component level. If it failed twice, probably
-          // don't need to fetch anymore.
-          setTimeout(() => {
-            dispatch(doFetchUserLocale(true));
-          }, 10000);
-        }
-
-        dispatch({
-          type: ACTIONS.USER_FETCH_LOCALE_DONE,
-          data: {},
         });
       });
   };

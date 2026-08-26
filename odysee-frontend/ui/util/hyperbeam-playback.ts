@@ -90,11 +90,6 @@ function hyperbeamMediaUrlFromPayload(payload: any): string {
     return `${node}/${hyperbeamStoreReadPath(`odysee/media/stream-id/${outpoint}`)}`;
   }
 
-  const sdHash = payload['sd-hash'] || payload.sd_hash;
-  if (typeof sdHash === 'string' && /^[0-9a-f]{96}$/i.test(sdHash)) {
-    return `${node}/${hyperbeamStoreReadPath(`odysee/media/sd-hash/${sdHash}`)}`;
-  }
-
   return '';
 }
 
