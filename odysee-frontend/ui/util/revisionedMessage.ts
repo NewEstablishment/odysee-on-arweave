@@ -71,10 +71,11 @@ export function collapseChains<T extends RevisionedItem>(items: Array<T>, spec: 
 // copies disagree semantically is dropped entirely; otherwise the first item
 // under `compare` (or arrival order) represents the version.
 export function dedupeVersions<T extends RevisionedItem>(items: Array<T>, spec: CollapseSpec<T>): Array<T> {
-  if (!spec.versionIdentity) return items;
+  const { versionIdentity } = spec;
+  if (!versionIdentity) return items;
   const byVersion = new Map<string, Array<T>>();
   items.forEach((item) => {
-    const identity = spec.versionIdentity!(item);
+    const identity = versionIdentity(item);
     const versions = byVersion.get(identity) || [];
     versions.push(item);
     byVersion.set(identity, versions);
@@ -94,11 +95,12 @@ export function dedupeVersions<T extends RevisionedItem>(items: Array<T>, spec: 
 // Refs whose version identities carry conflicting semantics ('poison-ref').
 function equivocatedRefs<T extends RevisionedItem>(items: Array<T>, spec: CollapseSpec<T>): Set<string> {
   const conflicts = new Set<string>();
-  if (!spec.versionIdentity || !spec.versionSemantics) return conflicts;
+  const { versionIdentity, versionSemantics } = spec;
+  if (!versionIdentity || !versionSemantics) return conflicts;
   const semanticsByVersion = new Map<string, string>();
   items.forEach((item) => {
-    const identity = spec.versionIdentity!(item);
-    const semantics = spec.versionSemantics!(item);
+    const identity = versionIdentity(item);
+    const semantics = versionSemantics(item);
     const existing = semanticsByVersion.get(identity);
     if (existing !== undefined && existing !== semantics) {
       conflicts.add(spec.revisionOf(item) || spec.rootRef(item));
