@@ -15,7 +15,7 @@ import { selectWatchHistoryUris } from 'redux/selectors/content';
 import { doOpenModal } from 'redux/actions/app';
 import { doClearContentHistoryAll } from 'redux/actions/content';
 import { doResolveUris } from 'redux/actions/claims';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated } from 'redux/selectors/user';
 import { selectFetchingRemoteHistory } from 'redux/selectors/content';
 import { doFetchViewHistory } from 'redux/actions/content';
 import './style.scss';
@@ -27,7 +27,7 @@ export const PAGE_SIZE = 30;
 export default function WatchHistoryPage() {
   const dispatch = useAppDispatch();
   const historyUris = useAppSelector(selectWatchHistoryUris);
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated);
   const fetchingRemoteHistory = useAppSelector(selectFetchingRemoteHistory);
 
   const doResolveUrisFn = React.useCallback(

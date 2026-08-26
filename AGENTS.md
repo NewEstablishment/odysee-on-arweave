@@ -48,8 +48,8 @@ Static manifest browser
 ```
 
 - Historical Odysee services are locators or byte sources behind stores.
-- Native uploads, profiles, comments, reactions, playlists, subscriptions, and
-  revisions are generic committed messages written through the stage-scoped
+- Native uploads, profiles, comments, reactions, playlists, subscriptions,
+  preference snapshots, and revisions are generic committed messages written through the stage-scoped
   `/id?0.%21=true&committers=all` route and discovered with `query@1.0`.
 - Production uses the manifest frontend served by the node. Do not introduce a
   required SSR/proxy product path.
@@ -64,8 +64,10 @@ Static manifest browser
 2. **Reads are stores.** Historical resolution and media reads go through the
    configured store stack and generic cache/message routes.
 3. **Writes are generic committed messages.** Do not add application upload,
-   comment, account, reaction, playlist, subscription, or moderation devices when a signed message plus
-   exact query expresses the contract.
+   comment, account, reaction, playlist, subscription, preference-persistence,
+   or moderation devices when a signed message plus exact query expresses the
+   contract. A narrow request-authenticated cryptographic boundary may seal or
+   open private payloads, but it must not own storage or revision behavior.
 4. **One LBRY commitment device.** `lbry@1.0` verifies every evidence kind.
    Do not restore the old family of per-kind codec devices.
 5. **Immutable reads are exact.** An immutable ID or outpoint must return that
@@ -96,6 +98,7 @@ Static manifest browser
 | Historical lookup, playback bytes, cache warming, or source normalization | `src/hb_store_*.erl` and `src/hb_odysee_*.erl`. |
 | Node store stack, cookie hook, match index, or manifest publishing | `src/hb_odysee_node.erl`, `src/hb_odysee_ui.erl`, and `config.json`. |
 | Generic local full-text behavior | `src/dev_search.erl` and `src/hb_search.erl`. |
+| Authenticated preference encryption/decryption | `src/dev_odysee_preference.erl`; persistence and reference projection remain generic writes plus frontend hydration. |
 | Browser routing, hydration, upload/comment messages, and SDK-shaped Redux adaptation | `odysee-frontend/ui/lbry.ts`, `ui/util/hyperbeam.ts`, and related services. |
 | Rendering only | React components. |
 
@@ -156,6 +159,21 @@ Playlists:
   restore channel selection, URL names, bids, confirmations, support, or
   `collection_*` SDK calls. Public deletion remains deferred.
 
+User preferences:
+
+- Store only encrypted `odysee-preferences@1.0` immutable snapshots through
+  the generic stage-scoped ID write.
+- Use the canonical `reference@1.0` init commitment as stable identity and
+  strictly newer same-owner set messages as the head. Hydrate and verify every
+  exact reference and snapshot; reject foreign, stale, tied, or owner-mismatched
+  state.
+- `odysee-preference@1.0` is a seal/open/owner crypto boundary only. It must
+  authenticate through the hosted cookie wallet, return `no-store, private`,
+  and never persist plaintext, credentials, or wallet material.
+- Do not let the preference blob shadow native follows, moderation/blocked
+  state, or local/private collection drafts. Do not fall back to legacy wallet
+  sync when a native preference request fails.
+
 Subscriptions:
 
 - Free channel follows are generic `odysee-subscription@1.0` messages, not
@@ -171,8 +189,10 @@ Subscriptions:
   provenance, but normal list/toggle flows must never call the legacy
   subscription API or wallet sync.
 
-Advanced moderation remains unimplemented and must follow the same generic
-message/event pattern and explicit authority checks.
+Creator hide, pin, heart, and channel block/unblock use generic append-only
+comment-control messages with explicit content-owner authority. Moderation
+delegates and blocked-word settings remain unimplemented and must follow the
+same generic message/event pattern and authority checks.
 
 ## Frontend rules
 
@@ -208,6 +228,7 @@ pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
+pnpm run test:native-preferences
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```
@@ -220,6 +241,7 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-reactions
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-playlists
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-subscriptions
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-preferences
 ```
 
 Always run `git diff --check`. Report skipped, timed-out, or environment-blocked

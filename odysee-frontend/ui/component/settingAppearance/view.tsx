@@ -11,7 +11,7 @@ import SettingsRow from 'component/settingsRow';
 import ThemeSelector from 'component/themeSelector';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClientSetting, selectHomepageKeys } from 'redux/selectors/settings';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUserIsNative } from 'redux/selectors/user';
 import { doSetClientSetting } from 'redux/actions/settings';
 
 export default function SettingAppearance() {
@@ -19,7 +19,8 @@ export default function SettingAppearance() {
   const clock24h = useAppSelector((state) => selectClientSetting(state, SETTINGS.CLOCK_24H));
   const searchInLanguage = useAppSelector((state) => selectClientSetting(state, SETTINGS.SEARCH_IN_LANGUAGE));
   const homepageKeys = useAppSelector(selectHomepageKeys);
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated);
+  const isNative = useAppSelector(selectUserIsNative);
   const hideBalance = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_BALANCE));
   const hideTitleNotificationCount = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_TITLE_NOTIFICATION_COUNT));
   const setClientSetting = (key: string, value: boolean | string | number) => dispatch(doSetClientSetting(key, value));
@@ -48,7 +49,7 @@ export default function SettingAppearance() {
               <FormField type="checkbox" name="clock24h" onChange={() => setClientSetting(SETTINGS.CLOCK_24H, !clock24h)} checked={clock24h} />
             </SettingsRow>
 
-            {(isAuthenticated || !IS_WEB) && <SettingsRow title={__('Hide wallet balance in header')}>
+            {(isAuthenticated || !IS_WEB) && !isNative && <SettingsRow title={__('Hide wallet balance in header')}>
                 <FormField type="checkbox" name="hide_balance" onChange={() => setClientSetting(SETTINGS.HIDE_BALANCE, !hideBalance)} checked={hideBalance} />
               </SettingsRow>}
 

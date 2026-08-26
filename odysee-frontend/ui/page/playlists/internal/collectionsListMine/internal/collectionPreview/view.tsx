@@ -13,6 +13,7 @@ import FileThumbnail from 'component/fileThumbnail';
 import DateTime from 'component/dateTime';
 import { formatLbryUrlForWeb, generateListSearchUrlParams } from 'util/url';
 import { getLocalizedNameForCollectionId } from 'util/collections';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 import CollectionPreviewOverlay from 'component/collectionPreviewOverlay';
 import Button from 'component/button';
 import ClaimPreviewLoading from 'component/common/claim-preview-loading';
@@ -81,7 +82,7 @@ function CollectionPreview(props: Props) {
   if (collectionType === 'featuredChannels') return null;
   const previewThumbnail = thumbnail || thumbnailFromSecondaryClaim || thumbnailFromClaim;
   const optimizedPreviewThumbnail = previewThumbnail
-    ? `https://thumbnails.odycdn.com/optimize/s:390:220/quality:85/plain/${previewThumbnail}`
+    ? getThumbnailCdnUrl({ thumbnail: previewThumbnail, width: 390, height: 220, quality: 85 })
     : null;
 
   if (isFetchingItems || isResolvingCollection) {

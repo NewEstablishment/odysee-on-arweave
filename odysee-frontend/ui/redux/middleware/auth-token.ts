@@ -16,7 +16,7 @@ export const populateAuthTokenHeader = (store: Store) => {
     switch (action.type) {
       case ACTIONS.USER_FETCH_SUCCESS:
       case ACTIONS.AUTHENTICATION_SUCCESS:
-        if (action.data.user.has_verified_email === true) {
+        if (action.data.user?.has_verified_email === true) {
           const actionToken = action.data.accessToken;
           const cookieToken = actionToken || getAuthToken();
           if (cookieToken) Lbry.setApiHeader(X_LBRY_AUTH_TOKEN, cookieToken);

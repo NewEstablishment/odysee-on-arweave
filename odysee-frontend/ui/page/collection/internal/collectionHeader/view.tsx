@@ -16,6 +16,7 @@ import CollectionSubtitle from './internal/collectionSubtitle';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimForId } from 'redux/selectors/claims';
 import { selectCountForCollectionId } from 'redux/selectors/collections';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 import './style.scss';
 type Props = {
   collection?: Collection;
@@ -39,7 +40,7 @@ const CollectionHeader = (props: Props) => {
   const isNotADefaultList = collection.id !== 'watchlater' && collection.id !== 'favorites';
   const backgroundImage =
     collection && collection.thumbnail && collection.thumbnail.url
-      ? 'https://thumbnails.odycdn.com/optimize/s:390:220/quality:85/plain/' + collection.thumbnail.url
+      ? getThumbnailCdnUrl({ thumbnail: collection.thumbnail.url, width: 390, height: 220, quality: 85 })
       : undefined;
   const isBuiltin = COLLECTIONS_CONSTS.BUILTIN_PLAYLISTS.includes(collectionId);
 

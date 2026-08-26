@@ -1,4 +1,3 @@
-import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import {
   MEMBERS_ONLY_TAGS,
   PURCHASE_TAG,
@@ -57,7 +56,7 @@ export function canDeleteThroughHyperbeam(claim: any) {
 export async function updateThroughHyperbeam(
   claim: any,
   publishPayload: PublishParams,
-  authToken?: string,
+  _authToken?: string,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
   const recordId = hyperbeamClaimRecordId(claim);
@@ -74,7 +73,7 @@ export async function updateThroughHyperbeam(
         ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
       },
     },
-    odyseeAuthHeaders(uploadIdentityToken(authToken))
+    {}
   );
   if (!request) throw new Error('HyperBEAM upload device is not configured.');
 
@@ -85,49 +84,16 @@ export async function updateThroughHyperbeam(
   return normalizePublishResponse(json, publishPayload, null, myChannels);
 }
 
-export async function deleteThroughHyperbeam(claim: any, authToken?: string): Promise<void> {
+export async function deleteThroughHyperbeam(claim: any, _authToken?: string): Promise<void> {
   const recordId = hyperbeamClaimRecordId(claim);
   if (!recordId) throw new Error('HyperBEAM record ID not found for this claim.');
 
-  const request = hyperbeamDevicePostParams64(
-    HYPERBEAM_DEVICE.upload,
-    'delete&!',
-    { record_id: recordId },
-    odyseeAuthHeaders(uploadIdentityToken(authToken))
-  );
+  const request = hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.upload, 'delete&!', { record_id: recordId }, {});
   if (!request) throw new Error('HyperBEAM upload device is not configured.');
 
   const response = await request;
   const json = await responseJson(response);
   if (!response.ok) throw new Error(errorMessage(json, response.status));
-}
-
-const UPLOAD_IDENTITY_STORAGE_KEY = 'hyperbeam-upload-identity';
-
-// The node's auth hook derives a deterministic signing wallet from this token,
-// so the same value must be sent for upload, edit, and delete to keep a stable
-// owner. Logged-in users use their Odysee auth token; otherwise we persist a
-// stable per-browser identity so uploads remain editable/deletable.
-function uploadIdentityToken(authToken?: string): string {
-  if (authToken) return authToken;
-  if (typeof localStorage === 'undefined') return '';
-
-  let identity = localStorage.getItem(UPLOAD_IDENTITY_STORAGE_KEY);
-  if (!identity) {
-    identity = `anon-${randomIdentitySuffix()}`;
-    localStorage.setItem(UPLOAD_IDENTITY_STORAGE_KEY, identity);
-  }
-  return identity;
-}
-
-function randomIdentitySuffix(): string {
-  const cryptoObj = typeof crypto !== 'undefined' ? crypto : undefined;
-  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
-  if (cryptoObj?.getRandomValues) {
-    const bytes = cryptoObj.getRandomValues(new Uint8Array(16));
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function hyperbeamClaimRecordId(claim: any) {
@@ -138,10 +104,9 @@ function hyperbeamClaimRecordId(claim: any) {
 export async function publishThroughHyperbeam(
   file: Blob,
   publishPayload: PublishParams,
-  authToken: string,
+  _authToken: string,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
-  const identityToken = uploadIdentityToken(authToken);
   const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
   const uploadPayload = {
     filename: fileName(file, publishPayload),
@@ -162,7 +127,7 @@ export async function publishThroughHyperbeam(
   const dataId = storeWriteId(storeJson);
   if (!dataId) throw new Error('HyperBEAM store write response did not include an ID.');
 
-  const indexResponse = await indexUploadResponse(dataId, uploadPayload, identityToken);
+  const indexResponse = await indexUploadResponse(dataId, uploadPayload);
   if (!indexResponse) throw new Error('HyperBEAM node is not configured.');
   const indexJson = await responseJsonWithHeaders(indexResponse);
   if (!indexResponse.ok) throw new Error(errorMessage(indexJson, indexResponse.status));
@@ -236,7 +201,7 @@ async function genericStoreWriteResponse(file: Blob) {
 // The index record is a plain native message. Stage 0 is committed with the
 // caller's auth-hook identity and persisted exactly like a comment; the
 // trailing `id` stage only resolves that immutable identity.
-async function indexUploadResponse(dataId: string, uploadPayload: Record<string, any>, authToken?: string) {
+async function indexUploadResponse(dataId: string, uploadPayload: Record<string, any>) {
   const base = hyperbeamNodeBase();
   if (!base) return null;
 
@@ -270,7 +235,6 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
-      ...odyseeAuthHeaders(authToken),
     },
     body: JSON.stringify(body),
   });
@@ -429,15 +393,6 @@ async function responseJsonWithHeaders(response: Response) {
     return acc;
   }, {});
   return { ...json, ...headers };
-}
-
-function odyseeAuthHeaders(authToken?: string): Record<string, string> {
-  return authToken
-    ? {
-        Authorization: `Bearer ${authToken}`,
-        [X_LBRY_AUTH_TOKEN]: authToken,
-      }
-    : {};
 }
 
 function responseJson(response: Response) {

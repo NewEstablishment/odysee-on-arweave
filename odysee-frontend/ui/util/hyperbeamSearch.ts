@@ -74,6 +74,32 @@ export function hyperbeamChannelSearchRequest(params: {
   return compactRequest({ limit: params.limit, offset: params.offset, filter, sort });
 }
 
+export function hyperbeamClaimSearchRequest(
+  options: Record<string, any>,
+  offset: number,
+  limit: number
+): HyperbeamSearchRequest {
+  const filter: Array<string> = [];
+  const claimTypes = normalizedClaimTypes(options.claim_type || options.claimType);
+  if (claimTypes.length) filter.push(inFilter('claim_type', claimTypes));
+
+  if (options.nsfw !== true) filter.push('nsfw = 0');
+
+  const languages = stringList(options.any_languages || options.language);
+  if (languages.length) filter.push(inFilter('language', languages));
+
+  const channelIds = stringList(options.channel_ids || options.channelIds);
+  if (channelIds.length) filter.push(inFilter('channel_claim_id', channelIds));
+
+  const releaseTime = numericComparison('release_time', options.release_time);
+  const timestamp = numericComparison('release_time', options.timestamp);
+  if (releaseTime) filter.push(releaseTime);
+  if (timestamp) filter.push(timestamp);
+
+  const sort = claimSearchSort(options.order_by);
+  return compactRequest({ limit, offset, filter, sort });
+}
+
 export function earliestReleaseTime(timeFilter: any, nowSeconds: number): number | null {
   const seconds = {
     lasthour: 60 * 60,
@@ -86,12 +112,31 @@ export function earliestReleaseTime(timeFilter: any, nowSeconds: number): number
 }
 
 function normalizedClaimTypes(value: any): Array<string> {
-  const requested = String(value || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const requested = stringList(value);
   const mapped = requested.flatMap((item) => (item === 'file' ? ['stream', 'repost'] : [item]));
   return Array.from(new Set(mapped.filter((item) => ['stream', 'repost', 'channel'].includes(item))));
+}
+
+function claimSearchSort(value: any): Array<string> {
+  const [field] = stringList(value);
+  if (field === '^release_time') return ['release_time:asc'];
+  return ['release_time:desc'];
+}
+
+function numericComparison(field: string, value: any): string | null {
+  const match = String(value || '')
+    .trim()
+    .match(/^(<=|>=|<|>)?\s*(\d+)$/);
+  if (!match) return null;
+  return `${field} ${match[1] || '='} ${Number(match[2])}`;
+}
+
+function stringList(value: any): Array<string> {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  return source
+    .map(String)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function searchSort(value: any): Array<string> {

@@ -20,7 +20,7 @@ import { useLocation } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doSignOut } from 'redux/actions/app';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
-import { selectUser, selectUserEmail, selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUser, selectUserAuthenticated, selectUserEmail, selectUserIsNative } from 'redux/selectors/user';
 import { selectClientSetting, selectTheme } from 'redux/selectors/settings';
 import { doSetClientSetting } from 'redux/actions/settings';
 
@@ -32,7 +32,8 @@ export default function HeaderProfileMenuButton() {
   );
   const user = useAppSelector(selectUser);
   const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
-  const authenticated = useAppSelector(selectUserVerifiedEmail);
+  const authenticated = useAppSelector(selectUserAuthenticated);
+  const isNative = useAppSelector(selectUserIsNative);
   const email = useAppSelector(selectUserEmail);
 
   const handleThemeToggle = () => {
@@ -42,7 +43,7 @@ export default function HeaderProfileMenuButton() {
     dispatch(doSetClientSetting(SETTINGS.THEME, currentTheme === 'dark' ? 'light' : 'dark', authenticated));
   };
   const signOut = () => dispatch(doSignOut());
-  const notificationsEnabled = ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui);
+  const notificationsEnabled = !isNative && (ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui));
   const [anchorEl, setAnchorEl] = React.useState(null);
   const [clicked, setClicked] = React.useState(false);
   const open = Boolean(anchorEl);
@@ -148,24 +149,35 @@ export default function HeaderProfileMenuButton() {
                 icon={ICONS.ANALYTICS}
                 name={__('Creator Analytics')}
               />
-              <HeaderMenuLink
-                useMui
-                {...uploadProps}
-                page={PAGES.YOUTUBE_SYNC}
-                icon={ICONS.YOUTUBE}
-                name={__('Sync YouTube Channel')}
-              />
+              {!isNative && (
+                <HeaderMenuLink
+                  useMui
+                  {...uploadProps}
+                  page={PAGES.YOUTUBE_SYNC}
+                  icon={ICONS.YOUTUBE}
+                  name={__('Sync YouTube Channel')}
+                />
+              )}
 
-              <hr className="menu__separator" />
-              <HeaderMenuLink useMui page={PAGES.REWARDS} icon={ICONS.REWARDS} name={__('Credits')} />
-              <HeaderMenuLink useMui page={PAGES.INVITE} icon={ICONS.INVITE} name={__('Invites')} />
-              <HeaderMenuLink
-                useMui
-                page={PAGES.MEMBERSHIPS_LANDING}
-                icon={ICONS.MEMBERSHIP}
-                name={__('Memberships')}
-              />
-              <HeaderMenuLink useMui page={PAGES.ODYSEE_MEMBERSHIP} icon={ICONS.UPGRADE} name={__('Odysee Premium')} />
+              {!isNative && (
+                <>
+                  <hr className="menu__separator" />
+                  <HeaderMenuLink useMui page={PAGES.REWARDS} icon={ICONS.REWARDS} name={__('Credits')} />
+                  <HeaderMenuLink useMui page={PAGES.INVITE} icon={ICONS.INVITE} name={__('Invites')} />
+                  <HeaderMenuLink
+                    useMui
+                    page={PAGES.MEMBERSHIPS_LANDING}
+                    icon={ICONS.MEMBERSHIP}
+                    name={__('Memberships')}
+                  />
+                  <HeaderMenuLink
+                    useMui
+                    page={PAGES.ODYSEE_MEMBERSHIP}
+                    icon={ICONS.UPGRADE}
+                    name={__('Odysee Premium')}
+                  />
+                </>
+              )}
 
               <hr className="menu__separator" />
               <HeaderMenuLink useMui page={PAGES.SETTINGS} icon={ICONS.SETTINGS} name={__('Settings')} />
@@ -176,7 +188,7 @@ export default function HeaderProfileMenuButton() {
                 <Icon aria-hidden icon={ICONS.SIGN_OUT} />
                 <span>
                   {__('Sign Out')}
-                  <span className="menu__link-help">{email}</span>
+                  <span className="menu__link-help">{email || user?.name}</span>
                 </span>
               </MuiMenuItem>
             </MuiMenu>

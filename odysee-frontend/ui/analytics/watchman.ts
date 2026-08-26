@@ -1,4 +1,5 @@
 import { SDK_API_PATH } from 'config';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 const isProduction = process.env.NODE_ENV === 'production';
 const WATCHMAN_BACKEND_ENDPOINT = 'https://watchman.na-backend.odysee.com/reports/playback';
 const SEND_DATA_TO_WATCHMAN_INTERVAL = 10; // in seconds
@@ -12,6 +13,10 @@ let lastSentTime;
 
 // calculate data for backend, send them, and reset buffer data for next interval
 async function sendAndResetWatchmanData() {
+  if (hyperbeamNodeEnabled()) {
+    resetWatchmanData();
+    return;
+  }
   if (!userId) {
     return 'Can only be used with a user id';
   }
@@ -62,6 +67,10 @@ async function sendAndResetWatchmanData() {
   // post to watchman
   await sendWatchmanData(objectToSend);
   // reset buffer data
+  resetWatchmanData();
+}
+
+function resetWatchmanData() {
   amountOfBufferEvents = 0;
   amountOfBufferTimeInMS = 0;
 }
@@ -76,6 +85,7 @@ function stopWatchmanInterval() {
 
 // creates the setInterval that will run send to watchman on recurring basis
 function startWatchmanIntervalIfNotRunning() {
+  if (hyperbeamNodeEnabled()) return;
   if (!watchmanInterval) {
     // instantiate the first time to calculate duration from
     lastSentTime = new Date();
@@ -89,6 +99,7 @@ function startWatchmanIntervalIfNotRunning() {
 
 // post data to the backend
 async function sendWatchmanData(body) {
+  if (hyperbeamNodeEnabled()) return;
   try {
     const response = await fetch(WATCHMAN_BACKEND_ENDPOINT, {
       method: 'POST',
@@ -135,7 +146,11 @@ export type Watchman = {
 };
 export const watchman: Watchman = {
   setState: (enable: boolean) => {
-    gWatchmanAnalyticsEnabled = enable;
+    gWatchmanAnalyticsEnabled = enable && !hyperbeamNodeEnabled();
+    if (!gWatchmanAnalyticsEnabled) {
+      stopWatchmanInterval();
+      resetWatchmanData();
+    }
   },
 
   /**
@@ -144,6 +159,7 @@ export const watchman: Watchman = {
    * @param {object} passedPlayer - VideoJS Player object
    */
   videoIsPlaying: (isPlaying, passedPlayer) => {
+    if (hyperbeamNodeEnabled()) return;
     let playerIsSeeking = false;
 
     // have to use this because videojs pauses/unpauses during seek
@@ -169,6 +185,7 @@ export const watchman: Watchman = {
   },
   // receive buffer events from tracking plugin and save buffer amounts and times for backend call
   videoBufferEvent: async (claim, data) => {
+    if (hyperbeamNodeEnabled()) return;
     amountOfBufferEvents = amountOfBufferEvents + 1;
     amountOfBufferTimeInMS = amountOfBufferTimeInMS + data.bufferDuration;
   },
@@ -183,6 +200,7 @@ export const watchman: Watchman = {
     isLivestreamClaim,
     isPreviewPlay
   ) => {
+    if (hyperbeamNodeEnabled()) return;
     userId = passedUserId;
     claimUrl = canonicalUrl;
     playerPoweredBy = poweredBy;
@@ -202,7 +220,7 @@ export const watchman: Watchman = {
 };
 
 function sendPromMetric(name: string, value: number | undefined, player: string) {
-  if (gWatchmanAnalyticsEnabled) {
+  if (gWatchmanAnalyticsEnabled && !hyperbeamNodeEnabled()) {
     let url = new URL(SDK_API_PATH + '/metric/ui');
     const params = {
       name: name,

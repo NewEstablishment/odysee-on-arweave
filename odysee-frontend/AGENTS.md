@@ -23,11 +23,24 @@ Full-text search calls generic `search@1.0` through `ui/util/hyperbeam.ts`.
 `ui/util/hyperbeamSearch.ts` maps product options to bounded generic filters,
 sort, limit, and offset. Hydrate the ordered immutable locators afterward;
 never implement ranking-affecting filters or pagination in a page component.
+Empty-query homepage/category discovery uses this same path. Native channel
+uploads use bounded exact `query@1.0` discovery because `channel-id` is not a
+generic full-text index selector.
+
+Keep `/$/discover` mounted without tag or moderator prerequisites. Existing
+links use its query parameters for generic search filters; materialized named
+categories use `/$/<category-name>` alongside it.
 
 ## Static manifest
 
 `pnpm run build:manifest` is the production build contract:
 
+- materialize ranked homepage/category `immutableIds` from the configured
+  node's generic `search@1.0` result and exact-read every locator before build;
+- require a populated search backend and fail rather than emit a homepage that
+  depends on the absent SSR `/$/api/content/v2/get` route;
+- enable `CUSTOM_HOMEPAGE=true` inside the script and verify that a materialized
+  locator reached the emitted JavaScript;
 - hash routing;
 - relative asset paths;
 - filenames and paths accepted by the node manifest handler;
@@ -41,6 +54,10 @@ repository's SSR server or same-origin API bridge. SSR files may remain for
 development or inherited application tooling, but they are not a second
 product-data architecture.
 
+`custom/homepages/v2/index.ts` is ignored generated build input. Regenerate it
+with `pnpm run materialize:manifest-homepage`; never hand-maintain search IDs in
+that file. Use `HYPERBEAM_BASE_URL` to override the materializer's node.
+
 The manifest and node should be same-origin so the `secret-*` identity cookie
 is sent on native writes.
 
@@ -50,7 +67,8 @@ is sent on native writes.
 - Its private non-volatile wallet store lets the same cookie recover the same
   committer across node restarts.
 - Signup asks only for a display name and commits a channel-profile message.
-- The cookie signer owns later uploads, comments, reactions, playlists, and subscriptions.
+- The cookie signer owns later uploads, comments, reactions, playlists,
+  subscriptions, and encrypted preference snapshots.
 - Local storage holds only the profile ID/name and signed-in display state. It
   is not an authority source.
 - Sign out hides the local profile but retains the cookie so login can restore
@@ -64,6 +82,9 @@ Historical reads use store paths through generic cache/message routes. Native
 reads use exact committed IDs. Mutable names and claim IDs are locators only.
 
 - Preserve immutable IDs through Redux and navigation.
+- Normalize exact native profile messages into SDK-compatible channel claims at
+  this boundary. Bind friendly channel URIs to the full 43-character profile
+  ID and do not spread raw HTTP or codec fields into Redux claim state.
 - A bare native `lbry://<name>` resolves by querying the
   `odysee-upload@1.0` index message and hydrating its immutable record ID.
 - Playback reads historical stream/media paths or a native upload's immutable
@@ -71,6 +92,11 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Mutable reads send `cache-control: no-store, no-cache`.
 - Response parsing must preserve HyperBEAM header/multipart fields and exact
   commitment identity.
+- Native channel, upload, and moderation flows must not call legacy
+  `channel_sign`, reward-address, or livestream-status endpoints.
+- In HyperBEAM mode, `channel_sign` must fail before SDK transport, and the
+  legacy SDK proxy host remains blocked by the fetch guard as defense-in-depth.
+  Do not make native pages sign merely to populate legacy livestream metrics.
 
 ## Uploads and thumbnails
 
@@ -84,6 +110,10 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Thumbnail bytes use the same generic committed-ID write path. Do not require
   a server-held cache-writer key or an SSR thumbnail bridge in this
   architecture.
+- Node, loopback, private-network, relative, `data:`, and `blob:` image sources
+  must bypass external thumbnail optimizers. Preserve the configured node
+  scheme when rendering these URLs.
+- HyperBEAM mode must not send playback telemetry to the legacy Watchman host.
 
 ## Comments
 
@@ -121,8 +151,10 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Never use claimed profile fields as authority and never call the legacy
   reaction API or a custom reaction device.
 
-Advanced moderation, delegates, and settings remain unsupported. Fail
-explicitly instead of falling back to legacy services.
+Creator hide, pin, heart, and channel block/unblock are generic append-only
+comment-control messages authorized by the exact content committer. Moderation
+delegates and blocked-word settings remain unsupported; fail explicitly
+instead of falling back to legacy services.
 
 ## Playlists
 
@@ -160,6 +192,35 @@ explicitly instead of falling back to legacy services.
   provenance. It must not become a fallback or recurring synchronization path.
 - Paid creator memberships are not free follows and are outside this contract.
 
+## User preferences
+
+- `Lbry.preference_get` and `Lbry.preference_set` stay SDK-shaped, but a
+  configured HyperBEAM node routes them through `ui/util/hyperbeam.ts`. Do not
+  fall back to the legacy daemon after a native request fails.
+- Persist an immutable encrypted `odysee-preferences@1.0` snapshot through the
+  generic stage-scoped ID write, then move its generic `reference@1.0` head
+  with a strictly newer same-owner set message.
+- Discover only reference locators through `query@1.0`; hydrate and verify the
+  exact init, set, and snapshot messages. Authority comes from commitment
+  committers, never local profile metadata or query order. Fail closed on
+  foreign writers, foreign-owned snapshots, stale updates, and conflicting
+  timestamp ties.
+- `odysee-preference@1.0` only derives the authenticated owner and seals/opens
+  AES-GCM envelopes. Its responses are private/no-store; plaintext, cookies,
+  and wallet keys must never appear in public messages or browser storage.
+- The native shared blob includes settings, tags, welcome state, analytics
+  sharing choice, and announcement state. Exclude subscriptions/follows,
+  blocked/moderation state, coin-swap state, and private/local collections so
+  their authoritative domains cannot be overwritten during hydration.
+- The manifest calls the node directly with cookie credentials. The
+  same-origin SSR auth/write bridges are development transport boundaries, not
+  a second preference architecture.
+- During startup, restore a native user only after the cookie owner and exact
+  profile committer match, then hydrate shared preferences. Native Retry repeats
+  this preference read and never starts the legacy sync loop.
+- Exact snapshot/reference readback acknowledges a preference save. Do not make
+  a successful write depend on the query listener indexing it synchronously.
+
 ## Publish and route guards
 
 - A configured HyperBEAM node enables native upload routes even without a
@@ -182,6 +243,8 @@ pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
+pnpm run test:native-preferences
+pnpm run test:manifest-homepage
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```
@@ -193,6 +256,7 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-reactions
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-playlists
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-subscriptions
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-preferences
 ```
 
 Also verify the actual browser lifecycle: manifest loads, signup mints the
@@ -202,11 +266,13 @@ normal-flow request reaches a legacy host.
 
 ## Current limitations
 
-- Native view/subscriber counts and advanced moderation are not implemented.
+- Native view/subscriber counts, moderation delegates, and blocked-word
+  settings are not implemented.
 - Upload edit/delete needs a complete append-only native contract.
-- Generic cache range propagation limits seeking for some historical media.
+- Only single HTTP byte ranges are supported; multipart range responses are not.
 - The cookie identity is node/browser-local and is not yet portable or
-  recoverable.
+  recoverable. Preference recovery consequently remains local to the same hosted
+  wallet until a portable identity or secret-sync contract exists.
 
 Update this guide whenever the manifest, account, upload, comment, playback,
 or browser-routing contract changes.

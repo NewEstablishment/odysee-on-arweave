@@ -67,7 +67,7 @@ import {
 import { selectMembershipForCreatorOnlyIdAndChannelId, selectUserOdyseeMembership } from 'redux/selectors/memberships';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { selectPlayingUri } from 'redux/selectors/content';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated } from 'redux/selectors/user';
 import { getChannelIdFromClaim } from 'util/claim';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
@@ -154,7 +154,7 @@ function CommentView(props: Props) {
   const creatorId = getChannelIdFromClaim(claim);
   const channelAge = useAppSelector((state) => selectDateForUri(state, channelUrl));
   const myChannelIds = useAppSelector(selectMyClaimIdsRaw);
-  const commentingEnabled = Boolean(useAppSelector(selectUserVerifiedEmail));
+  const commentingEnabled = Boolean(useAppSelector(selectUserAuthenticated));
   const othersReacts = useAppSelector((state) => selectOthersReactsForComment(state, reactionKey));
   const hasChannels = useAppSelector(selectHasChannels);
   const playingUri = useAppSelector(selectPlayingUri);

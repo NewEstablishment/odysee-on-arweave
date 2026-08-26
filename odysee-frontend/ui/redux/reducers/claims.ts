@@ -581,7 +581,7 @@ reducers[ACTIONS.FETCH_CHANNEL_LIST_COMPLETED] = (state: ClaimsState, action: an
     newMyChannelClaimsById = Object.assign({}, state.myChannelClaimsById);
     claims.forEach((claim) => {
       const { meta } = claim;
-      const { claims_in_channel: claimsInChannel } = meta;
+      const { claims_in_channel: claimsInChannel } = meta || {};
       const { canonical_url: canonicalUrl, permanent_url: permanentUrl, claim_id: claimId, confirmations } = claim;
       updateIfValueChanged(state.claimsByUri, byUriDelta, canonicalUrl, claimId);
       updateIfValueChanged(state.claimsByUri, byUriDelta, permanentUrl, claimId);

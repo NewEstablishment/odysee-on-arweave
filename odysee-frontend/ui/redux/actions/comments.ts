@@ -1494,6 +1494,37 @@ function doCommentModToggleBlock(
     });
     const commenterIdForAction = channelClaimId;
     const commenterNameForAction = channelName;
+    if (hyperbeamNodeEnabled()) {
+      const nativeAction = unblock ? Comments.moderation_unblock : Comments.moderation_block;
+      try {
+        await nativeAction({
+          blocked_channel_id: unblock ? undefined : commenterIdForAction,
+          blocked_channel_name: unblock ? undefined : commenterNameForAction,
+          un_blocked_channel_id: unblock ? commenterIdForAction : undefined,
+          un_blocked_channel_name: unblock ? commenterNameForAction : undefined,
+          offending_comment_id: offendingCommentId,
+          time_out: unblock ? undefined : timeoutSec,
+        } as unknown as ModerationBlockParams);
+        dispatch({
+          type: unblock ? ACTIONS.COMMENT_MODERATION_UN_BLOCK_COMPLETE : ACTIONS.COMMENT_MODERATION_BLOCK_COMPLETE,
+          data: { blockedUri: commenterUri, creatorUri: creatorUri || undefined, blockLevel },
+        });
+        dispatch(
+          doToast({
+            message: unblock
+              ? __('Channel unblocked!')
+              : __('Channel "%channel%" blocked.', { channel: commenterNameForAction }),
+          })
+        );
+      } catch (error) {
+        dispatch({
+          type: unblock ? ACTIONS.COMMENT_MODERATION_UN_BLOCK_FAILED : ACTIONS.COMMENT_MODERATION_BLOCK_FAILED,
+          data: { blockedUri: commenterUri, creatorUri: creatorUri || undefined, blockLevel },
+        });
+        dispatchToast(dispatch, error instanceof Error ? error.message : __('Unable to moderate this channel.'));
+      }
+      return;
+    }
     let channelSignatures = [];
     const sharedModBlockParams = unblock
       ? {
@@ -2292,15 +2323,16 @@ export const doFetchCreatorSettings = (channelId: string) => {
     });
     let signedName;
     const knownChannelName = (creatorChannel && creatorChannel.name) || undefined;
+    const nativeMode = hyperbeamNodeEnabled();
 
     // Try signing from claims cache first so uploads-page fetch does not depend
     // on `myChannels` being loaded beforehand.
-    if (knownChannelName) {
+    if (!nativeMode && knownChannelName) {
       signedName = await channelSignName(channelId, knownChannelName, true);
     }
 
     // Fallback to owned-channel list lookup when needed.
-    if (!signedName && myChannels) {
+    if (!nativeMode && !signedName && myChannels) {
       const myChannel = myChannels.find((channel) => channel.claim_id === channelId);
 
       if (myChannel && myChannel.name) {

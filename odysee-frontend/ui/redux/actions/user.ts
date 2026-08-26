@@ -23,6 +23,8 @@ import { LocalStorage, LS } from 'util/storage';
 import { doMembershipMine } from 'redux/actions/memberships';
 import { selectDefaultChannelId } from 'redux/selectors/settings';
 import { ODYSEE_TIER_NAMES } from 'constants/memberships';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
 export let sessionStorageAvailable = false;
 const CHECK_INTERVAL = 200;
 const AUTH_WAIT_TIMEOUT = 10000;
@@ -320,10 +322,37 @@ export function doAuthenticate(
   callbackForUsersWhoAreSharingData,
   callInstall = true
 ) {
-  return (dispatch) => {
+  return async (dispatch) => {
     dispatch({
       type: ACTIONS.AUTHENTICATION_STARTED,
     });
+
+    if (hyperbeamNodeEnabled()) {
+      try {
+        const account = getHyperbeamAccount() ? await recoverHyperbeamAccount() : null;
+        dispatch({
+          type: ACTIONS.AUTHENTICATION_SUCCESS,
+          data: {
+            user: account
+              ? {
+                  id: account.id,
+                  name: account.name,
+                  has_verified_email: false,
+                  is_native: true,
+                }
+              : null,
+            accessToken: null,
+          },
+        });
+      } catch (error) {
+        dispatch({
+          type: ACTIONS.AUTHENTICATION_FAILURE,
+          data: { error },
+        });
+      }
+      return;
+    }
+
     checkAuthBusy()
       .then(() => {
         dispatch(doFetchGeoBlockedList());
@@ -335,7 +364,10 @@ export function doAuthenticate(
           dispatch({
             type: ACTIONS.AUTHENTICATION_SUCCESS,
             data: {
-              user,
+              // In HyperBEAM mode the legacy account API is neutralized and
+              // resolves with no user; store null (signed-out) so the app
+              // gate does not wait forever on `user === undefined`.
+              user: user || null,
               accessToken: token,
             },
           });

@@ -41,7 +41,7 @@ import {
   toggleAutoplayMedia,
   doSetClientSetting,
 } from 'redux/actions/settings';
-import { selectUserVerifiedEmail, selectUser } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUser } from 'redux/selectors/user';
 import { selectRecommendedContentForUri } from 'redux/selectors/search';
 import { parseURI } from 'util/lbryURI';
 import { doToast } from 'redux/actions/notifications';
@@ -88,7 +88,7 @@ function VideoViewerWithRedux(props: any) {
   const videoPlaybackRate = useAppSelector((state) => selectClientSetting(state, SETTINGS.VIDEO_PLAYBACK_RATE));
   const thumbnail = useAppSelector((state) => selectThumbnailForUri(state, uri));
   const homepageData = useAppSelector(selectHomepageData) || {};
-  const authenticated = useAppSelector(selectUserVerifiedEmail);
+  const authenticated = useAppSelector(selectUserAuthenticated);
   const videoTheaterMode = useAppSelector((state) => selectClientSetting(state, SETTINGS.VIDEO_THEATER_MODE));
   const activeLivestreamForChannel = useAppSelector((state) => selectActiveLivestreamForChannel(state, channelId));
   const isLivestreamClaim = isStreamPlaceholderClaim(claim);

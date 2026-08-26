@@ -32,7 +32,7 @@ import {
 import { doClearClaimSearch, doResolveUris } from 'redux/actions/claims';
 import { doClearPurchasedUriSuccess } from 'redux/actions/file';
 import { selectFollowedTags } from 'redux/selectors/tags';
-import { selectUserVerifiedEmail, selectUser, hasLegacyOdyseePremium } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUser, hasLegacyOdyseePremium } from 'redux/selectors/user';
 import { selectClientSettings, selectHomepageData } from 'redux/selectors/settings';
 import { doSignOut } from 'redux/actions/app';
 import { selectUnseenNotificationCount } from 'redux/selectors/notifications';
@@ -49,7 +49,7 @@ const touch = platform.isTouch() && /iPad|Android/i.test(navigator.userAgent);
 const selectSidebarCategories = createSelector(
   selectHomepageData,
   selectClientSettings,
-  selectUserVerifiedEmail,
+  selectUserAuthenticated,
   hasLegacyOdyseePremium,
   (homepageData, clientSettings, email, hasMembership) => {
     const applyHomepageOrderToSidebar = clientSettings[SETTINGS.HOMEPAGE_ORDER_APPLY_TO_SIDEBAR];
@@ -259,7 +259,7 @@ function SideNavigation(props: Props) {
   const categories = useAppSelector(selectSidebarCategories);
   const lastActiveSubs = useAppSelector(selectLastActiveSubscriptions);
   const followedTags = useAppSelector(selectFollowedTags);
-  const email = useAppSelector(selectUserVerifiedEmail);
+  const email = useAppSelector(selectUserAuthenticated);
   const purchaseSuccess = useAppSelector(selectPurchaseUriSuccess);
   const unseenCount = useAppSelector(selectUnseenNotificationCount);
   const user = useAppSelector(selectUser);

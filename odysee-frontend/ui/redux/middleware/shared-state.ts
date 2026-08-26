@@ -4,6 +4,8 @@ import isEqual from 'util/deep-equal';
 import { doGetAndPopulatePreferences } from 'redux/actions/app';
 import { doPreferenceSet, doUpdateLastSyncHash } from 'redux/actions/sync';
 import { selectLastSyncHash } from 'redux/selectors/sync';
+import { hyperbeamPreferencesEnabled } from 'util/hyperbeam';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 const RUN_PREFERENCES_DELAY_MS = 2000;
 const SHARED_PREFERENCE_VERSION = '0.1';
 let oldShared = {};
@@ -23,12 +25,14 @@ function getPreferenceMetadata(state) {
   const syncEnabled = state?.settings?.clientSettings?.enable_sync;
   const hasVerifiedEmail = state?.user?.user?.has_verified_email;
   const prefsReady = state?.sync?.prefsReady;
+  const nativePreferences = hyperbeamPreferencesEnabled() && Boolean(getHyperbeamAccount());
   return {
-    preferenceKey: syncEnabled && hasVerifiedEmail && prefsReady ? 'shared' : 'local',
+    preferenceKey: nativePreferences || (syncEnabled && hasVerifiedEmail && prefsReady) ? 'shared' : 'local',
+    nativePreferences,
     // On web there is no local wallet, and the wallet servers reject
     // preference calls from users without a verified email ("authentication
     // required"), so anonymous/unverified sessions must not attempt them.
-    canSyncPreferences: !IS_WEB || Boolean(hasVerifiedEmail),
+    canSyncPreferences: nativePreferences ? Boolean(prefsReady) : !IS_WEB || Boolean(hasVerifiedEmail),
   };
 }
 
@@ -110,9 +114,9 @@ export const buildSharedStateMiddleware =
     clearTimeout(timeout);
     timeout = null;
     const state = getState();
-    const { preferenceKey } = getPreferenceMetadata(state);
+    const { preferenceKey, nativePreferences } = getPreferenceMetadata(state);
 
-    if (preferenceKey === 'shared') {
+    if (preferenceKey === 'shared' && !nativePreferences) {
       if (hadPendingWrite) {
         // Local state is already ahead of remote; keep building on that state until the debounce flushes.
         return applySharedAction(action);

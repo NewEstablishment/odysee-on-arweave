@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
 import { nativeCommentControlSignatureData } from '../../ui/util/nativeCommentControls.ts';
 import { collapseNativeCommentRevisions, nativeCommentSignatureData } from '../../ui/util/nativeCommentRevisions.ts';
 
@@ -6,6 +6,7 @@ const webBase = (process.env.BASE_URL || 'http://localhost:9090').replace(/\/+$/
 const hyperbeamBase = (process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18785').replace(/\/+$/, '');
 const webOrigin = new URL(webBase).origin;
 const authToken = process.env.AUTH_TOKEN || `native-comment-smoke-${Date.now()}`;
+const identityCookie = await mintCookieIdentity();
 const target = `native-comment-target-${Date.now()}`;
 const comment = `native query smoke ${Date.now()}`;
 const message = {
@@ -31,7 +32,7 @@ const writeResponse = await fetch(`${webBase}/$/api/hyperbeam-upload/v1/write`, 
   method: 'POST',
   headers: {
     accept: 'application/json',
-    cookie: `auth_token=${authToken}`,
+    cookie: identityCookie,
     'content-type': 'application/json',
   },
   body: JSON.stringify(message),
@@ -49,7 +50,7 @@ const replyResponse = await fetch(`${webBase}/$/api/hyperbeam-upload/v1/write`, 
   method: 'POST',
   headers: {
     accept: 'application/json',
-    cookie: `auth_token=${authToken}`,
+    cookie: identityCookie,
     'content-type': 'application/json',
   },
   body: JSON.stringify({
@@ -73,7 +74,7 @@ const revisionResponse = await fetch(`${webBase}/$/api/hyperbeam-upload/v1/write
   method: 'POST',
   headers: {
     accept: 'application/json',
-    cookie: `auth_token=${authToken}`,
+    cookie: identityCookie,
     'content-type': 'application/json',
   },
   body: JSON.stringify({
@@ -100,7 +101,7 @@ const secondRevisionResponse = await fetch(`${webBase}/$/api/hyperbeam-upload/v1
   method: 'POST',
   headers: {
     accept: 'application/json',
-    cookie: `auth_token=${authToken}`,
+    cookie: identityCookie,
     'content-type': 'application/json',
   },
   body: JSON.stringify({
@@ -317,7 +318,7 @@ async function verifyNativeOwnerControls(commentId) {
       method: 'POST',
       headers: {
         accept: 'application/json',
-        cookie: `auth_token=${authToken}`,
+        cookie: identityCookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ ...control, 'channel-signature': signature, 'signing-ts': signingTs }),
@@ -402,7 +403,7 @@ async function verifyCanonicalSignature() {
     method: 'POST',
     headers: {
       accept: 'application/json',
-      cookie: `auth_token=${authToken}`,
+      cookie: identityCookie,
       'content-type': 'application/json',
     },
     body: JSON.stringify({ ...signedMessage, 'channel-signature': signature, 'signing-ts': signingTs }),
@@ -428,28 +429,26 @@ async function verifyCanonicalSignature() {
 }
 
 async function verifySignature({ channelId, data, signature, signingTs, publicKeyHex }) {
-  const response = await fetch(`${hyperbeamBase}/~odysee-comment@1.0/verify-signature`, {
-    method: 'POST',
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({
-      'channel-id': channelId,
-      data,
-      signature,
-      'signing-ts': signingTs,
-      'public-key': publicKeyHex,
-    }),
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Signature verification failed: ${response.status} ${text.slice(0, 500)}`);
-  const result = { ...responseHeaders(response), ...(parseJson(text) || {}) };
-  return String(result['is-valid'] ?? result.is_valid).toLowerCase() === 'true';
+  const signatureData = Buffer.concat([
+    Buffer.from(signingTs),
+    Buffer.from(channelId, 'hex').reverse(),
+    Buffer.from(data),
+  ]);
+  const publicKey = createPublicKey({ key: Buffer.from(publicKeyHex, 'hex'), type: 'spki', format: 'der' });
+  return verify('sha256', signatureData, { key: publicKey, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'hex'));
 }
 
 async function queryPathsFor(selectors) {
+  const exactSelectors = Object.fromEntries(Object.entries(selectors).filter(([, value]) => value !== undefined));
   const response = await fetch(`${hyperbeamBase}/~query@1.0/only`, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ only: selectors, return: 'paths' }),
+    body: JSON.stringify({
+      ...exactSelectors,
+      only: Object.keys(exactSelectors),
+      return: 'paths',
+      'cache-control': ['no-store', 'no-cache'],
+    }),
   });
   const text = await response.text();
   if (response.status === 404 || (response.status === 500 && text.includes('not_found'))) return [];
@@ -468,7 +467,7 @@ function dedupeDiscovered(records) {
 }
 
 async function readMessage(id, expectComment = true) {
-  const response = await fetch(`${hyperbeamBase}/~cache@1.0/read?read=${encodeURIComponent(id)}`, {
+  const response = await fetch(`${hyperbeamBase}/${encodePath(id)}?accept-bundle=true`, {
     headers: { accept: 'application/json', origin: webOrigin },
   });
   const text = await response.text();
@@ -479,12 +478,14 @@ async function readMessage(id, expectComment = true) {
   const signers = response.headers.get('signers') || response.headers.get('signers+link') || '';
   const signerMetadata = Boolean(signatureInput || signers || stored?.commitments);
   const exposedHeaders = response.headers.get('access-control-expose-headers') || '';
-  const exposedCommentHeaders = ['schema', 'type', 'comment', 'channel-name', 'is-pinned'].every((header) =>
-    exposedHeaders
-      .split(',')
-      .map((value) => value.trim().toLowerCase())
-      .includes(header)
-  );
+  const exposedCommentHeaders =
+    exposedHeaders.trim() === '*' ||
+    ['schema', 'type', 'comment', 'channel-name', 'is-pinned'].every((header) =>
+      exposedHeaders
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .includes(header)
+    );
 
   if (!response.ok) throw new Error(`Generic read ${id} failed: ${response.status} ${text.slice(0, 500)}`);
   if (containsPrivateAuth(stored)) {
@@ -571,6 +572,24 @@ function nativeRevisionRecord({ id: messageId, stored }) {
   };
 }
 
+async function mintCookieIdentity() {
+  const response = await fetch(`${hyperbeamBase}/id?0.%21=true&committers=all`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'channel', name: `query-comment-smoke-${Date.now()}` }),
+  });
+  const text = await response.text();
+  const id = responseId(response, parseJson(text) || { body: text });
+  const cookie = String(response.headers.get('set-cookie') || '')
+    .split(/,(?=[^;,]+=)/)[0]
+    .split(';')[0]
+    .trim();
+  if (!response.ok || !id || !cookie) {
+    throw new Error(`Native identity setup failed: ${response.status} ${text.slice(0, 500)}`);
+  }
+  return cookie;
+}
+
 function payload(source) {
   let current = source;
   for (let index = 0; index < 4; index += 1) {
@@ -604,6 +623,7 @@ function payload(source) {
 function responseId(response, body) {
   const bodyPayload = payload(body);
   const candidate =
+    response.headers.get('message-id') ||
     response.headers.get('path') ||
     response.headers.get('id') ||
     response.headers.get('read-path') ||

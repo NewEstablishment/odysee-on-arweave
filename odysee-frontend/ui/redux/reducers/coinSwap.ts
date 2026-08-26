@@ -1,5 +1,6 @@
 import * as ACTIONS from 'constants/action_types';
 import { handleActions } from 'util/redux-utils';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 const SWAP_HISTORY_LENGTH_LIMIT = 10;
 
 function getBottomEntries(array, count) {
@@ -115,6 +116,7 @@ export default handleActions(
         };
       }
     ) => {
+      if (hyperbeamNodeEnabled()) return state;
       const { coinSwapCodes } = action.data;
       const newCoinSwaps = [];
 

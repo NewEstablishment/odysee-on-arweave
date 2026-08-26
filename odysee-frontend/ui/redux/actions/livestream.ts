@@ -13,6 +13,7 @@ import {
   selectActiveLivestreamsLastFetchedFailCountForQuery,
 } from 'redux/selectors/livestream';
 import { doClaimSearch } from 'redux/actions/claims';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 // -- Fetches the claims for the returned active livestreams, and filter based on the query (language, etc)
 // -- Since currently it only uses the lang param, it would be better if the backend could return us the appropriate
@@ -79,6 +80,12 @@ export const doFetchChannelIsLiveForId = (channelId: string) => async (dispatch:
   const state = getState();
   const alreadyFetching = selectIsLiveFetchingForId(state, channelId);
   if (alreadyFetching) return;
+  if (hyperbeamNodeEnabled()) {
+    return dispatch({
+      type: ACTIONS.LIVESTREAM_IS_LIVE_COMPLETE,
+      data: { [channelId]: null },
+    });
+  }
   dispatch({
     type: ACTIONS.LIVESTREAM_IS_LIVE_START,
     data: channelId,

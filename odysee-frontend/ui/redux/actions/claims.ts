@@ -34,8 +34,8 @@ import {
 import { hasFiatTags } from 'util/tags';
 import { PAGE_SIZE } from 'constants/claim';
 import { doUserHasPremium } from './user';
-import { fetchHyperbeamResolveClaimIds, fetchHyperbeamUploads } from 'util/hyperbeam';
-import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
+import { fetchHyperbeamChannelListMine, fetchHyperbeamResolveClaimIds, fetchHyperbeamUploads } from 'util/hyperbeam';
+import { hyperbeamNodeEnabled, hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import { canDeleteThroughHyperbeam, deleteThroughHyperbeam } from 'services/hyperbeamUpload';
 import { getAuthToken } from 'util/saved-passwords';
 import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
@@ -1014,14 +1014,14 @@ export const doFetchChannelListMine =
       type: ACTIONS.FETCH_CHANNEL_LIST_STARTED,
     });
 
-    const callback = (response: ChannelListResponse) => {
+    const callback = (response: ChannelListResponse, native: boolean = false) => {
       dispatch({
         type: ACTIONS.FETCH_CHANNEL_LIST_COMPLETED,
         data: {
           claims: response.items,
         },
       });
-      dispatch(doUserHasPremium()); // depends on channel list
+      if (!native) dispatch(doUserHasPremium()); // depends on legacy channel list
     };
 
     const failure = (error) => {
@@ -1030,6 +1030,11 @@ export const doFetchChannelListMine =
         data: error,
       });
     };
+
+    if (hyperbeamNodeEnabled()) {
+      fetchHyperbeamChannelListMine(page, pageSize).then((response) => callback(response, true), failure);
+      return;
+    }
 
     Lbry.channel_list({
       page,

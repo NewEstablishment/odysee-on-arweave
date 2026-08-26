@@ -15,6 +15,7 @@ import { getSavedPassword, getAuthToken } from 'util/saved-passwords';
 import { doHandleSyncComplete } from 'redux/actions/app';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
+import { hyperbeamPreferencesEnabled } from 'util/hyperbeam';
 let syncTimer = null;
 const SYNC_INTERVAL = 1000 * 60 * 5; // 5 minutes
 
@@ -800,6 +801,10 @@ export function doPreferenceSet(
 
     try {
       await Lbry.preference_set(options);
+      if (hyperbeamPreferencesEnabled()) {
+        if (success) success(preference);
+        return preference;
+      }
       const syncHash = await Lbry.sync_hash();
 
       if (key === 'shared') {

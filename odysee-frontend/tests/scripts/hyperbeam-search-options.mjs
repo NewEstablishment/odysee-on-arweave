@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import {
   earliestReleaseTime,
+  hyperbeamClaimSearchRequest,
   hyperbeamChannelSearchRequest,
   hyperbeamSearchRequest,
 } from '../../ui/util/hyperbeamSearch.ts';
@@ -65,6 +66,37 @@ assert.deepEqual(
     sort: ['effective_amount:desc'],
   }
 );
+
+assert.deepEqual(
+  hyperbeamClaimSearchRequest(
+    {
+      claim_type: ['stream', 'repost'],
+      any_languages: ['en', 'es'],
+      release_time: '>1787600000',
+      order_by: ['release_time'],
+    },
+    8,
+    8
+  ),
+  {
+    limit: 8,
+    offset: 8,
+    filter: ['claim_type IN ["stream", "repost"]', 'nsfw = 0', 'language IN ["en", "es"]', 'release_time > 1787600000'],
+    sort: ['release_time:desc'],
+  }
+);
+
+assert.deepEqual(hyperbeamClaimSearchRequest({ claim_type: 'channel', order_by: ['^release_time'] }, 0, 20), {
+  limit: 20,
+  filter: ['claim_type IN ["channel"]', 'nsfw = 0'],
+  sort: ['release_time:asc'],
+});
+
+assert.deepEqual(hyperbeamClaimSearchRequest({ claim_type: 'stream', nsfw: true }, 0, 8), {
+  limit: 8,
+  filter: ['claim_type IN ["stream"]'],
+  sort: ['release_time:desc'],
+});
 
 assert.equal(earliestReleaseTime('today', 200_000), 113_600);
 assert.equal(earliestReleaseTime('', 200_000), null);
