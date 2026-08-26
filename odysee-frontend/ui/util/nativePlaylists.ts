@@ -1,3 +1,14 @@
+import {
+  boundedText,
+  field,
+  hasControlCharacters,
+  hasUnsafeControlCharacters,
+  integer,
+  isNativeMessageId,
+  normalizeMessageId,
+  optionalString,
+} from './nativeMessageFields.ts';
+
 export const NATIVE_PLAYLIST_SCHEMA = 'odysee-playlist@1.0';
 export const NATIVE_PLAYLIST_TYPE = 'playlist';
 export const NATIVE_PLAYLIST_SIGNATURE_SCOPE = 'native-playlist-v1';
@@ -63,13 +74,12 @@ export function normalizeNativePlaylist(source: any): NativePlaylist | null {
     created_at: createdAt,
     updated_at: updatedAt,
     signature_scope: String(field(source, 'signature-scope', 'signature_scope') || ''),
-    message_id: String(field(source, 'message-id', 'message_id', 'hyperbeam_message_id') || '').replace(/^\/+/, ''),
+    message_id: normalizeMessageId(field(source, 'message-id', 'message_id', 'hyperbeam_message_id')),
     owner: String(field(source, 'hyperbeam-owner', 'hyperbeam_owner', 'owner') || ''),
   } as NativePlaylist;
 
   return isValidNativePlaylist(normalized) ? normalized : null;
 }
-
 export function isValidNativePlaylist(playlist: NativePlaylist): boolean {
   return Boolean(
     playlist.schema === NATIVE_PLAYLIST_SCHEMA &&
@@ -128,10 +138,6 @@ function validStringList(values: Array<string>, maxItems: number, maxLength: num
   return values.length <= maxItems && values.every((value) => boundedText(value, maxLength));
 }
 
-function boundedText(value: string, maxLength: number): boolean {
-  return value.trim().length > 0 && value.length <= maxLength && !hasControlCharacters(value);
-}
-
 function boundedOptionalText(value: string | undefined, maxLength: number, allowFormatting = false): boolean {
   return (
     value === undefined ||
@@ -151,20 +157,6 @@ function validThumbnailUrl(value: string | undefined): boolean {
   }
 }
 
-function hasControlCharacters(source: string): boolean {
-  return Array.from(source).some((character) => {
-    const code = character.charCodeAt(0);
-    return code < 32 || code === 127;
-  });
-}
-
-function hasUnsafeControlCharacters(source: string): boolean {
-  return Array.from(source).some((character) => {
-    const code = character.charCodeAt(0);
-    return (code < 32 && code !== 9 && code !== 10 && code !== 13) || code === 127;
-  });
-}
-
 function serializedStringArray(source: any): Array<string> | null {
   return stringArray(typeof source === 'string' ? parseJsonArray(source) : source || []);
 }
@@ -181,23 +173,4 @@ function parseJsonArray(source: any): any {
 
 function stringArray(source: any): Array<string> | null {
   return Array.isArray(source) && source.every((value) => typeof value === 'string') ? source : null;
-}
-
-function field(source: any, ...keys: Array<string>): any {
-  for (const key of keys) {
-    if (source?.[key] !== undefined && source?.[key] !== null) return source[key];
-  }
-}
-
-function optionalString(source: any): string | undefined {
-  return typeof source === 'string' && source ? source : undefined;
-}
-
-function integer(source: any, fallback: number): number {
-  const parsed = Math.floor(Number(source));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function isNativeMessageId(messageId: any): boolean {
-  return /^[0-9A-Za-z_-]{41,128}$/.test(String(messageId || ''));
 }
