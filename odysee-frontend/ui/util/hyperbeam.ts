@@ -15,6 +15,7 @@ import {
 import {
   isNativeMessageId,
   nativeMessageVersionRef,
+  verifiedNativeOwnerMatches,
   verifyNativeMessage,
   type VerifiedNativeMessage,
 } from 'util/nativeMessageVerification';
@@ -708,7 +709,7 @@ export async function fetchHyperbeamPlaylistListMine(
       type: NATIVE_PLAYLIST_TYPE,
       'profile-id': account.id,
     })
-  ).filter((playlist) => playlist.owner === owner);
+  ).filter((playlist) => verifiedNativeOwnerMatches(playlist.owner, owner));
   const references = // `device` is a system key the node's match index does not index, so it
     // cannot be a query selector; normalizeNativePlaylistReference verifies
     // the device on every fetched candidate instead.
@@ -717,7 +718,7 @@ export async function fetchHyperbeamPlaylistListMine(
         'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
         'profile-id': account.id,
       })
-    ).filter((reference) => reference.is_init && reference.owner === owner);
+    ).filter((reference) => reference.is_init && verifiedNativeOwnerMatches(reference.owner, owner));
   const referenced = (
     await Promise.all(references.map((reference) => fetchNativePlaylistForReference(reference).catch(() => null)))
   ).filter(Boolean) as Array<{
@@ -2776,9 +2777,9 @@ function sourceClaimQuery(params: ClaimSearchOptions): Record<string, any> {
   );
 }
 
-// List the node's native uploads as claims, for the "your uploads" page. The
-// match-index holds every `odysee-upload@1.0' record; each record-id resolves
-// to a claim through the immutable-id route.
+// List the active cookie identity's native uploads as claims. The match-index
+// discovers every `odysee-upload@1.0' record on the node, so ownership is
+// verified from each exact commitment before pagination.
 export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
   const page = toNumber(params?.page, 1);
   const pageSize = toNumber(params?.page_size, 20);
@@ -2787,10 +2788,13 @@ export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
     return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
   }
 
+  const owner = await activeHyperbeamAccountOwner();
+  if (!owner) return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
+
   const request = nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA });
   const recordIds = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
   const claims = (await Promise.all(recordIds.map((id) => resolveImmutableClaimById(id).catch(() => null)))).filter(
-    Boolean
+    (claim) => claim?.is_my_output === true && verifiedNativeOwnerMatches(claim?.hyperbeam?.owner, owner)
   );
 
   const start = (page - 1) * pageSize;
@@ -2799,7 +2803,7 @@ export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
     page,
     page_size: pageSize,
     total_items: claims.length,
-    total_pages: Math.max(1, Math.ceil(claims.length / pageSize)),
+    total_pages: claims.length ? Math.ceil(claims.length / pageSize) : 0,
   };
 }
 
@@ -3575,7 +3579,16 @@ async function resolveImmutableClaimById(
   if (name && claim.name !== name) return null;
   if (!nativeRecord) return claim;
   const activeOwner = await activeHyperbeamAccountOwner();
-  return { ...claim, is_my_output: Boolean(activeOwner && activeOwner === nativeRecord.owner) };
+  return {
+    ...claim,
+    is_my_output: Boolean(activeOwner && activeOwner === nativeRecord.owner),
+    hyperbeam: {
+      ...claim.hyperbeam,
+      owner: nativeRecord.owner,
+      committers: nativeRecord.committers,
+      commitment_verification: 'verified',
+    },
+  };
 }
 
 // Pre-2019 claims may have no release time in their verified claim bytes. The
