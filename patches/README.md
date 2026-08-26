@@ -78,3 +78,11 @@ The patch also removes the application `body` from credential verification.
 The cookie is verified first and the complete application message is then
 signed, preventing ordinary document bodies such as comment text from being
 interpreted as verifier messages.
+
+## 6. `hyperbeam-hb-beamr-otp29.patch`
+
+HyperBEAM's `hb_beamr` driver passes `long *` and `char **` values to the OTP
+29 `ei` API, whose current signatures require `int *`, `size_t *`, and
+`const char **`. Current compilers reject those incompatible pointers. This
+patch uses the API's declared types and makes the WebAssembly memory bounds
+check overflow-safe; it does not change the driver protocol.

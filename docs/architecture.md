@@ -287,7 +287,14 @@ without mutating earlier content. Readers hydrate and verify every candidate,
 derive authority from the init committer, and select only a strictly newer
 unambiguous set. Query order is never authority.
 
-Legacy-only interactive surfaces with no verifiable representation — fuzzy
-text search, view counts, subscription counts, legacy comment writes — are
-excluded from the trustless path and treated by the UI as progressive
-enhancements. The video page renders fully from store reads alone.
+Observational analytics are recorded by the reusable `analytics@1.0` device.
+Odysee maps playback to generic subject engagement in the frontend, while the
+device exposes only aggregate counts and wallet-authenticated reports. A
+one-time owner-authenticated baseline preserves historical view totals; native
+qualified engagement is added after cutover. These analytics remain
+non-authoritative signals and do not affect content verification.
+
+Other legacy-only interactive surfaces with no verifiable representation —
+subscription counts and legacy comment writes — are excluded from the
+trustless path and treated by the UI as progressive enhancements. The video
+page renders fully from store reads alone.
