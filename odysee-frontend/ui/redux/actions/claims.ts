@@ -548,7 +548,7 @@ export function doFetchClaimListMine(
       const channelClaimIds = new Set([]);
       const costInfos = new Set<Promise<CostInfo>>();
       result.items.forEach((item) => {
-        if (!isHyperbeamUploadClaim(item)) claimIds.push(item.claim_id);
+        claimIds.push(item.claim_id);
 
         if (item.value_type !== 'channel' && item.value_type !== 'collection') {
           const isProtected = isClaimProtected(item);
@@ -1086,7 +1086,7 @@ export function doClaimSearch(
           stream,
         };
         urls.push(stream.canonical_url);
-        if (!isHyperbeamUploadClaim(stream)) claimIds.push(stream.claim_id);
+        claimIds.push(stream.claim_id);
 
         if (stream.value_type !== 'channel' && stream.value_type !== 'collection') {
           const isProtected = isClaimProtected(stream);

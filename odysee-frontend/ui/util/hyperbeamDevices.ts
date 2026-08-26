@@ -6,6 +6,7 @@ import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 
 export const HYPERBEAM_DEVICE = {
   account: '~odysee-account@1.0',
+  analytics: '~analytics@1.0',
   cache: '~cache@1.0',
   claim: '~odysee-claim@1.0',
   channel: '~odysee-channel@1.0',

@@ -12,8 +12,9 @@ The shortest useful description is:
 > Odysee now runs as a static manifest on HyperBEAM. Historical LBRY content
 > enters through verifying source stores, while new accounts, uploads,
 > comments, reactions, playlists, follows, moderation, and encrypted settings
-> are signed append-only messages. Discovery returns immutable locators and
-> the UI hydrates exact objects separately.
+> are signed append-only messages. Playback analytics use the generic native
+> analytics device. Discovery returns immutable locators and the UI hydrates
+> exact objects separately.
 
 The architectural points worth emphasizing are:
 
@@ -29,12 +30,25 @@ The architectural points worth emphasizing are:
   `reference@1.0` provide append-only history and stable identity.
 - Historical transactions, claim outputs, descriptors, and blobs are checked
   against their native hashes before they are cached or served.
+- Page activity, playback engagement, and public view totals use
+  `analytics@1.0`; the browser does not call legacy Watchman or view-count
+  services.
 
 ## Presentation preflight
 
 Do this before the audience arrives. Avoid repeatedly refreshing the SPA: the
 stock per-IP limiter counts manifest assets and can temporarily return `429`
 after enough full reloads.
+
+Package the runtime once after a pull or any device change. Include the
+external reference device used by playlists and encrypted preferences:
+
+```sh
+HB_PORT=18734 rebar3 device preload \
+  --device-src src,_build/default/lib/reference_1_0/src \
+  --output-dir _build/device-local-store \
+  --verbose
+```
 
 ```sh
 # Terminal 1: Meilisearch. Use the already-populated demo database.

@@ -326,7 +326,14 @@ an index, never an object or authority source. Native per-channel listings use
 bounded `query@1.0` discovery over upload records and the same exact hydration
 boundary.
 
-Legacy-only interactive surfaces with no verifiable representation — view
-counts, aggregate subscription counts, and paid membership state — are
-excluded from the trustless path and treated by the UI as progressive
-enhancements. The video page renders fully from store reads alone.
+Observational analytics are recorded by the reusable `analytics@1.0` device.
+Odysee maps playback to generic subject engagement in the frontend, while the
+device exposes only aggregate counts and wallet-authenticated reports. A
+one-time owner-authenticated baseline preserves historical view totals; native
+qualified engagement is added after cutover. These analytics remain
+non-authoritative signals and do not affect content verification.
+
+Other legacy-only interactive surfaces with no verifiable representation —
+aggregate subscription counts and paid membership state — are excluded from
+the trustless path and treated by the UI as progressive enhancements. The
+video page renders fully from store reads alone.

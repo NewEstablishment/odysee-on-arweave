@@ -221,6 +221,17 @@ instead of falling back to legacy services.
 - Exact snapshot/reference readback acknowledges a preference save. Do not make
   a successful write depend on the query listener indexing it synchronously.
 
+## Analytics
+
+- `analytics@1.0` is a generic observational device. Odysee playback maps to
+  its engagement lifecycle through `ui/analytics/hyperbeam.ts` and
+  `ui/analytics/watchman.ts`.
+- Browser playback and view-count code must not call the legacy Watchman or
+  view-count APIs. Public counts are aggregates; reports and historical
+  baseline imports require wallet authentication.
+- Analytics are non-authoritative signals and must never affect content
+  identity, verification, discovery order, or access.
+
 ## Publish and route guards
 
 - A configured HyperBEAM node enables native upload routes even without a
@@ -266,8 +277,12 @@ normal-flow request reaches a legacy host.
 
 ## Current limitations
 
-- Native view/subscriber counts, moderation delegates, and blocked-word
-  settings are not implemented.
+- View totals combine an owner-imported historical baseline with qualified
+  generic `analytics@1.0` engagement. The device does not serve a dashboard;
+  the upstream dashboard is an independently hosted frontend. An Odysee-owned
+  dashboard is not yet implemented.
+- Native subscriber counts, moderation delegates, and blocked-word settings
+  are not implemented.
 - Upload edit/delete needs a complete append-only native contract.
 - Only single HTTP byte ranges are supported; multipart range responses are not.
 - The cookie identity is node/browser-local and is not yet portable or
@@ -275,4 +290,4 @@ normal-flow request reaches a legacy host.
   wallet until a portable identity or secret-sync contract exists.
 
 Update this guide whenever the manifest, account, upload, comment, playback,
-or browser-routing contract changes.
+analytics, or browser-routing contract changes.

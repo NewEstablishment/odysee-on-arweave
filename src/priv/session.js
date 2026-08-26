@@ -1,5 +1,6 @@
 (function () {
   var key = "{{TRACKING_KEY}}";
+  var visitorIdMode = "{{VISITOR_ID_MODE}}";
   var script = document.currentScript;
   if ((!key || key.indexOf("{{") === 0) && script) {
     key = script.getAttribute("data-analytics-key") || script.getAttribute("data-key") || "";
@@ -38,6 +39,7 @@
   }
 
   var visit = createVisitId();
+  var visitorId = persistentVisitorId();
   var page = currentPath();
   var visibleSince = document.visibilityState === "visible" ? now() : null;
   var activeMs = 0;
@@ -56,6 +58,20 @@
     return Array.prototype.map.call(bytes, function (byte) {
       return byte.toString(16).padStart(2, "0");
     }).join("");
+  }
+
+  function persistentVisitorId() {
+    if (visitorIdMode !== "persistent") return "";
+    var storageKey = "hyperbeam-analytics:" + key + ":visitor";
+    try {
+      var existing = window.localStorage.getItem(storageKey);
+      if (existing) return existing;
+      var created = createVisitId();
+      window.localStorage.setItem(storageKey, created);
+      return created;
+    } catch (_err) {
+      return "";
+    }
   }
 
   function now() {
@@ -91,6 +107,7 @@
     query.set("event", eventName);
     query.set("duration", String(activeDuration()));
     query.set("page", page);
+    if (visitorId) query.set("visitor-id", visitorId);
     if (referrer) query.set("referrer", referrer);
     if (language) query.set("language", language);
     Object.keys(utm).forEach(function (name) {

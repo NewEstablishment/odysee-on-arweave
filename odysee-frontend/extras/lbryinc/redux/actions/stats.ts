@@ -1,22 +1,22 @@
 import * as ACTIONS from 'constants/action_types';
 import { Lbryio } from 'lbryinc';
+import { fetchAnalyticsCounts } from 'analytics/hyperbeam';
 const FETCH_SUB_COUNT_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const FETCH_SUB_COUNT_IDLE_FIRE_MS = 100;
 export const doFetchViewCount = (claimIdCsv: string) => (dispatch: Dispatch) => {
+  const claimIds = claimIdCsv
+    .split(',')
+    .map((claimId) => claimId.trim())
+    .filter(Boolean);
   dispatch({
     type: ACTIONS.FETCH_VIEW_COUNT_STARTED,
   });
-  return Lbryio.call('file', 'view_count', { claim_id: claimIdCsv })
-    .then((result) => {
-      if (!result) throw new Error('file view_count returned no counts');
-      return result;
-    })
-    .then((result: Array<number>) => {
-      const viewCounts = result;
+  return fetchAnalyticsCounts(claimIds)
+    .then((viewCounts) => {
       dispatch({
         type: ACTIONS.FETCH_VIEW_COUNT_COMPLETED,
         data: {
-          claimIdCsv,
+          claimIdCsv: claimIds.join(','),
           viewCounts,
         },
       });

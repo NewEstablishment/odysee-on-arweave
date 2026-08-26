@@ -6,6 +6,7 @@ import { watchman } from 'analytics/watchman';
 import type { ApiLog } from 'analytics/apiLog';
 import type { Events } from 'analytics/events';
 import type { Watchman } from 'analytics/watchman';
+import { installAnalyticsPageTracker } from 'analytics/hyperbeam';
 const isProduction = process.env.NODE_ENV === 'production';
 let gAnalyticsEnabled = false;
 // ****************************************************************************
@@ -41,6 +42,7 @@ export type Analytics = {
 const analytics: Analytics = {
   init: () => {
     sentryWrapper.init();
+    installAnalyticsPageTracker();
   },
   setState: (enable: boolean) => {
     gAnalyticsEnabled = enable;
