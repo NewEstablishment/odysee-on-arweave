@@ -502,15 +502,32 @@ stream_media_source(Stream, Opts) ->
         {ok, maps:filter(fun(_Key, Value) -> present_optional(Value) end, Source0)}
     end.
 
-%% @doc Serve media bytes for a stream. Explicit ranges (store request
-%% `start'/`end' keys or a `range' header value) yield a bounded 206
-%% slice; without one the FULL decrypted object is served with a plain
-%% 200. HTTP `Range' headers do not reach store reads through
-%% `~cache@1.0/read', so serving a partial window to a rangeless caller
-%% would hand video elements the same slice for every request.
+%% @doc Serve media bytes for a stream. Media is id-addressed: the first
+%% full read reassembles and decrypts the stream, mints the plaintext as a
+%% content-addressed message, and serves it inline; every later full read
+%% finds that id through the attestation and redirects to `GET /(id)', so
+%% hot playback is a bare immutable read that never re-fetches blobs.
+%% Explicit ranges (store request `start'/`end' keys or a `range' header
+%% value) yield a bounded 206 slice; HTTP `Range' headers do not reach
+%% store reads through `~cache@1.0/read'.
 media_response(Source, Req, Opts) ->
     case request_range(Req, Opts) of
-        full -> full_media_response(Source, Opts);
+        full ->
+            LowerSDHash =
+                hb_util:to_lower(
+                    hb_maps:get(<<"sd-hash">>, Source, <<>>, Opts)
+                ),
+            case known_media_id(LowerSDHash, Opts) of
+                {ok, MediaID} ->
+                    {ok, #{
+                        <<"status">> => 302,
+                        <<"location">> => <<"/", MediaID/binary>>,
+                        <<"media-id">> => MediaID,
+                        <<"body">> => <<>>
+                    }};
+                not_found ->
+                    full_media_response(Source, Opts)
+            end;
         {ok, Start, End} -> ranged_media_response(Source, Start, End, Opts);
         Error -> Error
     end.
@@ -540,39 +557,80 @@ full_media_response(Source, Opts) ->
                     },
                     media_metadata(Source, byte_size(Body))
                 ),
-                media_attestation(LowerSDHash, Body, ContentType, Opts)
+                media_identity(LowerSDHash, Body, ContentType, Opts)
             )}
     end.
 
-%% @doc Operator attestation for decrypted media. The lbry commitment chain
-%% hashes only ciphertext, so the plaintext served here is outside it; the
-%% node binds the plaintext hash to the sd-hash in a message committed by
-%% the operator wallet, and the id rides the response as `media-attestation'.
-%% Lookup-first: RSA-PSS signatures are randomized, so recommitting identical
-%% content would mint a new commitment id every read. Best-effort: without a
-%% wallet, or on any failure, the media is served without the header.
-media_attestation(SDHash, Body, ContentType, Opts) ->
+attestation_spec(SDHash) ->
+    #{
+        <<"schema">> => <<"odysee-media-attestation@1.0">>,
+        <<"sd-hash">> => SDHash
+    }.
+
+%% @doc The minted plaintext id for a stream, from an existing attestation.
+%% Attestations written before media minting carry no `media-id'; those are
+%% skipped, so such streams take the cold path once and re-attest.
+known_media_id(SDHash, Opts) ->
     try
-        Spec = #{
-            <<"schema">> => <<"odysee-media-attestation@1.0">>,
-            <<"sd-hash">> => SDHash
-        },
-        case hb_cache:match(Spec, Opts) of
-            {ok, [ID | _]} -> #{ <<"media-attestation">> => ID };
-            _ -> write_media_attestation(Spec, Body, ContentType, Opts)
+        case hb_cache:match(attestation_spec(SDHash), Opts) of
+            {ok, IDs} -> first_media_id(IDs, Opts);
+            _ -> not_found
         end
+    catch
+        _:_ -> not_found
+    end.
+
+first_media_id([], _Opts) -> not_found;
+first_media_id([AttID | Rest], Opts) ->
+    case hb_cache:read(AttID, Opts) of
+        {ok, Att} ->
+            Loaded = hb_cache:ensure_all_loaded(Att, Opts),
+            case hb_maps:get(<<"media-id">>, Loaded, not_found, Opts) of
+                MediaID when is_binary(MediaID) -> {ok, MediaID};
+                _ -> first_media_id(Rest, Opts)
+            end;
+        _ -> first_media_id(Rest, Opts)
+    end.
+
+%% @doc Mint the decrypted stream as a content-addressed message (its
+%% uncommitted id is the hash of the bytes, so the id itself vouches for
+%% the content), and bind it to the lbry chain with an operator-committed
+%% attestation: sd-hash to plaintext hash and media id. The lbry commitment
+%% chain hashes only ciphertext, so this binding is what a client can check.
+%% Lookup-first: RSA-PSS signatures are randomized, so recommitting mints a
+%% new commitment id every time. Best-effort: on any failure the media is
+%% served inline without identity keys.
+media_identity(SDHash, Body, ContentType, Opts) ->
+    try
+        {ok, MediaID} =
+            hb_cache:write(
+                #{ <<"content-type">> => ContentType, <<"body">> => Body },
+                local_write_opts(Opts)
+            ),
+        Attestation =
+            case known_media_id(SDHash, Opts) of
+                {ok, _} ->
+                    case hb_cache:match(attestation_spec(SDHash), Opts) of
+                        {ok, [AttID | _]} -> #{ <<"media-attestation">> => AttID };
+                        _ -> #{}
+                    end;
+                not_found ->
+                    write_media_attestation(SDHash, MediaID, Body, ContentType, Opts)
+            end,
+        maps:merge(#{ <<"media-id">> => MediaID }, Attestation)
     catch
         _:_ -> #{}
     end.
 
-write_media_attestation(Spec, Body, ContentType, Opts) ->
+write_media_attestation(SDHash, MediaID, Body, ContentType, Opts) ->
     case hb_opts:get(priv_wallet, no_viable_wallet, Opts) of
         no_viable_wallet -> #{};
         _ ->
             Committed =
                 hb_message:commit(
-                    Spec#{
+                    (attestation_spec(SDHash))#{
                         <<"type">> => <<"media-attestation">>,
+                        <<"media-id">> => MediaID,
                         <<"plaintext-sha-384">> =>
                             hb_util:encode(crypto:hash(sha384, Body)),
                         <<"content-type">> => ContentType,
@@ -720,25 +778,21 @@ integer_or_undefined(Value) when is_binary(Value) ->
 integer_or_undefined(_Value) ->
     undefined.
 
-%% @doc Link a resolved bare outpoint key to its evidence message, so a
-%% later bare read hits the local store before falling through to this
-%% (remote, read-only) store. Only bare outpoints warm -- those keys are
-%% immutable, so the link can never go stale. The message is written to
-%% obtain its canonical cache id (`lbry@1.0' commitments carry no
-%% committer, so the id cannot be recomputed independently of the write),
-%% then the request key is linked to it. A warming failure never breaks
+%% @doc Link a freshly-read message to its direct addresses: the bare key
+%% (outpoint, txid, or blob hash: all content-derived and immutable, so the
+%% links can never go stale) and, when the read used the `ao:' form, that
+%% literal key as well. The message is written first to obtain its cache id;
+%% `lbry@1.0' commitments carry no committer, so the id cannot be recomputed
+%% independently of the write. Claim-ids are NEVER linked: identity is the
+%% LBRY TX, and a claim-id to TX mapping held in this store is exactly the
+%% static cache the flat-addressing agreement rules out. Claim-ids translate
+%% at entry only (live resolve today; the frozen-chain index snapshot
+%% replaces that upstream, not this store). Warming failure never breaks
 %% the read.
-%% Link a freshly-read message to its direct addresses: the bare outpoint
-%% (immutable, so the shortcut cannot go stale) and, when the read used the
-%% `ao:' form, that literal key as well. The message is written first to
-%% obtain its cache id; `lbry@1.0' commitments carry no committer, so the id
-%% cannot be recomputed independently of the write. Mutable locators are
-%% never linked: they re-resolve through the store on every read. Warming
-%% failure never breaks the read.
 warm_addresses(BareKey, _Path, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
     Direct = strip_ao_prefix(BareKey),
     Keys =
-        case is_bare_outpoint(Direct) of
+        case warmable_key(Direct) of
             true -> lists:usort([BareKey, Direct]);
             false -> []
         end,
@@ -746,6 +800,11 @@ warm_addresses(BareKey, _Path, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
     ok;
 warm_addresses(_BareKey, _Path, _Msg, _StoreOpts, _NodeOpts) ->
     ok.
+
+warmable_key(Key) ->
+    is_bare_outpoint(Key) orelse
+        valid_hex_size(Key, 32) orelse
+        valid_hex_size(Key, 48).
 
 strip_ao_prefix(<<"ao:", Rest/binary>>) -> Rest;
 strip_ao_prefix(Key) -> Key.
@@ -1555,6 +1614,24 @@ full_media_read_attaches_operator_attestation_test() ->
         [hb_util:human_id(ar_wallet:to_address(Wallet))],
         hb_message:signers(Attestation, Opts)
     ),
+    %% The plaintext is minted as a content-addressed message, so hot reads
+    %% redirect to a bare id read that serves the identical bytes.
+    MediaID = maps:get(<<"media-id">>, Msg),
+    ?assertEqual(
+        MediaID,
+        hb_maps:get(<<"media-id">>, Attestation, not_found, Opts)
+    ),
+    {ok, Minted0} = hb_cache:read(MediaID, Opts),
+    Minted = hb_cache:ensure_all_loaded(Minted0, Opts),
+    ?assertEqual(maps:get(<<"body">>, Msg), hb_maps:get(<<"body">>, Minted, not_found, Opts)),
+    {ok, Hot} =
+        read(
+            Store,
+            #{ <<"read">> => <<"odysee/media/sd-hash/", SDHash/binary>> },
+            Opts
+        ),
+    ?assertEqual(302, maps:get(<<"status">>, Hot)),
+    ?assertEqual(<<"/", MediaID/binary>>, maps:get(<<"location">>, Hot)),
     %% Without a wallet the media is served cleanly with no attestation.
     {ok, Bare} =
         read(
@@ -1644,10 +1721,16 @@ bare_outpoint_warm_cache_links_local_store_test() ->
     AoKey = <<"ao:", Outpoint/binary>>,
     ok = warm_addresses(AoKey, Path, ClaimOutput, #{}, Opts),
     ?assertMatch({ok, _}, hb_cache:read(AoKey, Opts)),
-    %% A mutable locator never becomes a direct address: nothing is linked.
+    %% A locator PATH never becomes a direct address: nothing is linked.
     LocatorPath = <<"odysee/claim/x">>,
     ok = warm_addresses(LocatorPath, LocatorPath, ClaimOutput, #{}, Opts),
     ?assertMatch({error, not_found}, hb_cache:read(LocatorPath, Opts)),
+    %% A bare claim-id never becomes a direct address either: identity is
+    %% the LBRY TX, and a claim-id to TX mapping in this store is the static
+    %% cache the flat-addressing agreement rules out.
+    ClaimID = maps:get(<<"claim-id">>, ClaimOutput),
+    ok = warm_addresses(ClaimID, Path, ClaimOutput, #{}, Opts),
+    ?assertMatch({error, not_found}, hb_cache:read(ClaimID, Opts)),
     %% Warming without local stores is a harmless no-op.
     ?assertEqual(
         ok,

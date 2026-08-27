@@ -243,7 +243,8 @@ export async function fetchStoreStreamEvidenceForUri(uri: string): Promise<any |
 
 async function fetchStoreStreamEvidenceForOutpoint(outpoint: string): Promise<any | null> {
   if (!isOutpointId(outpoint)) return null;
-  const result = await fetchCachedStoreJsonOrNull(storePath('odysee/stream-id', outpoint)).catch(() => null);
+  if (!allowHyperbeamCompatibilityReads()) return null;
+  const result = await fetchCachedStoreJsonOrNull(encodeDataPath(`ao:${outpoint}`)).catch(() => null);
   return storePayload(result);
 }
 
@@ -3993,9 +3994,8 @@ const BUNDLE_META_HEADERS = new Set([
 // the same way for legacy and native content.
 async function fetchImmutableJsonOrNull(id: string): Promise<any | null> {
   if (isOutpointId(id)) {
-    const stream = await fetchStoreJsonOrNull(storePath('odysee/stream-id', id));
-    if (stream) return stream;
-    return fetchStoreJsonOrNull(storePath('odysee/outpoint', id));
+    if (!allowHyperbeamCompatibilityReads()) return null;
+    return fetchStoreJsonOrNull(encodeDataPath(`ao:${id}`));
   }
   if (!isStandaloneImmutableId(id)) return null;
   return fetchStoreJsonOrNull(encodeDataPath(id));
