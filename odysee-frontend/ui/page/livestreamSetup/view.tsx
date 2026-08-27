@@ -34,6 +34,7 @@ import { WEBRTC_PUBLISH_PRESET_ORDER, type WebrtcPublishPresetId } from 'constan
 import { useLivestreamPublish } from 'contexts/livestreamPublish';
 import useLivestreamMetrics from 'effects/use-livestream-metrics';
 import LivestreamMetrics from 'component/livestreamMetrics/view';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 import './style.scss';
 
 const ALL_LIVESTREAM_TABS = ['Preview', 'Stream', 'Setup'];
@@ -169,7 +170,7 @@ export default function LivestreamSetupPage() {
 
   const [hasReplays, setHasReplays] = React.useState(false);
   React.useEffect(() => {
-    if (!channelId || !channelName || !sigData.signature || !sigData.signing_ts) return;
+    if (hyperbeamNodeEnabled() || !channelId || !channelName || !sigData.signature || !sigData.signing_ts) return;
     let cancelled = false;
     const url =
       `${NEW_LIVESTREAM_REPLAY_API}?channel_claim_id=${String(channelId)}` +

@@ -34,6 +34,7 @@ export type NativePreferenceSnapshot = {
 export type NativePreferenceReference = {
   device: string;
   reference_type: string;
+  preference_owner: string;
   reference_id: string;
   reference_value: string;
   timestamp: number;
@@ -52,6 +53,21 @@ export type NativePreferenceEnvelope = {
 };
 
 export type NativePreferenceMap = Record<string, any>;
+
+export type NativePreferenceState = {
+  reference: NativePreferenceReference;
+  snapshot: NativePreferenceSnapshot;
+  preferences: NativePreferenceMap;
+};
+
+export function latestNativePreferenceState(
+  discovered: NativePreferenceState | null,
+  locallyVerified: NativePreferenceState | null
+): NativePreferenceState | null {
+  if (!discovered) return locallyVerified;
+  if (!locallyVerified) return discovered;
+  return locallyVerified.reference.timestamp > discovered.reference.timestamp ? locallyVerified : discovered;
+}
 
 export function normalizeNativePreferenceSnapshot(source: any): NativePreferenceSnapshot | null {
   const snapshot: NativePreferenceSnapshot = {
@@ -125,10 +141,12 @@ export function normalizeNativePreferenceReference(source: any): NativePreferenc
   const explicitReferenceId = optionalString(field(source, 'reference-id', 'reference_id'));
   const messageId = String(field(source, 'message-id', 'message_id', 'hyperbeam_message_id') || '').replace(/^\/+/, '');
   const owner = String(field(source, 'hyperbeam-owner', 'hyperbeam_owner', 'owner') || '');
+  const preferenceOwner = String(field(source, 'preference-owner', 'preference_owner') || '');
   const authority = optionalString(field(source, 'authority'));
   const reference: NativePreferenceReference = {
     device: String(field(source, 'device') || ''),
     reference_type: String(field(source, 'reference-type', 'reference_type') || ''),
+    preference_owner: preferenceOwner,
     reference_id: explicitReferenceId || messageId,
     reference_value: String(field(source, 'reference-value', 'reference_value') || '').replace(/^\/+/, ''),
     timestamp: integer(field(source, 'timestamp'), -1),
@@ -140,6 +158,8 @@ export function normalizeNativePreferenceReference(source: any): NativePreferenc
   if (
     reference.device !== NATIVE_PREFERENCE_REFERENCE_DEVICE ||
     reference.reference_type !== NATIVE_PREFERENCE_REFERENCE_TYPE ||
+    !isNativeMessageId(reference.preference_owner) ||
+    reference.preference_owner !== reference.owner ||
     !isNativeMessageId(reference.reference_id) ||
     !isNativeMessageId(reference.reference_value) ||
     !isNativeMessageId(reference.message_id) ||
@@ -154,11 +174,16 @@ export function normalizeNativePreferenceReference(source: any): NativePreferenc
   return reference;
 }
 
-export function nativePreferenceReferenceInitMessage(snapshotId: string, timestamp: number): Record<string, any> {
-  assertReferenceFields(snapshotId, timestamp);
+export function nativePreferenceReferenceInitMessage(
+  snapshotId: string,
+  timestamp: number,
+  owner: string
+): Record<string, any> {
+  assertReferenceFields(snapshotId, timestamp, owner);
   return {
     device: NATIVE_PREFERENCE_REFERENCE_DEVICE,
     'reference-type': NATIVE_PREFERENCE_REFERENCE_TYPE,
+    'preference-owner': owner,
     'reference-value': snapshotId,
     timestamp,
   };
@@ -167,11 +192,12 @@ export function nativePreferenceReferenceInitMessage(snapshotId: string, timesta
 export function nativePreferenceReferenceSetMessage(
   referenceId: string,
   snapshotId: string,
-  timestamp: number
+  timestamp: number,
+  owner: string
 ): Record<string, any> {
   if (!isNativeMessageId(referenceId)) throw new Error('Native preference reference ID is invalid');
   return {
-    ...nativePreferenceReferenceInitMessage(snapshotId, timestamp),
+    ...nativePreferenceReferenceInitMessage(snapshotId, timestamp, owner),
     'reference-id': referenceId,
   };
 }
@@ -309,8 +335,13 @@ function encodedBytes(value: string, minBytes: number, maxBytes: number): boolea
   return byteLength >= minBytes && byteLength <= maxBytes;
 }
 
-function assertReferenceFields(snapshotId: string, timestamp: number) {
-  if (!isNativeMessageId(snapshotId) || !Number.isSafeInteger(timestamp) || timestamp < 0) {
+function assertReferenceFields(snapshotId: string, timestamp: number, owner: string) {
+  if (
+    !isNativeMessageId(snapshotId) ||
+    !isNativeMessageId(owner) ||
+    !Number.isSafeInteger(timestamp) ||
+    timestamp < 0
+  ) {
     throw new Error('Native preference reference fields are invalid');
   }
 }

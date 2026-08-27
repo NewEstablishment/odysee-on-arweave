@@ -86,3 +86,15 @@ HyperBEAM's `hb_beamr` driver passes `long *` and `char **` values to the OTP
 `const char **`. Current compilers reject those incompatible pointers. This
 patch uses the API's declared types and makes the WebAssembly memory bounds
 check overflow-safe; it does not change the driver protocol.
+
+## 7. `hb-http-single-range.patch`
+
+HyperBEAM's HTTP layer otherwise ignores a browser `Range` header when the
+resolved message body has already been materialized, returning a full `200`
+response that cannot seek reliably. This patch implements one satisfiable
+RFC 7233 byte range for binary `GET` responses, returns `206` with exact
+`Accept-Ranges`, `Content-Range`, and `Content-Length` fields, and returns
+`416` for malformed or unsatisfiable ranges. It removes whole-message digest
+and signature headers from the derived partial representation; the complete
+immutable message remains the verification surface. Multipart ranges are not
+implemented.

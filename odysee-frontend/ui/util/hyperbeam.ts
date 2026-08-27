@@ -54,6 +54,7 @@ import {
   NATIVE_PREFERENCE_KEY_VERSION,
   NATIVE_PREFERENCE_REFERENCE_TYPE,
   canonicalNativePreferenceReference,
+  latestNativePreferenceState,
   nativePreferencePlaintext,
   nativePreferenceReferenceInitMessage,
   nativePreferenceReferenceSetMessage,
@@ -68,6 +69,7 @@ import {
   type NativePreferenceMap,
   type NativePreferenceReference,
   type NativePreferenceSnapshot,
+  type NativePreferenceState,
 } from 'util/nativePreferences';
 import {
   NATIVE_SUBSCRIPTION_SCHEMA,
@@ -132,6 +134,7 @@ const nativePreferenceReferenceQueryCache = new Map<
   string,
   { expiresAt: number; promise: Promise<Array<NativePreferenceReference>> }
 >();
+const nativePreferenceStateByOwner = new Map<string, NativePreferenceState>();
 const nativeSubscriptionQueryCache = new Map<
   string,
   { expiresAt: number; promise: Promise<Array<NativeSubscription>> }
@@ -429,8 +432,8 @@ async function writeNativePreference(key: string, preferenceValue: any): Promise
   }
 
   const referenceMessage = current
-    ? nativePreferenceReferenceSetMessage(current.reference.reference_id, snapshotId, timestamp)
-    : nativePreferenceReferenceInitMessage(snapshotId, timestamp);
+    ? nativePreferenceReferenceSetMessage(current.reference.reference_id, snapshotId, timestamp, owner)
+    : nativePreferenceReferenceInitMessage(snapshotId, timestamp, owner);
   const referenceMessageId = await writeNativePreferenceMessage(referenceMessage, 'preference reference');
   nativePreferenceReferenceQueryCache.clear();
   const reference = await fetchNativePreferenceReferenceMessageById(referenceMessageId);
@@ -445,6 +448,8 @@ async function writeNativePreference(key: string, preferenceValue: any): Promise
   ) {
     throw new Error('HyperBEAM preference reference failed commitment or ownership verification');
   }
+
+  nativePreferenceStateByOwner.set(owner, { reference, snapshot, preferences });
 
   // Both immutable writes were read back and cryptographically verified above.
   // Discovery is eventually consistent and must not be a synchronous write
@@ -474,21 +479,20 @@ async function fetchNativePreferenceOwner(): Promise<string | null> {
   return owner;
 }
 
-async function fetchNativePreferenceState(owner: string): Promise<{
-  reference: NativePreferenceReference;
-  snapshot: NativePreferenceSnapshot;
-  preferences: NativePreferenceMap;
-} | null> {
+async function fetchNativePreferenceState(owner: string): Promise<NativePreferenceState | null> {
+  const locallyVerified = nativePreferenceStateByOwner.get(owner);
   // `device` is a system key the node's match index does not index, so it
   // cannot be a query selector; normalizeNativePreferenceReference verifies
   // the device on every fetched candidate instead.
   const references = await fetchNativePreferenceReferenceCollection({
     'reference-type': NATIVE_PREFERENCE_REFERENCE_TYPE,
+    'preference-owner': owner,
   });
   const init = canonicalNativePreferenceReference(references, owner);
-  if (!init) return null;
+  if (!init) return latestNativePreferenceState(null, locallyVerified || null);
   const candidates = await fetchNativePreferenceReferenceCollection({
     'reference-type': NATIVE_PREFERENCE_REFERENCE_TYPE,
+    'preference-owner': owner,
     'reference-id': init.reference_id,
   });
   const reference = projectNativePreferenceReference(init, candidates);
@@ -505,7 +509,12 @@ async function fetchNativePreferenceState(owner: string): Promise<{
   });
   const plaintext = value(opened, 'plaintext', 'body');
   const preferences = parseNativePreferencePlaintext(plaintext);
-  return preferences ? { reference, snapshot, preferences } : null;
+  if (!preferences) return latestNativePreferenceState(null, locallyVerified || null);
+  const discovered = { reference, snapshot, preferences };
+  const current = latestNativePreferenceState(discovered, locallyVerified || null);
+  if (!current) return null;
+  nativePreferenceStateByOwner.set(owner, current);
+  return current;
 }
 
 async function fetchNativePreferenceReferenceCollection(

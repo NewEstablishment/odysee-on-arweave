@@ -270,10 +270,10 @@ newer same-owner set message. Earlier snapshots remain exactly addressable.
   does not persist snapshots, implement references, or return wallet material.
 - Seal/open responses are `no-store, private`. Cookies and plaintext never
   enter a committed preference message or the match index.
-- `query@1.0` returns reference locators. The frontend hydrates and verifies
-  the exact init, set, and selected snapshot messages, derives authority from
-  their commitment committers, and rejects foreign writers, stale/tied heads,
-  and owner mismatches.
+- `query@1.0` returns reference locators scoped by the authenticated owner. The
+  frontend hydrates and verifies the exact init, set, and selected snapshot
+  messages, requires the indexed owner to equal their commitment committer,
+  and rejects foreign writers, stale/tied heads, and owner mismatches.
 - Native shared preferences retain settings, tags, welcome state, analytics
   sharing choice, and announcement state. They intentionally exclude follows,
   blocked/moderation state, coin-swap data, and local/private collections,
@@ -286,7 +286,8 @@ newer same-owner set message. Earlier snapshots remain exactly addressable.
   hydration rather than starting the legacy wallet-sync loop.
 - Saving verifies the two exact immutable writes and returns without requiring
   the asynchronous query listener to expose the new reference in the same
-  request turn.
+  request turn. The newest exact-verified state is retained per owner so a
+  second queued save during index lag advances the same reference.
 
 ### Subscriptions
 

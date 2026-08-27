@@ -4,17 +4,29 @@
 // empty array so callers neither crash nor toast. Node and asset (arweave,
 // fonts) requests are untouched. The SDK proxy is blocked as a final defense
 // after method-level routing; the comment server remains outside this list.
-import { ODYSEE_HYPERBEAM_NODE_API, LBRY_API_URL, PROXY_URL_NO_CF, RECSYS_ENDPOINT, RECSYS_FYP_ENDPOINT } from 'config';
-import { hyperbeamLegacyUrlBlocked } from 'util/hyperbeamLegacyBoundary';
+import {
+  HYPERBEAM_BASE_URL,
+  ODYSEE_HYPERBEAM_NODE_API,
+  LBRY_API_URL,
+  PROXY_URL,
+  PROXY_URL_NO_CF,
+  RECSYS_ENDPOINT,
+  RECSYS_FYP_ENDPOINT,
+} from 'config';
+import { hyperbeamLegacyFetchBases, hyperbeamLegacyUrlBlocked } from 'util/hyperbeamLegacyBoundary';
 
-if (ODYSEE_HYPERBEAM_NODE_API && typeof window !== 'undefined' && typeof window.fetch === 'function') {
-  const legacyHosts = [
-    LBRY_API_URL,
-    PROXY_URL_NO_CF,
-    RECSYS_ENDPOINT,
-    RECSYS_FYP_ENDPOINT,
-    'https://api.lbry.com',
-  ].filter((host: any): host is string => typeof host === 'string' && host.length > 0);
+if (
+  (HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API) &&
+  typeof window !== 'undefined' &&
+  typeof window.fetch === 'function'
+) {
+  const legacyHosts = hyperbeamLegacyFetchBases({
+    lbryApiUrl: LBRY_API_URL,
+    proxyUrl: PROXY_URL,
+    proxyUrlNoCf: PROXY_URL_NO_CF,
+    recsysEndpoint: RECSYS_ENDPOINT,
+    recsysFypEndpoint: RECSYS_FYP_ENDPOINT,
+  });
 
   const nativeFetch = window.fetch.bind(window);
   (window as any).fetch = (input: RequestInfo | URL, init?: RequestInit) => {

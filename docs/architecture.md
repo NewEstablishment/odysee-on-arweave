@@ -129,10 +129,11 @@ The UI talks to nodes over two channels:
   with a node-hosted per-user wallet. See "Writes" below.
 
 The browser never uses the legacy SDK proxy as a product backend. In
-HyperBEAM mode, legacy `channel_sign` requests fail at the SDK facade before
-transport, and the fetch boundary blocks the proxy host as a second guard.
-Legacy livestream actions that require that signature are unavailable until a
-native message contract exists.
+HyperBEAM mode, every legacy-only SDK method fails at the SDK facade before
+transport, and the fetch boundary blocks both configured proxy URLs as a
+second guard. Sockety, Odysee livestream APIs, WHIP publishing, OME viewer
+signaling, and the short-URL service are unavailable until native message
+contracts exist.
 
 ## Node roles
 
@@ -302,9 +303,11 @@ Private user preferences use the same separation. Each version is an immutable
 cookie-signed `odysee-preferences@1.0` message containing only an AES-256-GCM
 envelope. A generic `reference@1.0` init commitment is the stable preference
 identity and same-owner set messages select newer snapshots. Readers discover
-only locators, hydrate and verify every exact reference/snapshot commitment,
-and fail closed on foreign ownership, stale changes, or conflicting tied
-heads. The narrow `odysee-preference@1.0` device is not a write device: it
+only locators whose indexed preference owner is the authenticated cookie
+owner, hydrate and verify every exact reference/snapshot commitment, bind the
+indexed owner to the verified committer, and fail closed on foreign ownership,
+stale changes, or conflicting tied heads. The narrow
+`odysee-preference@1.0` device is not a write device: it
 authenticates the cookie-owned hosted wallet and seals or opens owner-bound
 ciphertext without storing preference state. Its private/no-store response is
 the only plaintext boundary; credentials and key material never enter public
@@ -312,7 +315,9 @@ messages.
 
 Preference writes use exact readback as their acknowledgement. Query/listener
 discovery is eventually consistent and is never required to expose the new
-reference before a valid save can complete.
+reference before a valid save can complete. The frontend retains the newest
+exact-verified state per owner, so queued saves during index lag continue the
+same reference chain rather than creating another init.
 
 HTTP delivery supports one RFC 7233 byte range. Range-aware cache/source stores
 receive the requested bounds directly; locally materialized immutable bodies

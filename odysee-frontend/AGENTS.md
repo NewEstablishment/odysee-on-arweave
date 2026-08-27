@@ -14,7 +14,13 @@ is the store-first HyperBEAM node; the manifest build is the production shape.
   proxy, Odysee APIs, search/recommendation services, geo, legal, or blocklist
   services.
 - `ui/util/hyperbeamFetchGuard.ts` is installed before the app and blocks
-  remaining legacy-host browser requests in HyperBEAM mode.
+  remaining legacy-host browser requests in HyperBEAM mode. Its host list must
+  be built from the same production config values used by the SDK facade,
+  including both SDK proxy URLs.
+- Legacy-only SDK methods fail before transport in HyperBEAM mode. Sockety,
+  Odysee livestream APIs/signaling/WHIP, and the short-URL service are
+  unavailable until native contracts exist; they must not become silent
+  browser fallbacks.
 
 Legacy services may still source historical bytes behind backend stores. That
 does not authorize a direct browser fallback.
@@ -201,10 +207,12 @@ instead of falling back to legacy services.
   generic stage-scoped ID write, then move its generic `reference@1.0` head
   with a strictly newer same-owner set message.
 - Discover only reference locators through `query@1.0`; hydrate and verify the
-  exact init, set, and snapshot messages. Authority comes from commitment
-  committers, never local profile metadata or query order. Fail closed on
-  foreign writers, foreign-owned snapshots, stale updates, and conflicting
-  timestamp ties.
+  exact init, set, and snapshot messages. Reference discovery includes the
+  authenticated owner as an indexed selector, and every hydrated reference
+  must bind that claimed owner to its verified committer. Authority comes from
+  commitment committers, never local profile metadata or query order. Fail
+  closed on foreign writers, foreign-owned snapshots, stale updates, and
+  conflicting timestamp ties.
 - `odysee-preference@1.0` only derives the authenticated owner and seals/opens
   AES-GCM envelopes. Its responses are private/no-store; plaintext, cookies,
   and wallet keys must never appear in public messages or browser storage.
@@ -220,6 +228,9 @@ instead of falling back to legacy services.
   this preference read and never starts the legacy sync loop.
 - Exact snapshot/reference readback acknowledges a preference save. Do not make
   a successful write depend on the query listener indexing it synchronously.
+  Retain the newest exact-verified state per authenticated owner so a queued
+  save during index lag advances the same reference rather than forking a
+  second init or restoring a stale snapshot.
 
 ## Analytics
 

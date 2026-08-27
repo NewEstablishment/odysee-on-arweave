@@ -1,8 +1,10 @@
 import { SHORT_URL_API } from 'config';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 const ShortUrl = {
   url: SHORT_URL_API,
   enabled: Boolean(SHORT_URL_API),
-  createFrom: (longUrl: string): Promise<ShortUrlResponse> => createFrom(longUrl), // expandFrom: (shortUrl: string) => expandFrom(shortUrl),
+  createFrom: (longUrl: string): Promise<ShortUrlResponse> =>
+    hyperbeamNodeEnabled() ? Promise.resolve({ shortUrl: longUrl }) : createFrom(longUrl),
 };
 
 // ****************************************************************************

@@ -207,9 +207,11 @@ User preferences:
 - Store only encrypted `odysee-preferences@1.0` immutable snapshots through
   the generic stage-scoped ID write.
 - Use the canonical `reference@1.0` init commitment as stable identity and
-  strictly newer same-owner set messages as the head. Hydrate and verify every
-  exact reference and snapshot; reject foreign, stale, tied, or owner-mismatched
-  state.
+  strictly newer same-owner set messages as the head. Query references with
+  the authenticated owner as an indexed selector, bind that field to the exact
+  verified committer, and verify every reference and snapshot. Reject foreign,
+  stale, tied, or owner-mismatched state. Retain the newest exact-verified state
+  per owner while the query index catches up so queued saves advance one chain.
 - `odysee-preference@1.0` is a seal/open/owner crypto boundary only. It must
   authenticate through the hosted cookie wallet, return `no-store, private`,
   and never persist plaintext, credentials, or wallet material.
@@ -242,6 +244,9 @@ same generic message/event pattern and authority checks.
 - `ODYSEE_HYPERBEAM_NODE_API` selects the node; it is not a Legacy/HyperBEAM
   mode switch.
 - Install the host-level legacy fetch guard before application imports.
+- Fail legacy-only SDK methods before transport and disable Sockety,
+  Odysee livestream API/signaling/WHIP, and short-URL calls in HyperBEAM mode
+  until native contracts exist.
 - Manifest builds use hash routing, relative assets, and node-safe content
   types.
 - Bare native `lbry://<name>` resolution uses the upload index and immutable
