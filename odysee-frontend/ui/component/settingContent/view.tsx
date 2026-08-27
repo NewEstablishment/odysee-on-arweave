@@ -15,7 +15,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 
 import { doSetClientSetting } from 'redux/actions/settings';
 import { selectClientSetting } from 'redux/selectors/settings';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUserIsNative } from 'redux/selectors/user';
 
 type Price = {
   currency: string;
@@ -24,7 +24,8 @@ type Price = {
 
 export default function SettingContent() {
   const dispatch = useAppDispatch();
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated);
+  const isNative = useAppSelector(selectUserIsNative);
   const hideMembersOnlyContent = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_MEMBERS_ONLY_CONTENT));
   const hideReposts = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_REPOSTS));
   const hideShorts = useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_SHORTS));
@@ -59,7 +60,7 @@ export default function SettingContent() {
 
             <SettingsRow title={__('Hide reposts')} subtitle={__(HELP.HIDE_REPOSTS)}>
               <FormField type="checkbox" name="hide_reposts" checked={hideReposts} onChange={(e) => {
-          if (isAuthenticated) {
+          if (isAuthenticated && !isNative) {
             let param = e.target.checked ? {
               add: 'noreposts'
             } : {
@@ -94,7 +95,7 @@ export default function SettingContent() {
               </fieldset-section>
             </SettingsRow>
 
-            {(isAuthenticated || !IS_WEB) && <>
+            {(isAuthenticated || !IS_WEB) && !isNative && <>
                 <SettingsRow title={__('Notifications')}>
                   <Button button="inverse" label={__('Manage')} icon={ICONS.ARROW_RIGHT} navigate={`/$/${PAGES.SETTINGS_NOTIFICATIONS}`} />
                 </SettingsRow>

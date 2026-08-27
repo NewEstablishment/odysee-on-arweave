@@ -56,6 +56,10 @@ export const selectPhoneVerifyErrorMessage = (state) => selectState(state).phone
 export const selectIdentityVerifyIsPending = (state) => selectState(state).identityVerifyIsPending;
 export const selectIdentityVerifyErrorMessage = (state) => selectState(state).identityVerifyErrorMessage;
 export const selectUserVerifiedEmail = createSelector(selectUser, (user) => user && user.has_verified_email);
+export const selectUserIsNative = createSelector(selectUser, (user) => Boolean(user?.is_native));
+export const selectUserAuthenticated = createSelector(selectUser, (user) =>
+  Boolean(user && (user.has_verified_email || user.is_native))
+);
 export const selectUser2FAPending = (state) => selectState(state).user2FAPending;
 export const selectUserIsVerificationCandidate = createSelector(
   selectUser,

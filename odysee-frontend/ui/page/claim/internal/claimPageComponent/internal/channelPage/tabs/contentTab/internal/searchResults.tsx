@@ -2,8 +2,9 @@ import React from 'react';
 import ClaimList from 'component/claimList';
 import { DEBOUNCE_WAIT_DURATION_MS, SEARCH_OPTIONS } from 'constants/search';
 import * as CS from 'constants/claim_search';
-import * as SETTINGS from 'constants/settings';
-import { lighthouse } from 'redux/actions/search';
+import { fetchSearchIds } from 'util/hyperbeam';
+import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
+import { earliestReleaseTime, hyperbeamChannelSearchRequest } from 'util/hyperbeamSearch';
 import { normalizeURI } from 'util/lbryURI';
 type Props = {
   searchQuery: string;
@@ -50,10 +51,8 @@ export function SearchResults(props: Props) {
   const [isSearchingState, setIsSearchingState] = React.useState(false);
   const isSearching = React.useRef(false);
   const noMoreResults = React.useRef(false);
-  // Map contentType from ClaimListDiscover to lighthouse mediaType param
-  const mediaTypeParam = React.useMemo(() => {
-    if (!contentType || contentType === CS.CONTENT_ALL) return '';
-    // Map claim_search file types to lighthouse media types
+  const mediaType = React.useMemo(() => {
+    if (!contentType || contentType === CS.CONTENT_ALL) return null;
     const typeMap = {
       [CS.FILE_VIDEO]: SEARCH_OPTIONS.MEDIA_VIDEO,
       [CS.FILE_AUDIO]: SEARCH_OPTIONS.MEDIA_AUDIO,
@@ -62,22 +61,19 @@ export function SearchResults(props: Props) {
       [CS.FILE_BINARY]: SEARCH_OPTIONS.MEDIA_APPLICATION,
       [CS.FILE_MODEL]: SEARCH_OPTIONS.MEDIA_APPLICATION,
     };
-    const mapped = typeMap[contentType];
-    return mapped ? `&mediaType=${mapped}` : '';
+    return typeMap[contentType] || null;
   }, [contentType]);
-  // Map freshness to lighthouse time_filter
-  const timeFilterParam = React.useMemo(() => {
-    if (!freshness || freshness === CS.FRESH_ALL) return '';
+  const releaseTimeFloor = React.useMemo(() => {
+    if (!freshness || freshness === CS.FRESH_ALL) return null;
     const freshnessMap = {
-      [CS.FRESH_DAY]: 'today',
-      [CS.FRESH_WEEK]: 'thisweek',
-      [CS.FRESH_MONTH]: 'thismonth',
-      [CS.FRESH_YEAR]: 'thisyear',
+      [CS.FRESH_DAY]: SEARCH_OPTIONS.TIME_FILTER_TODAY,
+      [CS.FRESH_WEEK]: SEARCH_OPTIONS.TIME_FILTER_THIS_WEEK,
+      [CS.FRESH_MONTH]: SEARCH_OPTIONS.TIME_FILTER_THIS_MONTH,
+      [CS.FRESH_YEAR]: SEARCH_OPTIONS.TIME_FILTER_THIS_YEAR,
     };
-    const mapped = freshnessMap[freshness];
-    return mapped ? `&time_filter=${mapped}` : '';
+    return earliestReleaseTime(freshnessMap[freshness], Math.floor(Date.now() / 1000));
   }, [freshness]);
-  // Map duration filter to lighthouse min_duration/max_duration (in seconds)
+  // Map duration filter to the search service min_duration/max_duration (in seconds)
   const SHORT_DURATION_SECONDS = 240; // 4 minutes
 
   const LONG_DURATION_SECONDS = 1200; // 20 minutes
@@ -96,14 +92,9 @@ export function SearchResults(props: Props) {
     if (durationParam === CS.DURATION.CUSTOM && customMaxMinutes) return customMaxMinutes * 60;
     return null;
   }, [durationParam, customMaxMinutes]);
-  // Build sort_by param: handle ascending (oldest first = ^release_time)
   const isOldestFirst = sortByParam === CS.SORT_BY.OLDEST.key;
-  const sortBy =
-    !orderBy || orderBy === CS.ORDER_BY_NEW
-      ? `&sort_by=${isOldestFirst ? '^' : ''}${CS.ORDER_BY_NEW_VALUE[0]}`
-      : orderBy === CS.ORDER_BY_TOP
-        ? `&sort_by=${CS.ORDER_BY_TOP_VALUE[0]}`
-        : ``;
+  const sortField =
+    !orderBy || orderBy === CS.ORDER_BY_NEW ? 'release_time' : orderBy === CS.ORDER_BY_TOP ? 'effective_amount' : null;
   // Combine prop-based duration (e.g. shorts) with filter-based duration using intersection
   const effectiveMinDuration =
     durationMinParam != null && minDuration != null
@@ -125,7 +116,7 @@ export function SearchResults(props: Props) {
     noMoreResults.current = false;
     setSearchResults(null);
     setPage(1);
-  }, [searchQuery, sortBy, mediaTypeParam, timeFilterParam, effectiveMinDuration, effectiveMaxDuration]);
+  }, [searchQuery, sortField, isOldestFirst, mediaType, releaseTimeFloor, effectiveMinDuration, effectiveMaxDuration]);
   React.useEffect(() => {
     if (onResults) {
       onResults(searchResults);
@@ -143,31 +134,25 @@ export function SearchResults(props: Props) {
       }
 
       setIsSearchingState(true);
-      lighthouse
-        .search(
-          `from=${SEARCH_PAGE_SIZE * (page - 1)}` +
-            `&s=${encodeURIComponent(searchQuery)}` +
-            `&channel_id=${encodeURIComponent(claimId)}` +
-            sortBy +
-            `&nsfw=${showMature ? 'true' : 'false'}` +
-            (effectiveMinDuration ? `&${SEARCH_OPTIONS.MIN_DURATION}=${effectiveMinDuration}` : '') +
-            (effectiveMaxDuration ? `&${SEARCH_OPTIONS.MAX_DURATION}=${effectiveMaxDuration}` : '') +
-            `&size=${SEARCH_PAGE_SIZE}` +
-            mediaTypeParam +
-            timeFilterParam +
-            (maxAspectRatio ? `&${SEARCH_OPTIONS.MAX_ASPECT_RATIO}=${maxAspectRatio}` : '') +
-            (hideShorts ? `&${SEARCH_OPTIONS.EXCLUDE_SHORTS}=true` : '') +
-            (hideShorts
-              ? `&${SEARCH_OPTIONS.EXCLUDE_SHORTS_ASPECT_RATIO_LTE}=${SETTINGS.SHORTS_ASPECT_RATIO_LTE}`
-              : '') +
-            (hideShorts ? `&${SEARCH_OPTIONS.EXCLUDE_SHORTS_DURATION_LTE}=${SETTINGS.SHORTS_DURATION_LTE}` : '')
-        )
-        .then(({ body: results }) => {
+      fetchSearchIds(
+        searchQuery,
+        hyperbeamChannelSearchRequest({
+          channelId: claimId,
+          showMature,
+          mediaType,
+          earliestReleaseTime: releaseTimeFloor,
+          minDuration: effectiveMinDuration,
+          maxDuration: effectiveMaxDuration,
+          sortField,
+          sortAscending: isOldestFirst,
+          offset: SEARCH_PAGE_SIZE * (page - 1),
+          limit: SEARCH_PAGE_SIZE,
+        })
+      )
+        .then((ids) => {
           if (canceled) return;
 
-          const urls = results.map(({ name, claimId }) => {
-            return `lbry://${name}#${claimId}`;
-          });
+          const urls = ids.map((id) => hyperbeamImmutableUri(id)).filter(Boolean);
           // Batch-resolve the urls before calling 'setSearchResults', as the
           // latter will immediately cause the tiles to resolve, ending up
           // calling doResolveUri one by one before the batched one.
@@ -184,15 +169,17 @@ export function SearchResults(props: Props) {
 
                   const resolveResult = resolveResponse[normalizedUrl] || resolveResponse[url];
 
-                  return !resolveResult || !('error' in resolveResult);
+                  if (!resolveResult) return true;
+                  if ('error' in resolveResult) return false;
+                  const stream = resolveResult.stream;
+                  return !stream || stream.signing_channel?.claim_id === claimId;
                 })
               : urls;
 
-            // De-dup (LH will return some duplicates) and concat results
             setSearchResults((prev) =>
               page === 1 ? resolvedUrls : Array.from(new Set((prev || []).concat(resolvedUrls)))
             );
-            noMoreResults.current = !urls || urls.length < SEARCH_PAGE_SIZE;
+            noMoreResults.current = !ids || ids.length < SEARCH_PAGE_SIZE;
           });
         })
         .catch(() => {
@@ -219,13 +206,14 @@ export function SearchResults(props: Props) {
     page,
     showMature,
     doResolveUris,
-    sortBy,
+    sortField,
+    isOldestFirst,
     effectiveMinDuration,
     effectiveMaxDuration,
     maxAspectRatio,
     hideShorts,
-    mediaTypeParam,
-    timeFilterParam,
+    mediaType,
+    releaseTimeFloor,
   ]);
 
   if (!searchResults) {

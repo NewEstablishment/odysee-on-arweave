@@ -165,6 +165,8 @@ read_live(<<"odysee/media/descriptor/", SDHash/binary>>, Req, StoreOpts, NodeOpt
 read_live(Path, _Req, StoreOpts, NodeOpts) ->
     read_live(Path, StoreOpts, NodeOpts).
 
+read_live(<<"odysee/claim-meta/", Encoded/binary>>, StoreOpts, NodeOpts) ->
+    claim_meta_read(Encoded, StoreOpts, NodeOpts);
 read_live(<<"odysee/claim/", Encoded/binary>>, StoreOpts, NodeOpts) ->
     maybe
         {ok, URI} ?= decode_uri_component(Encoded),
@@ -269,6 +271,33 @@ claim_evidence(Claim, RequiredClaimID, StoreOpts, NodeOpts) ->
             outpoint_evidence(claim_kind(Claim), TxID, Nout, StoreOpts, NodeOpts),
         ok ?= require_claim_id(RequiredClaimID, Msg),
         evidence_result(Msg, NodeOpts)
+    end.
+
+%% Display-only compatibility metadata that cannot be derived from claim
+%% bytes. Keep it on a separate uncommitted path so it never becomes part of
+%% verified claim evidence.
+claim_meta_read(Encoded, StoreOpts, NodeOpts) ->
+    maybe
+        {ok, Decoded} ?= decode_component(Encoded),
+        ClaimID = normalize_hex(Decoded),
+        ok ?= require_hex_size(ClaimID, 40, invalid_claim_id),
+        {ok, Claim} ?=
+            hb_odysee_client:claim_search(
+                ClaimID,
+                store_node_opts(StoreOpts, NodeOpts)
+            ),
+        {ok,
+            maps:filter(
+                fun(_K, V) -> V =/= not_found end,
+                #{
+                    <<"claim-id">> => ClaimID,
+                    <<"timestamp">> =>
+                        first_found([<<"timestamp">>], Claim, not_found, NodeOpts),
+                    <<"height">> =>
+                        first_found([<<"height">>], Claim, not_found, NodeOpts),
+                    <<"source">> => <<"legacy-compatibility">>
+                }
+            )}
     end.
 
 %% @doc Read a channel by claim id or `lbry://' URI. The channel-output
@@ -675,25 +704,27 @@ integer_or_undefined(_Value) ->
 %% committer, so the id cannot be recomputed independently of the write),
 %% then the request key is linked to it. A warming failure never breaks
 %% the read.
-%% Link a freshly-read message to the addresses that should resolve to it:
-%% the canonical path's alias id, plus the request key itself when it is a
-%% bare outpoint (immutable, so the shortcut cannot go stale). The message is
-%% written first to obtain its cache id; `lbry@1.0' commitments carry no
-%% committer, so the id cannot be recomputed independently of the write.
-%% Locator aliases re-link on each live read, so a node serving them needs
-%% `cache-control => [no-store]' or a cached result hides the store and the
-%% alias never refreshes. Warming failure never breaks the read.
-warm_addresses(BareKey, Path, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
+%% Link a freshly-read message to its direct addresses: the bare outpoint
+%% (immutable, so the shortcut cannot go stale) and, when the read used the
+%% `ao:' form, that literal key as well. The message is written first to
+%% obtain its cache id; `lbry@1.0' commitments carry no committer, so the id
+%% cannot be recomputed independently of the write. Mutable locators are
+%% never linked: they re-resolve through the store on every read. Warming
+%% failure never breaks the read.
+warm_addresses(BareKey, _Path, Msg, StoreOpts, NodeOpts) when is_map(Msg) ->
+    Direct = strip_ao_prefix(BareKey),
     Keys =
-        [hb_odysee_address:alias(Path)] ++
-        case is_bare_outpoint(BareKey) of
-            true -> [BareKey];
+        case is_bare_outpoint(Direct) of
+            true -> lists:usort([BareKey, Direct]);
             false -> []
         end,
     catch link_local(Keys, Msg, local_stores(StoreOpts, NodeOpts), NodeOpts),
     ok;
 warm_addresses(_BareKey, _Path, _Msg, _StoreOpts, _NodeOpts) ->
     ok.
+
+strip_ao_prefix(<<"ao:", Rest/binary>>) -> Rest;
+strip_ao_prefix(Key) -> Key.
 
 link_local(_Keys, _Msg, [], _Opts) ->
     ok;
@@ -1068,6 +1099,14 @@ classify_channel_claims_list_path(<<ChannelID:40/binary, "/claims">>) ->
 classify_channel_claims_list_path(_Path) ->
     not_found.
 
+%% `ao:' ids are immutable only: outpoints, txids, and content hashes. A
+%% claim id is a mutable locator (its current claim changes on update), so
+%% it is never an `ao:' id; resolve it to an outpoint first.
+classify_native_path(<<"ao:", Rest/binary>>) ->
+    case classify_native_path(Rest) of
+        {ok, <<"odysee/claim-id/", _/binary>>} -> not_found;
+        Classified -> Classified
+    end;
 classify_native_path(<<TxID:64/binary, ":", Nout/binary>>) ->
     case valid_hex_size(TxID, 32) andalso valid_uint(Nout) of
         true -> {ok, <<"odysee/claim-output/", TxID/binary, "/", Nout/binary>>};
@@ -1124,14 +1163,12 @@ restore_uri_scheme(URI) -> URI.
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-%% The property the alias scheme exists for: an object materialized from a
-%% canonical `odysee/' path is afterwards reachable by a plain `?IS_ID'-shaped
-%% id, with no device call and no knowledge of the path, and it still verifies.
-%% This is what lets `~query@1.0', a peer, or a router address Odysee content.
-alias_address_resolves_to_the_same_message_test() ->
-    Bytes = <<"aliased blob payload">>,
+%% An `ao:'-prefixed key resolves exactly like its bare form: the prefix is
+%% stripped and the remainder classifies onto the same canonical path, so
+%% outpoints, txids, and hashes need no alias or index scheme.
+ao_prefixed_key_resolves_like_bare_test() ->
+    Bytes = <<"ao addressed blob payload">>,
     Hash = dev_lbry_stream_descriptor:blob_hash(Bytes),
-    Path = <<"odysee/blob/", Hash/binary>>,
     Store = hb_test_utils:test_store(),
     Opts = #{ <<"store">> => [Store] },
     SourceStore = #{
@@ -1139,18 +1176,21 @@ alias_address_resolves_to_the_same_message_test() ->
         <<"fixtures">> => #{ <<"lbry/blob/", Hash/binary>> => Bytes },
         <<"local-store">> => [Store]
     },
-    {ok, Msg} = read(SourceStore, #{ <<"read">> => Path }, Opts),
-    %% Fixtures short-circuit `read_live', so warm explicitly here; a live
-    %% read reaches this through `read/3'.
-    ok = warm_addresses(Path, Path, Msg, SourceStore, Opts),
-    Alias = hb_odysee_address:alias(Path),
-    ?assertEqual(43, byte_size(Alias)),
-    {ok, ViaAlias} = hb_cache:read(Alias, Opts),
-    Loaded = hb_cache:ensure_all_loaded(ViaAlias, Opts),
+    {ok, Msg} = read(SourceStore, #{ <<"read">> => <<"ao:", Hash/binary>> }, Opts),
+    Loaded = hb_cache:ensure_all_loaded(Msg, Opts),
     ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Loaded, not_found, Opts)),
     ?assertEqual(
         true,
         hb_message:verify(Loaded, #{ <<"commitment-ids">> => <<"all">> }, Opts)
+    ).
+
+%% `ao:' ids are immutable: a claim id is a mutable locator, never an id.
+ao_prefixed_claim_id_is_not_an_id_test() ->
+    ClaimID = binary:copy(<<"c">>, 40),
+    ?assertEqual(not_found, classify_native_path(<<"ao:", ClaimID/binary>>)),
+    ?assertEqual(
+        {ok, <<"odysee/claim-id/", ClaimID/binary>>},
+        classify_native_path(ClaimID)
     ).
 
 %% A transport failure must NOT be mistaken for "this claim is not a stream".
@@ -1471,9 +1511,8 @@ direct_media_hash_is_disabled_with_policy_providers_test() ->
 signed_stream_media_metadata_includes_channel_test() ->
     Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
     {ok, Stream} = dev_lbry_commitment:stream_claim_message(Raw, 0),
-    {ok, CommittedStream} = hb_message:with_only_committed(Stream, #{}),
-    {ok, Source} = stream_media_source(CommittedStream, #{}),
-    ChannelID = maps:get(<<"signing-channel-id">>, CommittedStream),
+    {ok, Source} = stream_media_source(Stream, #{}),
+    ChannelID = maps:get(<<"signing-channel-id">>, Stream),
     ?assertEqual(ChannelID, maps:get(<<"signing-channel-id">>, Source)),
     ?assertEqual(
         ChannelID,
@@ -1554,17 +1593,15 @@ bare_outpoint_warm_cache_links_local_store_test() ->
         maps:get(<<"claim-id">>, ClaimOutput),
         hb_maps:get(<<"claim-id">>, Cached, not_found, Opts)
     ),
-    %% The same object is reachable by the canonical path's alias id, which
-    %% needs no knowledge of the path or of LBRY identifier shapes.
-    {ok, ViaAlias0} = hb_cache:read(hb_odysee_address:alias(Path), Opts),
-    ViaAlias = hb_cache:ensure_all_loaded(ViaAlias0, Opts),
-    ?assertEqual(TxID, hb_maps:get(<<"txid">>, ViaAlias, not_found, Opts)),
-    %% A non-outpoint key does not warm the bare key (only the alias), so a
-    %% mutable locator string never becomes a direct address.
+    %% An `ao:'-form read warms both the literal `ao:' key and the bare
+    %% outpoint, so either address hits the cache afterwards.
+    AoKey = <<"ao:", Outpoint/binary>>,
+    ok = warm_addresses(AoKey, Path, ClaimOutput, #{}, Opts),
+    ?assertMatch({ok, _}, hb_cache:read(AoKey, Opts)),
+    %% A mutable locator never becomes a direct address: nothing is linked.
     LocatorPath = <<"odysee/claim/x">>,
     ok = warm_addresses(LocatorPath, LocatorPath, ClaimOutput, #{}, Opts),
     ?assertMatch({error, not_found}, hb_cache:read(LocatorPath, Opts)),
-    ?assertMatch({ok, _}, hb_cache:read(hb_odysee_address:alias(LocatorPath), Opts)),
     %% Warming without local stores is a harmless no-op.
     ?assertEqual(
         ok,
@@ -1572,42 +1609,140 @@ bare_outpoint_warm_cache_links_local_store_test() ->
     ).
 
 sample_descriptor() ->
-    Key = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>,
-    IV = <<16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31>>,
-    Ciphertext = crypto:crypto_one_time(
-        aes_128_cbc,
-        Key,
-        IV,
-        pkcs7_pad(<<"hello verified legacy stream">>),
-        true
-    ),
-    BlobHash = dev_lbry_stream_descriptor:blob_hash(Ciphertext),
-    Descriptor =
-        #{
-            <<"stream_type">> => <<"lbryfile">>,
-            <<"stream_name">> => hb_util:to_hex(<<"sample.mp4">>),
-            <<"key">> => hb_util:to_hex(Key),
-            <<"suggested_file_name">> => hb_util:to_hex(<<"sample.mp4">>),
-            <<"stream_hash">> => dev_lbry_stream_descriptor:blob_hash(<<"stream hash test">>),
-            <<"blobs">> => [
-                #{
-                    <<"length">> => byte_size(Ciphertext),
-                    <<"blob_num">> => 0,
-                    <<"iv">> => hb_util:to_hex(IV),
-                    <<"blob_hash">> => BlobHash
-                },
-                #{
-                    <<"length">> => 0,
-                    <<"blob_num">> => 1,
-                    <<"iv">> => hb_util:to_hex(<<0:128>>)
-                }
-            ]
-        },
-    Raw = hb_json:encode(Descriptor),
-    {Raw, dev_lbry_stream_descriptor:descriptor_hash(Raw), BlobHash, Ciphertext}.
+    hb_lbry_test_fixtures:sample_descriptor(<<"hello verified legacy stream">>).
 
-pkcs7_pad(Data) ->
-    PadLen = 16 - (byte_size(Data) rem 16),
-    <<Data/binary, (binary:copy(<<PadLen>>, PadLen))/binary>>.
+%% Adversarial coverage for the attestation-enforcing stream-id path,
+%% ported from the removed hb_odysee_bridge:verified_stream/2 suite. The
+%% live path must fail closed on forged or misbound signatures and serve
+%% unsigned (anonymous) claims without an attestation commitment.
+stream_id_read_rejects_forged_signature_test() ->
+    application:ensure_all_started(inets),
+    Fixture = hb_lbry_test_fixtures:signed_stream_fixture(<<1:256>>, <<2:256>>),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:fixture_server(Fixture, #{}),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        StreamTxID = maps:get(stream_txid, Fixture),
+        ?assertEqual(
+            {error, #{
+                <<"status">> => 502,
+                <<"body">> => <<"invalid_claim_signature">>
+            }},
+            read(
+                Store,
+                #{ <<"read">> => <<"odysee/stream-id/", StreamTxID/binary, ":0">> },
+                #{ <<"store">> => [] }
+            )
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+stream_id_read_rejects_channel_binding_mismatch_test() ->
+    application:ensure_all_started(inets),
+    FixtureA = hb_lbry_test_fixtures:signed_stream_fixture(<<1:256>>, <<1:256>>),
+    FixtureB = hb_lbry_test_fixtures:signed_stream_fixture(<<2:256>>, <<2:256>>),
+    {ok, Server, Handle} =
+        hb_lbry_test_fixtures:fixture_server(FixtureA, #{
+            channel_txid => maps:get(channel_txid, FixtureB),
+            channel_tx_hex => maps:get(channel_tx_hex, FixtureB)
+        }),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        StreamTxID = maps:get(stream_txid, FixtureA),
+        ?assertEqual(
+            {error, #{
+                <<"status">> => 502,
+                <<"body">> => <<"channel_binding_mismatch">>
+            }},
+            read(
+                Store,
+                #{ <<"read">> => <<"odysee/stream-id/", StreamTxID/binary, ":0">> },
+                #{ <<"store">> => [] }
+            )
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+stream_id_read_serves_unsigned_claim_without_attestation_test() ->
+    application:ensure_all_started(inets),
+    Fixture = hb_lbry_test_fixtures:unsigned_stream_fixture(),
+    {ok, Server, Handle} = hb_lbry_test_fixtures:fixture_server(Fixture, #{}),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        StreamTxID = maps:get(stream_txid, Fixture),
+        {ok, Msg} =
+            read(
+                Store,
+                #{ <<"read">> => <<"odysee/stream-id/", StreamTxID/binary, ":0">> },
+                #{ <<"store">> => [] }
+            ),
+        Kinds =
+            lists:sort([
+                maps:get(<<"evidence">>, Commitment)
+             ||
+                Commitment <- maps:values(maps:get(<<"commitments">>, Msg))
+            ]),
+        ?assertEqual([<<"claim">>, <<"stream">>], Kinds),
+        ?assertEqual(
+            true,
+            hb_message:verify(Msg, #{ <<"commitment-ids">> => <<"all">> }, #{})
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+claim_id_read_rejects_locator_claim_id_mismatch_test() ->
+    application:ensure_all_started(inets),
+    BadClaimID = <<"0000000000000000000000000000000000000000">>,
+    Claim = #{
+        <<"claim_id">> => BadClaimID,
+        <<"txid">> => <<"51d3cd6a27420addb648347410233931b862ab52660c1dba58806b5b0f38a460">>,
+        <<"nout">> => 0
+    },
+    ClaimResponse =
+        hb_lbry_test_fixtures:proxy_result(#{ <<"items">> => [Claim] }),
+    TxResponse =
+        hb_lbry_test_fixtures:proxy_result(#{ <<"hex">> => dev_lbry_tx:task0_tx_hex() }),
+    {ok, Server, Handle} = hb_mock_server:start([
+        {"/api/v1/proxy", proxy, fun(Req) ->
+            case maps:get(<<"qs">>, Req) of
+                <<"m=claim_search">> -> {200, ClaimResponse};
+                <<"m=transaction_show">> -> {200, TxResponse}
+            end
+        end}
+    ]),
+    try
+        Store = #{
+            <<"store-module">> => ?MODULE,
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        ?assertEqual(
+            {error, #{
+                <<"status">> => 502,
+                <<"body">> => <<"claim_id_mismatch">>
+            }},
+            read(
+                Store,
+                #{ <<"read">> => <<"odysee/claim-id/", BadClaimID/binary>> },
+                #{ <<"store">> => [] }
+            )
+        )
+    after
+        hb_mock_server:stop(Handle)
+    end.
 
 -endif.

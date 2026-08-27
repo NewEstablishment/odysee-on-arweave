@@ -76,6 +76,7 @@ export function doCollectionPublish(options: CollectionPublishCreateParams, coll
   return async (dispatch: Dispatch, getState: GetState): Promise<any> => {
     const state = getState();
     const collection = selectCollectionForId(state, collectionId);
+    const existingClaim = selectClaimForClaimId(state, collectionId);
     if (!collection) throw new Error('Playlist does not exist');
     const items = (options.claims || []).filter((item): item is string => typeof item === 'string' && Boolean(item));
 
@@ -93,6 +94,7 @@ export function doCollectionPublish(options: CollectionPublishCreateParams, coll
         tags: (options.tags || []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)).filter(Boolean),
         languages: options.languages || [],
         items,
+        reference_id: existingClaim?.hyperbeam?.reference_id,
       });
       const publishedCollection = {
         ...collection,

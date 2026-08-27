@@ -1,4 +1,13 @@
-import { IMAGE_PROXY_URL, THUMBNAIL_CDN_URL, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH, THUMBNAIL_QUALITY } from 'config';
+import {
+  HYPERBEAM_BASE_URL,
+  IMAGE_PROXY_URL,
+  ODYSEE_HYPERBEAM_NODE_API,
+  THUMBNAIL_CDN_URL,
+  THUMBNAIL_HEIGHT,
+  THUMBNAIL_WIDTH,
+  THUMBNAIL_QUALITY,
+} from 'config';
+import { directImageUrl } from 'util/thumbnailProxy';
 type Props = {
   thumbnail: string | null | undefined;
   height?: number;
@@ -15,9 +24,13 @@ export function getThumbnailCdnUrl(props: Props) {
     isShorts = false,
   } = props;
 
-  if (!THUMBNAIL_CDN_URL || !thumbnail || typeof thumbnail !== 'string') {
+  if (!thumbnail || typeof thumbnail !== 'string') {
     return typeof thumbnail === 'string' ? thumbnail : null;
   }
+
+  const directUrl = directImageUrl(thumbnail, trustedImageBases());
+  if (directUrl) return directUrl;
+  if (!THUMBNAIL_CDN_URL) return thumbnail;
 
   if (thumbnail.includes(THUMBNAIL_CDN_URL)) {
     return thumbnail;
@@ -36,6 +49,8 @@ export function getThumbnailCdnUrl(props: Props) {
   }
 }
 export function getImageProxyUrl(thumbnail: string | null | undefined) {
+  const directUrl = typeof thumbnail === 'string' ? directImageUrl(thumbnail, trustedImageBases()) : null;
+  if (directUrl) return directUrl;
   if (
     IMAGE_PROXY_URL &&
     thumbnail &&
@@ -47,4 +62,12 @@ export function getImageProxyUrl(thumbnail: string | null | undefined) {
   }
 
   return typeof thumbnail === 'string' ? thumbnail : null;
+}
+
+function trustedImageBases(): Array<string> {
+  return [
+    HYPERBEAM_BASE_URL,
+    ODYSEE_HYPERBEAM_NODE_API,
+    typeof window !== 'undefined' ? window.location.origin : '',
+  ].filter(Boolean);
 }

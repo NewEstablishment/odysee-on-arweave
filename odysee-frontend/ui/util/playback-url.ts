@@ -1,4 +1,4 @@
-import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 export const HLS_FILETYPE = 'application/x-mpegURL';
 
@@ -114,7 +114,7 @@ function isHyperbeamCacheMediaUrl(url: URL): boolean {
 }
 
 function isConfiguredHyperbeamNodeUrl(url: URL) {
-  return [HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API].some((rawBase) => {
+  return [hyperbeamNodeBase()].some((rawBase) => {
     const base = String(rawBase || '').replace(/\/+$/, '');
     if (!base) return false;
 

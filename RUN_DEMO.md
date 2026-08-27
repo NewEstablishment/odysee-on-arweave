@@ -1,194 +1,241 @@
-# Odysee on HyperBEAM
+# Odysee on HyperBEAM demo
 
-Odysee served from a single HyperBEAM node. Legacy Odysee infrastructure is a
-byte source only: every fact the node serves is re-derived from raw bytes and
-carried as a commitment, so a client never has to trust the node.
+This is the presentation runbook for the store-first Odysee prototype. The
+product frontend is a static Arweave path manifest served directly by the same
+HyperBEAM node that owns cookie identity, immutable reads, generic writes,
+query, search, and playback. The SSR server is not part of the demo path.
 
-Verified working: the UI loads from the node, a real video plays, and every
-byte was hash-checked on the way through.
+## The story to tell
 
----
+The shortest useful description is:
 
-## What it is
+> Odysee now runs as a static manifest on HyperBEAM. Historical LBRY content
+> enters through verifying source stores, while new accounts, uploads,
+> comments, reactions, playlists, follows, moderation, and encrypted settings
+> are signed append-only messages. Playback analytics use the generic native
+> analytics device. Discovery returns immutable locators and the UI hydrates
+> exact objects separately.
 
-**Four devices and five stores.** No application devices.
+The architectural points worth emphasizing are:
 
-| | |
-|---|---|
-| `lbry@1.0` | verification only, proves LBRY evidence |
-| `odysee-auth@1.0` | session to account to signing key |
-| `search@1.0`, `reply-id@1.0` | generic full-text, write-reply shim |
-| `hb_store_odysee` | the compatibility boundary: classify a legacy id, fetch, verify, cache |
-| 4 x `hb_store_lbry_*` | transaction, claim output, stream descriptor, blob |
+- The browser has one product data route: the manifest's HyperBEAM origin.
+- Native writes use the generic `/id?0.%21=true&committers=all` path; product
+  schemas are messages, not a fleet of product write devices.
+- The node's `secret-*` cookie is the account authority. Email, password, and
+  legacy verified-email state are not required.
+- Search and query only discover locators. Exact committed messages remain the
+  source of truth.
+- Preferences are AES-256-GCM ciphertext at rest. A narrow authenticated
+  device seals and opens them, while generic immutable snapshots and
+  `reference@1.0` provide append-only history and stable identity.
+- Historical transactions, claim outputs, descriptors, and blobs are checked
+  against their native hashes before they are cached or served.
+- Page activity, playback engagement, and public view totals use
+  `analytics@1.0`; the browser does not call legacy Watchman or view-count
+  services.
 
-The old design had 25+ application devices (`odysee-claim@1.0`,
-`odysee-stream@1.0`, ...). They are gone. Reads are store reads, so anything
-that can read a HyperBEAM store can read Odysee content: `~query@1.0`, a peer
-node, a router such as weave.space.
+## Presentation preflight
 
-Why that matters operationally: every custom device must be trust-pinned by
-every node operator who wants to serve your content. Four pins is a different
-proposition from twenty-five.
+Do this before the audience arrives. Avoid repeatedly refreshing the SPA: the
+stock per-IP limiter counts manifest assets and can temporarily return `429`
+after enough full reloads.
 
-## The flow
-
-```mermaid
-flowchart TD
-    A["Browser: GET /~cache@1.0/read?read=odysee/media/stream-id/txid:0"] --> B[Store stack, in order]
-    B -->|hit| C[Local cache, served in ms]
-    B -->|miss| D[hb_store_odysee]
-    D --> E[Classify the key by shape]
-    E --> F[Fetch from legacy: SDK proxy locator, blob CDN bytes]
-    F --> G{Verify}
-    G -->|"txid = reverse(sha256d(raw))<br/>every blob = sha384"| H[Build committed message]
-    G -->|mismatch| I[Read fails, nothing served]
-    H --> J[Write to local cache, link addresses]
-    J --> K[HTTP response: fields as headers, commitments as signature]
-    style G fill:#854F0B,color:#fff
-    style I fill:#A32D2D,color:#fff
-```
-
-Read-through caching: the first read pays for legacy, everything after is
-local. Same object measured on the demo: **3.4s cold, 0.002s warm**.
-
-The response *is* the proof:
-
-```
-txid:            d22e243be78d...
-raw:             AQAAAAKConULCnjLdPQnQ43-Vpqt...
-signature-input: comm-...=("raw" "txid");alg="lbry@1.0/sha-256d"
-```
-
-Recompute `reverse(sha256d(raw))`, compare to `txid`. The node is a transport,
-not an oracle.
-
-## Run it locally
-
-Needs Erlang/OTP 27+, rebar3, node >= 22.12, and network access to Odysee.
+Package the runtime once after a pull or any device change. Include the
+external reference device used by playlists and encrypted preferences:
 
 ```sh
-# 1. Build the UI from the tracked odysee-frontend/, which carries the
-#    store-first data layer. The node API must be baked in at BUILD time,
-#    and the manifest profile (relative base, node-safe asset names) is
-#    required for serving from the node.
+HB_PORT=18734 rebar3 device preload \
+  --device-src src,_build/default/lib/reference_1_0/src \
+  --output-dir _build/device-local-store \
+  --verbose
+```
+
+```sh
+# Terminal 1: Meilisearch. Use the already-populated demo database.
+../meilisearch/target/release/meilisearch \
+  --http-addr 127.0.0.1:7700 \
+  --db-path /tmp/odysee-meili-data
+
+# Terminal 2: HyperBEAM. Keep the persistent store so the demo identity,
+# uploads, comments, preferences, and published manifest survive restarts.
+HB_CONFIG=config.json \
+HB_PRELOADED_STORE=_build/device-local-store \
+rebar3 shell
+
+# Terminal 3: only when a fresh manifest is required.
 cd odysee-frontend
-corepack enable && corepack prepare pnpm@10.33.0 --activate
-pnpm install
-ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18801 pnpm run build:manifest
-
-# 2. Build the preloaded device store, once.
-cd .. && HB_PORT=18734 rebar3 device local     # ctrl-C twice once it boots
-
-# 3. Start the configured cookie-auth node and publish the UI into its store.
-#    config.json owns port 18801, the writable store/match index, and the
-#    auth/reply-id/manifest hooks. Keep this shell running while testing.
-HB_CONFIG=config.json HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval '{ok, Config} = hb_opts:load("config.json", hb_opts:default_message_with_env()), [_, Writable | _] = maps:get(<<"store">>, Config), PublishOpts = Config#{<<"store">> => [Writable], <<"match-index">> => [Writable]}, {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", PublishOpts), io:format("~n=== MANIFEST ~s~n", [M]), receive stop -> ok end.'
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 \
+pnpm run publish:manifest
 ```
 
-Then open, using the manifest id it prints:
+Copy the printed manifest ID into the ignored root `.demo-manifest` file. The
+presentation URL is:
 
+```text
+http://127.0.0.1:18801/<MANIFEST-ID>/#/
 ```
-http://127.0.0.1:18801/<MANIFEST>/#/@conculturepodcast:c/what-if-anakin-won-star-wars-alternate:b
-```
 
-`cache-control => no-store` is required. Without it the resolution cache pins
-mutable locators at constant addresses and stale claims get served.
-
-### Tests
+Confirm the stack and published entry page:
 
 ```sh
-rebar3 device test --with-core        # 258 tests. --with-core is required,
-                                      # plain `device test` runs 91 and skips
-                                      # the whole store layer
-ODYSEE_LIVE=1 rebar3 device test --with-core   # adds live-infrastructure test
+curl http://127.0.0.1:7700/health
+curl -I http://127.0.0.1:18801/~meta@1.0/info
+curl -I "http://127.0.0.1:18801/$(tr -d '\n' < .demo-manifest)/"
 ```
 
-## What works
+Open the manifest once, verify that the homepage tiles appear, and leave that
+tab open. Have one short MP4 ready if you want to perform a fresh upload.
 
-Claims, channels, streams, transactions, descriptors, blobs, video playback,
-auth, search. All cryptographically verified, cached locally after first
-fetch, and addressable by a plain HyperBEAM id.
+## Recommended eight-minute walkthrough
 
-## Writes: uploads, channels, comments, reactions, playlists, subscriptions
+### 1. Start with the manifest homepage
 
-Native content never touches LBRY. Boot the node with
-`hb_odysee_node:upload_opts/1` instead of `seed_opts/1` and the stock auth
-hook turns any POST carrying the `!` commit flag into a committed, stored,
-queryable message, signed with a cookie-derived per-user wallet, so a
-browser needs no wallet. No new devices; the whole plane is node options.
+Open the manifest root. Show the materialized **Local content** section and
+open its sidebar category. Change sort or grid/list display, then click a tile.
+
+What to say: the homepage was built from ranked `search@1.0` locators and each
+locator was exact-read before it entered the bundle. Meilisearch discovers;
+it does not supply authoritative objects.
+
+### 2. Show playback as a normal browser experience
+
+Play the selected video, seek forward and backward, and enter/exit fullscreen.
+Point out the displayed view total. If you want to demonstrate a new qualified
+view, use media longer than 30 seconds and keep it actively playing beyond the
+configured threshold before refreshing the count.
+
+What to say: immutable native media and verified historical media support
+single HTTP byte ranges, so browser seeking receives `206 Partial Content`.
+The partial response is a delivery representation; the whole immutable object
+remains the commitment-verification surface. The view total combines an
+owner-imported historical baseline with qualified, deduplicated native
+`analytics@1.0` engagement.
+
+### 3. Show the cookie-native account and channel
+
+Open **Channels**, then open **My channel page**. Point out the banner, avatar,
+tabs, owner edit controls, upload count, and channel-attributed tiles.
+
+What to say: the hosted cookie wallet, not local storage or a claimed profile
+field, is the authority. The exact profile message is verified under that same
+committer and normalized into the legacy-compatible UI shape at one frontend
+boundary.
+
+### 4. Publish under the native channel
+
+Open the upload wizard. Show that the native channel is already selected,
+choose a short MP4, set a unique slug and title, review the summary, and
+publish. If you intentionally reuse a name, show the collision warning first.
+
+After publish, open the result and then the channel's **Content** tab.
+
+What to say: the file bytes receive one immutable ID, and a second generic
+`odysee-upload@1.0` record links presentation metadata to those bytes. A native
+upload takes precedence over a historical name collision without changing
+immutable identity.
+
+### 5. Demonstrate append-only social state
+
+On the video:
+
+1. Like it.
+2. Add a comment and a reply.
+3. Edit the comment if time permits.
+4. Use the creator menu to pin or hide a comment.
+5. Follow a channel, refresh, then unfollow it.
+
+What to say: every change is another signed message. Ayush's shared
+revisioned-message kernel validates contiguous same-owner chains and handles
+fork/equivocation policy consistently for comments, controls, reactions,
+playlists, and subscriptions.
+
+### 6. Show a stable public playlist
+
+Add the video to a playlist and publish it. Copy or open the
+`/$/playlist/<reference-id>` route. Reorder or change the list and republish if
+time allows; the public URL stays stable.
+
+What to say: each playlist version is a full immutable snapshot. The canonical
+`reference@1.0` init commitment is the stable ID, and authorized set messages
+advance its head without mutating history.
+
+### 7. Finish with encrypted preferences
+
+Open Settings, change theme or language, leave Settings so the save completes,
+then refresh the manifest. The chosen values should already be present before
+re-entering Settings.
+
+What to say: preferences hydrate during application startup. Public storage
+contains only IV, ciphertext, authentication tag, owner, and algorithm
+metadata; plaintext exists only at the authenticated seal/open boundary.
+
+### 8. Optional network proof
+
+In browser developer tools, filter the Network panel for:
+
+```text
+api.na-backend.odysee.com
+api.odysee.live
+comments.odysee.tv
+watchman.na-backend.odysee.com
+thumbnails.odycdn.com
+```
+
+Normal native navigation, publish, playback, settings, and social flows should
+show no product requests to those hosts. The manifest, reads, writes, queries,
+and ranges should target `127.0.0.1:18801`.
+
+## Validation before a demo build
 
 ```sh
-# Upload a video. The reply's message-id is its permanent address.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
-  -H "content-type: video/mp4" -H "type: stream" -H "title: my video" \
-  --data-binary @video.mp4
+rebar3 compile
+rebar3 eunit-all
+node --test scripts/export-legacy-analytics-baseline.test.mjs \
+  scripts/import-analytics-baseline.test.mjs
 
-# It now serves, byte-exact and signed, at:
-#   GET /<message-id>
-
-# Who am I? The profile's commitment names its committer:
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
-  -H "type: channel" -H "name: my channel"          # -> <profile-id>
-curl "$NODE/<profile-id>/commitments/<profile-id>/committer"   # -> <address>
-
-# Tag uploads with `channel: <address>`; the channel page is a query:
-curl -X POST "$NODE/~query@1.0/only" -H "type: stream" \
-  -H "channel: <address>" -H "only: type,channel" -H "return: paths"
-
-# Comments reference the video id:
-curl -X POST "$NODE/id?!=true&committers=all" \
-  -H "type: comment" -H "parent: <video-id>" --data-binary "nice one"
-
-# Likes and dislikes are generic committed reaction messages:
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
-  -H "content-type: application/json" \
-  --data-binary '{"schema":"odysee-reaction@1.0","type":"reaction","reaction-ref":"<stable-ref>","version-ref":"<version-ref>","target":"<video-or-comment-id>","subject":"content","reaction":"like","state":"active","operation":"set","revision":0,"event-timestamp":<milliseconds>,"signature-scope":"native-reaction-v1"}'
-
-# Public playlists are full ordered immutable snapshots. The returned
-# message-id is an exact /$/playlist/<message-id> route. A query can return a
-# different verified commitment locator for the same signed snapshot.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
-  -H "content-type: application/json" \
-  --data-binary '{"schema":"odysee-playlist@1.0","type":"playlist","profile-id":"<profile-id>","profile-name":"my channel","title":"My playlist","items-json":"[\"<immutable-video-id>\"]","item-count":1,"tags-json":"[]","languages-json":"[]","created-at":<milliseconds>,"signature-scope":"native-playlist-v1"}'
-
-# Free channel follows use a deterministic owner/channel relationship. Later
-# notification changes and unfollows append revision-of/previous-version.
-curl -b jar -c jar -X POST "$NODE/id?!=true&committers=all" \
-  -H "content-type: application/json" \
-  --data-binary '{"schema":"odysee-subscription@1.0","type":"subscription","subscription-ref":"<committer>.lbry:<full-channel-claim-id>","channel-ref":"lbry:<full-channel-claim-id>","channel-uri":"lbry://@channel#<full-channel-claim-id>","channel-name":"@channel","profile-id":"<profile-id>","profile-name":"my profile","notifications-disabled":true,"state":"active","operation":"follow","origin":"native","revision":0,"version-ref":"<version-ref>","created-at":<milliseconds>,"updated-at":<milliseconds>,"signature-scope":"native-subscription-v1"}'
+cd odysee-frontend
+pnpm run fmt:check
+pnpm run typecheck:tsc
+pnpm run check
+pnpm run test:native-comment-revisions
+pnpm run test:native-message-verification
+pnpm run test:native-comment-controls
+pnpm run test:native-reactions
+pnpm run test:native-playlists
+pnpm run test:native-subscriptions
+pnpm run test:native-preferences
+pnpm run test:manifest-homepage
+pnpm run test:static-manifest
 ```
 
-The query is convention; the proof is the commitment. A listing reader keeps
-entries the claimed channel signed (anyone can claim any `channel` key, nobody
-can forge the signature). Membership, not sole authorship: because storage is
-content addressed, an attacker can re-upload a video's public bytes to co-sign
-the shared object, so demanding the channel be the only signer would let them
-censor a genuine upload. The write-plane tests in `hb_odysee_node` drive all
-of this over HTTP, both the spoof and the censorship attempt.
+Live cookie lifecycle tests use the running node:
 
-## What does not
+```sh
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-reactions
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-playlists
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-subscriptions
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-preferences
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:hyperbeam-upload-smoke
+```
 
-- **View and subscriber counts, advanced moderation.** Not rebuilt.
-- **Homepage tiles.** Claims resolve, but the frontend wants decoded display
-  metadata that evidence messages do not carry.
-- **Seeking.** `dev_cache` drops the request, so Range headers never reach the
-  store. Whole-object playback only.
-- **Account banner.** Expected, there is no account backend.
-- **Zero-result query handling.** Unpatched nodes return HTTP 500 when
-  `~query@1.0` has no results because of an upstream `case_clause` in
-  `dev_query:match/4`. `patches/dev-query-match-error-tuple.patch` returns
-  type-correct empty aggregates and retains `not_found` for first-item modes.
+## Honest limitations
 
-By design, not a bug: `GET /<alias>` returns the bytes but no commitments.
-An alias is a hash of a *path*, so it has no cryptographic relationship to
-the content and cannot name the content's proof. The verifiable plain id is
-the `lbry@1.0` commitment id, and `GET /<commitment-id>` does carry the
-proof; so does the canonical `/~cache@1.0/read?read=...` form. Aliases and
-bare outpoints are locators. See `skeleton_blob_serves_and_addresses_test`
-in `hb_odysee_node` for both halves, and `ARCHITECTURE_READ_PATH.md` for the
-full read path.
+- View totals are implemented, but the Odysee application does not include an
+  analytics dashboard. Historical totals require a one-time owner-signed
+  baseline import.
+- Native aggregate subscriber counts, moderation delegates, and blocked-word
+  settings are not implemented.
+- Upload metadata edit/delete still needs a complete append-only contract.
+- Browser identity is local to this node/browser and is not yet portable or
+  recoverable on another deployment.
+- Single HTTP ranges work; multipart byte ranges are not implemented.
+- The stock per-IP rate-limit bucket must be raised for production static
+  manifest traffic. If a local demo returns a full-page `Rate limit exceeded`,
+  stop refreshing and wait roughly one minute before reopening the same tab.
+- Homepage/category data is build-time materialized. If the search index
+  changes, publish a new manifest rather than expecting an old bundle to gain
+  new categories.
 
-## Read next
-
-`ARCHITECTURE_READ_PATH.md` traces the whole read path in 26 steps with
-file:line references.
+For the detailed trust and data model, read `README.md`,
+`docs/architecture.md`, and `docs/native-messages.md`.

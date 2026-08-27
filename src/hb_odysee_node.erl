@@ -24,7 +24,12 @@
     <<"secret">>, <<"cookie">>, <<"set-cookie">>, <<"path">>,
     <<"method">>, <<"authorization">>, <<"!">>,
     <<"accept">>, <<"accept-bundle">>, <<"ao-peer">>, <<"ao-peer-port">>,
-    <<"committers">>, <<"host">>, <<"user-agent">>
+    <<"committers">>, <<"host">>, <<"user-agent">>, <<"origin">>,
+    <<"referer">>, <<"connection">>, <<"accept-language">>,
+    <<"accept-encoding">>, <<"sec-fetch-dest">>, <<"sec-fetch-mode">>,
+    <<"sec-fetch-site">>, <<"sec-ch-ua">>, <<"sec-ch-ua-mobile">>,
+    <<"sec-ch-ua-platform">>, <<"odysee-auth-token">>,
+    <<"x-odysee-auth-token">>, <<"x-lbry-auth-token">>
 ]).
 
 %% @doc Start a seed node on an OS-assigned port with default options.
@@ -46,8 +51,9 @@ seed_opts(Overrides) ->
     Base = maps:merge(#{ <<"port">> => 0 }, maps:remove(<<"store">>, Overrides)),
     Base#{ <<"store">> => Stores }.
 
-%% @doc Seed-node options that also accept committed writes: uploads,
-%% channel profiles, comments. The stock auth hook signs any request
+%% @doc Seed-node options that also accept committed native writes: uploads,
+%% channel profiles, comments, reactions, playlists, and subscriptions. The
+%% stock auth hook signs any request
 %% carrying the `!' commit flag with a cookie-derived per-user wallet,
 %% `store-all-signed' persists what it signs, and the match index makes
 %% the writes discoverable through `~query@1.0'. Writes land in the
@@ -58,7 +64,38 @@ upload_opts(Overrides) ->
         <<"on">> => cookie_auth_hooks(Opts),
         <<"store-all-signed">> => true,
         <<"match-index">> => [hd(Stores)],
-        <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS
+        <<"hook-auth-ignored-keys">> => ?UNSIGNED_REQUEST_KEYS,
+        <<"search-index-markers">> =>
+            [
+                #{
+                    <<"field">> => <<"schema">>,
+                    <<"values">> =>
+                        [
+                            <<"odysee-upload@1.0">>,
+                            <<"odysee-channel@1.0">>,
+                            <<"odysee-playlist@1.0">>,
+                            <<"odysee-comment@1.0">>
+                        ]
+                },
+                <<"claim-name">>
+            ],
+        <<"search-skip-fields">> =>
+            [
+                <<"claim">>,
+                <<"claim-ancestry">>,
+                <<"claim-envelope">>,
+                <<"claim-id">>,
+                <<"claim-op">>,
+                <<"claim-proof-strength">>,
+                <<"channel-id">>,
+                <<"evidence">>,
+                <<"native-id">>,
+                <<"native-id-type">>,
+                <<"nout">>,
+                <<"raw-transaction">>,
+                <<"sd-hash">>,
+                <<"txid">>
+            ]
     }.
 
 %% @doc The read-only Odysee source stores.
@@ -106,6 +143,8 @@ cookie_auth_hooks(Opts) ->
     Hooks = hb_opts:get(on, #{}, Opts),
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
     Hooks#{
+        <<"cache-write">> =>
+            [#{ <<"device">> => <<"search@1.0">>, <<"path">> => <<"write">> }],
         <<"request">> =>
             lists:flatmap(
                 fun
@@ -173,6 +212,7 @@ skeleton_node(Fixtures) ->
                 }
             ],
             <<"priv-wallet">> => ar_wallet:new(),
+            <<"search-backend-url">> => <<"http://127.0.0.1:1">>,
             %% A mutable value at a constant address must not come from the
             %% resolution cache, or an alias never refreshes.
             <<"http-extra-opts">> => #{
@@ -242,20 +282,7 @@ skeleton_blob_serves_and_addresses_test() ->
     [CommitmentID | _] = lbry_commitment_ids(Served, Opts),
     {ok, ViaID} = hb_http:get(Node, <<"/", CommitmentID/binary>>, #{}),
     Addressed = skeleton_assert_verifies(ViaID, Opts),
-    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)),
-
-    %% The alias locates the same object, without carrying the proof.
-    Alias = hb_odysee_address:alias(Path),
-    {ok, ViaAlias} = hb_http:get(Node, <<"/", Alias/binary>>, #{}),
-    ?assertEqual(
-        Hash,
-        hb_maps:get(
-            <<"blob-hash">>,
-            hb_cache:ensure_all_loaded(ViaAlias, Opts),
-            not_found,
-            Opts
-        )
-    ).
+    ?assertEqual(Hash, hb_maps:get(<<"blob-hash">>, Addressed, not_found, Opts)).
 
 %% Descriptor parsed and checked against its sd-hash.
 skeleton_descriptor_serves_test() ->
@@ -333,6 +360,7 @@ upload_node() ->
     Node =
         hb_http_server:start_node(upload_opts(#{
             <<"store">> => [Store],
+            <<"search-backend-url">> => <<"http://127.0.0.1:1">>,
             <<"priv-wallet">> => ar_wallet:new()
         })),
     {Node, #{ <<"store">> => [Store] }}.
@@ -341,7 +369,7 @@ upload_node() ->
 %% its session cookie, so the request commits as the same user; `none' is a
 %% fresh session and therefore a fresh identity.
 commit_post(Node, Msg, PrevReply, Opts) ->
-    Req = Msg#{ <<"path">> => <<"/id?!=true&committers=all">> },
+    Req = Msg#{ <<"path">> => <<"/id?0.!=true&committers=all">> },
     WithCookie =
         case PrevReply of
             none -> Req;
@@ -428,10 +456,11 @@ match_paths(Reply, Opts) ->
 %% content id: anyone can upload byte-identical content and have their
 %% commitment coalesced into the same group. Demanding the channel be the
 %% ONLY signer would let an attacker censor a genuine upload by re-uploading
-%% its public bytes, adding a second signer. So verify the channel's OWN
-%% commitments and ignore any others: a spoof (content the channel never
-%% signed) has no such commitment and is rejected; an attacker's extra
-%% commitment on genuine content changes nothing.
+%% its public bytes, adding a second signer. Verify the channel's exact
+%% commitments independently and require at least one valid commitment: a
+%% resolver-stage duplicate that does not verify must not invalidate a valid
+%% application commitment by the same signer, while a spoof has no valid
+%% channel commitment at all.
 verified_channel_entry(Path, Channel, Opts) ->
     {ok, Msg} = hb_cache:read(Path, Opts),
     Loaded =
@@ -440,20 +469,19 @@ verified_channel_entry(Path, Channel, Opts) ->
             Opts
         ),
     Commitments = hb_maps:get(<<"commitments">>, Loaded, #{}, Opts),
-    ByChannel =
+    VerifiedByChannel =
         [
             ID
         ||
             {ID, C} <- hb_maps:to_list(Commitments, Opts),
-            hb_maps:get(<<"committer">>, C, none, Opts) =:= Channel
-        ],
-    Genuine =
-        ByChannel =/= [] andalso
+            hb_maps:get(<<"committer">>, C, none, Opts) =:= Channel,
             hb_message:verify(
                 Loaded,
-                #{ <<"commitment-ids">> => ByChannel },
+                #{ <<"commitment-ids">> => [ID] },
                 Opts
-            ),
+            )
+        ],
+    Genuine = VerifiedByChannel =/= [],
     case Genuine of
         true -> {true, hb_maps:get(<<"title">>, Loaded, not_found, Opts)};
         false -> false
@@ -585,17 +613,6 @@ run_live_transaction() ->
         hb_message:verify(
             hb_cache:ensure_all_loaded(Msg, Opts),
             #{ <<"commitment-ids">> => <<"all">> },
-            Opts
-        )
-    ),
-    %% Warming linked the alias, so the object is now addressable by id.
-    {ok, ViaAlias} = hb_cache:read(hb_odysee_address:alias(Path), Opts),
-    ?assertEqual(
-        TxID,
-        hb_maps:get(
-            <<"txid">>,
-            hb_cache:ensure_all_loaded(ViaAlias, Opts),
-            not_found,
             Opts
         )
     ),

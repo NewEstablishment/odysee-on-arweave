@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   isNativeMessageId,
   nativeMessageVersionRef,
+  verifiedNativeOwnerMatches,
   verifyNativeMessage,
 } from '../../ui/util/nativeMessageVerification.ts';
 
@@ -24,6 +25,9 @@ assert.deepEqual(await verifyNativeMessage(`/${messageId}`, dependencies), {
 });
 assert.equal(await verifyNativeMessage(messageId, { ...dependencies, verifyCommitment: async () => false }), null);
 assert.equal(await verifyNativeMessage(messageId, { ...dependencies, loadCommitter: async () => null }), null);
+assert.equal(verifiedNativeOwnerMatches('owner-a', 'owner-a'), true);
+assert.equal(verifiedNativeOwnerMatches('owner-b', 'owner-a'), false);
+assert.equal(verifiedNativeOwnerMatches('owner-a', null), false);
 
 let invalidCalled = false;
 assert.equal(

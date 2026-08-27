@@ -2,6 +2,7 @@
 
 import { getLivestreamTurnServer } from 'constants/livestream';
 import type { WebrtcPublishVideoCodecPreference } from 'constants/webrtcPublish';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 const DEFAULT_ICE_GATHER_TIMEOUT_MS = 4000;
 const WHIP_DEBUG = process.env.NODE_ENV === 'development';
@@ -319,6 +320,10 @@ export async function startWhipPublish(
   stream: MediaStream,
   options?: StartWhipPublishOptions
 ): Promise<WhipPublishResult> {
+  if (hyperbeamNodeEnabled()) {
+    throw new Error('Legacy livestream publishing is unavailable in HyperBEAM mode.');
+  }
+
   const signal = options?.signal;
   const iceMs = options?.iceGatherTimeoutMs ?? DEFAULT_ICE_GATHER_TIMEOUT_MS;
 

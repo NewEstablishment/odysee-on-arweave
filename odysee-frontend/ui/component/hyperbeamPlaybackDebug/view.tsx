@@ -1,9 +1,9 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
-import { HYPERBEAM_BASE_URL } from 'config';
 import { buildHyperbeamPlaybackUrl } from 'util/hyperbeam-playback';
 import { fetchHyperbeamStreamVerification, hyperbeamStoreReadPath } from 'util/hyperbeam';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 import './style.lazy.scss';
 
 const TIMEOUT_MS = 8000;
@@ -730,7 +730,8 @@ function headersToObject(headers: Headers): Record<string, string> {
 }
 
 function hyperbeamBaseUrl(playbackRequestUrl: string): string {
-  if (HYPERBEAM_BASE_URL) return String(HYPERBEAM_BASE_URL).replace(/\/$/, '');
+  const configured = hyperbeamNodeBase();
+  if (configured) return configured;
 
   try {
     return new URL(playbackRequestUrl).origin;

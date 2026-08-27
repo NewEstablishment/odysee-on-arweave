@@ -2,20 +2,19 @@
 %%%
 %%% `analytics@1.0' lets a wallet register a web app, invite additional wallets,
 %%% embed a public tracking key, collect page-load visits, active duration, and
-%%% basic IP/location demographics, and inspect the results through a
+%%% basic IP/location demographics, and inspect the results through an external
 %%% wallet-authenticated dashboard.
 %%%
-%%% The public tracker does not use cookies, localStorage, sessionStorage,
-%%% IndexedDB, user-agent persistence, or fingerprinting. It creates one random
-%%% in-memory visit ID per page view so duration pings for that open page can be
-%%% joined. As a result, reported "users" are anonymous page-load visits, not
-%%% cross-session deduplicated people.
+%%% By default the public tracker creates only an in-memory visit ID. Sites may
+%%% explicitly enable a random first-party persistent visitor ID when they need
+%%% cross-day active-user and retention analytics. The device hashes that ID
+%%% with a private per-site salt before storing it and never exposes visitor
+%%% identifiers in reports.
 -module(dev_analytics).
 -implements(<<"analytics@1.0">>).
 -specification("../SPEC.md").
 -export([
     info/1,
-    index/3,
     nonce/3,
     register/3,
     delete/3,
@@ -23,12 +22,17 @@
     report/3,
     script/3,
     session/3,
-    event/3
+    event/3,
+    engagement/3,
+    count/3,
+    counts/3,
+    subjects/3,
+    baseline/3
 ]).
 -include_lib("hb/include/hb.hrl").
 
 -define(NO_CACHE, [<<"no-cache">>, <<"no-store">>]).
--define(MAX_DAYS, 90).
+-define(MAX_DAYS, 365).
 -define(DEFAULT_DAYS, 14).
 -define(MAX_DURATION_MS, 86_400_000).
 %% "Current visitors" liveness backstop. An open tab heartbeats every ~15s (and
@@ -39,7 +43,11 @@
 %% (crash, killed tab, dropped network) lingers before ageing out.
 -define(DEFAULT_ACTIVE_WINDOW_MS, 120_000).
 -define(SESSION_WINDOW_MS, 1_800_000).
+-define(ENGAGED_SESSION_MS, 10_000).
 -define(DEFAULT_NONCE_TTL_MS, 300_000).
+-define(DEFAULT_ENGAGEMENT_THRESHOLD_MS, 30_000).
+-define(DEFAULT_ENGAGEMENT_DEDUPE_WINDOW_MS, 86_400_000).
+-define(DEFAULT_ENGAGEMENT_CLOCK_SKEW_MS, 15_000).
 -define(SITE_KEY_BYTES, 32).
 -define(NONCE_BYTES, 24).
 -define(GEOIP_LOADER, analytics_geoip).
@@ -56,7 +64,6 @@
 info(_Opts) ->
     #{
         exports => [
-            <<"index">>,
             <<"nonce">>,
             <<"register">>,
             <<"delete">>,
@@ -64,46 +71,14 @@ info(_Opts) ->
             <<"report">>,
             <<"script">>,
             <<"session">>,
-            <<"event">>
-        ],
-        default => fun default/4
+            <<"event">>,
+            <<"engagement">>,
+            <<"count">>,
+            <<"counts">>,
+            <<"subjects">>,
+            <<"baseline">>
+        ]
     }.
-
-default(_Path, Base, Req, Opts) ->
-    index(Base, Req, Opts).
-
-%% @doc Return the embedded dashboard.
-index(_Base, _Req, Opts) ->
-    case static(<<"index.html">>, Opts) of
-        {ok, Msg = #{ <<"body">> := Body }} ->
-            Body1 =
-                inline_asset(
-                    Body,
-                    <<"styles.css">>,
-                    <<"{{ANALYTICS_CSS}}">>,
-                    fun escape_style/1,
-                    Opts
-                ),
-            Body2 =
-                inline_asset(
-                    Body1,
-                    <<"dashboard.js">>,
-                    <<"{{ANALYTICS_JS}}">>,
-                    fun escape_script/1,
-                    Opts
-                ),
-            Body3 =
-                inline_asset(
-                    Body2,
-                    <<"logo.svg">>,
-                    <<"{{ANALYTICS_LOGO_BASE64}}">>,
-                    fun base64:encode/1,
-                    Opts
-                ),
-            with_common_headers({ok, Msg#{ <<"body">> => Body3 }});
-        Other ->
-            Other
-    end.
 
 %% @doc Create a short-lived dashboard authentication nonce.
 nonce(_Base, Req, Opts) ->
@@ -192,7 +167,7 @@ sites(_Base, Req, Opts) ->
                     {ok, Keys} -> lists:sort(Keys);
                     _ -> []
                 end,
-            SiteRecords =
+            StoredSiteRecords =
                 lists:filtermap(
                     fun(Key) ->
                         case read_site(Key, Opts) of
@@ -206,6 +181,16 @@ sites(_Base, Req, Opts) ->
                     end,
                     SiteKeys
                 ),
+            ConfiguredSiteRecords = configured_sites_for_owner(Owner, Opts),
+            SitesByKey =
+                lists:foldl(
+                    fun(Site, Acc) ->
+                        Acc#{ hb_maps:get(<<"key">>, Site, <<>>, Opts) => Site }
+                    end,
+                    #{},
+                    ConfiguredSiteRecords ++ StoredSiteRecords
+                ),
+            SiteRecords = [maps:get(Key, SitesByKey) || Key <- lists:sort(maps:keys(SitesByKey))],
             json_ok(
                 #{
                     <<"owner">> => Owner,
@@ -239,17 +224,21 @@ report(_Base, Req, Opts) ->
             Pages = pages_from_days(Daily),
             Demographics = demographics_from_days(Daily),
             Summary = summary_from_days(Key, Daily, Route, Opts),
+            Audience = audience_from_days(Daily),
             Sessions = maps:get(<<"sessions">>, Summary, 0),
             json_ok(
                 #{
                     <<"owner">> => Owner,
                     <<"site">> => public_site(Site, Opts),
-                    <<"days">> => Daily,
+                    <<"days">> => [public_daily(Day) || Day <- Daily],
+                    <<"audience">> => Audience,
+                    <<"retention">> => retention_from_days(Daily),
                     <<"demographics">> => Demographics,
                     <<"acquisition">> => acquisition_from_days(Daily),
                     <<"technology">> => technology_from_days(Daily),
                     <<"navigation">> => navigation_from_days(Daily),
                     <<"events">> => events_from_days(Daily, Sessions),
+                    <<"actions">> => actions_from_days(Daily, Sessions),
                     <<"pages">> => Pages,
                     <<"summary">> => Summary
                 }
@@ -265,7 +254,7 @@ script(_Base, Req, Opts) ->
             case read_site(Key, Opts) of
                 undefined ->
                     js_error(404, <<"Unknown tracking key.">>);
-                _Site ->
+                Site ->
                     case static(<<"session.js">>, Opts) of
                         {ok, Msg = #{ <<"body">> := Body }} ->
                             Body1 =
@@ -275,10 +264,17 @@ script(_Base, Req, Opts) ->
                                     js_string_escape(Key),
                                     [global]
                                 ),
+                            Body2 =
+                                binary:replace(
+                                    Body1,
+                                    <<"{{VISITOR_ID_MODE}}">>,
+                                    js_string_escape(site_visitor_id_mode(Site, Opts)),
+                                    [global]
+                                ),
                             with_common_headers(
                                 {ok,
                                     Msg#{
-                                        <<"body">> => Body1,
+                                        <<"body">> => Body2,
                                         <<"content-type">> => <<"text/javascript">>
                                     }}
                             );
@@ -307,7 +303,9 @@ session(_Base, Req, Opts) ->
                             Demographics = demographics(Req, Opts),
                             Dimensions = dimensions(Site, Req, Opts),
                             Date = today(),
-                            VisitorHash = visitor_hash(Key, Date, Demographics, Req, Opts),
+                            PersistentVisitor =
+                                persistent_visitor(Key, Site, Date, Req, Dimensions, Opts),
+                            VisitorHash = visitor_hash(Key, Date, Demographics, Req, PersistentVisitor, Opts),
                             {ok, Visit} =
                                 update_visit_and_daily(
                                     Key,
@@ -319,6 +317,7 @@ session(_Base, Req, Opts) ->
                                     Demographics,
                                     Dimensions,
                                     VisitorHash,
+                                    PersistentVisitor,
                                     Opts
                                 ),
                             json_ok(
@@ -353,10 +352,19 @@ event(_Base, Req, Opts) ->
                                 {ok, RawName} ->
                                     Name = event_name(RawName),
                                     Value = duration_ms(Req, Opts),
+                                    Kind = event_kind(Req, Opts),
                                     Date = today(),
                                     Page = event_page(Req, Opts),
-                                    ok = record_event(Key, Date, Name, Value, Page, Opts),
-                                    json_ok(#{ <<"ok">> => true, <<"event">> => Name });
+                                    SubjectID = event_subject_id(Req, Opts),
+                                    ok = record_subject_event(Key, SubjectID, Name, Opts),
+                                    ok = record_event(Key, Date, Name, Kind, Value, Page, Opts),
+                                    Response0 = #{ <<"ok">> => true, <<"event">> => Name, <<"type">> => Kind },
+                                    Response =
+                                        case SubjectID of
+                                            undefined -> Response0;
+                                            _ -> Response0#{ <<"subject-id">> => SubjectID }
+                                        end,
+                                    json_ok(Response);
                                 {error, Reason} ->
                                     json_error(400, Reason)
                             end;
@@ -367,6 +375,646 @@ event(_Base, Req, Opts) ->
         {error, Reason} ->
             json_error(400, Reason)
     end.
+
+%% @doc Accept a generic, resumable engagement lifecycle for an arbitrary
+%% subject. Product integrations decide what a subject represents and what a
+%% qualified engagement means in their own UI; this device only validates
+%% monotonic evidence against the site's configured threshold.
+engagement(_Base, Req, Opts) ->
+    case required(<<"key">>, Req, Opts) of
+        {ok, Key} ->
+            case read_active_site(Key, Opts) of
+                undefined ->
+                    json_error(404, <<"Unknown tracking key.">>);
+                Site ->
+                    case origin_allowed(Site, Req, Opts) of
+                        false ->
+                            json_error(403, <<"Origin is not allowed for this tracking key.">>);
+                        true ->
+                            case engagement_request(Req, Opts) of
+                                {error, Reason} ->
+                                    json_error(400, Reason);
+                                {ok, Input0} ->
+                                    Input = Input0#{
+                                        <<"viewer-id">> => engagement_viewer_id(Key, Site, Req, Opts),
+                                        <<"view-bucket">> => engagement_view_bucket(Site, Opts)
+                                    },
+                                    engagement_result(
+                                        with_subject_lock(
+                                            Key,
+                                            maps:get(<<"subject-id">>, Input),
+                                            fun() -> update_engagement(Key, Site, Input, Opts) end
+                                        )
+                                    )
+                            end
+                    end
+            end;
+        {error, Reason} ->
+            json_error(400, Reason)
+    end.
+
+%% @doc Return the public aggregate for one arbitrary subject. Detailed site
+%% reports remain wallet-authenticated; this endpoint exposes counters only.
+count(_Base, Req, Opts) ->
+    case required(<<"key">>, Req, Opts) of
+        {ok, Key} ->
+            case read_active_site(Key, Opts) of
+                undefined ->
+                    json_error(404, <<"Unknown tracking key.">>);
+                Site ->
+                    case origin_allowed(Site, Req, Opts) of
+                        false ->
+                            json_error(403, <<"Origin is not allowed for this tracking key.">>);
+                        true ->
+                            case required(<<"subject-id">>, Req, Opts) of
+                                {ok, RawSubjectID} ->
+                                    SubjectID = limit_binary(trim_bin(RawSubjectID), 512),
+                                    Aggregate =
+                                        read_json(
+                                            subject_path(Key, SubjectID, Opts),
+                                            subject_default(SubjectID),
+                                            Opts
+                                        ),
+                                    json_ok(public_count(Aggregate));
+                                {error, Reason} ->
+                                    json_error(400, Reason)
+                            end
+                    end
+            end;
+        {error, Reason} ->
+            json_error(400, Reason)
+    end.
+
+%% @doc Return ordered public aggregates for up to 100 subjects in one request.
+counts(_Base, Req, Opts) ->
+    case required(<<"key">>, Req, Opts) of
+        {ok, Key} ->
+            case read_active_site(Key, Opts) of
+                undefined ->
+                    json_error(404, <<"Unknown tracking key.">>);
+                Site ->
+                    case origin_allowed(Site, Req, Opts) of
+                        false ->
+                            json_error(403, <<"Origin is not allowed for this tracking key.">>);
+                        true ->
+                            SubjectIDs0 =
+                                parse_binary_list(
+                                    hb_ao:get_first(
+                                        [
+                                            {Req, <<"subject-ids">>},
+                                            {Req, <<"subjects">>}
+                                        ],
+                                        [],
+                                        Opts
+                                    )
+                                ),
+                            SubjectIDs =
+                                lists:sublist(
+                                    [
+                                        limit_binary(SubjectID, 512)
+                                     || SubjectID <- SubjectIDs0,
+                                        SubjectID =/= <<>>
+                                    ],
+                                    100
+                                ),
+                            case SubjectIDs of
+                                [] ->
+                                    json_error(400, <<"Missing required field: subject-ids">>);
+                                _ ->
+                                    Counts =
+                                        [
+                                            public_count(
+                                                read_json(
+                                                    subject_path(Key, SubjectID, Opts),
+                                                    subject_default(SubjectID),
+                                                    Opts
+                                                )
+                                            )
+                                         || SubjectID <- SubjectIDs
+                                        ],
+                                    json_ok(#{ <<"counts">> => Counts })
+                            end
+                    end
+            end;
+        {error, Reason} ->
+            json_error(400, Reason)
+    end.
+
+%% @doc Return an authenticated, paginated list of subject aggregates for a
+%% tracking key. Subject IDs remain product-defined; the device only exposes
+%% generic counters and migration metadata already available through `count'.
+subjects(_Base, Req, Opts) ->
+    case owner_site_for_request(Req, Opts) of
+        {ok, Owner, Site} ->
+            Key = hb_maps:get(<<"key">>, Site, <<>>, Opts),
+            Page = bounded_positive_int(hb_maps:get(<<"page">>, Req, 1, Opts), 1, 1_000_000),
+            PageSize = bounded_positive_int(hb_maps:get(<<"page-size">>, Req, 50, Opts), 50, 100),
+            ok = ensure_group(subjects_path(Key, Opts), Opts),
+            SubjectKeys =
+                case hb_store:list(subjects_path(Key, Opts), Opts) of
+                    {ok, Keys} -> Keys;
+                    _ -> []
+                end,
+            Aggregates0 =
+                [
+                    public_count(Aggregate)
+                 || SubjectKey <- SubjectKeys,
+                    Aggregate <- [read_json(subject_child_path(Key, SubjectKey, Opts), undefined, Opts)],
+                    is_map(Aggregate)
+                ],
+            Aggregates =
+                lists:sort(
+                    fun(A, B) ->
+                        maps:get(<<"updated-at">>, A, 0) >= maps:get(<<"updated-at">>, B, 0)
+                    end,
+                    Aggregates0
+                ),
+            Total = length(Aggregates),
+            Offset = (Page - 1) * PageSize,
+            Items = lists:sublist(drop_n(Offset, Aggregates), PageSize),
+            json_ok(
+                #{
+                    <<"owner">> => Owner,
+                    <<"site">> => public_site(Site, Opts),
+                    <<"subjects">> => Items,
+                    <<"page">> => Page,
+                    <<"page-size">> => PageSize,
+                    <<"total">> => Total
+                }
+            );
+        {error, Status, Reason} ->
+            json_error(Status, Reason)
+    end.
+
+%% @doc Import a one-time aggregate baseline for a subject. This is an
+%% authenticated generic migration primitive: the device stores source/version
+%% metadata but does not interpret it. A baseline cannot be replaced with a
+%% different value or version after it is accepted.
+baseline(_Base, Req, Opts) ->
+    case owner_site_for_request(Req, Opts) of
+        {ok, Owner, Site} ->
+            SiteOwner = hb_maps:get(<<"owner">>, Site, <<>>, Opts),
+            case Owner =:= SiteOwner of
+                false ->
+                    json_error(403, <<"Only the site owner can import a baseline.">>);
+                true ->
+                    case baseline_request(Req, Opts) of
+                        {error, Reason} ->
+                            json_error(400, Reason);
+                        {ok, Input} ->
+                            Key = hb_maps:get(<<"key">>, Site, <<>>, Opts),
+                            SubjectID = maps:get(<<"subject-id">>, Input),
+                            baseline_result(
+                                with_subject_lock(
+                                    Key,
+                                    SubjectID,
+                                    fun() -> set_baseline(Key, Input, Opts) end
+                                )
+                            )
+                    end
+            end;
+        {error, Status, Reason} ->
+            json_error(Status, Reason)
+    end.
+
+engagement_result({ok, Interaction, Aggregate, Idempotent}) ->
+    json_ok(
+        #{
+            <<"ok">> => true,
+            <<"idempotent">> => Idempotent,
+            <<"interaction">> => public_interaction(Interaction),
+            <<"count">> => public_count(Aggregate)
+        }
+    );
+engagement_result({error, Status, Reason}) ->
+    json_error(Status, Reason);
+engagement_result({aborted, _Reason}) ->
+    json_error(503, <<"Engagement update was aborted.">>).
+
+baseline_result({ok, Aggregate, Idempotent}) ->
+    json_ok(
+        #{
+            <<"ok">> => true,
+            <<"idempotent">> => Idempotent,
+            <<"count">> => public_count(Aggregate)
+        }
+    );
+baseline_result({error, Status, Reason}) ->
+    json_error(Status, Reason);
+baseline_result({aborted, _Reason}) ->
+    json_error(503, <<"Baseline update was aborted.">>).
+
+with_subject_lock(Key, SubjectID, Fun) ->
+    Resource = {?MODULE, path_component(Key), path_component(SubjectID)},
+    global:trans({Resource, self()}, Fun).
+
+engagement_request(Req, Opts) ->
+    case {
+        required(<<"subject-id">>, Req, Opts),
+        required(<<"interaction-id">>, Req, Opts),
+        required(<<"event">>, Req, Opts),
+        required(<<"sequence">>, Req, Opts),
+        required(<<"active-ms">>, Req, Opts)
+    } of
+        {{ok, RawSubjectID}, {ok, RawInteractionID}, {ok, RawEvent}, {ok, RawSequence}, {ok, RawActiveMS}} ->
+            SubjectID = limit_binary(trim_bin(RawSubjectID), 512),
+            InteractionID = limit_binary(trim_bin(RawInteractionID), 128),
+            Event = engagement_event(RawEvent),
+            Sequence = int_value(RawSequence, -1),
+            ActiveMS = int_value(RawActiveMS, -1),
+            PositionMS =
+                int_value(hb_maps:get(<<"position-ms">>, Req, 0, Opts), -1),
+            case {
+                SubjectID =/= <<>>,
+                InteractionID =/= <<>>,
+                Event =/= invalid,
+                Sequence >= 0,
+                ActiveMS >= 0 andalso ActiveMS =< ?MAX_DURATION_MS,
+                PositionMS >= 0 andalso PositionMS =< ?MAX_DURATION_MS
+            } of
+                {true, true, true, true, true, true} ->
+                    {ok,
+                        #{
+                            <<"subject-id">> => SubjectID,
+                            <<"interaction-id">> => InteractionID,
+                            <<"event">> => Event,
+                            <<"sequence">> => Sequence,
+                            <<"active-ms">> => ActiveMS,
+                            <<"position-ms">> => PositionMS
+                        }};
+                _ ->
+                    {error, <<"Invalid engagement fields.">>}
+            end;
+        _ ->
+            {error, <<"Missing required engagement field.">>}
+    end.
+
+baseline_request(Req, Opts) ->
+    case {
+        required(<<"subject-id">>, Req, Opts),
+        required(<<"value">>, Req, Opts),
+        required(<<"version">>, Req, Opts),
+        required(<<"cutover-at">>, Req, Opts)
+    } of
+        {{ok, RawSubjectID}, {ok, RawValue}, {ok, RawVersion}, {ok, RawCutoverAt}} ->
+            SubjectID = limit_binary(trim_bin(RawSubjectID), 512),
+            Value = int_value(RawValue, -1),
+            Version = limit_binary(trim_bin(RawVersion), 128),
+            CutoverAt = int_value(RawCutoverAt, -1),
+            Source = limit_binary(trim_bin(hb_maps:get(<<"source">>, Req, <<>>, Opts)), 256),
+            case SubjectID =/= <<>> andalso Value >= 0 andalso Version =/= <<>> andalso CutoverAt >= 0 of
+                true ->
+                    {ok,
+                        #{
+                            <<"subject-id">> => SubjectID,
+                            <<"value">> => Value,
+                            <<"version">> => Version,
+                            <<"cutover-at">> => CutoverAt,
+                            <<"source">> => Source
+                        }};
+                false ->
+                    {error, <<"Invalid baseline fields.">>}
+            end;
+        _ ->
+            {error, <<"Missing required baseline field.">>}
+    end.
+
+engagement_event(Raw) ->
+    case trim_bin(Raw) of
+        <<"start">> -> <<"start">>;
+        <<"heartbeat">> -> <<"heartbeat">>;
+        <<"pause">> -> <<"pause">>;
+        <<"complete">> -> <<"complete">>;
+        <<"end">> -> <<"end">>;
+        _ -> invalid
+    end.
+
+update_engagement(Key, Site, Input, Opts) ->
+    ok = ensure_group(subjects_path(Key, Opts), Opts),
+    SubjectID = maps:get(<<"subject-id">>, Input),
+    InteractionID = maps:get(<<"interaction-id">>, Input),
+    InteractionPath = engagement_path(Key, SubjectID, InteractionID, Opts),
+    SubjectPath = subject_path(Key, SubjectID, Opts),
+    Existing = read_json(InteractionPath, undefined, Opts),
+    Aggregate0 = read_json(SubjectPath, subject_default(SubjectID), Opts),
+    Now = now_ms(),
+    case Existing of
+        undefined ->
+            start_engagement(Key, Site, Input, InteractionPath, SubjectPath, Aggregate0, Now, Opts);
+        _ ->
+            continue_engagement(Key, Input, Existing, InteractionPath, SubjectPath, Aggregate0, Now, Opts)
+    end.
+
+start_engagement(Key, Site, Input, InteractionPath, SubjectPath, Aggregate0, Now, Opts) ->
+    Event = maps:get(<<"event">>, Input),
+    ActiveMS = maps:get(<<"active-ms">>, Input),
+    case Event =:= <<"start">> andalso ActiveMS =< engagement_clock_skew_ms(Opts) of
+        false ->
+            suspicious_engagement(SubjectPath, Aggregate0, 409, <<"Interaction must begin with start.">>, Opts);
+        true ->
+            Threshold = site_engagement_threshold_ms(Site, Opts),
+            Qualified = ActiveMS >= Threshold,
+            Interaction0 =
+                Input#{
+                    <<"qualified">> => Qualified,
+                    <<"ended">> => false,
+                    <<"started-at">> => Now,
+                    <<"last-seen">> => Now,
+                    <<"threshold-ms">> => Threshold
+                },
+            ViewIncrement = qualified_view_increment(Key, Input, Qualified, false, Now, Opts),
+            Interaction1 =
+                maybe_set_timestamp(
+                    maybe_set_timestamp(
+                        Interaction0#{ <<"view-counted">> => ViewIncrement =:= 1 },
+                        <<"qualified-at">>,
+                        Qualified,
+                        Now
+                    ),
+                    <<"view-counted-at">>,
+                    ViewIncrement =:= 1,
+                    Now
+                ),
+            Aggregate =
+                Aggregate0#{
+                    <<"raw">> => int_value(maps:get(<<"raw">>, Aggregate0, 0), 0) + 1,
+                    <<"qualified">> =>
+                        int_value(maps:get(<<"qualified">>, Aggregate0, 0), 0) + ViewIncrement,
+                    <<"active-ms">> =>
+                        int_value(maps:get(<<"active-ms">>, Aggregate0, 0), 0) + ActiveMS,
+                    <<"updated-at">> => Now
+                },
+            ok = write_json_entries(#{ InteractionPath => Interaction1, SubjectPath => Aggregate }, Opts),
+            {ok, Interaction1, Aggregate, false}
+    end.
+
+continue_engagement(Key, Input, Existing, InteractionPath, SubjectPath, Aggregate0, Now, Opts) ->
+    case duplicate_engagement(Input, Existing) of
+        true ->
+            {ok, Existing, Aggregate0, true};
+        false ->
+            case validate_engagement_transition(Input, Existing, Now, Opts) of
+                ok ->
+                    ActiveMS = maps:get(<<"active-ms">>, Input),
+                    WasQualified = truthy(maps:get(<<"qualified">>, Existing, false)),
+                    Threshold = int_value(maps:get(<<"threshold-ms">>, Existing, default_engagement_threshold_ms(Opts)), default_engagement_threshold_ms(Opts)),
+                    Qualified = WasQualified orelse ActiveMS >= Threshold,
+                    Event = maps:get(<<"event">>, Input),
+                    Completed = Event =:= <<"complete">>,
+                    Ended = Event =:= <<"end">> orelse Completed,
+                    ActiveDelta =
+                        ActiveMS - int_value(maps:get(<<"active-ms">>, Existing, 0), 0),
+                    ViewIncrement = qualified_view_increment(Key, Input, Qualified, Completed, Now, Opts),
+                    Interaction0 =
+                        Existing#{
+                            <<"event">> => Event,
+                            <<"sequence">> => maps:get(<<"sequence">>, Input),
+                            <<"active-ms">> => ActiveMS,
+                            <<"position-ms">> => maps:get(<<"position-ms">>, Input),
+                            <<"qualified">> => Qualified,
+                            <<"view-counted">> =>
+                                truthy(maps:get(<<"view-counted">>, Existing, false)) orelse ViewIncrement =:= 1,
+                            <<"completed">> => Completed,
+                            <<"ended">> => Ended,
+                            <<"last-seen">> => Now
+                        },
+                    Interaction1 =
+                        maybe_set_timestamp(
+                            maybe_set_timestamp(
+                                maybe_set_timestamp(
+                                    maybe_set_timestamp(
+                                        Interaction0,
+                                        <<"qualified-at">>,
+                                        Qualified,
+                                        Now
+                                    ),
+                                    <<"view-counted-at">>,
+                                    ViewIncrement =:= 1,
+                                    Now
+                                ),
+                                <<"completed-at">>,
+                                Completed,
+                                Now
+                            ),
+                            <<"ended-at">>,
+                            Ended,
+                            Now
+                        ),
+                    Aggregate =
+                        Aggregate0#{
+                            <<"qualified">> =>
+                                int_value(maps:get(<<"qualified">>, Aggregate0, 0), 0) + ViewIncrement,
+                            <<"active-ms">> =>
+                                int_value(maps:get(<<"active-ms">>, Aggregate0, 0), 0) + ActiveDelta,
+                            <<"completions">> =>
+                                int_value(maps:get(<<"completions">>, Aggregate0, 0), 0) +
+                                    bool_to_int(Completed),
+                            <<"updated-at">> => Now
+                        },
+                    ok = write_json_entries(#{ InteractionPath => Interaction1, SubjectPath => Aggregate }, Opts),
+                    {ok, Interaction1, Aggregate, false};
+                {error, Status, Reason} ->
+                    suspicious_engagement(SubjectPath, Aggregate0, Status, Reason, Opts)
+            end
+    end.
+
+%% A play is not a view. A subject/viewer pair can contribute one qualified
+%% view per configured window. A completed interaction makes a subsequent
+%% qualified interaction an evidenced replay; completing an otherwise
+%% suppressed interaction also proves that the subject was watched again.
+qualified_view_increment(_Key, _Input, false, _Completed, _Now, _Opts) ->
+    0;
+qualified_view_increment(Key, Input, true, Completed, Now, Opts) ->
+    SubjectID = maps:get(<<"subject-id">>, Input),
+    InteractionID = maps:get(<<"interaction-id">>, Input),
+    ViewerID = maps:get(<<"viewer-id">>, Input),
+    Bucket = maps:get(<<"view-bucket">>, Input),
+    Path = engagement_view_path(Key, SubjectID, Bucket, ViewerID, Opts),
+    Existing = read_json(Path, undefined, Opts),
+    case Existing of
+        undefined ->
+            ok = write_engagement_view(Path, InteractionID, Completed, Now, Opts),
+            1;
+        _ ->
+            ExistingInteraction = maps:get(<<"interaction-id">>, Existing, <<>>),
+            ReplayReady = truthy(maps:get(<<"replay-ready">>, Existing, false)),
+            case ExistingInteraction =:= InteractionID of
+                true ->
+                    case Completed andalso not ReplayReady of
+                        true -> ok = write_engagement_view(Path, InteractionID, true, Now, Opts);
+                        false -> ok
+                    end,
+                    0;
+                false when ReplayReady orelse Completed ->
+                    ok = write_engagement_view(Path, InteractionID, Completed, Now, Opts),
+                    1;
+                false ->
+                    0
+            end
+    end.
+
+write_engagement_view(Path, InteractionID, ReplayReady, Now, Opts) ->
+    write_json(
+        Path,
+        #{
+            <<"interaction-id">> => InteractionID,
+            <<"replay-ready">> => ReplayReady,
+            <<"updated-at">> => Now
+        },
+        Opts
+    ).
+
+maybe_set_timestamp(Map, _Key, false, _Now) ->
+    Map;
+maybe_set_timestamp(Map, Key, true, Now) ->
+    case maps:is_key(Key, Map) of
+        true -> Map;
+        false -> Map#{ Key => Now }
+    end.
+
+duplicate_engagement(Input, Existing) ->
+    maps:get(<<"event">>, Input) =:= maps:get(<<"event">>, Existing, undefined) andalso
+        maps:get(<<"sequence">>, Input) =:= maps:get(<<"sequence">>, Existing, -1) andalso
+        maps:get(<<"active-ms">>, Input) =:= maps:get(<<"active-ms">>, Existing, -1) andalso
+        maps:get(<<"position-ms">>, Input) =:= maps:get(<<"position-ms">>, Existing, -1).
+
+validate_engagement_transition(Input, Existing, Now, Opts) ->
+    Event = maps:get(<<"event">>, Input),
+    Sequence = maps:get(<<"sequence">>, Input),
+    ActiveMS = maps:get(<<"active-ms">>, Input),
+    PositionMS = maps:get(<<"position-ms">>, Input),
+    LastSequence = int_value(maps:get(<<"sequence">>, Existing, -1), -1),
+    LastActiveMS = int_value(maps:get(<<"active-ms">>, Existing, 0), 0),
+    LastPositionMS = int_value(maps:get(<<"position-ms">>, Existing, 0), 0),
+    LastSeen = int_value(maps:get(<<"last-seen">>, Existing, Now), Now),
+    Ended = truthy(maps:get(<<"ended">>, Existing, false)),
+    MaxActiveDelta = max(0, Now - LastSeen) + engagement_clock_skew_ms(Opts),
+    case true of
+        _ when Event =:= <<"start">> ->
+            {error, 409, <<"Interaction has already started.">>};
+        _ when Ended ->
+            {error, 409, <<"Interaction has already ended.">>};
+        _ when Sequence =< LastSequence ->
+            {error, 409, <<"Engagement sequence is not monotonic.">>};
+        _ when ActiveMS < LastActiveMS ->
+            {error, 422, <<"Active duration regressed.">>};
+        _ when PositionMS < LastPositionMS ->
+            {error, 422, <<"Engagement position regressed.">>};
+        _ when ActiveMS - LastActiveMS > MaxActiveDelta ->
+            {error, 422, <<"Active duration exceeds elapsed time.">>};
+        true ->
+            ok
+    end.
+
+suspicious_engagement(SubjectPath, Aggregate0, Status, Reason, Opts) ->
+    Aggregate =
+        Aggregate0#{
+            <<"suspicious">> => int_value(maps:get(<<"suspicious">>, Aggregate0, 0), 0) + 1,
+            <<"updated-at">> => now_ms()
+        },
+    ok = write_json(SubjectPath, Aggregate, Opts),
+    {error, Status, Reason}.
+
+set_baseline(Key, Input, Opts) ->
+    ok = ensure_group(subjects_path(Key, Opts), Opts),
+    SubjectID = maps:get(<<"subject-id">>, Input),
+    Path = subject_path(Key, SubjectID, Opts),
+    Aggregate0 = read_json(Path, subject_default(SubjectID), Opts),
+    case maps:is_key(<<"baseline-version">>, Aggregate0) of
+        false ->
+            Aggregate =
+                Aggregate0#{
+                    <<"baseline">> => maps:get(<<"value">>, Input),
+                    <<"baseline-version">> => maps:get(<<"version">>, Input),
+                    <<"baseline-cutover-at">> => maps:get(<<"cutover-at">>, Input),
+                    <<"baseline-source">> => maps:get(<<"source">>, Input),
+                    <<"updated-at">> => now_ms()
+                },
+            ok = write_json(Path, Aggregate, Opts),
+            {ok, Aggregate, false};
+        true ->
+            case same_baseline(Aggregate0, Input) of
+                true -> {ok, Aggregate0, true};
+                false -> {error, 409, <<"A different baseline already exists for this subject.">>}
+            end
+    end.
+
+same_baseline(Aggregate, Input) ->
+    int_value(maps:get(<<"baseline">>, Aggregate, -1), -1) =:= maps:get(<<"value">>, Input) andalso
+        maps:get(<<"baseline-version">>, Aggregate, undefined) =:= maps:get(<<"version">>, Input) andalso
+        int_value(maps:get(<<"baseline-cutover-at">>, Aggregate, -1), -1) =:= maps:get(<<"cutover-at">>, Input) andalso
+        maps:get(<<"baseline-source">>, Aggregate, <<>>) =:= maps:get(<<"source">>, Input).
+
+subject_default(SubjectID) ->
+    #{
+        <<"subject-id">> => SubjectID,
+        <<"raw">> => 0,
+        <<"qualified">> => 0,
+        <<"suspicious">> => 0,
+        <<"active-ms">> => 0,
+        <<"completions">> => 0,
+        <<"baseline">> => 0,
+        <<"events">> => #{},
+        <<"updated-at">> => 0
+    }.
+
+public_count(Aggregate) ->
+    Baseline = int_value(maps:get(<<"baseline">>, Aggregate, 0), 0),
+    Qualified = int_value(maps:get(<<"qualified">>, Aggregate, 0), 0),
+    Base =
+        #{
+            <<"subject-id">> => maps:get(<<"subject-id">>, Aggregate, <<>>),
+            <<"raw">> => int_value(maps:get(<<"raw">>, Aggregate, 0), 0),
+            <<"qualified">> => Qualified,
+            <<"suspicious">> => int_value(maps:get(<<"suspicious">>, Aggregate, 0), 0),
+            <<"active-ms">> => int_value(maps:get(<<"active-ms">>, Aggregate, 0), 0),
+            <<"completions">> => int_value(maps:get(<<"completions">>, Aggregate, 0), 0),
+            <<"baseline">> => Baseline,
+            <<"total">> => Baseline + Qualified,
+            <<"events">> => map_value(maps:get(<<"events">>, Aggregate, #{})),
+            <<"updated-at">> => int_value(maps:get(<<"updated-at">>, Aggregate, 0), 0)
+        },
+    copy_optional_keys(
+        Aggregate,
+        Base,
+        [<<"baseline-version">>, <<"baseline-cutover-at">>, <<"baseline-source">>]
+    ).
+
+public_interaction(Interaction) ->
+    maps:with(
+        [
+            <<"subject-id">>,
+            <<"interaction-id">>,
+            <<"event">>,
+            <<"sequence">>,
+            <<"active-ms">>,
+            <<"position-ms">>,
+            <<"qualified">>,
+            <<"view-counted">>,
+            <<"completed">>,
+            <<"ended">>,
+            <<"threshold-ms">>,
+            <<"started-at">>,
+            <<"last-seen">>,
+            <<"qualified-at">>,
+            <<"view-counted-at">>,
+            <<"completed-at">>,
+            <<"ended-at">>
+        ],
+        Interaction
+    ).
+
+copy_optional_keys(Source, Target, Keys) ->
+    lists:foldl(
+        fun(Key, Acc) ->
+            case maps:find(Key, Source) of
+                {ok, Value} -> Acc#{ Key => Value };
+                error -> Acc
+            end
+        end,
+        Target,
+        Keys
+    ).
 
 owner_site_for_request(Req, Opts) ->
     case owner_for_request(Req, Opts) of
@@ -538,6 +1186,9 @@ site_record(undefined, Key, Owner, Req, Now, Opts) ->
         <<"name">> => site_name(Req, Opts),
         <<"origins">> => allowed_origins(Req, Opts),
         <<"users">> => site_users(Req, Owner, Opts),
+        <<"visitor-id-mode">> => visitor_id_mode(Req, Opts),
+        <<"engagement-threshold-ms">> => engagement_threshold_ms(Req, Opts),
+        <<"engagement-dedupe-window-ms">> => engagement_dedupe_window_ms(Req, Opts),
         <<"created-at">> => Now,
         <<"updated-at">> => Now,
         <<"enabled">> => true
@@ -549,6 +1200,40 @@ site_record(Existing, Key, Owner, Req, Now, Opts) ->
         <<"name">> => site_name(Req, hb_maps:get(<<"name">>, Existing, <<"Untitled site">>, Opts), Opts),
         <<"origins">> => allowed_origins(Req, hb_maps:get(<<"origins">>, Existing, [], Opts), Opts),
         <<"users">> => site_users(Req, hb_maps:get(<<"users">>, Existing, [], Opts), Owner, Opts),
+        <<"visitor-id-mode">> =>
+            visitor_id_mode(
+                Req,
+                site_visitor_id_mode(Existing, Opts),
+                Opts
+            ),
+        <<"engagement-threshold-ms">> =>
+            engagement_threshold_ms(
+                Req,
+                int_value(
+                    hb_maps:get(
+                        <<"engagement-threshold-ms">>,
+                        Existing,
+                        default_engagement_threshold_ms(Opts),
+                        Opts
+                    ),
+                    default_engagement_threshold_ms(Opts)
+                ),
+                Opts
+            ),
+        <<"engagement-dedupe-window-ms">> =>
+            engagement_dedupe_window_ms(
+                Req,
+                int_value(
+                    hb_maps:get(
+                        <<"engagement-dedupe-window-ms">>,
+                        Existing,
+                        default_engagement_dedupe_window_ms(Opts),
+                        Opts
+                    ),
+                    default_engagement_dedupe_window_ms(Opts)
+                ),
+                Opts
+            ),
         <<"updated-at">> => Now,
         <<"enabled">> => truthy(hb_maps:get(<<"enabled">>, Req, true, Opts))
     }.
@@ -562,6 +1247,18 @@ site_name(Req, Default, Opts) ->
         <<>> -> Default;
         _ -> limit_binary(Name, 120)
     end.
+
+visitor_id_mode(Req, Opts) ->
+    visitor_id_mode(Req, <<"daily">>, Opts).
+
+visitor_id_mode(Req, Default, Opts) ->
+    case to_lower_bin(hb_maps:get(<<"visitor-id-mode">>, Req, Default, Opts)) of
+        <<"persistent">> -> <<"persistent">>;
+        _ -> <<"daily">>
+    end.
+
+site_visitor_id_mode(Site, Opts) ->
+    visitor_id_mode(Site, <<"daily">>, Opts).
 
 allowed_origins(Req, Opts) ->
     allowed_origins(Req, [], Opts).
@@ -678,6 +1375,19 @@ public_site(Site, Opts) ->
         <<"name">> => hb_maps:get(<<"name">>, Site, <<"Untitled site">>, Opts),
         <<"origins">> => hb_maps:get(<<"origins">>, Site, [], Opts),
         <<"users">> => site_users_from_site(Site, Opts),
+        <<"visitor-id-mode">> => site_visitor_id_mode(Site, Opts),
+        <<"engagement-threshold-ms">> =>
+            int_value(
+                hb_maps:get(
+                    <<"engagement-threshold-ms">>,
+                    Site,
+                    default_engagement_threshold_ms(Opts),
+                    Opts
+                ),
+                default_engagement_threshold_ms(Opts)
+            ),
+        <<"engagement-dedupe-window-ms">> =>
+            engagement_dedupe_window_ms(Site, Opts),
         <<"created-at">> => hb_maps:get(<<"created-at">>, Site, 0, Opts),
         <<"updated-at">> => hb_maps:get(<<"updated-at">>, Site, 0, Opts),
         <<"enabled">> => hb_maps:get(<<"enabled">>, Site, true, Opts)
@@ -745,7 +1455,19 @@ host_with_node_port(Host, Opts) ->
 node_port(Opts) ->
     int_value(hb_opts:get(port, 8734, Opts), 8734).
 
-update_visit_and_daily(Key, Date, VisitID, Page, Event, Duration, Demographics0, Dimensions, VisitorHash, Opts) ->
+update_visit_and_daily(
+    Key,
+    Date,
+    VisitID,
+    Page,
+    Event,
+    Duration,
+    Demographics0,
+    Dimensions,
+    VisitorHash,
+    PersistentVisitor,
+    Opts
+) ->
     Path = visit_path(Key, Date, VisitID, Opts),
     Now = now_ms(),
     Existing = read_json(Path, undefined, Opts),
@@ -783,6 +1505,7 @@ update_visit_and_daily(Key, Date, VisitID, Page, Event, Duration, Demographics0,
                     <<"last-event">> => Event,
                     <<"ip">> => IP,
                     <<"location">> => Location,
+                    <<"dimensions">> => Dimensions,
                     <<"ended">> => Ended
                 };
             _ ->
@@ -794,6 +1517,8 @@ update_visit_and_daily(Key, Date, VisitID, Page, Event, Duration, Demographics0,
                     <<"last-event">> => Event,
                     <<"ip">> => IP,
                     <<"location">> => Location,
+                    <<"dimensions">> =>
+                        map_value(hb_maps:get(<<"dimensions">>, Existing, Dimensions, Opts)),
                     <<"ended">> => Ended
                 }
         end,
@@ -807,10 +1532,17 @@ update_visit_and_daily(Key, Date, VisitID, Page, Event, Duration, Demographics0,
     %% record above, so time-on-page keeps accumulating.
     CountView = NewVisit andalso mark_page_view(Key, Date, VisitorHash, Page, Opts),
     Session =
-        case NewVisit of
-            true -> touch_session(Key, Date, VisitorHash, Page, Now, Opts);
-            false -> #{}
-        end,
+        session_context(
+            Key,
+            Date,
+            VisitorHash,
+            Page,
+            Now,
+            NewVisit,
+            NewDuration,
+            Dimensions,
+            Opts
+        ),
     Ctx =
         #{
             <<"new-visit">> => NewVisit,
@@ -820,6 +1552,7 @@ update_visit_and_daily(Key, Date, VisitID, Page, Event, Duration, Demographics0,
             <<"demographics">> => Demographics,
             <<"dimensions">> => Dimensions,
             <<"new-visitor">> => NewVisitor,
+            <<"persistent-visitor">> => PersistentVisitor,
             <<"session">> => Session
         },
     ok = update_daily(Key, Date, Page, Ctx, Opts),
@@ -853,6 +1586,7 @@ update_daily(Key, Date, Page, Ctx, Opts) ->
     NewDuration = int_value(hb_maps:get(<<"new-duration">>, Ctx, 0, Opts), 0),
     Session = map_value(hb_maps:get(<<"session">>, Ctx, #{}, Opts)),
     NewVisitor = hb_maps:get(<<"new-visitor">>, Ctx, false, Opts),
+    PageLoadIncrement = bool_to_int(hb_maps:get(<<"new-visit">>, Ctx, false, Opts)),
     Delta = max(0, NewDuration - OldDuration),
     VisitIncrement =
         case CountView of
@@ -868,6 +1602,9 @@ update_daily(Key, Date, Page, Ctx, Opts) ->
     LocationLabel = location_label(Location, Opts),
     Page1 =
         Page0#{
+            <<"page-loads">> =>
+                int_value(hb_maps:get(<<"page-loads">>, Page0, 0, Opts), 0) +
+                    PageLoadIncrement,
             <<"visits">> => int_value(hb_maps:get(<<"visits">>, Page0, 0, Opts), 0) + VisitIncrement,
             <<"duration-ms">> =>
                 int_value(hb_maps:get(<<"duration-ms">>, Page0, 0, Opts), 0) + Delta,
@@ -922,6 +1659,9 @@ update_daily(Key, Date, Page, Ctx, Opts) ->
     Daily1 =
         Daily0#{
             <<"date">> => Date,
+            <<"page-loads">> =>
+                int_value(hb_maps:get(<<"page-loads">>, Daily0, 0, Opts), 0) +
+                    PageLoadIncrement,
             <<"visits">> =>
                 int_value(hb_maps:get(<<"visits">>, Daily0, 0, Opts), 0) + VisitIncrement,
             <<"duration-ms">> =>
@@ -942,12 +1682,18 @@ update_daily(Key, Date, Page, Ctx, Opts) ->
     %% Unique-visitor + session counters, landing/exit page counts, and their
     %% per-page mirrors on `by-path[Page]'/`by-path[EntryPage]'.
     Daily3 = apply_session_counters(Daily2, Session, NewVisitor, Page),
-    write_json(Path, Daily3, Opts).
+    PersistentVisitor = hb_maps:get(<<"persistent-visitor">>, Ctx, undefined, Opts),
+    Daily4 = apply_persistent_visitor(Daily3, PersistentVisitor, Demographics, Dimensions),
+    Daily5 = apply_acquisition_attribution(Daily4, Session, PersistentVisitor, Delta),
+    write_json(Path, Daily5, Opts).
 
 summary_from_days(Key, Daily, Route, Opts) ->
+    PageLoads = lists:sum([int_value(hb_maps:get(<<"page-loads">>, Day, 0, Opts), 0) || Day <- Daily]),
     Visits = lists:sum([int_value(hb_maps:get(<<"visits">>, Day, 0, Opts), 0) || Day <- Daily]),
     Uniques = lists:sum([int_value(hb_maps:get(<<"unique-visitors">>, Day, 0, Opts), 0) || Day <- Daily]),
     Sessions = lists:sum([int_value(hb_maps:get(<<"sessions">>, Day, 0, Opts), 0) || Day <- Daily]),
+    EngagedSessions =
+        lists:sum([int_value(hb_maps:get(<<"engaged-sessions">>, Day, 0, Opts), 0) || Day <- Daily]),
     Bounces = lists:sum([int_value(hb_maps:get(<<"bounces">>, Day, 0, Opts), 0) || Day <- Daily]),
     TotalEvents = lists:sum([int_value(hb_maps:get(<<"events">>, Day, 0, Opts), 0) || Day <- Daily]),
     TotalDuration =
@@ -960,10 +1706,14 @@ summary_from_days(Key, Daily, Route, Opts) ->
             0,
             Daily
         ),
+    Audience = audience_from_days(Daily),
     #{
+        <<"page-loads">> => PageLoads,
         <<"visits">> => Visits,
         <<"unique-visitors">> => Uniques,
         <<"sessions">> => Sessions,
+        <<"engaged-sessions">> => EngagedSessions,
+        <<"engagement-rate">> => ratio(EngagedSessions, Sessions),
         <<"bounces">> => Bounces,
         <<"bounce-rate">> => ratio(Bounces, Sessions),
         <<"pages-per-session">> => ratio(Visits, Sessions),
@@ -972,6 +1722,9 @@ summary_from_days(Key, Daily, Route, Opts) ->
         <<"avg-duration-ms">> => average(TotalDuration, Visits),
         <<"avg-session-duration-ms">> => average(TotalDuration, Sessions),
         <<"max-duration-ms">> => MaxDuration,
+        <<"active-users">> => maps:get(<<"active-users">>, Audience, 0),
+        <<"new-users">> => maps:get(<<"new-users">>, Audience, 0),
+        <<"returning-users">> => maps:get(<<"returning-users">>, Audience, 0),
         <<"active">> => active_visits(Key, Route, Opts),
         <<"active-pages">> => active_pages(Key, Route, Opts)
     }.
@@ -980,6 +1733,178 @@ ratio(_Numerator, Denominator) when Denominator =< 0 ->
     0.0;
 ratio(Numerator, Denominator) ->
     Numerator / Denominator.
+
+public_daily(Day) ->
+    maps:without([<<"stable-visitors">>, <<"stable-visitor-dimensions">>], Day).
+
+audience_from_days(Daily) ->
+    StableVisitors = stable_visitors_from_days(Daily),
+    HasPersistentVisitors = map_size(StableVisitors) > 0,
+    ActiveUsers =
+        case HasPersistentVisitors of
+            true -> map_size(StableVisitors);
+            false -> sum_daily_unique_visitors(Daily)
+        end,
+    Active1 = active_users_for_window(Daily, 1, HasPersistentVisitors),
+    Active7 = active_users_for_window(Daily, 7, HasPersistentVisitors),
+    Active28 = active_users_for_window(Daily, 28, HasPersistentVisitors),
+    DateSet = maps:from_list([{maps:get(<<"date">>, Day, <<>>), true} || Day <- Daily]),
+    NewUsers =
+        case HasPersistentVisitors of
+            true ->
+                map_size(
+                    maps:filter(
+                        fun(_Visitor, FirstSeen) -> maps:is_key(FirstSeen, DateSet) end,
+                        StableVisitors
+                    )
+                );
+            false -> 0
+        end,
+    #{
+        <<"persistent-identification">> => HasPersistentVisitors,
+        <<"active-users">> => ActiveUsers,
+        <<"new-users">> => NewUsers,
+        <<"returning-users">> => max(0, ActiveUsers - NewUsers),
+        <<"active-1-day-users">> => Active1,
+        <<"active-7-day-users">> => Active7,
+        <<"active-28-day-users">> => Active28,
+        <<"dau-per-wau">> => ratio(Active1, Active7),
+        <<"dau-per-mau">> => ratio(Active1, Active28),
+        <<"wau-per-mau">> => ratio(Active7, Active28),
+        <<"breakdowns">> => audience_breakdowns(Daily)
+    }.
+
+active_users_for_window(Daily, Window, true) ->
+    map_size(stable_visitors_from_days(take_last(Daily, Window)));
+active_users_for_window(Daily, Window, false) ->
+    sum_daily_unique_visitors(take_last(Daily, Window)).
+
+sum_daily_unique_visitors(Daily) ->
+    lists:sum([int_value(maps:get(<<"unique-visitors">>, Day, 0), 0) || Day <- Daily]).
+
+stable_visitors_from_days(Daily) ->
+    lists:foldl(
+        fun(Day, Acc) -> maps:merge(Acc, map_value(maps:get(<<"stable-visitors">>, Day, #{}))) end,
+        #{},
+        Daily
+    ).
+
+audience_breakdowns(Daily) ->
+    VisitorDimensions =
+        lists:foldl(
+            fun(Day, Acc) ->
+                maps:merge(
+                    Acc,
+                    map_value(maps:get(<<"stable-visitor-dimensions">>, Day, #{}))
+                )
+            end,
+            #{},
+            Daily
+        ),
+    #{
+        <<"countries">> => audience_dimension_items(VisitorDimensions, <<"country">>),
+        <<"regions">> => audience_dimension_items(VisitorDimensions, <<"region">>),
+        <<"cities">> => audience_dimension_items(VisitorDimensions, <<"city">>),
+        <<"devices">> => audience_dimension_items(VisitorDimensions, <<"device">>),
+        <<"browsers">> => audience_dimension_items(VisitorDimensions, <<"browser">>),
+        <<"operating-systems">> => audience_dimension_items(VisitorDimensions, <<"os">>),
+        <<"languages">> => audience_dimension_items(VisitorDimensions, <<"language">>)
+    }.
+
+audience_dimension_items(VisitorDimensions, Field) ->
+    Counts =
+        maps:fold(
+            fun(_Visitor, RawDimensions, Acc) ->
+                Label = dimension_label(maps:get(Field, map_value(RawDimensions), <<>>)),
+                maps:update_with(Label, fun(Count) -> Count + 1 end, 1, Acc)
+            end,
+            #{},
+            VisitorDimensions
+        ),
+    lists:sublist(
+        lists:sort(
+            fun(A, B) -> maps:get(<<"active-users">>, A) >= maps:get(<<"active-users">>, B) end,
+            [
+                #{ Field => Label, <<"active-users">> => Count }
+             || {Label, Count} <- maps:to_list(Counts)
+            ]
+        ),
+        50
+    ).
+
+take_last(List, Count) ->
+    Length = length(List),
+    lists:nthtail(max(0, Length - min(Length, Count)), List).
+
+retention_from_days(Daily) ->
+    Dates = [maps:get(<<"date">>, Day, <<>>) || Day <- Daily],
+    DateVisitors =
+        maps:from_list(
+            [
+                {maps:get(<<"date">>, Day, <<>>), map_value(maps:get(<<"stable-visitors">>, Day, #{}))}
+             || Day <- Daily
+            ]
+        ),
+    AllVisitors = stable_visitors_from_days(Daily),
+    CohortDates =
+        lists:sort(
+            lists:usort(
+                [FirstSeen || FirstSeen <- maps:values(AllVisitors), lists:member(FirstSeen, Dates)]
+            )
+        ),
+    Windows = [1, 7, 14, 30],
+    #{
+        <<"windows">> => Windows,
+        <<"cohorts">> =>
+            [retention_cohort(Date, AllVisitors, DateVisitors, Windows) || Date <- CohortDates]
+    }.
+
+retention_cohort(CohortDate, AllVisitors, DateVisitors, Windows) ->
+    Cohort = maps:filter(fun(_Visitor, FirstSeen) -> FirstSeen =:= CohortDate end, AllVisitors),
+    CohortSize = map_size(Cohort),
+    #{
+        <<"cohort-date">> => CohortDate,
+        <<"new-users">> => CohortSize,
+        <<"retention">> =>
+            [retention_checkpoint(CohortDate, Cohort, CohortSize, DateVisitors, Window) || Window <- Windows]
+    }.
+
+retention_checkpoint(CohortDate, Cohort, CohortSize, DateVisitors, Window) ->
+    TargetDate = add_iso_days(CohortDate, Window),
+    Eligible = maps:is_key(TargetDate, DateVisitors),
+    Active =
+        case Eligible of
+            true -> map_intersection_size(Cohort, maps:get(TargetDate, DateVisitors));
+            false -> 0
+        end,
+    #{
+        <<"day">> => Window,
+        <<"date">> => TargetDate,
+        <<"eligible">> => Eligible,
+        <<"active-users">> => Active,
+        <<"retention-rate">> => ratio(Active, CohortSize)
+    }.
+
+map_intersection_size(Left, Right) ->
+    maps:fold(
+        fun(Key, _Value, Count) ->
+            case maps:is_key(Key, Right) of
+                true -> Count + 1;
+                false -> Count
+            end
+        end,
+        0,
+        Left
+    ).
+
+add_iso_days(Date, Offset) ->
+    try
+        [Y, M, D] = [binary_to_integer(Part) || Part <- binary:split(Date, <<"-">>, [global])],
+        Gregorian = calendar:date_to_gregorian_days(Y, M, D),
+        date_string(calendar:gregorian_days_to_date(Gregorian + Offset))
+    catch
+        _:_ -> <<>>
+    end.
 
 %% @doc Fold `by-path' across the requested day range into a per-page mini
 %% report: totals (visits/duration/sessions/bounces) plus the same
@@ -1021,6 +1946,9 @@ merge_page_stats(RawA, RawB) ->
     B = normalize_page_stats(RawB),
     Base =
         #{
+            <<"page-loads">> =>
+                int_value(maps:get(<<"page-loads">>, A, 0), 0) +
+                    int_value(maps:get(<<"page-loads">>, B, 0), 0),
             <<"visits">> => int_value(maps:get(<<"visits">>, A, 0), 0) + int_value(maps:get(<<"visits">>, B, 0), 0),
             <<"duration-ms">> =>
                 int_value(maps:get(<<"duration-ms">>, A, 0), 0) + int_value(maps:get(<<"duration-ms">>, B, 0), 0),
@@ -1051,6 +1979,11 @@ merge_page_stats(RawA, RawB) ->
             merge_event_buckets(
                 map_value(maps:get(<<"by-event">>, A, #{})),
                 map_value(maps:get(<<"by-event">>, B, #{}))
+            ),
+        <<"by-action">> =>
+            merge_event_buckets(
+                map_value(maps:get(<<"by-action">>, A, #{})),
+                map_value(maps:get(<<"by-action">>, B, #{}))
             )
     }.
 
@@ -1124,6 +2057,7 @@ event_bucket_to_list(BucketMap, Sessions) ->
 page_metric_from_stats(Page, Stats) ->
     #{
         <<"page">> => Page,
+        <<"page-loads">> => maps:get(<<"page-loads">>, Stats, maps:get(<<"visits">>, Stats, 0)),
         <<"visits">> => maps:get(<<"visits">>, Stats, 0),
         <<"duration-ms">> => maps:get(<<"duration-ms">>, Stats, 0),
         <<"max-duration-ms">> => maps:get(<<"max-duration-ms">>, Stats, 0),
@@ -1149,7 +2083,9 @@ page_metric_from_stats(Page, Stats) ->
                 <<"languages">> => bucket_map_to_list(maps:get(<<"by-language">>, Stats, #{}))
             },
         <<"events">> =>
-            event_bucket_to_list(maps:get(<<"by-event">>, Stats, #{}), maps:get(<<"sessions">>, Stats, 0))
+            event_bucket_to_list(maps:get(<<"by-event">>, Stats, #{}), maps:get(<<"sessions">>, Stats, 0)),
+        <<"actions">> =>
+            event_bucket_to_list(maps:get(<<"by-action">>, Stats, #{}), maps:get(<<"sessions">>, Stats, 0))
     }.
 
 demographics_from_days(Daily) ->
@@ -1253,9 +2189,13 @@ is_ended(_) -> false.
 daily_default(Date) ->
     #{
         <<"date">> => Date,
+        <<"page-loads">> => 0,
         <<"visits">> => 0,
         <<"unique-visitors">> => 0,
+        <<"active-users">> => 0,
+        <<"new-users">> => 0,
         <<"sessions">> => 0,
+        <<"engaged-sessions">> => 0,
         <<"bounces">> => 0,
         <<"duration-ms">> => 0,
         <<"avg-duration-ms">> => 0,
@@ -1267,6 +2207,14 @@ daily_default(Date) ->
         <<"by-utm-source">> => #{},
         <<"by-utm-medium">> => #{},
         <<"by-utm-campaign">> => #{},
+        <<"by-first-referrer">> => #{},
+        <<"by-first-utm-source">> => #{},
+        <<"by-first-utm-medium">> => #{},
+        <<"by-first-utm-campaign">> => #{},
+        <<"by-session-referrer">> => #{},
+        <<"by-session-utm-source">> => #{},
+        <<"by-session-utm-medium">> => #{},
+        <<"by-session-utm-campaign">> => #{},
         <<"by-device">> => #{},
         <<"by-browser">> => #{},
         <<"by-os">> => #{},
@@ -1274,7 +2222,11 @@ daily_default(Date) ->
         <<"by-entry-page">> => #{},
         <<"by-exit-page">> => #{},
         <<"events">> => 0,
-        <<"by-event">> => #{}
+        <<"by-event">> => #{},
+        <<"actions">> => 0,
+        <<"by-action">> => #{},
+        <<"stable-visitors">> => #{},
+        <<"stable-visitor-dimensions">> => #{}
     }.
 
 normalize_daily(Date, Daily0) ->
@@ -1283,9 +2235,13 @@ normalize_daily(Date, Daily0) ->
     Duration = int_value(maps:get(<<"duration-ms">>, Daily, 0), 0),
     Daily#{
         <<"date">> => maps:get(<<"date">>, Daily, Date),
+        <<"page-loads">> => int_value(maps:get(<<"page-loads">>, Daily, Visits), Visits),
         <<"visits">> => Visits,
         <<"unique-visitors">> => int_value(maps:get(<<"unique-visitors">>, Daily, 0), 0),
+        <<"active-users">> => int_value(maps:get(<<"active-users">>, Daily, 0), 0),
+        <<"new-users">> => int_value(maps:get(<<"new-users">>, Daily, 0), 0),
         <<"sessions">> => int_value(maps:get(<<"sessions">>, Daily, 0), 0),
+        <<"engaged-sessions">> => int_value(maps:get(<<"engaged-sessions">>, Daily, 0), 0),
         <<"bounces">> => int_value(maps:get(<<"bounces">>, Daily, 0), 0),
         <<"duration-ms">> => Duration,
         <<"avg-duration-ms">> => average(Duration, Visits),
@@ -1297,6 +2253,14 @@ normalize_daily(Date, Daily0) ->
         <<"by-utm-source">> => map_value(maps:get(<<"by-utm-source">>, Daily, #{})),
         <<"by-utm-medium">> => map_value(maps:get(<<"by-utm-medium">>, Daily, #{})),
         <<"by-utm-campaign">> => map_value(maps:get(<<"by-utm-campaign">>, Daily, #{})),
+        <<"by-first-referrer">> => map_value(maps:get(<<"by-first-referrer">>, Daily, #{})),
+        <<"by-first-utm-source">> => map_value(maps:get(<<"by-first-utm-source">>, Daily, #{})),
+        <<"by-first-utm-medium">> => map_value(maps:get(<<"by-first-utm-medium">>, Daily, #{})),
+        <<"by-first-utm-campaign">> => map_value(maps:get(<<"by-first-utm-campaign">>, Daily, #{})),
+        <<"by-session-referrer">> => map_value(maps:get(<<"by-session-referrer">>, Daily, #{})),
+        <<"by-session-utm-source">> => map_value(maps:get(<<"by-session-utm-source">>, Daily, #{})),
+        <<"by-session-utm-medium">> => map_value(maps:get(<<"by-session-utm-medium">>, Daily, #{})),
+        <<"by-session-utm-campaign">> => map_value(maps:get(<<"by-session-utm-campaign">>, Daily, #{})),
         <<"by-device">> => map_value(maps:get(<<"by-device">>, Daily, #{})),
         <<"by-browser">> => map_value(maps:get(<<"by-browser">>, Daily, #{})),
         <<"by-os">> => map_value(maps:get(<<"by-os">>, Daily, #{})),
@@ -1304,7 +2268,12 @@ normalize_daily(Date, Daily0) ->
         <<"by-entry-page">> => map_value(maps:get(<<"by-entry-page">>, Daily, #{})),
         <<"by-exit-page">> => map_value(maps:get(<<"by-exit-page">>, Daily, #{})),
         <<"events">> => int_value(maps:get(<<"events">>, Daily, 0), 0),
-        <<"by-event">> => map_value(maps:get(<<"by-event">>, Daily, #{}))
+        <<"by-event">> => map_value(maps:get(<<"by-event">>, Daily, #{})),
+        <<"actions">> => int_value(maps:get(<<"actions">>, Daily, 0), 0),
+        <<"by-action">> => map_value(maps:get(<<"by-action">>, Daily, #{})),
+        <<"stable-visitors">> => map_value(maps:get(<<"stable-visitors">>, Daily, #{})),
+        <<"stable-visitor-dimensions">> =>
+            map_value(maps:get(<<"stable-visitor-dimensions">>, Daily, #{}))
     }.
 
 %% @doc Normalize a `by-path' entry. `sessions'/`bounces' mirror the site-wide
@@ -1316,6 +2285,7 @@ normalize_daily(Date, Daily0) ->
 normalize_page_stats(Raw) ->
     Stats = map_value(Raw),
     #{
+        <<"page-loads">> => int_value(maps:get(<<"page-loads">>, Stats, maps:get(<<"visits">>, Stats, 0)), 0),
         <<"visits">> => int_value(maps:get(<<"visits">>, Stats, 0), 0),
         <<"duration-ms">> => int_value(maps:get(<<"duration-ms">>, Stats, 0), 0),
         <<"max-duration-ms">> => int_value(maps:get(<<"max-duration-ms">>, Stats, 0), 0),
@@ -1331,7 +2301,8 @@ normalize_page_stats(Raw) ->
         <<"by-browser">> => map_value(maps:get(<<"by-browser">>, Stats, #{})),
         <<"by-os">> => map_value(maps:get(<<"by-os">>, Stats, #{})),
         <<"by-language">> => map_value(maps:get(<<"by-language">>, Stats, #{})),
-        <<"by-event">> => map_value(maps:get(<<"by-event">>, Stats, #{}))
+        <<"by-event">> => map_value(maps:get(<<"by-event">>, Stats, #{})),
+        <<"by-action">> => map_value(maps:get(<<"by-action">>, Stats, #{}))
     }.
 
 normalize_demographic_stats(Raw) ->
@@ -1372,7 +2343,72 @@ average(Total, Count) ->
     Total div Count.
 
 read_site(Key, Opts) ->
-    read_json(site_path(Key, Opts), undefined, Opts).
+    case read_json(site_path(Key, Opts), undefined, Opts) of
+        undefined -> configured_site(Key, Opts);
+        Site -> Site
+    end.
+
+configured_site(Key, Opts) ->
+    Sites = hb_opts:get(<<"analytics-sites">>, [], Opts),
+    case [Site || Site <- Sites, configured_site_key(Site, Opts) =:= trim_bin(Key)] of
+        [Site | _] -> normalize_configured_site(Site, Opts);
+        [] -> undefined
+    end.
+
+configured_sites_for_owner(Owner, Opts) ->
+    Sites = hb_opts:get(<<"analytics-sites">>, [], Opts),
+    lists:filtermap(
+        fun
+            (Site) when is_map(Site) ->
+                Normalized = normalize_configured_site(Site, Opts),
+                case
+                    configured_site_key(Site, Opts) =/= <<>> andalso
+                        site_enabled(Normalized, Opts) andalso
+                        site_wallet_allowed(Normalized, Owner, Opts)
+                of
+                    true -> {true, public_site(Normalized, Opts)};
+                    false -> false
+                end;
+            (_) ->
+                false
+        end,
+        Sites
+    ).
+
+configured_site_key(Site, Opts) when is_map(Site) ->
+    trim_bin(hb_maps:get(<<"key">>, Site, <<>>, Opts));
+configured_site_key(_Site, _Opts) ->
+    <<>>.
+
+normalize_configured_site(Site, Opts) ->
+    #{
+        <<"key">> => configured_site_key(Site, Opts),
+        <<"owner">> => configured_site_owner(Site, Opts),
+        <<"name">> => site_name(Site, Opts),
+        <<"origins">> => allowed_origins(Site, Opts),
+        <<"users">> => site_users(Site, <<>>, Opts),
+        <<"visitor-id-mode">> => visitor_id_mode(Site, Opts),
+        <<"engagement-threshold-ms">> => engagement_threshold_ms(Site, Opts),
+        <<"engagement-dedupe-window-ms">> => engagement_dedupe_window_ms(Site, Opts),
+        <<"configured">> => true,
+        <<"enabled">> => truthy(hb_maps:get(<<"enabled">>, Site, true, Opts))
+    }.
+
+configured_site_owner(Site, Opts) ->
+    case trim_bin(hb_maps:get(<<"owner">>, Site, <<>>, Opts)) of
+        <<>> -> node_wallet_address(Opts);
+        Owner -> Owner
+    end.
+
+node_wallet_address(Opts) ->
+    case hb_opts:get(priv_wallet, undefined, Opts) of
+        undefined -> <<>>;
+        Wallet ->
+            try hb_util:human_id(ar_wallet:to_address(Wallet))
+            catch
+                _:_ -> <<>>
+            end
+    end.
 
 %% A site is enabled unless explicitly disabled (soft-deleted). Legacy records
 %% without the field are treated as enabled.
@@ -1405,6 +2441,9 @@ read_json(Path, Default, Opts) ->
 
 write_json(Path, Value, Opts) ->
     hb_store:write(#{ Path => hb_json:encode(Value) }, Opts).
+
+write_json_entries(Entries, Opts) ->
+    hb_store:write(maps:map(fun(_Path, Value) -> hb_json:encode(Value) end, Entries), Opts).
 
 %% @doc Ensure a listable group marker exists at `Path'. Some stores (notably
 %% `hb_store_lmdb', the default primary store for a running node) require an
@@ -1441,6 +2480,26 @@ visit_path(Key, Date, VisitID, Opts) ->
 nonce_path(Owner, Nonce, Opts) ->
     store_path([<<"nonces">>, path_component(Owner), path_component(Nonce)], Opts).
 
+subject_path(Key, SubjectID, Opts) ->
+    store_path([<<"subjects">>, path_component(Key), path_component(SubjectID)], Opts).
+
+subjects_path(Key, Opts) ->
+    store_path([<<"subjects">>, path_component(Key)], Opts).
+
+subject_child_path(Key, SubjectKey, Opts) ->
+    store_path([<<"subjects">>, path_component(Key), SubjectKey], Opts).
+
+engagement_path(Key, SubjectID, InteractionID, Opts) ->
+    store_path(
+        [
+            <<"engagements">>,
+            path_component(Key),
+            path_component(SubjectID),
+            path_component(InteractionID)
+        ],
+        Opts
+    ).
+
 store_path(Parts, Opts) ->
     [store_root(Opts) | Parts].
 
@@ -1465,26 +2524,8 @@ static(Name, _Opts) ->
             {error, not_found}
     end.
 
-content_type(<<"index.html">>) -> <<"text/html">>;
-content_type(<<"dashboard.js">>) -> <<"text/javascript">>;
 content_type(<<"session.js">>) -> <<"text/javascript">>;
-content_type(<<"styles.css">>) -> <<"text/css">>;
-content_type(<<"logo.svg">>) -> <<"image/svg+xml">>;
 content_type(_) -> <<"application/octet-stream">>.
-
-inline_asset(Body, Name, Placeholder, Escape, Opts) ->
-    Asset =
-        case static(Name, Opts) of
-            {ok, #{ <<"body">> := AssetBody }} -> Escape(AssetBody);
-            _ -> <<>>
-        end,
-    binary:replace(Body, Placeholder, Asset, [global]).
-
-escape_style(Bin) ->
-    binary:replace(Bin, <<"</style">>, <<"<\\/style">>, [global]).
-
-escape_script(Bin) ->
-    binary:replace(Bin, <<"</script">>, <<"<\\/script">>, [global]).
 
 with_common_headers({ok, Msg}) ->
     {ok,
@@ -1879,12 +2920,102 @@ duration_ms(Req, Opts) ->
         ?MAX_DURATION_MS
     ).
 
+engagement_threshold_ms(Req, Opts) ->
+    engagement_threshold_ms(Req, default_engagement_threshold_ms(Opts), Opts).
+
+engagement_threshold_ms(Req, Default, Opts) ->
+    clamp(
+        int_value(hb_maps:get(<<"engagement-threshold-ms">>, Req, Default, Opts), Default),
+        1_000,
+        ?MAX_DURATION_MS
+    ).
+
+default_engagement_threshold_ms(Opts) ->
+    clamp(
+        int_value(
+            hb_opts:get(
+                <<"analytics-engagement-threshold-ms">>,
+                ?DEFAULT_ENGAGEMENT_THRESHOLD_MS,
+                Opts
+            ),
+            ?DEFAULT_ENGAGEMENT_THRESHOLD_MS
+        ),
+        1_000,
+        ?MAX_DURATION_MS
+    ).
+
+site_engagement_threshold_ms(Site, Opts) ->
+    clamp(
+        int_value(
+            hb_maps:get(
+                <<"engagement-threshold-ms">>,
+                Site,
+                default_engagement_threshold_ms(Opts),
+                Opts
+            ),
+            default_engagement_threshold_ms(Opts)
+        ),
+        1_000,
+        ?MAX_DURATION_MS
+    ).
+
+engagement_dedupe_window_ms(Req, Opts) ->
+    engagement_dedupe_window_ms(Req, default_engagement_dedupe_window_ms(Opts), Opts).
+
+engagement_dedupe_window_ms(Req, Default, Opts) ->
+    clamp(
+        int_value(hb_maps:get(<<"engagement-dedupe-window-ms">>, Req, Default, Opts), Default),
+        60_000,
+        2_592_000_000
+    ).
+
+default_engagement_dedupe_window_ms(Opts) ->
+    clamp(
+        int_value(
+            hb_opts:get(
+                <<"analytics-engagement-dedupe-window-ms">>,
+                ?DEFAULT_ENGAGEMENT_DEDUPE_WINDOW_MS,
+                Opts
+            ),
+            ?DEFAULT_ENGAGEMENT_DEDUPE_WINDOW_MS
+        ),
+        60_000,
+        2_592_000_000
+    ).
+
+site_engagement_dedupe_window_ms(Site, Opts) ->
+    engagement_dedupe_window_ms(Site, default_engagement_dedupe_window_ms(Opts), Opts).
+
+engagement_clock_skew_ms(Opts) ->
+    clamp(
+        int_value(
+            hb_opts:get(
+                <<"analytics-engagement-clock-skew-ms">>,
+                ?DEFAULT_ENGAGEMENT_CLOCK_SKEW_MS,
+                Opts
+            ),
+            ?DEFAULT_ENGAGEMENT_CLOCK_SKEW_MS
+        ),
+        0,
+        300_000
+    ).
+
 days(Req, Opts) ->
     clamp(
         int_value(hb_maps:get(<<"days">>, Req, ?DEFAULT_DAYS, Opts), ?DEFAULT_DAYS),
         1,
         ?MAX_DAYS
     ).
+
+bounded_positive_int(Value, Default, Maximum) ->
+    clamp(int_value(Value, Default), 1, Maximum).
+
+drop_n(Count, List) when Count =< 0 ->
+    List;
+drop_n(_Count, []) ->
+    [];
+drop_n(Count, [_ | Rest]) ->
+    drop_n(Count - 1, Rest).
 
 nonce_ttl_ms(Opts) ->
     clamp(
@@ -2206,6 +3337,82 @@ fold_dimension_buckets(Daily, Dimensions, VisitIncrement, Delta, NewDuration) ->
         Specs
     ).
 
+acquisition_dimensions(Dimensions) ->
+    maps:with(
+        [<<"referrer">>, <<"utm-source">>, <<"utm-medium">>, <<"utm-campaign">>],
+        map_value(Dimensions)
+    ).
+
+%% First-touch attribution is written once for an opted-in persistent visitor.
+%% Session-touch attribution is written once per session and receives duration
+%% and engagement deltas as that session advances. Labels remain generic web
+%% dimensions; channel grouping is a report-consumer concern.
+apply_acquisition_attribution(Daily, Session, PersistentVisitor, Delta) ->
+    Daily1 =
+        case PersistentVisitor of
+            #{ <<"new-user">> := true, <<"first-acquisition">> := FirstAcquisition } ->
+                fold_attribution_buckets(
+                    Daily,
+                    <<"by-first">>,
+                    FirstAcquisition,
+                    #{ <<"users">> => 1, <<"new-users">> => 1 }
+                );
+            _ ->
+                Daily
+        end,
+    Acquisition = map_value(maps:get(<<"acquisition">>, Session, #{})),
+    case map_size(Acquisition) of
+        0 ->
+            Daily1;
+        _ ->
+            fold_attribution_buckets(
+                Daily1,
+                <<"by-session">>,
+                Acquisition,
+                #{
+                    <<"sessions">> => bool_to_int(maps:get(<<"new-session">>, Session, false)),
+                    <<"engaged-sessions">> =>
+                        bool_to_int(maps:get(<<"new-engaged-session">>, Session, false)),
+                    <<"duration-ms">> => Delta
+                }
+            )
+    end.
+
+fold_attribution_buckets(Daily, Prefix, Dimensions, Increments) ->
+    Specs =
+        [
+            {<<Prefix/binary, "-referrer">>, <<"referrer">>},
+            {<<Prefix/binary, "-utm-source">>, <<"utm-source">>},
+            {<<Prefix/binary, "-utm-medium">>, <<"utm-medium">>},
+            {<<Prefix/binary, "-utm-campaign">>, <<"utm-campaign">>}
+        ],
+    lists:foldl(
+        fun({BucketKey, Field}, Acc) ->
+            case maps:get(Field, Dimensions, <<>>) of
+                <<>> ->
+                    Acc;
+                Label ->
+                    Bucket0 = map_value(maps:get(BucketKey, Acc, #{})),
+                    Stats0 = map_value(maps:get(Label, Bucket0, #{})),
+                    Stats1 =
+                        maps:fold(
+                            fun(Counter, Increment, StatsAcc) ->
+                                StatsAcc#{
+                                    Counter =>
+                                        int_value(maps:get(Counter, StatsAcc, 0), 0) +
+                                            int_value(Increment, 0)
+                                }
+                            end,
+                            Stats0#{ Field => Label },
+                            Increments
+                        ),
+                    Acc#{ BucketKey => Bucket0#{ Label => Stats1 } }
+            end
+        end,
+        Daily,
+        Specs
+    ).
+
 %% @doc Apply unique-visitor, session and bounce counters plus landing/exit page
 %% counts to the daily record. `bounces' tracks single-page sessions: +1 when a
 %% session opens, -1 when its second pageview arrives.
@@ -2213,11 +3420,15 @@ apply_session_counters(Daily, Session, NewVisitor, Page) ->
     UniqueInc = bool_to_int(NewVisitor),
     NewSession = maps:get(<<"new-session">>, Session, false),
     Unbounced = maps:get(<<"unbounced">>, Session, false),
+    NewEngagedSession = maps:get(<<"new-engaged-session">>, Session, false),
     BounceInc = bool_to_int(NewSession) - bool_to_int(Unbounced),
     Daily1 =
         Daily#{
             <<"unique-visitors">> => int_value(maps:get(<<"unique-visitors">>, Daily, 0), 0) + UniqueInc,
             <<"sessions">> => int_value(maps:get(<<"sessions">>, Daily, 0), 0) + bool_to_int(NewSession),
+            <<"engaged-sessions">> =>
+                int_value(maps:get(<<"engaged-sessions">>, Daily, 0), 0) +
+                    bool_to_int(NewEngagedSession),
             <<"bounces">> => max(0, int_value(maps:get(<<"bounces">>, Daily, 0), 0) + BounceInc)
         },
     Daily2 = apply_page_session_counters(Daily1, Session, Page),
@@ -2320,15 +3531,137 @@ bool_to_int(_) -> 0.
 %% Unique visitors + sessions (privacy-preserving)
 %% =========================================================================
 
-%% @doc Per-day visitor id: a hash of a per-site daily RANDOM salt, the client
-%% IP and the User-Agent. The salt rotates daily and is never exposed, so the
-%% hash cannot be linked across days or reversed to the raw IP/UA.
-visitor_hash(Key, Date, Demographics, Req, Opts) ->
+%% @doc Per-day visitor id. Persistent-mode sites use the already server-hashed
+%% visitor ID as input; daily-mode sites retain the IP + User-Agent estimate.
+%% The daily random salt prevents either input from being linked through the
+%% ordinary daily visitor marker.
+visitor_hash(Key, Date, Demographics, Req, PersistentVisitor, Opts) ->
     Salt = daily_salt(Key, Date, Opts),
     IP = hb_maps:get(<<"ip">>, Demographics, <<"unknown">>, Opts),
     UA = trim_bin(hb_maps:get(<<"user-agent">>, Req, <<>>, Opts)),
-    Material = <<Salt/binary, "|", Key/binary, "|", IP/binary, "|", UA/binary>>,
+    IdentityMaterial =
+        case PersistentVisitor of
+            #{ <<"hash">> := Hash } -> Hash;
+            _ -> <<IP/binary, "|", UA/binary>>
+        end,
+    Material = <<Salt/binary, "|", Key/binary, "|", IdentityMaterial/binary>>,
     hb_util:human_id(crypto:hash(sha256, Material)).
+
+persistent_visitor(Key, Site, Date, Req, Dimensions, Opts) when is_map(Site) ->
+    case site_visitor_id_mode(Site, Opts) of
+        <<"persistent">> -> persistent_visitor_enabled(Key, Date, Req, Dimensions, Opts);
+        _ -> undefined
+    end.
+
+persistent_visitor_enabled(Key, Date, Req, Dimensions, Opts) ->
+    case limit_binary(trim_bin(hb_maps:get(<<"visitor-id">>, Req, <<>>, Opts)), 128) of
+        <<>> ->
+            undefined;
+        RawID ->
+            Salt = persistent_visitor_salt(Key, Opts),
+            Hash = hb_util:human_id(crypto:hash(sha256, <<Salt/binary, "|", Key/binary, "|", RawID/binary>>)),
+            Path = persistent_visitor_path(Key, Hash, Opts),
+            Resource = {?MODULE, persistent_visitor, path_component(Key), path_component(Hash)},
+            global:trans(
+                {Resource, self()},
+                fun() ->
+                    Existing = read_json(Path, undefined, Opts),
+                    FirstSeen =
+                        case Existing of
+                            undefined -> Date;
+                            _ -> maps:get(<<"first-seen-date">>, Existing, Date)
+                        end,
+                    FirstAcquisition =
+                        case Existing of
+                            undefined -> acquisition_dimensions(Dimensions);
+                            _ -> map_value(maps:get(<<"first-acquisition">>, Existing, #{}))
+                        end,
+                    NewUser = Existing =:= undefined,
+                    case Existing of
+                        #{ <<"last-seen-date">> := Date } -> ok;
+                        _ ->
+                            ok =
+                                write_json(
+                                    Path,
+                                    #{
+                                        <<"first-seen-date">> => FirstSeen,
+                                        <<"first-acquisition">> => FirstAcquisition,
+                                        <<"last-seen-date">> => Date,
+                                        <<"updated-at">> => now_ms()
+                                    },
+                                    Opts
+                                )
+                    end,
+                    #{
+                        <<"hash">> => Hash,
+                        <<"first-seen-date">> => FirstSeen,
+                        <<"first-acquisition">> => FirstAcquisition,
+                        <<"new-user">> => NewUser
+                    }
+                end
+            )
+    end.
+
+persistent_visitor_salt(Key, Opts) ->
+    Path = persistent_visitor_salt_path(Key, Opts),
+    Resource = {?MODULE, persistent_visitor_salt, path_component(Key)},
+    global:trans(
+        {Resource, self()},
+        fun() ->
+            case read_json(Path, undefined, Opts) of
+                undefined ->
+                    Salt = random_token(?SITE_KEY_BYTES),
+                    ok = write_json(Path, #{ <<"salt">> => Salt }, Opts),
+                    Salt;
+                Record ->
+                    maps:get(<<"salt">>, Record, Key)
+            end
+        end
+    ).
+
+apply_persistent_visitor(Daily, undefined, _Demographics, _Dimensions) ->
+    Daily;
+apply_persistent_visitor(
+    Daily,
+    #{ <<"hash">> := Hash, <<"first-seen-date">> := FirstSeen },
+    Demographics,
+    Dimensions
+) ->
+    Visitors0 = map_value(maps:get(<<"stable-visitors">>, Daily, #{})),
+    VisitorDimensions0 = map_value(maps:get(<<"stable-visitor-dimensions">>, Daily, #{})),
+    FirstToday = not maps:is_key(Hash, Visitors0),
+    NewUser = FirstToday andalso FirstSeen =:= maps:get(<<"date">>, Daily, <<>>),
+    Visitors = Visitors0#{ Hash => FirstSeen },
+    VisitorDimensions =
+        VisitorDimensions0#{
+            Hash =>
+                maps:get(
+                    Hash,
+                    VisitorDimensions0,
+                    audience_dimensions(Demographics, Dimensions)
+                )
+        },
+    Daily#{
+        <<"stable-visitors">> => Visitors,
+        <<"stable-visitor-dimensions">> => VisitorDimensions,
+        <<"active-users">> => map_size(Visitors),
+        <<"new-users">> => int_value(maps:get(<<"new-users">>, Daily, 0), 0) + bool_to_int(NewUser)
+    }.
+
+audience_dimensions(Demographics, Dimensions) ->
+    Location = map_value(maps:get(<<"location">>, Demographics, #{})),
+    #{
+        <<"country">> => dimension_label(maps:get(<<"country">>, Location, <<>>)),
+        <<"region">> => dimension_label(maps:get(<<"region">>, Location, <<>>)),
+        <<"city">> => dimension_label(maps:get(<<"city">>, Location, <<>>)),
+        <<"device">> => dimension_label(maps:get(<<"device">>, Dimensions, <<>>)),
+        <<"browser">> => dimension_label(maps:get(<<"browser">>, Dimensions, <<>>)),
+        <<"os">> => dimension_label(maps:get(<<"os">>, Dimensions, <<>>)),
+        <<"language">> => dimension_label(maps:get(<<"language">>, Dimensions, <<>>))
+    }.
+
+dimension_label(<<>>) -> <<"Unknown">>;
+dimension_label(Value) -> limit_binary(trim_bin(Value), 96).
 
 daily_salt(Key, Date, Opts) ->
     Path = salt_path(Key, Date, Opts),
@@ -2343,6 +3676,34 @@ daily_salt(Key, Date, Opts) ->
                 Salt -> Salt
             end
     end.
+
+engagement_view_bucket(Site, Opts) ->
+    Window = site_engagement_dedupe_window_ms(Site, Opts),
+    integer_to_binary(now_ms() div Window).
+
+engagement_viewer_id(Key, Site, Req, Opts) ->
+    Bucket = engagement_view_bucket(Site, Opts),
+    Salt = engagement_bucket_salt(Key, Bucket, Opts),
+    IP = client_ip(Req, Opts),
+    UA = trim_bin(hb_maps:get(<<"user-agent">>, Req, <<>>, Opts)),
+    hb_util:human_id(crypto:hash(sha256, <<Salt/binary, "|", Key/binary, "|", IP/binary, "|", UA/binary>>)).
+
+engagement_bucket_salt(Key, Bucket, Opts) ->
+    Path = engagement_salt_path(Key, Bucket, Opts),
+    Resource = {?MODULE, engagement_salt, path_component(Key), path_component(Bucket)},
+    global:trans(
+        {Resource, self()},
+        fun() ->
+            case read_json(Path, undefined, Opts) of
+                undefined ->
+                    Salt = random_token(?SITE_KEY_BYTES),
+                    ok = write_json(Path, #{ <<"salt">> => Salt }, Opts),
+                    Salt;
+                Record ->
+                    maps:get(<<"salt">>, Record, Bucket)
+            end
+        end
+    ).
 
 %% @doc Record-once visitor marker; returns true the first time a visitor hash
 %% is seen on a given day (i.e. a new unique visitor).
@@ -2371,42 +3732,54 @@ mark_page_view(Key, Date, VisitorHash, Page, Opts) ->
 
 %% @doc Open or extend the visitor's session for the day, applying the inactivity
 %% window. Returns the increments the daily aggregate should apply.
-touch_session(Key, Date, VisitorHash, Page, Now, Opts) ->
+session_context(Key, Date, VisitorHash, Page, Now, true, _Duration, Dimensions, Opts) ->
+    touch_session(Key, Date, VisitorHash, Page, Now, Dimensions, Opts);
+session_context(Key, Date, VisitorHash, _Page, Now, false, Duration, _Dimensions, Opts) ->
+    touch_session_activity(Key, Date, VisitorHash, Now, Duration, Opts).
+
+touch_session(Key, Date, VisitorHash, Page, Now, Dimensions, Opts) ->
     Path = session_path(Key, Date, VisitorHash, Opts),
     case read_json(Path, undefined, Opts) of
         undefined ->
-            open_session(Path, Page, Now, Opts);
+            open_session(Path, Page, Now, Dimensions, Opts);
         Record ->
             LastSeen = int_value(hb_maps:get(<<"last-seen">>, Record, 0, Opts), 0),
             case Now - LastSeen =< ?SESSION_WINDOW_MS of
                 false ->
-                    open_session(Path, Page, Now, Opts);
+                    open_session(Path, Page, Now, Dimensions, Opts);
                 true ->
                     Pageviews0 = int_value(hb_maps:get(<<"pageviews">>, Record, 1, Opts), 1),
                     ExitFrom = hb_maps:get(<<"exit-page">>, Record, Page, Opts),
                     EntryPage = hb_maps:get(<<"entry-page">>, Record, Page, Opts),
                     Pages0 = map_value(hb_maps:get(<<"pages">>, Record, #{}, Opts)),
                     PageNewToSession = not maps:is_key(Page, Pages0),
+                    WasEngaged = truthy(hb_maps:get(<<"engaged">>, Record, false, Opts)),
+                    Engaged = WasEngaged orelse (PageNewToSession andalso Pageviews0 >= 1),
                     Updated =
                         Record#{
                             <<"pageviews">> => Pageviews0 + 1,
                             <<"exit-page">> => Page,
                             <<"pages">> => Pages0#{ Page => true },
+                            <<"engaged">> => Engaged,
                             <<"last-seen">> => Now
                         },
                     ok = write_json(Path, Updated, Opts),
                     #{
                         <<"new-session">> => false,
                         <<"unbounced">> => Pageviews0 =:= 1,
+                        <<"new-engaged-session">> => Engaged andalso not WasEngaged,
                         <<"exit-from">> => ExitFrom,
                         <<"exit-to">> => Page,
                         <<"entry-page">> => EntryPage,
+                        <<"acquisition">> =>
+                            map_value(hb_maps:get(<<"acquisition">>, Record, #{}, Opts)),
                         <<"page-new-to-session">> => PageNewToSession
                     }
             end
     end.
 
-open_session(Path, Page, Now, Opts) ->
+open_session(Path, Page, Now, Dimensions, Opts) ->
+    Acquisition = acquisition_dimensions(Dimensions),
     ok =
         write_json(
             Path,
@@ -2415,6 +3788,8 @@ open_session(Path, Page, Now, Opts) ->
                 <<"entry-page">> => Page,
                 <<"exit-page">> => Page,
                 <<"pages">> => #{ Page => true },
+                <<"acquisition">> => Acquisition,
+                <<"engaged">> => false,
                 <<"first-seen">> => Now,
                 <<"last-seen">> => Now
             },
@@ -2423,10 +3798,31 @@ open_session(Path, Page, Now, Opts) ->
     #{
         <<"new-session">> => true,
         <<"unbounced">> => false,
+        <<"new-engaged-session">> => false,
         <<"entry-page">> => Page,
         <<"exit-to">> => Page,
+        <<"acquisition">> => Acquisition,
         <<"page-new-to-session">> => true
     }.
+
+touch_session_activity(Key, Date, VisitorHash, Now, Duration, Opts) ->
+    Path = session_path(Key, Date, VisitorHash, Opts),
+    case read_json(Path, undefined, Opts) of
+        undefined ->
+            #{};
+        Record ->
+            WasEngaged = truthy(hb_maps:get(<<"engaged">>, Record, false, Opts)),
+            Engaged = WasEngaged orelse Duration >= ?ENGAGED_SESSION_MS,
+            ok = write_json(Path, Record#{ <<"engaged">> => Engaged, <<"last-seen">> => Now }, Opts),
+            #{
+                <<"new-session">> => false,
+                <<"unbounced">> => false,
+                <<"new-engaged-session">> => Engaged andalso not WasEngaged,
+                <<"acquisition">> =>
+                    map_value(hb_maps:get(<<"acquisition">>, Record, #{}, Opts)),
+                <<"page-new-to-session">> => false
+            }
+    end.
 
 %% =========================================================================
 %% Custom events
@@ -2436,6 +3832,12 @@ event_name(Raw) ->
     case limit_binary(trim_bin(Raw), 80) of
         <<>> -> <<"event">>;
         Name -> Name
+    end.
+
+event_kind(Req, Opts) ->
+    case trim_bin(hb_maps:get(<<"type">>, Req, <<"event">>, Opts)) of
+        <<"action">> -> <<"action">>;
+        _ -> <<"event">>
     end.
 
 %% @doc The page an event fired on, when the tracker sent one. Older cached
@@ -2449,7 +3851,37 @@ event_page(Req, Opts) ->
         Raw -> sanitize_page(Raw)
     end.
 
-record_event(Key, Date, Name, Value, Page, Opts) ->
+%% @doc Optionally associate a custom event with an arbitrary subject. The
+%% event name remains product-defined; analytics only maintains generic
+%% per-subject counters alongside the site-wide event report.
+event_subject_id(Req, Opts) ->
+    case trim_bin(hb_maps:get(<<"subject-id">>, Req, <<>>, Opts)) of
+        <<>> -> undefined;
+        Raw -> limit_binary(Raw, 512)
+    end.
+
+record_subject_event(_Key, undefined, _Name, _Opts) ->
+    ok;
+record_subject_event(Key, SubjectID, Name, Opts) ->
+    with_subject_lock(
+        Key,
+        SubjectID,
+        fun() ->
+            ok = ensure_group(subjects_path(Key, Opts), Opts),
+            Path = subject_path(Key, SubjectID, Opts),
+            Aggregate0 = read_json(Path, subject_default(SubjectID), Opts),
+            Events0 = map_value(maps:get(<<"events">>, Aggregate0, #{})),
+            Aggregate =
+                Aggregate0#{
+                    <<"events">> =>
+                        Events0#{ Name => int_value(maps:get(Name, Events0, 0), 0) + 1 },
+                    <<"updated-at">> => now_ms()
+                },
+            write_json(Path, Aggregate, Opts)
+        end
+    ).
+
+record_event(Key, Date, Name, Kind, Value, Page, Opts) ->
     Path = daily_path(Key, Date, Opts),
     Daily0 = normalize_daily(Date, read_json(Path, daily_default(Date), Opts)),
     ByEvent0 = map_value(hb_maps:get(<<"by-event">>, Daily0, #{}, Opts)),
@@ -2460,7 +3892,28 @@ record_event(Key, Date, Name, Value, Page, Opts) ->
             <<"updated-at">> => now_ms()
         },
     Daily2 = record_page_event(Daily1, Page, Name, Value),
-    write_json(Path, Daily2, Opts).
+    Daily3 = record_action(Daily2, Page, Name, Kind, Value),
+    write_json(Path, Daily3, Opts).
+
+record_action(Daily, _Page, _Name, <<"event">>, _Value) ->
+    Daily;
+record_action(Daily, Page, Name, <<"action">>, Value) ->
+    ByAction0 = map_value(maps:get(<<"by-action">>, Daily, #{})),
+    Daily1 =
+        Daily#{
+            <<"actions">> => int_value(maps:get(<<"actions">>, Daily, 0), 0) + 1,
+            <<"by-action">> => ByAction0#{ Name => increment_event_stats(ByAction0, Name, Value) }
+        },
+    record_page_action(Daily1, Page, Name, Value).
+
+record_page_action(Daily, undefined, _Name, _Value) ->
+    Daily;
+record_page_action(Daily, Page, Name, Value) ->
+    ByPath0 = map_value(maps:get(<<"by-path">>, Daily, #{})),
+    PageStats0 = normalize_page_stats(maps:get(Page, ByPath0, #{})),
+    ByAction0 = maps:get(<<"by-action">>, PageStats0, #{}),
+    PageStats1 = PageStats0#{ <<"by-action">> => ByAction0#{ Name => increment_event_stats(ByAction0, Name, Value) } },
+    Daily#{ <<"by-path">> => ByPath0#{ Page => PageStats1 } }.
 
 increment_event_stats(ByEvent, Name, Value) ->
     Stats0 = normalize_event_stats(maps:get(Name, ByEvent, #{})),
@@ -2497,8 +3950,81 @@ acquisition_from_days(Daily) ->
         <<"referrers">> => demographic_items_from_days(Daily, <<"by-referrer">>, <<"referrer">>),
         <<"utm-sources">> => demographic_items_from_days(Daily, <<"by-utm-source">>, <<"utm-source">>),
         <<"utm-mediums">> => demographic_items_from_days(Daily, <<"by-utm-medium">>, <<"utm-medium">>),
-        <<"utm-campaigns">> => demographic_items_from_days(Daily, <<"by-utm-campaign">>, <<"utm-campaign">>)
+        <<"utm-campaigns">> => demographic_items_from_days(Daily, <<"by-utm-campaign">>, <<"utm-campaign">>),
+        <<"first-touch">> => attribution_from_days(Daily, <<"by-first">>, <<"users">>),
+        <<"session-touch">> => attribution_from_days(Daily, <<"by-session">>, <<"sessions">>)
     }.
+
+attribution_from_days(Daily, Prefix, SortKey) ->
+    #{
+        <<"referrers">> =>
+            attribution_items_from_days(
+                Daily,
+                <<Prefix/binary, "-referrer">>,
+                <<"referrer">>,
+                SortKey
+            ),
+        <<"utm-sources">> =>
+            attribution_items_from_days(
+                Daily,
+                <<Prefix/binary, "-utm-source">>,
+                <<"utm-source">>,
+                SortKey
+            ),
+        <<"utm-mediums">> =>
+            attribution_items_from_days(
+                Daily,
+                <<Prefix/binary, "-utm-medium">>,
+                <<"utm-medium">>,
+                SortKey
+            ),
+        <<"utm-campaigns">> =>
+            attribution_items_from_days(
+                Daily,
+                <<Prefix/binary, "-utm-campaign">>,
+                <<"utm-campaign">>,
+                SortKey
+            )
+    }.
+
+attribution_items_from_days(Daily, BucketKey, LabelKey, SortKey) ->
+    Items =
+        lists:foldl(
+            fun(Day, Acc) ->
+                maps:fold(
+                    fun(Label0, RawStats, ItemAcc) ->
+                        Stats = map_value(RawStats),
+                        Label = maps:get(LabelKey, Stats, Label0),
+                        Existing = map_value(maps:get(Label, ItemAcc, #{})),
+                        Counters = maps:without([LabelKey], Stats),
+                        Merged =
+                            maps:fold(
+                                fun(Counter, Value, StatsAcc) ->
+                                    StatsAcc#{
+                                        Counter =>
+                                            int_value(maps:get(Counter, StatsAcc, 0), 0) +
+                                                int_value(Value, 0)
+                                    }
+                                end,
+                                Existing#{ LabelKey => Label },
+                                Counters
+                            ),
+                        ItemAcc#{ Label => Merged }
+                    end,
+                    Acc,
+                    map_value(maps:get(BucketKey, Day, #{}))
+                )
+            end,
+            #{},
+            Daily
+        ),
+    lists:sublist(
+        lists:sort(
+            fun(A, B) -> maps:get(SortKey, A, 0) >= maps:get(SortKey, B, 0) end,
+            maps:values(Items)
+        ),
+        50
+    ).
 
 technology_from_days(Daily) ->
     #{
@@ -2543,10 +4069,16 @@ count_items_from_days(Daily, BucketKey) ->
     ).
 
 events_from_days(Daily, Sessions) ->
+    named_metrics_from_days(Daily, <<"by-event">>, Sessions).
+
+actions_from_days(Daily, Sessions) ->
+    named_metrics_from_days(Daily, <<"by-action">>, Sessions).
+
+named_metrics_from_days(Daily, BucketKey, Sessions) ->
     Items =
         lists:foldl(
             fun(Day, Acc) ->
-                ByEvent = map_value(maps:get(<<"by-event">>, Day, #{})),
+                ByEvent = map_value(maps:get(BucketKey, Day, #{})),
                 maps:fold(
                     fun(Name, RawStats, ItemAcc) ->
                         Stats = normalize_event_stats(RawStats),
@@ -2631,6 +4163,25 @@ active_pages(Key, Route, Opts) ->
 salt_path(Key, Date, Opts) ->
     store_path([<<"salts">>, path_component(Key), path_component(Date)], Opts).
 
+persistent_visitor_salt_path(Key, Opts) ->
+    store_path([<<"persistent-visitor-salts">>, path_component(Key)], Opts).
+
+persistent_visitor_path(Key, VisitorHash, Opts) ->
+    store_path(
+        [<<"persistent-visitors">>, path_component(Key), path_component(VisitorHash)],
+        Opts
+    ).
+
+engagement_salt_path(Key, Bucket, Opts) ->
+    store_path([<<"engagement-salts">>, path_component(Key), path_component(Bucket)], Opts).
+
+engagement_view_path(Key, SubjectID, Bucket, ViewerID, Opts) ->
+    Slug = hb_util:human_id(crypto:hash(sha256, <<SubjectID/binary, "|", ViewerID/binary>>)),
+    store_path(
+        [<<"engagement-views">>, path_component(Key), path_component(Bucket), path_component(Slug)],
+        Opts
+    ).
+
 visitor_path(Key, Date, VisitorHash, Opts) ->
     store_path(
         [<<"visitors">>, path_component(Key), path_component(Date), path_component(VisitorHash)],
@@ -2712,6 +4263,322 @@ register_signed_request_creates_site_test() ->
     ?assertMatch(<<_/binary>>, maps:get(<<"key">>, Body)),
     ?assertNotEqual(nomatch, binary:match(maps:get(<<"snippet">>, Body), <<"~analytics@1.0/script">>)).
 
+external_frontend_not_exported_test() ->
+    Info = info(#{}),
+    ?assertNot(lists:member(<<"index">>, maps:get(exports, Info))),
+    ?assertNot(maps:is_key(default, Info)).
+
+configured_site_is_immediately_active_test() ->
+    Wallet = ar_wallet:new(),
+    Opts =
+        (test_opts())#{
+            <<"priv-wallet">> => Wallet,
+            <<"analytics-sites">> =>
+                [
+                    #{
+                        <<"key">> => <<"configured-key">>,
+                        <<"name">> => <<"Configured site">>,
+                        <<"origins">> => [<<"https://example.com">>],
+                        <<"engagement-threshold-ms">> => 2_000
+                    }
+                ]
+        },
+    Site = read_active_site(<<"configured-key">>, Opts),
+    ?assertEqual(<<"Configured site">>, maps:get(<<"name">>, Site)),
+    ?assertEqual(2_000, maps:get(<<"engagement-threshold-ms">>, Site)),
+    ?assertEqual(
+        hb_util:human_id(ar_wallet:to_address(Wallet)),
+        maps:get(<<"owner">>, Site)
+    ),
+    {ok, Res} =
+        session(
+            #{},
+            #{
+                <<"key">> => <<"configured-key">>,
+                <<"visit">> => <<"visit-1">>,
+                <<"event">> => <<"start">>,
+                <<"page">> => <<"/">>,
+                <<"origin">> => <<"https://example.com">>
+            },
+            Opts
+        ),
+    ?assertEqual(200, maps:get(<<"status">>, Res)),
+    {ok, SitesRes} = sites(#{}, signed_req(#{}, Wallet, Opts), Opts),
+    [ConfiguredSite] = maps:get(<<"sites">>, hb_json:decode(maps:get(<<"body">>, SitesRes))),
+    ?assertEqual(<<"configured-key">>, maps:get(<<"key">>, ConfiguredSite)).
+
+subject_scoped_events_are_exposed_in_counts_test() ->
+    Opts = test_opts(),
+    Wallet = ar_wallet:new(),
+    RegReq = signed_req(#{ <<"name">> => <<"Subject events">> }, Wallet, Opts),
+    {ok, RegRes} = register(#{}, RegReq, Opts),
+    Key = maps:get(<<"key">>, hb_json:decode(maps:get(<<"body">>, RegRes))),
+    EventReq =
+        #{
+            <<"key">> => Key,
+            <<"name">> => <<"impression">>,
+            <<"subject-id">> => <<"subject-1">>,
+            <<"page">> => <<"/discover">>
+        },
+    {ok, FirstRes} = event(#{}, EventReq, Opts),
+    ?assertEqual(<<"subject-1">>, maps:get(<<"subject-id">>, hb_json:decode(maps:get(<<"body">>, FirstRes)))),
+    {ok, _} = event(#{}, EventReq, Opts),
+    {ok, _} = event(#{}, EventReq#{ <<"subject-id">> => <<"subject-2">> }, Opts),
+    {ok, CountsRes} =
+        counts(
+            #{},
+            #{ <<"key">> => Key, <<"subject-ids">> => [<<"subject-1">>, <<"subject-2">>] },
+            Opts
+        ),
+    [FirstCount, SecondCount] = maps:get(<<"counts">>, hb_json:decode(maps:get(<<"body">>, CountsRes))),
+    ?assertEqual(2, maps:get(<<"impression">>, maps:get(<<"events">>, FirstCount))),
+    ?assertEqual(1, maps:get(<<"impression">>, maps:get(<<"events">>, SecondCount))),
+    ?assertEqual(0, maps:get(<<"total">>, FirstCount)).
+
+engagement_is_idempotent_and_qualifies_once_test() ->
+    Opts =
+        (test_opts())#{
+            <<"analytics-engagement-threshold-ms">> => 1_000,
+            <<"analytics-engagement-clock-skew-ms">> => 10_000
+        },
+    Wallet = ar_wallet:new(),
+    RegReq =
+        signed_req(
+            #{
+                <<"name">> => <<"Media">>,
+                <<"origin">> => <<"https://example.com">>,
+                <<"engagement-threshold-ms">> => 1_000
+            },
+            Wallet,
+            Opts
+        ),
+    {ok, RegRes} = register(#{}, RegReq, Opts),
+    Key = maps:get(<<"key">>, hb_json:decode(maps:get(<<"body">>, RegRes))),
+    Base =
+        #{
+            <<"key">> => Key,
+            <<"subject-id">> => <<"subject-1">>,
+            <<"interaction-id">> => <<"interaction-1">>,
+            <<"origin">> => <<"https://example.com">>
+        },
+    {ok, StartRes} =
+        engagement(
+            #{},
+            Base#{
+                <<"event">> => <<"start">>,
+                <<"sequence">> => 0,
+                <<"active-ms">> => 0,
+                <<"position-ms">> => 0
+            },
+            Opts
+        ),
+    ?assertEqual(200, maps:get(<<"status">>, StartRes)),
+    Heartbeat =
+        Base#{
+            <<"event">> => <<"heartbeat">>,
+            <<"sequence">> => 1,
+            <<"active-ms">> => 1_000,
+            <<"position-ms">> => 1_000
+        },
+    {ok, HeartbeatRes} = engagement(#{}, Heartbeat, Opts),
+    HeartbeatBody = hb_json:decode(maps:get(<<"body">>, HeartbeatRes)),
+    ?assertEqual(false, maps:get(<<"idempotent">>, HeartbeatBody)),
+    HeartbeatInteraction = maps:get(<<"interaction">>, HeartbeatBody),
+    ?assert(maps:get(<<"qualified-at">>, HeartbeatInteraction) > 0),
+    ?assert(maps:get(<<"view-counted-at">>, HeartbeatInteraction) > 0),
+    {ok, DuplicateRes} = engagement(#{}, Heartbeat, Opts),
+    DuplicateBody = hb_json:decode(maps:get(<<"body">>, DuplicateRes)),
+    ?assertEqual(true, maps:get(<<"idempotent">>, DuplicateBody)),
+    {ok, CountRes} =
+        count(
+            #{},
+            #{
+                <<"key">> => Key,
+                <<"subject-id">> => <<"subject-1">>,
+                <<"origin">> => <<"https://example.com">>
+            },
+            Opts
+        ),
+    CountBody = hb_json:decode(maps:get(<<"body">>, CountRes)),
+    ?assertEqual(1, maps:get(<<"raw">>, CountBody)),
+    ?assertEqual(1, maps:get(<<"qualified">>, CountBody)),
+    ?assertEqual(1_000, maps:get(<<"active-ms">>, CountBody)),
+    ?assertEqual(0, maps:get(<<"completions">>, CountBody)),
+    ?assertEqual(1, maps:get(<<"total">>, CountBody)),
+    {ok, CountsRes} =
+        counts(
+            #{},
+            #{
+                <<"key">> => Key,
+                <<"subject-ids">> => <<"subject-1,subject-2">>,
+                <<"origin">> => <<"https://example.com">>
+            },
+            Opts
+        ),
+    [FirstCount, SecondCount] = maps:get(<<"counts">>, hb_json:decode(maps:get(<<"body">>, CountsRes))),
+    ?assertEqual(1, maps:get(<<"total">>, FirstCount)),
+    ?assertEqual(0, maps:get(<<"total">>, SecondCount)).
+
+completed_play_allows_one_evidenced_replay_test() ->
+    Opts =
+        (test_opts())#{
+            <<"analytics-engagement-threshold-ms">> => 1_000,
+            <<"analytics-engagement-clock-skew-ms">> => 10_000,
+            <<"analytics-engagement-dedupe-window-ms">> => 86_400_000
+        },
+    Wallet = ar_wallet:new(),
+    RegReq = signed_req(#{ <<"name">> => <<"Media">> }, Wallet, Opts),
+    {ok, RegRes} = register(#{}, RegReq, Opts),
+    Key = maps:get(<<"key">>, hb_json:decode(maps:get(<<"body">>, RegRes))),
+    Base =
+        #{
+            <<"key">> => Key,
+            <<"subject-id">> => <<"subject-1">>,
+            <<"x-forwarded-for">> => <<"203.0.113.10">>,
+            <<"user-agent">> => <<"analytics-test">>
+        },
+    First = Base#{ <<"interaction-id">> => <<"interaction-1">> },
+    {ok, _} = engagement(#{}, First#{ <<"event">> => <<"start">>, <<"sequence">> => 0, <<"active-ms">> => 0, <<"position-ms">> => 0 }, Opts),
+    {ok, _} = engagement(#{}, First#{ <<"event">> => <<"heartbeat">>, <<"sequence">> => 1, <<"active-ms">> => 1_000, <<"position-ms">> => 1_000 }, Opts),
+    {ok, CompleteRes} = engagement(#{}, First#{ <<"event">> => <<"complete">>, <<"sequence">> => 2, <<"active-ms">> => 1_000, <<"position-ms">> => 1_000 }, Opts),
+    CompleteInteraction = maps:get(<<"interaction">>, hb_json:decode(maps:get(<<"body">>, CompleteRes))),
+    ?assert(maps:get(<<"completed-at">>, CompleteInteraction) > 0),
+    ?assert(maps:get(<<"ended-at">>, CompleteInteraction) > 0),
+    Second = Base#{ <<"interaction-id">> => <<"interaction-2">> },
+    {ok, _} = engagement(#{}, Second#{ <<"event">> => <<"start">>, <<"sequence">> => 0, <<"active-ms">> => 0, <<"position-ms">> => 0 }, Opts),
+    {ok, _} = engagement(#{}, Second#{ <<"event">> => <<"heartbeat">>, <<"sequence">> => 1, <<"active-ms">> => 1_000, <<"position-ms">> => 1_000 }, Opts),
+    Third = Base#{ <<"interaction-id">> => <<"interaction-3">> },
+    {ok, _} = engagement(#{}, Third#{ <<"event">> => <<"start">>, <<"sequence">> => 0, <<"active-ms">> => 0, <<"position-ms">> => 0 }, Opts),
+    {ok, _} = engagement(#{}, Third#{ <<"event">> => <<"heartbeat">>, <<"sequence">> => 1, <<"active-ms">> => 1_000, <<"position-ms">> => 1_000 }, Opts),
+    {ok, CountRes} = count(#{}, #{ <<"key">> => Key, <<"subject-id">> => <<"subject-1">> }, Opts),
+    CountBody = hb_json:decode(maps:get(<<"body">>, CountRes)),
+    ?assertEqual(3, maps:get(<<"raw">>, CountBody)),
+    ?assertEqual(2, maps:get(<<"qualified">>, CountBody)),
+    ?assertEqual(3_000, maps:get(<<"active-ms">>, CountBody)),
+    ?assertEqual(1, maps:get(<<"completions">>, CountBody)),
+    ?assertEqual(2, maps:get(<<"total">>, CountBody)).
+
+engagement_rejects_regressions_test() ->
+    Opts =
+        (test_opts())#{
+            <<"analytics-engagement-threshold-ms">> => 1_000,
+            <<"analytics-engagement-clock-skew-ms">> => 10_000
+        },
+    Wallet = ar_wallet:new(),
+    RegReq = signed_req(#{ <<"name">> => <<"Media">> }, Wallet, Opts),
+    {ok, RegRes} = register(#{}, RegReq, Opts),
+    Key = maps:get(<<"key">>, hb_json:decode(maps:get(<<"body">>, RegRes))),
+    Base =
+        #{
+            <<"key">> => Key,
+            <<"subject-id">> => <<"subject-1">>,
+            <<"interaction-id">> => <<"interaction-1">>
+        },
+    {ok, _} =
+        engagement(
+            #{},
+            Base#{
+                <<"event">> => <<"start">>,
+                <<"sequence">> => 0,
+                <<"active-ms">> => 0,
+                <<"position-ms">> => 100
+            },
+            Opts
+        ),
+    {ok, RegressionRes} =
+        engagement(
+            #{},
+            Base#{
+                <<"event">> => <<"heartbeat">>,
+                <<"sequence">> => 1,
+                <<"active-ms">> => 100,
+                <<"position-ms">> => 50
+            },
+            Opts
+        ),
+    ?assertEqual(422, maps:get(<<"status">>, RegressionRes)),
+    {ok, CountRes} = count(#{}, #{ <<"key">> => Key, <<"subject-id">> => <<"subject-1">> }, Opts),
+    CountBody = hb_json:decode(maps:get(<<"body">>, CountRes)),
+    ?assertEqual(1, maps:get(<<"suspicious">>, CountBody)),
+    ?assertEqual(0, maps:get(<<"qualified">>, CountBody)).
+
+baseline_is_authenticated_immutable_and_included_in_total_test() ->
+    Opts = test_opts(),
+    Wallet = ar_wallet:new(),
+    RegReq = signed_req(#{ <<"name">> => <<"Migration">> }, Wallet, Opts),
+    {ok, RegRes} = register(#{}, RegReq, Opts),
+    Key = maps:get(<<"key">>, hb_json:decode(maps:get(<<"body">>, RegRes))),
+    BaselineFields =
+        #{
+            <<"key">> => Key,
+            <<"subject-id">> => <<"subject-1">>,
+            <<"value">> => 42,
+            <<"version">> => <<"legacy-2026-08-20">>,
+            <<"cutover-at">> => 1_787_184_000,
+            <<"source">> => <<"legacy-export">>
+        },
+    {ok, BaselineRes} = baseline(#{}, signed_req(BaselineFields, Wallet, Opts), Opts),
+    BaselineBody = hb_json:decode(maps:get(<<"body">>, BaselineRes)),
+    CountBody = maps:get(<<"count">>, BaselineBody),
+    ?assertEqual(42, maps:get(<<"baseline">>, CountBody)),
+    ?assertEqual(42, maps:get(<<"total">>, CountBody)),
+    {ok, DuplicateRes} = baseline(#{}, signed_req(BaselineFields, Wallet, Opts), Opts),
+    ?assertEqual(true, maps:get(<<"idempotent">>, hb_json:decode(maps:get(<<"body">>, DuplicateRes)))),
+    ConflictFields = BaselineFields#{ <<"value">> => 43 },
+    {ok, ConflictRes} = baseline(#{}, signed_req(ConflictFields, Wallet, Opts), Opts),
+    ?assertEqual(409, maps:get(<<"status">>, ConflictRes)).
+
+subjects_lists_authorized_paginated_aggregates_test() ->
+    Opts = test_opts(),
+    Wallet = ar_wallet:new(),
+    RegReq = signed_req(#{ <<"name">> => <<"Subjects">> }, Wallet, Opts),
+    {ok, RegRes} = register(#{}, RegReq, Opts),
+    Key = maps:get(<<"key">>, hb_json:decode(maps:get(<<"body">>, RegRes))),
+    Import =
+        fun(SubjectID, Value) ->
+            Fields =
+                #{
+                    <<"key">> => Key,
+                    <<"subject-id">> => SubjectID,
+                    <<"value">> => Value,
+                    <<"version">> => <<"migration-v1">>,
+                    <<"cutover-at">> => 1_787_184_000,
+                    <<"source">> => <<"migration">>
+                },
+            {ok, Result} = baseline(#{}, signed_req(Fields, Wallet, Opts), Opts),
+            ?assertEqual(200, maps:get(<<"status">>, Result))
+        end,
+    Import(<<"subject-1">>, 10),
+    Import(<<"subject-2">>, 20),
+    Request =
+        signed_req(
+            #{ <<"key">> => Key, <<"page">> => 1, <<"page-size">> => 1 },
+            Wallet,
+            Opts
+        ),
+    {ok, Page1Res} = subjects(#{}, Request, Opts),
+    Page1 = hb_json:decode(maps:get(<<"body">>, Page1Res)),
+    ?assertEqual(2, maps:get(<<"total">>, Page1)),
+    ?assertEqual(1, maps:get(<<"page-size">>, Page1)),
+    ?assertEqual(1, length(maps:get(<<"subjects">>, Page1))),
+    {ok, Page2Res} =
+        subjects(
+            #{},
+            signed_req(
+                #{ <<"key">> => Key, <<"page">> => 2, <<"page-size">> => 1 },
+                Wallet,
+                Opts
+            ),
+            Opts
+        ),
+    [First] = maps:get(<<"subjects">>, Page1),
+    [Second] = maps:get(
+        <<"subjects">>,
+        hb_json:decode(maps:get(<<"body">>, Page2Res))
+    ),
+    ?assertNotEqual(maps:get(<<"subject-id">>, First), maps:get(<<"subject-id">>, Second)),
+    ?assertEqual(30, maps:get(<<"total">>, First) + maps:get(<<"total">>, Second)).
+
 track_updates_daily_report_test() ->
     Opts = test_opts(),
     Wallet = ar_wallet:new(),
@@ -2752,9 +4619,11 @@ track_updates_daily_report_test() ->
     Demographics = maps:get(<<"demographics">>, Report),
     [IP] = maps:get(<<"ips">>, Demographics),
     [Location] = maps:get(<<"locations">>, Demographics),
+    ?assertEqual(1, maps:get(<<"page-loads">>, Summary)),
     ?assertEqual(1, maps:get(<<"visits">>, Summary)),
     ?assertEqual(12000, maps:get(<<"duration-ms">>, Summary)),
     ?assertEqual(<<"/docs">>, maps:get(<<"page">>, Page)),
+    ?assertEqual(1, maps:get(<<"page-loads">>, Page)),
     ?assertEqual(1, maps:get(<<"visits">>, Page)),
     ?assertEqual(<<"203.0.113.10">>, maps:get(<<"ip">>, IP)),
     ?assertEqual(1, maps:get(<<"visits">>, IP)),
@@ -2842,6 +4711,30 @@ nested_route_pages_tracked_distinctly_test() ->
     ?assert(page_matches_route(<<"/blog/post-a">>, <<"/blog">>)),
     ?assert(page_matches_route(<<"/blog/post-b">>, <<"/blog">>)),
     ?assertNot(page_matches_route(<<"/blog/post-b">>, <<"/blog/post-a">>)).
+
+page_loads_preserve_repeat_navigations_test() ->
+    Opts = test_opts(),
+    Wallet = ar_wallet:new(),
+    {ok, RegRes} = register(#{}, signed_req(#{ <<"name">> => <<"Pages">> }, Wallet, Opts), Opts),
+    Key = maps:get(<<"key">>, hb_json:decode(maps:get(<<"body">>, RegRes))),
+    Base =
+        #{
+            <<"key">> => Key,
+            <<"page">> => <<"/same-page">>,
+            <<"event">> => <<"start">>,
+            <<"remote-addr">> => <<"192.0.2.20">>,
+            <<"user-agent">> => <<"same-browser">>
+        },
+    {ok, _} = session(#{}, Base#{ <<"visit">> => <<"visit-1">> }, Opts),
+    {ok, _} = session(#{}, Base#{ <<"visit">> => <<"visit-2">> }, Opts),
+    {ok, ReportRes} = report(#{}, signed_req(#{ <<"key">> => Key, <<"days">> => 1 }, Wallet, Opts), Opts),
+    Report = hb_json:decode(maps:get(<<"body">>, ReportRes)),
+    Summary = maps:get(<<"summary">>, Report),
+    [Page] = maps:get(<<"pages">>, Report),
+    ?assertEqual(2, maps:get(<<"page-loads">>, Summary)),
+    ?assertEqual(1, maps:get(<<"visits">>, Summary)),
+    ?assertEqual(2, maps:get(<<"page-loads">>, Page)),
+    ?assertEqual(1, maps:get(<<"visits">>, Page)).
 
 sites_lists_registered_site_test_() ->
     [
@@ -3108,21 +5001,29 @@ page_scoped_events_test() ->
     {ok, RegRes} = register(#{}, RegReq, Opts),
     Key = maps:get(<<"key">>, hb_json:decode(maps:get(<<"body">>, RegRes))),
     Base = #{ <<"key">> => Key, <<"origin">> => <<"https://example.com">> },
-    {ok, _} = event(#{}, Base#{ <<"name">> => <<"Signup">>, <<"page">> => <<"/pricing">> }, Opts),
+    {ok, _} = event(#{}, Base#{ <<"name">> => <<"Impression">>, <<"page">> => <<"/pricing">>, <<"type">> => <<"event">> }, Opts),
+    {ok, _} = event(#{}, Base#{ <<"name">> => <<"Play">>, <<"page">> => <<"/pricing">>, <<"type">> => <<"action">> }, Opts),
     {ok, _} = event(#{}, Base#{ <<"name">> => <<"Newsletter">> }, Opts),
     ReportReq = signed_req(#{ <<"key">> => Key, <<"days">> => <<"1">> }, Wallet, Opts),
     {ok, ReportRes} = report(#{}, ReportReq, Opts),
     Report = hb_json:decode(maps:get(<<"body">>, ReportRes)),
     %% Site-wide: both events count.
-    [SiteEvent] = [Ev || Ev <- maps:get(<<"events">>, Report), maps:get(<<"name">>, Ev) =:= <<"Signup">>],
+    [SiteEvent] = [Ev || Ev <- maps:get(<<"events">>, Report), maps:get(<<"name">>, Ev) =:= <<"Play">>],
     ?assertEqual(1, maps:get(<<"count">>, SiteEvent)),
-    ?assertEqual(2, maps:get(<<"events">>, maps:get(<<"summary">>, Report))),
-    %% Per-page: only the event sent with a page is attributed to it.
+    ?assertEqual(3, maps:get(<<"events">>, maps:get(<<"summary">>, Report))),
+    %% Actions are an explicit projection of action-typed events. Passive
+    %% impressions remain in Events and never appear in Actions.
+    [Action] = maps:get(<<"actions">>, Report),
+    ?assertEqual(<<"Play">>, maps:get(<<"name">>, Action)),
+    ?assertEqual(1, maps:get(<<"count">>, Action)),
+    %% Per-page: only events sent with a page are attributed to it.
     Pages = maps:get(<<"pages">>, Report),
     [Pricing] = [P || P <- Pages, maps:get(<<"page">>, P) =:= <<"/pricing">>],
-    [PricingEvent] = maps:get(<<"events">>, Pricing),
-    ?assertEqual(<<"Signup">>, maps:get(<<"name">>, PricingEvent)),
-    ?assertEqual(1, maps:get(<<"count">>, PricingEvent)).
+    PricingEvents = maps:get(<<"events">>, Pricing),
+    ?assertEqual(2, length(PricingEvents)),
+    [PricingAction] = maps:get(<<"actions">>, Pricing),
+    ?assertEqual(<<"Play">>, maps:get(<<"name">>, PricingAction)),
+    ?assertEqual(1, maps:get(<<"count">>, PricingAction)).
 
 %% @doc The realtime Active Visitors count, scoped to a page filter, only
 %% counts open tabs whose current page matches the route -- exact match or a
@@ -3306,6 +5207,102 @@ client_ip_falls_back_to_connection_ip_test() ->
     ?assertEqual(<<"203.0.113.10">>, client_ip(Proxied, Opts)),
     %% Nothing available at all stays "unknown".
     ?assertEqual(<<"unknown">>, client_ip(#{}, Opts)).
+
+persistent_visitors_and_engaged_sessions_test() ->
+    Opts =
+        (test_opts())#{
+            <<"analytics-sites">> =>
+                [
+                    #{
+                        <<"key">> => <<"persistent-site">>,
+                        <<"name">> => <<"Persistent">>,
+                        <<"origins">> => [],
+                        <<"visitor-id-mode">> => <<"persistent">>
+                    }
+                ]
+        },
+    Base =
+        #{
+            <<"key">> => <<"persistent-site">>,
+            <<"visitor-id">> => <<"browser-random-id">>,
+            <<"user-agent">> => <<"analytics-test">>,
+            <<"remote-addr">> => <<"192.0.2.10">>,
+            <<"page">> => <<"/video">>
+        },
+    {ok, _} = session(#{}, Base#{ <<"visit">> => <<"visit-1">>, <<"event">> => <<"start">> }, Opts),
+    {ok, _} =
+        session(
+            #{},
+            Base#{
+                <<"visit">> => <<"visit-1">>,
+                <<"event">> => <<"heartbeat">>,
+                <<"duration">> => ?ENGAGED_SESSION_MS
+            },
+            Opts
+        ),
+    {ok, _} = session(#{}, Base#{ <<"visit">> => <<"visit-2">>, <<"page">> => <<"/about">> }, Opts),
+    Daily = normalize_daily(today(), read_json(daily_path(<<"persistent-site">>, today(), Opts), #{}, Opts)),
+    ?assertEqual(1, maps:get(<<"active-users">>, Daily)),
+    ?assertEqual(1, maps:get(<<"new-users">>, Daily)),
+    ?assertEqual(1, maps:get(<<"engaged-sessions">>, Daily)),
+    ?assertEqual(1, map_size(maps:get(<<"stable-visitors">>, Daily))),
+    FirstDirect = maps:get(<<"Direct">>, maps:get(<<"by-first-referrer">>, Daily)),
+    ?assertEqual(1, maps:get(<<"users">>, FirstDirect)),
+    SessionDirect = maps:get(<<"Direct">>, maps:get(<<"by-session-referrer">>, Daily)),
+    ?assertEqual(1, maps:get(<<"sessions">>, SessionDirect)),
+    ?assertEqual(1, maps:get(<<"engaged-sessions">>, SessionDirect)),
+    ?assertEqual(?ENGAGED_SESSION_MS, maps:get(<<"duration-ms">>, SessionDirect)),
+    Acquisition = acquisition_from_days([Daily]),
+    FirstTouch = maps:get(<<"first-touch">>, Acquisition),
+    [FirstReferrer] = maps:get(<<"referrers">>, FirstTouch),
+    ?assertEqual(<<"Direct">>, maps:get(<<"referrer">>, FirstReferrer)),
+    ?assertEqual(1, maps:get(<<"users">>, FirstReferrer)),
+    Audience = audience_from_days([Daily]),
+    Breakdowns = maps:get(<<"breakdowns">>, Audience),
+    [Desktop] = maps:get(<<"devices">>, Breakdowns),
+    ?assertEqual(<<"Desktop">>, maps:get(<<"device">>, Desktop)),
+    ?assertEqual(1, maps:get(<<"active-users">>, Desktop)),
+    PublicDaily = public_daily(Daily),
+    ?assertNot(maps:is_key(<<"stable-visitors">>, PublicDaily)),
+    ?assertNot(maps:is_key(<<"stable-visitor-dimensions">>, PublicDaily)).
+
+audience_and_retention_aggregate_test() ->
+    Day1 =
+        (daily_default(<<"2026-08-01">>))#{
+            <<"unique-visitors">> => 3,
+            <<"stable-visitors">> =>
+                #{
+                    <<"a">> => <<"2026-08-01">>,
+                    <<"b">> => <<"2026-08-01">>,
+                    <<"returning">> => <<"2026-07-01">>
+                }
+        },
+    Day2 =
+        (daily_default(<<"2026-08-02">>))#{
+            <<"unique-visitors">> => 2,
+            <<"stable-visitors">> =>
+                #{ <<"a">> => <<"2026-08-01">>, <<"c">> => <<"2026-08-02">> }
+        },
+    Day8 =
+        (daily_default(<<"2026-08-08">>))#{
+            <<"unique-visitors">> => 2,
+            <<"stable-visitors">> =>
+                #{ <<"a">> => <<"2026-08-01">>, <<"b">> => <<"2026-08-01">> }
+        },
+    Daily = [Day1, Day2, Day8],
+    Audience = audience_from_days(Daily),
+    ?assertEqual(4, maps:get(<<"active-users">>, Audience)),
+    ?assertEqual(3, maps:get(<<"new-users">>, Audience)),
+    ?assertEqual(1, maps:get(<<"returning-users">>, Audience)),
+    Retention = retention_from_days(Daily),
+    [Cohort | _] = maps:get(<<"cohorts">>, Retention),
+    ?assertEqual(<<"2026-08-01">>, maps:get(<<"cohort-date">>, Cohort)),
+    ?assertEqual(2, maps:get(<<"new-users">>, Cohort)),
+    [Day1Retention, Day7Retention | _] = maps:get(<<"retention">>, Cohort),
+    ?assertEqual(1, maps:get(<<"active-users">>, Day1Retention)),
+    ?assertEqual(0.5, maps:get(<<"retention-rate">>, Day1Retention)),
+    ?assertEqual(2, maps:get(<<"active-users">>, Day7Retention)),
+    ?assertEqual(1.0, maps:get(<<"retention-rate">>, Day7Retention)).
 
 store_module(Opts) ->
     maps:get(<<"store-module">>, maps:get(<<"store">>, Opts)).

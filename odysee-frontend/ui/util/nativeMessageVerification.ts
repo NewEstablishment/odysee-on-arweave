@@ -45,6 +45,10 @@ export function isNativeMessageId(messageId: any): boolean {
   return /^[0-9A-Za-z_-]{41,128}$/.test(String(messageId || ''));
 }
 
+export function verifiedNativeOwnerMatches(recordOwner: unknown, activeOwner: unknown): boolean {
+  return Boolean(activeOwner && recordOwner === activeOwner);
+}
+
 export function nativeMessageVersionRef(): string {
   const cryptoObject = typeof crypto !== 'undefined' ? crypto : undefined;
   if (cryptoObject?.randomUUID) return cryptoObject.randomUUID();

@@ -129,6 +129,13 @@ The UI talks to nodes over two channels:
   flag), which the stock `~auth-hook@1.0` request hook intercepts and signs
   with a node-hosted per-user wallet. See "Writes" below.
 
+The browser never uses the legacy SDK proxy as a product backend. In
+HyperBEAM mode, every legacy-only SDK method fails at the SDK facade before
+transport, and the fetch boundary blocks both configured proxy URLs as a
+second guard. Sockety, Odysee livestream APIs, WHIP publishing, OME viewer
+signaling, and the short-URL service are unavailable until native message
+contracts exist.
+
 ## Node roles
 
 **Seed nodes** run this repository as a rebar3 application on top of the
@@ -247,16 +254,21 @@ Two mitigations, in order of preference today:
 
 ## Writes
 
-There is no custom write device. Uploads, comments, reactions, playlists, subscriptions, and moderation events are
+There is no custom write device. Uploads, comments, reactions, playlists,
+subscriptions, encrypted preference snapshots, and moderation events are
 ordinary committed messages, using stock HyperBEAM machinery end to end:
 
-1. The client sends `POST /<path>?!=true`. The stock `~auth-hook@1.0`
+1. The client sends `POST /id?0.%21=true&committers=all`. Scoping `!` to stage
+   zero commits the application document once; a global `!` can also commit
+   intermediate resolver stages and expose multiple locators for one semantic
+   write. The stock `~auth-hook@1.0`
    request hook (in the default `on/request` pipeline) matches the `!` commit
    flag, derives a per-user secret via its secret provider (HTTP Basic by
    default; a cookie provider for anonymous-but-stable identity), obtains the
-   user's node-hosted wallet from `~secret@1.0`, and signs both the request
-   and the `!`-marked message with real RSA-PSS commitments. The user never
-   handles key material.
+   user's node-hosted wallet from `~secret@1.0`, and signs the `!`-marked
+   application message with a real RSA-PSS commitment. Transport, credential,
+   browser fetch, and commit-control fields are removed before that commitment.
+   The user never handles key material.
 2. The node persists verified signed inbound messages to a dedicated
    `cache-http` filesystem store (`store-all-signed`, default on); every
    cache write also populates the `~match@1.0` reverse index in its target
@@ -264,20 +276,25 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    `match-index` stacks.
 3. Readers discover writes via `~query@1.0`'s exact-match index —
    `POST /~query@1.0/only` with equality selectors (schema, type, target,
-   author) returns matching message paths — and hydrate them with generic
-   `/~cache@1.0/read` calls.
+   author) returns matching message paths — and hydrate them with exact
+   immutable reads. Query selectors contain only committed application fields.
+   If older writes produced multiple locators for one semantic message,
+   deduplication preserves discovery order but prefers a locator whose exact
+   named commitment verifies.
 4. Native account ownership is the verified committer established by the
    cookie-derived node wallet. Claimed profile/channel fields are display
    metadata only. Product projections such as comment revisions, reactions,
-   and subscriptions accept only contiguous same-committer chains. Each basic
-   public playlist is instead one independently addressable immutable message:
-   each verified commitment ID is an exact route, its snapshot contains ordered
-   immutable locators, and republishing changes the payload to produce a new
-   snapshot. Query may return another verified commitment locator for the same
-   message. Stable playlist-head semantics wait for the
-   separately loaded generic reference/frequency contract.
+   and subscriptions accept only contiguous same-committer chains. Public
+   playlist content is an independently addressable immutable full snapshot;
+   the pinned generic `reference@1.0` init commitment supplies its stable route
+   and same-owner set messages select later snapshots.
    Historical LBRY ownership remains governed by its separately verified
    source evidence.
+
+   The browser keeps only an active/saved profile hint. At authentication it
+   asks the node for the cookie owner, exact-hydrates candidate channel
+   profiles, and creates a native Redux user only for a same-committer match.
+   Preference hydration follows that verification during startup.
 
 Free channel subscriptions use `odysee-subscription@1.0`. A deterministic
 `subscription-ref` combines the verified subscriber committer with a stable
@@ -290,13 +307,69 @@ browser operation never reads or writes the legacy subscription service.
    `hb_store_remote_node` against nodes that accepted the writes.
 
 As with reads, authenticity checks are a *between-node* concern: a replicating
-peer re-filters query results against their selectors and re-verifies the
-channel signature before caching a write, so `~query@1.0` stays a dumb index
-and no node is trusted for write authenticity by its peers. The end user, as
-always, trusts the TEE-terminated serving node rather than verifying in the
-browser.
+peer re-filters query results against their selectors, verifies each exact
+commitment, and derives native ownership from that commitment's committer
+before caching a write. `~query@1.0` remains a dumb locator index rather than
+an authority. The end user trusts the TEE-terminated serving node rather than
+verifying in the browser.
 
-Legacy-only interactive surfaces with no verifiable representation — fuzzy
-text search, view counts, subscription counts, legacy comment writes — are
-excluded from the trustless path and treated by the UI as progressive
-enhancements. The video page renders fully from store reads alone.
+The configured cookie deployment persists hosted wallets in the node's private
+store and warms recovered wallets in memory. A valid cookie therefore maps to
+the same committer after a process restart. Credential verification excludes
+the application `body`; only after the cookie is verified is the complete
+message signed. Native comment text can consequently live in `body`, making an
+exact immutable read the comment document while older `comment`/`text` fields
+remain read-compatible.
+
+Comments, reactions, and subscriptions model changes as contiguous append-only
+revisions. Public playlists separate identity from content: each publish writes
+an immutable full `odysee-playlist@1.0` snapshot, while the pinned external
+`reference@1.0` device supplies the stable public identity. Its init commitment
+is the playlist ID; later same-authority set messages point to new snapshots
+without mutating earlier content. Readers hydrate and verify every candidate,
+derive authority from the init committer, and select only a strictly newer
+unambiguous set. Query order is never authority.
+
+Private user preferences use the same separation. Each version is an immutable
+cookie-signed `odysee-preferences@1.0` message containing only an AES-256-GCM
+envelope. A generic `reference@1.0` init commitment is the stable preference
+identity and same-owner set messages select newer snapshots. Readers discover
+only locators whose indexed preference owner is the authenticated cookie
+owner, hydrate and verify every exact reference/snapshot commitment, bind the
+indexed owner to the verified committer, and fail closed on foreign ownership,
+stale changes, or conflicting tied heads. The narrow
+`odysee-preference@1.0` device is not a write device: it
+authenticates the cookie-owned hosted wallet and seals or opens owner-bound
+ciphertext without storing preference state. Its private/no-store response is
+the only plaintext boundary; credentials and key material never enter public
+messages.
+
+Preference writes use exact readback as their acknowledgement. Query/listener
+discovery is eventually consistent and is never required to expose the new
+reference before a valid save can complete. The frontend retains the newest
+exact-verified state per owner, so queued saves during index lag continue the
+same reference chain rather than creating another init.
+
+HTTP delivery supports one RFC 7233 byte range. Range-aware cache/source stores
+receive the requested bounds directly; locally materialized immutable bodies
+are sliced at the HTTP boundary and returned as an unsigned derived `206`
+representation, leaving the exact whole message as the verification surface.
+
+Generic `search@1.0` provides ranked locator discovery for homepage, category,
+and text-search requests. The frontend maps filters and sort before the query,
+preserves locator order, and exact-hydrates every result; Meilisearch remains
+an index, never an object or authority source. Native per-channel listings use
+bounded `query@1.0` discovery over upload records and the same exact hydration
+boundary.
+
+Observational analytics are recorded by the reusable `analytics@1.0` device.
+Odysee maps playback to generic subject engagement in the frontend, while the
+device exposes only aggregate counts and wallet-authenticated reports. A
+one-time owner-authenticated baseline preserves historical view totals; native
+qualified engagement is added after cutover. These analytics remain
+non-authoritative signals and do not affect content verification.
+
+Other legacy-only interactive surfaces with no verifiable representation —
+aggregate subscription counts and paid membership state — are excluded from
+the trustless path and treated by the UI as progressive enhancements. The
+video page renders fully from store reads alone.

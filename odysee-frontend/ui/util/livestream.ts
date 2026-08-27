@@ -2,6 +2,7 @@ import { LIVESTREAM_KILL } from 'constants/livestream';
 import { toHex } from 'util/hex';
 import Lbry from 'lbry';
 import dayjs from 'util/dayjs';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 type StreamData = {
   d: string;
   s: string;
@@ -115,6 +116,7 @@ export const transformNewLivestreamData = (data: Array<any>): LivestreamInfoByCr
 
 const getStreamData = async (channelId: string, channelName: string): Promise<StreamData> => {
   if (!channelId || !channelName) throw new Error('Invalid channel data provided.');
+  if (hyperbeamNodeEnabled()) throw new Error('Legacy livestream signing is unavailable in HyperBEAM mode.');
   const channelNameHex = toHex(channelName);
   let channelSignature;
 

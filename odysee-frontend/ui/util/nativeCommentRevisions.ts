@@ -1,3 +1,6 @@
+import { compact, stableJson } from './nativeMessageFields.ts';
+import { collapseChains, type CollapseSpec } from './revisionedMessage.ts';
+
 export type NativeCommentRevision = {
   comment_id?: string;
   comment_ref?: string;
@@ -17,6 +20,16 @@ export type NativeCommentRevision = {
   [key: string]: any;
 };
 
+export function nativeCommentBody(comment: NativeCommentRevision): string | undefined {
+  const body = field(comment, 'comment', 'body', 'text');
+  if (typeof body === 'string') return body;
+
+  // HTTPSig multipart encoding may omit a zero-length scalar part. Native
+  // author tombstones deliberately use an empty body, so restore that value
+  // only for the explicit delete/deleted shape. Active comments still fail
+  // closed when their body is missing.
+  return comment.operation === 'delete' && comment.state === 'deleted' ? '' : undefined;
+}
 export function nativeCommentSignatureData(comment: NativeCommentRevision): string {
   if (field(comment, 'signature-scope', 'signature_scope') !== 'native-comment-v1') {
     return String(field(comment, 'comment', 'body', 'text') || '');
@@ -31,7 +44,7 @@ export function nativeCommentSignatureData(comment: NativeCommentRevision): stri
       parent: field(comment, 'parent', 'parent-id', 'parent_id') || 'root',
       state: field(comment, 'state'),
       author: field(comment, 'author', 'channel-id', 'channel_id'),
-      comment: field(comment, 'comment', 'body', 'text'),
+      comment: nativeCommentBody(comment),
       timestamp: numberField(comment, 'timestamp'),
       'revision-of': field(comment, 'revision-of', 'revision_of'),
       'previous-version': field(comment, 'previous-version', 'previous_version'),
@@ -43,19 +56,17 @@ export function nativeCommentSignatureData(comment: NativeCommentRevision): stri
   )}`;
 }
 
+const commentChainSpec: CollapseSpec<NativeCommentRevision> = {
+  rootRef: (comment) => comment.comment_id || '',
+  revisionOf: (comment) => comment.revision_of,
+  isNext: isNextNativeCommentRevision,
+  versionIdentity: (comment) => String(comment.hyperbeam_message_id || comment.comment_id || ''),
+  equivocation: 'none',
+};
+
 export function collapseNativeCommentRevisions(comments: Array<NativeCommentRevision>): Array<NativeCommentRevision> {
-  const unique = uniquePhysicalComments(comments);
-  const roots = unique.filter((comment) => !comment.revision_of);
-  const revisionsByRoot = new Map<string, Array<NativeCommentRevision>>();
-
-  unique.forEach((comment) => {
-    if (!comment.revision_of) return;
-    const revisions = revisionsByRoot.get(comment.revision_of) || [];
-    revisions.push(comment);
-    revisionsByRoot.set(comment.revision_of, revisions);
-  });
-
-  return roots.map((root) => latestNativeCommentRevision(root, revisionsByRoot.get(root.comment_id || '') || []));
+  const identified = comments.filter((comment) => comment.hyperbeam_message_id || comment.comment_id);
+  return collapseChains(identified, commentChainSpec);
 }
 
 export function latestNativeCommentRevision(
@@ -65,11 +76,8 @@ export function latestNativeCommentRevision(
   let current = root;
 
   while (true) {
-    const candidates = revisions
-      .filter((revision) => isNextNativeCommentRevision(root, current, revision))
-      .sort(compareRevisionCandidates);
-    if (!candidates.length) return current;
-    if (candidates.length > 1) return current;
+    const candidates = revisions.filter((revision) => isNextNativeCommentRevision(root, current, revision));
+    if (candidates.length !== 1) return current;
     current = candidates[0];
   }
 }
@@ -103,22 +111,6 @@ export function isNextNativeCommentRevision(
   );
 }
 
-function uniquePhysicalComments(comments: Array<NativeCommentRevision>): Array<NativeCommentRevision> {
-  const seen = new Set<string>();
-  return comments.filter((comment) => {
-    const id = comment.hyperbeam_message_id || comment.comment_id;
-    if (!id || seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
-}
-
-function compareRevisionCandidates(left: NativeCommentRevision, right: NativeCommentRevision): number {
-  const timestampDifference = Number(left.revision_timestamp || 0) - Number(right.revision_timestamp || 0);
-  if (timestampDifference) return timestampDifference;
-  return String(left.hyperbeam_message_id || '').localeCompare(String(right.hyperbeam_message_id || ''));
-}
-
 function revisionNumber(comment: NativeCommentRevision): number {
   const revision = Math.floor(Number(comment.revision || 0));
   return Number.isFinite(revision) && revision >= 0 ? revision : 0;
@@ -140,17 +132,4 @@ function numberField(source: NativeCommentRevision, ...keys: Array<string>): num
   if (sourceValue === undefined) return undefined;
   const parsed = Number(sourceValue);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function compact(source: Record<string, any>): Record<string, any> {
-  return Object.fromEntries(Object.entries(source).filter(([, sourceValue]) => sourceValue !== undefined));
-}
-
-function stableJson(source: any): string {
-  if (!source || typeof source !== 'object') return JSON.stringify(source);
-  if (Array.isArray(source)) return `[${source.map(stableJson).join(',')}]`;
-  return `{${Object.keys(source)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableJson(source[key])}`)
-    .join(',')}}`;
 }

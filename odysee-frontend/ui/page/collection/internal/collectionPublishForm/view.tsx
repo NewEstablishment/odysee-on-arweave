@@ -350,8 +350,8 @@ const CollectionPublishForm = (props: Props) => {
         <p className="help">
           {publishing
             ? hasClaim
-              ? __('Publishing creates a new immutable playlist with a new message ID and share URL.')
-              : __('After publishing, the immutable signed playlist is available from this HyperBEAM node immediately.')
+              ? __('Publishing creates a new immutable snapshot while keeping this playlist link unchanged.')
+              : __('Publishing creates an immutable snapshot and a stable playlist link on this HyperBEAM node.')
             : __('After saving, all changes will remain private')}
         </p>
       </CollectionFormContext.Provider>

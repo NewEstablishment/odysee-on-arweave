@@ -2,7 +2,7 @@ import { createSelector } from 'reselect';
 import { EMPTY_ARRAY, EMPTY_OBJECT } from 'redux/selectors/empty';
 import { SHOW_ADS } from 'config';
 import { selectClaimForId, selectMyChannelClaims, selectStakedLevelForChannelUri } from 'redux/selectors/claims';
-import { hasLegacyOdyseePremium, selectUserEmail, selectUserLocale } from 'redux/selectors/user';
+import { hasLegacyOdyseePremium, selectUserAuthenticated, selectUserLocale } from 'redux/selectors/user';
 import { selectDefaultChannelClaim } from 'redux/selectors/settings';
 export const selectState = (state) => state.app || EMPTY_OBJECT;
 export const selectPlatform = (state) => selectState(state).platform;
@@ -74,12 +74,12 @@ export const selectSplashAnimationEnabled = (state) => selectState(state).splash
 export const selectActiveChannelId = (state) => selectState(state).activeChannel;
 export const selectActiveChannelClaim = createSelector(
   (state) => selectClaimForId(state, selectActiveChannelId(state)), // i.e. 'byId[activeChannelId]' specifically, instead of just 'byId'.
-  (state) => selectUserEmail(state),
+  selectUserAuthenticated,
   selectDefaultChannelClaim,
   selectMyChannelClaims,
-  (activeChannelClaim, userEmail, defaultChannel, myChannelClaims) => {
+  (activeChannelClaim, authenticated, defaultChannel, myChannelClaims) => {
     // Null: has none. Undefined: not resolved, default state, could have or not
-    if (!userEmail || myChannelClaims === null) {
+    if (!authenticated || myChannelClaims === null) {
       return null;
     } else if (!myChannelClaims || !myChannelClaims.length) {
       return undefined;

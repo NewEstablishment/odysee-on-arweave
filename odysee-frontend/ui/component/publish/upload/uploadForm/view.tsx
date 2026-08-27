@@ -226,7 +226,7 @@ function UploadForm(props: Props) {
 
   // -- Effects (unchanged) --
   useEffect(() => {
-    if (!hasClaimedInitialRewards) {
+    if (!hyperbeamUploadEnabled() && !hasClaimedInitialRewards) {
       claimInitialRewards();
     }
   }, [hasClaimedInitialRewards, claimInitialRewards]);

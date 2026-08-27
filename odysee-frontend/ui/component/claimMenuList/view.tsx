@@ -59,7 +59,7 @@ import {
 import { selectIsSubscribedForUri } from 'redux/selectors/subscriptions';
 import { selectIsProtectedContentLockedFromUserForId } from 'redux/selectors/memberships';
 import { selectClientSetting } from 'redux/selectors/settings';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated } from 'redux/selectors/user';
 import { selectFileRenderModeForUri } from 'redux/selectors/content';
 import {
   doEnableCollectionShuffle as doEnableCollectionShuffleAction,
@@ -160,7 +160,7 @@ function ClaimMenuListInner(props: Props) {
   );
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
   const isUnlisted = useAppSelector((state) => selectIsUriUnlisted(state, uri));
-  const isAuthenticated = Boolean(useAppSelector(selectUserVerifiedEmail));
+  const isAuthenticated = Boolean(useAppSelector(selectUserAuthenticated));
   const collectionEmpty = useAppSelector((state) => selectCollectionIsEmptyForId(state, collectionId));
   const isContentProtectedAndLocked = useAppSelector((state) =>
     contentClaim ? selectIsProtectedContentLockedFromUserForId(state, contentClaim.claim_id) : false

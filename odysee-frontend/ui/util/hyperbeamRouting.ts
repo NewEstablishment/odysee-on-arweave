@@ -1,10 +1,12 @@
 const HYPERBEAM_DEVICES = new Set([
+  '~analytics@1.0',
   '~odysee-account@1.0',
   '~odysee-claim@1.0',
   '~odysee-channel@1.0',
   '~odysee-comment@1.0',
   '~odysee-file@1.0',
   '~odysee-file-reaction@1.0',
+  '~odysee-preference@1.0',
   '~odysee-reaction@1.0',
   '~query@1.0',
   '~search@1.0',

@@ -10,13 +10,14 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doWalletStatus } from 'redux/actions/wallet';
 import { doOpenModal, doClearCache } from 'redux/actions/app';
 import { doFetchClaimListMine } from 'redux/actions/claims';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUserIsNative } from 'redux/selectors/user';
 import { selectMyClaims } from 'redux/selectors/claims';
 
 export default function SettingSystem() {
   const dispatch = useAppDispatch();
 
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated);
+  const isNative = useAppSelector(selectUserIsNative);
   const myClaims = useAppSelector(selectMyClaims);
   const hasClaims = myClaims && myClaims.length > 0;
 
@@ -28,7 +29,7 @@ export default function SettingSystem() {
 
   // Update storedPassword state
   React.useEffect(() => {
-    if (isAuthenticated || !IS_WEB) {
+    if ((isAuthenticated || !IS_WEB) && !isNative) {
       updateWalletStatus();
       dispatch(doFetchClaimListMine());
       getPasswordFromCookie().then((p) => {
@@ -64,24 +65,26 @@ export default function SettingSystem() {
               />
             </SettingsRow>
 
-            <SettingsRow
-              title={__('Request account deletion')}
-              subtitle={
-                hasClaims
-                  ? __('You must delete all your uploads before you can delete your account.')
-                  : __('Send account deletion request to Odysee')
-              }
-            >
-              <Button
-                button="secondary"
-                icon={ALERT}
-                label={__('Delete Account')}
-                disabled={hasClaims}
-                onClick={() => {
-                  dispatch(doOpenModal(MODALS.ACCOUNT_DELETE));
-                }}
-              />
-            </SettingsRow>
+            {!isNative && (
+              <SettingsRow
+                title={__('Request account deletion')}
+                subtitle={
+                  hasClaims
+                    ? __('You must delete all your uploads before you can delete your account.')
+                    : __('Send account deletion request to Odysee')
+                }
+              >
+                <Button
+                  button="secondary"
+                  icon={ALERT}
+                  label={__('Delete Account')}
+                  disabled={hasClaims}
+                  onClick={() => {
+                    dispatch(doOpenModal(MODALS.ACCOUNT_DELETE));
+                  }}
+                />
+              </SettingsRow>
+            )}
           </>
         }
       />

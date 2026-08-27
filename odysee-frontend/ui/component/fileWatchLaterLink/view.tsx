@@ -9,7 +9,7 @@ import { getLocalizedNameForCollectionId } from 'util/collections';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectCollectionForIdHasClaimUrl } from 'redux/selectors/collections';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated } from 'redux/selectors/user';
 import { doPlaylistAddAndAllowPlaying } from 'redux/actions/content';
 type Props = {
   uri: string;
@@ -21,7 +21,7 @@ function FileWatchLaterLink(props: Props) {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
-  const emailVerified = useAppSelector(selectUserVerifiedEmail);
+  const emailVerified = useAppSelector(selectUserAuthenticated);
   const hasClaimInWatchLater = useAppSelector((state) =>
     selectCollectionForIdHasClaimUrl(state, COLLECTIONS_CONSTS.WATCH_LATER_ID, uri)
   );

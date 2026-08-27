@@ -215,7 +215,7 @@ function ChannelPage(props: Props) {
       setHasShorts(true);
     }
 
-    // Use claim_search instead of lighthouse to detect shorts
+    // Use claim_search instead of fuzzy search to detect shorts.
     Lbry.claim_search({
       channel_ids: [claimId],
       page_size: 1,

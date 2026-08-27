@@ -1,5 +1,5 @@
-import { ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { isHyperbeamPublicReadDevice } from 'util/hyperbeamRouting';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 export type HyperbeamDebugLevel = 'info' | 'ok' | 'warn' | 'error';
 
@@ -13,6 +13,9 @@ export type HyperbeamDebugEvent = {
 const EVENT_NAME = 'odysee-hyperbeam-debug';
 const MAX_BUFFERED_EVENTS = 320;
 const AUTH_REQUIRED_DEVICE_PATHS = new Set([
+  '/~odysee-preference@1.0/owner',
+  '/~odysee-preference@1.0/seal',
+  '/~odysee-preference@1.0/open',
   '/~odysee-account@1.0/preference-get',
   '/~odysee-account@1.0/preference-set',
   '/~odysee-account@1.0/settings-get',
@@ -85,7 +88,7 @@ export function addHyperbeamDebugListener(listener: (event: HyperbeamDebugEvent)
 export function installHyperbeamFetchDebug() {
   if (installed || typeof window === 'undefined' || typeof fetch !== 'function') return;
 
-  const nodeBase = String(ODYSEE_HYPERBEAM_NODE_API || '').replace(/\/+$/, '');
+  const nodeBase = hyperbeamNodeBase();
 
   installed = true;
   const nativeFetch = window.fetch.bind(window);

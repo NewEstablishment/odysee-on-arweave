@@ -91,10 +91,10 @@ function ChannelAbout(props: Props) {
             </>
           )}
 
-          {claim.meta.claims_in_channel && (
+          {claim.meta?.claims_in_channel && (
             <>
               <label>{__('Total Uploads')}</label>
-              <div className="media__info-text">{claim.meta.claims_in_channel}</div>
+              <div className="media__info-text">{claim.meta?.claims_in_channel}</div>
             </>
           )}
 

@@ -1,6 +1,19 @@
+import {
+  field,
+  integer,
+  isNativeMessageId,
+  normalizeMessageId,
+  optionalString,
+  validReference,
+  validTarget,
+} from './nativeMessageFields.ts';
+import { collapseChains, compareByEvent, latestByKey, type CollapseSpec } from './revisionedMessage.ts';
+
 export const NATIVE_REACTION_SCHEMA = 'odysee-reaction@1.0';
 export const NATIVE_REACTION_TYPE = 'reaction';
 export const NATIVE_REACTION_SIGNATURE_SCOPE = 'native-reaction-v1';
+
+const MAX_REACTION_REFERENCE_LENGTH = 128;
 
 export type NativeReactionKind = 'like' | 'dislike';
 export type NativeReactionSubject = 'content' | 'comment';
@@ -34,7 +47,6 @@ export type NativeReactionProjection = {
 };
 
 export function normalizeNativeReaction(source: any): NativeReaction | null {
-  const revision = integer(field(source, 'revision'), -1);
   const normalized = {
     ...source,
     schema: String(field(source, 'schema') || ''),
@@ -45,13 +57,13 @@ export function normalizeNativeReaction(source: any): NativeReaction | null {
     reaction: String(field(source, 'reaction') || ''),
     state: String(field(source, 'state') || ''),
     operation: String(field(source, 'operation') || ''),
-    revision,
+    revision: integer(field(source, 'revision'), -1),
     version_ref: String(field(source, 'version-ref', 'version_ref') || ''),
     revision_of: optionalString(field(source, 'revision-of', 'revision_of')),
     previous_version: optionalString(field(source, 'previous-version', 'previous_version')),
     event_timestamp: integer(field(source, 'event-timestamp', 'event_timestamp'), 0),
     signature_scope: String(field(source, 'signature-scope', 'signature_scope') || ''),
-    message_id: String(field(source, 'message-id', 'message_id', 'hyperbeam_message_id') || '').replace(/^\/+/, ''),
+    message_id: normalizeMessageId(field(source, 'message-id', 'message_id', 'hyperbeam_message_id')),
     owner: String(field(source, 'hyperbeam-owner', 'hyperbeam_owner', 'owner') || ''),
     profile_id: optionalString(field(source, 'profile-id', 'profile_id', 'author')),
     profile_name: optionalString(field(source, 'profile-name', 'profile_name')),
@@ -71,8 +83,8 @@ export function isValidNativeReaction(reaction: NativeReaction): boolean {
     Boolean(
       reaction.revision_of &&
       reaction.previous_version &&
-      validReference(reaction.revision_of) &&
-      validReference(reaction.previous_version)
+      validRef(reaction.revision_of) &&
+      validRef(reaction.previous_version)
     ) &&
     reaction.revision > 0 &&
     ((reaction.operation === 'set' && reaction.state === 'active') ||
@@ -82,8 +94,8 @@ export function isValidNativeReaction(reaction: NativeReaction): boolean {
     reaction.schema === NATIVE_REACTION_SCHEMA &&
     reaction.type === NATIVE_REACTION_TYPE &&
     reaction.signature_scope === NATIVE_REACTION_SIGNATURE_SCOPE &&
-    validReference(reaction.reaction_ref) &&
-    validReference(reaction.version_ref) &&
+    validRef(reaction.reaction_ref) &&
+    validRef(reaction.version_ref) &&
     validTarget(reaction.target) &&
     (reaction.subject === 'content' || reaction.subject === 'comment') &&
     (reaction.reaction === 'like' || reaction.reaction === 'dislike') &&
@@ -112,26 +124,41 @@ export function isNextNativeReactionRevision(
   );
 }
 
+const compareReactionEvents = compareByEvent<NativeReaction>(
+  (reaction) => reaction.event_timestamp,
+  (reaction) => reaction.revision,
+  (reaction) => reaction.message_id
+);
+
+const reactionChainSpec: CollapseSpec<NativeReaction> = {
+  rootRef: (reaction) => reaction.reaction_ref,
+  revisionOf: (reaction) => reaction.revision_of,
+  isNext: isNextNativeReactionRevision,
+  versionIdentity: (reaction) =>
+    `${reaction.subject}\u0000${reaction.target}\u0000${reaction.owner}\u0000${reaction.reaction_ref}\u0000${reaction.version_ref}`,
+  versionSemantics: (reaction) =>
+    JSON.stringify({
+      reaction: reaction.reaction,
+      state: reaction.state,
+      operation: reaction.operation,
+      revision: reaction.revision,
+      revision_of: reaction.revision_of,
+      previous_version: reaction.previous_version,
+      event_timestamp: reaction.event_timestamp,
+      profile_id: reaction.profile_id,
+      profile_name: reaction.profile_name,
+    }),
+  equivocation: 'drop-version',
+  compare: compareReactionEvents,
+};
+
 export function collapseNativeReactionStates(reactions: Array<NativeReaction>): Array<NativeReaction> {
-  const unique = uniqueReactionVersions(reactions.filter(isValidNativeReaction));
-  const roots = unique.filter((reaction) => !reaction.revision_of);
-  const revisionsByRoot = new Map<string, Array<NativeReaction>>();
-
-  unique.forEach((reaction) => {
-    if (!reaction.revision_of) return;
-    const revisions = revisionsByRoot.get(reaction.revision_of) || [];
-    revisions.push(reaction);
-    revisionsByRoot.set(reaction.revision_of, revisions);
-  });
-
-  const tips = roots.map((root) => latestRevision(root, revisionsByRoot.get(root.reaction_ref) || []));
-  const byIdentity = new Map<string, NativeReaction>();
-  tips.forEach((reaction) => {
-    const key = `${reaction.subject}\u0000${reaction.target}\u0000${reaction.owner}`;
-    const existing = byIdentity.get(key);
-    if (!existing || compareReactionEvents(existing, reaction) < 0) byIdentity.set(key, reaction);
-  });
-  return Array.from(byIdentity.values());
+  const tips = collapseChains(reactions.filter(isValidNativeReaction), reactionChainSpec);
+  return latestByKey(
+    tips,
+    (reaction) => `${reaction.subject}\u0000${reaction.target}\u0000${reaction.owner}`,
+    compareReactionEvents
+  );
 }
 
 export function projectNativeReactions(
@@ -164,88 +191,6 @@ export function nativeReactionToggleRemoves(
   return current?.state === 'active' && current.reaction === reaction;
 }
 
-function latestRevision(root: NativeReaction, revisions: Array<NativeReaction>): NativeReaction {
-  let current = root;
-  while (true) {
-    const candidates = revisions
-      .filter((candidate) => isNextNativeReactionRevision(root, current, candidate))
-      .sort(compareReactionEvents);
-    if (!candidates.length) return current;
-    if (candidates.length > 1) return current;
-    current = candidates[0];
-  }
-}
-
-function compareReactionEvents(left: NativeReaction, right: NativeReaction): number {
-  const timestampDifference = left.event_timestamp - right.event_timestamp;
-  if (timestampDifference) return timestampDifference;
-  const revisionDifference = left.revision - right.revision;
-  if (revisionDifference) return revisionDifference;
-  return left.message_id.localeCompare(right.message_id);
-}
-
-function uniqueReactionVersions(reactions: Array<NativeReaction>): Array<NativeReaction> {
-  const byVersion = new Map<string, Array<NativeReaction>>();
-  reactions.forEach((reaction) => {
-    const identity = `${reaction.subject}\u0000${reaction.target}\u0000${reaction.owner}\u0000${reaction.reaction_ref}\u0000${reaction.version_ref}`;
-    const versions = byVersion.get(identity) || [];
-    versions.push(reaction);
-    byVersion.set(identity, versions);
-  });
-
-  const unique: Array<NativeReaction> = [];
-  byVersion.forEach((versions) => {
-    const semantic = new Set(versions.map(reactionSemantics));
-    if (semantic.size !== 1) return;
-    unique.push(versions.sort(compareReactionEvents)[0]);
-  });
-  return unique;
-}
-
-function reactionSemantics(reaction: NativeReaction): string {
-  return JSON.stringify({
-    reaction: reaction.reaction,
-    state: reaction.state,
-    operation: reaction.operation,
-    revision: reaction.revision,
-    revision_of: reaction.revision_of,
-    previous_version: reaction.previous_version,
-    event_timestamp: reaction.event_timestamp,
-    profile_id: reaction.profile_id,
-    profile_name: reaction.profile_name,
-  });
-}
-
-function validReference(reference: string): boolean {
-  return reference.length >= 16 && reference.length <= 128 && !hasControlCharacters(reference);
-}
-
-function validTarget(target: string): boolean {
-  return target.length > 0 && target.length <= 1024 && !hasControlCharacters(target);
-}
-
-function hasControlCharacters(source: string): boolean {
-  return Array.from(source).some((character) => {
-    const code = character.charCodeAt(0);
-    return code < 32 || code === 127;
-  });
-}
-
-function field(source: any, ...keys: Array<string>): any {
-  for (const key of keys) {
-    if (source?.[key] !== undefined && source?.[key] !== null) return source[key];
-  }
-}
-
-function optionalString(source: any): string | undefined {
-  return typeof source === 'string' && source ? source : undefined;
-}
-
-function integer(source: any, fallback: number): number {
-  const parsed = Math.floor(Number(source));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function isNativeMessageId(messageId: any): boolean {
-  return /^[0-9A-Za-z_-]{41,128}$/.test(String(messageId || ''));
+function validRef(reference: string): boolean {
+  return validReference(reference, MAX_REACTION_REFERENCE_LENGTH);
 }

@@ -146,10 +146,11 @@ test('writes cannot advance checkpoints before Meilisearch tasks finish', () => 
 });
 
 test('legacy replacements are source-scoped and expired claims become deletions', () => {
-  const current = { claim_id: 'claim-a', bid_state: 'Controlling' };
-  const expired = { claim_id: 'claim-b', bid_state: 'Expired' };
+  const current = { claim_id: 'claim-a', bid_state: 'Controlling', title: 'Current', has_thumbnail: 1 };
+  const expired = { claim_id: 'claim-b', bid_state: 'Expired', title: 'Expired', has_thumbnail: 1 };
   assert.equal(activeLegacyDocument(current), true);
   assert.equal(activeLegacyDocument(expired), false);
+  assert.equal(activeLegacyDocument({ ...current, title: '', has_thumbnail: 0 }), false);
   assert.equal(
     legacyClaimFilter([current, expired, current]),
     'source_system = "legacy-chainquery" AND claim_id IN ["claim-a", "claim-b"]'

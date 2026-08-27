@@ -46,9 +46,9 @@ const HYPERBEAM_PUBLIC_STORE_LINK_DEPTH = 3;
 const HYPERBEAM_PUBLIC_STORE_LINK_FIELDS = new Set(['value', 'thumbnail']);
 const hyperbeamPublicStoreCache = new Map();
 const hyperbeamPublicStoreReads = new Map();
-const HYPERBEAM_UPLOAD_PATH = '/id?!=true&committers=all';
-const HYPERBEAM_UPLOAD_CHUNK_PATH = '/id?!=true&committers=all';
-const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/id?!=true&committers=all';
+const HYPERBEAM_UPLOAD_PATH = '/id?0.%21=true&committers=all';
+const HYPERBEAM_UPLOAD_CHUNK_PATH = '/id?0.%21=true&committers=all';
+const HYPERBEAM_UPLOAD_FINALIZE_PATH = '/id?0.%21=true&committers=all';
 const HYPERBEAM_UPLOAD_INDEX_PATH = '/~odysee-upload@1.0/index?!=true';
 const HYPERBEAM_UPLOAD_LIST_PATH = '/~odysee-upload@1.0/list';
 const HYPERBEAM_UPLOAD_DELETE_PATH = '/~odysee-upload@1.0/delete?!=true';
@@ -61,6 +61,9 @@ const HYPERBEAM_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 const HYPERBEAM_UPLOAD_MANIFEST_TYPE = 'application/vnd.odysee.hyperbeam-upload-manifest+json';
 const HYPERBEAM_UPLOAD_MANIFEST_KIND = 'odysee-hyperbeam-chunked-upload';
 const HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
+  '/~odysee-preference@1.0/owner',
+  '/~odysee-preference@1.0/seal',
+  '/~odysee-preference@1.0/open',
   '/~odysee-account@1.0/preference-get',
   '/~odysee-account@1.0/preference-set',
   '/~odysee-account@1.0/settings-get',
@@ -155,10 +158,16 @@ async function postHyperbeamAuthDevice(ctx) {
   // the browser cookie; the cookie only fills in when the body carries none.
   const body = authToken ? { auth_token: authToken, ...requestBody } : requestBody;
 
-  const response = await postJson(`${nodeUrl}${devicePath}`, body);
+  const cookie = ctx.get('cookie');
+  const response = await postJson(`${nodeUrl}${devicePath}`, body, {
+    ...(cookie ? { cookie } : {}),
+    accept: ctx.get('accept') || 'application/json',
+    'accept-bundle': ctx.get('accept-bundle') || 'false',
+  });
 
   ctx.status = response.statusCode;
-  ctx.set('Cache-Control', 'no-store');
+  ctx.set('Cache-Control', response.headers['cache-control'] || 'no-store');
+  if (response.headers.pragma) ctx.set('Pragma', response.headers.pragma);
   ctx.set('Content-Type', response.headers['content-type'] || 'application/json');
   ctx.body = response.body;
 }
@@ -369,6 +378,7 @@ async function postHyperbeamUpload(ctx) {
   const contentType = ctx.get('content-type') || 'application/octet-stream';
   const authHeaders = {
     ...(authToken ? { 'x-odysee-auth-token': authToken } : {}),
+    ...(ctx.get('cookie') ? { cookie: ctx.get('cookie') } : {}),
     accept: ctx.get('accept') || 'application/json',
     'accept-bundle': ctx.get('accept-bundle') || 'false',
   };
@@ -1503,6 +1513,7 @@ router.get(`/$/api/auth-token/v1/get`, async (ctx) => {
 router.post(`${HYPERBEAM_AUTH_DEVICE_PREFIX}/:device/:method`, postHyperbeamAuthDevice);
 router.post(`${HYPERBEAM_PUBLIC_DEVICE_PREFIX}/:device/:method`, postHyperbeamPublicDevice);
 router.post(HYPERBEAM_PUBLIC_STORE_BATCH_PATH, postHyperbeamPublicStoreBatch);
+router.post(`/$/api/hyperbeam-native-message/v1/write`, postHyperbeamUpload);
 router.post(`/$/api/hyperbeam-upload/v1/write`, postHyperbeamUpload);
 router.post(`/$/api/hyperbeam-upload/v1/large`, postHyperbeamLargeUpload);
 router.post(`/$/api/hyperbeam-upload/v1/index`, postHyperbeamUploadIndex);

@@ -1,6 +1,81 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "analytics-sites": [
+    {
+      "key": "odysee",
+      "name": "Odysee",
+      "owner": "6MtoDlONgReycEzF5WU9n7ZWCvNA6mIZLvYKNHfh6qg",
+      "users": [
+        "kMxC5YAS2TsZDiJ5Ei8cQEFMjqa6Y3z00Hyqwv8TEco"
+      ],
+      "origins": [],
+      "visitor-id-mode": "persistent",
+      "engagement-threshold-ms": 30000,
+      "engagement-dedupe-window-ms": 86400000
+    }
+  ],
+  "secret-default-persist": "non-volatile",
+  "hook-auth-ignored-keys": [
+    "secret",
+    "cookie",
+    "set-cookie",
+    "path",
+    "method",
+    "authorization",
+    "!",
+    "accept",
+    "accept-bundle",
+    "ao-peer",
+    "ao-peer-port",
+    "committers",
+    "host",
+    "user-agent",
+    "origin",
+    "referer",
+    "connection",
+    "accept-language",
+    "accept-encoding",
+    "sec-fetch-dest",
+    "sec-fetch-mode",
+    "sec-fetch-site",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "odysee-auth-token",
+    "x-odysee-auth-token",
+    "x-lbry-auth-token"
+  ],
+  "search-backend-url": "http://127.0.0.1:7700",
+  "search-index": "odysee_claims",
+  "search-index-markers": [
+    {
+      "field": "schema",
+      "values": [
+        "odysee-upload@1.0",
+        "odysee-channel@1.0",
+        "odysee-playlist@1.0",
+        "odysee-comment@1.0"
+      ]
+    },
+    "claim-name"
+  ],
+  "search-skip-fields": [
+    "claim",
+    "claim-ancestry",
+    "claim-envelope",
+    "claim-id",
+    "claim-op",
+    "claim-proof-strength",
+    "channel-id",
+    "evidence",
+    "native-id",
+    "native-id-type",
+    "nout",
+    "raw-transaction",
+    "sd-hash",
+    "txid"
+  ],
   "http-extra-opts": {
     "force-message": true,
     "cache-control": [
@@ -63,6 +138,12 @@
     }
   ],
   "on": {
+    "cache-write": [
+      {
+        "device": "search@1.0",
+        "path": "write"
+      }
+    ],
     "request": [
       {
         "device": "rate-limit@1.0"

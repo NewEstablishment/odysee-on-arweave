@@ -39,7 +39,7 @@ import {
   selectAppDrawerOpen,
 } from 'redux/selectors/app';
 import { selectDaemonSettings, selectClientSetting } from 'redux/selectors/settings';
-import { selectUser, selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUser, selectUserAuthenticated, selectUserIsNative, selectUserVerifiedEmail } from 'redux/selectors/user';
 import { doSetPrefsReady, doPreferenceGet, doPopulateSharedUserState, syncInvalidated } from 'redux/actions/sync';
 import { doAuthenticate } from 'redux/actions/user';
 import { doMembershipMine } from 'redux/actions/memberships';
@@ -50,6 +50,8 @@ import { doNotificationSocketConnect } from 'redux/actions/websocket';
 import { getClaimOutpoint, getClaimScheduledState, isClaimPrivate, isClaimUnlisted } from 'util/claim';
 import { selectContentPositionForUri } from 'redux/selectors/content';
 import { doTipAccountStatus } from './payments';
+import { doFetchSubscriptions } from 'redux/actions/subscriptions';
+import { signOutHyperbeam } from 'util/hyperbeamAccount';
 const appVersion = '0.0.0';
 
 const CHECK_UPGRADE_INTERVAL = 10 * 60 * 1000;
@@ -277,7 +279,7 @@ export function doAlertError(errorList: any) {
 export function doAlertWaitingForSync() {
   return (dispatch: Dispatch, getState: GetState) => {
     const state = getState();
-    const authenticated = selectUserVerifiedEmail(state);
+    const authenticated = selectUserAuthenticated(state);
     dispatch(
       doToast({
         message:
@@ -453,6 +455,14 @@ export function doSignIn() {
     const state = getState();
     const user = selectUser(state);
 
+    if (selectUserIsNative(state)) {
+      dispatch(doFetchChannelListMine());
+      dispatch(doFetchCollectionListMine());
+      dispatch(doFetchSubscriptions());
+      dispatch(doGetAndPopulatePreferences());
+      return;
+    }
+
     if (pushNotifs.ready) {
       pushNotifs.ready
         .then(() => {
@@ -525,6 +535,11 @@ function doSignOutAction() {
 
 export function doSignOut() {
   return async (dispatch: Dispatch, getState: GetState) => {
+    if (selectUserIsNative(getState())) {
+      signOutHyperbeam();
+      location.reload();
+      return;
+    }
     const pendingActions = Object.values(window.beforeUnloadMap || {});
 
     if (pendingActions.length > 0) {
@@ -572,17 +587,13 @@ export function doToggle3PAnalytics(allowParam: any, doNotDispatch: any) {
 export function doGetAndPopulatePreferences(syncId?: number) {
   const { SDK_SYNC_KEYS } = SHARED_PREFERENCES;
   return (dispatch: Dispatch, getState: GetState) => {
-    const state = getState();
-    const syncEnabled = selectClientSetting(state, SETTINGS.ENABLE_SYNC);
-    const hasVerifiedEmail = selectUserVerifiedEmail(state);
     let preferenceKey;
     // TODO: the logic should match `runPreferences`, but since this function is
     // only hit as a successful sync callback, it doesn't matter for now.
     preferenceKey = 'shared';
 
     function successCb(savedPreferences) {
-      const successState = getState();
-      const daemonSettings = selectDaemonSettings(successState);
+      dispatch({ type: ACTIONS.SYNC_FATAL_ERROR_CLEAR });
 
       if (savedPreferences !== null) {
         if (!syncInvalidated(getState, syncId)) {

@@ -6,8 +6,8 @@ import { FormField } from 'component/common/form-components/form-field';
 import Spinner from 'component/spinner';
 import { URL } from 'config';
 import * as ICONS from 'constants/icons';
-import { LIGHTHOUSE_MIN_CHARACTERS, SEARCH_OPTIONS } from 'constants/search';
-import useLighthouse from 'effects/use-lighthouse';
+import { SEARCH_MIN_CHARACTERS, SEARCH_OPTIONS } from 'constants/search';
+import useSearch from 'effects/use-search';
 import { getUriForSearchTerm } from 'util/search';
 import { isNameValid, parseURI } from 'util/lbryURI';
 import { doResolveUris } from 'redux/actions/claims';
@@ -59,24 +59,24 @@ export default function ChannelFinder(props: Props) {
   const [uriSearchTermError, setUriSearchTermError] = React.useState('');
   const [isResolvingUri, setIsResolvingUri] = React.useState(false);
   const resolvedUri = claimsByUri[uriSearchTerm]?.permanent_url;
-  // --- Lighthouse search ---
+  // --- Search suggestions ---
   const additionalOptions = {
     isBackgroundSearch: false,
     [SEARCH_OPTIONS.CLAIM_TYPE]: SEARCH_OPTIONS.INCLUDE_CHANNELS,
   };
-  const lighthouseResponse = useLighthouse(getLhTerm(searchTermDebounced), false, 15, additionalOptions, 0);
-  const urisStringified = JSON.stringify(lighthouseResponse.results);
+  const searchResponse = useSearch(getSearchableTerm(searchTermDebounced), false, 15, additionalOptions, 0);
+  const urisStringified = JSON.stringify(searchResponse.results);
   const [showSubscriptions, setShowSubscriptions] = React.useState(false);
 
   // **************************************************************************
   // **************************************************************************
 
-  const LighthouseResults = (props: {}) => (
+  const SearchSuggestions = (props: {}) => (
     <>
-      {!lighthouseResponse.loading &&
-        searchTerm?.length >= LIGHTHOUSE_MIN_CHARACTERS &&
-        lighthouseResponse.results &&
-        lighthouseResponse.results
+      {!searchResponse.loading &&
+        searchTerm?.length >= SEARCH_MIN_CHARACTERS &&
+        searchResponse.results &&
+        searchResponse.results
           .filter((uri) => uri !== resolvedUri)
           .map((uri) => (
             <Entry
@@ -115,7 +115,7 @@ export default function ChannelFinder(props: Props) {
   );
 
   const MiscSuggestions = (props: {}) => {
-    const show = showSubscriptions && subscriptionUris.length > 0 && !lighthouseResponse.loading;
+    const show = showSubscriptions && subscriptionUris.length > 0 && !searchResponse.loading;
     return show ? (
       <div className="channel-finder__misc-suggestions">
         <label>{__('Following')}</label>
@@ -140,9 +140,9 @@ export default function ChannelFinder(props: Props) {
     return str.startsWith(`${URL}`) || str.startsWith('lbry://');
   }
 
-  function getLhTerm(term) {
-    // This should be moved into `useLighthouse`
-    return searchTerm && searchTerm.length >= LIGHTHOUSE_MIN_CHARACTERS ? searchTerm : '';
+  function getSearchableTerm(term) {
+    // This should be moved into `useSearch`
+    return searchTerm && searchTerm.length >= SEARCH_MIN_CHARACTERS ? searchTerm : '';
   }
 
   function handleSuggestionClicked(uri: string) {
@@ -176,14 +176,14 @@ export default function ChannelFinder(props: Props) {
       return () => clearTimeout(timer);
     }
   }, [searchTerm, searchTermDebounced]);
-  // -- Resolve and store lighthouse results
+  // -- Resolve and store search results
   React.useEffect(() => {
-    const uris = lighthouseResponse.results;
+    const uris = searchResponse.results;
 
     if (searchTermDebounced && uris && uris.length > 0) {
       dispatch(doResolveUris(uris, true));
       dispatch(doSetMentionSearchResults(searchTermDebounced, uris));
-    } // 1. urisStringified covers 'lighthouseResponse.results' (should be in sync).
+    } // 1. urisStringified covers 'searchResponse.results' (should be in sync).
     // 2. Ignore functions as they won't change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urisStringified, searchTermDebounced]);
@@ -250,12 +250,12 @@ export default function ChannelFinder(props: Props) {
       </div>
       <div className="channel-finder__middle">
         <div className="channel-finder__suggestion-list">
-          {lighthouseResponse.loading || isResolvingUri ? (
+          {searchResponse.loading || isResolvingUri ? (
             <CenteredSpinner />
           ) : (
             <>
               {uriSearchTerm && <UriSearchResult />}
-              {!isUrl && <LighthouseResults />}
+              {!isUrl && <SearchSuggestions />}
               <MiscSuggestions />
             </>
           )}

@@ -65,7 +65,6 @@ import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { doDaemonReady, doOpenModal, doHideModal, doToggle3PAnalytics, doMinVersionSubscribe } from 'redux/actions/app';
 import Lbry, { apiCall } from 'lbry';
-import { setSearchApi } from 'redux/actions/search';
 import {
   doFetchLanguage,
   doFetchDevStrings,
@@ -213,10 +212,6 @@ Lbry.setOverride(
 analytics.event.initAppStartTime(Date.now());
 if (LBRY_API_URL) {
   Lbryio.setLocalApi(LBRY_API_URL);
-}
-
-if (process.env.SEARCH_API_URL) {
-  setSearchApi(process.env.SEARCH_API_URL);
 }
 
 doAuthTokenRefresh();

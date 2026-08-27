@@ -199,6 +199,7 @@ function resolveSearchOptions(resolveProps: any) {
     no_totals: true,
     any_tags: tags || [],
     not_tags: CsOptHelper.not_tags(notTagInput),
+    nsfw: Boolean(showNsfw),
     any_languages: languages,
     channel_ids: channelIds || [],
     not_channel_ids: mutedAndBlockedChannelIds,

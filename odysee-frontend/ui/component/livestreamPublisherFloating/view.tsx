@@ -25,6 +25,7 @@ import { LIVESTREAM_SERVER_API } from 'config';
 import { doToast } from 'redux/actions/notifications';
 import { platform } from 'util/platform';
 import describeUnknown from 'util/describeUnknown';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 import './style.scss';
 
 function formatResolutionLabel(resolution: string | null): string | null {
@@ -75,7 +76,7 @@ export default function LivestreamPublisherFloating() {
     signing_ts?: string;
   }>({});
   React.useEffect(() => {
-    if (channelId && channelName) {
+    if (!hyperbeamNodeEnabled() && channelId && channelName) {
       Lbry.channel_sign({ channel_id: channelId, hexdata: toHex(channelName) })
         .then((data: any) => setSigData(data))
         .catch(() => setSigData({}));

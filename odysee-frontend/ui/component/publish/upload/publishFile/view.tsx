@@ -30,6 +30,7 @@ import {
 } from 'redux/selectors/publish';
 import { doUpdateFile, doUpdatePublishForm, doUpdateTitle } from 'redux/actions/publish';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 type Props = {
   uri: string | null | undefined;
   mode: string | null | undefined;
@@ -155,7 +156,7 @@ function PublishFile(props: Props) {
   }
 
   useEffect(() => {
-    if (activeChannelClaim && activeChannelClaim.claim_id && activeChannelName) {
+    if (!hyperbeamNodeEnabled() && activeChannelClaim && activeChannelClaim.claim_id && activeChannelName) {
       fetchLivestreams(activeChannelClaim.claim_id, activeChannelName);
     } // eslint-disable-next-line react-hooks/exhaustive-deps -- @see TODO_NEED_VERIFICATION
   }, [claimChannelId, activeChannelName]);

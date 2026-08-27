@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import classnames from 'classnames';
-import { THUMBNAIL_CDN_URL } from 'config';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 type Props = {
   src: string;
   className: string;
@@ -14,11 +14,15 @@ const FreezeframeWrapper: React.ComponentType<Props> = React.memo((props: Props)
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(() => {
     const devicePixelRatio = window.devicePixelRatio || 1.0;
-    const fullSrc = src ? `${THUMBNAIL_CDN_URL}s:${Math.floor(64 * devicePixelRatio)}:0/quality:95/plain/${src}` : null;
+    const fullSrc = src
+      ? getThumbnailCdnUrl({ thumbnail: src, width: Math.floor(64 * devicePixelRatio), height: 0, quality: 95 })
+      : null;
     return fullSrc ? imageDataCache.has(fullSrc) : false;
   });
   const devicePixelRatio = window.devicePixelRatio || 1.0;
-  const fullSrc = src ? `${THUMBNAIL_CDN_URL}s:${Math.floor(64 * devicePixelRatio)}:0/quality:95/plain/${src}` : null;
+  const fullSrc = src
+    ? getThumbnailCdnUrl({ thumbnail: src, width: Math.floor(64 * devicePixelRatio), height: 0, quality: 95 })
+    : null;
   useLayoutEffect(() => {
     if (!canvasRef.current || !fullSrc) return;
     const cached = imageDataCache.get(fullSrc);

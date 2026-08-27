@@ -12,7 +12,6 @@ import LivestreamPublishProvider from 'component/livestreamPublishProvider';
 import { lazyImport } from 'util/lazyImport';
 import { tusUnlockAndNotify, tusHandleTabUpdates } from 'util/tus';
 import analytics from 'analytics';
-import { setSearchUserId } from 'redux/actions/search';
 import { parseURI, buildURI } from 'util/lbryURI';
 import { generateGoogleCacheUrl } from 'util/url';
 import ReactModal from 'react-modal';
@@ -47,7 +46,7 @@ import {
 } from 'redux/selectors/sync';
 import { doUserSetReferrerForUri } from 'redux/actions/user';
 import { doSetLastViewedAnnouncement } from 'redux/actions/content';
-import { selectUser, selectUserLocale, selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUser, selectUserAuthenticated, selectUserLocale } from 'redux/selectors/user';
 import { selectMyChannelClaimIds } from 'redux/selectors/claims';
 import {
   selectLanguage,
@@ -79,6 +78,7 @@ import {
   doOpenModal,
   doChangeVolume,
   doChangeMute,
+  doGetAndPopulatePreferences,
 } from 'redux/actions/app';
 import { selectError } from 'redux/selectors/notifications';
 const DebugLog = lazyImport(
@@ -225,7 +225,7 @@ function App() {
   const syncDeferredDueToMissingPassword = useAppSelector(selectSyncDeferredDueToMissingPassword);
   const syncIsLocked = useAppSelector(selectSyncIsLocked);
   const uploadCount = useAppSelector(selectUploadCount);
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated);
   const currentModal = useAppSelector(selectModal);
   const modalError = useAppSelector(selectError);
   const syncFatalError = useAppSelector(selectSyncFatalError);
@@ -393,7 +393,7 @@ function App() {
               message: __('Failed to synchronize settings. Wait a while before retrying.'),
               actionText: __('Retry'),
               onClick: () => {
-                dispatch(doSyncLoop(true));
+                dispatch(hyperbeamNodeEnabled() ? doGetAndPopulatePreferences() : doSyncLoop(true));
                 setRetryingSync(true);
                 setTimeout(() => setRetryingSync(false), 4000);
               },
@@ -438,7 +438,6 @@ function App() {
   useEffect(() => {
     if (userId) {
       analytics.setUser(userId);
-      setSearchUserId(userId);
     }
   }, [userId]);
   useEffect(() => {
@@ -742,11 +741,11 @@ function App() {
   }, []);
   useEffect(() => {
     if (embedPath) return;
-    if (!hasSignedIn && hasVerifiedEmail) {
+    if (!hasSignedIn && isAuthenticated) {
       dispatch(doSignIn());
       setHasSignedIn(true);
     }
-  }, [dispatch, hasVerifiedEmail, hasSignedIn]);
+  }, [dispatch, isAuthenticated, hasSignedIn]);
   useDegradedPerformance(setLbryTvApiStatus, user, doSetAssignedLbrynetServer_);
   useEffect(() => {
     if (!syncIsLocked) {

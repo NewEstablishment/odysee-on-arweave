@@ -18,6 +18,7 @@ import I18nMessage from 'component/i18nMessage';
 import ChannelThumbnail from 'component/channelThumbnail';
 import { useIsMobile } from 'effects/use-screensize';
 import { platform } from 'util/platform';
+import { isHyperbeamSignedIn } from 'util/hyperbeamAccount';
 import { DOMAIN, ENABLE_UI_NOTIFICATIONS } from 'config';
 import MembershipBadge from 'component/membershipBadge';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -31,7 +32,7 @@ import {
 import { doClearClaimSearch, doResolveUris } from 'redux/actions/claims';
 import { doClearPurchasedUriSuccess } from 'redux/actions/file';
 import { selectFollowedTags } from 'redux/selectors/tags';
-import { selectUserVerifiedEmail, selectUser, hasLegacyOdyseePremium } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUser, hasLegacyOdyseePremium } from 'redux/selectors/user';
 import { selectClientSettings, selectHomepageData } from 'redux/selectors/settings';
 import { doSignOut } from 'redux/actions/app';
 import { selectUnseenNotificationCount } from 'redux/selectors/notifications';
@@ -48,7 +49,7 @@ const touch = platform.isTouch() && /iPad|Android/i.test(navigator.userAgent);
 const selectSidebarCategories = createSelector(
   selectHomepageData,
   selectClientSettings,
-  selectUserVerifiedEmail,
+  selectUserAuthenticated,
   hasLegacyOdyseePremium,
   (homepageData, clientSettings, email, hasMembership) => {
     const applyHomepageOrderToSidebar = clientSettings[SETTINGS.HOMEPAGE_ORDER_APPLY_TO_SIDEBAR];
@@ -176,6 +177,12 @@ const PLAYLISTS: SideNavLink = {
   icon: ICONS.PLAYLIST,
   hideForUnauth: true,
 };
+const UPLOADS: SideNavLink = {
+  title: 'Uploads',
+  link: `/$/${PAGES.UPLOADS}`,
+  icon: ICONS.PUBLISH,
+  hideForUnauth: true,
+};
 const WATCH_HISTORY: SideNavLink = {
   title: 'Watch History',
   link: `/$/${PAGES.WATCH_HISTORY}`,
@@ -252,7 +259,7 @@ function SideNavigation(props: Props) {
   const categories = useAppSelector(selectSidebarCategories);
   const lastActiveSubs = useAppSelector(selectLastActiveSubscriptions);
   const followedTags = useAppSelector(selectFollowedTags);
-  const email = useAppSelector(selectUserVerifiedEmail);
+  const email = useAppSelector(selectUserAuthenticated);
   const purchaseSuccess = useAppSelector(selectPurchaseUriSuccess);
   const unseenCount = useAppSelector(selectUnseenNotificationCount);
   const user = useAppSelector(selectUser);
@@ -341,7 +348,9 @@ function SideNavigation(props: Props) {
     },
   ];
   const notificationsEnabled = ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui);
-  const isAuthenticated = Boolean(email);
+  // A HyperBEAM cookie account is a signed-in identity even though it never
+  // carries the legacy verified email.
+  const isAuthenticated = Boolean(email) || isHyperbeamSignedIn();
   const [pulseLibrary, setPulseLibrary] = React.useState(false);
   const [expandTags, setExpandTags] = React.useState(false);
   const isPersonalized = !IS_WEB || isAuthenticated;
@@ -386,7 +395,7 @@ function SideNavigation(props: Props) {
     const { hideForUnauth, route, link, noI18n, ...passedProps } = props;
     const { title, icon, extra } = passedProps;
 
-    if (hideForUnauth && !email) {
+    if (hideForUnauth && !isAuthenticated) {
       return null;
     }
 
@@ -687,6 +696,7 @@ function SideNavigation(props: Props) {
               {getLink(RECENT_FROM_FOLLOWING)}
               {showMicroMenu && getLink(WATCH_LATER)}
               {showMicroMenu && getLink(PLAYLISTS)}
+              {showMicroMenu && getLink(UPLOADS)}
               {!hasMembership && getLink(PREMIUM)}
             </ul>
             <ul className="navigation-links--absolute mobile-only">
@@ -698,11 +708,21 @@ function SideNavigation(props: Props) {
                 'navigation-links--absolute': shouldRenderLargeMenu,
               })}
             >
-              {!showMicroMenu && email && <SectionHeader title={__('Lists')} />}
+              {!showMicroMenu && isAuthenticated && <SectionHeader title={__('Lists')} />}
               {!showMicroMenu && getLink(WATCH_LATER)}
               {!showMicroMenu && getLink(FAVORITES)}
               {!showMicroMenu && getLink(PLAYLISTS)}
               {!showMicroMenu && getLink(WATCH_HISTORY)}
+            </ul>
+
+            <ul
+              className={classnames('navigation-links', {
+                'navigation-links--micro': showMicroMenu,
+                'navigation-links--absolute': shouldRenderLargeMenu,
+              })}
+            >
+              {!showMicroMenu && isAuthenticated && <SectionHeader title={__('You')} />}
+              {!showMicroMenu && getLink(UPLOADS)}
             </ul>
 
             <ul
@@ -727,7 +747,7 @@ function SideNavigation(props: Props) {
 
             <ul className="navigation-links--absolute mobile-only">
               {email && MOBILE_LINKS.map((linkProps) => getLink(linkProps))}
-              {!email && UNAUTH_LINKS.map((linkProps) => getLink(linkProps))}
+              {!isAuthenticated && UNAUTH_LINKS.map((linkProps) => getLink(linkProps))}
             </ul>
 
             {getSubscriptionSection()}

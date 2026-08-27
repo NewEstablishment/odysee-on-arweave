@@ -48,8 +48,9 @@ Static manifest browser
 ```
 
 - Historical Odysee services are locators or byte sources behind stores.
-- Native uploads, profiles, comments, reactions, playlists, subscriptions, and revisions are generic committed
-  messages written through `/id?!` and discovered with `query@1.0`.
+- Native uploads, profiles, comments, reactions, playlists, subscriptions,
+  preference snapshots, and revisions are generic committed messages written through the stage-scoped
+  `/id?0.%21=true&committers=all` route and discovered with `query@1.0`.
 - Production uses the manifest frontend served by the node. Do not introduce a
   required SSR/proxy product path.
 - Browser product code must not call Commentron, Lbryio, the SDK proxy,
@@ -63,8 +64,10 @@ Static manifest browser
 2. **Reads are stores.** Historical resolution and media reads go through the
    configured store stack and generic cache/message routes.
 3. **Writes are generic committed messages.** Do not add application upload,
-   comment, account, reaction, playlist, subscription, or moderation devices when a signed message plus
-   exact query expresses the contract.
+   comment, account, reaction, playlist, subscription, preference-persistence,
+   or moderation devices when a signed message plus exact query expresses the
+   contract. A narrow request-authenticated cryptographic boundary may seal or
+   open private payloads, but it must not own storage or revision behavior.
 4. **One LBRY commitment device.** `lbry@1.0` verifies every evidence kind.
    Do not restore the old family of per-kind codec devices.
 5. **Immutable reads are exact.** An immutable ID or outpoint must return that
@@ -87,8 +90,54 @@ Static manifest browser
     request and response hooks with local country data. The browser renders
     decisions; it does not fetch policy lists or viewer location. Check global
     providers before ISO-code-keyed country providers.
+14. **Search controls stay server-side.** Product filters, sort order, limit,
+    and offset are mapped in the frontend integration layer and sent through
+    generic `search@1.0`; never post-filter ranked pages in React.
 
-## Change ownership
+1. **Immutable reads are ID-first.** A read for an immutable ID returns that
+   exact object. It must never silently resolve to an unrelated current claim
+   version.
+2. **Discovery returns locators.** Exact query and full-text search return IDs
+   or paths. Callers hydrate objects separately through normal store reads and
+   preserve the returned order.
+3. **Generic devices stay generic.** Upstream-style `query@1.0`, `search@1.0`,
+   `cache@1.0`, `auth-hook@1.0`, and message `/id` behavior must remain reusable.
+   Do not add Odysee ranking, moderation, grouping, pagination, hydration, or
+   compatibility semantics to them.
+4. **Product behavior belongs in narrow devices.** Odysee contracts and legacy
+   normalization belong in explicit Odysee devices. Do not recreate a broad
+   SDK proxy device.
+5. **Source formats stay separate from product semantics.** LBRY transaction,
+   claim, descriptor, blob, attestation, and header verification belongs in
+   LBRY codecs and core libraries, not in React or product adapters.
+6. **Stores source objects; devices implement behavior.** A store may locate,
+   normalize, verify, and return an object. It must not become a second
+   playback, search, or UI adapter.
+7. **Hydration has one integration boundary.** SDK-compatible claim shape,
+   Redux ingestion, merged legacy/native lists, deduplication, and stable sort
+   belong in the frontend integration layer, not in page-specific fixes.
+8. **Credentials are request-only.** Cookies, auth tokens, private keys, and
+   credential carriers must be stripped before public messages are signed,
+   cached, indexed, or persisted.
+9. **Indexes are not sources of truth.** Chainquery and Meilisearch discover
+   objects. Native messages and verified source evidence remain authoritative.
+10. **Native state changes are append-only.** Comment edits, comment controls,
+    upload metadata updates, deletes, and mutable references create signed new
+    state or revisions; they do not mutate immutable messages.
+11. **Native social writes use generic messages.** Comments, reactions, public
+    playlists, and follows/subscriptions are committed through `/id?!` and
+    discovered with `query@1.0`; do not add product write devices or legacy API
+    fallbacks for these flows.
+12. **Compatibility sourcing remains observable.** Weaker player-proxy or
+    legacy-source boundaries must be represented honestly in response metadata
+    and diagnostics.
+13. **Observed diagnostics report reality.** Debug graph activity, call counts,
+    edges, backends, and stores must come from actual request events. Never add
+    fictitious nodes, inferred calls, or hardcoded active paths.
+
+## Change Ownership
+
+Use this ownership table before implementing a fix:
 
 | Concern | Correct location |
 | --- | --- |
@@ -96,6 +145,7 @@ Static manifest browser
 | Historical lookup, playback bytes, cache warming, or source normalization | `src/hb_store_*.erl` and `src/hb_odysee_*.erl`. |
 | Node store stack, cookie hook, match index, or manifest publishing | `src/hb_odysee_node.erl`, `src/hb_odysee_ui.erl`, and `config.json`. |
 | Generic local full-text behavior | `src/dev_search.erl` and `src/hb_search.erl`. |
+| Authenticated preference encryption/decryption | `src/dev_odysee_preference.erl`; persistence and reference projection remain generic writes plus frontend hydration. |
 | Browser routing, hydration, upload/comment messages, and SDK-shaped Redux adaptation | `odysee-frontend/ui/lbry.ts`, `ui/util/hyperbeam.ts`, and related services. |
 | Rendering only | React components. |
 | Global or geographic content-policy evaluation | Upstream `blacklist@1.0`; keep an accepted patch under `patches/` until its merged revision is pinned. |
@@ -111,7 +161,7 @@ metadata only and grants no authority.
 
 Uploads:
 
-- Post raw bytes to `/id?!=true&committers=all`.
+- Post raw bytes to `/id?0.%21=true&committers=all`.
 - Write a generic `odysee-upload@1.0` index message linking metadata to the
   immutable data ID.
 - Resolve/list uploads through the match index and exact immutable reads.
@@ -145,19 +195,34 @@ Playlists:
 
 - Public playlists are generic `odysee-playlist@1.0` messages, not LBRY
   collection claims and not a custom device.
-- A committed playlist ID is an exact-read public route. Discovery may return
-  another verified commitment locator for the same immutable message. Every
-  distinct published payload is an independent immutable full snapshot.
 - Store ordered immutable native IDs or legacy outpoints only. Resolve local
   draft URIs before publish; never persist mutable claim IDs as item identity.
-- Editing or reordering stays local until the user explicitly publishes a new
-  snapshot, which receives a new ID and URL. Do not emulate mutable update,
-  delete, or current-head semantics before the generic reference/frequency
-  contract is integrated.
-- Verify the snapshot and its claimed profile under the same committer.
+- The pinned external `reference@1.0` init commitment supplies the stable
+  public playlist ID. Republish writes a new immutable full snapshot and a
+  strictly newer same-owner set message while preserving the public URL.
+- Hydrate and verify every init, set, and selected snapshot. Authority comes
+  from the init commitment's committer; reject foreign writers, stale or tied
+  updates, and snapshots owned by another committer.
 - Keep Queue, Watch Later, Favorites, and unpublished drafts local. Do not
   restore channel selection, URL names, bids, confirmations, support, or
-  `collection_*` SDK calls.
+  `collection_*` SDK calls. Public deletion remains deferred.
+
+User preferences:
+
+- Store only encrypted `odysee-preferences@1.0` immutable snapshots through
+  the generic stage-scoped ID write.
+- Use the canonical `reference@1.0` init commitment as stable identity and
+  strictly newer same-owner set messages as the head. Query references with
+  the authenticated owner as an indexed selector, bind that field to the exact
+  verified committer, and verify every reference and snapshot. Reject foreign,
+  stale, tied, or owner-mismatched state. Retain the newest exact-verified state
+  per owner while the query index catches up so queued saves advance one chain.
+- `odysee-preference@1.0` is a seal/open/owner crypto boundary only. It must
+  authenticate through the hosted cookie wallet, return `no-store, private`,
+  and never persist plaintext, credentials, or wallet material.
+- Do not let the preference blob shadow native follows, moderation/blocked
+  state, or local/private collection drafts. Do not fall back to legacy wallet
+  sync when a native preference request fails.
 
 Subscriptions:
 
@@ -174,14 +239,19 @@ Subscriptions:
   provenance, but normal list/toggle flows must never call the legacy
   subscription API or wallet sync.
 
-Advanced moderation remains unimplemented and must follow the same generic
-message/event pattern and explicit authority checks.
+Creator hide, pin, heart, and channel block/unblock use generic append-only
+comment-control messages with explicit content-owner authority. Moderation
+delegates and blocked-word settings remain unimplemented and must follow the
+same generic message/event pattern and authority checks.
 
 ## Frontend rules
 
 - `ODYSEE_HYPERBEAM_NODE_API` selects the node; it is not a Legacy/HyperBEAM
   mode switch.
 - Install the host-level legacy fetch guard before application imports.
+- Fail legacy-only SDK methods before transport and disable Sockety,
+  Odysee livestream API/signaling/WHIP, and short-URL calls in HyperBEAM mode
+  until native contracts exist.
 - Manifest builds use hash routing, relative assets, and node-safe content
   types.
 - Bare native `lbry://<name>` resolution uses the upload index and immutable
@@ -191,7 +261,150 @@ message/event pattern and explicit authority checks.
 - Do not fetch viewer locale or content-restriction lists in the browser.
   Render the enforcing node's `451` and `503 location-unavailable` results.
 
-## Validation
+### Search and query
+
+Keep these surfaces distinct:
+
+- `query@1.0`: generic exact structured discovery over stored messages.
+- `search@1.0`: generic full-text discovery for arbitrary HyperBEAM messages and
+  the only fuzzy-search device used by Odysee.
+
+Odysee search filters and sort options must reach `search@1.0`; browser
+post-filtering breaks ranking and pagination. Search responses expose ordered
+immutable locators, and hydration happens afterward. Indexing or deleting a
+Meilisearch document must not mutate the underlying object.
+
+### Comments and moderation
+
+- New comments are signed native messages written through the generic ID path.
+- One target-wide `query@1.0/only` discovery request should find native comment
+  paths; product logic handles hydration, valid revision selection, hierarchy,
+  counts, sorting, moderation, historical merging, and pagination.
+- Edits are append-only revisions with `revision-of`, `previous-version`, and a
+  monotonic revision number. Accept only contiguous, same-owner, signature-valid
+  chains.
+- Channel-owner hide, pin, creator-heart, and creator-channel-block actions are
+  append-only `odysee-comment-control@1.0` messages. Apply only the latest valid,
+  authorized control state.
+- Historical comments and controls remain behind `odysee-comment@1.0`; browser
+  code must not call Commentron directly.
+
+### Reactions
+
+- Video and comment reactions are generic `odysee-reaction@1.0` messages.
+- Query only returns locators. Hydrate and verify each exact message and derive
+  ownership from its selected commitment's committer.
+- Toggle, switch, and removal operations are contiguous append-only revisions.
+  Reject forks and conflicting semantic duplicates, and project at most one
+  active reaction per committer and target.
+- Browser actions must not call the legacy reaction API.
+
+### Playlists
+
+- Public playlists are immutable `odysee-playlist@1.0` snapshots written through
+  the generic committed-message path, not LBRY collection claims or a custom
+  device.
+- Playlist items are ordered immutable native IDs or legacy outpoints. Resolve
+  draft URIs before publishing and reject mutable claim IDs as stored identity.
+- Editing a published playlist remains local until the user explicitly publishes
+  another independent snapshot with a new message ID and share URL.
+- Queue, Watch Later, Favorites, and unpublished drafts remain local. A stable
+  mutable playlist reference is deferred until the canonical reference-device
+  contract is available.
+
+### Follows and subscriptions
+
+- Free channel follows are generic `odysee-subscription@1.0` messages written
+  through the generic committed-message path, not the legacy subscription API
+  or a custom device.
+- Follow, notification-preference updates, unfollow, and re-follow form one
+  contiguous same-owner append-only revision chain bound to a stable channel
+  reference.
+- Query results are locators. Hydrate and verify each exact message, derive the
+  owner from its commitment committer, and accept profile display metadata only
+  when the profile verifies under that same committer.
+- Legacy subscription import, aggregate subscriber counts, paid memberships,
+  and Following-feed aggregation are separate contracts.
+
+### Uploads and thumbnails
+
+- `odysee-upload@1.0` owns authenticated chunks, manifests, metadata records,
+  listing, updates, deletes, reconciliation, and native search indexing.
+- Metadata changes and deletes create new state while retaining immutable media
+  and history.
+- Thumbnail bytes use signed generic `cache@1.0/write`. The SSR server holds
+  `HYPERBEAM_CACHE_WRITER_JWK`; the browser never receives it. Its address must
+  be trusted in the node's `cache_writers` option.
+
+### Authentication
+
+- The normal request hook is `auth-hook@1.0` with `odysee-auth@1.0` as the Odysee
+  secret provider.
+- Same-origin SSR bridges exist where browser cookies cannot cross origins or a
+  server-held signer is required. They are transport/security boundaries, not a
+  second data mode.
+- The internal compatibility subscription implementation is not the native
+  follow write path. The public/frontend subscription-count surface remains
+  `odysee-account@1.0`; native follows are generic committed messages.
+
+## Local Services
+
+The normal local stack is:
+
+| Service | Address | Purpose |
+| --- | --- | --- |
+| Meilisearch | `http://127.0.0.1:7700` | Odysee claim-search index |
+| HyperBEAM | `http://127.0.0.1:18785` | Runtime, devices, and stores |
+| Frontend SSR | `http://localhost:9090` | Browser application and same-origin bridges |
+
+Start Meilisearch from its sibling checkout when needed:
+
+```sh
+../meilisearch/target/release/meilisearch --http-addr 127.0.0.1:7700
+```
+
+Build and start HyperBEAM:
+
+```sh
+cd hyperbeam
+HOME=/tmp/odysee-hb-home rebar3 as hyperbeam compile
+HOME=/tmp/odysee-hb-home HB_PORT=18785 rebar3 device local
+```
+
+Install and start the frontend:
+
+```sh
+cd odysee-frontend
+corepack enable
+corepack prepare pnpm@10.33.0 --activate
+pnpm install
+ODYSEE_HYPERBEAM_NODE_API=http://127.0.0.1:18785 pnpm run dev:web-server
+```
+
+Keep required services running while the user tests. If a required service
+dies, restart it promptly and verify its listener. Run only one frontend
+`dev:web-server` supervisor; duplicate asset watchers can terminate or race the
+SSR child process.
+
+Useful health checks:
+
+```sh
+curl http://127.0.0.1:7700/health
+curl http://127.0.0.1:18785/~meta@1.0/info
+curl -I http://127.0.0.1:9090/
+ss -ltnp | rg ':(7700|9090|18785)\b'
+pgrep -af 'meilisearch|rebar3.*device|dev-web-server|web/index.js'
+```
+
+Never commit credentials. Chainquery access is read-only for the importer, and
+Meilisearch credentials belong in environment variables. Use the documented
+checkpoint/staging-index rebuild flow rather than bulk-rebuilding a live index
+in place.
+
+## Validation Requirements
+
+Complete the full affected workflow, not only the narrow function that changed.
+Choose the broadest practical checks for the touched boundary.
 
 Backend baseline:
 
@@ -213,6 +426,7 @@ pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
+pnpm run test:native-preferences
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```
@@ -225,6 +439,7 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-comments
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-reactions
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-playlists
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-subscriptions
+HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:native-cookie-preferences
 ```
 
 Always run `git diff --check`. Report skipped, timed-out, or environment-blocked

@@ -11,6 +11,7 @@ import { COLLECTION_PAGE } from 'constants/urlParams';
 import { isChannelClaim, isClaimNsfw, isClaimShort, isStreamPlaceholderClaim } from 'util/claim';
 import { isClaimAllowedForCollection } from 'util/collections';
 import { formatLbryUrlForWeb } from 'util/url';
+import { appHref } from 'util/manifest-prefix';
 import { formatClaimPreviewTitle } from 'util/formatAriaLabel';
 import { getChannelSubCountStr } from 'util/formatMediaDuration';
 import { toCompactNotation } from 'util/string';
@@ -329,9 +330,20 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
     onClick: handleNavLinkClick,
     onAuxClick: undefined,
   };
+  // A claim that resolved but carries no title, thumbnail or channel has
+  // nothing to show the user: a placeholder card with a bare name. Those
+  // are noise in any list, so treat them like unresolved claims.
+  const unrenderable = Boolean(
+    claim &&
+    !claim.value?.title &&
+    !claim.value?.thumbnail?.url &&
+    !claim.signing_channel &&
+    claim.value_type !== 'channel'
+  );
   let shouldHide =
     placeholder !== 'loading' &&
-    ((abandoned && !showUnresolvedClaim) || (!claimIsMine && obscureNsfw && nsfw && !showUserBlocked));
+    (((abandoned || unrenderable) && !showUnresolvedClaim) ||
+      (!claimIsMine && obscureNsfw && nsfw && !showUserBlocked));
 
   // This will be replaced once blocking is done at the wallet server level
   if (!shouldHide && !claimIsMine && (banState.blacklisted || banState.filtered)) {
@@ -517,7 +529,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
       onAuxClick={(e: any) => {
         if (e.button === 1 && navigateUrl && !pending && !disableNavigation) {
           e.preventDefault();
-          window.open(navigateUrl, '_blank');
+          window.open(appHref(navigateUrl), '_blank');
         }
       }}
       className={classnames('claim-preview__wrapper', {

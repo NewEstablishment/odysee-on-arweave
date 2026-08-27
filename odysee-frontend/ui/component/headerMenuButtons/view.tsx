@@ -11,7 +11,7 @@ import React from 'react';
 import Tooltip from 'component/common/tooltip';
 import UploadManagerMenu from 'component/header/uploadManagerMenu';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { selectUserVerifiedEmail, selectUser } from 'redux/selectors/user';
+import { selectUser, selectUserAuthenticated, selectUserIsNative } from 'redux/selectors/user';
 import { selectActivePipelineItems, selectCurrentUploads } from 'redux/selectors/publish';
 import { doBeginPublish as doBeginPublishAction } from 'redux/actions/publish';
 import { useLivestreamPublish } from 'contexts/livestreamPublish';
@@ -45,11 +45,12 @@ function HeaderLivestreamButton({
 export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
   const { authRedirect } = props;
   const dispatch = useAppDispatch();
-  const authenticated = useAppSelector(selectUserVerifiedEmail);
+  const authenticated = useAppSelector(selectUserAuthenticated);
+  const isNative = useAppSelector(selectUserIsNative);
   const canUpload = authenticated || hyperbeamUploadEnabled();
   const user = useAppSelector(selectUser);
   const doBeginPublish = (type: PublishType) => dispatch(doBeginPublishAction(type));
-  const livestreamEnabled = Boolean(ENABLE_NO_SOURCE_CLAIMS && user && !user.odysee_live_disabled);
+  const livestreamEnabled = Boolean(!isNative && ENABLE_NO_SOURCE_CLAIMS && user && !user.odysee_live_disabled);
   const authRedirectParam = authRedirect ? `?redirect=${authRedirect}` : '';
   const pipelineItems = useAppSelector(selectActivePipelineItems);
   const currentUploads = useAppSelector(selectCurrentUploads);
@@ -63,11 +64,13 @@ export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
     <div className="header__buttons">
       <UploadManagerMenu hasActivity={hasUploadActivity} onUploadClick={() => doBeginPublish(PUBLISH_TYPES.FILE)} />
       {livestreamEnabled && <HeaderLivestreamButton uploadProps={uploadProps} doBeginPublish={doBeginPublish} />}
-      <Tooltip title={__('Post an article')}>
-        <Button className="header__navigationItem--icon" onClick={() => doBeginPublish(PUBLISH_TYPES.POST)}>
-          <Icon size={18} icon={ICONS.POST} aria-hidden />
-        </Button>
-      </Tooltip>
+      {!isNative && (
+        <Tooltip title={__('Post an article')}>
+          <Button className="header__navigationItem--icon" onClick={() => doBeginPublish(PUBLISH_TYPES.POST)}>
+            <Icon size={18} icon={ICONS.POST} aria-hidden />
+          </Button>
+        </Tooltip>
+      )}
     </div>
   ) : (
     <>

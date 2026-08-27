@@ -1,11 +1,13 @@
 # Proposed upstream HyperBEAM changes
 
-Application behavior remains usable on the pinned stock node unless a section
-explicitly documents a feature that activates only after its patch lands.
-Defect fixes should remain terse and test-focused. Deliberately accepted
-upstream features may be larger when they are generic HyperBEAM capabilities,
-preserve backward compatibility, and include their complete dependency and
-test surface.
+These narrow fixes are applied idempotently to pinned dependencies during
+compilation and should land upstream before their hooks are removed. Any
+proposal beyond this list must take the form of a terse (<= 20 lines, test +
+fix) branch on a dependency worktree, and only for defects demonstrably owned
+by that dependency rather than this application.
+An explicitly accepted generic upstream feature may be larger when it preserves
+backward compatibility and includes its complete dependency and test surface.
+Sections state when a staged patch is not yet activated by this application.
 
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
@@ -46,11 +48,61 @@ miss is a 500. This is independent of configuration: no `match-index`
 setting avoids it, because an empty result is `{error, not_found}` either
 way. Observed on every video page load in this application, where the
 frontend issues a `POST /~query@1.0/only`. The patch maps misses to `[]`, `0`,
-or `false` according to the requested aggregate type, retains `not_found` for
-first-item modes, and adds focused upstream EUnit assertions. Applies cleanly
-to the pinned dep (`git apply --check` verified).
+or `false` according to the requested aggregate type and retains `not_found`
+for first-item modes.
 
-## 4. `blacklist-content-restrictions.patch`
+The same semantic message may have more than one commitment locator after
+authentication and application signing. The expanded patch preserves discovery
+order but prefers a locator whose named commitment verifies, falling back to
+the first locator only for unsigned indexed messages. This keeps query generic
+while ensuring a stale resolver-stage locator does not hide the exact committed
+application message.
+
+## 4. `reference-message-operations.patch`
+
+The canonical `reference@1.0` default resolver dereferences unknown keys to the
+current value. Its exclude list omitted reserved `message@1.0` operations, so
+`/<reference-id>/verify` verified the pointed-at snapshot and exact committer
+lookup could not reach the init/set commitment. The patch keeps `id`,
+`commitments`, `committers`, `committed`, and `verify` bound to `message@1.0`
+and adds a regression assertion. It is applied idempotently to the pinned
+external dependency during compilation.
+
+## 5. `secret-default-persist.patch`
+
+`secret@1.0` otherwise hard-codes new hosted wallets to `in-memory`, so a valid
+browser cookie can resolve to another wallet after a restart. The patch adds a
+generic `secret-default-persist` node option; `config.json` selects
+`non-volatile`, while upstream behavior remains unchanged unless configured.
+Recovered wallets are warmed in memory so the same cookie keeps the same
+committer.
+
+The patch also removes the application `body` from credential verification.
+The cookie is verified first and the complete application message is then
+signed, preventing ordinary document bodies such as comment text from being
+interpreted as verifier messages.
+
+## 6. `hyperbeam-hb-beamr-otp29.patch`
+
+HyperBEAM's `hb_beamr` driver passes `long *` and `char **` values to the OTP
+29 `ei` API, whose current signatures require `int *`, `size_t *`, and
+`const char **`. Current compilers reject those incompatible pointers. This
+patch uses the API's declared types and makes the WebAssembly memory bounds
+check overflow-safe; it does not change the driver protocol.
+
+## 7. `hb-http-single-range.patch`
+
+HyperBEAM's HTTP layer otherwise ignores a browser `Range` header when the
+resolved message body has already been materialized, returning a full `200`
+response that cannot seek reliably. This patch implements one satisfiable
+RFC 7233 byte range for binary `GET` responses, returns `206` with exact
+`Accept-Ranges`, `Content-Range`, and `Content-Length` fields, and returns
+`416` for malformed or unsatisfiable ranges. It removes whole-message digest
+and signature headers from the derived partial representation; the complete
+immutable message remains the verification surface. Multipart ranges are not
+implemented.
+
+## 8. `blacklist-content-restrictions.patch`
 
 Expand upstream `blacklist@1.0` from a request-only newline-ID blacklist into a
 backward-compatible generic content-policy device. Structured policy snapshots

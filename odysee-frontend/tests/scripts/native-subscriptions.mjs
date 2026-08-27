@@ -154,7 +154,7 @@ function subscription({
     'notifications-disabled': notificationsDisabled,
     state,
     operation,
-    origin,
+    'source-system': origin,
     'imported-at': importedAt,
     revision,
     'version-ref': version,

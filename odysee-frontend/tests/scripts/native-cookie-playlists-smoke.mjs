@@ -6,6 +6,13 @@ import {
   immutableNativePlaylists,
   normalizeNativePlaylist,
 } from '../../ui/util/nativePlaylists.ts';
+import {
+  NATIVE_PLAYLIST_REFERENCE_TYPE,
+  nativePlaylistReferenceInitMessage,
+  nativePlaylistReferenceSetMessage,
+  normalizeNativePlaylistReference,
+  projectNativePlaylistReference,
+} from '../../ui/util/nativePlaylistReferences.ts';
 
 const nodeBase = String(process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18801').replace(/\/+$/, '');
 const now = Date.now();
@@ -29,6 +36,21 @@ const first = await write(
 );
 assert.equal(await verified(first.id), true);
 assert.equal(await committer(first.id), ownerA);
+const playlistReference = await write(
+  nativePlaylistReferenceInitMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    snapshotId: first.id,
+    timestamp: now,
+  }),
+  profileA.cookie
+);
+assert.equal(
+  await verified(playlistReference.id),
+  true,
+  `reference init verification failed for ${playlistReference.id}`
+);
+assert.equal(await committer(playlistReference.id), ownerA);
 
 const republished = await write(
   playlistMessage({
@@ -43,6 +65,45 @@ const republished = await write(
 assert.equal(await verified(republished.id), true);
 assert.equal(await committer(republished.id), ownerA);
 assert.notEqual(first.id, republished.id, 'republishing must produce a new immutable playlist ID');
+const referenceUpdate = await write(
+  nativePlaylistReferenceSetMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    referenceId: playlistReference.id,
+    snapshotId: republished.id,
+    timestamp: now + 1,
+  }),
+  profileA.cookie
+);
+assert.equal(await verified(referenceUpdate.id), true);
+assert.equal(await committer(referenceUpdate.id), ownerA);
+
+const forgedReferenceUpdate = await write(
+  nativePlaylistReferenceSetMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    referenceId: playlistReference.id,
+    snapshotId: profileB.id,
+    timestamp: now + 999,
+  }),
+  profileB.cookie
+);
+assert.equal(await committer(forgedReferenceUpdate.id), ownerB);
+
+const referencePaths = await queryUntilTimestamps(
+  {
+    'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
+    'profile-id': profileA.id,
+  },
+  [now, now + 1, now + 999]
+);
+const references = (await Promise.all(referencePaths.map(hydrateReference))).filter(Boolean);
+const init = references.find((reference) => reference.message_id === playlistReference.id);
+assert.ok(init?.is_init);
+const referenceHead = projectNativePlaylistReference(init, references);
+assert.equal(referenceHead.reference_id, playlistReference.id, 'the playlist URL remains the init message ID');
+assert.equal(referenceHead.reference_value, republished.id, 'the valid owner update selects the new snapshot');
+assert.equal(referenceHead.owner, ownerA, 'a foreign committer cannot move the reference');
 
 const firstPayload = unwrap(await read(first.id));
 const republishedPayload = unwrap(await read(republished.id));
@@ -108,6 +169,9 @@ console.log(
     owner_b: ownerB,
     first_playlist_id: first.id,
     republished_playlist_id: republished.id,
+    playlist_reference_id: playlistReference.id,
+    reference_update_id: referenceUpdate.id,
+    forged_reference_update_id: forgedReferenceUpdate.id,
     forged_playlist_id: forged.id,
     other_playlist_id: other.id,
     owner_a_discovery_locators: pathsA,
@@ -134,6 +198,15 @@ function playlistMessage({ profile, profileName, title, items, createdAt }) {
   };
 }
 
+async function hydrateReference(id) {
+  const payload = unwrap(await read(id));
+  return normalizeNativePlaylistReference({
+    ...payload,
+    'message-id': id,
+    'hyperbeam-owner': await committer(id),
+  });
+}
+
 async function hydrateVerified(id) {
   const payload = unwrap(await read(id));
   const playlist = normalizeNativePlaylist({
@@ -156,7 +229,7 @@ async function hydrateVerified(id) {
 }
 
 async function write(message, cookie) {
-  const response = await fetch(`${nodeBase}/id?!=true&committers=all`, {
+  const response = await fetch(`${nodeBase}/id?0.%21=true&committers=all`, {
     method: 'POST',
     headers: {
       accept: 'application/json',
@@ -201,7 +274,7 @@ async function query(selectors) {
   const response = await fetch(`${nodeBase}/~query@1.0/only`, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ ...selectors, only: [...Object.keys(selectors), 'accept'], return: 'paths' }),
+    body: JSON.stringify({ ...selectors, only: Object.keys(selectors), return: 'paths' }),
   });
   const text = await response.text();
   assert.equal(response.ok, true, `query failed: ${response.status} ${text.slice(0, 500)}`);
@@ -222,6 +295,19 @@ async function queryUntilCreatedAts(selectors, expectedCreatedAts) {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   assert.fail(`query did not discover every snapshot: ${JSON.stringify({ selectors, expectedCreatedAts, paths })}`);
+}
+
+async function queryUntilTimestamps(selectors, expectedTimestamps) {
+  let paths = [];
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    paths = await query(selectors);
+    const timestamps = await Promise.all(paths.map(async (id) => Number(unwrap(await read(id)).timestamp)));
+    if (expectedTimestamps.every((timestamp) => timestamps.includes(timestamp))) return paths;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  assert.fail(
+    `query did not discover every reference message: ${JSON.stringify({ selectors, expectedTimestamps, paths })}`
+  );
 }
 
 function cookiePair(setCookie) {

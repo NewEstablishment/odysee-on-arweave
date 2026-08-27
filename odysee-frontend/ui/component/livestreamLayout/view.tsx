@@ -21,6 +21,7 @@ import LivestreamMetrics from 'component/livestreamMetrics/view';
 import Lbry from 'lbry';
 import { toHex } from 'util/hex';
 import LivestreamWebrtcOptIn from 'component/livestreamWebrtcOptIn';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 const LivestreamScheduledInfo = lazyImport(
   () =>
@@ -79,7 +80,7 @@ export default function LivestreamLayout(props: Props) {
   const myChannelId = claimIsMine ? signingChannel?.claim_id : undefined;
   const [sigData, setSigData] = React.useState<{ signature?: string; signing_ts?: string }>({});
   React.useEffect(() => {
-    if (myChannelId && myChannelName) {
+    if (!hyperbeamNodeEnabled() && myChannelId && myChannelName) {
       Lbry.channel_sign({ channel_id: myChannelId, hexdata: toHex(myChannelName) })
         .then((data: any) => setSigData(data))
         .catch(() => setSigData({}));
