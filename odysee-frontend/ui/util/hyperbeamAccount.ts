@@ -14,7 +14,7 @@
 // device for a portable, recoverable identity. This frontend contract is
 // unchanged.
 
-import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { HYPERBEAM_COMMITTED_WRITE_PATH, committedWriteId, hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 const ACCOUNT_KEY = 'hyperbeam-account';
 const SAVED_KEY = 'hyperbeam-account-saved';
@@ -71,15 +71,15 @@ export async function signUpHyperbeam(name: string): Promise<HyperbeamAccount> {
 
   clearNodeCookies();
 
-  const response = await fetch(`${base}/id?0.%21=true&committers=all`, {
+  const response = await fetch(`${base}/${HYPERBEAM_COMMITTED_WRITE_PATH}`, {
     method: 'POST',
     credentials: 'include',
     headers: { accept: 'application/json', type: 'channel', name: trimmed },
   });
-  let id = response.headers.get('message-id') || '';
-  if (response.ok && !id) {
+  let id = '';
+  if (response.ok) {
     try {
-      id = String((await response.json())['message-id'] || '');
+      id = committedWriteId(await response.json());
     } catch (e) {}
   }
   if (!response.ok || !id) {

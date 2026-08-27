@@ -131,14 +131,17 @@ odysee_stores(Opts) ->
     ] ++ hb_opts:get(<<"odysee-extra-stores">>, [], Opts).
 
 %% @doc The node's default `on' hooks, with the `~auth-hook@1.0' request
-%% handler's secret provider swapped to `~cookie@1.0', followed by a
-%% `~reply-id@1.0' stage that surfaces the stored message's ID in the
-%% reply. Browsers then receive a stable anonymous identity
-%% automatically: the first commit-flag request mints a cookie-derived
-%% per-user wallet, every subsequent request with that cookie commits as
-%% the same user, and the committed writes (uploads, comments) persist
-%% via the hook's `store-all-signed' handling. Pass the result as the
-%% node's `on' option.
+%% handler's secret provider swapped to `~cookie@1.0'. Browsers then
+%% receive a stable anonymous identity automatically: the first
+%% commit-flag request mints a cookie-derived per-user wallet, every
+%% subsequent request with that cookie commits as the same user, and the
+%% committed writes (uploads, comments) persist via the hook's
+%% `store-all-signed' handling. Committed writes resolve `commitments'
+%% rather than `id': the cookie provider's finalize appends a `set'
+%% step to the sequence, which consumes a scalar `id' result as an
+%% address, while the commitments map passes through it intact and its
+%% keys are servable aliases of the stored message. Pass the result as
+%% the node's `on' option.
 cookie_auth_hooks(Opts) ->
     Hooks = hb_opts:get(on, #{}, Opts),
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
@@ -146,24 +149,19 @@ cookie_auth_hooks(Opts) ->
         <<"cache-write">> =>
             [#{ <<"device">> => <<"search@1.0">>, <<"path">> => <<"write">> }],
         <<"request">> =>
-            lists:flatmap(
-                fun
-                    (Handler = #{ <<"device">> := <<"auth-hook@1.0">> }) ->
-                        [
-                            Handler#{
-                                <<"secret-provider">> =>
-                                    #{ <<"device">> => <<"cookie@1.0">> }
-                            },
-                            #{
-                                <<"device">> => <<"reply-id@1.0">>,
-                                <<"path">> => <<"request">>
-                            }
-                        ];
-                    (Handler) ->
-                        [Handler]
-                end,
-                Pipeline
-            )
+            [
+                case Handler of
+                    #{ <<"device">> := <<"auth-hook@1.0">> } ->
+                        Handler#{
+                            <<"secret-provider">> =>
+                                #{ <<"device">> => <<"cookie@1.0">> }
+                        };
+                    _ ->
+                        Handler
+                end
+             ||
+                Handler <- Pipeline
+            ]
     }.
 
 %% @doc The store stack for a stock serving node: local caches first,
@@ -369,16 +367,38 @@ upload_node() ->
 %% its session cookie, so the request commits as the same user; `none' is a
 %% fresh session and therefore a fresh identity.
 commit_post(Node, Msg, PrevReply, Opts) ->
-    Req = Msg#{ <<"path">> => <<"/id?0.!=true&committers=all">> },
+    Req = Msg#{ <<"path">> => <<"/commitments?0.!=true&committers=all">> },
     WithCookie =
         case PrevReply of
             none -> Req;
             _ -> with_cookie(Req, PrevReply, Opts)
         end,
     {ok, Reply} = hb_http:post(Node, WithCookie, Opts),
-    ID = hb_maps:get(<<"message-id">>, Reply, not_found, Opts),
+    ID = commitment_id_from_reply(Reply, Opts),
     ?assert(is_binary(ID)),
     {Reply, ID}.
+
+%% @doc The stored message's id from a committed-write reply: the reply is
+%% the commitments map, keyed by commitment id, and any key is a servable
+%% alias of the message. Prefer a commitment naming a committer.
+commitment_id_from_reply(Reply, Opts) ->
+    Entries =
+        [
+            {Key, hb_cache:ensure_loaded(Value, Opts)}
+         ||
+            {Key, Value} <- hb_maps:to_list(Reply, Opts),
+            is_binary(Key),
+            byte_size(Key) == 43
+        ],
+    Commitments = [{Key, Value} || {Key, Value} <- Entries, is_map(Value)],
+    case [Key || {Key, Value} <- Commitments, is_map_key(<<"committer">>, Value)] of
+        [Signed | _] -> Signed;
+        [] ->
+            case Commitments of
+                [{First, _} | _] -> First;
+                [] -> not_found
+            end
+    end.
 
 %% What a browser does: each `set-cookie' line's `name=value' pair, joined
 %% into one `cookie' header on the next request.

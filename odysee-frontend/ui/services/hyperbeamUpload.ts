@@ -8,7 +8,7 @@ import {
   SCHEDULED_TAGS,
   VISIBILITY_TAGS,
 } from 'constants/tags';
-import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { HYPERBEAM_COMMITTED_WRITE_PATH, HYPERBEAM_DEVICE, committedWriteId, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 const METADATA_KEYS = [
   'title',
@@ -222,7 +222,7 @@ async function genericStoreWriteResponse(file: Blob) {
   const base = hyperbeamNodeBase();
   if (!base) return null;
 
-  return fetch(`${base}/id?0.%21=true&committers=all`, {
+  return fetch(`${base}/${HYPERBEAM_COMMITTED_WRITE_PATH}`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -264,7 +264,7 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     Object.entries(message).filter(([, value]) => value !== undefined && value !== null && value !== '')
   );
 
-  return fetch(`${base}/id?0.%21=true&committers=all`, {
+  return fetch(`${base}/${HYPERBEAM_COMMITTED_WRITE_PATH}`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -417,6 +417,7 @@ function uploadRecordId(json: any, claim: any) {
 
 function storeWriteId(json: any) {
   const path =
+    committedWriteId(json) ||
     json?.['message-id'] || json?.path || json?.id || json?.['read-path'] || json?.read_path || json?.url || json?.body;
   return typeof path === 'string' ? path.replace(/^\//, '') : '';
 }

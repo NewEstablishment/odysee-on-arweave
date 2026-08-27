@@ -63,7 +63,6 @@ The application minimizes custom device surface:
 | --- | --- |
 | `lbry@1.0` | Verifies transactions, claim outputs, channels, streams, descriptors, blobs, and attestations from their native evidence. |
 | `search@1.0` | Generic local full-text indexing and lookup. It is not an Odysee SDK proxy. |
-| `reply-id@1.0` | Adds the committed message ID to cookie-auth write replies. |
 | `odysee-auth@1.0` | Compatibility authentication helper where an existing session must be translated. It is not the native account model. |
 
 There are no `odysee-claim@1.0`, `odysee-stream@1.0`,

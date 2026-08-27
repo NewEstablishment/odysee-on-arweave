@@ -1,5 +1,6 @@
 import { HYPERBEAM_BASE_URL, ODYSEE_HYPERBEAM_NODE_API } from 'config';
 import { SORT_BY } from 'constants/comment';
+import { HYPERBEAM_COMMITTED_WRITE_PATH, committedWriteId } from 'util/hyperbeamDevices';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { allowHyperbeamCompatibilityReads } from 'util/hyperbeamMode';
 import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
@@ -87,10 +88,6 @@ const SEARCH_DEVICE = '~search@1.0';
 const SEARCH_MAX_LIMIT = 100;
 const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
 const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
-// Scope the auth-hook commit flag to stage 0 (the posted message). A global
-// `!` also commits resolver stages, producing multiple locators for one
-// semantic write and nondeterministic discovery.
-const HYPERBEAM_NATIVE_WRITE_PATH = 'id?0.%21=true&committers=all';
 const storeReadCache = new Map<string, { expiresAt: number; promise: Promise<any | null> }>();
 const nativeCommentQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<any>> }>();
 const nativeCommentControlQueryCache = new Map<
@@ -304,7 +301,7 @@ async function writeNativeMessage(message: Record<string, any>, label: string): 
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) throw new Error('HyperBEAM node is not configured');
 
-  const response = await fetch(`${baseUrl}/${HYPERBEAM_NATIVE_WRITE_PATH}`, {
+  const response = await fetch(`${baseUrl}/${HYPERBEAM_COMMITTED_WRITE_PATH}`, {
     method: 'POST',
     credentials: hyperbeamFetchCredentials(baseUrl),
     headers: {
@@ -1878,6 +1875,8 @@ function queryPayload(response: any): any {
 function nativeWriteId(result: any): string {
   const payload = responsePayload(result);
   const id =
+    committedWriteId(result) ||
+    committedWriteId(payload) ||
     value(result, 'message-id', 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
     value(payload, 'message-id', 'path', 'id', 'read-path', 'read_path', 'url', 'body') ||
     (typeof payload === 'string' ? payload : '');

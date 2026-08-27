@@ -148,10 +148,6 @@
         }
       },
       {
-        "device": "reply-id@1.0",
-        "path": "request"
-      },
-      {
         "device": "name@1.0"
       },
       {

@@ -1,7 +1,7 @@
-import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { HYPERBEAM_COMMITTED_WRITE_PATH, committedWriteId, hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
 // A thumbnail is just bytes. Store it through the same committed-write endpoint
-// as a video (a stage-0 committed POST /id) and reference the node-served image by its id. The
+// as a video and reference the node-served image by its id. The
 // legacy /$/api/hyperbeam-thumbnail endpoint does not exist on a HyperBEAM node.
 export default async function uploadThumbnail(data: FormData): Promise<any> {
   const file = data.get('file-input');
@@ -10,7 +10,7 @@ export default async function uploadThumbnail(data: FormData): Promise<any> {
   const base = hyperbeamNodeBase();
   if (!base) throw new Error('No HyperBEAM node configured for thumbnail upload.');
 
-  const response = await fetch(`${base}/id?0.%21=true&committers=all`, {
+  const response = await fetch(`${base}/${HYPERBEAM_COMMITTED_WRITE_PATH}`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -20,10 +20,10 @@ export default async function uploadThumbnail(data: FormData): Promise<any> {
     body: file,
   });
 
-  let id = response.headers.get('message-id') || '';
-  if (response.ok && !id) {
+  let id = '';
+  if (response.ok) {
     try {
-      id = String((await response.json())['message-id'] || '');
+      id = committedWriteId(await response.json());
     } catch (e) {}
   }
   if (!response.ok || !id) {

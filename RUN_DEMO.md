@@ -17,7 +17,7 @@ byte was hash-checked on the way through.
 |---|---|
 | `lbry@1.0` | verification only, proves LBRY evidence |
 | `odysee-auth@1.0` | session to account to signing key |
-| `search@1.0`, `reply-id@1.0` | generic full-text, write-reply shim |
+| `search@1.0` | generic full-text |
 | `reference@1.0` | generic stable identity above immutable playlist snapshots |
 | `hb_store_odysee` | the compatibility boundary: classify a legacy id, fetch, verify, cache |
 | 4 x `hb_store_lbry_*` | transaction, claim output, stream descriptor, blob |
@@ -82,7 +82,7 @@ cd .. && HB_PORT=18734 rebar3 odysee-local     # ctrl-C twice once it boots
 
 # 3. Start the configured cookie-auth node and publish the UI into its store.
 #    config.json owns port 18801, the writable store/match index, and the
-#    auth/reply-id/manifest hooks and persistent hosted cookie wallets. Keep
+#    auth/manifest hooks and persistent hosted cookie wallets. Keep
 #    this shell running while testing.
 HB_CONFIG=config.json HB_PRELOADED_STORE=_build/device-local-store rebar3 shell --eval '{ok, Config} = hb_opts:load("config.json", hb_opts:default_message_with_env()), [_, Writable | _] = maps:get(<<"store">>, Config), PublishOpts = Config#{<<"store">> => [Writable], <<"match-index">> => [Writable]}, {ok, M} = hb_odysee_ui:publish("odysee-frontend/web/dist/public", PublishOpts), io:format("~n=== MANIFEST ~s~n", [M]), receive stop -> ok end.'
 ```

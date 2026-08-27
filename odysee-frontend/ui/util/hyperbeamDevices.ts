@@ -20,6 +20,26 @@ export const HYPERBEAM_DEVICE = {
   upload: '~odysee-upload@1.0',
 };
 
+// A committed write resolves `commitments`, so the reply itself carries the
+// stored message's addresses: a map keyed by commitment id, each key a
+// servable alias of the message. The commit flag is scoped to stage 0 (the
+// posted message); a global `!` would also commit resolver stages, producing
+// multiple locators for one semantic write. `accept-bundle` keeps the map in
+// the JSON body instead of linkifying it.
+export const HYPERBEAM_COMMITTED_WRITE_PATH = 'commitments?0.%21=true&committers=all&accept-bundle=true';
+
+// Pick the stored message's id out of a committed-write reply. Prefer a
+// commitment naming a committer (the user's signature) over an hmac entry.
+export function committedWriteId(json: any): string {
+  if (!json || typeof json !== 'object') return '';
+  const entries = Object.entries(json).filter(
+    ([key, val]) => /^[A-Za-z0-9_-]{43}$/.test(key) && val && typeof val === 'object'
+  );
+  if (!entries.length) return '';
+  const signed = entries.find(([, val]) => typeof (val as any).committer === 'string');
+  return (signed || entries[0])[0];
+}
+
 export function hyperbeamNodeBase() {
   return resolveHyperbeamNodeBase({
     manifestOrigin: typeof window !== 'undefined' && isServedFromManifest() ? window.location.origin : '',
