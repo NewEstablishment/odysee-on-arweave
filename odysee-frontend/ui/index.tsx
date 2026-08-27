@@ -72,7 +72,6 @@ import {
   doUpdateIsNightAsync,
   doLoadBuiltInHomepageData,
 } from 'redux/actions/settings';
-import { doFetchUserLocale } from 'redux/actions/user';
 import { Lbryio, doBlackListedDataSubscribe, doFilteredDataSubscribe } from 'lbryinc';
 import { store, persistor } from 'store';
 import app from './app';
@@ -291,7 +290,6 @@ function AppWrapper() {
         app.store.dispatch(doUpdateIsNightAsync());
         app.store.dispatch(doBlackListedDataSubscribe());
         app.store.dispatch(doFilteredDataSubscribe());
-        app.store.dispatch(doFetchUserLocale());
         analytics.event.startup(Date.now());
       });
       const cancelIdle = scheduleWhenIdle(() => {

@@ -86,6 +86,7 @@ import {
   type NativeSubscriptionOperation,
 } from 'util/nativeSubscriptions';
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
+import { normalizeContentRestrictionResponse } from 'util/hyperbeamContentRestriction';
 import {
   hasNativeCommentControlAuthority,
   hasNativeCommentControlCommitterAuthority,
@@ -237,17 +238,20 @@ async function fetchUploadClaimByName(uri: string): Promise<any | null> {
 
 async function fetchStoreClaimForUri(uri: string): Promise<any | null> {
   const result = await fetchCachedStoreJsonOrNull(storePath('odysee/claim', uri)).catch(() => null);
+  if (isContentRestriction(result)) return contentRestrictionClaim(uri, result);
   return storeClaimEntry(result);
 }
 
 async function fetchStoreClaimById(claimId: string): Promise<any | null> {
   const result = await fetchCachedStoreJsonOrNull(storePath('odysee/claim-id', claimId)).catch(() => null);
+  if (isContentRestriction(result)) return contentRestrictionClaim(`lbry://restricted#${claimId}`, result, claimId);
   return storeClaimEntry(result);
 }
 
 async function fetchStoreChannelClaimForUri(uri: string): Promise<any | null> {
   const claimId = claimIdFromChannelUri(uri);
   const result = await fetchCachedStoreJsonOrNull(storePath('odysee/channel', claimId || uri)).catch(() => null);
+  if (isContentRestriction(result)) return contentRestrictionClaim(uri, result, claimId || undefined, true);
   return storeClaimFromHyperbeam(storePayload(result));
 }
 
@@ -3556,6 +3560,9 @@ async function resolveImmutableClaimById(
   immutableSigningChannelId?: string
 ): Promise<any | null> {
   const result = await fetchCachedImmutableJsonOrNull(immutableId).then(responsePayload);
+  if (isContentRestriction(result)) {
+    return contentRestrictionClaim(immutableUri(immutableId) || `lbry://immutable_${immutableId}`, result, immutableId);
+  }
   const payload = storePayload(result);
   const decodedClaim = decodeClaimMetadata(payload);
   const nativeSigningChannelId = value(payload, 'channel-id', 'channel_id');
@@ -3985,8 +3992,9 @@ async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): P
       headers: preferJson ? { accept: 'application/json' } : undefined,
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
-    if (!response.ok) return null;
-    return parseStoreResponse(response);
+    const parsed = await parseStoreResponse(response);
+    if (response.ok) return parsed;
+    return normalizeContentRestrictionResponse(parsed, response.status);
   } catch {
     return null;
   }
@@ -4032,7 +4040,6 @@ function isCompatibilityStorePath(path: string): boolean {
     'odysee/descriptor/',
     'odysee/blob/',
     'odysee/media/stream-id/',
-    'odysee/media/sd-hash/',
   ].some((prefix) => targetPath.startsWith(prefix));
 }
 
@@ -4275,6 +4282,56 @@ function storePayload(result: any): any {
   }
 
   return payload;
+}
+
+function isContentRestriction(result: any): boolean {
+  const payload = storePayload(result);
+  return Boolean(payload && value(payload, 'content-restriction', 'content_restriction'));
+}
+
+function contentRestrictionClaim(uri: string, result: any, fallbackId?: string, forceChannel: boolean = false): any {
+  const payload = storePayload(result) || {};
+  const blockedSubject = value(payload, 'blocked-subject', 'blocked_subject') || {};
+  const blockedValue = value(blockedSubject, 'value');
+  const status = toNumber(value(payload, 'status'), 451);
+  const trigger = String(value(payload, 'reason') || 'content-policy');
+  const reason = String(value(payload, 'policy-reason', 'policy_reason') || trigger);
+  const message =
+    String(value(payload, 'body') || '') ||
+    (status === 503
+      ? "The viewer's location could not be determined for this content."
+      : "Requested content is unavailable under this node's content policy.");
+  let parsed: any = {};
+  try {
+    parsed = parseURI(uri);
+  } catch {}
+  const name = parsed.streamName || parsed.channelName || parsed.claimName || 'restricted';
+  const isChannel = forceChannel || Boolean(parsed.channelName && !parsed.streamName);
+  const claimId =
+    fallbackId || (isClaimId(blockedValue) ? String(blockedValue) : claimIdFromUri(uri)) || `restricted-${name}`;
+
+  return {
+    claim_id: claimId,
+    name,
+    canonical_url: uri,
+    permanent_url: uri,
+    short_url: uri,
+    value_type: isChannel ? 'channel' : 'stream',
+    value: {
+      title: isChannel ? 'Channel unavailable' : 'Content unavailable',
+      description: '',
+    },
+    hyperbeam: {
+      content_restriction: {
+        id: String(blockedValue || ''),
+        trigger,
+        reason,
+        message,
+        status,
+        policy_id: value(payload, 'policy-id', 'policy_id'),
+      },
+    },
+  };
 }
 
 function decodeClaimMetadata(payload: any): DecodedClaimMetadata | null {
@@ -4537,17 +4594,13 @@ function claimIdFromChannelUri(uri: string): string | null {
   return match ? match[1] : null;
 }
 
-// Decrypted media bytes are served by the store's media routes (plain
-// GET-able cache-read URLs, usable directly as a video src); prefer the
-// immutable outpoint route, falling back to the stream descriptor hash.
-function hyperbeamMediaUrl(outpoint: any, sdHash: any): string {
+// Decrypted legacy media is addressed through stream evidence so node policy
+// can evaluate the claim and signing channel before bytes are returned.
+function hyperbeamMediaUrl(outpoint: any, _sdHash: any): string {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl || !allowHyperbeamCompatibilityReads()) return '';
 
   if (isOutpointId(outpoint)) return `${baseUrl}/${storePath('odysee/media/stream-id', String(outpoint))}`;
-  if (typeof sdHash === 'string' && /^[0-9a-f]{96}$/i.test(sdHash)) {
-    return `${baseUrl}/${storePath('odysee/media/sd-hash', sdHash)}`;
-  }
   return '';
 }
 

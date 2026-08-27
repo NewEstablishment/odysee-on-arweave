@@ -5,6 +5,9 @@ compilation and should land upstream before their hooks are removed. Any
 proposal beyond this list must take the form of a terse (<= 20 lines, test +
 fix) branch on a dependency worktree, and only for defects demonstrably owned
 by that dependency rather than this application.
+An explicitly accepted generic upstream feature may be larger when it preserves
+backward compatibility and includes its complete dependency and test surface.
+Sections state when a staged patch is not yet activated by this application.
 
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
@@ -98,3 +101,26 @@ RFC 7233 byte range for binary `GET` responses, returns `206` with exact
 and signature headers from the derived partial representation; the complete
 immutable message remains the verification surface. Multipart ranges are not
 implemented.
+
+## 8. `blacklist-content-restrictions.patch`
+
+Expand upstream `blacklist@1.0` from a request-only newline-ID blacklist into a
+backward-compatible generic content-policy device. Structured policy snapshots
+support typed subjects, global/country/continent/country-group denies, optional
+trusted signers and expiry, atomic replacement, and request plus response
+enforcement. The existing newline-delimited HyperBEAM ID format is unchanged.
+Global sources are checked before location resolution. ISO-code-keyed country
+providers support separate signed sources and compact JSON entries containing
+`id`, optional `type`, optional `country`, and `reason`.
+
+Country attributes are resolved locally from an operator-supplied MMDB through
+Locus. The HTTP layer supplies the private direct socket peer; `X-Real-IP` is
+used only for an explicit trusted proxy. DB-IP's EU membership field is exposed
+as the `EU` country group and remains distinct from the European continent.
+
+The patch compiles on the pinned dependency and its upstream device suite
+covers legacy compatibility, country rules, EU membership, unavailable
+locations, country-source selection, global short-circuiting, trusted-proxy
+handling, generation replacement, and one-million-rule parsing. The feature is
+not activated in `config.json` until upstream merges it and this repository
+pins the merged revision.
