@@ -21,8 +21,6 @@ interface Config {
   LIVESTREAM_WHIP_URL_TEMPLATE: string | undefined;
   SHORT_URL_API: string | undefined;
   SOCKETY_SERVER_API: string | undefined;
-  LOCALE_API: string | undefined;
-  GEO_BLOCK_API: string | undefined;
   WELCOME_VERSION: string | undefined;
   DOMAIN: string | undefined;
   SHARE_DOMAIN_URL: string | undefined;

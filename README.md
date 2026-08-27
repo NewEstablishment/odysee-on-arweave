@@ -27,11 +27,15 @@ The current implementation follows these decisions:
   reads are store reads; native writes are generic committed messages.
 - [`decisions/single-commitment-device.md`](decisions/single-commitment-device.md):
   one `lbry@1.0` verification device covers all LBRY evidence kinds.
+- [`decisions/content-restrictions.md`](decisions/content-restrictions.md):
+  content policy and geographic enforcement belong to the serving node.
 - [`decisions/native-user-preferences.md`](decisions/native-user-preferences.md):
   private settings use encrypted immutable snapshots and a generic stable
   reference head.
 - [`docs/architecture.md`](docs/architecture.md): full trust, node-role, read,
   and write architecture.
+- [`docs/content-restrictions.md`](docs/content-restrictions.md): policy schema,
+  offline country data, node configuration, and rollout.
 - [`ARCHITECTURE_READ_PATH.md`](ARCHITECTURE_READ_PATH.md): traced HTTP read
   path with implementation references.
 - [`RUN_DEMO.md`](RUN_DEMO.md): local operation and end-to-end examples.
@@ -69,6 +73,7 @@ The application minimizes custom device surface:
 | `analytics@1.0` | Generic page analytics, qualified engagement counters, and authenticated baseline import. |
 | `reply-id@1.0` | Adds the committed message ID to cookie-auth write replies. |
 | `odysee-auth@1.0` | Compatibility authentication helper where an existing session must be translated. It is not the native account model. |
+| `blacklist@1.0` (upstream) | Enforces node-selected global and geographic content policy on request and response hooks. |
 | `odysee-preference@1.0` | Authenticated seal/open boundary for private preference ciphertext. It stores no state and owns no reference semantics. |
 
 There are no `odysee-claim@1.0`, `odysee-stream@1.0`,
@@ -207,6 +212,24 @@ match index, then the frontend hydrates and verifies exact immutable IDs.
 
 The normal UI does not call Commentron, the legacy LBRY API, or an Odysee SDK
 proxy for comments.
+
+### Content restrictions
+
+The serving node enforces content restrictions through the generic upstream
+`blacklist@1.0` device. Policies can name HyperBEAM messages or typed LBRY
+claim, channel, outpoint, and hash subjects. Country, continent, and country-
+group conditions are resolved from the direct request peer against a local
+MMDB database; no browser or node request is sent to an Odysee location API.
+Operators can keep the main blacklist global and configure separate signed
+sources by ISO country code. Global rules are checked first; the node resolves
+the viewer country only for a subject with regional entries and then evaluates
+the applicable country source from its refreshed local policy generation.
+
+The browser renders node `451` and affected `503 location-unavailable`
+responses. It does not download policy lists or determine the viewer's locale.
+Historical media is addressed through stream evidence so the response hook can
+evaluate its committed claim and signing-channel identifiers. See
+[`docs/content-restrictions.md`](docs/content-restrictions.md).
 
 ### Reactions
 
@@ -394,6 +417,9 @@ sequence.
   bundle or rapid full reloads can temporarily return `429` for the SPA itself.
 - TEE deployment and attestation require infrastructure beyond ordinary local
   development.
+- Geographic enforcement requires the accepted upstream
+  `blacklist@1.0` expansion to land, a new pinned HyperBEAM revision, and a
+  locally installed country MMDB on each enforcing node.
 
 Do not hide these gaps by restoring direct browser calls to legacy services or
 by rebuilding a fleet of product-specific devices.
