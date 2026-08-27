@@ -6,12 +6,14 @@ import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 
 export const HYPERBEAM_DEVICE = {
   account: '~odysee-account@1.0',
+  analytics: '~analytics@1.0',
   cache: '~cache@1.0',
   claim: '~odysee-claim@1.0',
   channel: '~odysee-channel@1.0',
   comment: '~odysee-comment@1.0',
   file: '~odysee-file@1.0',
   fileReaction: '~odysee-file-reaction@1.0',
+  preference: '~odysee-preference@1.0',
   reaction: '~odysee-reaction@1.0',
   query: '~query@1.0',
   search: '~search@1.0',
@@ -192,7 +194,10 @@ export function isHyperbeamMethodEnabled(method: string) {
 }
 
 export function hyperbeamMethodDevice(method: string) {
-  if (['preference_get', 'preference_set', 'settings_get', 'settings_set', 'settings_clear'].includes(method)) {
+  if (['preference_get', 'preference_set'].includes(method)) {
+    return HYPERBEAM_DEVICE.preference;
+  }
+  if (['settings_get', 'settings_set', 'settings_clear'].includes(method)) {
     return HYPERBEAM_DEVICE.account;
   }
   if (

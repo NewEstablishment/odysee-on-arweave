@@ -23,6 +23,8 @@ import { LocalStorage, LS } from 'util/storage';
 import { doMembershipMine } from 'redux/actions/memberships';
 import { selectDefaultChannelId } from 'redux/selectors/settings';
 import { ODYSEE_TIER_NAMES } from 'constants/memberships';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
 export let sessionStorageAvailable = false;
 const CHECK_INTERVAL = 200;
 const AUTH_WAIT_TIMEOUT = 10000;
@@ -330,15 +332,14 @@ export function doAuthenticate(
   callbackForUsersWhoAreSharingData,
   callInstall = true
 ) {
-  return (dispatch) => {
+  return async (dispatch) => {
     dispatch({
       type: ACTIONS.AUTHENTICATION_STARTED,
     });
     // The app gate blocks until user !== undefined, so this chain MUST reach a
-    // terminal action. The neutralized account API can never mint a real user,
-    // so if any step stalls, fail over to signed-out rather than hang the boot.
-    // The watchdog outlives checkAuthBusy's own 10s wait so it never cuts ahead
-    // of a legitimate cross-tab wait; `stage` names the stall for the debug log.
+    // terminal action. The watchdog outlives checkAuthBusy's own 10s wait so it
+    // never cuts ahead of a legitimate cross-tab wait; `stage` names the stall
+    // for the debug log; `finish` dispatches exactly one terminal action.
     let settled = false;
     let stage = 'check-auth-busy';
     const finish = (action) => {
@@ -354,6 +355,36 @@ export function doAuthenticate(
         data: { error: new Error(`authentication stalled at ${stage}`) },
       });
     }, AUTH_WAIT_TIMEOUT + 5000);
+
+    // HyperBEAM mode never runs the neutralized legacy chain: the native
+    // account (when saved) IS the user, and signed-out is null, not undefined.
+    if (hyperbeamNodeEnabled()) {
+      stage = 'hyperbeam-account-recovery';
+      try {
+        const account = getHyperbeamAccount() ? await recoverHyperbeamAccount() : null;
+        finish({
+          type: ACTIONS.AUTHENTICATION_SUCCESS,
+          data: {
+            user: account
+              ? {
+                  id: account.id,
+                  name: account.name,
+                  has_verified_email: false,
+                  is_native: true,
+                }
+              : null,
+            accessToken: null,
+          },
+        });
+      } catch (error) {
+        finish({
+          type: ACTIONS.AUTHENTICATION_FAILURE,
+          data: { error },
+        });
+      }
+      return;
+    }
+
     checkAuthBusy()
       .then(() => {
         dispatch(doFetchGeoBlockedList());
@@ -369,7 +400,8 @@ export function doAuthenticate(
           const won = finish({
             type: ACTIONS.AUTHENTICATION_SUCCESS,
             data: {
-              // Neutralized account API can resolve undefined; the app gate blocks until user !== undefined.
+              // A missing legacy user stores null (signed-out) so the app
+              // gate does not wait forever on `user === undefined`.
               user: user || null,
               accessToken: token,
             },

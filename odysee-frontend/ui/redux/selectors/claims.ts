@@ -1107,7 +1107,7 @@ export const selectTakeOverAmountForName = (state: State, name: string) => {
     streamName: name,
   });
   const winningClaim = selectClaimForUri(state, shortUri);
-  return winningClaim ? winningClaim.meta.effective_amount || winningClaim.amount : null;
+  return winningClaim ? winningClaim.meta?.effective_amount || winningClaim.amount : null;
 };
 export const selectIsFetchingPurchases = (state: State) => selectState(state).fetchingMyPurchasedClaims;
 export const selectMyPurchasedClaims = createSelector(selectState, (state) => state.myPurchasedClaims || []);

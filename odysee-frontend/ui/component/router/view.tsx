@@ -11,13 +11,12 @@ import { parseURI } from 'util/lbryURI';
 import { SITE_TITLE } from 'config';
 import LoadingBarOneOff from 'component/loadingBarOneOff';
 import { GetLinksData } from 'util/buildHomepage';
-import * as CS from 'constants/claim_search';
 import { buildUnseenCountStr } from 'util/notifications';
 import Spinner from 'component/spinner';
 import { getPathForPage, htmlDecode } from 'util/url';
 import { useStore } from 'react-redux';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { selectUserVerifiedEmail, selectUser } from 'redux/selectors/user';
+import { selectUserAuthenticated } from 'redux/selectors/user';
 import { selectHasNavigated, selectScrollStartingPosition } from 'redux/selectors/app';
 import { selectClientSetting, selectHomepageData, selectWildWestDisabled } from 'redux/selectors/settings';
 import { selectTitleForUri, selectChannelPermanentUriForUri, selectClaimUriForId } from 'redux/selectors/claims';
@@ -620,8 +619,7 @@ function AppRouter(props: Props) {
   const effectiveUri = playlistClaimUri || passedUri;
 
   const currentScroll = useAppSelector(selectScrollStartingPosition);
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail) || hyperbeamUploadEnabled();
-  const isGlobalMod = Boolean(useAppSelector(selectUser)?.global_mod);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated) || hyperbeamUploadEnabled();
   const hasNavigated = useAppSelector(selectHasNavigated);
   const hasUnclaimedRefereeReward = useAppSelector(selectHasUnclaimedRefereeReward);
   const homepageData = useAppSelector(selectHomepageData);
@@ -641,7 +639,6 @@ function AppRouter(props: Props) {
   const urlParams = new URLSearchParams(search);
   const resetScroll = urlParams.get('reset_scroll');
   const hasLinkedCommentInUrl = urlParams.get(LINKED_COMMENT_QUERY_PARAM);
-  const tagParams = urlParams.get(CS.TAGS_KEY);
   const isSmallScreen = useIsSmallScreen();
   const isMediumScreen = useIsMediumScreen();
   const isLargeScreen = useIsLargeScreen();
@@ -782,7 +779,7 @@ function AppRouter(props: Props) {
 
         <Route path="/" element={renderLegacyPage(HomePage)} />
 
-        {(tagParams || isGlobalMod) && <Route path={`/$/${PAGES.DISCOVER}`} element={renderLegacyPage(DiscoverPage)} />}
+        <Route path={`/$/${PAGES.DISCOVER}`} element={renderLegacyPage(DiscoverPage)} />
         {categoryPages}
 
         <Route path={`/$/${PAGES.AUTH_SIGNIN}`} element={renderLegacyPage(SignInPage)} />

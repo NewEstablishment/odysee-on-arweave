@@ -122,7 +122,7 @@ function AboutTab(props: Props) {
           )}
 
           <label>{__('Total Uploads')}</label>
-          <div className="media__info-text">{claim.meta.claims_in_channel}</div>
+          <div className="media__info-text">{claim.meta?.claims_in_channel}</div>
 
           <label>{__('Created At')}</label>
           <div className="media__info-text">

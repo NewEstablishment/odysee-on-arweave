@@ -22,6 +22,7 @@ export default function HyperbeamSignUp() {
     try {
       await signUpHyperbeam(name);
       navigate(redirectTo);
+      window.location.reload();
     } catch (e: any) {
       setError(e?.message || __('Something went wrong. Please try again.'));
       setPending(false);

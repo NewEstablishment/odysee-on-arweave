@@ -87,18 +87,19 @@ export async function signUpHyperbeam(name: string): Promise<HyperbeamAccount> {
   }
 
   const account = { name: trimmed, id };
+  const { verifyHyperbeamAccountProfile } = await import('util/hyperbeam');
+  if (!(await verifyHyperbeamAccountProfile(account))) {
+    throw new Error('The new HyperBEAM account could not be verified against this browser session.');
+  }
   localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
   localStorage.setItem(SAVED_KEY, JSON.stringify(account));
   return account;
 }
 
-// Log back in with the existing cookie by restoring the saved display profile.
-// The browser sends the opaque node cookie and the node validates it.
-export function logInHyperbeam(): HyperbeamAccount | null {
-  const saved = read(SAVED_KEY);
-  if (!saved) return null;
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(saved));
-  return saved;
+// A saved profile is only a UI hint. Login always asks the node to prove that
+// the opaque cookie owns the exact committed profile before restoring it.
+export async function logInHyperbeam(): Promise<HyperbeamAccount | null> {
+  return recoverHyperbeamAccount();
 }
 
 export async function recoverHyperbeamAccount(): Promise<HyperbeamAccount | null> {

@@ -4,11 +4,16 @@ import { NO_AUTH, X_LBRY_AUTH_TOKEN } from 'constants/token';
 import fetchWithTimeout from 'util/fetch';
 import {
   fetchHyperbeamGet,
+  fetchHyperbeamPreferenceGet,
+  fetchHyperbeamPreferenceSet,
   fetchHyperbeamResolve,
   fetchHyperbeamResolveClaimIds,
   fetchHyperbeamSearch,
+  hyperbeamPreferencesEnabled,
 } from 'util/hyperbeam';
 import { ODYSEE_HYPERBEAM_NODE_API, PROXY_URL_NO_CF } from 'config';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { hyperbeamSdkMethodBlocked } from 'util/hyperbeamLegacyBoundary';
 
 import 'proxy-polyfill';
 
@@ -125,8 +130,14 @@ const Lbry: LbryTypes = {
   sync_hash: (params = {}) => daemonCallWithResult('sync_hash', params),
   sync_apply: (params = {}) => daemonCallWithResult('sync_apply', params),
   // Preferences
-  preference_get: (params = {}) => daemonCallWithResult('preference_get', params),
-  preference_set: (params = {}) => daemonCallWithResult('preference_set', params),
+  preference_get: (params = {}) =>
+    hyperbeamPreferencesEnabled()
+      ? fetchHyperbeamPreferenceGet(params)
+      : daemonCallWithResult('preference_get', params),
+  preference_set: (params = {}) =>
+    hyperbeamPreferencesEnabled()
+      ? fetchHyperbeamPreferenceSet(params)
+      : daemonCallWithResult('preference_set', params),
   // Comments
   comment_list: (params = {}) => daemonCallWithResult('comment_list', params),
   comment_create: (params = {}) => daemonCallWithResult('comment_create', params),
@@ -346,6 +357,10 @@ export function apiCall(
 }
 
 function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null {
+  if (hyperbeamSdkMethodBlocked(method, hyperbeamNodeEnabled())) {
+    return Promise.reject(new Error(`HyperBEAM does not support legacy SDK method ${method}`));
+  }
+
   if (ODYSEE_HYPERBEAM_NODE_API) {
     const startupResult = hyperbeamStartupSdkResult(method, params);
     if (startupResult) return startupResult;

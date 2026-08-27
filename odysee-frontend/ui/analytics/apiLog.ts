@@ -1,7 +1,6 @@
 import { Lbryio } from 'lbryinc';
 
 const isProduction = process.env.NODE_ENV === 'production';
-const devInternalApis = process.env.LBRY_API_URL && process.env.LBRY_API_URL.includes('dev');
 type LogPublishParams = {
   uri: string;
   claim_id: string;
@@ -27,25 +26,9 @@ export const apiLog: ApiLog = {
   setState: (enable: boolean) => {
     gApiLogOn = enable;
   },
-  view: (uri, outpoint, claimId) => {
-    return new Promise((resolve, reject) => {
-      if (gApiLogOn && (isProduction || devInternalApis)) {
-        const params: {
-          uri: string;
-          outpoint: string;
-          claim_id: string;
-          time_to_start?: number;
-        } = {
-          uri,
-          outpoint,
-          claim_id: claimId,
-        };
-        resolve(Lbryio.call('file', 'view', params));
-      } else {
-        resolve(undefined);
-      }
-    });
-  },
+  // View qualification is handled by analytics@1.0 engagement events. Keep
+  // this compatibility method resolved so reward call sites do not dual-write.
+  view: () => Promise.resolve(undefined),
   search: () => {
     if (gApiLogOn && isProduction) {
       Lbryio.call('event', 'search');

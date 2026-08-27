@@ -30,7 +30,6 @@ export function nativeCommentBody(comment: NativeCommentRevision): string | unde
   // closed when their body is missing.
   return comment.operation === 'delete' && comment.state === 'deleted' ? '' : undefined;
 }
-
 export function nativeCommentSignatureData(comment: NativeCommentRevision): string {
   if (field(comment, 'signature-scope', 'signature_scope') !== 'native-comment-v1') {
     return String(field(comment, 'comment', 'body', 'text') || '');
@@ -134,4 +133,3 @@ function numberField(source: NativeCommentRevision, ...keys: Array<string>): num
   const parsed = Number(sourceValue);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
-

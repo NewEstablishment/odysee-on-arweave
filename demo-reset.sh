@@ -5,7 +5,7 @@
 # never delete it. It also survives crashes because fs writes are synchronous.
 #
 # After running this, start the node in THIS terminal with:
-#     HB_CONFIG=config.json rebar3 shell
+#     HB_CONFIG=config.json HB_PRELOADED_STORE=_build/device-local-store rebar3 shell
 #
 # If you REBUILT the frontend and want the new bundle served, first run:
 #     rm -rf ui-store .demo-manifest
@@ -37,7 +37,7 @@ MAN=$(cat .demo-manifest)
 echo ""
 echo "==> Clean slate ready. Now start the node in THIS terminal:"
 echo ""
-echo "    HB_CONFIG=config.json rebar3 shell"
+echo "    HB_CONFIG=config.json HB_PRELOADED_STORE=_build/device-local-store rebar3 shell"
 echo ""
 echo "Then open:"
 echo "    http://127.0.0.1:18801/${MAN}/#/"

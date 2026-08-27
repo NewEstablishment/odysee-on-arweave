@@ -16,12 +16,12 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doEnterSettingsPage, doExitSettingsPage } from 'redux/actions/settings';
 import { selectDaemonSettings, selectLanguage } from 'redux/selectors/settings';
 import { selectPrefsReady } from 'redux/selectors/sync';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated } from 'redux/selectors/user';
 
 export default function SettingsPage() {
   const dispatch = useAppDispatch();
   const daemonSettings = useAppSelector(selectDaemonSettings);
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated);
   const prefsReady = useAppSelector(selectPrefsReady);
   const language = useAppSelector(selectLanguage);
 

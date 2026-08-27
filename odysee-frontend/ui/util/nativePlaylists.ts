@@ -80,7 +80,6 @@ export function normalizeNativePlaylist(source: any): NativePlaylist | null {
 
   return isValidNativePlaylist(normalized) ? normalized : null;
 }
-
 export function isValidNativePlaylist(playlist: NativePlaylist): boolean {
   return Boolean(
     playlist.schema === NATIVE_PLAYLIST_SCHEMA &&
@@ -175,4 +174,3 @@ function parseJsonArray(source: any): any {
 function stringArray(source: any): Array<string> | null {
   return Array.isArray(source) && source.every((value) => typeof value === 'string') ? source : null;
 }
-

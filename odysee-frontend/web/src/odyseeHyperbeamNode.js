@@ -109,15 +109,17 @@ async function hyperbeamNodeResolveEntries(urls, extraHeaders) {
 }
 
 async function hyperbeamNodeImmutableResolve(uri) {
-  const immutableId = immutableRouteIdFromUri(uri);
+  const nativeChannel = nativeChannelIdentityFromUri(uri);
+  const immutableId = (nativeChannel && nativeChannel.id) || immutableRouteIdFromUri(uri);
   if (!immutableId) return null;
 
-  const name = claimNameFromUri(uri);
+  let name = nativeChannel ? nativeChannel.name : claimNameFromUri(uri);
+  if (name && immutableIdFromRouteToken(name)) name = null;
   const result = storeResponsePayload(await hyperbeamNodeFetchImmutableJson(immutableId));
   const claim = immutableClaimFromHyperbeam(result, immutableId, name);
   if (!claim) return null;
 
-  return !name || claim.name === name ? claim : null;
+  return !name || claim.name.replace(/^@/, '') === safeClaimName(name) ? claim : null;
 }
 
 async function hyperbeamNodeUploadResolve(uri, extraHeaders) {
@@ -694,6 +696,23 @@ function sdkClaimFromHyperbeam(result) {
   };
 }
 
+function normalizeHyperbeamClaimMeta(meta = {}) {
+  const source = isObject(meta) ? meta : {};
+  const claimsInChannel = source.claims_in_channel ?? source['claims-in-channel'];
+  return {
+    activation_height: source.activation_height ?? source['activation-height'] ?? 0,
+    ...(claimsInChannel !== undefined ? { claims_in_channel: claimsInChannel } : {}),
+    creation_height: source.creation_height ?? source['creation-height'] ?? 0,
+    creation_timestamp: source.creation_timestamp ?? source['creation-timestamp'] ?? 0,
+    effective_amount: source.effective_amount ?? source['effective-amount'] ?? '0',
+    expiration_height: source.expiration_height ?? source['expiration-height'] ?? 0,
+    is_controlling: source.is_controlling ?? source['is-controlling'] ?? true,
+    reposted: source.reposted ?? 0,
+    support_amount: source.support_amount ?? source['support-amount'] ?? '0',
+    ...source,
+  };
+}
+
 function sdkSearchFromHyperbeam(result) {
   if (!result) return null;
   const sdkResult =
@@ -762,6 +781,10 @@ function safeClaimName(name) {
   return cleaned || 'store-object';
 }
 
+function channelClaimName(name) {
+  return `@${safeClaimName(name)}`;
+}
+
 function slugFromText(text) {
   if (typeof text !== 'string' || !text.trim()) return undefined;
   return safeClaimName(text).toLowerCase();
@@ -807,7 +830,28 @@ function webSafeImmutableId(id) {
   return outpoint ? `out_${outpoint[1]}_${outpoint[2]}` : result;
 }
 
+function immutableUri(id) {
+  const text = String(id || '');
+  const outpoint = text.match(/^([0-9a-f]{64}):([0-9]+)$/i);
+  if (outpoint) return `lbry://out_${outpoint[1]}_${outpoint[2]}`;
+  return isStandaloneImmutableId(text) ? `lbry://immutable_${text}` : null;
+}
+
+function nativeChannelUri(name, id) {
+  return name && isStandaloneImmutableId(id) ? `lbry://@${safeClaimName(name)}#${id}` : null;
+}
+
 function immutableRouteIdFromUri(uri) {
+  const token = String(uri || '')
+    .replace(/^lbry:\/\//, '')
+    .split('/')
+    .pop();
+  const tokenId = immutableIdFromRouteToken(token);
+  if (tokenId) return tokenId;
+
+  const nativeChannel = nativeChannelIdentityFromUri(uri);
+  if (nativeChannel) return nativeChannel.id;
+
   const modifier = routeModifierFromUri(uri);
   if (typeof modifier !== 'string') {
     const name = claimNameFromUri(uri);
@@ -815,7 +859,19 @@ function immutableRouteIdFromUri(uri) {
   }
 
   const outpoint = modifier.match(/^out_([0-9a-f]{64})_([0-9]+)$/i);
-  return outpoint ? `${outpoint[1]}:${outpoint[2]}` : null;
+  return outpoint ? `${outpoint[1]}:${outpoint[2]}` : isStandaloneImmutableId(modifier) ? modifier : null;
+}
+
+function immutableIdFromRouteToken(token) {
+  const outpoint = String(token || '').match(/^out_([0-9a-f]{64})_([0-9]+)$/i);
+  if (outpoint) return `${outpoint[1]}:${outpoint[2]}`;
+  const immutable = String(token || '').match(/^immutable_([0-9A-Za-z_-]{41,128})$/);
+  return immutable ? immutable[1] : null;
+}
+
+function nativeChannelIdentityFromUri(uri) {
+  const match = String(uri || '').match(/^lbry:\/\/@([^#:/]+)[#:]([0-9A-Za-z_-]{41,128})$/);
+  return match ? { name: safeClaimName(match[1]), id: match[2] } : null;
 }
 
 function streamPartFromUri(uri) {
@@ -987,16 +1043,19 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
     );
   const frontendClaimId = nativeUpload ? String(storeId) : sourceClaimId || String(storeId);
   const routeClaimId = webSafeImmutableId(storeId);
+  const device = value(payload, 'device');
+  const isNativeChannelProfile = value(payload, 'type') === 'channel';
 
   const rawName =
     fallbackName ||
     value(payload, 'claim-name', 'claim_name', 'name') ||
     value(claim, 'name') ||
     slugFromText(value(existingValue, 'title') || value(payload, 'title'));
-  const name = safeClaimName(rawName || `store-${String(storeId).slice(0, 8)}`);
+  const name = isNativeChannelProfile
+    ? channelClaimName(rawName || `store-${String(storeId).slice(0, 8)}`)
+    : safeClaimName(rawName || `store-${String(storeId).slice(0, 8)}`);
   const title = value(existingValue, 'title') || value(payload, 'title') || rawName || name;
   const description = value(existingValue, 'description') || value(payload, 'description') || '';
-  const device = value(payload, 'device');
   const isChannelEvidence = Boolean(
     value(payload, 'channel-id', 'channel_id') || value(payload, 'public-key', 'public_key')
   );
@@ -1035,35 +1094,53 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
       'media-type': mediaType,
     }) ||
     directMediaUrl;
+  const immutableCanonicalUrl = immutableUri(storeId);
+  const nativeChannelCanonicalUrl = isNativeChannelProfile ? nativeChannelUri(name, storeId) : null;
   const canonicalUrl0 =
+    nativeChannelCanonicalUrl ||
+    immutableCanonicalUrl ||
     value(claim, 'canonical_url', 'canonical-url') ||
     value(payload, 'canonical_url', 'canonical-url') ||
     claimUrl(name, routeClaimId);
   const permanentUrl0 =
+    nativeChannelCanonicalUrl ||
+    immutableCanonicalUrl ||
     value(claim, 'permanent_url', 'permanent-url') ||
     value(payload, 'permanent_url', 'permanent-url') ||
     claimUrl(name, routeClaimId);
-  const canonicalUrl = nativeUpload ? uriWithClaimId(canonicalUrl0, routeClaimId) : canonicalUrl0;
-  const permanentUrl = nativeUpload ? uriWithClaimId(permanentUrl0, routeClaimId) : permanentUrl0;
+  const canonicalUrl = canonicalUrl0;
+  const permanentUrl = permanentUrl0;
   const valueType =
     value(claim, 'value_type', 'value-type') ||
     value(payload, 'value_type', 'value-type') ||
-    (isChannelEvidence || device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0' ? 'channel' : 'stream');
+    (isNativeChannelProfile || isChannelEvidence || device === 'lbry-channel@1.0' || device === 'odysee-channel@1.0'
+      ? 'channel'
+      : 'stream');
 
   return compactParams({
-    ...claim,
+    ...(isNativeChannelProfile ? {} : claim),
+    address: value(claim, 'address') || '',
+    amount: value(claim, 'amount') || '0',
     claim_id: frontendClaimId,
-    txid,
-    nout,
+    claim_op: value(claim, 'claim_op', 'claim-op') || 'create',
+    claim_sequence: numericValue(value(claim, 'claim_sequence', 'claim-sequence'), 1),
+    immutable_id: String(storeId),
+    txid: txid || (isStandaloneImmutableId(storeId) ? String(storeId) : undefined),
+    nout: nout ?? (isStandaloneImmutableId(storeId) ? 0 : undefined),
     name,
+    normalized_name: name.toLowerCase(),
+    type: 'claim',
     canonical_url: canonicalUrl,
     permanent_url: permanentUrl,
-    short_url: nativeUpload
-      ? uriWithClaimId(value(claim, 'short_url', 'short-url') || permanentUrl, routeClaimId)
-      : value(claim, 'short_url', 'short-url') || permanentUrl,
+    short_url: value(claim, 'short_url', 'short-url') || permanentUrl,
     value_type: valueType,
-    timestamp: value(claim, 'timestamp') || value(payload, 'timestamp', 'release_time', 'release-time'),
-    confirmations: Number(value(claim, 'confirmations') || 1),
+    timestamp: numericValue(
+      value(claim, 'timestamp') || value(payload, 'timestamp', 'release_time', 'release-time'),
+      0
+    ),
+    height: numericValue(value(claim, 'height'), 0),
+    confirmations: numericValue(value(claim, 'confirmations'), 1),
+    meta: normalizeHyperbeamClaimMeta(value(claim, 'meta')),
     is_my_output: value(claim, 'is_my_output', 'is-my-output'),
     streaming_url: mediaUrl || value(claim, 'streaming_url', 'streaming-url'),
     download_url: mediaUrl || value(claim, 'download_url', 'download-url'),
@@ -1096,6 +1173,7 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
       txid,
       nout,
       device,
+      native_type: value(payload, 'type'),
     }),
   });
 }

@@ -17,6 +17,7 @@ import { getDefaultLanguage } from 'util/default-languages';
 import { postProcessHomepageDb, updateHomepageDb } from 'util/homepages';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { LocalStorage } from 'util/storage';
+import { hyperbeamPreferencesEnabled } from 'util/hyperbeam';
 
 import { URL_DEV } from 'config';
 
@@ -253,13 +254,13 @@ export function doEnterSettingsPage() {
     const syncEnabled = selectClientSetting(state, SETTINGS.ENABLE_SYNC);
     const hasVerifiedEmail = state.user && state.user.user && state.user.user.has_verified_email;
 
-    if (IS_WEB && !hasVerifiedEmail) {
+    if (IS_WEB && !hasVerifiedEmail && !hyperbeamPreferencesEnabled()) {
       return;
     }
 
     dispatch(doSyncUnsubscribe());
 
-    if (syncEnabled && hasVerifiedEmail) {
+    if (syncEnabled && hasVerifiedEmail && !hyperbeamPreferencesEnabled()) {
       await dispatch(doSyncLoop(true));
     } else {
       await dispatch(doGetAndPopulatePreferences());
@@ -273,7 +274,7 @@ export function doExitSettingsPage() {
     const state = getState();
     const hasVerifiedEmail = state.user && state.user.user && state.user.user.has_verified_email;
 
-    if (IS_WEB && !hasVerifiedEmail) {
+    if (IS_WEB && !hasVerifiedEmail && !hyperbeamPreferencesEnabled()) {
       return;
     }
 

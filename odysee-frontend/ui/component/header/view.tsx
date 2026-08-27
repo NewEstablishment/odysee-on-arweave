@@ -11,7 +11,6 @@ import Logo from 'component/logo';
 import NotificationBubble from 'component/notificationBubble';
 import React from 'react';
 import { lazyImport } from 'util/lazyImport';
-import { getHyperbeamAccount, signOutHyperbeam } from 'util/hyperbeamAccount';
 import Skeleton from '@mui/material/Skeleton';
 import SkipNavigationButton from 'component/skipNavigationButton';
 import Tooltip from 'component/common/tooltip';
@@ -26,7 +25,7 @@ import { selectClientSetting } from 'redux/selectors/settings';
 import { selectGetSyncErrorMessage, selectPrefsReady } from 'redux/selectors/sync';
 import { selectHasNavigated } from 'redux/selectors/app';
 import { selectTotalBalance, selectBalance } from 'redux/selectors/wallet';
-import { selectUserVerifiedEmail, selectEmailToVerify, selectUser } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUserIsNative, selectEmailToVerify, selectUser } from 'redux/selectors/user';
 import { selectAPIArweaveActiveAccounts } from 'redux/selectors/payments';
 import { selectIsPlayerFloating } from 'redux/selectors/content';
 
@@ -73,7 +72,8 @@ type Props = {
 const Header = (props: Props) => {
   const { authHeader, authRedirect, backout, hideCancel, isAbsoluteSideNavHidden, sidebarOpen, setSidebarOpen } = props;
   const dispatch = useAppDispatch();
-  const authenticated = useAppSelector(selectUserVerifiedEmail);
+  const authenticated = useAppSelector(selectUserAuthenticated);
+  const isNative = useAppSelector(selectUserIsNative);
   const balance = useAppSelector(selectBalance);
   const emailToVerify = useAppSelector(selectEmailToVerify);
   const hasNavigated = useAppSelector(selectHasNavigated);
@@ -170,7 +170,7 @@ const Header = (props: Props) => {
 
       {authenticated ? (
         <>
-          {!hideWallet && (
+          {!hideWallet && !isNative && (
             <>
               {arweaveAccounts.length > 0 ? (
                 <React.Suspense fallback={null}>
@@ -221,35 +221,14 @@ const Header = (props: Props) => {
           <React.Suspense fallback={null}>
             <HeaderProfileMenuButton />
           </React.Suspense>
-          {getHyperbeamAccount() ? (
-            <div className="header__authButtons">
-              <Button
-                button="alt"
-                icon={ICONS.CHANNEL}
-                label={getHyperbeamAccount()?.name}
-                navigate={`/$/${PAGES.UPLOAD}`}
-                title={__('Upload')}
-              />
-              <Button
-                button="link"
-                label={__('Sign Out')}
-                onClick={() => {
-                  signOutHyperbeam();
-                  window.location.hash = '#/';
-                  window.location.reload();
-                }}
-              />
-            </div>
-          ) : (
-            <div className="header__authButtons">
-              <Button
-                button="link"
-                label={__('Log In')}
-                onClick={() => navigate(`/$/${PAGES.AUTH_SIGNIN}${authRedirectParam}`)}
-              />
-              <Button navigate={`/$/${PAGES.AUTH}${authRedirectParam}`} button="primary" label={__('Sign Up')} />
-            </div>
-          )}
+          <div className="header__authButtons">
+            <Button
+              button="link"
+              label={__('Log In')}
+              onClick={() => navigate(`/$/${PAGES.AUTH_SIGNIN}${authRedirectParam}`)}
+            />
+            <Button navigate={`/$/${PAGES.AUTH}${authRedirectParam}`} button="primary" label={__('Sign Up')} />
+          </div>
         </>
       ) : (
         <React.Suspense fallback={null}>

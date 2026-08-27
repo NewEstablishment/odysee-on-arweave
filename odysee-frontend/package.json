@@ -26,8 +26,9 @@
     "dev:ssr": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development node scripts/dev-web-server.mjs",
     "dev:ssr:usagi-local": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development USE_LOCAL_USAGI=true node scripts/dev-web-server.mjs",
     "materialize:homepage": "node web/src/materializeHomepage.js",
+    "materialize:manifest-homepage": "node scripts/materialize-manifest-homepage.mjs",
     "build": "vp build",
-    "build:manifest": "cross-env NODE_ENV=production HYPERBEAM_STATIC_MANIFEST=true vp build && node build/check-static-manifest.mjs",
+    "build:manifest": "pnpm run materialize:manifest-homepage && cross-env NODE_ENV=production CUSTOM_HOMEPAGE=true HYPERBEAM_STATIC_MANIFEST=true vp build && node build/check-static-manifest.mjs",
     "build:usagi-local": "cross-env USE_LOCAL_USAGI=true vp build",
     "publish:manifest": "pnpm run build:manifest && node build/static-manifest.mjs",
     "preview": "vp preview",
@@ -56,6 +57,7 @@
     "test:hyperbeam-upload-smoke": "node tests/scripts/hyperbeam-upload-smoke.mjs",
     "test:hyperbeam-query-comment-smoke": "node --experimental-strip-types tests/scripts/hyperbeam-query-comment-smoke.mjs",
     "test:hyperbeam-search-options": "node --experimental-strip-types tests/scripts/hyperbeam-search-options.mjs",
+    "test:manifest-homepage": "node --test tests/scripts/manifest-homepage-materializer.test.mjs && node --experimental-strip-types tests/scripts/thumbnail-proxy.mjs",
     "test:native-comment-revisions": "node --experimental-strip-types tests/scripts/native-comment-revisions.mjs",
     "test:native-message-verification": "node --experimental-strip-types tests/scripts/native-message-verification.mjs",
     "test:native-cookie-comments": "node --experimental-strip-types tests/scripts/native-cookie-comments-smoke.mjs",
@@ -64,9 +66,11 @@
     "test:native-cookie-reactions": "node --experimental-strip-types tests/scripts/native-cookie-reactions-smoke.mjs",
     "test:native-playlists": "node --experimental-strip-types tests/scripts/native-playlists.mjs && node --experimental-strip-types tests/scripts/native-playlist-references.mjs",
     "test:native-cookie-playlists": "node --experimental-strip-types tests/scripts/native-cookie-playlists-smoke.mjs",
+    "test:native-preferences": "node --experimental-strip-types tests/scripts/native-preferences.mjs",
+    "test:native-cookie-preferences": "node --experimental-strip-types tests/scripts/native-cookie-preferences-smoke.mjs",
     "test:native-subscriptions": "node --experimental-strip-types tests/scripts/native-subscriptions.mjs",
     "test:native-cookie-subscriptions": "node --experimental-strip-types tests/scripts/native-cookie-subscriptions-smoke.mjs",
-    "test:static-manifest": "node --experimental-strip-types tests/scripts/hyperbeam-node-routing.mjs && node --test build/static-manifest.test.mjs"
+    "test:static-manifest": "node --experimental-strip-types tests/scripts/hyperbeam-node-routing.mjs && node --experimental-strip-types tests/scripts/hyperbeam-legacy-boundary.mjs && node --test build/static-manifest.test.mjs"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.2",

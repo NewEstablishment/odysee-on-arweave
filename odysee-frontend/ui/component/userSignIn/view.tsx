@@ -8,7 +8,7 @@ import { selectUser, selectUserIsPending, selectEmailToVerify, selectPasswordExi
 import { doUserSignIn } from 'redux/actions/user';
 import Button from 'component/button';
 import Card from 'component/common/card';
-import { logInHyperbeam, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
+import { recoverHyperbeamAccount } from 'util/hyperbeamAccount';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 function HyperbeamSignIn() {
@@ -22,7 +22,7 @@ function HyperbeamSignIn() {
     setError(null);
     setIsPending(true);
     try {
-      const account = logInHyperbeam() || (await recoverHyperbeamAccount());
+      const account = await recoverHyperbeamAccount();
       if (!account) {
         setError(__('No account is associated with this browser session.'));
         return;

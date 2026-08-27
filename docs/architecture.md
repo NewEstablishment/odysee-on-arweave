@@ -128,6 +128,12 @@ The UI talks to nodes over two channels:
   flag), which the stock `~auth-hook@1.0` request hook intercepts and signs
   with a node-hosted per-user wallet. See "Writes" below.
 
+The browser never uses the legacy SDK proxy as a product backend. In
+HyperBEAM mode, legacy `channel_sign` requests fail at the SDK facade before
+transport, and the fetch boundary blocks the proxy host as a second guard.
+Legacy livestream actions that require that signature are unavailable until a
+native message contract exists.
+
 ## Node roles
 
 **Seed nodes** run this repository as a rebar3 application on top of the
@@ -217,8 +223,8 @@ Two mitigations, in order of preference today:
 ## Writes
 
 There is no custom write device. Uploads, comments, reactions, playlists,
-subscriptions, and moderation events are ordinary committed messages, using
-stock HyperBEAM machinery end to end:
+subscriptions, encrypted preference snapshots, and moderation events are
+ordinary committed messages, using stock HyperBEAM machinery end to end:
 
 1. The client sends `POST /id?0.%21=true&committers=all`. Scoping `!` to stage
    zero commits the application document once; a global `!` can also commit
@@ -252,6 +258,11 @@ stock HyperBEAM machinery end to end:
    and same-owner set messages select later snapshots.
    Historical LBRY ownership remains governed by its separately verified
    source evidence.
+
+   The browser keeps only an active/saved profile hint. At authentication it
+   asks the node for the cookie owner, exact-hydrates candidate channel
+   profiles, and creates a native Redux user only for a same-committer match.
+   Preference hydration follows that verification during startup.
 
 Free channel subscriptions use `odysee-subscription@1.0`. A deterministic
 `subscription-ref` combines the verified subscriber committer with a stable
@@ -287,7 +298,42 @@ without mutating earlier content. Readers hydrate and verify every candidate,
 derive authority from the init committer, and select only a strictly newer
 unambiguous set. Query order is never authority.
 
-Legacy-only interactive surfaces with no verifiable representation — fuzzy
-text search, view counts, subscription counts, legacy comment writes — are
-excluded from the trustless path and treated by the UI as progressive
-enhancements. The video page renders fully from store reads alone.
+Private user preferences use the same separation. Each version is an immutable
+cookie-signed `odysee-preferences@1.0` message containing only an AES-256-GCM
+envelope. A generic `reference@1.0` init commitment is the stable preference
+identity and same-owner set messages select newer snapshots. Readers discover
+only locators, hydrate and verify every exact reference/snapshot commitment,
+and fail closed on foreign ownership, stale changes, or conflicting tied
+heads. The narrow `odysee-preference@1.0` device is not a write device: it
+authenticates the cookie-owned hosted wallet and seals or opens owner-bound
+ciphertext without storing preference state. Its private/no-store response is
+the only plaintext boundary; credentials and key material never enter public
+messages.
+
+Preference writes use exact readback as their acknowledgement. Query/listener
+discovery is eventually consistent and is never required to expose the new
+reference before a valid save can complete.
+
+HTTP delivery supports one RFC 7233 byte range. Range-aware cache/source stores
+receive the requested bounds directly; locally materialized immutable bodies
+are sliced at the HTTP boundary and returned as an unsigned derived `206`
+representation, leaving the exact whole message as the verification surface.
+
+Generic `search@1.0` provides ranked locator discovery for homepage, category,
+and text-search requests. The frontend maps filters and sort before the query,
+preserves locator order, and exact-hydrates every result; Meilisearch remains
+an index, never an object or authority source. Native per-channel listings use
+bounded `query@1.0` discovery over upload records and the same exact hydration
+boundary.
+
+Observational analytics are recorded by the reusable `analytics@1.0` device.
+Odysee maps playback to generic subject engagement in the frontend, while the
+device exposes only aggregate counts and wallet-authenticated reports. A
+one-time owner-authenticated baseline preserves historical view totals; native
+qualified engagement is added after cutover. These analytics remain
+non-authoritative signals and do not affect content verification.
+
+Other legacy-only interactive surfaces with no verifiable representation —
+aggregate subscription counts and paid membership state — are excluded from
+the trustless path and treated by the UI as progressive enhancements. The
+video page renders fully from store reads alone.

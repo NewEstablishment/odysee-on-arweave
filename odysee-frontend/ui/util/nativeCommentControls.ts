@@ -70,7 +70,6 @@ export function nativeCommentControlSignatureData(control: NativeCommentControl)
     })
   )}`;
 }
-
 export function normalizeNativeCommentControl(source: NativeCommentControl): NativeCommentControl {
   return compact({
     ...source,
@@ -267,4 +266,3 @@ function legacyBlockExpiresAt(entry: Record<string, any>, now: number): number |
   const parsed = Date.parse(String(source || ''));
   return Number.isFinite(parsed) ? Math.floor(parsed / 1000) + duration : undefined;
 }
-

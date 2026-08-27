@@ -6,7 +6,7 @@ import { formatLbryUrlForWeb } from 'util/url';
 import * as PAGES from 'constants/pages';
 import useCombinedRefs from 'effects/use-combined-refs';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { selectUser, selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUser, selectUserAuthenticated } from 'redux/selectors/user';
 import { selectHasChannels } from 'redux/selectors/claims';
 import { doHideModal } from 'redux/actions/app';
 
@@ -95,7 +95,7 @@ const Button = forwardRef<any, Props>((props: Props, ref: any) => {
   // This prevents every single button in the app from re-rendering on
   // unrelated Redux state changes (user, router, channels).
   const needsAuth = requiresAuth || requiresChannel;
-  const emailVerified = useAppSelector((state) => (needsAuth ? selectUserVerifiedEmail(state) : false));
+  const emailVerified = useAppSelector((state) => (needsAuth ? selectUserAuthenticated(state) : false));
   const user = useAppSelector((state) => (needsAuth ? selectUser(state) : undefined));
   const hasChannels = useAppSelector((state) => (needsAuth ? selectHasChannels(state) : false));
 

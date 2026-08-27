@@ -1,3 +1,9 @@
+const { YOUTUBERS } = require('./homepage');
+
 module.exports = {
-  en: {},
+  en: {
+    categories: {
+      YOUTUBERS,
+    },
+  },
 };

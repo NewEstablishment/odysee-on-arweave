@@ -136,6 +136,11 @@ reducers[ACTIONS.SYNC_FATAL_ERROR] = (state: SyncState) => {
   });
 };
 
+reducers[ACTIONS.SYNC_FATAL_ERROR_CLEAR] = (state: SyncState) => ({
+  ...state,
+  fatalError: false,
+});
+
 reducers[ACTIONS.SYNC_RESET] = () => defaultState;
 
 reducers[ACTIONS.SHARED_STATE_SYNC_ID_CHANGED] = (state: SyncState, action: any) => {

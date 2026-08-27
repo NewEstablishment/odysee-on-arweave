@@ -5,7 +5,7 @@ import { formatLbryUrlForWeb } from 'util/url';
 import { URL as APP_URL, SITE_NAME } from 'config';
 import Logo from 'component/logo';
 import { useAppSelector } from 'redux/hooks';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated } from 'redux/selectors/user';
 import { makeSelectTagInClaimOrChannelForUri } from 'redux/selectors/claims';
 import { selectContentStates } from 'redux/selectors/content';
 import { PREFERENCE_EMBED } from 'constants/tags';
@@ -22,7 +22,7 @@ type Props = {
 
 function FileViewerEmbeddedEnded(props: Props) {
   const { uri, doReplay } = props;
-  const isAuthenticated = useAppSelector((state) => selectUserVerifiedEmail(state));
+  const isAuthenticated = useAppSelector((state) => selectUserAuthenticated(state));
   const preferEmbed = useAppSelector((state) => makeSelectTagInClaimOrChannelForUri(uri, PREFERENCE_EMBED)(state));
   const uriAccessKey = useAppSelector((state) => selectContentStates(state).uriAccessKeys[uri]);
   const prompts = isAuthenticated

@@ -22,7 +22,7 @@ import { selectClaimIsMine, selectClaimForUri } from 'redux/selectors/claims';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { selectModerationDelegatorsById, selectModerationDelegatesById } from 'redux/selectors/comments';
 import { selectPlayingUri } from 'redux/selectors/content';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated } from 'redux/selectors/user';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 
 type Props = {
@@ -83,7 +83,7 @@ function CommentMenuList(props: Props) {
   const authorCanonicalUri = (authorClaim && authorClaim.canonical_url) || '';
   const authorId = (authorClaim && authorClaim.claim_id) || '';
   const claimIsMine = useAppSelector((state) => selectClaimIsMine(state, claim));
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated);
   const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
   const playingUri = useAppSelector(selectPlayingUri);
   const moderationDelegatorsById = useAppSelector(selectModerationDelegatorsById);

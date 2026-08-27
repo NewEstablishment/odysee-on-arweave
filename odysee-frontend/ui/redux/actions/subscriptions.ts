@@ -4,11 +4,12 @@ import { SIDEBAR_SUBS_DISPLAYED } from 'constants/subscriptions';
 import { doClaimSearch, doResolveUris } from 'redux/actions/claims';
 import { getChannelFromClaim } from 'util/claim';
 import { doToast } from 'redux/actions/notifications';
-import { selectSubscriptionIds, selectSubscriptionUris } from 'redux/selectors/subscriptions';
+import { selectSubscriptionIds, selectSubscriptionUris, selectSubscriptions } from 'redux/selectors/subscriptions';
 import { fetchHyperbeamSubscriptions, fetchHyperbeamSubscriptionUpdate } from 'util/hyperbeam';
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 import { nativeSubscriptionNotificationsDisabled } from 'util/nativeSubscriptions';
+import { isURIEqual, parseURI } from 'util/lbryURI';
 type SubscriptionArgs = {
   channelName: string;
   uri: string;
@@ -21,7 +22,7 @@ export function doToggleSubscription(
   followToast: boolean,
   isSubscribed: boolean = false
 ) {
-  return async (dispatch: Dispatch) => {
+  return async (dispatch: Dispatch, getState: GetState) => {
     if (hyperbeamNodeEnabled() && !getHyperbeamAccount()) {
       dispatch(
         doToast({
@@ -32,9 +33,15 @@ export function doToggleSubscription(
       return;
     }
 
+    const authoritativeSubscription = isSubscribed
+      ? matchingNativeSubscription(selectSubscriptions(getState()) || [], subscription)
+      : null;
     const normalizedSubscription = {
       ...subscription,
-      notificationsDisabled: nativeSubscriptionNotificationsDisabled(subscription.notificationsDisabled),
+      ...authoritativeSubscription,
+      notificationsDisabled: nativeSubscriptionNotificationsDisabled(
+        authoritativeSubscription?.notificationsDisabled ?? subscription.notificationsDisabled
+      ),
     };
 
     dispatch({
@@ -78,6 +85,27 @@ export function doToggleSubscription(
     // Reset last-fetch counter
     activeSubsLastFetchedTime = 0;
   };
+}
+
+function matchingNativeSubscription(subscriptions: Array<SubscriptionArgs>, requested: SubscriptionArgs) {
+  const requestedId = channelClaimId(requested.uri);
+  const matches = subscriptions.filter((candidate) => {
+    if (isURIEqual(candidate.uri, requested.uri)) return true;
+    const candidateId = channelClaimId(candidate.uri);
+    return Boolean(requestedId && candidateId && requestedId === candidateId);
+  });
+  if (matches.length === 1) return matches[0];
+
+  const nameMatches = subscriptions.filter((candidate) => candidate.channelName === requested.channelName);
+  return nameMatches.length === 1 ? nameMatches[0] : null;
+}
+
+function channelClaimId(uri: string): string | null {
+  try {
+    return parseURI(uri).channelClaimId || null;
+  } catch {
+    return null;
+  }
 }
 export function doFetchSubscriptions() {
   return async (dispatch: Dispatch) => {

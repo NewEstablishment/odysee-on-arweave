@@ -7,10 +7,11 @@ import Card from 'component/common/card';
 import SettingsRow from 'component/settingsRow';
 import { useAppSelector } from 'redux/hooks';
 import { selectHasChannels } from 'redux/selectors/claims';
-import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUserIsNative } from 'redux/selectors/user';
 
 export default function SettingAccount() {
-  const isAuthenticated = useAppSelector(selectUserVerifiedEmail);
+  const isAuthenticated = useAppSelector(selectUserAuthenticated);
+  const isNative = useAppSelector(selectUserIsNative);
   const hasChannels = useAppSelector(selectHasChannels);
   return (
     <>
@@ -21,7 +22,7 @@ export default function SettingAccount() {
         isBodyList
         body={
           <>
-            {isAuthenticated && (
+            {isAuthenticated && !isNative && (
               <SettingsRow title={__('Password')}>
                 <Button
                   button="inverse"
@@ -43,9 +44,16 @@ export default function SettingAccount() {
               </SettingsRow>
             )}
 
-            <SettingsRow title={__('Purchases')} subtitle={__('View your purchased content.')}>
-              <Button button="inverse" label={__('Manage')} icon={ICONS.ARROW_RIGHT} navigate={`/$/${PAGES.LIBRARY}`} />
-            </SettingsRow>
+            {!isNative && (
+              <SettingsRow title={__('Purchases')} subtitle={__('View your purchased content.')}>
+                <Button
+                  button="inverse"
+                  label={__('Manage')}
+                  icon={ICONS.ARROW_RIGHT}
+                  navigate={`/$/${PAGES.LIBRARY}`}
+                />
+              </SettingsRow>
+            )}
           </>
         }
       />

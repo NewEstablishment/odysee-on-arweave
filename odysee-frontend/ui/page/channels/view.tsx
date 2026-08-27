@@ -98,7 +98,7 @@ export default function ChannelsPage() {
           loading={fetchingChannels}
           uris={channelUrls}
           renderActions={(claim) => {
-            const claimsInChannel = claim.meta.claims_in_channel;
+            const claimsInChannel = claim.meta?.claims_in_channel;
             return claimsInChannel === 0 ? (
               <span />
             ) : (
@@ -116,7 +116,7 @@ export default function ChannelsPage() {
             );
           }}
           renderProperties={(claim) => {
-            const claimsInChannel = claim.meta.claims_in_channel;
+            const claimsInChannel = claim.meta?.claims_in_channel;
 
             if (!claim || claimsInChannel === 0) {
               return null;
