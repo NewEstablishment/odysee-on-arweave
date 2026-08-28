@@ -117,26 +117,30 @@ export default function FeaturedBanner(props: Props) {
     () => sessionStorage.getItem('bannerHidden') === 'true'
   );
   const wrapper = React.useRef(null);
+  const itemCount = Array.isArray(featured?.items) ? featured.items.length : 0;
+  const configuredTransitionTime = Number(featured?.transitionTime);
+  const transitionTime =
+    Number.isFinite(configuredTransitionTime) && configuredTransitionTime > 0 ? configuredTransitionTime : 3;
+  const transitionInterval = transitionTime * 1000 + 1000;
   const imageWidth = width >= 1600 ? 1700 : width >= 1150 ? 1150 : width >= 900 ? 900 : width >= 600 ? 600 : 400;
   const navigate = useNavigate();
   React.useEffect(() => {
-    if (featured && width) {
-      const interval = setInterval(
-        () => {
-          if (!pause) {
-            setIndex(index + 1 <= featured.items.length ? index + 1 : 1);
-          }
-        },
-        featured.transitionTime * 1000 + 1000
-      );
-      return () => clearInterval(interval);
-    }
-  }, [featured, marginLeft, width, pause, index]);
+    if (!width || !itemCount || pause) return;
+
+    const interval = setInterval(() => {
+      setIndex((currentIndex) => (currentIndex < itemCount ? currentIndex + 1 : 1));
+    }, transitionInterval);
+    return () => clearInterval(interval);
+  }, [width, itemCount, pause, transitionInterval]);
   React.useEffect(() => {
-    if (featured && width) {
+    if (!itemCount) return;
+    setIndex((currentIndex) => Math.min(Math.max(currentIndex, 1), itemCount));
+  }, [itemCount]);
+  React.useEffect(() => {
+    if (itemCount && width) {
       setMarginLeft((index - 1) * (width * -1));
     }
-  }, [featured, index, width]);
+  }, [index, itemCount, width]);
   React.useEffect(() => {
     function measure() {
       if (wrapper.current) {

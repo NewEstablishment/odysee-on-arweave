@@ -10,6 +10,7 @@
 
 -define(DEFAULT_PROXY_NODE, <<"https://api.na-backend.odysee.com">>).
 -define(PROXY_PATH, <<"/api/v1/proxy">>).
+-define(DEFAULT_PROXY_TIMEOUT, 10000).
 
 claim(ClaimIDOrName, Opts) ->
     case valid_claim_id(ClaimIDOrName) of
@@ -56,21 +57,29 @@ call(Method, Params, Opts) ->
         }),
     Path = <<?PROXY_PATH/binary, "?m=", Method/binary>>,
     Node = hb_maps:get(<<"lbry-proxy-node">>, Opts, ?DEFAULT_PROXY_NODE, Opts),
+    Timeout = hb_maps:get(
+        <<"lbry-proxy-timeout">>,
+        Opts,
+        ?DEFAULT_PROXY_TIMEOUT,
+        Opts
+    ),
     HTTPOpts =
         Opts#{
             <<"http-client">> =>
-                hb_maps:get(<<"http-client">>, Opts, httpc, Opts)
+                hb_maps:get(<<"http-client">>, Opts, hackney, Opts),
+            <<"http-client-connect-timeout">> => min(Timeout, 5000),
+            <<"http-client-hackney-recv-timeout">> => Timeout,
+            <<"http-retry">> =>
+                hb_maps:get(<<"lbry-proxy-retries">>, Opts, 0, Opts)
         },
-    case hb_http_client:request(
-        #{
-            peer => Node,
-            path => Path,
-            method => <<"POST">>,
-            headers => #{ <<"content-type">> => <<"application/json-rpc">> },
-            body => Body
-        },
-        HTTPOpts
-    ) of
+    Request = #{
+        peer => Node,
+        path => Path,
+        method => <<"POST">>,
+        headers => #{ <<"content-type">> => <<"application/json-rpc">> },
+        body => Body
+    },
+    case request_with_timeout(Request, HTTPOpts, Timeout) of
         {ok, 200, _Headers, RespBody} ->
             decode_proxy_response(RespBody);
         {ok, Status, _Headers, RespBody} when Status < 500 ->
@@ -79,6 +88,26 @@ call(Method, Params, Opts) ->
             {failure, {http_status, Status, RespBody}};
         {error, Reason} ->
             {failure, Reason}
+    end.
+
+request_with_timeout(Request, Opts, Timeout) ->
+    Caller = self(),
+    Ref = make_ref(),
+    {Pid, Monitor} = spawn_monitor(fun() ->
+        Caller ! {Ref, hb_http_client:request(Request, Opts)}
+    end),
+    receive
+        {Ref, Result} ->
+            erlang:demonitor(Monitor, [flush]),
+            Result;
+        {'DOWN', Monitor, process, Pid, Reason} ->
+            {error, {http_client_exit, Reason}}
+    after Timeout ->
+        exit(Pid, kill),
+        receive
+            {'DOWN', Monitor, process, Pid, _Reason} -> ok
+        end,
+        {error, timeout}
     end.
 
 decode_proxy_response(RespBody) ->
@@ -188,6 +217,32 @@ claim_search_uses_minimal_proxy_request_test() ->
         ?assertEqual([ClaimID], maps:get(<<"claim_ids">>, Params)),
         ?assertEqual(true, maps:get(<<"no_totals">>, Params)),
         ?assertEqual(1, maps:get(<<"page_size">>, Params))
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
+proxy_timeout_is_enforced_test() ->
+    SlowResponse = fun(_Req) ->
+        timer:sleep(250),
+        {200, <<"{}">>}
+    end,
+    {ok, Server, Handle} = hb_mock_server:start([
+        {"/api/v1/proxy", proxy, SlowResponse}
+    ]),
+    try
+        Started = erlang:monotonic_time(millisecond),
+        Result = call(
+            <<"claim_search">>,
+            #{},
+            #{
+                <<"lbry-proxy-node">> => Server,
+                <<"lbry-proxy-timeout">> => 50,
+                <<"http-client">> => httpc
+            }
+        ),
+        Elapsed = erlang:monotonic_time(millisecond) - Started,
+        ?assertMatch({failure, _}, Result),
+        ?assert(Elapsed < 200)
     after
         hb_mock_server:stop(Handle)
     end.

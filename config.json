@@ -1,6 +1,16 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "homepage-materializer": true,
+  "homepage-refresh-interval": "1-hour",
+  "homepage-category-pool-size": 36,
+  "homepage-initial-category-pool-size": 12,
+  "homepage-initial-language": "en",
+  "homepage-source-timeout": 10000,
+  "lbry-proxy-timeout": 5000,
+  "lbry-proxy-retries": 0,
+  "relay-block-internal": false,
+  "relay-allowed-hosts": ["127.0.0.1"],
   "analytics-sites": [
     {
       "key": "odysee",
@@ -95,7 +105,7 @@
       "store-module": "hb_store_lmdb",
       "name": "cache-odysee-demo",
       "ao-types": "store-module=\"atom\", capacity=\"integer\"",
-      "capacity": 4294967296
+      "capacity": 8589934592
     },
     {
       "store-module": "hb_store_lmdb",
@@ -134,7 +144,7 @@
       "store-module": "hb_store_lmdb",
       "name": "cache-odysee-demo",
       "ao-types": "store-module=\"atom\", capacity=\"integer\"",
-      "capacity": 4294967296
+      "capacity": 8589934592
     }
   ],
   "on": {

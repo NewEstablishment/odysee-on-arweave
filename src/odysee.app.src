@@ -7,7 +7,8 @@
             "streams) through trustless content-addressed commitments, "
             "plus the store and client modules used by seed nodes."},
         {vsn, "0.1.0"},
-        {registered, []},
+        {registered, [odysee_sup, hb_odysee_homepage]},
+        {mod, {odysee_app, []}},
         {applications, [kernel, stdlib, hb]},
         {env, []},
         {modules, []}

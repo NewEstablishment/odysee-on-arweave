@@ -97,6 +97,7 @@ const config = {
   ENABLE_UI_NOTIFICATIONS: process.env.ENABLE_UI_NOTIFICATIONS === 'true',
   ENABLE_MATURE: process.env.ENABLE_MATURE === 'true',
   CUSTOM_HOMEPAGE: process.env.CUSTOM_HOMEPAGE === 'true',
+  HOMEPAGE_LOCAL_CONTENT: process.env.HOMEPAGE_LOCAL_CONTENT === 'true',
   SHOW_TAGS_INTRO: process.env.SHOW_TAGS_INTRO === 'true',
   SEARCH_DEFAULT_TYPES: process.env.SEARCH_DEFAULT_TYPES,
   BRANDED_SITE: process.env.BRANDED_SITE,

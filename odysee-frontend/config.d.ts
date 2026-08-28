@@ -84,6 +84,7 @@ interface Config {
   ENABLE_UI_NOTIFICATIONS: boolean;
   ENABLE_MATURE: boolean;
   CUSTOM_HOMEPAGE: boolean;
+  HOMEPAGE_LOCAL_CONTENT: boolean;
   SHOW_TAGS_INTRO: boolean;
   SEARCH_DEFAULT_TYPES: string | undefined;
   BRANDED_SITE: string | undefined;

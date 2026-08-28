@@ -362,6 +362,14 @@ an index, never an object or authority source. Native per-channel listings use
 bounded `query@1.0` discovery over upload records and the same exact hydration
 boundary.
 
+Static manifests embed homepage presentation templates, not node-specific
+claim selections. The node stores its immutable Lua materializer and homepage
+plan, runs the computation against its own configured stores, and publishes
+node-signed `odysee-homepage@1.0` snapshots. Stock `cron@1.0` refreshes all
+languages hourly. The browser uses `query@1.0` only for locator discovery, then
+exact-hydrates and verifies the node committer before using a snapshot. There
+is no SSR timer or filesystem snapshot authority.
+
 Observational analytics are recorded by the reusable `analytics@1.0` device.
 Odysee maps playback to generic subject engagement in the frontend, while the
 device exposes only aggregate counts and wallet-authenticated reports. A

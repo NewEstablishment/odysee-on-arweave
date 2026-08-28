@@ -1,18 +1,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const {
-  homepageSnapshotPath,
-  materializeHomepageData,
-  readHomepageSnapshot,
-  writeHomepageSnapshot,
-} = require('./homepageMaterializer');
 
 const memo = {};
 const FORMAT = {
   ROKU: 'roku',
 };
-const DEFAULT_CATEGORY_POOL_SIZE = 180;
 
 function walkFiles(dir, handler) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -111,33 +104,7 @@ function loadHomepageData() {
 
 function currentHomepageData() {
   loadHomepageData();
-  return readHomepageSnapshot(homepageSnapshotPath())?.data || memo.homepageData || {};
-}
-
-async function getMaterializedHomepageData(forceRefresh = false) {
-  loadHomepageData();
-  if (!memo.homepageData) return {};
-
-  const snapshotPath = homepageSnapshotPath();
-  const previous = readHomepageSnapshot(snapshotPath)?.data || {};
-  if (!forceRefresh && Object.keys(previous).length) return previous;
-
-  const requestedLanguages = String(process.env.HOMEPAGE_LANGUAGES || '')
-    .split(',')
-    .map((language) => language.trim())
-    .filter(Boolean);
-  const source = requestedLanguages.length
-    ? Object.fromEntries(
-        requestedLanguages
-          .filter((language) => memo.homepageData[language])
-          .map((language) => [language, memo.homepageData[language]])
-      )
-    : memo.homepageData;
-  const categoryPoolSize = Number(process.env.HOMEPAGE_CATEGORY_POOL_SIZE) || DEFAULT_CATEGORY_POOL_SIZE;
-  const refreshed = await materializeHomepageData(source, { categoryPoolSize });
-  const data = { ...previous, ...refreshed };
-  writeHomepageSnapshot(snapshotPath, data);
-  return data;
+  return memo.homepageData || {};
 }
 
 // ****************************************************************************
@@ -209,7 +176,6 @@ const getHomepageJsonV2 = (format, lang) => {
 };
 
 module.exports = {
-  getMaterializedHomepageData,
   getHomepageJsonV1,
   getHomepageJsonV2,
 };

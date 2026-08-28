@@ -27,6 +27,7 @@ export type HomepageCat = {
   searchLanguages?: Array<string>;
   duration?: string;
   exclude_shorts?: boolean;
+  excludeFuture?: boolean;
   mixIn?: Array<string>;
   hideByDefault?: boolean;
   immutableIds?: Array<string>;
@@ -149,10 +150,15 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
     title: cat.label,
     pinnedUrls: cat.pinnedUrls,
     pinnedClaimIds: cat.pinnedClaimIds,
-    uris: (cat.immutableIds || []).map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri)),
-    categoryUris: (cat.immutablePoolIds || cat.immutableIds || [])
-      .map(hyperbeamImmutableUri)
-      .filter((uri): uri is string => Boolean(uri)),
+    uris: cat.immutableIds
+      ? cat.immutableIds.map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri))
+      : undefined,
+    categoryUris:
+      cat.immutablePoolIds || cat.immutableIds
+        ? (cat.immutablePoolIds || cat.immutableIds || [])
+            .map(hyperbeamImmutableUri)
+            .filter((uri): uri is string => Boolean(uri))
+        : undefined,
     immutableSigningChannelIds: Object.fromEntries(
       Object.entries(cat.immutableSigningChannelIds || {}).map(([mediaId, channelId]) => [
         hyperbeamImmutableUri(mediaId) || mediaId,
@@ -172,6 +178,7 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
       duration: cat.duration || undefined,
       excludeShorts: cat.exclude_shorts ? true : undefined,
       releaseTime: `>${getRelativeUnixTimestamp(cat.daysOfContent || 30, 'days', 'hour')}`,
+      timestamp: cat.excludeFuture ? `<${Math.floor(Date.now() / 1000)}` : undefined,
     },
   };
 };

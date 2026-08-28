@@ -261,9 +261,16 @@ async function hyperbeamNodeWarmImmutableChannels(ids) {
 
 function isHydratedChannelEvidence(payload) {
   if (!payload || typeof payload !== 'object') return false;
-  const channelId = value(payload, 'channel-id', 'channel_id', 'public-key', 'public_key');
+  const channelId = value(payload, 'channel-id', 'channel_id', 'claim-id', 'claim_id');
+  const publicKey = value(payload, 'public-key', 'public_key');
+  const rawClaim = value(payload, 'claim');
   const channelValue = value(payload, 'value');
-  return Boolean(channelId && channelValue && typeof channelValue === 'object');
+  return Boolean(
+    channelId &&
+    publicKey &&
+    ((rawClaim && (typeof rawClaim === 'string' || typeof rawClaim === 'object')) ||
+      (channelValue && typeof channelValue === 'object'))
+  );
 }
 
 async function hyperbeamNodeQueueImmutableClaims(ids) {
@@ -1598,4 +1605,5 @@ module.exports = {
   hyperbeamNodeWarmImmutableClaim,
   hyperbeamNodeWarmImmutableClaims,
   hyperbeamNodeWarmImmutableChannels,
+  isHydratedChannelEvidence,
 };

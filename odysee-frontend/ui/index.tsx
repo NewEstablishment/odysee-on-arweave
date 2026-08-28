@@ -279,8 +279,9 @@ function AppWrapper() {
   useEffect(() => {
     if (persistDone) {
       app.store.dispatch(doDaemonReady());
-      app.store.dispatch(doLoadBuiltInHomepageData());
-      app.store.dispatch(doFetchHomepages());
+      Promise.resolve(app.store.dispatch(doLoadBuiltInHomepageData())).finally(() => {
+        app.store.dispatch(doFetchHomepages());
+      });
 
       const cancelAfterPaint = scheduleAfterPaint(() => {
         if (DEFAULT_LANGUAGE) {

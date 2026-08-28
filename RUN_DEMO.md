@@ -233,9 +233,11 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:hyperbeam-upload-smoke
 - The stock per-IP rate-limit bucket must be raised for production static
   manifest traffic. If a local demo returns a full-page `Rate limit exceeded`,
   stop refreshing and wait roughly one minute before reopening the same tab.
-- Homepage/category data is build-time materialized. If the search index
-  changes, publish a new manifest rather than expecting an old bundle to gain
-  new categories.
+- Homepage/category selections are node-signed HyperBEAM messages. The Odysee
+  OTP application publishes an initial snapshot at node startup and installs
+  the all-language hourly refresh through stock `cron@1.0`. Keep Meilisearch
+  and the configured source stores available when a refresh runs; the previous
+  valid snapshot remains readable if a refresh fails.
 
 For the detailed trust and data model, read `README.md`,
 `docs/architecture.md`, and `docs/native-messages.md`.

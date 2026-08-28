@@ -15,14 +15,17 @@ import { selectPrefsReady } from 'redux/selectors/sync';
 import { Lbryio } from 'lbryinc';
 import { getDefaultLanguage } from 'util/default-languages';
 import { postProcessHomepageDb, updateHomepageDb } from 'util/homepages';
+import { fetchHomepageSnapshot, mergeHomepageSnapshot, withLocalContentCategory } from 'util/homepageSnapshots';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { LocalStorage } from 'util/storage';
 import { hyperbeamPreferencesEnabled } from 'util/hyperbeam';
 
-import { URL_DEV } from 'config';
+import { HOMEPAGE_LOCAL_CONTENT, URL_DEV } from 'config';
 
 const { SDK_SYNC_KEYS } = SHARED_PREFERENCES;
 const UPDATE_IS_NIGHT_INTERVAL = 5 * 60 * 1000;
+const HOMEPAGE_SNAPSHOT_STARTUP_WAIT_MS = 3000;
+const HOMEPAGE_SNAPSHOT_TIMEOUT = Symbol('homepage-snapshot-timeout');
 export function doFetchDaemonSettings() {
   return (dispatch: Dispatch) => {
     Lbry.settings_get().then((settings) => {
@@ -351,7 +354,7 @@ export function doLoadBuiltInHomepageData() {
     // As a compromise between the above needs vs. wanting a smaller ui.js,
     // we'll just bake in the English version.
     // @if process.env.CUSTOM_HOMEPAGE='true'
-    import('homepages').then((mod) => {
+    return import('homepages').then((mod) => {
       const builtInHomepages = mod.default || mod;
       const enHp = builtInHomepages.en || mod.en;
       if (enHp) {
@@ -366,9 +369,6 @@ export function doLoadBuiltInHomepageData() {
         });
         window.homepages['en'] ||= enHp;
         populateCategoryTitles(window.homepages?.en?.categories);
-        dispatch({
-          type: ACTIONS.FETCH_HOMEPAGES_DONE,
-        });
       }
     }); // @endif
   };
@@ -388,40 +388,76 @@ export function doOpenAnnouncements() {
   };
 }
 export function doFetchHomepages(hp?: string) {
-  return (dispatch: Dispatch) => {
-    if (isServedFromManifest()) {
-      // Static manifest serving has no /$/api homepage endpoint; rely on the
-      // built-in homepage data instead.
+  return async (dispatch: Dispatch) => {
+    const language = hp || getDefaultLanguage();
+    if (HOMEPAGE_LOCAL_CONTENT && window.homepages?.[language]) {
+      window.homepages = updateHomepageDb(
+        window.homepages,
+        { [language]: withLocalContentCategory(window.homepages[language]) },
+        language
+      );
+    }
+    let hasRenderableHomepage = Boolean(
+      window.homepages?.[language]?.categories && Object.keys(window.homepages[language].categories).length
+    );
+
+    if (!isServedFromManifest()) {
+      try {
+        const response = await fetch(`/$/api/content/v2/get?hp=${encodeURIComponent(language)}`);
+        const json = await response.json();
+        if (json?.status === 'success' && json?.data?.[language]?.categories) {
+          window.homepages = updateHomepageDb(window.homepages, json.data, language);
+          if (HOMEPAGE_LOCAL_CONTENT) {
+            window.homepages = updateHomepageDb(
+              window.homepages,
+              { [language]: withLocalContentCategory(window.homepages?.[language]) },
+              language
+            );
+          }
+          window.homepages = postProcessHomepageDb(window.homepages);
+          hasRenderableHomepage = Object.keys(window.homepages?.[language]?.categories || {}).length > 0;
+        }
+      } catch (e) {
+        console.log('doFetchHomepages fallback:', e); // eslint-disable-line no-console
+      }
+    }
+
+    try {
+      const snapshotPromise = fetchHomepageSnapshot(language).catch((e) => {
+        console.log('doFetchHomepages snapshot:', e); // eslint-disable-line no-console
+        return null;
+      });
+      const snapshot = await Promise.race([
+        snapshotPromise,
+        new Promise<typeof HOMEPAGE_SNAPSHOT_TIMEOUT>((resolve) =>
+          setTimeout(() => resolve(HOMEPAGE_SNAPSHOT_TIMEOUT), HOMEPAGE_SNAPSHOT_STARTUP_WAIT_MS)
+        ),
+      ]);
+      if (snapshot !== HOMEPAGE_SNAPSHOT_TIMEOUT && snapshot) {
+        const merged = mergeHomepageSnapshot(window.homepages?.[language], snapshot);
+        const presented = HOMEPAGE_LOCAL_CONTENT ? withLocalContentCategory(merged) : merged;
+        window.homepages = updateHomepageDb(window.homepages, { [language]: presented }, language);
+        window.homepages = postProcessHomepageDb(window.homepages);
+        populateCategoryTitles(window.homepages?.en?.categories);
+        dispatch({
+          type: ACTIONS.FETCH_HOMEPAGES_DONE,
+        });
+        return;
+      }
+    } catch (e) {
+      console.log('doFetchHomepages snapshot:', e); // eslint-disable-line no-console
+    }
+
+    if (hasRenderableHomepage) {
+      populateCategoryTitles(window.homepages?.en?.categories);
+      dispatch({
+        type: ACTIONS.FETCH_HOMEPAGES_DONE,
+      });
+    } else {
       dispatch({
         type: ACTIONS.FETCH_HOMEPAGES_FAILED,
       });
-      return;
     }
-
-    const param = hp ? `?hp=${hp}` : '';
-    return fetch(`/$/api/content/v2/get${param}`)
-      .then((response) => response.json())
-      .then((json) => {
-        if (json?.status === 'success' && json?.data) {
-          window.homepages = updateHomepageDb(window.homepages, json.data, hp);
-          window.homepages = postProcessHomepageDb(window.homepages);
-          populateCategoryTitles(window.homepages?.en?.categories);
-          dispatch({
-            type: ACTIONS.FETCH_HOMEPAGES_DONE,
-          });
-        } else {
-          dispatch({
-            type: ACTIONS.FETCH_HOMEPAGES_FAILED,
-          });
-        }
-      })
-      .catch((e) => {
-        console.log('doFetchHomepages:', e); // eslint-disable-line no-console
-
-        dispatch({
-          type: ACTIONS.FETCH_HOMEPAGES_FAILED,
-        });
-      });
   };
 }
 export function doSetHomepage(code: string) {
@@ -429,7 +465,7 @@ export function doSetHomepage(code: string) {
     const state = getState();
     const homepages = selectHomepageDb(state);
 
-    if (code && !homepages[code]) {
+    if (code) {
       await dispatch(doFetchHomepages(code));
     }
 

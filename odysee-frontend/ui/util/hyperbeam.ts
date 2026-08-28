@@ -7,6 +7,7 @@ import { isServedFromManifest } from 'util/manifest-prefix';
 import { hyperbeamClaimSearchRequest, type HyperbeamSearchRequest } from 'util/hyperbeamSearch';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
+import { hasLbryOutpointCommitment, lbryEvidenceCommitmentId } from 'util/lbryCommitment';
 import {
   collapseNativeCommentRevisions,
   isNextNativeCommentRevision,
@@ -144,6 +145,7 @@ const nativeCommentTargetOwnerCache = new Map<string, { expiresAt: number; promi
 let activeAccountOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
 let nativePreferenceOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
 let nativePreferenceWriteQueue: Promise<void> = Promise.resolve();
+let hyperbeamNodeAddressPromise: Promise<string | null> | undefined;
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const urls = urlsFromResolveParams(params);
@@ -2153,6 +2155,31 @@ async function fetchPublicQueryJson(body: Record<string, any>): Promise<any> {
   }
 }
 
+export async function fetchHyperbeamQueryPaths(selectors: Record<string, any>): Promise<Array<string>> {
+  return uniquePaths(queryPaths(await fetchPublicQueryJson(nativeQueryRequest(selectors))));
+}
+
+export function fetchHyperbeamNodeAddress(): Promise<string | null> {
+  if (hyperbeamNodeAddressPromise) return hyperbeamNodeAddressPromise;
+
+  hyperbeamNodeAddressPromise = (async () => {
+    const baseUrl = hyperbeamBaseUrl();
+    if (!baseUrl) return null;
+    const response = await fetch(buildDeviceUrl(baseUrl, '~meta@1.0/info'), {
+      method: 'GET',
+      credentials: hyperbeamFetchCredentials(baseUrl),
+      headers: { accept: 'application/json' },
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const parsed = parseDeviceJson(await response.text());
+    const address = String(value(responsePayload(parsed), 'address') || '').trim();
+    return address || null;
+  })().catch(() => null);
+
+  return hyperbeamNodeAddressPromise;
+}
+
 async function fetchPublicDeviceJson(path: string, body: Record<string, any>): Promise<any> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) throw new Error('HyperBEAM node is not configured');
@@ -2690,7 +2717,15 @@ export async function fetchSearchIds(query: string, options: number | HyperbeamS
     ...(request.sort?.length ? { sort: request.sort } : {}),
   });
   const ids = await searchResultIds(responsePayload(response));
-  return ids.map(String).filter(Boolean);
+  const canonicalIds = await Promise.all(
+    ids.map(async (id) => {
+      const locator = String(id || '');
+      if (!isOutpointId(locator)) return locator;
+      const result = await fetchCachedImmutableJsonOrNull(locator).catch(() => null);
+      return lbryClaimCommitmentId(storePayload(result));
+    })
+  );
+  return canonicalIds.filter((id): id is string => typeof id === 'string' && Boolean(id));
 }
 
 async function searchResultIds(result: any): Promise<Array<any>> {
@@ -3564,19 +3599,22 @@ async function resolveImmutableClaimById(
     return contentRestrictionClaim(immutableUri(immutableId) || `lbry://immutable_${immutableId}`, result, immutableId);
   }
   const payload = storePayload(result);
+  const canonicalImmutableId = lbryClaimCommitmentId(payload) || immutableId;
   const decodedClaim = decodeClaimMetadata(payload);
   const nativeSigningChannelId = value(payload, 'channel-id', 'channel_id');
   const signingChannelId = immutableSigningChannelId || nativeSigningChannelId || decodedClaim?.signedChannelId;
-  const nativeRecord = isNativeMessageId(immutableId)
-    ? await fetchVerifiedNativeMessage(immutableId, payload).catch(() => null)
+  const isNativeRecord =
+    isNativeMessageId(canonicalImmutableId) && !hasLbryOutpointCommitment(payload, canonicalImmutableId);
+  const nativeRecord = isNativeRecord
+    ? await fetchVerifiedNativeMessage(canonicalImmutableId, payload).catch(() => null)
     : null;
-  if (isNativeMessageId(immutableId) && !nativeRecord) return null;
+  if (isNativeRecord && !nativeRecord) return null;
   let signingChannel = signingChannelId
     ? await fetchCachedImmutableChannelJsonOrNull(signingChannelId)
         .then(responsePayload)
         .catch(() => null)
     : null;
-  if (nativeSigningChannelId && signingChannel) {
+  if (isNativeRecord && nativeSigningChannelId && signingChannel) {
     const profile = await fetchVerifiedNativeMessage(String(nativeSigningChannelId), storePayload(signingChannel));
     if (
       !nativeRecord ||
@@ -3588,7 +3626,7 @@ async function resolveImmutableClaimById(
     }
   }
   const claim = await withCompatibilityDate(
-    immutableClaimFromHyperbeam(result, immutableId, signingChannel, decodedClaim, name, signingChannelId)
+    immutableClaimFromHyperbeam(result, canonicalImmutableId, signingChannel, decodedClaim, name, signingChannelId)
   );
   if (!claim) return null;
 
@@ -3605,6 +3643,10 @@ async function resolveImmutableClaimById(
       commitment_verification: 'verified',
     },
   };
+}
+
+function lbryClaimCommitmentId(payload: any): string | null {
+  return lbryEvidenceCommitmentId(payload, 'claim');
 }
 
 // Pre-2019 claims may have no release time in their verified claim bytes. The
@@ -3649,7 +3691,7 @@ export async function fetchVerifiedNativeMessage<T extends Record<string, any> =
   return verifyNativeMessage<T>(
     messageId,
     {
-      loadPayload: async (id) => storePayload(await fetchImmutableJsonOrNull(id)) as T | null,
+      loadPayload: async (id) => storePayload(await fetchImmutableBundleOrNull(id)) as T | null,
       verifyCommitment: fetchNativeMessageCommitmentVerification,
       loadCommitter: fetchNativeMessageCommitter,
     },
@@ -3755,11 +3797,23 @@ function immutableClaimFromHyperbeam(
   const decodedValue: Record<string, any> = claimMetadata?.value || {};
   const decodedSource: Record<string, any> = isObject(decodedValue.source) ? decodedValue.source : {};
   const channelPayload = storePayload(channelResult);
+  const channelSourceClaim = channelPayload
+    ? storeClaimFromHyperbeam(channelPayload) || sdkClaimFromHyperbeam(channelPayload) || channelPayload
+    : null;
+  const decodedChannelValue = channelPayload ? decodeClaimMetadata(channelPayload)?.value : null;
   const channelClaim0 = channelPayload
-    ? normalizeHyperbeamChannelClaim(sdkClaimFromHyperbeam(channelPayload) || channelPayload)
+    ? normalizeHyperbeamChannelClaim({
+        ...channelSourceClaim,
+        value: {
+          ...(isObject(decodedChannelValue) ? decodedChannelValue : {}),
+          ...(isObject(channelSourceClaim?.value) ? channelSourceClaim.value : {}),
+        },
+      })
     : null;
   const channelImmutableId =
-    immutableSigningChannelId || value(channelClaim0, 'immutable_id', 'immutable-id', 'outpoint');
+    lbryEvidenceCommitmentId(channelPayload, 'channel') ||
+    (isStandaloneImmutableId(immutableSigningChannelId) ? immutableSigningChannelId : null) ||
+    value(channelClaim0, 'immutable_id', 'immutable-id', 'outpoint');
   const channelImmutableUri = immutableUri(channelImmutableId);
   const channelName = channelClaim0 && channelClaimName(value(channelClaim0, 'name', 'claim-name', 'claim_name'));
   const channelNativeUri = nativeChannelUri(channelName, channelImmutableId);
@@ -4627,6 +4681,11 @@ async function fetchImmutableJsonOrNull(id: string): Promise<any | null> {
   return fetchStoreJsonOrNull(encodeDataPath(id));
 }
 
+function fetchImmutableBundleOrNull(id: string): Promise<any | null> {
+  if (!isStandaloneImmutableId(id)) return Promise.resolve(null);
+  return fetchStoreJsonOrNull(encodeDataPath(id), false);
+}
+
 function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> {
   const key = `immutable-channel:${id}`;
   const now = Date.now();
@@ -4634,9 +4693,11 @@ function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> 
   if (cached && cached.expiresAt > now) return cached.promise;
 
   const promise = (
-    isOutpointId(id) || isStandaloneImmutableId(id)
-      ? fetchStoreJsonOrNull(encodeDataPath(id))
-      : fetchStoreJsonOrNull(storePath('odysee/channel', id))
+    isOutpointId(id)
+      ? fetchImmutableJsonOrNull(id)
+      : isStandaloneImmutableId(id)
+        ? fetchStoreJsonOrNull(encodeDataPath(id))
+        : fetchStoreJsonOrNull(storePath('odysee/channel', id))
   ).catch((error) => {
     storeReadCache.delete(key);
     throw error;

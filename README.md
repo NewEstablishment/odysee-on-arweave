@@ -342,14 +342,21 @@ the node's generic `manifest@1.0` hook. Manifest builds use hash routing,
 relative assets, and node-safe content types. No production SSR or proxy tier
 is part of the product data path.
 
-Before Vite starts, `build:manifest` queries the configured node's generic
-`search@1.0` surface, verifies every returned immutable locator with an exact
-read, and materializes the ranked homepage/category database into the static
-bundle. This requires a reachable node with a populated Meilisearch index; the
-build fails instead of publishing an empty homepage. The generated
-`custom/homepages/v2/index.ts` is ignored build input and must not be edited by
-hand. `CUSTOM_HOMEPAGE=true` is part of the script rather than a caller-supplied
-flag.
+The bundle contains the language-specific presentation templates, but not a
+node's claim selection. At node startup the Odysee OTP application publishes
+the immutable homepage plan and Lua materializer into the local HyperBEAM
+cache. The Lua computation discovers locators through the configured stores,
+exact-hydrates the selected claims and channels, and publishes one node-signed
+`odysee-homepage@1.0` snapshot per language. It first publishes the configured
+startup language, then stock `cron@1.0` runs the complete all-language refresh
+hourly. A failed refresh leaves the previous committed snapshots available.
+
+The browser discovers snapshots with generic `query@1.0`, exact-reads each
+candidate, verifies its commitment and node committer, and uses the newest
+valid snapshot. Homepage rows and their matching category routes share each
+category's ordered immutable pool. The optional `homepage-local-content`
+configuration adds a locally indexed category without changing the generic
+search device or the frontend templates.
 
 ```sh
 cd odysee-frontend
@@ -358,8 +365,8 @@ pnpm run publish:manifest
 ```
 
 `ODYSEE_HYPERBEAM_NODE_API` is baked into the manifest build and should use the
-same origin as the served frontend for cookie writes. The materializer accepts
-`HYPERBEAM_BASE_URL` as an explicit build-time node override.
+same origin as the served frontend for cookie writes. Homepage generation does
+not require SSR, a browser timer, a local JSON file, or a separate scheduler.
 
 ## Local validation
 
