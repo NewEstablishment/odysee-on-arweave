@@ -38,7 +38,11 @@
 -export([read/3, type/3, resolve/3, list/3]).
 -export([write/3, group/3, link/3]).
 
--define(DEFAULT_RANGE_SIZE, 1048576).
+%% Open-ended browser ranges remain bounded to one standard LBRY plaintext
+%% blob. The bridge aligns the actual end using the verified descriptor's
+%% `plain-blob-stride', avoiding overlap without making a seek wait for a large
+%% response to be fully materialized.
+-define(DEFAULT_RANGE_SIZE, 2_097_151).
 
 start(_StoreOpts, _Req, _NodeOpts) ->
     ok.
@@ -528,13 +532,15 @@ stream_media_source(Stream, Opts) ->
 %% @doc Serve media bytes for a stream. Explicit ranges (store request
 %% `start'/`end' keys or a `range' header value) yield a bounded 206
 %% slice; without one the FULL decrypted object is served with a plain
-%% 200. HTTP `Range' headers do not reach store reads through
-%% `~cache@1.0/read', so serving a partial window to a rangeless caller
-%% would hand video elements the same slice for every request.
+%% 200. A range must be forwarded through `~cache@1.0/read'; serving a
+%% partial window to a rangeless caller would hand video elements the same
+%% slice for every request.
 media_response(Source, Req, Opts) ->
     case request_range(Req, Opts) of
         full -> full_media_response(Source, Opts);
         {ok, Start, End} -> ranged_media_response(Source, Start, End, Opts);
+        {window, Start, MaxBytes} ->
+            windowed_media_response(Source, Start, MaxBytes, Opts);
         Error -> Error
     end.
 
@@ -568,32 +574,66 @@ ranged_media_response(Source, Start, End, Opts) ->
         SDHash = hb_maps:get(<<"sd-hash">>, Source, not_found, Opts),
         {ok, Result} ?=
             hb_odysee_bridge:stream_range(SDHash, BoundedStart, BoundedEnd, Opts),
-        Body = maps:get(<<"bytes">>, Result),
-        ActualEnd = maps:get(<<"end">>, Result),
-        Total = hb_maps:get(<<"byte-size">>, Source, undefined, Opts),
-        {ok,
-            maps:merge(
-                #{
-                    <<"status">> => 206,
-                    <<"content-type">> =>
-                        hb_maps:get(
-                            <<"content-type">>,
-                            Source,
-                            <<"application/octet-stream">>,
-                            Opts
-                        ),
-                    <<"content-length">> => byte_size(Body),
-                    <<"accept-ranges">> => <<"bytes">>,
-                    <<"content-range">> => content_range(BoundedStart, ActualEnd, Total),
-                    <<"sd-hash">> => hb_util:to_lower(SDHash),
-                    <<"start">> => BoundedStart,
-                    <<"end">> => ActualEnd,
-                    <<"requested-end">> => maps:get(<<"requested-end">>, Result),
-                    <<"body">> => Body
-                },
-                media_metadata(Source, Total)
-            )}
+        media_range_response(Source, SDHash, BoundedStart, Result, Opts)
     end.
+
+windowed_media_response(Source, Start, MaxBytes, Opts) ->
+    maybe
+        true ?= is_integer(MaxBytes) andalso MaxBytes > 0 orelse {error, invalid_range},
+        MaxEnd = Start + MaxBytes - 1,
+        {ok, BoundedStart, BoundedEnd} ?= bounded_range(Source, Start, MaxEnd),
+        SDHash = hb_maps:get(<<"sd-hash">>, Source, not_found, Opts),
+        {ok, Result} ?=
+            stream_window_result(
+                Source,
+                SDHash,
+                BoundedStart,
+                BoundedEnd,
+                Opts
+            ),
+        media_range_response(Source, SDHash, BoundedStart, Result, Opts)
+    end.
+
+%% At a known end-of-file there is no following response to overlap, so retain
+%% the exact final byte instead of rounding down to an earlier blob boundary.
+stream_window_result(Source, SDHash, Start, MaxEnd, Opts) ->
+    case range_reaches_eof(Source, MaxEnd) of
+        true -> hb_odysee_bridge:stream_range(SDHash, Start, MaxEnd, Opts);
+        false -> hb_odysee_bridge:stream_window(SDHash, Start, MaxEnd, Opts)
+    end.
+
+range_reaches_eof(Source, End) ->
+    case hb_maps:get(<<"byte-size">>, Source, undefined, #{}) of
+        Size when is_integer(Size), Size > 0 -> End == Size - 1;
+        _ -> false
+    end.
+
+media_range_response(Source, SDHash, BoundedStart, Result, Opts) ->
+    Body = maps:get(<<"bytes">>, Result),
+    ActualEnd = maps:get(<<"end">>, Result),
+    Total = hb_maps:get(<<"byte-size">>, Source, undefined, Opts),
+    {ok,
+        maps:merge(
+            #{
+                <<"status">> => 206,
+                <<"content-type">> =>
+                    hb_maps:get(
+                        <<"content-type">>,
+                        Source,
+                        <<"application/octet-stream">>,
+                        Opts
+                    ),
+                <<"content-length">> => byte_size(Body),
+                <<"accept-ranges">> => <<"bytes">>,
+                <<"content-range">> => content_range(BoundedStart, ActualEnd, Total),
+                <<"sd-hash">> => hb_util:to_lower(SDHash),
+                <<"start">> => BoundedStart,
+                <<"end">> => ActualEnd,
+                <<"requested-end">> => maps:get(<<"requested-end">>, Result),
+                <<"body">> => Body
+            },
+            media_metadata(Source, Total)
+        )}.
 
 request_range(Req, Opts) ->
     case {
@@ -614,9 +654,7 @@ parse_range(<<"bytes=", Spec/binary>>, Opts) ->
         [StartBin, EndBin] when byte_size(StartBin) > 0 ->
             maybe
                 {ok, Start} ?= non_negative_integer(StartBin),
-                {ok, End} ?= range_end(Start, EndBin, Opts),
-                true ?= End >= Start orelse {error, invalid_range},
-                {ok, Start, End}
+                parsed_range_end(Start, EndBin, Opts)
             end;
         _ ->
             {error, invalid_range}
@@ -624,13 +662,29 @@ parse_range(<<"bytes=", Spec/binary>>, Opts) ->
 parse_range(_Range, _Opts) ->
     {error, invalid_range}.
 
-range_end(Start, <<>>, Opts) ->
-    {ok, Start + default_range_size(Opts) - 1};
-range_end(_Start, EndBin, _Opts) ->
-    non_negative_integer(EndBin).
+parsed_range_end(Start, <<>>, Opts) ->
+    case default_range_size(Opts) of
+        MaxBytes when is_integer(MaxBytes), MaxBytes > 0 ->
+            {window, Start, MaxBytes};
+        _ ->
+            {error, invalid_range}
+    end;
+parsed_range_end(Start, EndBin, _Opts) ->
+    maybe
+        {ok, End} ?= non_negative_integer(EndBin),
+        true ?= End >= Start orelse {error, invalid_range},
+        {ok, Start, End}
+    end.
 
 default_range_size(Opts) ->
-    hb_maps:get(<<"odysee-default-range-size">>, Opts, ?DEFAULT_RANGE_SIZE, Opts).
+    integer_or_undefined(
+        hb_maps:get(
+            <<"odysee-default-range-size">>,
+            Opts,
+            ?DEFAULT_RANGE_SIZE,
+            Opts
+        )
+    ).
 
 bounded_range(Source, Start, End) ->
     case hb_maps:get(<<"byte-size">>, Source, undefined, #{}) of
@@ -1484,6 +1538,75 @@ media_sd_hash_range_read_returns_partial_content_test() ->
     ?assertEqual(<<"hello ">>, maps:get(<<"body">>, Msg)),
     ?assertEqual(<<"bytes 0-5/*">>, maps:get(<<"content-range">>, Msg)),
     ?assertEqual(SDHash, maps:get(<<"sd-hash">>, Msg)).
+
+open_ended_range_preserves_bounded_window_intent_test() ->
+    ?assertEqual(
+        {window, 0, ?DEFAULT_RANGE_SIZE},
+        request_range(#{ <<"range">> => <<"bytes=0-">> }, #{})
+    ),
+    ?assertEqual(
+        {window, 17, 4096},
+        request_range(
+            #{ <<"range">> => <<"bytes=17-">> },
+            #{ <<"odysee-default-range-size">> => 4096 }
+        )
+    ),
+    ?assertEqual(
+        {window, 17, 4096},
+        request_range(
+            #{ <<"range">> => <<"bytes=17-">> },
+            #{ <<"odysee-default-range-size">> => <<"4096">> }
+        )
+    ),
+    ?assertEqual(
+        {error, invalid_range},
+        request_range(
+            #{ <<"range">> => <<"bytes=17-">> },
+            #{ <<"odysee-default-range-size">> => 0 }
+        )
+    ).
+
+explicit_closed_range_remains_exact_test() ->
+    ?assertEqual(
+        {ok, 17, 31},
+        request_range(#{ <<"range">> => <<"bytes=17-31">> }, #{})
+    ),
+    ?assertEqual(
+        {error, invalid_range},
+        request_range(#{ <<"range">> => <<"bytes=31-17">> }, #{})
+    ).
+
+open_ended_final_short_stream_returns_exact_eof_test() ->
+    Plaintext = <<"hello verified legacy stream">>,
+    {Raw, SDHash, BlobHash, Ciphertext} =
+        hb_lbry_test_fixtures:sample_descriptor(Plaintext),
+    Source = #{
+        <<"sd-hash">> => SDHash,
+        <<"byte-size">> => byte_size(Plaintext),
+        <<"content-type">> => <<"video/mp4">>
+    },
+    Opts = #{
+        <<"lbry-blob-store">> => #{
+            <<"fixtures">> => #{
+                SDHash => Raw,
+                BlobHash => Ciphertext
+            }
+        }
+    },
+    {ok, Msg} = media_response(
+        Source,
+        #{ <<"range">> => <<"bytes=0-">> },
+        Opts
+    ),
+    End = byte_size(Plaintext) - 1,
+    ?assertEqual(206, maps:get(<<"status">>, Msg)),
+    ?assertEqual(Plaintext, maps:get(<<"body">>, Msg)),
+    ?assertEqual(byte_size(Plaintext), maps:get(<<"content-length">>, Msg)),
+    ?assertEqual(
+        content_range(0, End, byte_size(Plaintext)),
+        maps:get(<<"content-range">>, Msg)
+    ),
+    ?assertEqual(End, maps:get(<<"requested-end">>, Msg)).
 
 direct_media_hash_is_disabled_with_policy_providers_test() ->
     SDHash = <<"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef">>,

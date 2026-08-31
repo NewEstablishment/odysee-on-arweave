@@ -169,7 +169,12 @@ creator controls.
 Direct immutable responses honor RFC 7233 single byte ranges. The generic
 cache read forwards range fields to range-aware source stores, while the HTTP
 boundary derives a `206` slice for locally stored immutable bodies and removes
-whole-object commitment headers from that partial representation.
+whole-object commitment headers from that partial representation. Historical
+LBRY open-ended ranges use a bounded, descriptor-aligned one-blob window by
+default, avoiding overlap between adjacent browser requests without making
+startup or a seek wait for a large response to be fully materialized; explicit
+ranges retain their exact bounds. The browser also avoids generating
+scrub-preview sprites by seeking a second hidden player across HyperBEAM media.
 
 Native channel profiles are normalized at the frontend integration boundary
 into the same claim shape consumed by Redux and channel pages. Their permanent

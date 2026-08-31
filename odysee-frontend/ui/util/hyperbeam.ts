@@ -3,6 +3,7 @@ import { SORT_BY } from 'constants/comment';
 import { pushHyperbeamDebug } from 'util/hyperbeamDebug';
 import { allowHyperbeamCompatibilityReads } from 'util/hyperbeamMode';
 import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
+import { resolveHyperbeamPayloadOutpoint } from 'util/hyperbeamOutpoint';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { hyperbeamClaimSearchRequest, type HyperbeamSearchRequest } from 'util/hyperbeamSearch';
 import { isHyperbeamUploadClaim } from 'util/claim';
@@ -3862,8 +3863,13 @@ function immutableClaimFromHyperbeam(
     value(payload, 'claim_id', 'claim-id') ||
     value(claim, 'claim_id', 'claim-id') ||
     claimIdFromSignatureInput(value(payload, 'signature-input'));
-  const txid = value(payload, 'txid') || immutableOutpoint?.txid;
-  const nout = value(payload, 'nout') || immutableOutpoint?.nout;
+  // Keeping output zero here makes wrapped legacy evidence use the verified
+  // `odysee/media/stream-id/<txid>:0` store route, not its evidence-message ID.
+  const { txid, nout } = resolveHyperbeamPayloadOutpoint(
+    value(payload, 'txid'),
+    value(payload, 'nout'),
+    immutableOutpoint
+  );
   const device = value(payload, 'device');
   const isNativeChannelProfile = value(payload, 'type') === 'channel';
   const isChannelEvidence = Boolean(value(payload, 'public-key', 'public_key'));

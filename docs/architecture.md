@@ -354,6 +354,14 @@ HTTP delivery supports one RFC 7233 byte range. Range-aware cache/source stores
 receive the requested bounds directly; locally materialized immutable bodies
 are sliced at the HTTP boundary and returned as an unsigned derived `206`
 representation, leaving the exact whole message as the verification surface.
+For historical LBRY media, an open-ended browser range remains bounded to one
+plaintext source blob by default and ends on the verified descriptor's blob
+boundary when possible. The next request therefore starts at the next source
+blob instead of refetching an overlap. Explicit closed ranges and the final
+end-of-file window remain exact, and every fetched encrypted blob is still
+hash-verified before decryption. The frontend does not synthesize scrub-preview
+sprites from HyperBEAM media, because doing so would create a hidden second
+player that competes with playback by seeking across the external source.
 
 Generic `search@1.0` provides ranked locator discovery for homepage, category,
 and text-search requests. The frontend maps filters and sort before the query,
