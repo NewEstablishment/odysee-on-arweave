@@ -7,7 +7,6 @@ import { isURIValid } from 'util/lbryURI';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import * as PAGES from 'constants/pages';
 import * as SETTINGS from 'constants/settings';
-import { COLLECTION_PAGE } from 'constants/urlParams';
 import { isChannelClaim, isClaimNsfw, isClaimShort, isStreamPlaceholderClaim } from 'util/claim';
 import { isClaimAllowedForCollection } from 'util/collections';
 import { formatLbryUrlForWeb } from 'util/url';
@@ -198,9 +197,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
   const isEmbed = React.useContext(EmbedContext);
   const isMobile = useIsMobile();
   const { pathname, search } = useLocation();
-  const urlParams = new URLSearchParams(search);
   const playlistPreviewItem = unavailableUris !== undefined || showIndexes;
-  const isCollectionOnPublicView = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLIC;
   const collectionClaimId = isCollection && claim && claim.claim_id;
   const listId = collectionId || collectionClaimId || undefined;
   const WrapperElement: any = wrapperElement || 'li';
@@ -574,7 +571,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
             </span>
           )}
 
-          {isMyCollection && showEdit && !isCollectionOnPublicView && (
+          {isMyCollection && showEdit && (
             <CollectionEditButtons
               uri={uri}
               collectionId={listId}

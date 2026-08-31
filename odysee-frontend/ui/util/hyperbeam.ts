@@ -51,6 +51,15 @@ import {
   type NativePlaylistReference,
 } from 'util/nativePlaylistReferences';
 import {
+  NATIVE_PRIVATE_PLAYLIST_PURPOSE,
+  nativePrivatePlaylistPlaintext,
+  nativePrivatePlaylistSnapshotMessage,
+  normalizeNativePrivatePlaylistEnvelope,
+  normalizeNativePrivatePlaylistSnapshot,
+  parseNativePrivatePlaylistPlaintext,
+  type NativePrivatePlaylistSnapshot,
+} from 'util/nativePrivatePlaylists';
+import {
   NATIVE_PREFERENCE_ALGORITHM,
   NATIVE_PREFERENCE_KEY_VERSION,
   NATIVE_PREFERENCE_REFERENCE_TYPE,
@@ -110,6 +119,7 @@ const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
 const SEARCH_DEVICE = '~search@1.0';
 const PREFERENCE_DEVICE = '~odysee-preference@1.0';
+const PRIVATE_DEVICE = '~odysee-private@1.0';
 const SEARCH_MAX_LIMIT = 100;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
@@ -707,6 +717,7 @@ export type NativePlaylistWriteParams = {
   languages?: Array<string>;
   items: Array<string>;
   reference_id?: string;
+  visibility?: 'private' | 'public';
 };
 
 export async function fetchHyperbeamPlaylistListMine(
@@ -773,16 +784,16 @@ export async function fetchHyperbeamPlaylistById(messageId: string): Promise<Cla
       resolved.reference.reference_id
     );
   }
-  const playlist = await fetchNativePlaylistById(messageId);
+  const playlist = await fetchNativePlaylistSnapshotById(messageId);
   if (!playlist) return null;
   const viewerOwner = await activeHyperbeamAccountOwner();
   return nativePlaylistClaim(playlist, viewerOwner === playlist.owner);
 }
 
-export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteParams): Promise<Claim> {
+export async function fetchHyperbeamPlaylistSave(params: NativePlaylistWriteParams): Promise<Claim> {
   const account = getHyperbeamAccount();
   const owner = await activeHyperbeamAccountOwner();
-  if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before publishing');
+  if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before saving playlists');
 
   let reference: NativePlaylistReference | null = null;
   let currentPlaylist: NativePlaylist | null = null;
@@ -798,19 +809,26 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
     currentPlaylist = resolved.playlist;
   }
 
+  const currentVisibility = currentPlaylist?.visibility === 'private' ? 'private' : currentPlaylist ? 'public' : null;
+  const visibility = params.visibility || currentVisibility || 'private';
+  if (currentVisibility === 'public' && visibility === 'private') {
+    throw new Error('A public playlist cannot be made private because its published history remains public');
+  }
+
   const timestamp = Math.max(Date.now(), (reference?.timestamp || 0) + 1);
-  const message = nativePlaylistMessage({
+  const playlistMessage = nativePlaylistMessage({
     ...params,
     profileId: account.id,
     profileName: account.name,
     createdAt: currentPlaylist?.created_at || timestamp,
     updatedAt: timestamp,
   });
-  validateNativePlaylistWrite(message, owner);
+  validateNativePlaylistWrite(playlistMessage, owner);
 
-  const messageId = await writeNativeMessage(message, 'playlist');
+  const message = visibility === 'private' ? await nativePrivatePlaylistMessage(playlistMessage) : playlistMessage;
+  const messageId = await writeNativeMessage(message, visibility === 'private' ? 'private playlist' : 'playlist');
   nativePlaylistQueryCache.clear();
-  const written = await fetchNativePlaylistById(messageId);
+  const written = await fetchNativePlaylistSnapshotById(messageId);
   if (!written || written.owner !== owner || written.message_id !== messageId) {
     throw new Error('HyperBEAM native playlist failed commitment or ownership verification');
   }
@@ -819,6 +837,7 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
     ? nativePlaylistReferenceSetMessage({
         profileId: account.id,
         profileName: account.name,
+        owner,
         referenceId: reference.reference_id,
         snapshotId: messageId,
         timestamp,
@@ -826,6 +845,7 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
     : nativePlaylistReferenceInitMessage({
         profileId: account.id,
         profileName: account.name,
+        owner,
         snapshotId: messageId,
         timestamp,
       });
@@ -894,7 +914,7 @@ async function fetchNativePlaylistForReference(
     'reference-id': init.reference_id,
   });
   const reference = projectNativePlaylistReference(init, candidates);
-  const playlist = await fetchNativePlaylistById(reference.reference_value);
+  const playlist = await fetchNativePlaylistSnapshotById(reference.reference_value);
   if (
     !playlist ||
     playlist.owner !== init.owner ||
@@ -961,6 +981,39 @@ async function fetchNativePlaylistById(id: string): Promise<NativePlaylist | nul
   return profile ? { ...playlist, profile_name: profile.name } : null;
 }
 
+async function fetchNativePlaylistSnapshotById(id: string): Promise<NativePlaylist | null> {
+  const publicPlaylist = await fetchNativePlaylistById(id);
+  if (publicPlaylist) return { ...publicPlaylist, visibility: 'public' };
+  return fetchNativePrivatePlaylistById(id);
+}
+
+async function fetchNativePrivatePlaylistById(id: string): Promise<NativePlaylist | null> {
+  if (!isNativeMessageId(id)) return null;
+  const normalizedId = id.replace(/^\/+/, '');
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  const snapshot = normalizeNativePrivatePlaylistSnapshot({
+    ...verified.payload,
+    'message-id': normalizedId,
+    'hyperbeam-owner': verified.owner,
+  });
+  if (!snapshot || snapshot.owner !== verified.owner) return null;
+  const viewerOwner = await activeHyperbeamAccountOwner();
+  if (!viewerOwner || viewerOwner !== snapshot.owner || snapshot.encrypted_for !== viewerOwner) return null;
+
+  let opened;
+  try {
+    opened = await fetchPrivateDeviceJson('open', privatePlaylistEnvelopeBody(snapshot));
+  } catch {
+    return null;
+  }
+  const playlist = parseNativePrivatePlaylistPlaintext(value(opened, 'plaintext', 'body'), snapshot);
+  if (!playlist || playlist.owner !== viewerOwner) return null;
+  const profile = await verifiedNativePlaylistProfile(playlist);
+  return profile ? { ...playlist, profile_name: profile.name, visibility: 'private' } : null;
+}
+
 async function verifiedNativePlaylistProfile(playlist: NativePlaylist): Promise<{ name: string } | null> {
   const verified = await fetchVerifiedNativeMessage(playlist.profile_id);
   const name = value(verified?.payload || {}, 'name');
@@ -1005,6 +1058,28 @@ function nativePlaylistMessage(
   });
 }
 
+async function nativePrivatePlaylistMessage(playlistMessage: Record<string, any>): Promise<Record<string, any>> {
+  const sealed = await fetchPrivateDeviceJson('seal', {
+    purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE,
+    plaintext: nativePrivatePlaylistPlaintext(playlistMessage),
+  });
+  const envelope = normalizeNativePrivatePlaylistEnvelope(sealed);
+  if (!envelope) throw new Error('HyperBEAM returned an invalid private playlist encryption envelope');
+  return nativePrivatePlaylistSnapshotMessage(envelope);
+}
+
+function privatePlaylistEnvelopeBody(snapshot: NativePrivatePlaylistSnapshot): Record<string, any> {
+  return {
+    purpose: snapshot.purpose,
+    algorithm: snapshot.algorithm,
+    'key-version': snapshot.key_version,
+    owner: snapshot.encrypted_for,
+    iv: snapshot.iv,
+    ciphertext: snapshot.ciphertext,
+    tag: snapshot.tag,
+  };
+}
+
 function validateNativePlaylistWrite(message: Record<string, any>, owner: string) {
   const candidate = normalizeNativePlaylist({
     ...message,
@@ -1019,6 +1094,7 @@ function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean, referenc
   const creationTimestamp = Math.floor(playlist.created_at / 1000);
   const publicId = referenceId || playlist.message_id;
   const permanentUrl = `/$/playlist/${encodeURIComponent(publicId)}`;
+  const visibility = playlist.visibility === 'private' ? 'private' : 'public';
   return {
     claim_id: publicId,
     name: playlist.title,
@@ -1040,13 +1116,15 @@ function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean, referenc
     timestamp,
     confirmations: 1,
     is_my_output: isMine,
+    visibility,
     hyperbeam: {
-      schema: playlist.schema,
+      schema: playlist.storage_schema || playlist.schema,
       message_id: playlist.message_id,
       reference_id: referenceId,
       owner: playlist.owner,
       profile_id: playlist.profile_id,
       profile_name: playlist.profile_name,
+      visibility,
     },
   } as unknown as Claim;
 }
@@ -2222,6 +2300,32 @@ async function fetchPreferenceDeviceJson(method: 'owner' | 'seal' | 'open', body
   const text = await response.text();
   if (!response.ok) {
     const error = new Error(`HyperBEAM preference ${method} failed with ${response.status}`);
+    Object.assign(error, { status: response.status, responseBody: text });
+    throw error;
+  }
+  return parseDeviceJson(text);
+}
+
+async function fetchPrivateDeviceJson(method: 'seal' | 'open', body: Record<string, any>): Promise<any> {
+  const baseUrl = hyperbeamBaseUrl();
+  if (!baseUrl) throw new Error('HyperBEAM node is not configured');
+  const direct = typeof window === 'undefined' || isServedFromManifest();
+  const url = direct
+    ? buildDeviceUrl(baseUrl, `${PRIVATE_DEVICE}/${method}`)
+    : `${HYPERBEAM_AUTH_DEVICE_PROXY_BASE}/${PRIVATE_DEVICE}/${method}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`HyperBEAM private ${method} failed with ${response.status}`);
     Object.assign(error, { status: response.status, responseBody: text });
     throw error;
   }

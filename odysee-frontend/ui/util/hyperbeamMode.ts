@@ -17,6 +17,7 @@ const CANONICAL_NATIVE_DEVICES = new Set([
   '~odysee-file@1.0',
   '~odysee-file-reaction@1.0',
   '~odysee-preference@1.0',
+  '~odysee-private@1.0',
   '~odysee-reaction@1.0',
   '~query@1.0',
   '~odysee-search@1.0',

@@ -47,7 +47,8 @@ forever (committed messages are immutable, historical shapes never go away).
 | `odysee-comment@1.0` | the root comment id |
 | `odysee-reaction@1.0` | `reaction-ref`, random per (owner, target) |
 | `odysee-subscription@1.0` | `subscription-ref` = `<owner>.<channel-ref>`, deterministic |
-| `odysee-playlist@1.0` | none: immutable snapshots, every publish is a new message |
+| `odysee-playlist@1.0` | none: immutable snapshots, every save is a new message |
+| `odysee-private-playlist@1.0` | none: owner-bound encrypted immutable snapshots, every save is a new message |
 | `odysee-upload@1.0` | none yet: revisions are the planned model for edit/delete |
 
 ## Identity and verification
@@ -56,3 +57,9 @@ The committer is the cookie account's wallet; readers verify the
 commitment (`hb_message` semantics via the node) and trust only committed
 keys. `owner` in projections is always the verified committer, never a
 self-declared field.
+
+Private playlist snapshots contain an AES-256-GCM envelope only. Their
+decrypted payload uses the ordinary playlist fields under the separate
+`odysee-private-playlist-payload@1.0` signing domain. The
+`odysee-private@1.0` device performs authenticated, domain-separated seal/open
+but never writes the snapshot or moves its generic `reference@1.0` head.

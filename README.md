@@ -32,6 +32,9 @@ The current implementation follows these decisions:
 - [`decisions/native-user-preferences.md`](decisions/native-user-preferences.md):
   private settings use encrypted immutable snapshots and a generic stable
   reference head.
+- [`decisions/private-playlists.md`](decisions/private-playlists.md): private
+  playlists use owner-bound encrypted snapshots and can advance the same
+  stable reference to a public snapshot exactly once.
 - [`docs/architecture.md`](docs/architecture.md): full trust, node-role, read,
   and write architecture.
 - [`docs/content-restrictions.md`](docs/content-restrictions.md): policy schema,
@@ -75,6 +78,7 @@ The application minimizes custom device surface:
 | `odysee-auth@1.0` | Compatibility authentication helper where an existing session must be translated. It is not the native account model. |
 | `blacklist@1.0` (upstream) | Enforces node-selected global and geographic content policy on request and response hooks. |
 | `odysee-preference@1.0` | Authenticated seal/open boundary for private preference ciphertext. It stores no state and owns no reference semantics. |
+| `odysee-private@1.0` | Domain-separated authenticated seal/open boundary for private playlist ciphertext. It stores no playlist state and owns no reference semantics. |
 
 There are no `odysee-claim@1.0`, `odysee-stream@1.0`,
 `odysee-upload@1.0`, or `odysee-comment@1.0` application devices in the active
@@ -107,7 +111,7 @@ they are not alternate UI APIs.
 | Name or URI | Mutable lookup input, never immutable identity. |
 | Native comment revision | Its own immutable message ID, linked to a logical root comment. |
 | Native reaction revision | Its own immutable message ID, linked through stable logical reaction and version references. |
-| Native playlist snapshot | Any verified commitment ID for its immutable message. Republished payloads receive new exact-read IDs. |
+| Native playlist snapshot | Any verified commitment ID for its immutable message. Later saved payloads receive new exact-read IDs. |
 | Native preference snapshot | Its verified immutable message ID. |
 | Native preference state | The canonical `reference@1.0` init commitment ID; same-owner set messages advance its snapshot value. |
 
@@ -182,6 +186,11 @@ before transport and the browser fetch guard blocks the legacy SDK proxy as a
 second boundary. Livestream operations that still require a legacy channel
 signature remain unavailable until they have a native contract.
 
+The manifest does not poll the legacy Odysee degraded-performance endpoint.
+Historical remote thumbnail sources render directly in HyperBEAM mode;
+inherited `thumbnails.odycdn.com` optimizer URLs are unwrapped, and built-in
+wallpaper/placeholder assets are served from the manifest itself.
+
 Homepage and category `claim_search` requests map filters, ordering, and
 pagination to generic `search@1.0` requests, then hydrate the returned ordered
 immutable locators through exact reads. Native channel content uses a bounded
@@ -253,32 +262,51 @@ legacy reaction API.
 
 ### Playlists
 
-Public playlists pair cookie-signed immutable `odysee-playlist@1.0` snapshots
-with the pinned generic `reference@1.0` device. The reference init commitment
-is the stable public route `/$/playlist/<reference-id>`. The frontend uses
-generic stage-scoped `/id` writes, `query@1.0/only` discovery, and exact commitment
-hydration; it does not call the LBRY `collection_*` API.
+User-created playlists pair cookie-signed immutable snapshots with the pinned
+generic `reference@1.0` device. The reference init commitment is the stable
+route `/$/playlist/<reference-id>`. Public contents use
+`odysee-playlist@1.0`; private contents use an
+`odysee-private-playlist@1.0` AES-256-GCM envelope whose decrypted payload has
+the same playlist contract. The frontend uses generic stage-scoped `/id`
+writes, `query@1.0/only` discovery, and exact commitment hydration; it does not
+call the LBRY `collection_*` API.
 
 - Every message contains a complete ordered snapshot of immutable native IDs
   and/or legacy `<txid>:<nout>` outpoints.
-- A republish after editing or reordering writes a new full snapshot and a
+- Every create or save writes a new full snapshot and a
   strictly newer same-owner reference set while keeping the share URL stable.
   Earlier snapshots remain immutable and exactly addressable.
+- New and copied playlists default to private. Their title, description,
+  thumbnail, tags, languages, profile metadata, and ordered item IDs are
+  ciphertext at rest. Only the matching authenticated cookie wallet can open
+  them through the private/no-store crypto boundary.
+- The reference declares and verifies its playlist owner so private discovery
+  is owner-scoped before decryption. A private playlist may be made public by
+  advancing the same reference to a plaintext `odysee-playlist@1.0` snapshot.
+  That conversion is one-way because prior public history cannot be hidden.
 - Readers hydrate and verify every discovered init/set commitment and the
   selected snapshot. The init committer is the authority; foreign writers,
   stale or tied updates, and foreign-owned snapshots are rejected.
 - Mutable 40-character claim IDs, names, and URIs are rejected as stored item
-  identity; the integration layer resolves local draft URIs before publish.
+  identity; the integration layer resolves browser-side URIs before saving.
 - Duplicate physical reads are deduplicated by their returned locator. The playlist
   and its claimed profile must verify under the same committer.
-- Queue, Watch Later, Favorites, and unpublished drafts stay local. Publishing
-  a draft creates a new public immutable snapshot.
+- Queue, Watch Later, and Favorites stay local. A temporary browser draft is
+  retained only when a committed save fails so the user can retry without
+  losing edits; playlist data is not stored in encrypted user preferences.
 
-Playlist UI retains list, local edit/reorder, explicit snapshot publish, play,
-shuffle, and share. Published delete remains hidden until it has an honest
-append-only contract. The UI has no
+Playlist UI retains list, edit/reorder, play, and shuffle; Share appears only
+for public playlists. There is no
+separate publish or republish step: Save is the committed HyperBEAM write, and
+ordinary add/remove actions save automatically. Saved deletion remains hidden
+until it has an honest append-only contract. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
+
+`odysee-private@1.0` is a cryptographic boundary, not a playlist device. It
+derives an owner-bound, playlist-domain-separated key from the authenticated
+hosted wallet and seals or opens payloads without storing snapshots, moving
+references, or returning key material.
 
 ### User preferences
 

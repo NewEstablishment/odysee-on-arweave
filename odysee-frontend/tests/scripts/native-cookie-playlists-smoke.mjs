@@ -13,8 +13,21 @@ import {
   normalizeNativePlaylistReference,
   projectNativePlaylistReference,
 } from '../../ui/util/nativePlaylistReferences.ts';
+import {
+  NATIVE_PRIVATE_PLAYLIST_ALGORITHM,
+  NATIVE_PRIVATE_PLAYLIST_KEY_VERSION,
+  NATIVE_PRIVATE_PLAYLIST_PURPOSE,
+  nativePrivatePlaylistPlaintext,
+  nativePrivatePlaylistSnapshotMessage,
+  normalizeNativePrivatePlaylistEnvelope,
+  normalizeNativePrivatePlaylistSnapshot,
+  parseNativePrivatePlaylistPlaintext,
+} from '../../ui/util/nativePrivatePlaylists.ts';
 
 const nodeBase = String(process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18801').replace(/\/+$/, '');
+const authDeviceBridgeBase = String(
+  process.env.HYPERBEAM_AUTH_DEVICE_BRIDGE_BASE || process.env.HYPERBEAM_PREFERENCE_BRIDGE_BASE || ''
+).replace(/\/+$/, '');
 const now = Date.now();
 const profileNameA = `playlist-a-${now}`;
 const profileNameB = `playlist-b-${now}`;
@@ -23,6 +36,122 @@ const profileB = await write({ type: 'channel', name: profileNameB });
 const ownerA = await committer(profileA.id);
 const ownerB = await committer(profileB.id);
 assert.notEqual(ownerA, ownerB);
+
+const anonymousPrivateOwner = await privateRequest('owner', {}, '');
+assert.equal(anonymousPrivateOwner.response.ok, false, 'private playlist crypto requires an authenticated wallet');
+const privateOwner = await privateRequest('owner', {}, profileA.cookie);
+assert.equal(privateOwner.response.ok, true, privateOwner.text.slice(0, 500));
+assert.equal(privateOwner.response.headers.get('cache-control'), 'no-store, private');
+assert.equal(String(privateOwner.payload.owner || privateOwner.payload.body), ownerA);
+
+const privateTimestamp = now + 10;
+const privateTitle = `Private playlist ${now}`;
+const privatePlaintext = nativePrivatePlaylistPlaintext(
+  playlistMessage({
+    profile: profileA.id,
+    profileName: profileNameA,
+    title: privateTitle,
+    items: [profileA.id, profileB.id],
+    createdAt: privateTimestamp,
+  })
+);
+const privateSeal = await privateRequest(
+  'seal',
+  { purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE, plaintext: privatePlaintext },
+  profileA.cookie
+);
+assert.equal(privateSeal.response.ok, true, privateSeal.text.slice(0, 500));
+assert.equal(privateSeal.response.headers.get('cache-control'), 'no-store, private');
+assert.equal(privateSeal.text.includes(privateTitle), false, 'the seal response must not echo playlist plaintext');
+const privateEnvelope = normalizeNativePrivatePlaylistEnvelope(privateSeal.payload);
+assert.ok(privateEnvelope);
+assert.equal(privateEnvelope.algorithm, NATIVE_PRIVATE_PLAYLIST_ALGORITHM);
+assert.equal(privateEnvelope.key_version, NATIVE_PRIVATE_PLAYLIST_KEY_VERSION);
+assert.equal(privateEnvelope.owner, ownerA);
+
+const privateSnapshot = await write(nativePrivatePlaylistSnapshotMessage(privateEnvelope), profileA.cookie);
+assert.equal(await verified(privateSnapshot.id), true);
+assert.equal(await committer(privateSnapshot.id), ownerA);
+const privateSnapshotPayload = unwrap(await read(privateSnapshot.id));
+assert.equal(JSON.stringify(privateSnapshotPayload).includes(privateTitle), false);
+assert.equal(JSON.stringify(privateSnapshotPayload).includes(profileA.id), false);
+const privateSnapshotRecord = normalizeNativePrivatePlaylistSnapshot({
+  ...privateSnapshotPayload,
+  'message-id': privateSnapshot.id,
+  'hyperbeam-owner': ownerA,
+});
+assert.ok(privateSnapshotRecord);
+
+const openedPrivate = await privateRequest('open', privateOpenRequest(privateSnapshotRecord), profileA.cookie);
+assert.equal(openedPrivate.response.ok, true, openedPrivate.text.slice(0, 500));
+assert.equal(openedPrivate.response.headers.get('cache-control'), 'no-store, private');
+const decryptedPrivate = parseNativePrivatePlaylistPlaintext(
+  openedPrivate.payload.plaintext || openedPrivate.payload.body,
+  privateSnapshotRecord
+);
+assert.equal(decryptedPrivate?.title, privateTitle);
+assert.deepEqual(decryptedPrivate?.items, [profileA.id, profileB.id]);
+assert.equal(decryptedPrivate?.owner, ownerA);
+
+const foreignPrivateOpen = await privateRequest('open', privateOpenRequest(privateSnapshotRecord), profileB.cookie);
+assert.equal(foreignPrivateOpen.response.ok, false, 'another authenticated wallet must not decrypt the playlist');
+const tamperedPrivateOpen = await privateRequest(
+  'open',
+  { ...privateOpenRequest(privateSnapshotRecord), ciphertext: tamper(privateSnapshotRecord.ciphertext) },
+  profileA.cookie
+);
+assert.equal(tamperedPrivateOpen.response.ok, false, 'authenticated encryption must reject modified ciphertext');
+
+const privateReference = await write(
+  nativePlaylistReferenceInitMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    owner: ownerA,
+    snapshotId: privateSnapshot.id,
+    timestamp: privateTimestamp,
+  }),
+  profileA.cookie
+);
+const publicConversionTimestamp = privateTimestamp + 1;
+const publicConversion = await write(
+  playlistMessage({
+    profile: profileA.id,
+    profileName: profileNameA,
+    title: privateTitle,
+    items: [profileA.id, profileB.id],
+    createdAt: publicConversionTimestamp,
+  }),
+  profileA.cookie
+);
+const publicConversionReference = await write(
+  nativePlaylistReferenceSetMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    owner: ownerA,
+    referenceId: privateReference.id,
+    snapshotId: publicConversion.id,
+    timestamp: publicConversionTimestamp,
+  }),
+  profileA.cookie
+);
+const privateReferencePaths = await queryUntilTimestamps(
+  {
+    'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
+    'reference-id': privateReference.id,
+  },
+  [publicConversionTimestamp]
+);
+const privateReferenceInit = await hydrateReference(privateReference.id);
+assert.ok(privateReferenceInit?.is_init);
+const privateReferenceCandidates = (await Promise.all(privateReferencePaths.map(hydrateReference))).filter(Boolean);
+const convertedHead = projectNativePlaylistReference(privateReferenceInit, privateReferenceCandidates);
+assert.equal(convertedHead.reference_id, privateReference.id, 'visibility conversion preserves the stable URL');
+assert.equal(
+  convertedHead.reference_value,
+  publicConversion.id,
+  'the stable reference advances to plaintext public data'
+);
+assert.equal(await verified(publicConversionReference.id), true);
 
 const first = await write(
   playlistMessage({
@@ -40,6 +169,7 @@ const playlistReference = await write(
   nativePlaylistReferenceInitMessage({
     profileId: profileA.id,
     profileName: profileNameA,
+    owner: ownerA,
     snapshotId: first.id,
     timestamp: now,
   }),
@@ -52,25 +182,26 @@ assert.equal(
 );
 assert.equal(await committer(playlistReference.id), ownerA);
 
-const republished = await write(
+const laterSave = await write(
   playlistMessage({
     profile: profileA.id,
     profileName: profileNameA,
-    title: 'Republished immutable snapshot',
+    title: 'Later saved immutable snapshot',
     items: [profileB.id, profileA.id],
     createdAt: now + 1,
   }),
   profileA.cookie
 );
-assert.equal(await verified(republished.id), true);
-assert.equal(await committer(republished.id), ownerA);
-assert.notEqual(first.id, republished.id, 'republishing must produce a new immutable playlist ID');
+assert.equal(await verified(laterSave.id), true);
+assert.equal(await committer(laterSave.id), ownerA);
+assert.notEqual(first.id, laterSave.id, 'a later save must produce a new immutable playlist ID');
 const referenceUpdate = await write(
   nativePlaylistReferenceSetMessage({
     profileId: profileA.id,
     profileName: profileNameA,
+    owner: ownerA,
     referenceId: playlistReference.id,
-    snapshotId: republished.id,
+    snapshotId: laterSave.id,
     timestamp: now + 1,
   }),
   profileA.cookie
@@ -82,6 +213,7 @@ const forgedReferenceUpdate = await write(
   nativePlaylistReferenceSetMessage({
     profileId: profileA.id,
     profileName: profileNameA,
+    owner: ownerB,
     referenceId: playlistReference.id,
     snapshotId: profileB.id,
     timestamp: now + 999,
@@ -102,14 +234,14 @@ const init = references.find((reference) => reference.message_id === playlistRef
 assert.ok(init?.is_init);
 const referenceHead = projectNativePlaylistReference(init, references);
 assert.equal(referenceHead.reference_id, playlistReference.id, 'the playlist URL remains the init message ID');
-assert.equal(referenceHead.reference_value, republished.id, 'the valid owner update selects the new snapshot');
+assert.equal(referenceHead.reference_value, laterSave.id, 'the valid owner update selects the new snapshot');
 assert.equal(referenceHead.owner, ownerA, 'a foreign committer cannot move the reference');
 
 const firstPayload = unwrap(await read(first.id));
-const republishedPayload = unwrap(await read(republished.id));
+const laterSavePayload = unwrap(await read(laterSave.id));
 assert.deepEqual(JSON.parse(firstPayload['items-json']), [profileA.id, profileB.id]);
-assert.deepEqual(JSON.parse(republishedPayload['items-json']), [profileB.id, profileA.id]);
-for (const payload of [firstPayload, republishedPayload]) {
+assert.deepEqual(JSON.parse(laterSavePayload['items-json']), [profileB.id, profileA.id]);
+for (const payload of [firstPayload, laterSavePayload]) {
   assert.equal(payload['playlist-ref'], undefined);
   assert.equal(payload['version-ref'], undefined);
   assert.equal(payload['revision-of'], undefined);
@@ -141,17 +273,18 @@ const other = await write(
 
 const pathsA = await queryUntilCreatedAts(
   { schema: NATIVE_PLAYLIST_SCHEMA, type: 'playlist', 'profile-id': profileA.id },
-  [now, now + 1, now + 2]
+  [now, now + 1, now + 2, publicConversionTimestamp]
 );
 const recordsA = (await Promise.all(pathsA.map(hydrateVerified))).filter(Boolean);
 const snapshotsA = immutableNativePlaylists(recordsA);
 assert.deepEqual(
   snapshotsA.map((playlist) => playlist.created_at),
-  [now + 1, now],
-  'owner listing keeps both immutable snapshots and rejects a foreign signer claiming the profile'
+  [publicConversionTimestamp, now + 1, now],
+  'owner listing keeps every valid immutable snapshot and rejects a foreign signer claiming the profile'
 );
-assert.deepEqual(snapshotsA[0].items, [profileB.id, profileA.id]);
-assert.deepEqual(snapshotsA[1].items, [profileA.id, profileB.id]);
+assert.deepEqual(snapshotsA[0].items, [profileA.id, profileB.id]);
+assert.deepEqual(snapshotsA[1].items, [profileB.id, profileA.id]);
+assert.deepEqual(snapshotsA[2].items, [profileA.id, profileB.id]);
 
 const pathsB = await queryUntilCreatedAts(
   { schema: NATIVE_PLAYLIST_SCHEMA, type: 'playlist', 'profile-id': profileB.id },
@@ -168,7 +301,7 @@ console.log(
     owner_a: ownerA,
     owner_b: ownerB,
     first_playlist_id: first.id,
-    republished_playlist_id: republished.id,
+    later_save_playlist_id: laterSave.id,
     playlist_reference_id: playlistReference.id,
     reference_update_id: referenceUpdate.id,
     forged_reference_update_id: forgedReferenceUpdate.id,
@@ -176,6 +309,12 @@ console.log(
     other_playlist_id: other.id,
     owner_a_discovery_locators: pathsA,
     owner_b_discovery_locators: pathsB,
+    private_snapshot_id: privateSnapshot.id,
+    private_reference_id: privateReference.id,
+    public_conversion_snapshot_id: publicConversion.id,
+    public_conversion_reference_id: publicConversionReference.id,
+    encrypted_private_playlist_verified: true,
+    private_to_public_reference_verified: true,
     immutable_exact_reads_verified: true,
     owner_listing_verified: true,
   })
@@ -196,6 +335,41 @@ function playlistMessage({ profile, profileName, title, items, createdAt }) {
     'created-at': createdAt,
     'signature-scope': NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   };
+}
+
+function privateOpenRequest(snapshot) {
+  return {
+    purpose: snapshot.purpose,
+    algorithm: snapshot.algorithm,
+    'key-version': snapshot.key_version,
+    owner: snapshot.encrypted_for,
+    iv: snapshot.iv,
+    ciphertext: snapshot.ciphertext,
+    tag: snapshot.tag,
+  };
+}
+
+function tamper(value) {
+  const first = value[0] === 'A' ? 'B' : 'A';
+  return `${first}${value.slice(1)}`;
+}
+
+async function privateRequest(method, body, cookie) {
+  const url = authDeviceBridgeBase
+    ? `${authDeviceBridgeBase}/$/api/hyperbeam-auth-device/v1/~odysee-private@1.0/${method}`
+    : `${nodeBase}/~odysee-private@1.0/${method}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...(cookie ? { cookie } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  const payload = unwrap(parse(text));
+  return { response, text, payload: payload && typeof payload === 'object' ? payload : { body: payload } };
 }
 
 async function hydrateReference(id) {

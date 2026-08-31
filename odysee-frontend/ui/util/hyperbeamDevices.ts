@@ -14,6 +14,7 @@ export const HYPERBEAM_DEVICE = {
   file: '~odysee-file@1.0',
   fileReaction: '~odysee-file-reaction@1.0',
   preference: '~odysee-preference@1.0',
+  private: '~odysee-private@1.0',
   reaction: '~odysee-reaction@1.0',
   query: '~query@1.0',
   search: '~search@1.0',

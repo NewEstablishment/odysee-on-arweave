@@ -119,7 +119,12 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Node, loopback, private-network, relative, `data:`, and `blob:` image sources
   must bypass external thumbnail optimizers. Preserve the configured node
   scheme when rendering these URLs.
+- A HyperBEAM manifest must render remote historical thumbnails directly and
+  unwrap inherited `thumbnails.odycdn.com` URLs to their original source.
+  Built-in placeholders and wallpaper assets must use manifest-local files.
 - HyperBEAM mode must not send playback telemetry to the legacy Watchman host.
+- HyperBEAM mode must not poll the Odysee Web2 degraded-performance status
+  endpoint; node health is the relevant availability boundary.
 
 ## Comments
 
@@ -164,18 +169,32 @@ instead of falling back to legacy services.
 
 ## Playlists
 
-- Public playlists are generic `odysee-playlist@1.0` messages written through
-  `/id?0.%21=true&committers=all`; do not call `collection_*` or add a playlist
-  device.
+- Public playlists are generic `odysee-playlist@1.0` messages and private
+  playlists are generic `odysee-private-playlist@1.0` ciphertext messages,
+  both written through `/id?0.%21=true&committers=all`; do not call
+  `collection_*` or add a playlist write device.
 - Store a complete ordered immutable item list in every snapshot. Native IDs
   and legacy outpoints are allowed; mutable claim IDs, names, and URIs are not.
 - The pinned external `reference@1.0` init commitment is the stable public
-  playlist ID. Republish writes a new full snapshot and then a strictly newer
+  playlist ID. Every later save writes a new full snapshot and then a strictly newer
   same-owner reference set; it never mutates an earlier snapshot.
 - Hydrate and verify every init, set, and selected snapshot. Bind authority to
   the init committer, never profile fields or query order. Reject foreign
   writers, stale or tied updates, and foreign-owned snapshots.
-- Local drafts and builtin lists remain local. Public deletion is not exposed.
+- Queue, Watch Later, Favorites, and failed-save recovery drafts remain local.
+  Creating, editing, adding to, or removing from a user playlist commits
+  automatically; do not expose a separate publish or republish action. Public
+  deletion is not exposed.
+- New and copied playlists default private. `odysee-private@1.0` is only the
+  authenticated, playlist-domain-separated AES-GCM seal/open boundary. It
+  stores no playlist data or references and its responses must remain
+  `no-store, private`. Verify the exact ciphertext commitment and owner before
+  opening it; never expose plaintext or key material in committed messages.
+- Making a private playlist public writes a plaintext public snapshot and
+  advances the same stable reference. Require explicit irreversible
+  confirmation and never offer public-to-private.
+- Direct edit links must hydrate and resolve the private playlist's item set
+  before enabling Save; visiting the view page first must never be required.
 - Preserve Redux collection shape and playback order at the integration
   boundary. The playlist UI must not expose channel selection, URL names,
   bids, balances, confirmations, supports, reports, or abandon-claim flows.

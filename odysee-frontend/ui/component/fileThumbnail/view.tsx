@@ -370,7 +370,7 @@ function FileThumbnail(props: Props) {
     return (
       <Thumb
         small={small}
-        thumb={thumbnailUrl || MISSING_THUMB_DEFAULT}
+        thumb={thumbnailUrl || FALLBACK}
         fallback={FALLBACK}
         className={classnames(className, {
           'media__thumb--live': Boolean(liveThumbnail),

@@ -24,14 +24,17 @@ import {
   selectCollectionKeyForId,
   selectCollectionForIdClaimForUriItem,
   selectAreThumbnailClaimsFetchingForCollectionIds,
+  selectCollectionSaveParamsForId,
 } from 'redux/selectors/collections';
-import { selectCollectionClaimUploadParamsForId } from 'redux/selectors/publish';
 import * as COLS from 'constants/collections';
 import { resolveAuxParams, resolveCollectionType, getClaimIdsInCollectionClaim } from 'util/collections';
 import { getClaimOutpoint, getThumbnailFromClaim } from 'util/claim';
 import { doToast } from 'redux/actions/notifications';
-import { fetchHyperbeamPlaylistListMine, fetchHyperbeamPlaylistPublish } from 'util/hyperbeam';
+import { fetchHyperbeamPlaylistListMine, fetchHyperbeamPlaylistSave } from 'util/hyperbeam';
 const FETCH_BATCH_SIZE = 50;
+const nativePlaylistSaveQueues = new Map<string, Promise<Claim | null>>();
+const nativePlaylistReferenceAliases = new Map<string, string>();
+const nativePlaylistSaveRevisions = new Map<string, number>();
 export const doFetchCollectionListMine =
   (
     options: CollectionListOptions = {
@@ -72,106 +75,151 @@ export const doFetchCollectionListMine =
       return null;
     }
   };
-export function doCollectionPublish(options: CollectionPublishCreateParams, collectionId: string, cb?: () => void) {
-  return async (dispatch: Dispatch, getState: GetState): Promise<any> => {
-    const state = getState();
-    const collection = selectCollectionForId(state, collectionId);
-    const existingClaim = selectClaimForClaimId(state, collectionId);
-    if (!collection) throw new Error('Playlist does not exist');
-    const items = (options.claims || []).filter((item): item is string => typeof item === 'string' && Boolean(item));
+async function saveCollectionSnapshot(
+  dispatch: Dispatch,
+  getState: GetState,
+  collectionId: string,
+  revision: number,
+  options: CollectionSaveParams,
+  collection: Collection
+): Promise<Claim> {
+  const existingClaim = selectClaimForClaimId(
+    getState(),
+    nativePlaylistReferenceAliases.get(collectionId) || collectionId
+  );
+  const items = (options.claims || []).filter((item): item is string => typeof item === 'string' && Boolean(item));
 
-    dispatch({
-      type: ACTIONS.COLLECTION_PUBLISH_START,
-      data: {
-        collectionId,
-      },
+  dispatch({
+    type: ACTIONS.COLLECTION_SAVE_START,
+    data: { collectionId },
+  });
+
+  try {
+    const collectionClaim = await fetchHyperbeamPlaylistSave({
+      title: options.title || collection.title || collection.name,
+      description: typeof options.description === 'string' ? options.description : undefined,
+      thumbnail_url: options.thumbnail_url,
+      tags: (options.tags || []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)).filter(Boolean),
+      languages: options.languages || [],
+      items,
+      visibility: options.visibility || collection.visibility || collection.hyperbeam?.visibility || 'private',
+      reference_id: existingClaim?.hyperbeam?.reference_id || nativePlaylistReferenceAliases.get(collectionId),
     });
-    try {
-      const collectionClaim = await fetchHyperbeamPlaylistPublish({
-        title: options.title || collection.title || collection.name,
-        description: typeof options.description === 'string' ? options.description : undefined,
-        thumbnail_url: options.thumbnail_url,
-        tags: (options.tags || []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)).filter(Boolean),
-        languages: options.languages || [],
-        items,
-        reference_id: existingClaim?.hyperbeam?.reference_id,
-      });
-      const publishedCollection = {
-        ...collection,
-        id: collectionClaim.claim_id,
-        name: collectionClaim.value?.title || collection.name,
-        title: collectionClaim.value?.title || collection.title || collection.name,
-        description: collectionClaim.value?.description,
-        thumbnail: collectionClaim.value?.thumbnail,
-        tags: collectionClaim.value?.tags || [],
-        items,
-        itemCount: items.length,
-        createdAt: collectionClaim.meta?.creation_timestamp,
-        updatedAt: collectionClaim.timestamp,
-      };
+    const savedCollection = {
+      ...collection,
+      id: collectionClaim.claim_id,
+      name: collectionClaim.value?.title || collection.name,
+      title: collectionClaim.value?.title || collection.title || collection.name,
+      description: collectionClaim.value?.description,
+      thumbnail: collectionClaim.value?.thumbnail,
+      tags: collectionClaim.value?.tags || [],
+      items,
+      itemCount: items.length,
+      visibility:
+        (collectionClaim as any).visibility ||
+        (collectionClaim as any).hyperbeam?.visibility ||
+        options.visibility ||
+        'private',
+      createdAt: collectionClaim.meta?.creation_timestamp,
+      updatedAt: collectionClaim.timestamp,
+    };
+    nativePlaylistReferenceAliases.set(collectionId, collectionClaim.claim_id);
+
+    if (nativePlaylistSaveRevisions.get(collectionId) === revision) {
       dispatch({
         type: ACTIONS.DELETE_ID_FROM_LOCAL_COLLECTIONS,
         data: collectionId,
       });
-      dispatch({
-        type: ACTIONS.COLLECTION_EDIT,
-        data: {
-          collectionKey: COLS.KEYS.UPDATED,
-          collection: {
-            id: collectionClaim.claim_id,
-            updatedAt: collectionClaim.timestamp,
-          },
-        },
-      });
-      dispatch({
-        type: ACTIONS.COLLECTION_PUBLISH_SUCCESS,
-        data: {
-          collectionId,
-          publishedCollectionId: collectionClaim.claim_id,
-        },
-      });
-      dispatch(
-        batchActions(
-          {
-            type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
-            data: { result: { items: [collectionClaim], page: 1, page_size: 1, total_items: 1, total_pages: 1 } },
-          },
-          {
-            type: ACTIONS.COLLECTION_ITEMS_RESOLVE_SUCCESS,
-            data: {
-              resolvedCollection: publishedCollection,
-            },
-          },
-          {
-            type: ACTIONS.COLLECTION_CLAIM_ITEMS_RESOLVE_COMPLETE,
-            data: publishedCollection,
-          }
-        )
-      );
-      return collectionClaim;
-    } catch (error) {
-      if (cb) cb();
-      dispatch({
-        type: ACTIONS.COLLECTION_PUBLISH_FAIL,
-        data: { collectionId, error: error?.message || error },
-      });
-      dispatch(doToast({ message: error?.message || error, isError: true }));
-      throw error;
     }
-  };
+    dispatch({
+      type: ACTIONS.COLLECTION_EDIT,
+      data: {
+        collectionKey: COLS.KEYS.UPDATED,
+        collection: {
+          id: collectionClaim.claim_id,
+          updatedAt: collectionClaim.timestamp,
+        },
+      },
+    });
+    dispatch({
+      type: ACTIONS.COLLECTION_SAVE_SUCCESS,
+      data: {
+        collectionId,
+        savedCollectionId: collectionClaim.claim_id,
+      },
+    });
+    dispatch(
+      batchActions(
+        {
+          type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
+          data: { result: { items: [collectionClaim], page: 1, page_size: 1, total_items: 1, total_pages: 1 } },
+        },
+        {
+          type: ACTIONS.COLLECTION_ITEMS_RESOLVE_SUCCESS,
+          data: {
+            resolvedCollection: savedCollection,
+          },
+        },
+        {
+          type: ACTIONS.COLLECTION_CLAIM_ITEMS_RESOLVE_COMPLETE,
+          data: savedCollection,
+        }
+      )
+    );
+    return collectionClaim;
+  } catch (error) {
+    dispatch({
+      type: ACTIONS.COLLECTION_SAVE_FAIL,
+      data: { collectionId, error: error?.message || error },
+    });
+    dispatch(doToast({ message: error?.message || error, isError: true }));
+    throw error;
+  }
 }
 
-export const doRetryCollectionPublish = (collectionId: string) => (dispatch: Dispatch, getState: GetState) => {
-  const collectionUploadParams = selectCollectionClaimUploadParamsForId(getState(), collectionId);
-  if (!collectionUploadParams?.claims?.length) return Promise.resolve();
-  return dispatch(doCollectionPublish(collectionUploadParams, collectionId)).catch(() => Promise.resolve());
-};
-export const doLocalCollectionCreate =
-  (params: CollectionLocalCreateParams, cb?: (id: any) => void) => (dispatch: Dispatch, getState: GetState) => {
-    const { items, sourceId } = params;
-    const id = uuid(); // start with a uuid, this becomes a claimId after publish
+export const doCollectionSave = (collectionId: string) => async (dispatch: Dispatch, getState: GetState) => {
+  let state = getState();
+  let collection = selectCollectionForId(state, collectionId);
+  if (!collection) throw new Error('Playlist does not exist');
 
-    if (cb) cb(id);
+  let saveParams = selectCollectionSaveParamsForId(state, collectionId);
+  if (saveParams?.claims === undefined && collection.items?.length) {
+    await dispatch(doFetchItemsInCollection({ collectionId }));
+    state = getState();
+    collection = selectCollectionForId(state, collectionId);
+    saveParams = selectCollectionSaveParamsForId(state, collectionId);
+  }
+  if (!collection || !saveParams || !Array.isArray(saveParams.claims)) {
+    const error = new Error('Playlist items could not be resolved for saving');
+    dispatch({
+      type: ACTIONS.COLLECTION_SAVE_FAIL,
+      data: { collectionId, error: error.message },
+    });
+    dispatch(doToast({ message: error.message, isError: true }));
+    throw error;
+  }
+
+  const revision = (nativePlaylistSaveRevisions.get(collectionId) || 0) + 1;
+  nativePlaylistSaveRevisions.set(collectionId, revision);
+  const previousSave = nativePlaylistSaveQueues.get(collectionId) || Promise.resolve(null);
+  const queuedSave = previousSave
+    .catch(() => null)
+    .then(() => saveCollectionSnapshot(dispatch, getState, collectionId, revision, saveParams, collection));
+  nativePlaylistSaveQueues.set(collectionId, queuedSave);
+
+  try {
+    return await queuedSave;
+  } finally {
+    if (nativePlaylistSaveQueues.get(collectionId) === queuedSave) nativePlaylistSaveQueues.delete(collectionId);
+  }
+};
+
+export const doRetryCollectionSave = (collectionId: string) => (dispatch: Dispatch) =>
+  dispatch(doCollectionSave(collectionId)).catch(() => Promise.resolve());
+export const doLocalCollectionCreate =
+  (params: CollectionLocalCreateParams, cb?: (id: any) => void) => async (dispatch: Dispatch, getState: GetState) => {
+    const { items, sourceId } = params;
+    const id = uuid();
 
     if (sourceId) {
       const state = getState();
@@ -182,7 +230,7 @@ export const doLocalCollectionCreate =
         sourceCollection.description ||
         makeSelectMetadataItemForUri(sourceCollectionClaim?.canonical_url, 'description')(state);
       const thumbnailUrl = sourceCollection.thumbnail?.url || getThumbnailFromClaim(sourceCollectionClaim);
-      return dispatch({
+      dispatch({
         type: ACTIONS.COLLECTION_NEW,
         data: {
           entry: {
@@ -199,18 +247,23 @@ export const doLocalCollectionCreate =
           },
         },
       });
+    } else {
+      dispatch({
+        type: ACTIONS.COLLECTION_NEW,
+        data: {
+          entry: {
+            id: id,
+            items: items || [],
+            ...params,
+          },
+        },
+      });
     }
 
-    return dispatch({
-      type: ACTIONS.COLLECTION_NEW,
-      data: {
-        entry: {
-          id: id,
-          items: items || [],
-          ...params,
-        },
-      },
-    });
+    const saved = await dispatch(doCollectionSave(id));
+    const savedId = saved.claim_id;
+    if (cb) cb(savedId);
+    return savedId;
   };
 export const doCollectionDelete =
   (collectionId: string, collectionKey: string | null | undefined = undefined) =>
@@ -219,7 +272,7 @@ export const doCollectionDelete =
     const claim = selectClaimForClaimId(state, collectionId);
 
     if (claim) {
-      throw new Error('Published playlists are immutable and cannot be deleted. Publish a new snapshot instead.');
+      throw new Error('Saved playlists are immutable and cannot be deleted yet.');
     }
     if (collectionKey) {
       dispatch({
@@ -661,97 +714,60 @@ export const doCollectionEdit =
 
     const isQueue = collectionId === COLS.QUEUE_ID;
     const title = params.title || params.name;
-    return new Promise<boolean>((success) => {
-      dispatch({
-        // -- queue specific action prevents attempting to sync settings and throwing errors on unauth users
-        type: isQueue ? ACTIONS.QUEUE_EDIT : ACTIONS.COLLECTION_EDIT,
-        data: {
-          collectionKey: isPreview
-            ? COLS.KEYS.UNSAVED_CHANGES
-            : isPublic
-              ? COLS.KEYS.EDITED
-              : selectCollectionKeyForId(state, collectionId),
-          collection: {
-            ...collection,
-            items: newItems,
-            itemCount: newItems.length,
-            // this means pass description even if undefined or null, but not if it's not passed at all, so it can be deleted
-            ...('description' in params
-              ? {
-                  description: params.description,
-                }
-              : {}),
-            ...('tags' in params
-              ? {
-                  tags: params.tags,
-                }
-              : {}),
-            ...(title
-              ? {
-                  name: title,
-                  title,
-                }
-              : {}),
-            ...(type
-              ? {
-                  type,
-                }
-              : {}),
-            ...(params.thumbnail_url
-              ? {
-                  thumbnail: {
-                    url: params.thumbnail_url,
-                  },
-                }
-              : {}),
-          },
+    dispatch({
+      // -- queue specific action prevents attempting to sync settings and throwing errors on unauth users
+      type: isQueue ? ACTIONS.QUEUE_EDIT : ACTIONS.COLLECTION_EDIT,
+      data: {
+        collectionKey: isPreview
+          ? COLS.KEYS.UNSAVED_CHANGES
+          : isPublic
+            ? COLS.KEYS.EDITED
+            : selectCollectionKeyForId(state, collectionId),
+        collection: {
+          ...collection,
+          items: newItems,
+          itemCount: newItems.length,
+          // this means pass description even if undefined or null, but not if it's not passed at all, so it can be deleted
+          ...('description' in params
+            ? {
+                description: params.description,
+              }
+            : {}),
+          ...('tags' in params
+            ? {
+                tags: params.tags,
+              }
+            : {}),
+          ...(title
+            ? {
+                name: title,
+                title,
+              }
+            : {}),
+          ...(type
+            ? {
+                type,
+              }
+            : {}),
+          ...('visibility' in params
+            ? {
+                visibility: params.visibility,
+              }
+            : {}),
+          ...(params.thumbnail_url
+            ? {
+                thumbnail: {
+                  url: params.thumbnail_url,
+                },
+              }
+            : {}),
         },
-      });
-
-      success(true);
-    });
-  };
-export const doClearEditsForCollectionId = (id: string) => (dispatch: Dispatch) => {
-  dispatch({
-    type: ACTIONS.COLLECTION_AUTOPUBLISH_SCHEDULED,
-    data: {
-      collectionId: id,
-      scheduledAt: null,
-    },
-  });
-  dispatch({
-    type: ACTIONS.COLLECTION_DELETE,
-    data: {
-      id,
-      collectionKey: 'edited',
-    },
-  });
-  dispatch({
-    type: ACTIONS.COLLECTION_DELETE,
-    data: {
-      id,
-      collectionKey: COLS.KEYS.UNSAVED_CHANGES,
-    },
-  });
-  dispatch({
-    type: ACTIONS.COLLECTION_EDIT,
-    data: {
-      collectionKey: COLS.KEYS.UPDATED,
-      collection: {
-        id,
       },
-    },
-  });
-};
-export const doRemoveFromUpdatedCollectionsForCollectionId = (id: string) => (dispatch: Dispatch) => {
-  dispatch({
-    type: ACTIONS.COLLECTION_DELETE,
-    data: {
-      id,
-      collectionKey: 'updated',
-    },
-  });
-};
+    });
+
+    if (isPreview || COLS.BUILTIN_PLAYLISTS.includes(collectionId)) return true;
+    return dispatch(doCollectionSave(collectionId));
+  };
 export const doRemoveFromUnsavedChangesCollectionsForCollectionId = (id: string) => (dispatch: Dispatch) => {
   dispatch({
     type: ACTIONS.COLLECTION_DELETE,

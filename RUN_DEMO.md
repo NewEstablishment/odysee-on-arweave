@@ -149,15 +149,22 @@ revisioned-message kernel validates contiguous same-owner chains and handles
 fork/equivocation policy consistently for comments, controls, reactions,
 playlists, and subscriptions.
 
-### 6. Show a stable public playlist
+### 6. Show an encrypted private playlist
 
-Add the video to a playlist and publish it. Copy or open the
-`/$/playlist/<reference-id>` route. Reorder or change the list and republish if
-time allows; the public URL stays stable.
+Add the video to a new playlist. The create confirmation stays busy until the
+signed snapshot and stable reference are saved; there is no separate Publish
+button. New playlists are private by default: show the lock badge and absence
+of Share, refresh, then reorder or change the list and press Save. The route
+stays `/$/playlist/<reference-id>` and the decrypted contents survive refresh.
+
+Open Edit, select **Make this playlist public**, press Save, and accept the
+irreversible confirmation. The same route now shows Public and enables Share.
 
 What to say: each playlist version is a full immutable snapshot. The canonical
 `reference@1.0` init commitment is the stable ID, and authorized set messages
-advance its head without mutating history.
+advance its head without mutating history. Private versions contain only
+owner-bound AES-GCM ciphertext. Save is the committed write, and conversion to
+public is one-way because public history cannot be hidden later.
 
 ### 7. Finish with encrypted preferences
 
