@@ -4,6 +4,7 @@ import * as CS from 'constants/claim_search';
 import { SEARCH_OPTIONS } from 'constants/search';
 import * as SETTINGS from 'constants/settings';
 import { getSearchQueryString } from 'util/query-params';
+import { getRecommendationSearchQuery } from 'util/relatedSearch';
 
 const addLbryIfNot = (term: string) => {
   return term.startsWith('lbry://') ? term : `lbry://${term}`;
@@ -139,6 +140,7 @@ export function getRecommendationSearchOptions(
 
   return options;
 }
+
 export function getShortsRecommendationSearchOptions(
   matureEnabled: boolean,
   claimIsMature: boolean,
@@ -170,8 +172,9 @@ export function getShortsRecommendationSearchOptions(
 
   return options;
 }
-export function getRecommendationSearchKey(title: string, options: {}) {
-  const searchQuery = getSearchQueryString(title.replace(/\//, ' '), options);
+export function getRecommendationSearchKey(title: string, options: {}, tags?: Array<string> | null) {
+  const query = getRecommendationSearchQuery(title, tags);
+  const searchQuery = getSearchQueryString(query.replace(/\//, ' '), options);
   return createNormalizedSearchKey(searchQuery);
 }
 export function tagSearchCsOptionsHook(options: Record<string, any>): Record<string, any> {

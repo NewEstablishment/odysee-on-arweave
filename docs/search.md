@@ -77,6 +77,13 @@ the normalized claims into Redux. A search hit is never the source of truth for
 the object. Applying filters and pagination in the backend prevents browser
 post-filtering from corrupting ranking or page boundaries.
 
+The watch-page Related tab uses the same contract. The frontend builds one
+bounded full-text query from up to five claim tags followed by the title, maps
+the current claim to a server-side `claim_id != ...` filter, and asks for free
+video results. The returned locators still pass through exact hydration; this
+replaces the legacy `related_to` Web2 recommendation endpoint without adding a
+second data mode or recommendation device.
+
 ## Operations
 
 Run Meilisearch separately at the configured URL. The generic hook handles

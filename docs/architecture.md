@@ -368,7 +368,9 @@ and text-search requests. The frontend maps filters and sort before the query,
 preserves locator order, and exact-hydrates every result; Meilisearch remains
 an index, never an object or authority source. Native per-channel listings use
 bounded `query@1.0` discovery over upload records and the same exact hydration
-boundary.
+boundary. Watch-page related content is also a generic full-text search: a
+bounded tag-and-title query plus a server-side current-claim exclusion replaces
+the legacy recommendation endpoint, while exact hydration remains unchanged.
 
 Static manifests embed homepage presentation templates, not node-specific
 claim selections. The node stores its immutable Lua materializer and homepage
