@@ -392,8 +392,8 @@ export const doFetchItemsInCollection =
       type: ACTIONS.COLLECTION_ITEMS_RESOLVE_START,
       data: collectionId,
     });
-    const isPrivate = selectHasPrivateCollectionForId(state, collectionId);
-    const hasClaim = selectHasClaimForId(state, collectionId);
+    let isPrivate = selectHasPrivateCollectionForId(state, collectionId);
+    let hasClaim = selectHasClaimForId(state, collectionId);
 
     // -- Resolve collections:
     if (!isPrivate && hasClaim === undefined) {
@@ -404,6 +404,8 @@ export const doFetchItemsInCollection =
       ).finally(() => {
         // get the state after claimSearch
         state = getState();
+        isPrivate = selectHasPrivateCollectionForId(state, collectionId);
+        hasClaim = selectHasClaimForId(state, collectionId);
       });
     }
 

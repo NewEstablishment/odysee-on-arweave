@@ -36,12 +36,12 @@ The architectural points worth emphasizing are:
 
 ## Presentation preflight
 
-Do this before the audience arrives. Avoid repeatedly refreshing the SPA: the
-stock per-IP limiter counts manifest assets and can temporarily return `429`
-after enough full reloads.
+Do this before the audience arrives. The checked-in demo configuration allows
+10,000 requests/minute per IP so the roughly 1,000-asset cold manifest load does
+not exhaust the stock bucket. Avoid unnecessary refresh loops all the same.
 
-Package the runtime once after a pull or any device change. Include the
-external reference device used by playlists and encrypted preferences:
+Package the runtime once after a pull or any device change. Playlists use the
+external reference device; private-playlist cryptography stays in the browser:
 
 ```sh
 HB_PORT=18734 rebar3 device preload \
@@ -163,8 +163,11 @@ irreversible confirmation. The same route now shows Public and enables Share.
 What to say: each playlist version is a full immutable snapshot. The canonical
 `reference@1.0` init commitment is the stable ID, and authorized set messages
 advance its head without mutating history. Private versions contain only
-owner-bound AES-GCM ciphertext. Save is the committed write, and conversion to
-public is one-way because public history cannot be hidden later.
+a WeaveMail-format envelope: browser WebCrypto creates a fresh AES key and
+wraps it to a non-exportable RSA key stored in IndexedDB for the signed-in
+native owner. The node only receives ciphertext and generic reference writes;
+there is no playlist crypto device. Save is the committed write, and conversion
+to public is one-way because public history cannot be hidden later.
 
 ### 7. Finish with encrypted preferences
 
@@ -236,10 +239,12 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:hyperbeam-upload-smoke
 - Upload metadata edit/delete still needs a complete append-only contract.
 - Browser identity is local to this node/browser and is not yet portable or
   recoverable on another deployment.
+- Private-playlist keys are local to browser IndexedDB. There is no backup or
+  cross-device recovery yet, so do not clear browser data used for the demo.
 - Single HTTP ranges work; multipart byte ranges are not implemented.
-- The stock per-IP rate-limit bucket must be raised for production static
-  manifest traffic. If a local demo returns a full-page `Rate limit exceeded`,
-  stop refreshing and wait roughly one minute before reopening the same tab.
+- Production deployments must tune the per-IP rate-limit bucket together with
+  their static asset delivery and abuse controls; the demo uses 10,000
+  requests/minute specifically to accommodate cold manifest loads.
 - Homepage/category selections are node-signed HyperBEAM messages. The Odysee
   OTP application publishes an initial snapshot at node startup and installs
   the all-language hourly refresh through stock `cron@1.0`. Keep Meilisearch

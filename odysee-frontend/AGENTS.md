@@ -185,11 +185,13 @@ instead of falling back to legacy services.
   Creating, editing, adding to, or removing from a user playlist commits
   automatically; do not expose a separate publish or republish action. Public
   deletion is not exposed.
-- New and copied playlists default private. `odysee-private@1.0` is only the
-  authenticated, playlist-domain-separated AES-GCM seal/open boundary. It
-  stores no playlist data or references and its responses must remain
-  `no-store, private`. Verify the exact ciphertext commitment and owner before
-  opening it; never expose plaintext or key material in committed messages.
+- New and copied playlists default private. The WebCrypto client in
+  `ui/util/weavemailClient.ts` implements the WeaveMail 1.0 envelope format in
+  the browser using a non-exportable RSA-OAEP key pair stored in IndexedDB and
+  scoped to the verified native cookie owner. Do not call or add a
+  private-playlist or WeaveMail HTTP device. Verify the exact ciphertext
+  commitment and owner before local decryption; never expose plaintext,
+  content keys, or private key material in committed messages or requests.
 - Making a private playlist public writes a plaintext public snapshot and
   advances the same stable reference. Require explicit irreversible
   confirmation and never offer public-to-private.

@@ -78,7 +78,6 @@ The application minimizes custom device surface:
 | `odysee-auth@1.0` | Compatibility authentication helper where an existing session must be translated. It is not the native account model. |
 | `blacklist@1.0` (upstream) | Enforces node-selected global and geographic content policy on request and response hooks. |
 | `odysee-preference@1.0` | Authenticated seal/open boundary for private preference ciphertext. It stores no state and owns no reference semantics. |
-| `odysee-private@1.0` | Domain-separated authenticated seal/open boundary for private playlist ciphertext. It stores no playlist state and owns no reference semantics. |
 
 There are no `odysee-claim@1.0`, `odysee-stream@1.0`,
 `odysee-upload@1.0`, or `odysee-comment@1.0` application devices in the active
@@ -266,8 +265,8 @@ User-created playlists pair cookie-signed immutable snapshots with the pinned
 generic `reference@1.0` device. The reference init commitment is the stable
 route `/$/playlist/<reference-id>`. Public contents use
 `odysee-playlist@1.0`; private contents use an
-`odysee-private-playlist@1.0` AES-256-GCM envelope whose decrypted payload has
-the same playlist contract. The frontend uses generic stage-scoped `/id`
+`odysee-private-playlist@1.0` WeaveMail RSA-OAEP/AES-256-GCM envelope whose
+decrypted payload has the same playlist contract. The frontend uses generic stage-scoped `/id`
 writes, `query@1.0/only` discovery, and exact commitment hydration; it does not
 call the LBRY `collection_*` API.
 
@@ -278,8 +277,9 @@ call the LBRY `collection_*` API.
   Earlier snapshots remain immutable and exactly addressable.
 - New and copied playlists default to private. Their title, description,
   thumbnail, tags, languages, profile metadata, and ordered item IDs are
-  ciphertext at rest. Only the matching authenticated cookie wallet can open
-  them through the private/no-store crypto boundary.
+  ciphertext at rest. A browser-generated, non-exportable RSA-OAEP key pair is
+  persisted in IndexedDB under the verified native cookie owner; only that
+  browser key can open the snapshots.
 - The reference declares and verifies its playlist owner so private discovery
   is owner-scoped before decryption. A private playlist may be made public by
   advancing the same reference to a plaintext `odysee-playlist@1.0` snapshot.
@@ -303,10 +303,13 @@ until it has an honest append-only contract. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
 
-`odysee-private@1.0` is a cryptographic boundary, not a playlist device. It
-derives an owner-bound, playlist-domain-separated key from the authenticated
-hosted wallet and seals or opens payloads without storing snapshots, moving
-references, or returning key material.
+The small browser client in `ui/util/weavemailClient.ts` implements the
+WeaveMail 1.0 envelope format directly with WebCrypto. It creates a fresh
+AES-256-GCM key for every snapshot and wraps that key with the owner's browser
+RSA-OAEP/SHA-256 public key. Encryption and decryption are entirely local: the
+node receives only the generic committed ciphertext snapshot and reference
+messages. There is no private-playlist or WeaveMail HTTP device. The RSA
+private key is non-exportable and never leaves IndexedDB.
 
 ### User preferences
 
@@ -447,9 +450,14 @@ sequence.
   is supported for native immutable uploads and range-aware source stores.
 - The cookie account is local to a node/browser and is not yet a portable or
   recoverable production identity.
-- The stock global per-IP rate limiter counts manifest assets as requests. A
-  deployment must tune its default 1,000-request/minute bucket for the static
-  bundle or rapid full reloads can temporarily return `429` for the SPA itself.
+- Private-playlist decryption keys are likewise local to browser IndexedDB and
+  have no backup or cross-device recovery flow yet. Clearing browser data loses
+  access to existing private snapshots; making a playlist public first keeps
+  that public version readable.
+- The global per-IP rate limiter counts manifest assets as requests. The demo
+  configuration raises the bucket to 10,000 requests/minute because one cold
+  SPA load fetches roughly 1,000 assets; production deployments must tune this
+  jointly with their static delivery and abuse controls.
 - TEE deployment and attestation require infrastructure beyond ordinary local
   development.
 - Geographic enforcement requires the accepted upstream

@@ -146,7 +146,7 @@ Use this ownership table before implementing a fix:
 | Node store stack, cookie hook, match index, or manifest publishing | `src/hb_odysee_node.erl`, `src/hb_odysee_ui.erl`, and `config.json`. |
 | Generic local full-text behavior | `src/dev_search.erl` and `src/hb_search.erl`. |
 | Authenticated preference encryption/decryption | `src/dev_odysee_preference.erl`; persistence and reference projection remain generic writes plus frontend hydration. |
-| Authenticated private-playlist encryption/decryption | `src/dev_odysee_private.erl`; playlist persistence and reference projection remain generic writes plus frontend hydration. |
+| Private-playlist envelope encryption | Browser WebCrypto in `odysee-frontend/ui/util/weavemailClient.ts`; persistence and reference projection remain generic writes plus frontend hydration. Do not add a private-playlist or WeaveMail HTTP device. |
 | Browser routing, hydration, upload/comment messages, and SDK-shaped Redux adaptation | `odysee-frontend/ui/lbry.ts`, `ui/util/hyperbeam.ts`, and related services. |
 | Rendering only | React components. |
 | Global or geographic content-policy evaluation | Upstream `blacklist@1.0`; keep an accepted patch under `patches/` until its merged revision is pinned. |
@@ -205,12 +205,13 @@ Playlists:
 - Hydrate and verify every init, set, and selected snapshot. Authority comes
   from the init commitment's committer; reject foreign writers, stale or tied
   updates, and snapshots owned by another committer.
-- New and copied playlists default private. Encrypt title, description,
-  thumbnail, tags, languages, profile metadata, and item locators with
-  authenticated AES-GCM before the generic write. `odysee-private@1.0` is a
-  cookie-authenticated, domain-separated seal/open boundary only; it stores no
-  state, owns no references, returns no key material, and responds
-  `no-store, private`.
+- New and copied playlists default private. The browser generates a
+  non-exportable RSA-OAEP key pair, persists it in IndexedDB under the verified
+  native cookie owner, and uses the small WebCrypto client in
+  `ui/util/weavemailClient.ts` to produce the WeaveMail 1.0 AES-256-GCM
+  envelope before the generic write. Encryption and decryption stay in the
+  browser; no plaintext, content key, private key, private-playlist device, or
+  WeaveMail HTTP route belongs on the node.
 - Private-to-public conversion advances the existing reference to a plaintext
   public snapshot and is irreversible. Never offer public-to-private because
   already-public history cannot be revoked.

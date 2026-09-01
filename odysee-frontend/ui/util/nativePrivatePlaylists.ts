@@ -1,4 +1,4 @@
-import { field, integer, isNativeMessageId, normalizeMessageId } from './nativeMessageFields.ts';
+import { field, isNativeMessageId, normalizeMessageId } from './nativeMessageFields.ts';
 import {
   NATIVE_PLAYLIST_SCHEMA,
   NATIVE_PLAYLIST_SIGNATURE_SCOPE,
@@ -6,6 +6,7 @@ import {
   normalizeNativePlaylist,
   type NativePlaylist,
 } from './nativePlaylists.ts';
+import { normalizeWeavemailEnvelope, WEAVEMAIL_FORMAT, type BrowserWeavemailEnvelope } from './weavemailClient.ts';
 
 export const NATIVE_PRIVATE_PLAYLIST_SCHEMA = 'odysee-private-playlist@1.0';
 export const NATIVE_PRIVATE_PLAYLIST_TYPE = 'private-playlist';
@@ -13,18 +14,13 @@ export const NATIVE_PRIVATE_PLAYLIST_SIGNATURE_SCOPE = 'native-private-playlist-
 export const NATIVE_PRIVATE_PLAYLIST_PAYLOAD_SCHEMA = 'odysee-private-playlist-payload@1.0';
 export const NATIVE_PRIVATE_PLAYLIST_PAYLOAD_SIGNATURE_SCOPE = 'native-private-playlist-payload-v1';
 export const NATIVE_PRIVATE_PLAYLIST_PURPOSE = 'playlist';
-export const NATIVE_PRIVATE_PLAYLIST_ALGORITHM = 'aes-256-gcm';
-export const NATIVE_PRIVATE_PLAYLIST_KEY_VERSION = 1;
+export const NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT = WEAVEMAIL_FORMAT;
 export const NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES = 256 * 1024;
 
-export type NativePrivatePlaylistEnvelope = {
-  algorithm: string;
-  key_version: number;
+export type NativePrivatePlaylistEnvelope = BrowserWeavemailEnvelope & {
+  encryption_format: string;
   purpose: string;
   owner: string;
-  iv: string;
-  ciphertext: string;
-  tag: string;
 };
 
 export type NativePrivatePlaylistSnapshot = NativePrivatePlaylistEnvelope & {
@@ -36,14 +32,14 @@ export type NativePrivatePlaylistSnapshot = NativePrivatePlaylistEnvelope & {
 };
 
 export function normalizeNativePrivatePlaylistEnvelope(source: any): NativePrivatePlaylistEnvelope | null {
+  const weavemail = normalizeWeavemailEnvelope(source, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES);
+  if (!weavemail) return null;
   const envelope: NativePrivatePlaylistEnvelope = {
-    algorithm: String(field(source, 'algorithm') || ''),
-    key_version: integer(field(source, 'key-version', 'key_version'), -1),
+    ...weavemail,
+    recipient_key_id: String(field(source, 'recipient-key-id', 'recipient_key_id') || ''),
+    encryption_format: String(field(source, 'encryption-format', 'encryption_format') || ''),
     purpose: String(field(source, 'purpose') || ''),
-    owner: String(field(source, 'owner', 'hyperbeam-owner', 'hyperbeam_owner') || ''),
-    iv: String(field(source, 'iv') || ''),
-    ciphertext: String(field(source, 'ciphertext') || ''),
-    tag: String(field(source, 'tag') || ''),
+    owner: String(field(source, 'hyperbeam-owner', 'hyperbeam_owner', 'owner', 'encrypted-for', 'encrypted_for') || ''),
   };
 
   return validEnvelope(envelope) ? envelope : null;
@@ -79,12 +75,13 @@ export function nativePrivatePlaylistSnapshotMessage(envelope: NativePrivatePlay
     schema: NATIVE_PRIVATE_PLAYLIST_SCHEMA,
     type: NATIVE_PRIVATE_PLAYLIST_TYPE,
     purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE,
-    algorithm: envelope.algorithm,
-    'key-version': envelope.key_version,
+    'encryption-format': envelope.encryption_format,
+    'recipient-key-id': envelope.recipient_key_id,
     'encrypted-for': envelope.owner,
-    iv: envelope.iv,
     ciphertext: envelope.ciphertext,
-    tag: envelope.tag,
+    'encrypted-key': envelope.encrypted_key,
+    'encrypted-iv': envelope.encrypted_iv,
+    'encrypted-tag': envelope.encrypted_tag,
     'signature-scope': NATIVE_PRIVATE_PLAYLIST_SIGNATURE_SCOPE,
   };
 }
@@ -142,23 +139,9 @@ export function parseNativePrivatePlaylistPlaintext(
 
 function validEnvelope(envelope: NativePrivatePlaylistEnvelope): boolean {
   return Boolean(
-    envelope.algorithm === NATIVE_PRIVATE_PLAYLIST_ALGORITHM &&
-    envelope.key_version === NATIVE_PRIVATE_PLAYLIST_KEY_VERSION &&
+    envelope.encryption_format === NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT &&
     envelope.purpose === NATIVE_PRIVATE_PLAYLIST_PURPOSE &&
     isNativeMessageId(envelope.owner) &&
-    encodedBytes(envelope.iv, 12, 12) &&
-    encodedBytes(envelope.tag, 16, 16) &&
-    encodedBytes(envelope.ciphertext, 1, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES)
+    isNativeMessageId(envelope.recipient_key_id)
   );
-}
-
-function encodedBytes(value: string, minimum: number, maximum: number): boolean {
-  if (!/^[0-9A-Za-z_-]+$/.test(value)) return false;
-  const padding = '='.repeat((4 - (value.length % 4)) % 4);
-  try {
-    const decoded = atob(value.replace(/-/g, '+').replace(/_/g, '/') + padding);
-    return decoded.length >= minimum && decoded.length <= maximum;
-  } catch {
-    return false;
-  }
 }

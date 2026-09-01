@@ -14,8 +14,8 @@ import {
   projectNativePlaylistReference,
 } from '../../ui/util/nativePlaylistReferences.ts';
 import {
-  NATIVE_PRIVATE_PLAYLIST_ALGORITHM,
-  NATIVE_PRIVATE_PLAYLIST_KEY_VERSION,
+  NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES,
   NATIVE_PRIVATE_PLAYLIST_PURPOSE,
   nativePrivatePlaylistPlaintext,
   nativePrivatePlaylistSnapshotMessage,
@@ -23,11 +23,13 @@ import {
   normalizeNativePrivatePlaylistSnapshot,
   parseNativePrivatePlaylistPlaintext,
 } from '../../ui/util/nativePrivatePlaylists.ts';
+import {
+  decryptWeavemailEnvelope,
+  encryptWeavemailEnvelope,
+  generateBrowserWeavemailKeyPair,
+} from '../../ui/util/weavemailClient.ts';
 
 const nodeBase = String(process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18801').replace(/\/+$/, '');
-const authDeviceBridgeBase = String(
-  process.env.HYPERBEAM_AUTH_DEVICE_BRIDGE_BASE || process.env.HYPERBEAM_PREFERENCE_BRIDGE_BASE || ''
-).replace(/\/+$/, '');
 const now = Date.now();
 const profileNameA = `playlist-a-${now}`;
 const profileNameB = `playlist-b-${now}`;
@@ -36,13 +38,9 @@ const profileB = await write({ type: 'channel', name: profileNameB });
 const ownerA = await committer(profileA.id);
 const ownerB = await committer(profileB.id);
 assert.notEqual(ownerA, ownerB);
-
-const anonymousPrivateOwner = await privateRequest('owner', {}, '');
-assert.equal(anonymousPrivateOwner.response.ok, false, 'private playlist crypto requires an authenticated wallet');
-const privateOwner = await privateRequest('owner', {}, profileA.cookie);
-assert.equal(privateOwner.response.ok, true, privateOwner.text.slice(0, 500));
-assert.equal(privateOwner.response.headers.get('cache-control'), 'no-store, private');
-assert.equal(String(privateOwner.payload.owner || privateOwner.payload.body), ownerA);
+const browserKeyA = await generateBrowserWeavemailKeyPair();
+const browserKeyB = await generateBrowserWeavemailKeyPair();
+assert.equal(browserKeyA.privateKey.extractable, false);
 
 const privateTimestamp = now + 10;
 const privateTitle = `Private playlist ${now}`;
@@ -55,18 +53,19 @@ const privatePlaintext = nativePrivatePlaylistPlaintext(
     createdAt: privateTimestamp,
   })
 );
-const privateSeal = await privateRequest(
-  'seal',
-  { purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE, plaintext: privatePlaintext },
-  profileA.cookie
+const privateSeal = await encryptWeavemailEnvelope(
+  privatePlaintext,
+  browserKeyA,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
 );
-assert.equal(privateSeal.response.ok, true, privateSeal.text.slice(0, 500));
-assert.equal(privateSeal.response.headers.get('cache-control'), 'no-store, private');
-assert.equal(privateSeal.text.includes(privateTitle), false, 'the seal response must not echo playlist plaintext');
-const privateEnvelope = normalizeNativePrivatePlaylistEnvelope(privateSeal.payload);
+const privateEnvelope = normalizeNativePrivatePlaylistEnvelope({
+  ...privateSeal,
+  'encryption-format': NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT,
+  purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE,
+  owner: ownerA,
+});
 assert.ok(privateEnvelope);
-assert.equal(privateEnvelope.algorithm, NATIVE_PRIVATE_PLAYLIST_ALGORITHM);
-assert.equal(privateEnvelope.key_version, NATIVE_PRIVATE_PLAYLIST_KEY_VERSION);
+assert.equal(privateEnvelope.encryption_format, NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT);
 assert.equal(privateEnvelope.owner, ownerA);
 
 const privateSnapshot = await write(nativePrivatePlaylistSnapshotMessage(privateEnvelope), profileA.cookie);
@@ -82,25 +81,30 @@ const privateSnapshotRecord = normalizeNativePrivatePlaylistSnapshot({
 });
 assert.ok(privateSnapshotRecord);
 
-const openedPrivate = await privateRequest('open', privateOpenRequest(privateSnapshotRecord), profileA.cookie);
-assert.equal(openedPrivate.response.ok, true, openedPrivate.text.slice(0, 500));
-assert.equal(openedPrivate.response.headers.get('cache-control'), 'no-store, private');
-const decryptedPrivate = parseNativePrivatePlaylistPlaintext(
-  openedPrivate.payload.plaintext || openedPrivate.payload.body,
-  privateSnapshotRecord
+const openedPrivate = await decryptWeavemailEnvelope(
+  privateSnapshotRecord,
+  browserKeyA,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
 );
+const decryptedPrivate = parseNativePrivatePlaylistPlaintext(openedPrivate, privateSnapshotRecord);
 assert.equal(decryptedPrivate?.title, privateTitle);
 assert.deepEqual(decryptedPrivate?.items, [profileA.id, profileB.id]);
 assert.equal(decryptedPrivate?.owner, ownerA);
 
-const foreignPrivateOpen = await privateRequest('open', privateOpenRequest(privateSnapshotRecord), profileB.cookie);
-assert.equal(foreignPrivateOpen.response.ok, false, 'another authenticated wallet must not decrypt the playlist');
-const tamperedPrivateOpen = await privateRequest(
-  'open',
-  { ...privateOpenRequest(privateSnapshotRecord), ciphertext: tamper(privateSnapshotRecord.ciphertext) },
-  profileA.cookie
+await assert.rejects(
+  decryptWeavemailEnvelope(privateSnapshotRecord, browserKeyB, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
+  /invalid/,
+  'another browser key must not decrypt the playlist'
 );
-assert.equal(tamperedPrivateOpen.response.ok, false, 'authenticated encryption must reject modified ciphertext');
+await assert.rejects(
+  decryptWeavemailEnvelope(
+    { ...privateSnapshotRecord, ciphertext: tamper(privateSnapshotRecord.ciphertext) },
+    browserKeyA,
+    NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+  ),
+  /failed authentication/,
+  'authenticated encryption must reject modified ciphertext'
+);
 
 const privateReference = await write(
   nativePlaylistReferenceInitMessage({
@@ -337,39 +341,9 @@ function playlistMessage({ profile, profileName, title, items, createdAt }) {
   };
 }
 
-function privateOpenRequest(snapshot) {
-  return {
-    purpose: snapshot.purpose,
-    algorithm: snapshot.algorithm,
-    'key-version': snapshot.key_version,
-    owner: snapshot.encrypted_for,
-    iv: snapshot.iv,
-    ciphertext: snapshot.ciphertext,
-    tag: snapshot.tag,
-  };
-}
-
 function tamper(value) {
   const first = value[0] === 'A' ? 'B' : 'A';
   return `${first}${value.slice(1)}`;
-}
-
-async function privateRequest(method, body, cookie) {
-  const url = authDeviceBridgeBase
-    ? `${authDeviceBridgeBase}/$/api/hyperbeam-auth-device/v1/~odysee-private@1.0/${method}`
-    : `${nodeBase}/~odysee-private@1.0/${method}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-      ...(cookie ? { cookie } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  const text = await response.text();
-  const payload = unwrap(parse(text));
-  return { response, text, payload: payload && typeof payload === 'object' ? payload : { body: payload } };
 }
 
 async function hydrateReference(id) {

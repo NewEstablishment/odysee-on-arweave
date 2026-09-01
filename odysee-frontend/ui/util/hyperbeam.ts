@@ -51,6 +51,8 @@ import {
   type NativePlaylistReference,
 } from 'util/nativePlaylistReferences';
 import {
+  NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES,
   NATIVE_PRIVATE_PLAYLIST_PURPOSE,
   nativePrivatePlaylistPlaintext,
   nativePrivatePlaylistSnapshotMessage,
@@ -109,6 +111,7 @@ import {
   type NativeCommentControl,
 } from 'util/nativeCommentControls';
 import { FF_MAX_CHARS_IN_COMMENT } from 'constants/form-field';
+import { decryptWithBrowserWeavemail, encryptWithBrowserWeavemail } from 'util/weavemailClient';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
@@ -119,7 +122,6 @@ const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
 const SEARCH_DEVICE = '~search@1.0';
 const PREFERENCE_DEVICE = '~odysee-preference@1.0';
-const PRIVATE_DEVICE = '~odysee-private@1.0';
 const SEARCH_MAX_LIMIT = 100;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
@@ -825,7 +827,8 @@ export async function fetchHyperbeamPlaylistSave(params: NativePlaylistWritePara
   });
   validateNativePlaylistWrite(playlistMessage, owner);
 
-  const message = visibility === 'private' ? await nativePrivatePlaylistMessage(playlistMessage) : playlistMessage;
+  const message =
+    visibility === 'private' ? await nativePrivatePlaylistMessage(playlistMessage, owner) : playlistMessage;
   const messageId = await writeNativeMessage(message, visibility === 'private' ? 'private playlist' : 'playlist');
   nativePlaylistQueryCache.clear();
   const written = await fetchNativePlaylistSnapshotById(messageId);
@@ -1002,13 +1005,13 @@ async function fetchNativePrivatePlaylistById(id: string): Promise<NativePlaylis
   const viewerOwner = await activeHyperbeamAccountOwner();
   if (!viewerOwner || viewerOwner !== snapshot.owner || snapshot.encrypted_for !== viewerOwner) return null;
 
-  let opened;
+  let plaintext;
   try {
-    opened = await fetchPrivateDeviceJson('open', privatePlaylistEnvelopeBody(snapshot));
+    plaintext = await decryptWithBrowserWeavemail(snapshot, viewerOwner, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES);
   } catch {
     return null;
   }
-  const playlist = parseNativePrivatePlaylistPlaintext(value(opened, 'plaintext', 'body'), snapshot);
+  const playlist = parseNativePrivatePlaylistPlaintext(plaintext, snapshot);
   if (!playlist || playlist.owner !== viewerOwner) return null;
   const profile = await verifiedNativePlaylistProfile(playlist);
   return profile ? { ...playlist, profile_name: profile.name, visibility: 'private' } : null;
@@ -1058,26 +1061,23 @@ function nativePlaylistMessage(
   });
 }
 
-async function nativePrivatePlaylistMessage(playlistMessage: Record<string, any>): Promise<Record<string, any>> {
-  const sealed = await fetchPrivateDeviceJson('seal', {
+async function nativePrivatePlaylistMessage(
+  playlistMessage: Record<string, any>,
+  owner: string
+): Promise<Record<string, any>> {
+  const sealed = await encryptWithBrowserWeavemail(
+    nativePrivatePlaylistPlaintext(playlistMessage),
+    owner,
+    NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+  );
+  const envelope = normalizeNativePrivatePlaylistEnvelope({
+    ...sealed,
+    'encryption-format': NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT,
     purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE,
-    plaintext: nativePrivatePlaylistPlaintext(playlistMessage),
+    owner,
   });
-  const envelope = normalizeNativePrivatePlaylistEnvelope(sealed);
-  if (!envelope) throw new Error('HyperBEAM returned an invalid private playlist encryption envelope');
+  if (!envelope) throw new Error('The browser produced an invalid private playlist encryption envelope');
   return nativePrivatePlaylistSnapshotMessage(envelope);
-}
-
-function privatePlaylistEnvelopeBody(snapshot: NativePrivatePlaylistSnapshot): Record<string, any> {
-  return {
-    purpose: snapshot.purpose,
-    algorithm: snapshot.algorithm,
-    'key-version': snapshot.key_version,
-    owner: snapshot.encrypted_for,
-    iv: snapshot.iv,
-    ciphertext: snapshot.ciphertext,
-    tag: snapshot.tag,
-  };
 }
 
 function validateNativePlaylistWrite(message: Record<string, any>, owner: string) {
@@ -2306,32 +2306,6 @@ async function fetchPreferenceDeviceJson(method: 'owner' | 'seal' | 'open', body
   return parseDeviceJson(text);
 }
 
-async function fetchPrivateDeviceJson(method: 'seal' | 'open', body: Record<string, any>): Promise<any> {
-  const baseUrl = hyperbeamBaseUrl();
-  if (!baseUrl) throw new Error('HyperBEAM node is not configured');
-  const direct = typeof window === 'undefined' || isServedFromManifest();
-  const url = direct
-    ? buildDeviceUrl(baseUrl, `${PRIVATE_DEVICE}/${method}`)
-    : `${HYPERBEAM_AUTH_DEVICE_PROXY_BASE}/${PRIVATE_DEVICE}/${method}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    const error = new Error(`HyperBEAM private ${method} failed with ${response.status}`);
-    Object.assign(error, { status: response.status, responseBody: text });
-    throw error;
-  }
-  return parseDeviceJson(text);
-}
-
 function queryPaths(response: any): Array<string> {
   const payload = queryPayload(response);
   if (Array.isArray(payload)) return payload.map(String).filter(Boolean);
@@ -2740,7 +2714,7 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   const pageSize = toNumber(params.page_size, 20);
   const offset = (page - 1) * pageSize;
   const request = hyperbeamClaimSearchRequest(params, offset, pageSize);
-  const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, { q: '', ...request });
+  const response = await fetchPublicOrProxiedDeviceJson(`${SEARCH_DEVICE}/query`, { q: '', ...request });
   const locators = (await searchResultIds(responsePayload(response))).map(String).filter(Boolean);
   const items = (
     await Promise.all(locators.map((locator) => resolveImmutableClaimById(locator).catch(() => null)))
@@ -2813,7 +2787,7 @@ export async function fetchSearchIds(query: string, options: number | HyperbeamS
   const trimmed = String(query || '').trim();
   if (!trimmed) return [];
   const request = typeof options === 'number' ? { limit: options } : options;
-  const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, {
+  const response = await fetchPublicOrProxiedDeviceJson(`${SEARCH_DEVICE}/query`, {
     q: trimmed,
     limit: Math.max(1, Math.min(SEARCH_MAX_LIMIT, toNumber(request.limit, 20))),
     ...(request.offset ? { offset: Math.max(0, Math.min(10000, toNumber(request.offset, 0))) } : {}),
@@ -2842,7 +2816,7 @@ async function searchResultIds(result: any): Promise<Array<any>> {
   if (rootIndexed.length) return rootIndexed.map(searchHitId).filter(Boolean);
   const link = value(result, 'ids+link', 'ids-link');
   if (typeof link !== 'string' || !link) return [];
-  const linked = responsePayload(await fetchSearchDeviceJson(`${CACHE_DEVICE}/read`, { read: link }));
+  const linked = responsePayload(await fetchPublicOrProxiedDeviceJson(`${CACHE_DEVICE}/read`, { read: link }));
   const linkedIds = Array.isArray(linked) ? linked : searchIndexedValues(linked);
   return linkedIds.map(searchHitId).filter(Boolean);
 }
@@ -2854,7 +2828,7 @@ function searchHitId(hit: any): string | null {
   return typeof id === 'string' && id ? id : null;
 }
 
-async function fetchSearchDeviceJson(path: string, body: Record<string, any>): Promise<any> {
+async function fetchPublicOrProxiedDeviceJson(path: string, body: Record<string, any>): Promise<any> {
   if (isServedFromManifest()) return fetchPublicDeviceJson(path, body);
   const response = await fetch(`${HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE}/${path}`, {
     method: 'POST',

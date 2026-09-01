@@ -12,15 +12,17 @@ the generic committed-message and reference contracts.
 
 - New and copied user playlists default private.
 - A private version is a generic committed
-  `odysee-private-playlist@1.0` message containing only an AES-256-GCM envelope
-  and its cryptographic metadata. The decrypted
+  `odysee-private-playlist@1.0` message containing only a `weavemail@1.0`
+  envelope and its cryptographic metadata. The decrypted
   `odysee-private-playlist-payload@1.0` value carries the normal complete
   playlist snapshot.
-- `odysee-private@1.0` is a stateless cryptographic boundary. It authenticates
-  the hosted cookie wallet, derives a playlist-domain-separated owner key, and
-  seals or opens plaintext. It never writes messages, moves references,
-  returns wallet material, or indexes plaintext; responses are
-  `no-store, private`.
+- The browser implements the WeaveMail 1.0 envelope format directly with
+  WebCrypto. It generates a fresh AES-256-GCM content key per snapshot and
+  wraps it with a browser RSA-OAEP/SHA-256 public key. The RSA key pair is
+  generated once per verified native cookie owner and persisted as CryptoKeys
+  in IndexedDB; the private key is non-exportable. There is no
+  private-playlist gateway or WeaveMail HTTP device, and no plaintext or key
+  material is sent to the node.
 - The generic `reference@1.0` init commitment remains the playlist's stable
   route. Reference messages bind `playlist-owner` to their exact verified
   committer. Discovery is owner-scoped, and readers verify the exact reference
@@ -37,6 +39,10 @@ the generic committed-message and reference contracts.
 Private playlist contents remain confidential at rest and across ordinary
 query/index paths while preserving the same append-only history and stable URL
 model as public playlists. A public conversion does not create a second
-playlist identity, and no key or plaintext enters public storage. Anyone can
-observe that the owner has a reference and encrypted snapshot, but only the
-matching authenticated wallet can recover its contents.
+playlist identity, and no private key, unwrapped content key, or plaintext
+enters public storage. Anyone can observe that the owner has a reference and
+encrypted snapshot, but only the browser holding the matching key can recover
+its contents. Clearing browser data or moving to another browser loses access
+until a key backup/recovery design exists. Experimental snapshots created on
+this branch before this browser-only format are intentionally rejected; they
+are test data, not a supported persisted format.

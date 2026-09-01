@@ -58,8 +58,11 @@ commitment (`hb_message` semantics via the node) and trust only committed
 keys. `owner` in projections is always the verified committer, never a
 self-declared field.
 
-Private playlist snapshots contain an AES-256-GCM envelope only. Their
+Private playlist snapshots contain a `weavemail@1.0` envelope only: ciphertext,
+an RSA-OAEP-wrapped random AES-256-GCM key, IV, and authentication tag. Their
 decrypted payload uses the ordinary playlist fields under the separate
-`odysee-private-playlist-payload@1.0` signing domain. The
-`odysee-private@1.0` device performs authenticated, domain-separated seal/open
-but never writes the snapshot or moves its generic `reference@1.0` head.
+`odysee-private-playlist-payload@1.0` signing domain. Browser WebCrypto performs
+encryption and decryption with a non-exportable RSA-OAEP key pair stored in
+IndexedDB under the verified native cookie owner. The node only commits and
+serves the generic ciphertext and reference messages; no private-playlist or
+WeaveMail HTTP device participates.
