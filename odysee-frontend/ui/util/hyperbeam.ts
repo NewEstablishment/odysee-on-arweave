@@ -2680,7 +2680,7 @@ async function fetchHomepageEligibleSearchPage(
 
     const claims = await Promise.all(locators.map((locator) => resolveImmutableClaimById(locator).catch(() => null)));
     claims.forEach((claim) => {
-      if (!claim || !isHomepageEligibleClaim(claim)) return;
+      if (!claim || !isHomepageEligibleClaim(claim, (params as any).homepage_include_future === true)) return;
       const identity = String(claim.immutable_id || claim.claim_id || claim.canonical_url || '');
       if (!identity || seen.has(identity)) return;
       seen.add(identity);
@@ -2700,8 +2700,10 @@ async function fetchHomepageEligibleSearchPage(
   };
 }
 
-function isHomepageEligibleClaim(claim: Claim): boolean {
-  const source = (claim as any).reposted_claim || claim;
+function isHomepageEligibleClaim(claim: Claim, includeFuture = false): boolean {
+  if ((claim as any).value_type === 'repost' || (claim as any)['value-type'] === 'repost') return false;
+  if ((claim as any).reposted_claim || (claim as any)['reposted-claim']) return false;
+  const source: any = claim;
   const value = source?.value || {};
   const thumbnail = value.thumbnail;
   const thumbnailUrl = typeof thumbnail === 'string' ? thumbnail : thumbnail?.url;
@@ -2715,7 +2717,7 @@ function isHomepageEligibleClaim(claim: Claim): boolean {
         ? Math.floor(parsed / 1000)
         : parsed
       : toNumber(source.meta?.creation_timestamp || source.timestamp, 0);
-  return effectiveTime > 0 && effectiveTime <= Math.floor(Date.now() / 1000);
+  return effectiveTime > 0 && (includeFuture || effectiveTime <= Math.floor(Date.now() / 1000));
 }
 
 async function fetchNativeChannelClaimSearch(
@@ -3895,7 +3897,6 @@ function immutableClaimFromHyperbeam(
     value(channelClaim0, 'immutable_id', 'immutable-id', 'outpoint');
   const channelImmutableUri = immutableUri(channelImmutableId);
   const channelName = channelClaim0 && channelClaimName(value(channelClaim0, 'name', 'claim-name', 'claim_name'));
-  const channelNativeUri = nativeChannelUri(channelName, channelImmutableId);
   const channelClaim =
     channelClaim0 && channelImmutableId
       ? {
@@ -3906,9 +3907,9 @@ function immutableClaimFromHyperbeam(
           normalized_name: channelName?.toLowerCase(),
           type: 'claim',
           value_type: 'channel',
-          canonical_url: channelNativeUri || channelImmutableUri || channelClaim0.canonical_url,
-          permanent_url: channelNativeUri || channelImmutableUri || channelClaim0.permanent_url,
-          short_url: channelNativeUri || channelImmutableUri || channelClaim0.short_url,
+          canonical_url: channelImmutableUri || channelClaim0.canonical_url,
+          permanent_url: channelImmutableUri || channelClaim0.permanent_url,
+          short_url: channelImmutableUri || channelClaim0.short_url,
           confirmations: toNumber(channelClaim0.confirmations, 1),
           meta: normalizeHyperbeamClaimMeta(channelClaim0.meta),
           value: compactParams({

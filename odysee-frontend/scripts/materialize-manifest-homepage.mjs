@@ -31,7 +31,7 @@ export function manifestHomepageModule(ids, options = {}) {
           name: 'local-content',
           label,
           pageSize: locators.length,
-          claimType: ['stream', 'repost'],
+          claimType: ['stream'],
           order: 'new',
           immutableIds: locators,
           immutablePoolIds: locators,
@@ -54,7 +54,7 @@ export async function materializeManifestHomepage(options = {}) {
     body: JSON.stringify({
       q: '',
       limit: discoveryLimit,
-      filter: ['claim_type IN ["stream", "repost"]', 'nsfw = 0'],
+      filter: ['claim_type IN ["stream"]', 'nsfw = 0'],
       sort: ['release_time:desc'],
     }),
     signal: AbortSignal.timeout(15_000),
@@ -77,7 +77,7 @@ export async function materializeManifestHomepage(options = {}) {
     const compatibilityTimestamp = needsCompatibilityDate(claim)
       ? await fetchCompatibilityTimestamp(fetchImpl, nodeUrl, claim)
       : undefined;
-    return isHomepageEligibleClaim(claim, nowSeconds, compatibilityTimestamp) ? locator : null;
+    return isHomepageEligibleClaim(claim, nowSeconds, compatibilityTimestamp, { includeFuture: true }) ? locator : null;
   });
   const locators = hydrated.filter(Boolean).slice(0, limit);
   if (!locators.length) throw new Error('Homepage search returned no eligible immutable locators');
@@ -90,9 +90,22 @@ export async function materializeManifestHomepage(options = {}) {
   return { locators, outputPath };
 }
 
-export function isHomepageEligibleClaim(payload, nowSeconds = Math.floor(Date.now() / 1000), compatibilityTimestamp) {
+export function isHomepageEligibleClaim(
+  payload,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  compatibilityTimestamp,
+  options = {}
+) {
   const claim = responsePayload(payload);
   if (!claim || typeof claim !== 'object') return false;
+  if (
+    claim.value_type === 'repost' ||
+    claim['value-type'] === 'repost' ||
+    claim.reposted_claim ||
+    claim['reposted-claim']
+  ) {
+    return false;
+  }
   const displayed = claim.reposted_claim || claim['reposted-claim'] || claim;
   const value = displayed.value || displayed.payload || displayed;
   const thumbnail = value.thumbnail || displayed.thumbnail;
@@ -117,13 +130,13 @@ export function isHomepageEligibleClaim(payload, nowSeconds = Math.floor(Date.no
   const parsed = Number(rawReleaseTime);
   if (Number.isFinite(parsed) && parsed > 0 && parsed !== LEGACY_UNSET_RELEASE_TIME) {
     const releaseTime = parsed >= 1_000_000_000_000 ? Math.floor(parsed / 1000) : parsed;
-    return releaseTime <= nowSeconds;
+    return options.includeFuture === true || releaseTime <= nowSeconds;
   }
 
   const fallback = Number(
     compatibilityTimestamp ?? displayed.meta?.creation_timestamp ?? displayed.meta?.['creation-timestamp']
   );
-  return Number.isFinite(fallback) && fallback > 0 && fallback <= nowSeconds;
+  return Number.isFinite(fallback) && fallback > 0 && (options.includeFuture === true || fallback <= nowSeconds);
 }
 
 function needsCompatibilityDate(payload) {

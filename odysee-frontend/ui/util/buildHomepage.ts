@@ -28,6 +28,7 @@ export type HomepageCat = {
   duration?: string;
   exclude_shorts?: boolean;
   excludeFuture?: boolean;
+  includeFuture?: boolean;
   mixIn?: Array<string>;
   hideByDefault?: boolean;
   immutableIds?: Array<string>;
@@ -168,7 +169,7 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
     hideByDefault: cat.hideByDefault,
     hideSort: cat.hideSort,
     options: {
-      claimType: cat.claimType || ['stream', 'repost'],
+      claimType: cat.claimType || ['stream'],
       channelIds,
       excludedChannelIds: cat.excludedChannelIds,
       orderBy: orderValue,
@@ -180,6 +181,7 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
       releaseTime: `>${getRelativeUnixTimestamp(cat.daysOfContent || 30, 'days', 'hour')}`,
       timestamp: cat.excludeFuture ? `<${Math.floor(Date.now() / 1000)}` : undefined,
       homepageEligible: true,
+      includeFuture: cat.includeFuture,
     },
   };
 };
@@ -217,7 +219,7 @@ export function GetLinksData(
       hideSort: false,
       options: {
         orderBy: CS.ORDER_BY_NEW,
-        claimType: ['stream', 'repost'],
+        claimType: ['stream'],
         releaseTime:
           subscribedChannelIds.length > 20
             ? `>${getRelativeUnixTimestamp(9, 'months', 'week')}`

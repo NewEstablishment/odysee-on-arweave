@@ -167,6 +167,13 @@ local function display_claim(item)
     return item
 end
 
+local function is_repost(item)
+    if type(item) ~= "table" then return false end
+    local value_type = item.value_type or item["value-type"]
+    return value_type == "repost" or
+        type(item.reposted_claim or item["reposted-claim"]) == "table"
+end
+
 local function has_usable_thumbnail(item)
     local displayed = display_claim(item)
     local value = resolve_field(displayed, "value")
@@ -188,6 +195,7 @@ local function effective_release_time(item)
 end
 
 local function is_homepage_eligible(item, now)
+    if is_repost(item) then return false end
     if not has_usable_thumbnail(item) then return false end
     local release_time = effective_release_time(item)
     return release_time == nil or release_time <= now
@@ -218,7 +226,6 @@ end
 local function is_materializable_media(item)
     if type(item) ~= "table" then return false end
     local value_type = item.value_type or item["value-type"]
-    if value_type == "repost" then return true end
     if value_type ~= "stream" then return false end
     local value = item.value
     local source = type(value) == "table" and value.source or nil
@@ -276,12 +283,19 @@ local function exact_id(id)
     return id
 end
 
+local function exact_homepage_id(id, now)
+    if type(id) ~= "string" or id == "" then return nil end
+    local response = store_read(id)
+    if response == nil or not is_homepage_eligible(response, now) then return nil end
+    return id
+end
+
 local function local_search(category, pool_size)
     local status, result = ao.resolve({
         path = "/~search@1.0/query",
         q = "",
         limit = math.min(100, pool_size),
-        filter = { 'claim_type IN ["stream", "repost"]', "nsfw = 0" },
+        filter = { 'claim_type IN ["stream"]', "nsfw = 0" },
         sort = { "release_time:desc" },
         ["cache-control"] = { "no-store", "no-cache" }
     })
@@ -311,8 +325,7 @@ local function category_query(category, now, page, page_size, relaxed)
     if order == "new" then order_by = { "release_time" } end
     if order == "top" then order_by = { "effective_amount" } end
 
-    local claim_types = array(category.claimType or { "stream", "repost" })
-    local channel_only = #claim_types == 1 and claim_types[1] == "channel"
+    local claim_types = { "stream" }
     local days = positive(category.daysOfContent, 30)
     if relaxed then days = math.max(days * 4, 365) end
     local query = {
@@ -336,11 +349,9 @@ local function category_query(category, now, page, page_size, relaxed)
         query.any_languages = category.searchLanguages
     end
     if category.duration ~= nil then query.duration = category.duration end
-    if not channel_only then
-        query.timestamp = ">" .. tostring(now - days * 86400)
-        query.release_time = "<" .. tostring(now)
-    end
-    if not channel_only then query.limit_claims_per_channel = 1 end
+    query.timestamp = ">" .. tostring(now - days * 86400)
+    query.release_time = "<" .. tostring(now)
+    query.limit_claims_per_channel = 1
     return query
 end
 
@@ -368,7 +379,7 @@ local function append_candidate(state, item, replace_channel)
 
     local exact_media = exact_outpoint(item, "media")
     if exact_media == nil then return nil end
-    if exact_id(exact_media) == nil then return nil end
+    if exact_homepage_id(exact_media, state.now) == nil then return nil end
     if signing ~= nil then
         signing_id = state.warmed_channels[signing_source_locator]
         if signing_id == nil then
@@ -502,6 +513,7 @@ local function category_delta(category, selection)
         if category[key] ~= nil then result[key] = copy(category[key]) end
     end
     result.pageSize = positive(category.pageSize, DEFAULT_PAGE_SIZE)
+    result.claimType = { "stream" }
     result.immutableIds = selection.immutableIds
     result.immutablePoolIds = selection.immutablePoolIds
     result.immutableSigningChannelIds = selection.immutableSigningChannelIds
@@ -561,7 +573,7 @@ local function materialize_featured(items, now)
                 if signing_id ~= nil and exact_id(signing_id) == nil then signing_id = nil end
                 local signing_locator = outpoint(signing)
                 local id = is_homepage_eligible(item, now) and exact_outpoint(item, "media") or nil
-                if id ~= nil and exact_id(id) == nil then id = nil end
+                if id ~= nil and exact_homepage_id(id, now) == nil then id = nil end
                 if id ~= nil and signing_id ~= nil and same_text(signing_locator, banner_locator) then
                     table.insert(media, id)
                     channels[id] = signing_id

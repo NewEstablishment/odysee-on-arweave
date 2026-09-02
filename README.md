@@ -364,7 +364,9 @@ category's ordered immutable pool. The optional `homepage-local-content`
 configuration adds a locally indexed category without changing the generic
 search device or the frontend templates. Both signed category snapshots and
 the separately materialized Local content row reject exact-hydrated media that
-lack a usable thumbnail or have a future effective release time.
+lack a usable thumbnail. Signed language snapshots also reject future-dated
+media, while Local content intentionally retains scheduled streams. Homepage
+media discovery is stream-only; repost wrappers are not published.
 
 ```sh
 cd odysee-frontend

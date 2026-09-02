@@ -57,7 +57,7 @@ test('materializes search locators only after exact reads succeed', async (t) =>
   assert.deepEqual(result.locators, [firstId, secondId]);
   assert.equal(requests.length, 3);
   const searchBody = JSON.parse(requests[0].options.body);
-  assert.deepEqual(searchBody.filter, ['claim_type IN ["stream", "repost"]', 'nsfw = 0']);
+  assert.deepEqual(searchBody.filter, ['claim_type IN ["stream"]', 'nsfw = 0']);
   assert.deepEqual(searchBody.sort, ['release_time:desc']);
   assert.equal(searchBody.limit, 72);
   const generated = await fs.readFile(outputPath, 'utf8');
@@ -87,7 +87,7 @@ test('hydrates legacy outpoints through the immutable store route', async (t) =>
   assert.equal(hydrationUrl.searchParams.get('accept-bundle'), 'true');
 });
 
-test('rejects missing-thumbnail and future claims before writing local content', async (t) => {
+test('rejects missing thumbnails but keeps upcoming claims in local content', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'odysee-manifest-homepage-eligibility-'));
   const outputPath = path.join(directory, 'index.ts');
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -115,11 +115,11 @@ test('rejects missing-thumbnail and future claims before writing local content',
     },
   });
 
-  assert.deepEqual(result.locators, [firstId]);
+  assert.deepEqual(result.locators, [futureId, firstId]);
   const generated = await fs.readFile(outputPath, 'utf8');
   assert.match(generated, new RegExp(firstId));
   assert.doesNotMatch(generated, new RegExp(noThumbnailId));
-  assert.doesNotMatch(generated, new RegExp(futureId));
+  assert.match(generated, new RegExp(futureId));
 });
 
 test('uses compatibility metadata for legacy claims without a release date', async (t) => {
@@ -180,6 +180,16 @@ test('homepage eligibility accepts a thumbnail only at or before the current tim
       1_800_000_000
     ),
     true
+  );
+  assert.equal(
+    isHomepageEligibleClaim(
+      {
+        value_type: 'repost',
+        reposted_claim: validClaim,
+      },
+      1_800_000_000
+    ),
+    false
   );
 });
 
