@@ -16,7 +16,8 @@ type HomepageSnapshot = {
   'content-hash': string;
   'category-count'?: number;
   complete?: boolean;
-  homepage: Record<string, any>;
+  homepage?: Record<string, any>;
+  'homepage-json'?: string;
 };
 
 export async function fetchHomepageSnapshot(language: string): Promise<HomepageSnapshot | null> {
@@ -45,11 +46,13 @@ export async function fetchHomepageSnapshot(language: string): Promise<HomepageS
 }
 
 function normalizeHomepageSnapshot(snapshot: HomepageSnapshot): HomepageSnapshot {
-  if (!snapshot?.homepage || typeof snapshot.homepage !== 'object') return snapshot;
+  const homepage = snapshot?.homepage || parseHomepageJson(snapshot?.['homepage-json']);
+  if (!homepage || typeof homepage !== 'object') return snapshot;
 
-  const homepage = snapshot.homepage;
   const categories = Object.fromEntries(
-    Object.entries(homepage.categories || {}).map(([key, category]) => [key, normalizeHomepageCategory(category)])
+    Object.entries(homepage.categories || {})
+      .filter(([key]) => key !== 'commitments' && key !== 'priv')
+      .map(([key, category]) => [key, normalizeHomepageCategory(category)])
   );
   const featured = normalizeHomepageFeatured(homepage.featured);
 
@@ -61,6 +64,16 @@ function normalizeHomepageSnapshot(snapshot: HomepageSnapshot): HomepageSnapshot
       ...(featured ? { featured } : {}),
     },
   };
+}
+
+function parseHomepageJson(raw: unknown): Record<string, any> | undefined {
+  if (typeof raw !== 'string' || !raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined;
+  } catch (_) {
+    return undefined;
+  }
 }
 
 function normalizeHomepageCategory(category: any): any {
@@ -153,7 +166,7 @@ export function mergeHomepageSnapshot(
   if (!configuredHomepage && !snapshot) return null;
   if (!snapshot) return configuredHomepage || null;
 
-  const generated = snapshot.homepage;
+  const generated = snapshot.homepage || { categories: {} };
   const localContent = configuredHomepage?.categories?.LOCAL_CONTENT;
   return {
     ...configuredHomepage,
@@ -180,8 +193,9 @@ export function withLocalContentCategory(homepage: Record<string, any> | null): 
         pageSize: 12,
         claimType: ['stream', 'repost'],
         order: 'new',
-        excludeFuture: true,
         ...configuredLocalContent,
+        excludeFuture: true,
+        homepageEligible: true,
       },
       ...snapshotCategories,
     },

@@ -376,15 +376,20 @@ Static manifests embed homepage presentation templates, not node-specific
 claim selections. The node stores its immutable Lua materializer and homepage
 plan, runs the computation against its own configured stores, and publishes
 node-signed `odysee-homepage@1.0` snapshots. Stock `cron@1.0` refreshes all
-languages hourly. The browser uses `query@1.0` only for locator discovery, then
+languages every six hours. The browser uses `query@1.0` only for locator discovery, then
 exact-hydrates and verifies the node committer before using a snapshot. There
-is no SSR timer or filesystem snapshot authority.
+is no SSR timer or filesystem snapshot authority. Homepage selection rejects
+exact-hydrated media without a usable thumbnail and media whose effective
+release time is in the future; the separate manifest-local content selection
+applies the same eligibility rule before emitting immutable IDs.
 
 Observational analytics are recorded by the reusable `analytics@1.0` device.
 Odysee maps playback to generic subject engagement in the frontend, while the
-device exposes only aggregate counts and wallet-authenticated reports. A
-one-time owner-authenticated baseline preserves historical view totals; native
-qualified engagement is added after cutover. These analytics remain
+device exposes only aggregate counts and wallet-authenticated reports. The
+Odysee file adapter lazily imports a missing historical view baseline with the
+node signer when a legacy claim is first hydrated for view display. Operators
+can also perform a one-time owner-authenticated bulk import before retiring the
+legacy source. Native qualified engagement is added after cutover. These analytics remain
 non-authoritative signals and do not affect content verification.
 
 Other legacy-only interactive surfaces with no verifiable representation —

@@ -19,7 +19,8 @@ The node provisions the public tracking key in `config.json`:
       "origins": ["https://example.invalid"],
       "visitor-id-mode": "persistent",
       "engagement-threshold-ms": 30000,
-      "engagement-dedupe-window-ms": 86400000
+      "engagement-dedupe-window-ms": 86400000,
+      "node-baseline-writer": true
     }
   ]
 }
@@ -78,20 +79,36 @@ position, and lifecycle timestamps. Those records are sufficient to derive
 total watch minutes and completion metrics later; no such UI is part of the
 current view-counter work.
 
-Claim tiles and media pages request public totals from `count` or batched
-`counts`. The displayed value is:
+Claim tiles and media pages request public totals through the Odysee file
+adapter's batched `view-count` endpoint. It reads generic `analytics@1.0`
+counts first. For a legacy claim with no baseline marker, the node obtains its
+historical value from the legacy view-count API, signs the baseline itself, and
+stores it through generic `analytics@1.0/baseline` before returning the total.
+The anonymous legacy service token exists only in node memory. The browser
+never receives it and never calls the legacy API.
+
+The displayed value is:
 
 ```text
 total = imported baseline + qualified native engagements
 ```
 
 These aggregate endpoints are public and require no Odysee account, cookie, or
-wallet. Detailed site reports and baseline writes remain owner-authenticated.
+wallet. Detailed site reports remain wallet-authenticated. Baseline writes
+remain signature-authenticated: the configured site owner is always allowed,
+and `node-baseline-writer: true` additionally allows only that node's signer.
+It does not authorize unsigned requests or arbitrary wallets.
 
 The browser never calls legacy Watchman or the legacy view-count API after the
 cutover.
 
 ## Legacy baseline import
+
+Lazy import covers claims as the product hydrates their view counts and writes
+an immutable zero baseline marker as well, preventing repeated legacy lookups.
+Before the legacy backend is retired, operators should still bulk-import the
+remaining inventory so every historical count survives independently of that
+backend.
 
 Generate a cutover export from the legacy media IDs in Meilisearch. The
 exporter creates a transient anonymous legacy service token and refreshes the

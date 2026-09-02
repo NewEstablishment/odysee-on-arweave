@@ -63,11 +63,70 @@ local function decode_json(body)
 end
 
 local function encode_json(value)
-    local base = copy(value)
-    base.device = "json@1.0"
-    local status, encoded = ao.resolve(base, "serialize")
-    if status ~= "ok" or type(encoded) ~= "table" then return nil end
-    return encoded.body
+    local function escape(text)
+        return string.gsub(tostring(text), '[%z\1-\31\\"]', function(character)
+            if character == '"' then return '\\"' end
+            if character == '\\' then return '\\\\' end
+            if character == '\b' then return '\\b' end
+            if character == '\f' then return '\\f' end
+            if character == '\n' then return '\\n' end
+            if character == '\r' then return '\\r' end
+            if character == '\t' then return '\\t' end
+            return string.format('\\u%04x', string.byte(character))
+        end)
+    end
+
+    local function encode(item, active)
+        local item_type = type(item)
+        if item == nil then return "null" end
+        if item_type == "boolean" then return item and "true" or "false" end
+        if item_type == "number" then
+            if item ~= item or item == math.huge or item == -math.huge then return nil end
+            return tostring(item)
+        end
+        if item_type == "string" then return '"' .. escape(item) .. '"' end
+        if item_type ~= "table" or active[item] then return nil end
+
+        active[item] = true
+        local count = 0
+        local highest = 0
+        local indexed = true
+        for key, _ in pairs(item) do
+            count = count + 1
+            if type(key) ~= "number" or key < 1 or key ~= math.floor(key) then
+                indexed = false
+            elseif key > highest then
+                highest = key
+            end
+        end
+
+        local parts = {}
+        if indexed and count > 0 and highest == count then
+            for index = 1, highest do
+                local encoded = encode(item[index], active)
+                if encoded == nil then active[item] = nil return nil end
+                table.insert(parts, encoded)
+            end
+            active[item] = nil
+            return "[" .. table.concat(parts, ",") .. "]"
+        end
+
+        local keys = {}
+        for key, _ in pairs(item) do
+            if type(key) ~= "string" then active[item] = nil return nil end
+            table.insert(keys, key)
+        end
+        table.sort(keys)
+        for _, key in ipairs(keys) do
+            local encoded = encode(item[key], active)
+            if encoded == nil then active[item] = nil return nil end
+            table.insert(parts, '"' .. escape(key) .. '":' .. encoded)
+        end
+        active[item] = nil
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+
+    return encode(value, {})
 end
 
 local function percent_encode(value)
@@ -99,6 +158,39 @@ local function resolve_field(message, key)
     local status, value = ao.resolve(message, key)
     if status ~= "ok" then return nil end
     return value
+end
+
+local function display_claim(item)
+    if type(item) ~= "table" then return nil end
+    local reposted = item.reposted_claim or item["reposted-claim"]
+    if type(reposted) == "table" then return reposted end
+    return item
+end
+
+local function has_usable_thumbnail(item)
+    local displayed = display_claim(item)
+    local value = resolve_field(displayed, "value")
+    if type(value) ~= "table" then return false end
+    local thumbnail = resolve_field(value, "thumbnail")
+    local url = type(thumbnail) == "table" and (thumbnail.url or thumbnail["url"]) or thumbnail
+    return type(url) == "string" and string.match(url, "%S") ~= nil
+end
+
+local function effective_release_time(item)
+    local displayed = display_claim(item)
+    local value = resolve_field(displayed, "value")
+    local release_time = type(value) == "table" and
+        (value.release_time or value["release-time"]) or nil
+    if release_time == nil and type(displayed) == "table" then
+        release_time = displayed.release_time or displayed["release-time"] or displayed.timestamp
+    end
+    return tonumber(release_time)
+end
+
+local function is_homepage_eligible(item, now)
+    if not has_usable_thumbnail(item) then return false end
+    local release_time = effective_release_time(item)
+    return release_time == nil or release_time <= now
 end
 
 local function source_search(query)
@@ -198,8 +290,10 @@ local function local_search(category, pool_size)
     local ids = {}
     local seen = {}
     for _, raw_id in ipairs(array(result)) do
-        local id = exact_id(tostring(raw_id))
-        if id ~= nil and not seen[id] then
+        local candidate_id = tostring(raw_id)
+        local candidate = store_read(candidate_id)
+        local id = candidate ~= nil and candidate_id or nil
+        if id ~= nil and is_homepage_eligible(candidate, os.time()) and not seen[id] then
             seen[id] = true
             table.insert(ids, id)
         end
@@ -257,6 +351,7 @@ local function remove_id(ids, id)
 end
 
 local function append_candidate(state, item, replace_channel)
+    if not is_homepage_eligible(item, state.now) then return nil end
     local source_locator = outpoint(item)
     if source_locator == nil then return nil end
     if state.seen[source_locator] ~= nil then return state.seen[source_locator] end
@@ -346,6 +441,7 @@ local function collect_category(category, now, pool_size)
     local page_size = positive(category.pageSize, DEFAULT_PAGE_SIZE)
     local target = math.max(page_size, pool_size)
     local state = {
+        now = now,
         ids = {},
         channels = {},
         seen = {},
@@ -464,7 +560,7 @@ local function materialize_featured(items, now)
                 local signing_id = signing and exact_outpoint(signing, "channel") or nil
                 if signing_id ~= nil and exact_id(signing_id) == nil then signing_id = nil end
                 local signing_locator = outpoint(signing)
-                local id = exact_outpoint(item, "media")
+                local id = is_homepage_eligible(item, now) and exact_outpoint(item, "media") or nil
                 if id ~= nil and exact_id(id) == nil then id = nil end
                 if id ~= nil and signing_id ~= nil and same_text(signing_locator, banner_locator) then
                     table.insert(media, id)
@@ -516,6 +612,8 @@ local function as_message(message)
 end
 
 local function persist_snapshot(language, homepage, now)
+    local homepage_json = encode_json(homepage)
+    if type(homepage_json) ~= "string" then return nil, "homepage encoding failed" end
     local hash_input = copy(homepage)
     local hash_status, content_hash = ao.resolve(
         as_message(hash_input),
@@ -531,50 +629,71 @@ local function persist_snapshot(language, homepage, now)
         ["content-hash"] = content_hash,
         ["category-count"] = #ordered_categories(homepage.categories),
         complete = true,
-        homepage = homepage
+        ["homepage-json"] = homepage_json
     }
     local commit_status, committed = ao.resolve(
         as_message(snapshot),
-        { path = "commit", committers = "all" }
+        {
+            path = "commit",
+            committers = "all",
+            bundle = true,
+            ["commitment-device"] = "httpsig@1.0",
+            type = "rsa-pss-sha512"
+        }
     )
     if commit_status ~= "ok" or type(committed) ~= "table" then
         return nil, "snapshot commitment failed"
     end
-    -- `priv` is Lua execution state attached by the enclosing resolver. It is
-    -- not part of the committed snapshot and cannot be nested in another
-    -- signed message.
     committed.priv = nil
 
-    local publish_node = _G.homepage_publish_node
-    if type(publish_node) ~= "string" or publish_node == "" then
-        return nil, "homepage publish node is required"
+    local id_status, published_id = ao.resolve(
+        as_message(committed),
+        { path = "id", committers = "all" }
+    )
+    if id_status ~= "ok" or type(published_id) ~= "string" or #published_id ~= 43 then
+        return nil, "snapshot immutable ID failed"
     end
+
     local write_request = {
-        path = string.gsub(publish_node, "/$", "") .. "/~cache@1.0/write",
-        method = "POST",
-        body = committed
+        path = "register",
+        key = "odysee-homepage-" .. language,
+        value = committed
     }
     local request_status, signed_request = ao.resolve(
         write_request,
-        { "as", "message@1.0", { path = "commit", committers = "all" } }
+        {
+            "as",
+            "message@1.0",
+            {
+                path = "commit",
+                committers = "all",
+                bundle = true,
+                ["commitment-device"] = "httpsig@1.0",
+                type = "rsa-pss-sha512"
+            }
+        }
     )
     if request_status ~= "ok" or type(signed_request) ~= "table" then
         return nil, {
-            stage = "cache write commitment",
+            stage = "snapshot cache-write commitment",
             status = request_status,
             result = signed_request
         }
     end
+    signed_request.priv = nil
     local write_status, write_result = ao.resolve(
-        { device = "relay@1.0" },
-        { path = "call", target = "body", body = signed_request }
+        { device = "local-name@1.0" },
+        signed_request
     )
-    if write_status ~= "ok" then return nil, "cache relay failed: " .. tostring(write_result) end
-    return committed, nil
+    if write_status ~= "ok" then return nil, "snapshot registration failed: " .. tostring(write_result) end
+    -- Returning the full snapshot here would make the enclosing Lua result a
+    -- second discoverable snapshot with the Lua resolver's own commitment.
+    -- Keep refresh output as an operational summary; the published ID above is
+    -- the sole snapshot identity.
+    return { id = published_id, language = language }, nil
 end
 
 function refresh(base, req, opts)
-    _G.homepage_publish_node = req["publish-node"]
     local plan = req.homepages
     if type(plan) ~= "table" then
         local plan_id = req["plan-id"]

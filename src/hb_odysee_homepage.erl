@@ -8,7 +8,7 @@
 -export([module_message/0, plan_message/0, plan_message/1, install/1, refresh/1]).
 
 -define(RETRY_MS, 5000).
--define(DEFAULT_INTERVAL, <<"1-hour">>).
+-define(DEFAULT_INTERVAL, <<"6-hours">>).
 -define(DEFAULT_POOL_SIZE, 36).
 -define(DEFAULT_INITIAL_POOL_SIZE, 12).
 
@@ -157,7 +157,8 @@ schedule(ModuleID, PlanID, Opts) ->
         <<"module">> => ModuleID,
         <<"device-sandbox">> => [
             <<"cache@1.0">>, <<"json@1.0">>, <<"message@1.0">>,
-            <<"httpsig@1.0">>, <<"relay@1.0">>, <<"search@1.0">>
+            <<"httpsig@1.0">>, <<"local-name@1.0">>, <<"meta@1.0">>,
+            <<"search@1.0">>
         ],
         <<"path">> => <<"every">>,
         <<"cron-path">> => <<"refresh">>,
@@ -207,7 +208,20 @@ start_initial_refresh(ModuleID, PlanID, Opts) ->
     ok.
 
 refresh_summary({ok, Snapshots}) when is_map(Snapshots) ->
-    {ok, maps:keys(Snapshots)};
+    Published = maps:filtermap(
+        fun(Language, Snapshot) when is_map(Snapshot) ->
+            case {
+                maps:get(<<"language">>, Snapshot, undefined),
+                maps:get(<<"id">>, Snapshot, undefined)
+            } of
+                {Language, ID} when is_binary(ID), byte_size(ID) =:= 43 -> {true, ID};
+                _ -> false
+            end;
+           (_, _) -> false
+        end,
+        Snapshots
+    ),
+    {ok, Published};
 refresh_summary({error, Failures}) when is_map(Failures) ->
     Normalized = maps:map(fun(_Language, Value) -> normalize_failure(Value) end, Failures),
     LanguageFailures = maps:filter(fun(_Language, Value) -> is_list(Value) end, Normalized),
@@ -229,17 +243,9 @@ normalize_failure(Value) ->
 
 refresh_request(PlanID, Opts) ->
     PoolSize = hb_opts:get(<<"homepage-category-pool-size">>, ?DEFAULT_POOL_SIZE, Opts),
-    PublishNode =
-        case hb_opts:get(<<"homepage-publish-node">>, not_found, Opts) of
-            not_found ->
-                Port = hb_opts:get(port, 8734, Opts),
-                <<"http://127.0.0.1:", (integer_to_binary(Port))/binary>>;
-            Configured -> Configured
-        end,
     #{
         <<"path">> => <<"refresh">>,
         <<"plan-id">> => PlanID,
-        <<"publish-node">> => PublishNode,
         <<"category-pool-size">> => PoolSize
     }.
 
@@ -249,7 +255,8 @@ run_refresh(ModuleID, PlanID, Opts, Overrides) ->
         <<"module">> => ModuleID,
         <<"device-sandbox">> => [
             <<"cache@1.0">>, <<"json@1.0">>, <<"message@1.0">>,
-            <<"httpsig@1.0">>, <<"relay@1.0">>, <<"search@1.0">>
+            <<"httpsig@1.0">>, <<"local-name@1.0">>, <<"meta@1.0">>,
+            <<"search@1.0">>
         ]
     },
     Req = maps:merge(refresh_request(PlanID, Opts), Overrides),

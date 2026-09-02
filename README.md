@@ -354,14 +354,17 @@ cache. The Lua computation discovers locators through the configured stores,
 exact-hydrates the selected claims and channels, and publishes one node-signed
 `odysee-homepage@1.0` snapshot per language. It first publishes the configured
 startup language, then stock `cron@1.0` runs the complete all-language refresh
-hourly. A failed refresh leaves the previous committed snapshots available.
+every six hours. A failed refresh leaves the previous committed snapshots
+available.
 
 The browser discovers snapshots with generic `query@1.0`, exact-reads each
 candidate, verifies its commitment and node committer, and uses the newest
 valid snapshot. Homepage rows and their matching category routes share each
 category's ordered immutable pool. The optional `homepage-local-content`
 configuration adds a locally indexed category without changing the generic
-search device or the frontend templates.
+search device or the frontend templates. Both signed category snapshots and
+the separately materialized Local content row reject exact-hydrated media that
+lack a usable thumbnail or have a future effective release time.
 
 ```sh
 cd odysee-frontend

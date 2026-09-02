@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const DEFAULT_NODE_URL = 'http://127.0.0.1:18801';
 const DEFAULT_LIMIT = 24;
+const LEGACY_UNSET_RELEASE_TIME = 2_147_483_647;
 const LOCATOR_PATTERN = /^(?:[A-Za-z0-9_-]{43}|[0-9a-f]{64}:[0-9]+)$/i;
 
 export function searchResultIds(payload) {
@@ -45,12 +46,14 @@ export async function materializeManifestHomepage(options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const nodeUrl = normalizeBase(options.nodeUrl || DEFAULT_NODE_URL);
   const limit = boundedLimit(options.limit || DEFAULT_LIMIT);
+  const discoveryLimit = Math.min(100, limit * 3);
+  const nowSeconds = Number(options.nowSeconds) || Math.floor(Date.now() / 1000);
   const searchResponse = await fetchImpl(`${nodeUrl}/~search@1.0/query`, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
     body: JSON.stringify({
       q: '',
-      limit,
+      limit: discoveryLimit,
       filter: ['claim_type IN ["stream", "repost"]', 'nsfw = 0'],
       sort: ['release_time:desc'],
     }),
@@ -61,15 +64,23 @@ export async function materializeManifestHomepage(options = {}) {
     throw new Error(`Homepage search failed with ${searchResponse.status}: ${searchText.slice(0, 300)}`);
   }
 
-  const locators = searchResultIds(parseJson(searchText));
-  if (!locators.length) throw new Error('Homepage search returned no immutable locators');
-  await mapWithConcurrency(locators, 8, async (locator) => {
+  const candidates = searchResultIds(parseJson(searchText));
+  if (!candidates.length) throw new Error('Homepage search returned no immutable locators');
+  const hydrated = await mapWithConcurrency(candidates, 8, async (locator) => {
     const response = await fetchImpl(immutableHydrationUrl(nodeUrl, locator), {
       headers: { accept: 'application/json' },
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error(`Homepage locator ${locator} failed exact hydration with ${response.status}`);
+    const body = await response.text();
+    const claim = parseJson(body);
+    const compatibilityTimestamp = needsCompatibilityDate(claim)
+      ? await fetchCompatibilityTimestamp(fetchImpl, nodeUrl, claim)
+      : undefined;
+    return isHomepageEligibleClaim(claim, nowSeconds, compatibilityTimestamp) ? locator : null;
   });
+  const locators = hydrated.filter(Boolean).slice(0, limit);
+  if (!locators.length) throw new Error('Homepage search returned no eligible immutable locators');
 
   const outputPath = path.resolve(options.outputPath || defaultOutputPath());
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
@@ -77,6 +88,75 @@ export async function materializeManifestHomepage(options = {}) {
   await fs.writeFile(temporaryPath, manifestHomepageModule(locators, { label: options.label }), 'utf8');
   await fs.rename(temporaryPath, outputPath);
   return { locators, outputPath };
+}
+
+export function isHomepageEligibleClaim(payload, nowSeconds = Math.floor(Date.now() / 1000), compatibilityTimestamp) {
+  const claim = responsePayload(payload);
+  if (!claim || typeof claim !== 'object') return false;
+  const displayed = claim.reposted_claim || claim['reposted-claim'] || claim;
+  const value = displayed.value || displayed.payload || displayed;
+  const thumbnail = value.thumbnail || displayed.thumbnail;
+  const thumbnailUrl =
+    (typeof thumbnail === 'string' ? thumbnail : thumbnail?.url) ||
+    value.thumbnail_url ||
+    value['thumbnail-url'] ||
+    displayed.thumbnail_url ||
+    displayed['thumbnail-url'];
+  const thumbnailLink =
+    value['thumbnail+link'] || value['thumbnail-link'] || displayed['thumbnail+link'] || displayed['thumbnail-link'];
+  if ((!thumbnailUrl || !String(thumbnailUrl).trim()) && !LOCATOR_PATTERN.test(String(thumbnailLink || ''))) {
+    return false;
+  }
+
+  const rawReleaseTime =
+    value.release_time ??
+    value['release-time'] ??
+    displayed.release_time ??
+    displayed['release-time'] ??
+    displayed.timestamp;
+  const parsed = Number(rawReleaseTime);
+  if (Number.isFinite(parsed) && parsed > 0 && parsed !== LEGACY_UNSET_RELEASE_TIME) {
+    const releaseTime = parsed >= 1_000_000_000_000 ? Math.floor(parsed / 1000) : parsed;
+    return releaseTime <= nowSeconds;
+  }
+
+  const fallback = Number(
+    compatibilityTimestamp ?? displayed.meta?.creation_timestamp ?? displayed.meta?.['creation-timestamp']
+  );
+  return Number.isFinite(fallback) && fallback > 0 && fallback <= nowSeconds;
+}
+
+function needsCompatibilityDate(payload) {
+  const claim = responsePayload(payload);
+  if (!claim || typeof claim !== 'object') return false;
+  const displayed = claim.reposted_claim || claim['reposted-claim'] || claim;
+  const value = displayed.value || displayed.payload || displayed;
+  const releaseTime = Number(
+    value.release_time ?? value['release-time'] ?? displayed.release_time ?? displayed['release-time']
+  );
+  return !Number.isFinite(releaseTime) || releaseTime <= 0 || releaseTime === LEGACY_UNSET_RELEASE_TIME;
+}
+
+async function fetchCompatibilityTimestamp(fetchImpl, nodeUrl, payload) {
+  const claim = responsePayload(payload);
+  const displayed = claim?.reposted_claim || claim?.['reposted-claim'] || claim;
+  const claimId = displayed?.['claim-id'] || displayed?.claim_id;
+  if (!claimId) return undefined;
+
+  const url = new URL(`${nodeUrl}/~cache@1.0/read`);
+  url.searchParams.set('read', `odysee/claim-meta/${claimId}`);
+  url.searchParams.set('accept-bundle', 'true');
+  try {
+    const response = await fetchImpl(url.href, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return undefined;
+    const metadata = responsePayload(parseJson(await response.text()));
+    return metadata?.timestamp;
+  } catch {
+    return undefined;
+  }
 }
 
 function immutableHydrationUrl(nodeUrl, locator) {
@@ -134,14 +214,16 @@ function parseJson(value) {
 }
 
 async function mapWithConcurrency(values, concurrency, worker) {
+  const results = Array.from({ length: values.length });
   let cursor = 0;
   const workers = Array.from({ length: Math.min(values.length, concurrency) }, async () => {
     while (cursor < values.length) {
       const index = cursor++;
-      await worker(values[index]);
+      results[index] = await worker(values[index]);
     }
   });
   await Promise.all(workers);
+  return results;
 }
 
 function defaultOutputPath() {

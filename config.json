@@ -2,7 +2,7 @@
   "port": 18801,
   "store-all-signed": true,
   "homepage-materializer": true,
-  "homepage-refresh-interval": "1-hour",
+  "homepage-refresh-interval": "6-hours",
   "homepage-category-pool-size": 36,
   "homepage-initial-category-pool-size": 12,
   "homepage-initial-language": "en",
@@ -21,6 +21,7 @@
       ],
       "origins": [],
       "visitor-id-mode": "persistent",
+      "node-baseline-writer": true,
       "engagement-threshold-ms": 30000,
       "engagement-dedupe-window-ms": 86400000
     }

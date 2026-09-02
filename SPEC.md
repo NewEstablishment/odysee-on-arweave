@@ -71,7 +71,9 @@ lawfully configure persistent tracking for their deployment.
 Sites may be provisioned without registration through the `analytics-sites`
 node option. Each entry accepts `key`, `name`, optional `owner`, `origins`,
 `users`, `enabled`, `visitor-id-mode`, `engagement-threshold-ms`, and
-`engagement-dedupe-window-ms`. An omitted owner defaults to the node wallet.
+`engagement-dedupe-window-ms`. `node-baseline-writer` defaults to false and,
+when true, permits only the node's own signer to import immutable baselines in
+addition to the site owner. An omitted owner defaults to the node wallet.
 
 ### `nonce`
 
@@ -261,9 +263,10 @@ known-subject `count` and `counts` contract.
 
 ### `baseline`
 
-Imports a one-time aggregate baseline for a subject. The request must use the
-same wallet authentication as owner-only registration operations, and only the
-site owner may import it.
+Imports a one-time aggregate baseline for a subject. The request must carry a
+valid message signature. The site owner may always import it. The node's signer
+may also import when that configured site explicitly sets
+`node-baseline-writer` to true; no other wallet is authorized.
 
 ```http
 POST /~analytics@1.0/baseline

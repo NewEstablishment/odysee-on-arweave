@@ -238,8 +238,10 @@ instead of falling back to legacy services.
   its engagement lifecycle through `ui/analytics/hyperbeam.ts` and
   `ui/analytics/watchman.ts`.
 - Browser playback and view-count code must not call the legacy Watchman or
-  view-count APIs. Public counts are aggregates; reports and historical
-  baseline imports require wallet authentication.
+  view-count APIs. Public counts are aggregates. A narrow node-side Odysee file
+  adapter may obtain a missing historical count and submit a node-signed
+  immutable baseline when the configured analytics site explicitly enables
+  its node signer; reports remain wallet-authenticated.
 - Analytics are non-authoritative signals and must never affect content
   identity, verification, discovery order, or access.
 
@@ -288,8 +290,8 @@ normal-flow request reaches a legacy host.
 
 ## Current limitations
 
-- View totals combine an owner-imported historical baseline with qualified
-  generic `analytics@1.0` engagement. The device does not serve a dashboard;
+- View totals combine a node- or owner-imported historical baseline with
+  qualified generic `analytics@1.0` engagement. The device does not serve a dashboard;
   the upstream dashboard is an independently hosted frontend. An Odysee-owned
   dashboard is not yet implemented.
 - Native subscriber counts, moderation delegates, and blocked-word settings

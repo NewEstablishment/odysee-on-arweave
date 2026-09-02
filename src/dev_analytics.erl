@@ -551,27 +551,21 @@ subjects(_Base, Req, Opts) ->
 %% metadata but does not interpret it. A baseline cannot be replaced with a
 %% different value or version after it is accepted.
 baseline(_Base, Req, Opts) ->
-    case owner_site_for_request(Req, Opts) of
-        {ok, Owner, Site} ->
-            SiteOwner = hb_maps:get(<<"owner">>, Site, <<>>, Opts),
-            case Owner =:= SiteOwner of
-                false ->
-                    json_error(403, <<"Only the site owner can import a baseline.">>);
-                true ->
-                    case baseline_request(Req, Opts) of
-                        {error, Reason} ->
-                            json_error(400, Reason);
-                        {ok, Input} ->
-                            Key = hb_maps:get(<<"key">>, Site, <<>>, Opts),
-                            SubjectID = maps:get(<<"subject-id">>, Input),
-                            baseline_result(
-                                with_subject_lock(
-                                    Key,
-                                    SubjectID,
-                                    fun() -> set_baseline(Key, Input, Opts) end
-                                )
-                            )
-                    end
+    case baseline_site_for_request(Req, Opts) of
+        {ok, _Owner, Site} ->
+            case baseline_request(Req, Opts) of
+                {error, Reason} ->
+                    json_error(400, Reason);
+                {ok, Input} ->
+                    Key = hb_maps:get(<<"key">>, Site, <<>>, Opts),
+                    SubjectID = maps:get(<<"subject-id">>, Input),
+                    baseline_result(
+                        with_subject_lock(
+                            Key,
+                            SubjectID,
+                            fun() -> set_baseline(Key, Input, Opts) end
+                        )
+                    )
             end;
         {error, Status, Reason} ->
             json_error(Status, Reason)
@@ -1036,6 +1030,33 @@ owner_site_for_request(Req, Opts) ->
         {error, Status, Reason} ->
             {error, Status, Reason}
     end.
+
+baseline_site_for_request(Req, Opts) ->
+    case owner_for_request(Req, Opts) of
+        {ok, Owner} ->
+            case required(<<"key">>, Req, Opts) of
+                {ok, Key} ->
+                    case read_site(Key, Opts) of
+                        undefined ->
+                            {error, 404, <<"Unknown tracking key.">>};
+                        Site ->
+                            case baseline_writer_allowed(Site, Owner, Opts) of
+                                true -> {ok, Owner, Site};
+                                false -> {error, 403, <<"Wallet cannot import baselines for this site.">>}
+                            end
+                    end;
+                {error, Reason} ->
+                    {error, 400, Reason}
+            end;
+        {error, Status, Reason} ->
+            {error, Status, Reason}
+    end.
+
+baseline_writer_allowed(Site, Wallet, Opts) ->
+    SiteOwner = hb_maps:get(<<"owner">>, Site, <<>>, Opts),
+    NodeWriter = truthy(hb_maps:get(<<"node-baseline-writer">>, Site, false, Opts)),
+    Wallet =:= SiteOwner orelse
+        (NodeWriter andalso Wallet =:= node_wallet_address(Opts)).
 
 owner_for_request(Req, Opts) ->
     case auth_owner(Req, Opts) of
@@ -2390,6 +2411,8 @@ normalize_configured_site(Site, Opts) ->
         <<"visitor-id-mode">> => visitor_id_mode(Site, Opts),
         <<"engagement-threshold-ms">> => engagement_threshold_ms(Site, Opts),
         <<"engagement-dedupe-window-ms">> => engagement_dedupe_window_ms(Site, Opts),
+        <<"node-baseline-writer">> =>
+            truthy(hb_maps:get(<<"node-baseline-writer">>, Site, false, Opts)),
         <<"configured">> => true,
         <<"enabled">> => truthy(hb_maps:get(<<"enabled">>, Site, true, Opts))
     }.
@@ -4527,6 +4550,51 @@ baseline_is_authenticated_immutable_and_included_in_total_test() ->
     ConflictFields = BaselineFields#{ <<"value">> => 43 },
     {ok, ConflictRes} = baseline(#{}, signed_req(ConflictFields, Wallet, Opts), Opts),
     ?assertEqual(409, maps:get(<<"status">>, ConflictRes)).
+
+configured_node_baseline_writer_is_limited_to_node_signer_test() ->
+    NodeWallet = ar_wallet:new(),
+    OwnerWallet = ar_wallet:new(),
+    OtherWallet = ar_wallet:new(),
+    Owner = hb_util:human_id(ar_wallet:to_address(OwnerWallet)),
+    Key = <<"configured-migration">>,
+    Opts =
+        (test_opts())#{
+            <<"priv-wallet">> => NodeWallet,
+            <<"analytics-sites">> =>
+                [
+                    #{
+                        <<"key">> => Key,
+                        <<"name">> => <<"Configured migration">>,
+                        <<"owner">> => Owner,
+                        <<"node-baseline-writer">> => true
+                    }
+                ]
+        },
+    Fields =
+        #{
+            <<"key">> => Key,
+            <<"subject-id">> => <<"subject-node">>,
+            <<"value">> => 17,
+            <<"version">> => <<"source-v1">>,
+            <<"cutover-at">> => 0,
+            <<"source">> => <<"source">>
+        },
+    {ok, NodeRes} = baseline(#{}, signed_req(Fields, NodeWallet, Opts), Opts),
+    ?assertEqual(200, maps:get(<<"status">>, NodeRes)),
+    {ok, OtherRes} =
+        baseline(
+            #{},
+            signed_req(Fields#{ <<"subject-id">> => <<"subject-other">> }, OtherWallet, Opts),
+            Opts
+        ),
+    ?assertEqual(403, maps:get(<<"status">>, OtherRes)),
+    {ok, OwnerRes} =
+        baseline(
+            #{},
+            signed_req(Fields#{ <<"subject-id">> => <<"subject-owner">> }, OwnerWallet, Opts),
+            Opts
+        ),
+    ?assertEqual(200, maps:get(<<"status">>, OwnerRes)).
 
 subjects_lists_authorized_paginated_aggregates_test() ->
     Opts = test_opts(),

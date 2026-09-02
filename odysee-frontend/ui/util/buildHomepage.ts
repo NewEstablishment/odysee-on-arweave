@@ -179,6 +179,7 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
       excludeShorts: cat.exclude_shorts ? true : undefined,
       releaseTime: `>${getRelativeUnixTimestamp(cat.daysOfContent || 30, 'days', 'hour')}`,
       timestamp: cat.excludeFuture ? `<${Math.floor(Date.now() / 1000)}` : undefined,
+      homepageEligible: true,
     },
   };
 };
@@ -224,6 +225,7 @@ export function GetLinksData(
         pageSize: getPageSize(subscribedChannelIds.length > 3 ? (subscribedChannelIds.length > 6 ? 12 : 8) : 4, true),
         streamTypes: null,
         channelIds: subscribedChannelIds,
+        homepageEligible: true,
       },
     };
     rowData.push(RECENT_FROM_FOLLOWING); // const SHORTS_SECTION = {

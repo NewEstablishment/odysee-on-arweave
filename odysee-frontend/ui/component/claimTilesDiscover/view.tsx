@@ -113,6 +113,7 @@ type Props = {
   duration?: string;
   contentAspectRatio?: string;
   excludeShorts?: boolean;
+  homepageEligible?: boolean;
   sectionTitle?: HomepageTitles;
   isShorts?: boolean;
   homepageOrder?: number;
@@ -174,6 +175,7 @@ function resolveSearchOptions(resolveProps: any) {
     duration,
     contentAspectRatio,
     excludeShorts,
+    homepageEligible,
   } = resolveProps;
   const urlParams = new URLSearchParams(search);
   const feeAmountInUrl = urlParams.get('fee_amount');
@@ -208,6 +210,7 @@ function resolveSearchOptions(resolveProps: any) {
     remove_duplicates: true,
     duration: CsOptHelper.duration(null, claimType, CS.DURATION.ALL as any),
   };
+  if (homepageEligible) (options as any).homepage_eligible = true;
 
   function resolveOrderByOption(ob: string | Array<string>) {
     let order_by;

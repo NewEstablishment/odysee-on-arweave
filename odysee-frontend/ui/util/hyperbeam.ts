@@ -112,6 +112,7 @@ const CACHE_DEVICE = '~cache@1.0';
 const SEARCH_DEVICE = '~search@1.0';
 const PREFERENCE_DEVICE = '~odysee-preference@1.0';
 const SEARCH_MAX_LIMIT = 100;
+const LEGACY_UNSET_RELEASE_TIME = 2_147_483_647;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
 const HYPERBEAM_NATIVE_WRITE_PROXY_PATH = '/$/api/hyperbeam-native-message/v1/write';
@@ -2598,6 +2599,12 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   const claimIds = paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id');
   if (claimIds.length) return fetchHyperbeamResolveClaimIds({ ...params, claim_ids: claimIds });
 
+  const page = Math.max(1, toNumber(params.page, 1));
+  const pageSize = Math.max(1, toNumber(params.page_size, 20));
+  if ((params as any).homepage_eligible === true) {
+    return fetchHomepageEligibleSearchPage(params, page, pageSize);
+  }
+
   const channelIds = paramValues(params, 'channel_ids', 'channel-ids', 'channel_id', 'channel-id');
   if (channelIds.length) {
     const nativeChannelIds = channelIds.filter(isNativeMessageId);
@@ -2633,8 +2640,6 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     }
   }
 
-  const page = Math.max(1, toNumber(params.page, 1));
-  const pageSize = toNumber(params.page_size, 20);
   const offset = (page - 1) * pageSize;
   const request = hyperbeamClaimSearchRequest(params, offset, pageSize);
   const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, { q: '', ...request });
@@ -2651,6 +2656,66 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     total_items: discoveredItems + (hasNextPage ? 1 : 0),
     total_pages: hasNextPage ? page + 1 : page,
   };
+}
+
+async function fetchHomepageEligibleSearchPage(
+  params: ClaimSearchOptions,
+  page: number,
+  pageSize: number
+): Promise<ClaimSearchResponse> {
+  const first = (page - 1) * pageSize;
+  const target = page * pageSize;
+  const batchSize = Math.min(100, Math.max(36, pageSize * 3));
+  const eligible: Array<Claim> = [];
+  const seen = new Set<string>();
+  let offset = 0;
+  let sourceExhausted = false;
+
+  for (let batch = 0; batch < 10 && eligible.length < target; batch += 1) {
+    const request = hyperbeamClaimSearchRequest(params, offset, batchSize);
+    const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, { q: '', ...request });
+    const locators = (await searchResultIds(responsePayload(response))).map(String).filter(Boolean);
+    if (locators.length < batchSize) sourceExhausted = true;
+    offset += locators.length;
+
+    const claims = await Promise.all(locators.map((locator) => resolveImmutableClaimById(locator).catch(() => null)));
+    claims.forEach((claim) => {
+      if (!claim || !isHomepageEligibleClaim(claim)) return;
+      const identity = String(claim.immutable_id || claim.claim_id || claim.canonical_url || '');
+      if (!identity || seen.has(identity)) return;
+      seen.add(identity);
+      eligible.push(claim);
+    });
+    if (sourceExhausted) break;
+  }
+
+  const items = eligible.slice(first, target);
+  const hasNextPage = eligible.length > target || !sourceExhausted;
+  return {
+    items,
+    page,
+    page_size: pageSize,
+    total_items: Math.max(first + items.length, target + (hasNextPage ? 1 : 0)),
+    total_pages: hasNextPage ? page + 1 : Math.max(1, Math.ceil(eligible.length / pageSize)),
+  };
+}
+
+function isHomepageEligibleClaim(claim: Claim): boolean {
+  const source = (claim as any).reposted_claim || claim;
+  const value = source?.value || {};
+  const thumbnail = value.thumbnail;
+  const thumbnailUrl = typeof thumbnail === 'string' ? thumbnail : thumbnail?.url;
+  if (typeof thumbnailUrl !== 'string' || !thumbnailUrl.trim()) return false;
+
+  const rawReleaseTime = value.release_time ?? value['release-time'];
+  const parsed = Number(rawReleaseTime);
+  const effectiveTime =
+    Number.isFinite(parsed) && parsed > 0 && parsed !== LEGACY_UNSET_RELEASE_TIME
+      ? parsed >= 1_000_000_000_000
+        ? Math.floor(parsed / 1000)
+        : parsed
+      : toNumber(source.meta?.creation_timestamp || source.timestamp, 0);
+  return effectiveTime > 0 && effectiveTime <= Math.floor(Date.now() / 1000);
 }
 
 async function fetchNativeChannelClaimSearch(
@@ -3654,18 +3719,31 @@ function lbryClaimCommitmentId(payload: any): string | null {
 // compatibility timestamp is display metadata only and stays outside the
 // immutable evidence object served by the claim path.
 async function withCompatibilityDate(claim: any): Promise<any> {
-  if (!claim || claim.value?.release_time || claim.timestamp) return claim;
+  if (!claim) return claim;
+  const releaseTime = toNumber(claim.value?.release_time, 0);
+  if (releaseTime && releaseTime !== LEGACY_UNSET_RELEASE_TIME) return claim;
+  const claimValue = { ...claim.value };
+  if (releaseTime === LEGACY_UNSET_RELEASE_TIME) delete claimValue.release_time;
+  const existingTimestamp = toNumber(claim.timestamp, 0);
+  if (existingTimestamp) {
+    return {
+      ...claim,
+      value: claimValue,
+      meta: { ...claim.meta, creation_timestamp: existingTimestamp },
+    };
+  }
   const claimId = claim.claim_id;
-  if (!isClaimId(claimId)) return claim;
+  if (!isClaimId(claimId)) return { ...claim, value: claimValue };
 
   const meta = storePayload(
     await fetchCachedStoreJsonOrNull(storePath('odysee/claim-meta', String(claimId))).catch(() => null)
   );
   const timestamp = toNumber(value(meta || {}, 'timestamp'), 0);
-  if (!timestamp) return claim;
+  if (!timestamp) return { ...claim, value: claimValue };
 
   return {
     ...claim,
+    value: claimValue,
     timestamp,
     meta: { ...claim.meta, creation_timestamp: timestamp },
   };
