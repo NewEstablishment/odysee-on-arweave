@@ -47,10 +47,12 @@ messages.
 - Every media category contains at most one claim from a signing channel. The
   materializer requests that limit from its source and enforces it again while
   building the immutable pool; a valid pinned claim takes precedence.
-- Signed homepage media are eligible only when exact hydration exposes a
-  usable thumbnail and the effective release time is not in the future. The
-  separate Local content materializer also requires a usable thumbnail, but
-  intentionally retains scheduled and upcoming streams.
+- Signed homepage media are eligible only when exact hydration exposes an
+  audio, video, image, or Markdown blog-post source with a usable thumbnail and
+  the effective release time is not in the future. Bare claims, plain-text
+  files, and arbitrary binary files are excluded. The separate Local content
+  materializer applies the same media and thumbnail policy but intentionally
+  retains scheduled and upcoming streams.
 - Homepage media discovery is stream-only. Repost wrappers are never published
   in signed category pools, featured media, or the separate Local content row.
 - Optional local content is configuration, not a product rule in a generic

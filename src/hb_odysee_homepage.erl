@@ -8,7 +8,7 @@
 -export([module_message/0, plan_message/0, plan_message/1, install/1, refresh/1]).
 
 -define(RETRY_MS, 5000).
--define(DEFAULT_INTERVAL, <<"6-hours">>).
+-define(DEFAULT_INTERVAL, <<"1-hour">>).
 -define(DEFAULT_POOL_SIZE, 36).
 -define(DEFAULT_INITIAL_POOL_SIZE, 12).
 

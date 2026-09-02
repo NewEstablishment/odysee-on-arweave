@@ -376,12 +376,14 @@ Static manifests embed homepage presentation templates, not node-specific
 claim selections. The node stores its immutable Lua materializer and homepage
 plan, runs the computation against its own configured stores, and publishes
 node-signed `odysee-homepage@1.0` snapshots. Stock `cron@1.0` refreshes all
-languages every six hours. The browser uses `query@1.0` only for locator discovery, then
-exact-hydrates and verifies the node committer before using a snapshot. There
-is no SSR timer or filesystem snapshot authority. Homepage selection rejects
-exact-hydrated media without a usable thumbnail and media whose effective
-release time is in the future; the separate manifest-local content selection
-applies the same eligibility rule before emitting immutable IDs.
+languages every hour. The browser uses `query@1.0` only for locator discovery,
+then exact-hydrates and verifies the node committer before using a snapshot.
+There is no SSR timer or filesystem snapshot authority. Homepage selection
+accepts only exact-hydrated audio, video, image, and Markdown blog-post streams
+with a usable thumbnail, and rejects media whose effective release time is in
+the future; the separate manifest-local content selection applies the same
+media and thumbnail eligibility before emitting immutable IDs while retaining
+scheduled content.
 
 Observational analytics are recorded by the reusable `analytics@1.0` device.
 Odysee maps playback to generic subject engagement in the frontend, while the

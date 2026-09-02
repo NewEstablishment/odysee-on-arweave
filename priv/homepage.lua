@@ -183,6 +183,23 @@ local function has_usable_thumbnail(item)
     return type(url) == "string" and string.match(url, "%S") ~= nil
 end
 
+local function has_supported_media(item)
+    local displayed = display_claim(item)
+    local value = resolve_field(displayed, "value")
+    if type(value) ~= "table" then return false end
+    local source = resolve_field(value, "source")
+    if type(source) ~= "table" then return false end
+    local sd_hash = source.sd_hash or source["sd-hash"]
+    local media_type = source.media_type or source["media-type"]
+    local stream_type = value.stream_type or value["stream-type"]
+    if type(sd_hash) ~= "string" or sd_hash == "" or type(media_type) ~= "string" then return false end
+    media_type = string.lower(media_type)
+    return string.match(media_type, "^video/") ~= nil or
+        string.match(media_type, "^audio/") ~= nil or
+        string.match(media_type, "^image/") ~= nil or
+        (stream_type == "document" and string.match(media_type, "^text/markdown") ~= nil)
+end
+
 local function effective_release_time(item)
     local displayed = display_claim(item)
     local value = resolve_field(displayed, "value")
@@ -196,6 +213,7 @@ end
 
 local function is_homepage_eligible(item, now)
     if is_repost(item) then return false end
+    if not has_supported_media(item) then return false end
     if not has_usable_thumbnail(item) then return false end
     local release_time = effective_release_time(item)
     return release_time == nil or release_time <= now
@@ -227,10 +245,7 @@ local function is_materializable_media(item)
     if type(item) ~= "table" then return false end
     local value_type = item.value_type or item["value-type"]
     if value_type ~= "stream" then return false end
-    local value = item.value
-    local source = type(value) == "table" and value.source or nil
-    local sd_hash = type(source) == "table" and (source.sd_hash or source["sd-hash"]) or nil
-    return type(sd_hash) == "string" and sd_hash ~= ""
+    return has_supported_media(item)
 end
 
 local function is_channel(item)

@@ -2,7 +2,7 @@
   "port": 18801,
   "store-all-signed": true,
   "homepage-materializer": true,
-  "homepage-refresh-interval": "6-hours",
+  "homepage-refresh-interval": "1-hour",
   "homepage-category-pool-size": 36,
   "homepage-initial-category-pool-size": 12,
   "homepage-initial-language": "en",

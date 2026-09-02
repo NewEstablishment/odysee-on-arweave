@@ -108,6 +108,18 @@ export function isHomepageEligibleClaim(
   }
   const displayed = claim.reposted_claim || claim['reposted-claim'] || claim;
   const value = displayed.value || displayed.payload || displayed;
+  const source = value.source;
+  const sdHash = source?.sd_hash || source?.['sd-hash'];
+  const mediaType = String(source?.media_type || source?.['media-type'] || '').toLowerCase();
+  const streamType = value.stream_type || value['stream-type'];
+  if (
+    !sdHash ||
+    !String(sdHash).trim() ||
+    (!['video/', 'audio/', 'image/'].some((prefix) => mediaType.startsWith(prefix)) &&
+      !(streamType === 'document' && mediaType.startsWith('text/markdown')))
+  ) {
+    return false;
+  }
   const thumbnail = value.thumbnail || displayed.thumbnail;
   const thumbnailUrl =
     (typeof thumbnail === 'string' ? thumbnail : thumbnail?.url) ||

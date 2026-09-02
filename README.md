@@ -354,7 +354,7 @@ cache. The Lua computation discovers locators through the configured stores,
 exact-hydrates the selected claims and channels, and publishes one node-signed
 `odysee-homepage@1.0` snapshot per language. It first publishes the configured
 startup language, then stock `cron@1.0` runs the complete all-language refresh
-every six hours. A failed refresh leaves the previous committed snapshots
+every hour. A failed refresh leaves the previous committed snapshots
 available.
 
 The browser discovers snapshots with generic `query@1.0`, exact-reads each

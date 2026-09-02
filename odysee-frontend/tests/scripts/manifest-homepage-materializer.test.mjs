@@ -14,12 +14,20 @@ import {
 const firstId = Buffer.alloc(32, 1).toString('base64url');
 const secondId = Buffer.alloc(32, 2).toString('base64url');
 const outpoint = `${'ab'.repeat(32)}:0`;
-const validClaim = {
-  value: {
-    thumbnail: { url: 'https://example.test/thumbnail.jpg' },
-    release_time: 1_700_000_000,
-  },
-};
+
+function eligibleClaim(overrides = {}) {
+  return {
+    value: {
+      source: { media_type: 'video/mp4', sd_hash: 'ab'.repeat(48) },
+      stream_type: 'video',
+      thumbnail: { url: 'https://example.test/thumbnail.jpg' },
+      release_time: 1_700_000_000,
+      ...overrides,
+    },
+  };
+}
+
+const validClaim = eligibleClaim();
 
 test('reads ordered locators from HyperBEAM indexed-object responses', () => {
   assert.deepEqual(searchResultIds({ 2: secondId, status: 200, 1: firstId, 3: firstId }), [firstId, secondId]);
@@ -108,7 +116,12 @@ test('rejects missing thumbnails but keeps upcoming claims in local content', as
       }
       if (url.includes(futureId)) {
         return Response.json({
-          value: { thumbnail: { url: 'https://example.test/future.jpg' }, release_time: nowSeconds + 1 },
+          value: {
+            source: { media_type: 'audio/mpeg', sd_hash: 'cd'.repeat(48) },
+            stream_type: 'audio',
+            thumbnail: { url: 'https://example.test/future.jpg' },
+            release_time: nowSeconds + 1,
+          },
         });
       }
       return Response.json(validClaim);
@@ -130,6 +143,8 @@ test('uses compatibility metadata for legacy claims without a release date', asy
   const legacyClaim = {
     'claim-id': 'ab'.repeat(20),
     value: {
+      source: { media_type: 'text/markdown', sd_hash: 'ef'.repeat(48) },
+      stream_type: 'document',
       thumbnail: { url: 'https://example.test/legacy.jpg' },
       release_time: 2_147_483_647,
     },
@@ -152,31 +167,53 @@ test('uses compatibility metadata for legacy claims without a release date', asy
 test('homepage eligibility accepts a thumbnail only at or before the current time', () => {
   assert.equal(isHomepageEligibleClaim(validClaim, 1_800_000_000), true);
   assert.equal(isHomepageEligibleClaim({ value: { release_time: 1_700_000_000 } }, 1_800_000_000), false);
+  assert.equal(isHomepageEligibleClaim(eligibleClaim({ release_time: 1_800_000_001 }), 1_800_000_000), false);
+  assert.equal(isHomepageEligibleClaim(eligibleClaim({ release_time: 64_874_620_800 }), 1_800_000_000), false);
+  assert.equal(
+    isHomepageEligibleClaim(eligibleClaim({ release_time: 2_147_483_647 }), 1_800_000_000, 1_700_000_000),
+    true
+  );
+  assert.equal(isHomepageEligibleClaim(eligibleClaim({ release_time: 1_700_000_000_000 }), 1_800_000_000), true);
   assert.equal(
     isHomepageEligibleClaim(
-      { value: { thumbnail: { url: 'https://example.test/future.jpg' }, release_time: 1_800_000_001 } },
+      {
+        value_type: 'repost',
+        reposted_claim: validClaim,
+      },
       1_800_000_000
     ),
     false
   );
   assert.equal(
     isHomepageEligibleClaim(
-      { value: { thumbnail: { url: 'https://example.test/year-4026.jpg' }, release_time: 64_874_620_800 } },
+      eligibleClaim({ source: { media_type: 'image/png', sd_hash: '05'.repeat(48) } }),
       1_800_000_000
-    ),
-    false
-  );
-  assert.equal(
-    isHomepageEligibleClaim(
-      { value: { thumbnail: { url: 'https://example.test/unset.jpg' }, release_time: 2_147_483_647 } },
-      1_800_000_000,
-      1_700_000_000
     ),
     true
   );
   assert.equal(
     isHomepageEligibleClaim(
-      { value: { thumbnail: { url: 'https://example.test/milliseconds.jpg' }, release_time: 1_700_000_000_000 } },
+      eligibleClaim({ source: { media_type: 'application/octet-stream', sd_hash: '06'.repeat(48) } }),
+      1_800_000_000
+    ),
+    false
+  );
+  assert.equal(
+    isHomepageEligibleClaim(
+      eligibleClaim({
+        source: { media_type: 'text/plain', sd_hash: '08'.repeat(48) },
+        stream_type: 'document',
+      }),
+      1_800_000_000
+    ),
+    false
+  );
+  assert.equal(
+    isHomepageEligibleClaim(
+      eligibleClaim({
+        source: { media_type: 'text/markdown', sd_hash: '07'.repeat(48) },
+        stream_type: 'document',
+      }),
       1_800_000_000
     ),
     true
@@ -184,8 +221,9 @@ test('homepage eligibility accepts a thumbnail only at or before the current tim
   assert.equal(
     isHomepageEligibleClaim(
       {
-        value_type: 'repost',
-        reposted_claim: validClaim,
+        'claim-id': '9ef9bd9884b412678f68e17af5d92325efa0bd2e',
+        'claim-name': 'CMV',
+        'claim-proof-strength': 'hash-derived',
       },
       1_800_000_000
     ),
