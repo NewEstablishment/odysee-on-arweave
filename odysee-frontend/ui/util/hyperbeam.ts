@@ -2665,16 +2665,18 @@ async function fetchHomepageEligibleSearchPage(
 ): Promise<ClaimSearchResponse> {
   const first = (page - 1) * pageSize;
   const target = page * pageSize;
-  const batchSize = Math.min(100, Math.max(36, pageSize * 3));
+  const batchSize = Math.max(36, pageSize);
   const eligible: Array<Claim> = [];
   const seen = new Set<string>();
+  const channelsByPage: Array<Set<string>> = [];
   let offset = 0;
   let sourceExhausted = false;
 
-  for (let batch = 0; batch < 10 && eligible.length < target; batch += 1) {
-    const request = hyperbeamClaimSearchRequest(params, offset, batchSize);
-    const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, { q: '', ...request });
-    const locators = (await searchResultIds(responsePayload(response))).map(String).filter(Boolean);
+  for (let batch = 0; batch < 20 && eligible.length < target; batch += 1) {
+    const sourcePage = Math.floor(offset / batchSize) + 1;
+    const query = sourceClaimQuery({ ...params, page: sourcePage, page_size: batchSize });
+    const response = await fetchStoreJsonOrNull(storePath('odysee/source-claims', JSON.stringify(query)));
+    const locators = paramValues(response, 'locators').map(String).filter(Boolean);
     if (locators.length < batchSize) sourceExhausted = true;
     offset += locators.length;
 
@@ -2683,13 +2685,24 @@ async function fetchHomepageEligibleSearchPage(
       if (!claim || !isHomepageEligibleClaim(claim, (params as any).homepage_include_future === true)) return;
       const identity = String(claim.immutable_id || claim.claim_id || claim.canonical_url || '');
       if (!identity || seen.has(identity)) return;
+      const pageIndex = Math.floor(eligible.length / pageSize);
+      const pageChannels = channelsByPage[pageIndex] || (channelsByPage[pageIndex] = new Set<string>());
+      const channelIdentity = String(
+        claim.signing_channel?.claim_id || claim.signing_channel?.immutable_id || claim.channel_id || ''
+      );
+      if (channelIdentity && pageChannels.has(channelIdentity)) return;
       seen.add(identity);
+      if (channelIdentity) pageChannels.add(channelIdentity);
       eligible.push(claim);
     });
     if (sourceExhausted) break;
   }
 
-  const items = eligible.slice(first, target);
+  const pageItems = eligible.slice(first, target);
+  const items =
+    sourceExhausted && pageItems.length < pageSize
+      ? pageItems.slice(0, Math.floor(pageItems.length / 12) * 12)
+      : pageItems;
   const hasNextPage = eligible.length > target || !sourceExhausted;
   return {
     items,
@@ -2703,11 +2716,27 @@ async function fetchHomepageEligibleSearchPage(
 function isHomepageEligibleClaim(claim: Claim, includeFuture = false): boolean {
   if ((claim as any).value_type === 'repost' || (claim as any)['value-type'] === 'repost') return false;
   if ((claim as any).reposted_claim || (claim as any)['reposted-claim']) return false;
-  const source: any = claim;
-  const value = source?.value || {};
+  const displayed: any = claim;
+  const value = displayed?.value || {};
+  const source = value.source || {};
+  const sdHash = source.sd_hash || source['sd-hash'];
+  const mediaType = String(source.media_type || source['media-type'] || '').toLowerCase();
+  const streamType = value.stream_type || value['stream-type'];
+  if (
+    !sdHash ||
+    !String(sdHash).trim() ||
+    (!['video/', 'audio/', 'image/'].some((prefix) => mediaType.startsWith(prefix)) &&
+      !(streamType === 'document' && mediaType.startsWith('text/markdown')))
+  ) {
+    return false;
+  }
   const thumbnail = value.thumbnail;
-  const thumbnailUrl = typeof thumbnail === 'string' ? thumbnail : thumbnail?.url;
-  if (typeof thumbnailUrl !== 'string' || !thumbnailUrl.trim()) return false;
+  const thumbnailUrl =
+    (typeof thumbnail === 'string' ? thumbnail : thumbnail?.url) || value.thumbnail_url || value['thumbnail-url'];
+  const thumbnailLink = value['thumbnail+link'] || value['thumbnail-link'];
+  if ((!thumbnailUrl || !String(thumbnailUrl).trim()) && !/^[A-Za-z0-9_-]{43}$/.test(String(thumbnailLink || ''))) {
+    return false;
+  }
 
   const rawReleaseTime = value.release_time ?? value['release-time'];
   const parsed = Number(rawReleaseTime);
@@ -2716,7 +2745,7 @@ function isHomepageEligibleClaim(claim: Claim, includeFuture = false): boolean {
       ? parsed >= 1_000_000_000_000
         ? Math.floor(parsed / 1000)
         : parsed
-      : toNumber(source.meta?.creation_timestamp || source.timestamp, 0);
+      : toNumber(displayed.meta?.creation_timestamp || displayed.timestamp, 0);
   return effectiveTime > 0 && (includeFuture || effectiveTime <= Math.floor(Date.now() / 1000));
 }
 

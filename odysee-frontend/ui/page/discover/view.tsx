@@ -220,16 +220,19 @@ function DiscoverPage(props: Props) {
         <ClaimListDiscover
           uris={dynamicRouteProps?.categoryUris}
           immutableSigningChannelIds={dynamicRouteProps?.immutableSigningChannelIds}
+          homepageEligible={dynamicRouteProps?.options?.homepageEligible}
+          includeFuture={dynamicRouteProps?.options?.includeFuture}
           pins={dynamicRouteProps?.categoryUris?.length ? undefined : getPins(dynamicRouteProps)}
           hideFilters={isWildWest ? true : hideFilter}
           header={repostedUri ? <span /> : undefined}
           subSection={getSubSection()}
           tileLayout={repostedUri ? false : tileLayout}
           defaultOrderBy={getDefaultOrderBy()}
-          claimType={claimType ? [claimType] : undefined}
+          claimType={claimType ? [claimType] : dynamicRouteProps?.options?.claimType}
           defaultStreamType={undefined} // defaultStreamType={isCategory && !isWildWest ? [CS.FILE_VIDEO, CS.FILE_AUDIO, CS.FILE_DOCUMENT] : undefined} remove due to claim search bug with reposts
           headerLabel={getHeaderLabel()}
           tags={tags ? tags.join(',') : undefined}
+          defaultTags={dynamicRouteProps?.options?.tags?.join(',')}
           hiddenNsfwMessage={<HiddenNsfw type="page" />}
           repostedClaimId={repostedClaim ? repostedClaim.claim_id : null} // TODO: find a better way to determine discover / wild west vs other modes release times
           // for now including && !tags so that
@@ -238,9 +241,12 @@ function DiscoverPage(props: Props) {
           channelIds={isExplore && exploreChannelsIds ? exploreChannelsIds : channelIds}
           excludedChannelIds={excludedChannelIds}
           limitClaimsPerChannel={
-            orderParam === CS.ORDER_BY_NEW
-              ? 5
-              : (dynamicRouteProps && dynamicRouteProps.options && dynamicRouteProps.options.limitClaimsPerChannel) || 3
+            dynamicRouteProps?.options?.homepageEligible
+              ? 1
+              : orderParam === CS.ORDER_BY_NEW
+                ? 5
+                : (dynamicRouteProps && dynamicRouteProps.options && dynamicRouteProps.options.limitClaimsPerChannel) ||
+                  3
           }
           meta={getMeta()}
           hasSource
@@ -248,7 +254,8 @@ function DiscoverPage(props: Props) {
           hideMembersOnly={hideMembersOnlyContent}
           searchLanguages={dynamicRouteProps?.options?.searchLanguages}
           duration={dynamicRouteProps?.options?.duration}
-          csOptionsHook={tagSearchCsOptionsHook}
+          excludeShortsAspectRatio={dynamicRouteProps?.options?.excludeShorts}
+          csOptionsHook={dynamicRouteProps?.options?.homepageEligible ? undefined : tagSearchCsOptionsHook}
           sectionTitle={dynamicRouteProps?.title as HomepageTitles}
         />
       </ClaimSearchFilterContext.Provider>

@@ -45,6 +45,7 @@ type Props = {
   empty?: string | React.ReactNode;
   defaultSort?: boolean;
   onScrollBottom?: (arg0?: any) => void;
+  hasMore?: boolean;
   page?: number;
   pageSize?: number;
   // If using the default header, this is a unique ID needed to persist the state of the filter setting
@@ -88,6 +89,7 @@ type Props = {
   placeholder?: string;
   showNullPlaceholder?: boolean;
   onHidden?: (arg0: any) => void;
+  trailingPlaceholderCount?: number;
 };
 export default function ClaimList(props: Props) {
   const {
@@ -103,6 +105,7 @@ export default function ClaimList(props: Props) {
     type,
     header,
     onScrollBottom,
+    hasMore,
     page,
     pageSize,
     showHiddenByUser,
@@ -138,6 +141,7 @@ export default function ClaimList(props: Props) {
     setHasActive,
     isShortFromChannelPage,
     sectionTitle,
+    trailingPlaceholderCount = 0,
   } = props;
   const searchInLanguage = useAppSelector((state) => selectClientSetting(state, SETTINGS.SEARCH_IN_LANGUAGE));
   const isMobile = useIsMobile();
@@ -256,7 +260,9 @@ export default function ClaimList(props: Props) {
       if (page && pageSize && onScrollBottom) {
         const mainEl = document.querySelector(`.${MAIN_CLASS}`);
 
-        if (mainEl && !loading && urisLength >= pageSize) {
+        const canLoadMore = hasMore === undefined ? urisLength >= pageSize : hasMore;
+
+        if (mainEl && !loading && canLoadMore) {
           const ROUGH_TILE_HEIGHT_PX = 200;
           const mainBoundingRect = mainEl.getBoundingClientRect();
           const contentWrapperAtBottomOfPage = mainBoundingRect.bottom - ROUGH_TILE_HEIGHT_PX <= window.innerHeight;
@@ -270,9 +276,10 @@ export default function ClaimList(props: Props) {
 
     if (onScrollBottom) {
       window.addEventListener('scroll', handleScroll);
+      handleScroll();
       return () => window.removeEventListener('scroll', handleScroll);
     }
-  }, [loading, onScrollBottom, urisLength, pageSize, page]);
+  }, [hasMore, loading, onScrollBottom, urisLength, pageSize, page]);
 
   const getClaimPreview = (uri: string, index: number, draggableProvided?: any) => (
     <ClaimPreview
@@ -393,6 +400,9 @@ export default function ClaimList(props: Props) {
               );
             }
           })}
+        {Array.from({ length: trailingPlaceholderCount }, (_, index) => (
+          <ClaimPreviewTile key={`trailing-placeholder:${index}`} placeholder="loading" pulse />
+        ))}
         {!timedOut && urisLength === 0 && !loading && !noEmpty && (
           <div className="empty main--empty">{empty || noResultMsg}</div>
         )}
