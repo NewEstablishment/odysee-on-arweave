@@ -163,10 +163,10 @@ irreversible confirmation. The same route now shows Public and enables Share.
 What to say: each playlist version is a full immutable snapshot. The canonical
 `reference@1.0` init commitment is the stable ID, and authorized set messages
 advance its head without mutating history. Private versions contain only
-a WeaveMail-format envelope: browser WebCrypto creates a fresh AES key and
-wraps it to a non-exportable RSA key stored in IndexedDB for the signed-in
-native owner. The node only receives ciphertext and generic reference writes;
-there is no playlist crypto device. Save is the committed write, and conversion
+a WeaveMail-format envelope: the browser creates a fresh AES key and wraps it
+to the signed-in owner's own hosted wallet, exported in-session through the
+cookie-authenticated `~secret@1.0` boundary. The node only receives ciphertext
+and generic reference writes; there is no playlist crypto device. Save is the committed write, and conversion
 to public is one-way because public history cannot be hidden later.
 
 ### 7. Finish with encrypted preferences
@@ -239,8 +239,8 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:hyperbeam-upload-smoke
 - Upload metadata edit/delete still needs a complete append-only contract.
 - Browser identity is local to this node/browser and is not yet portable or
   recoverable on another deployment.
-- Private-playlist keys are local to browser IndexedDB. There is no backup or
-  cross-device recovery yet, so do not clear browser data used for the demo.
+- Private-playlist recovery follows the account: the recipient key is the
+  owner's hosted wallet, so it is exactly as portable as the identity itself.
 - Single HTTP ranges work; multipart byte ranges are not implemented.
 - Production deployments must tune the per-IP rate-limit bucket together with
   their static asset delivery and abuse controls; the demo uses 10,000

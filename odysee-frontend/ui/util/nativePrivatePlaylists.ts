@@ -6,7 +6,7 @@ import {
   normalizeNativePlaylist,
   type NativePlaylist,
 } from './nativePlaylists.ts';
-import { normalizeWeavemailEnvelope, WEAVEMAIL_FORMAT, type BrowserWeavemailEnvelope } from './weavemailClient.ts';
+import { normalizeWeavemailEnvelope, WEAVEMAIL_FORMAT, type WeavemailEnvelope } from './weavemail.ts';
 
 export const NATIVE_PRIVATE_PLAYLIST_SCHEMA = 'odysee-private-playlist@1.0';
 export const NATIVE_PRIVATE_PLAYLIST_TYPE = 'private-playlist';
@@ -17,7 +17,7 @@ export const NATIVE_PRIVATE_PLAYLIST_PURPOSE = 'playlist';
 export const NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT = WEAVEMAIL_FORMAT;
 export const NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES = 256 * 1024;
 
-export type NativePrivatePlaylistEnvelope = BrowserWeavemailEnvelope & {
+export type NativePrivatePlaylistEnvelope = WeavemailEnvelope & {
   encryption_format: string;
   purpose: string;
   owner: string;
@@ -36,7 +36,6 @@ export function normalizeNativePrivatePlaylistEnvelope(source: any): NativePriva
   if (!weavemail) return null;
   const envelope: NativePrivatePlaylistEnvelope = {
     ...weavemail,
-    recipient_key_id: String(field(source, 'recipient-key-id', 'recipient_key_id') || ''),
     encryption_format: String(field(source, 'encryption-format', 'encryption_format') || ''),
     purpose: String(field(source, 'purpose') || ''),
     owner: String(field(source, 'hyperbeam-owner', 'hyperbeam_owner', 'owner', 'encrypted-for', 'encrypted_for') || ''),
@@ -76,7 +75,6 @@ export function nativePrivatePlaylistSnapshotMessage(envelope: NativePrivatePlay
     type: NATIVE_PRIVATE_PLAYLIST_TYPE,
     purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE,
     'encryption-format': envelope.encryption_format,
-    'recipient-key-id': envelope.recipient_key_id,
     'encrypted-for': envelope.owner,
     ciphertext: envelope.ciphertext,
     'encrypted-key': envelope.encrypted_key,
@@ -141,7 +139,6 @@ function validEnvelope(envelope: NativePrivatePlaylistEnvelope): boolean {
   return Boolean(
     envelope.encryption_format === NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT &&
     envelope.purpose === NATIVE_PRIVATE_PLAYLIST_PURPOSE &&
-    isNativeMessageId(envelope.owner) &&
-    isNativeMessageId(envelope.recipient_key_id)
+    isNativeMessageId(envelope.owner)
   );
 }

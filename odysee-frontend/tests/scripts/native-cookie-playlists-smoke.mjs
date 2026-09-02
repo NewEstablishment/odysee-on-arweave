@@ -23,11 +23,7 @@ import {
   normalizeNativePrivatePlaylistSnapshot,
   parseNativePrivatePlaylistPlaintext,
 } from '../../ui/util/nativePrivatePlaylists.ts';
-import {
-  decryptWeavemailEnvelope,
-  encryptWeavemailEnvelope,
-  generateBrowserWeavemailKeyPair,
-} from '../../ui/util/weavemailClient.ts';
+import { decryptWeavemailEnvelope, encryptWeavemailEnvelope } from '../../ui/util/weavemail.ts';
 
 const nodeBase = String(process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18801').replace(/\/+$/, '');
 const now = Date.now();
@@ -38,9 +34,11 @@ const profileB = await write({ type: 'channel', name: profileNameB });
 const ownerA = await committer(profileA.id);
 const ownerB = await committer(profileB.id);
 assert.notEqual(ownerA, ownerB);
-const browserKeyA = await generateBrowserWeavemailKeyPair();
-const browserKeyB = await generateBrowserWeavemailKeyPair();
-assert.equal(browserKeyA.privateKey.extractable, false);
+// The recipient key is the owner's hosted wallet, exported by the node for the
+// cookie that owns it. No key is generated or stored in the browser.
+const walletA = await exportWallet(profileA.cookie, ownerA);
+const walletB = await exportWallet(profileB.cookie, ownerB);
+assert.notEqual(walletA.n, walletB.n);
 
 const privateTimestamp = now + 10;
 const privateTitle = `Private playlist ${now}`;
@@ -55,7 +53,7 @@ const privatePlaintext = nativePrivatePlaylistPlaintext(
 );
 const privateSeal = await encryptWeavemailEnvelope(
   privatePlaintext,
-  browserKeyA,
+  walletA.n,
   NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
 );
 const privateEnvelope = normalizeNativePrivatePlaylistEnvelope({
@@ -83,7 +81,7 @@ assert.ok(privateSnapshotRecord);
 
 const openedPrivate = await decryptWeavemailEnvelope(
   privateSnapshotRecord,
-  browserKeyA,
+  walletA,
   NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
 );
 const decryptedPrivate = parseNativePrivatePlaylistPlaintext(openedPrivate, privateSnapshotRecord);
@@ -92,14 +90,14 @@ assert.deepEqual(decryptedPrivate?.items, [profileA.id, profileB.id]);
 assert.equal(decryptedPrivate?.owner, ownerA);
 
 await assert.rejects(
-  decryptWeavemailEnvelope(privateSnapshotRecord, browserKeyB, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
-  /invalid/,
-  'another browser key must not decrypt the playlist'
+  decryptWeavemailEnvelope(privateSnapshotRecord, walletB, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
+  /failed authentication/,
+  'another owner wallet must not decrypt the playlist'
 );
 await assert.rejects(
   decryptWeavemailEnvelope(
     { ...privateSnapshotRecord, ciphertext: tamper(privateSnapshotRecord.ciphertext) },
-    browserKeyA,
+    walletA,
     NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
   ),
   /failed authentication/,
@@ -456,6 +454,22 @@ async function queryUntilTimestamps(selectors, expectedTimestamps) {
   assert.fail(
     `query did not discover every reference message: ${JSON.stringify({ selectors, expectedTimestamps, paths })}`
   );
+}
+
+async function exportWallet(cookie, expectedOwner) {
+  const response = await fetch(`${nodeBase}/~secret@1.0/export`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'accept-bundle': 'true', 'content-type': 'application/json', cookie },
+    body: '{}',
+  });
+  assert.equal(response.ok, true, 'the cookie owner must be able to export its hosted wallet');
+  const exported = unwrap(parse(await response.text()));
+  const wallets = (Array.isArray(exported) ? exported : Object.values(exported || {})).filter(
+    (wallet) => wallet && typeof wallet.wallet === 'string'
+  );
+  assert.equal(wallets.length, 1, 'the export must contain exactly one wallet record');
+  assert.equal(wallets[0].address, expectedOwner, 'the exported wallet must be the cookie owner');
+  return JSON.parse(wallets[0].wallet);
 }
 
 function cookiePair(setCookie) {

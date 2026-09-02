@@ -32,9 +32,9 @@ inversion that makes the store unusable without the whole device fleet.
   addressable immutable full snapshot containing ordered immutable locators.
   Public snapshots are plaintext `odysee-playlist@1.0` messages; private
   snapshots are `odysee-private-playlist@1.0` WeaveMail-format envelopes
-  produced and opened locally by browser WebCrypto. A non-exportable
-  RSA-OAEP key pair is persisted in IndexedDB under the verified native cookie
-  owner; there is no playlist crypto device or gateway. Any
+  produced and opened locally with the shared WeaveMail client primitives,
+  sealed to the verified owner's hosted wallet (exported via
+  `~secret@1.0/export`); there is no playlist crypto device or gateway. Any
   verified commitment ID is an exact route to that message; discovery may
   return another commitment locator for the same snapshot. Exact query lists
   snapshots by verified owner/profile; exact message reads hydrate them.

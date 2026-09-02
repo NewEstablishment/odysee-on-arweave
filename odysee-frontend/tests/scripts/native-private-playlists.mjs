@@ -23,11 +23,7 @@ import {
   parseNativePrivatePlaylistPlaintext,
 } from '../../ui/util/nativePrivatePlaylists.ts';
 import { NATIVE_PLAYLIST_SIGNATURE_SCOPE } from '../../ui/util/nativePlaylists.ts';
-import {
-  decryptWeavemailEnvelope,
-  encryptWeavemailEnvelope,
-  generateBrowserWeavemailKeyPair,
-} from '../../ui/util/weavemailClient.ts';
+import { decryptWeavemailEnvelope, encryptWeavemailEnvelope } from '../../ui/util/weavemail.ts';
 
 const owner = id('o');
 const profileId = id('p');
@@ -54,61 +50,37 @@ const plaintext = nativePrivatePlaylistPlaintext(publicShape);
 const parsedPayload = JSON.parse(plaintext);
 assert.equal(parsedPayload.schema, NATIVE_PRIVATE_PLAYLIST_PAYLOAD_SCHEMA);
 
-const browserKey = await generateBrowserWeavemailKeyPair();
-assert.equal(browserKey.privateKey.extractable, false);
-const sealed = await encryptWeavemailEnvelope(plaintext, browserKey, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES);
+// An Arweave-shaped wallet keyfile (RSA-4096 JWK) plays the hosted owner wallet.
+const wallet = await walletKeyfile();
+const sealed = await encryptWeavemailEnvelope(plaintext, wallet.n, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES);
 assert.equal(
-  await decryptWeavemailEnvelope(sealed, browserKey, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
+  await decryptWeavemailEnvelope(sealed, wallet, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
   plaintext,
-  'the browser client must round-trip the WeaveMail-compatible envelope without a device call'
+  'the wallet keyfile must round-trip the WeaveMail envelope without a device call'
 );
 
-const interoperabilityPair = await crypto.subtle.generateKey(
-  {
-    name: 'RSA-OAEP',
-    modulusLength: 4096,
-    publicExponent: new Uint8Array([1, 0, 1]),
-    hash: 'SHA-256',
-  },
-  true,
-  ['encrypt', 'decrypt']
-);
-const interoperabilityKey = {
-  publicKey: interoperabilityPair.publicKey,
-  privateKey: interoperabilityPair.privateKey,
-  keyId: id('k'),
-};
-const publicKey = createPublicKey({
-  key: await crypto.subtle.exportKey('jwk', interoperabilityPair.publicKey),
-  format: 'jwk',
-});
-const privateKey = createPrivateKey({
-  key: await crypto.subtle.exportKey('jwk', interoperabilityPair.privateKey),
-  format: 'jwk',
-});
-const browserEnvelope = await encryptWeavemailEnvelope(
+// HyperBEAM exports hosted wallets without CRT parameters; the client recovers them.
+const { p: _p, q: _q, dp: _dp, dq: _dq, qi: _qi, ...minimalWallet } = wallet;
+assert.equal(
+  await decryptWeavemailEnvelope(sealed, minimalWallet, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
   plaintext,
-  interoperabilityKey,
-  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+  'a node-exported (n, e, d) keyfile must decrypt after prime recovery'
 );
-const browserContentKey = Buffer.from(
+
+// Interoperability with independent RSA-OAEP/AES-GCM primitives in both directions.
+const publicKey = createPublicKey({ key: { kty: 'RSA', n: wallet.n, e: wallet.e }, format: 'jwk' });
+const privateKey = createPrivateKey({ key: wallet, format: 'jwk' });
+const contentKey = Buffer.from(
   privateDecrypt(
     { key: privateKey, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
-    Buffer.from(browserEnvelope.encrypted_key, 'base64url')
+    Buffer.from(sealed.encrypted_key, 'base64url')
   ).toString(),
   'base64url'
 );
-const nodeDecipher = createDecipheriv(
-  'aes-256-gcm',
-  browserContentKey,
-  Buffer.from(browserEnvelope.encrypted_iv, 'base64url')
-);
-nodeDecipher.setAuthTag(Buffer.from(browserEnvelope.encrypted_tag, 'base64url'));
+const nodeDecipher = createDecipheriv('aes-256-gcm', contentKey, Buffer.from(sealed.encrypted_iv, 'base64url'));
+nodeDecipher.setAuthTag(Buffer.from(sealed.encrypted_tag, 'base64url'));
 assert.equal(
-  Buffer.concat([
-    nodeDecipher.update(Buffer.from(browserEnvelope.ciphertext, 'base64url')),
-    nodeDecipher.final(),
-  ]).toString(),
+  Buffer.concat([nodeDecipher.update(Buffer.from(sealed.ciphertext, 'base64url')), nodeDecipher.final()]).toString(),
   plaintext,
   'the browser envelope must open with the independent WeaveMail RSA/AES primitives'
 );
@@ -125,10 +97,9 @@ const nodeEnvelope = {
   ).toString('base64url'),
   encrypted_iv: nodeIv.toString('base64url'),
   encrypted_tag: nodeCipher.getAuthTag().toString('base64url'),
-  recipient_key_id: interoperabilityKey.keyId,
 };
 assert.equal(
-  await decryptWeavemailEnvelope(nodeEnvelope, interoperabilityKey, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
+  await decryptWeavemailEnvelope(nodeEnvelope, wallet, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
   plaintext,
   'the browser client must open an independently generated WeaveMail envelope'
 );
@@ -144,10 +115,11 @@ assert.ok(envelope);
 const committedMessage = nativePrivatePlaylistSnapshotMessage(envelope);
 const committedJson = JSON.stringify(committedMessage);
 assert.equal(committedMessage.schema, NATIVE_PRIVATE_PLAYLIST_SCHEMA);
-assert.equal(committedMessage['recipient-key-id'], browserKey.keyId);
+assert.equal(committedMessage['encrypted-for'], owner);
 assert.equal(committedJson.includes(secretTitle), false, 'the committed snapshot must not reveal the title');
 assert.equal(committedJson.includes(secretItem), false, 'the committed snapshot must not reveal an item ID');
 assert.equal(committedJson.includes(profileId), false, 'the committed snapshot must not reveal the profile ID');
+assert.equal(committedJson.includes(wallet.d), false, 'the committed snapshot must not carry the wallet');
 
 const snapshot = normalizeNativePrivatePlaylistSnapshot({
   ...committedMessage,
@@ -163,20 +135,15 @@ assert.equal(playlist.owner, owner);
 assert.equal(playlist.visibility, 'private');
 assert.equal(playlist.storage_schema, NATIVE_PRIVATE_PLAYLIST_SCHEMA);
 
-const wrongKey = await generateBrowserWeavemailKeyPair();
 await assert.rejects(
-  decryptWeavemailEnvelope(
-    { ...sealed, recipient_key_id: wrongKey.keyId },
-    wrongKey,
-    NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
-  ),
+  decryptWeavemailEnvelope(sealed, await walletKeyfile(), NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
   /failed authentication/,
-  'another browser key must not decrypt the envelope'
+  'another wallet must not decrypt the envelope'
 );
 await assert.rejects(
   decryptWeavemailEnvelope(
     { ...sealed, ciphertext: tamper(sealed.ciphertext) },
-    browserKey,
+    wallet,
     NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
   ),
   /failed authentication/,
@@ -203,7 +170,17 @@ assert.equal(
   'a cross-domain plaintext payload fails closed'
 );
 
-console.log('native browser-only private playlist envelope tests passed');
+console.log('native wallet-keyed private playlist envelope tests passed');
+
+async function walletKeyfile() {
+  const pair = await crypto.subtle.generateKey(
+    { name: 'RSA-OAEP', modulusLength: 4096, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+    true,
+    ['encrypt', 'decrypt']
+  );
+  const { alg: _alg, key_ops: _keyOps, ext: _ext, ...keyfile } = await crypto.subtle.exportKey('jwk', pair.privateKey);
+  return keyfile;
+}
 
 function tamper(value) {
   return `${value[0] === 'A' ? 'B' : 'A'}${value.slice(1)}`;

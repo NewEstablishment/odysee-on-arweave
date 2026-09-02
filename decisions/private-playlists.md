@@ -16,13 +16,14 @@ the generic committed-message and reference contracts.
   envelope and its cryptographic metadata. The decrypted
   `odysee-private-playlist-payload@1.0` value carries the normal complete
   playlist snapshot.
-- The browser implements the WeaveMail 1.0 envelope format directly with
-  WebCrypto. It generates a fresh AES-256-GCM content key per snapshot and
-  wraps it with a browser RSA-OAEP/SHA-256 public key. The RSA key pair is
-  generated once per verified native cookie owner and persisted as CryptoKeys
-  in IndexedDB; the private key is non-exportable. There is no
-  private-playlist gateway or WeaveMail HTTP device, and no plaintext or key
-  material is sent to the node.
+- The browser seals and opens with the shared WeaveMail client primitives
+  (vendored from permaweb/PermawebOS-Browser, `ui/util/weavemail.ts`): a fresh
+  AES-256-GCM content key per snapshot, RSA-OAEP/SHA-256 wrapped to the
+  recipient wallet. The recipient is the owner's own hosted wallet, exported
+  in-session through the cookie-authenticated `~secret@1.0/export` boundary and
+  held in memory only. No key is generated or persisted in the browser, there
+  is no private-playlist or WeaveMail HTTP device, and no plaintext or content
+  key is sent to the node.
 - The generic `reference@1.0` init commitment remains the playlist's stable
   route. Reference messages bind `playlist-owner` to their exact verified
   committer. Discovery is owner-scoped, and readers verify the exact reference
@@ -41,8 +42,19 @@ query/index paths while preserving the same append-only history and stable URL
 model as public playlists. A public conversion does not create a second
 playlist identity, and no private key, unwrapped content key, or plaintext
 enters public storage. Anyone can observe that the owner has a reference and
-encrypted snapshot, but only the browser holding the matching key can recover
-its contents. Clearing browser data or moving to another browser loses access
-until a key backup/recovery design exists. Experimental snapshots created on
-this branch before this browser-only format are intentionally rejected; they
-are test data, not a supported persisted format.
+encrypted snapshot, but only the owner wallet can recover its contents. Because
+identity and recipient key are the same wallet, recovery follows the account:
+clearing browser data loses nothing once the owner signs in again, and any
+device that can authenticate as the owner (cookie today, portable providers
+later) opens the same snapshots. The node operator who hosts the wallet can
+derive the key, exactly as for the account itself. While private playlists are
+open, the wallet keyfile is present in page memory, so a script running on the
+app origin could read it; that origin already holds the cookie that controls
+the account, so this widens the blast radius of a compromise (the key outlives
+cookie rotation) rather than creating a new one. The wallet export must always
+be requested with `accept-bundle: true`: HyperBEAM offloads the nested
+messages of an unbundled reply into the node's public store (`hb_link`), which
+would publish the wallet record at its content id, while a bundled reply
+writes nothing (verified against a live node). Experimental snapshots
+created on this branch before this format are intentionally rejected; they are
+test data, not a supported persisted format.

@@ -111,7 +111,8 @@ import {
   type NativeCommentControl,
 } from 'util/nativeCommentControls';
 import { FF_MAX_CHARS_IN_COMMENT } from 'constants/form-field';
-import { decryptWithBrowserWeavemail, encryptWithBrowserWeavemail } from 'util/weavemailClient';
+import { withRsaPrimes } from 'util/rsaJwk';
+import { decryptWeavemailEnvelope, encryptWeavemailEnvelope, type WalletKeyfile } from 'util/weavemail';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
@@ -122,6 +123,7 @@ const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
 const SEARCH_DEVICE = '~search@1.0';
 const PREFERENCE_DEVICE = '~odysee-preference@1.0';
+const SECRET_DEVICE = '~secret@1.0';
 const SEARCH_MAX_LIMIT = 100;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
 const HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE = '/$/api/hyperbeam-public-device/v1';
@@ -1007,7 +1009,8 @@ async function fetchNativePrivatePlaylistById(id: string): Promise<NativePlaylis
 
   let plaintext;
   try {
-    plaintext = await decryptWithBrowserWeavemail(snapshot, viewerOwner, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES);
+    const keyfile = await ownerWalletKeyfile(viewerOwner);
+    plaintext = await decryptWeavemailEnvelope(snapshot, keyfile, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES);
   } catch {
     return null;
   }
@@ -1065,9 +1068,9 @@ async function nativePrivatePlaylistMessage(
   playlistMessage: Record<string, any>,
   owner: string
 ): Promise<Record<string, any>> {
-  const sealed = await encryptWithBrowserWeavemail(
+  const sealed = await encryptWeavemailEnvelope(
     nativePrivatePlaylistPlaintext(playlistMessage),
-    owner,
+    (await ownerWalletKeyfile(owner)).n,
     NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
   );
   const envelope = normalizeNativePrivatePlaylistEnvelope({
@@ -2280,26 +2283,63 @@ async function fetchPublicDeviceJson(path: string, body: Record<string, any>): P
   return parseDeviceJson(text);
 }
 
-async function fetchPreferenceDeviceJson(method: 'owner' | 'seal' | 'open', body: Record<string, any>): Promise<any> {
+function fetchPreferenceDeviceJson(method: 'owner' | 'seal' | 'open', body: Record<string, any>): Promise<any> {
+  return fetchAuthDeviceJson(PREFERENCE_DEVICE, method, body);
+}
+
+// The signed-in owner's hosted wallet, exported through the cookie-authenticated
+// secret@1.0 boundary and held in memory only. It is the WeaveMail recipient:
+// identity and key are the same wallet, so recovery follows the account.
+// Always requested bundled: an unbundled reply offloads its nested wallet record
+// into the node's public store (HyperBEAM hb_link offload), a bundled one does not.
+const walletKeyfiles = new Map<string, Promise<WalletKeyfile>>();
+
+function ownerWalletKeyfile(owner: string): Promise<WalletKeyfile> {
+  let pending = walletKeyfiles.get(owner);
+  if (!pending) {
+    pending = fetchAuthDeviceJson(SECRET_DEVICE, 'export', {}, { 'accept-bundle': 'true' }).then((exported) => {
+      const wallets = Array.isArray(exported)
+        ? exported
+        : exported?.wallet
+          ? [exported]
+          : Object.values(exported || {});
+      const entry = wallets.find((wallet) => wallet && value(wallet, 'address') === owner);
+      const keyfile = typeof entry?.wallet === 'string' ? JSON.parse(entry.wallet) : null;
+      if (!keyfile?.n || !keyfile?.d) throw new Error('The signed-in owner wallet is unavailable');
+      return withRsaPrimes(keyfile) as WalletKeyfile;
+    });
+    pending.catch(() => walletKeyfiles.delete(owner));
+    walletKeyfiles.set(owner, pending);
+  }
+  return pending;
+}
+
+async function fetchAuthDeviceJson(
+  device: string,
+  method: string,
+  body: Record<string, any>,
+  headers: Record<string, string> = {}
+): Promise<any> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) throw new Error('HyperBEAM node is not configured');
   const direct = typeof window === 'undefined' || isServedFromManifest();
   const url = direct
-    ? buildDeviceUrl(baseUrl, `${PREFERENCE_DEVICE}/${method}`)
-    : `${HYPERBEAM_AUTH_DEVICE_PROXY_BASE}/${PREFERENCE_DEVICE}/${method}`;
+    ? buildDeviceUrl(baseUrl, `${device}/${method}`)
+    : `${HYPERBEAM_AUTH_DEVICE_PROXY_BASE}/${device}/${method}`;
   const response = await fetch(url, {
     method: 'POST',
     credentials: 'include',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
+      ...headers,
     },
     body: JSON.stringify(body),
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
   });
   const text = await response.text();
   if (!response.ok) {
-    const error = new Error(`HyperBEAM preference ${method} failed with ${response.status}`);
+    const error = new Error(`HyperBEAM ${device} ${method} failed with ${response.status}`);
     Object.assign(error, { status: response.status, responseBody: text });
     throw error;
   }

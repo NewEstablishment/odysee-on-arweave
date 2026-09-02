@@ -61,8 +61,8 @@ self-declared field.
 Private playlist snapshots contain a `weavemail@1.0` envelope only: ciphertext,
 an RSA-OAEP-wrapped random AES-256-GCM key, IV, and authentication tag. Their
 decrypted payload uses the ordinary playlist fields under the separate
-`odysee-private-playlist-payload@1.0` signing domain. Browser WebCrypto performs
-encryption and decryption with a non-exportable RSA-OAEP key pair stored in
-IndexedDB under the verified native cookie owner. The node only commits and
-serves the generic ciphertext and reference messages; no private-playlist or
-WeaveMail HTTP device participates.
+`odysee-private-playlist-payload@1.0` signing domain. The browser performs
+encryption and decryption with the shared WeaveMail primitives, keyed to the
+verified owner's hosted wallet exported through `~secret@1.0/export`. The node
+only commits and serves the generic ciphertext and reference messages; no
+private-playlist or WeaveMail HTTP device participates.

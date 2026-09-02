@@ -185,13 +185,14 @@ instead of falling back to legacy services.
   Creating, editing, adding to, or removing from a user playlist commits
   automatically; do not expose a separate publish or republish action. Public
   deletion is not exposed.
-- New and copied playlists default private. The WebCrypto client in
-  `ui/util/weavemailClient.ts` implements the WeaveMail 1.0 envelope format in
-  the browser using a non-exportable RSA-OAEP key pair stored in IndexedDB and
-  scoped to the verified native cookie owner. Do not call or add a
-  private-playlist or WeaveMail HTTP device. Verify the exact ciphertext
-  commitment and owner before local decryption; never expose plaintext,
-  content keys, or private key material in committed messages or requests.
+- New and copied playlists default private. `ui/util/weavemail.ts` carries the
+  shared WeaveMail 1.0 client primitives (vendored from PermawebOS-Browser; do
+  not reimplement them). The recipient key is the verified owner's hosted
+  wallet, exported through `~secret@1.0/export` and held in memory only. Do not
+  call or add a private-playlist or WeaveMail HTTP device, and do not generate
+  or persist browser keys. Verify the exact ciphertext commitment and owner
+  before local decryption; never expose plaintext, content keys, or wallet
+  material in committed messages.
 - Making a private playlist public writes a plaintext public snapshot and
   advances the same stable reference. Require explicit irreversible
   confirmation and never offer public-to-private.

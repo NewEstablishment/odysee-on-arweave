@@ -277,9 +277,8 @@ call the LBRY `collection_*` API.
   Earlier snapshots remain immutable and exactly addressable.
 - New and copied playlists default to private. Their title, description,
   thumbnail, tags, languages, profile metadata, and ordered item IDs are
-  ciphertext at rest. A browser-generated, non-exportable RSA-OAEP key pair is
-  persisted in IndexedDB under the verified native cookie owner; only that
-  browser key can open the snapshots.
+  ciphertext at rest, sealed to the owner's own hosted wallet; only that wallet
+  can open the snapshots, on any device that authenticates as the owner.
 - The reference declares and verifies its playlist owner so private discovery
   is owner-scoped before decryption. A private playlist may be made public by
   advancing the same reference to a plaintext `odysee-playlist@1.0` snapshot.
@@ -303,13 +302,15 @@ until it has an honest append-only contract. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
 
-The small browser client in `ui/util/weavemailClient.ts` implements the
-WeaveMail 1.0 envelope format directly with WebCrypto. It creates a fresh
-AES-256-GCM key for every snapshot and wraps that key with the owner's browser
-RSA-OAEP/SHA-256 public key. Encryption and decryption are entirely local: the
-node receives only the generic committed ciphertext snapshot and reference
-messages. There is no private-playlist or WeaveMail HTTP device. The RSA
-private key is non-exportable and never leaves IndexedDB.
+`ui/util/weavemail.ts` carries the shared WeaveMail 1.0 client primitives,
+vendored from permaweb/PermawebOS-Browser. It creates a fresh AES-256-GCM key
+for every snapshot and wraps that key with RSA-OAEP/SHA-256 to the owner's
+hosted wallet, which the browser exports in-session through the
+cookie-authenticated `~secret@1.0/export` boundary and holds in memory only.
+Encryption and decryption are entirely local: the node receives only the
+generic committed ciphertext snapshot and reference messages. There is no
+private-playlist or WeaveMail HTTP device, and the browser generates or
+persists no key of its own.
 
 ### User preferences
 
@@ -450,10 +451,9 @@ sequence.
   is supported for native immutable uploads and range-aware source stores.
 - The cookie account is local to a node/browser and is not yet a portable or
   recoverable production identity.
-- Private-playlist decryption keys are likewise local to browser IndexedDB and
-  have no backup or cross-device recovery flow yet. Clearing browser data loses
-  access to existing private snapshots; making a playlist public first keeps
-  that public version readable.
+- Private-playlist recovery is therefore bounded by the same limit: the
+  recipient key is the hosted wallet, so private snapshots are recoverable
+  exactly where the account is.
 - The global per-IP rate limiter counts manifest assets as requests. The demo
   configuration raises the bucket to 10,000 requests/minute because one cold
   SPA load fetches roughly 1,000 assets; production deployments must tune this
