@@ -246,15 +246,20 @@ local function category_query(category, now, page, page_size, relaxed)
         query.timestamp = ">" .. tostring(now - days * 86400)
         query.release_time = "<" .. tostring(now)
     end
-    if category.channelLimit ~= nil and category.channelLimit ~= "auto" then
-        query.limit_claims_per_channel = tonumber(category.channelLimit)
-    end
+    if not channel_only then query.limit_claims_per_channel = 1 end
     return query
 end
 
-local function append_candidate(state, item)
+local function remove_id(ids, id)
+    for index = #ids, 1, -1 do
+        if ids[index] == id then table.remove(ids, index) end
+    end
+end
+
+local function append_candidate(state, item, replace_channel)
     local source_locator = outpoint(item)
-    if source_locator == nil or state.seen[source_locator] then return nil end
+    if source_locator == nil then return nil end
+    if state.seen[source_locator] ~= nil then return state.seen[source_locator] end
     local signing = channel(item)
     local signing_source_locator = nil
     local signing_id = nil
@@ -262,6 +267,9 @@ local function append_candidate(state, item)
         signing_source_locator = outpoint(signing)
         if signing_source_locator == nil then return nil end
     end
+    local existing_channel_media = signing_source_locator ~= nil and
+        state.seen_channels[signing_source_locator] or nil
+    if existing_channel_media ~= nil and replace_channel ~= true then return nil end
 
     local exact_media = exact_outpoint(item, "media")
     if exact_media == nil then return nil end
@@ -276,9 +284,20 @@ local function append_candidate(state, item)
         end
     end
 
+    if existing_channel_media ~= nil and existing_channel_media ~= exact_media then
+        remove_id(state.ids, existing_channel_media)
+        local previous_source = state.source_by_media[existing_channel_media]
+        if previous_source ~= nil then state.seen[previous_source] = nil end
+        state.source_by_media[existing_channel_media] = nil
+        state.channels[existing_channel_media] = nil
+    end
     state.seen[source_locator] = exact_media
+    state.source_by_media[exact_media] = source_locator
     table.insert(state.ids, exact_media)
-    if signing_id ~= nil then state.channels[exact_media] = signing_id end
+    if signing_id ~= nil then
+        state.channels[exact_media] = signing_id
+        state.seen_channels[signing_source_locator] = exact_media
+    end
     return exact_media
 end
 
@@ -296,18 +315,25 @@ local function insert_pinned(state, pinned_claim_ids, pinned_items)
     end
 
     local pinned_locators = {}
+    local pinned_channels = {}
     for _, id in ipairs(pinned_claim_ids) do
         local item = by_claim_id[id]
         if item ~= nil then
-            local immutable_id = append_candidate(state, item)
-            if immutable_id ~= nil then table.insert(pinned_locators, immutable_id) end
+            local signing_source_locator = outpoint(channel(item))
+            if signing_source_locator == nil or not pinned_channels[signing_source_locator] then
+                local immutable_id = append_candidate(state, item, true)
+                if immutable_id ~= nil then
+                    table.insert(pinned_locators, immutable_id)
+                    if signing_source_locator ~= nil then
+                        pinned_channels[signing_source_locator] = true
+                    end
+                end
+            end
         end
     end
 
     for _, locator in ipairs(pinned_locators) do
-        for index = #state.ids, 1, -1 do
-            if state.ids[index] == locator then table.remove(state.ids, index) end
-        end
+        remove_id(state.ids, locator)
     end
     local position = math.min(3, #state.ids + 1)
     for index = #pinned_locators, 1, -1 do
@@ -319,7 +345,14 @@ local function collect_category(category, now, pool_size)
     if category.source == "search" then return local_search(category, pool_size) end
     local page_size = positive(category.pageSize, DEFAULT_PAGE_SIZE)
     local target = math.max(page_size, pool_size)
-    local state = { ids = {}, channels = {}, seen = {}, warmed_channels = {} }
+    local state = {
+        ids = {},
+        channels = {},
+        seen = {},
+        seen_channels = {},
+        source_by_media = {},
+        warmed_channels = {}
+    }
     local pages = math.min(MAX_SEARCH_PAGES, math.max(1, math.ceil((target * 3) / SEARCH_PAGE_SIZE)))
 
     for page = 1, pages do

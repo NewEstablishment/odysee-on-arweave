@@ -26,9 +26,15 @@ messages.
 
 - A deployment generates snapshots from its own store and search index.
 - Homepage rows and category routes share the same ordered immutable pools.
+- Every media category contains at most one claim from a signing channel. The
+  materializer requests that limit from its source and enforces it again while
+  building the immutable pool; a valid pinned claim takes precedence.
 - Optional local content is configuration, not a product rule in a generic
   device.
+- The demo-only Local content row is materialized into the frontend manifest
+  from the deployment node's search index and exact immutable store reads. It
+  remains separate from signed language snapshots and cron refreshes.
 - SSR, browser timers, filesystem JSON, and build-time materialization are not
-  authority or refresh mechanisms.
+  authority or refresh mechanisms for language snapshots.
 - The Lua script and snapshot can be executed and verified on stock HyperBEAM
   primitives without trusting a custom homepage device.

@@ -24,7 +24,7 @@ import { HOMEPAGE_LOCAL_CONTENT, URL_DEV } from 'config';
 
 const { SDK_SYNC_KEYS } = SHARED_PREFERENCES;
 const UPDATE_IS_NIGHT_INTERVAL = 5 * 60 * 1000;
-const HOMEPAGE_SNAPSHOT_STARTUP_WAIT_MS = 3000;
+const HOMEPAGE_SNAPSHOT_STARTUP_WAIT_MS = 30_000;
 const HOMEPAGE_SNAPSHOT_TIMEOUT = Symbol('homepage-snapshot-timeout');
 export function doFetchDaemonSettings() {
   return (dispatch: Dispatch) => {

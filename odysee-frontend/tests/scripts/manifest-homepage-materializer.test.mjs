@@ -12,6 +12,7 @@ import {
 
 const firstId = Buffer.alloc(32, 1).toString('base64url');
 const secondId = Buffer.alloc(32, 2).toString('base64url');
+const outpoint = `${'ab'.repeat(32)}:0`;
 
 test('reads ordered locators from HyperBEAM indexed-object responses', () => {
   assert.deepEqual(searchResultIds({ 2: secondId, status: 200, 1: firstId, 3: firstId }), [firstId, secondId]);
@@ -51,6 +52,29 @@ test('materializes search locators only after exact reads succeed', async (t) =>
   assert.deepEqual(searchBody.sort, ['release_time:desc']);
   const generated = await fs.readFile(outputPath, 'utf8');
   assert.equal(generated, manifestHomepageModule([firstId, secondId]));
+});
+
+test('hydrates legacy outpoints through the immutable store route', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'odysee-manifest-homepage-outpoint-'));
+  const outputPath = path.join(directory, 'index.ts');
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const requests = [];
+
+  await materializeManifestHomepage({
+    nodeUrl: 'http://node.test',
+    outputPath,
+    fetchImpl: async (url) => {
+      requests.push(String(url));
+      return String(url).endsWith('/~search@1.0/query')
+        ? Response.json({ 1: outpoint, status: 200 })
+        : new Response('', { status: 200 });
+    },
+  });
+
+  const hydrationUrl = new URL(requests[1]);
+  assert.equal(hydrationUrl.pathname, '/~cache@1.0/read');
+  assert.equal(hydrationUrl.searchParams.get('read'), `odysee/outpoint/${'ab'.repeat(32)}/0`);
+  assert.equal(hydrationUrl.searchParams.get('accept-bundle'), 'true');
 });
 
 test('fails instead of emitting an unreachable homepage locator', async (t) => {

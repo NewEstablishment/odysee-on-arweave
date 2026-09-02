@@ -64,7 +64,7 @@ export async function materializeManifestHomepage(options = {}) {
   const locators = searchResultIds(parseJson(searchText));
   if (!locators.length) throw new Error('Homepage search returned no immutable locators');
   await mapWithConcurrency(locators, 8, async (locator) => {
-    const response = await fetchImpl(`${nodeUrl}/${encodeURIComponent(locator)}?accept-bundle=true`, {
+    const response = await fetchImpl(immutableHydrationUrl(nodeUrl, locator), {
       headers: { accept: 'application/json' },
       signal: AbortSignal.timeout(15_000),
     });
@@ -77,6 +77,16 @@ export async function materializeManifestHomepage(options = {}) {
   await fs.writeFile(temporaryPath, manifestHomepageModule(locators, { label: options.label }), 'utf8');
   await fs.rename(temporaryPath, outputPath);
   return { locators, outputPath };
+}
+
+function immutableHydrationUrl(nodeUrl, locator) {
+  const outpoint = String(locator).match(/^([0-9a-f]{64}):(\d+)$/i);
+  if (!outpoint) return `${nodeUrl}/${encodeURIComponent(locator)}?accept-bundle=true`;
+
+  const url = new URL(`${nodeUrl}/~cache@1.0/read`);
+  url.searchParams.set('read', `odysee/outpoint/${outpoint[1]}/${outpoint[2]}`);
+  url.searchParams.set('accept-bundle', 'true');
+  return url.href;
 }
 
 function responsePayload(payload) {

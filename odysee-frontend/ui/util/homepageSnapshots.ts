@@ -154,16 +154,21 @@ export function mergeHomepageSnapshot(
   if (!snapshot) return configuredHomepage || null;
 
   const generated = snapshot.homepage;
+  const localContent = configuredHomepage?.categories?.LOCAL_CONTENT;
   return {
     ...configuredHomepage,
     ...generated,
-    categories: generated.categories,
+    categories: {
+      ...(localContent ? { LOCAL_CONTENT: localContent } : {}),
+      ...generated.categories,
+    },
   };
 }
 
 export function withLocalContentCategory(homepage: Record<string, any> | null): Record<string, any> | null {
   if (!homepage) return null;
   const categories = homepage.categories || {};
+  const { LOCAL_CONTENT: configuredLocalContent, ...snapshotCategories } = categories;
   return {
     ...homepage,
     categories: {
@@ -176,8 +181,9 @@ export function withLocalContentCategory(homepage: Record<string, any> | null): 
         claimType: ['stream', 'repost'],
         order: 'new',
         excludeFuture: true,
+        ...configuredLocalContent,
       },
-      ...categories,
+      ...snapshotCategories,
     },
   };
 }
