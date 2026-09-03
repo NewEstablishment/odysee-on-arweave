@@ -24,6 +24,7 @@ import {
 } from '../../ui/util/nativePrivatePlaylists.ts';
 import { NATIVE_PLAYLIST_SIGNATURE_SCOPE } from '../../ui/util/nativePlaylists.ts';
 import { decryptWeavemailEnvelope, encryptWeavemailEnvelope } from '../../ui/util/weavemail.ts';
+import { withRsaPrimes } from '../../ui/util/rsaJwk.ts';
 
 const owner = id('o');
 const profileId = id('p');
@@ -66,6 +67,23 @@ assert.equal(
   plaintext,
   'a node-exported (n, e, d) keyfile must decrypt after prime recovery'
 );
+
+// The node pads exported JWK members with leading zero octets (e in particular),
+// which WebCrypto rejects; the client must re-encode them minimally.
+const paddedWallet = { ...minimalWallet, e: padded(minimalWallet.e), d: padded(minimalWallet.d) };
+assert.equal(
+  await decryptWeavemailEnvelope(sealed, paddedWallet, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
+  plaintext,
+  'a keyfile exported with leading-zero JWK members must still decrypt'
+);
+for (const [member, encoded] of Object.entries(withRsaPrimes(paddedWallet))) {
+  if (typeof encoded !== 'string' || member === 'kty') continue;
+  assert.notEqual(
+    Buffer.from(encoded, 'base64url')[0],
+    0,
+    `withRsaPrimes must strip the leading zero octet from "${member}" (Chrome WebCrypto rejects it)`
+  );
+}
 
 // Interoperability with independent RSA-OAEP/AES-GCM primitives in both directions.
 const publicKey = createPublicKey({ key: { kty: 'RSA', n: wallet.n, e: wallet.e }, format: 'jwk' });
@@ -180,6 +198,10 @@ async function walletKeyfile() {
   );
   const { alg: _alg, key_ops: _keyOps, ext: _ext, ...keyfile } = await crypto.subtle.exportKey('jwk', pair.privateKey);
   return keyfile;
+}
+
+function padded(value) {
+  return Buffer.concat([Buffer.from([0]), Buffer.from(value, 'base64url')]).toString('base64url');
 }
 
 function tamper(value) {

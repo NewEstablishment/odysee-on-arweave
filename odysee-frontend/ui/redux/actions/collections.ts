@@ -223,8 +223,14 @@ export const doLocalCollectionCreate =
 
     if (sourceId) {
       const state = getState();
-      const sourceCollectionItems = selectUrlsForCollectionId(state, sourceId);
       const sourceCollection = selectCollectionForId(state, sourceId);
+      if (!sourceCollection) {
+        throw new Error('The playlist being copied could not be loaded');
+      }
+      // `selectUrlsForCollectionId` returns undefined while a resolve is outstanding.
+      // Reading `.length` off it threw, and the caller swallowed the error, so Copy
+      // silently did nothing. Fall back to the collection's own stored items.
+      const sourceCollectionItems = selectUrlsForCollectionId(state, sourceId) || sourceCollection.items || [];
       const sourceCollectionClaim = selectClaimForId(state, sourceId);
       const sourceDescription =
         sourceCollection.description ||
@@ -261,6 +267,9 @@ export const doLocalCollectionCreate =
     }
 
     const saved = await dispatch(doCollectionSave(id));
+    if (!saved?.claim_id) {
+      throw new Error('The playlist was created but could not be saved');
+    }
     const savedId = saved.claim_id;
     if (cb) cb(savedId);
     return savedId;
@@ -444,6 +453,24 @@ export const doFetchItemsInCollection =
     }
 
     if (!collectionItems || collectionItems?.length === undefined) {
+      if (isPrivate) {
+        // A private collection whose items only partly resolved used to land here
+        // as RESOLVE_FAIL, which never adds the id to `resolvedIds`. The items HOC
+        // then re-dispatched this thunk forever and rendered a spinner that never
+        // settled. Terminate the resolve instead, keeping the stored items intact.
+        const unresolvedCollection = selectCollectionForId(state, collectionId);
+        if (unresolvedCollection) {
+          return dispatch({
+            type: ACTIONS.COLLECTION_ITEMS_RESOLVE_SUCCESS,
+            data: {
+              resolvedCollection: {
+                ...unresolvedCollection,
+                key: selectCollectionKeyForId(state, collectionId),
+              },
+            },
+          });
+        }
+      }
       return dispatch({
         type: ACTIONS.COLLECTION_ITEMS_RESOLVE_FAIL,
         data: collectionId,
@@ -454,7 +481,18 @@ export const doFetchItemsInCollection =
     const collectionKey = selectCollectionKeyForId(state, collectionId);
 
     if (isPrivate) {
-      const newItems = collectionItems.map((item) => item.permanent_url);
+      // Map each stored item to its resolved permanent_url, but keep entries that
+      // did not resolve. Replacing `items` with only the resolved subset silently
+      // dropped playlist entries whenever a single claim failed to come back.
+      const resolvedUrlByKey: Record<string, string> = {};
+      collectionItems.forEach((item: any) => {
+        if (!item?.permanent_url) return;
+        [item.claim_id, item.canonical_url, item.permanent_url, getClaimOutpoint(item)].forEach((key) => {
+          if (key) resolvedUrlByKey[key] = item.permanent_url;
+        });
+      });
+      const storedItems = collection?.items || [];
+      const newItems = storedItems.map((item) => resolvedUrlByKey[item] || item);
       const newPrivateCollection = { ...collection, items: newItems, key: collectionKey };
       return dispatch({
         type: ACTIONS.COLLECTION_ITEMS_RESOLVE_SUCCESS,

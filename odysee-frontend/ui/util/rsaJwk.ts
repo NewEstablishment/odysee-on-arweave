@@ -2,7 +2,15 @@
 // WebCrypto refuses to import a private RSA JWK without its CRT parameters.
 // Recover p and q from (n, e, d) (e*d - 1 = 2^t * r; squaring g^r finds a
 // non-trivial square root of 1 mod n) and derive dp, dq, qi. Pure BigInt.
-export function withRsaPrimes(jwk: JsonWebKey): JsonWebKey {
+// WebCrypto also rejects any JWK big-integer member encoded with leading zero
+// octets (the node exports e as such), so re-encode every member minimally.
+const RSA_BIGINT_MEMBERS = ['n', 'e', 'd', 'p', 'q', 'dp', 'dq', 'qi'] as const;
+
+export function withRsaPrimes(source: JsonWebKey): JsonWebKey {
+  const jwk: JsonWebKey = { ...source };
+  for (const member of RSA_BIGINT_MEMBERS) {
+    if (typeof jwk[member] === 'string' && jwk[member]) jwk[member] = toBase64Url(fromBase64Url(jwk[member]));
+  }
   if (jwk.p && jwk.q && jwk.dp && jwk.dq && jwk.qi) return jwk;
   if (!jwk.n || !jwk.e || !jwk.d) throw new Error('RSA keyfile is incomplete');
   const n = fromBase64Url(jwk.n);

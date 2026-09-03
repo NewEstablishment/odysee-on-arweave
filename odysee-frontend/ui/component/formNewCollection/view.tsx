@@ -7,6 +7,7 @@ import { FormField } from 'component/common/form';
 import Button from 'component/button';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doPlaylistAddAndAllowPlaying } from 'redux/actions/content';
+import { doToast } from 'redux/actions/notifications';
 import { selectCollectionForId } from 'redux/selectors/collections';
 
 type Props = {
@@ -54,8 +55,15 @@ function FormNewCollection(props: Props) {
         })
       );
       closeForm(name, id);
-    } catch {
-      return;
+    } catch (error) {
+      // Previously swallowed, which is why a failed create/copy looked like the
+      // button simply did nothing. Surface it so the user knows it did not save.
+      dispatch(
+        doToast({
+          message: (error && (error as Error).message) || __('The playlist could not be created'),
+          isError: true,
+        })
+      );
     } finally {
       setSaving(false);
     }

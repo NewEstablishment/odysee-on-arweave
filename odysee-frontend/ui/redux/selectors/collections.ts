@@ -451,13 +451,26 @@ export const selectUrlsForCollectionId = createCachedSelector(
   selectItemsForCollectionId,
   selectClaimsById,
   selectClaimsByImmutableLocator,
-  (collectionId, itemCount, items, claimsById, claimsByLocator) => {
+  selectCollectionHasItemsResolvedForId,
+  selectClaimIdsByUri,
+  (collectionId, itemCount, items, claimsById, claimsByLocator, itemsResolved, claimIdsByUri) => {
     if (!items) return items;
     const uris: string[] = [];
     let notFetched;
     items.forEach((item) => {
       if (isPermanentUrl(item) || isCanonicalUrl(item)) {
         uris.push(item);
+      } else if (claimIdsByUri && item in claimIdsByUri) {
+        // Private collections store their items as immutable permanent URLs
+        // ("lbry://immutable_<id>"). Those parse as neither a permanent nor a
+        // canonical URL, and the locator map is keyed by the bare id, so the
+        // entry matched nothing and was dropped from the rendered playlist.
+        const claimId = claimIdsByUri[item];
+        if (claimId === undefined) {
+          notFetched = true;
+        } else if (claimId !== null) {
+          uris.push(item);
+        }
       } else {
         const claim = claimsById[item] || claimsByLocator[item];
 
@@ -471,7 +484,11 @@ export const selectUrlsForCollectionId = createCachedSelector(
       }
     });
 
-    if (notFetched && (!Number.isInteger(itemCount) || itemCount > uris.length)) {
+    // `undefined` means "still loading" to consumers. Only claim it while the
+    // collection's item resolve is genuinely outstanding: an item whose claim the
+    // search never returns stays `undefined` in `claimsById` forever, so once the
+    // resolve has completed we return what we have instead of spinning for good.
+    if (notFetched && !itemsResolved && (!Number.isInteger(itemCount) || itemCount > uris.length)) {
       return undefined;
     }
 
