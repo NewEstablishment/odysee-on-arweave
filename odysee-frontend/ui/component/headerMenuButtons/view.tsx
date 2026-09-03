@@ -1,6 +1,5 @@
 import 'scss/component/_header.scss';
 import { ENABLE_NO_SOURCE_CLAIMS } from 'config';
-import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import * as PUBLISH_TYPES from 'constants/publish_types';
@@ -47,7 +46,10 @@ export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
   const dispatch = useAppDispatch();
   const authenticated = useAppSelector(selectUserAuthenticated);
   const isNative = useAppSelector(selectUserIsNative);
-  const canUpload = authenticated || hyperbeamUploadEnabled();
+  // Native uploads must be attributable to the signed-in profile, so the
+  // upload entry point requires a session even though the node would accept
+  // an anonymous write.
+  const canUpload = authenticated;
   const user = useAppSelector(selectUser);
   const doBeginPublish = (type: PublishType) => dispatch(doBeginPublishAction(type));
   const livestreamEnabled = Boolean(!isNative && ENABLE_NO_SOURCE_CLAIMS && user && !user.odysee_live_disabled);

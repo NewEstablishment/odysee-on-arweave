@@ -8,6 +8,7 @@ import {
   VISIBILITY_TAGS,
 } from 'constants/tags';
 import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 
 const METADATA_KEYS = [
   'title',
@@ -79,7 +80,7 @@ export async function updateThroughHyperbeam(
 
   const response = await request;
   const json = await responseJson(response);
-  if (!response.ok) throw new Error(errorMessage(json, response.status));
+  if (!response.ok) throw new Error(uploadDeviceErrorMessage(json, response.status));
 
   return normalizePublishResponse(json, publishPayload, null, myChannels);
 }
@@ -93,12 +94,32 @@ export async function deleteThroughHyperbeam(claim: any, _authToken?: string): P
 
   const response = await request;
   const json = await responseJson(response);
-  if (!response.ok) throw new Error(errorMessage(json, response.status));
+  if (!response.ok) throw new Error(uploadDeviceErrorMessage(json, response.status));
+}
+
+// The `~odysee-upload@1.0` edit/delete device has not shipped on the node
+// yet, so its routes answer 404/500; surface that as a capability gap rather
+// than a generic request failure.
+function uploadDeviceErrorMessage(json: any, status: number) {
+  if (status === 404 || status === 500) {
+    return 'Editing or deleting uploads is not supported by this node yet.';
+  }
+  return errorMessage(json, status);
 }
 
 function hyperbeamClaimRecordId(claim: any) {
   const hyperbeam = claim?.hyperbeam;
-  return hyperbeam?.['record-id'] || hyperbeam?.record_id || hyperbeam?.['data-id'] || hyperbeam?.data_id || '';
+  // record-id/record_id come from a fresh publish response; a claim resolved
+  // from the node after a reload carries the same id as immutable_id.
+  return (
+    hyperbeam?.['record-id'] ||
+    hyperbeam?.record_id ||
+    hyperbeam?.['data-id'] ||
+    hyperbeam?.data_id ||
+    hyperbeam?.immutable_id ||
+    hyperbeam?.['immutable-id'] ||
+    ''
+  );
 }
 
 export async function publishThroughHyperbeam(
@@ -107,7 +128,13 @@ export async function publishThroughHyperbeam(
   _authToken: string,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
+  // Every native upload is attributed to the signed-in profile: an anonymous
+  // index message can never be claimed by a channel later, so without an
+  // account the upload would be permanently orphaned.
+  const account = getHyperbeamAccount();
+  if (!account) throw new Error('Sign in with your account before publishing.');
   const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
+  const channel = signingChannel ? channelSummary(signingChannel) : { claim_id: account.id, name: account.name };
   const uploadPayload = {
     filename: fileName(file, publishPayload),
     content_type: file.type || publishPayload.content_type || 'application/octet-stream',
@@ -116,7 +143,7 @@ export async function publishThroughHyperbeam(
     metadata: {
       ...publishMetadata(publishPayload),
       ...(await fileMediaMetadata(file)),
-      ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
+      channel,
     },
   };
   const storeResponse = await genericStoreWriteResponse(file);
@@ -159,6 +186,7 @@ function synthesizedUploadResponse(recordId: string, dataId: string, uploadPaylo
         value_type: 'stream',
         confirmations: 1,
         meta: {},
+        ...(metadata.channel ? { signing_channel: metadata.channel, is_channel_signature_valid: true } : {}),
         value: {
           title: metadata.title,
           description: metadata.description,

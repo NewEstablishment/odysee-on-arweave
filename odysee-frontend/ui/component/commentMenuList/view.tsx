@@ -18,6 +18,7 @@ import { doCommentPin, doCommentModAddDelegate, doCommentModRemoveDelegate } fro
 import { doOpenModal, doSetActiveChannel } from 'redux/actions/app';
 import { doClearPlayingUri } from 'redux/actions/content';
 import { doToast } from 'redux/actions/notifications';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 import { selectClaimIsMine, selectClaimForUri } from 'redux/selectors/claims';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { selectModerationDelegatorsById, selectModerationDelegatesById } from 'redux/selectors/comments';
@@ -301,8 +302,12 @@ function CommentMenuList(props: Props) {
         </MenuItem>
       )}
       {!disableRemove &&
+        // Native comment deletion is an owner-signed tombstone revision, so
+        // only the author can remove; a moderator/creator delete would always
+        // fail commitment verification on the node.
         (commentIsMine ||
-          (activeChannelClaim &&
+          (!hyperbeamNodeEnabled() &&
+            activeChannelClaim &&
             (activeChannelIsModerator ||
               activeChannelIsAdmin ||
               activeChannelClaim.permanent_url === authorUri ||

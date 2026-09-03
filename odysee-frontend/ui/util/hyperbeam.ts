@@ -1589,7 +1589,16 @@ async function fetchNativeCommentSource(params: CommentListParams): Promise<Comm
 
   const comments = await fetchNativeCommentCollection(selectors);
   const projected = await projectNativeCommentCollection(comments);
-  const visibleComments = projected.items.filter((comment) => !comment.removed && !comment.hidden && !comment.blocked);
+  let visibleComments = projected.items.filter((comment) => !comment.removed && !comment.hidden && !comment.blocked);
+  // Drop replies whose ancestors are not visible (deleted or unverifiable
+  // parents): they can never render, so counting them skews total_items.
+  for (let size = -1; visibleComments.length !== size; ) {
+    size = visibleComments.length;
+    const visibleIds = new Set(visibleComments.map((comment) => String(comment.comment_id)));
+    visibleComments = visibleComments.filter(
+      (comment) => !comment.parent_id || visibleIds.has(String(comment.parent_id))
+    );
+  }
   const childCounts = nativeCommentChildCounts(visibleComments);
   const items = projected.items
     .filter((comment) => nativeCommentMatchesParams(comment, params))
@@ -1607,7 +1616,23 @@ async function fetchNativeCommentSource(params: CommentListParams): Promise<Comm
 }
 
 async function fetchNativeCommentCollection(selectors: Record<string, any>): Promise<Array<any>> {
-  return collapseNativeCommentRevisions(await fetchNativeCommentVersions(selectors));
+  const versions = await fetchNativeCommentVersions(selectors);
+  const collapsed = collapseNativeCommentRevisions(versions);
+  // A reply may name its parent by any id the parent is known under (the
+  // client comment-ref or a version's message id); canonicalize parent_id to
+  // the parent's comment_id so grouping, reply counts, and totals agree.
+  const canonicalByAlias = new Map<string, string>();
+  for (const version of versions) {
+    const canonical = version?.comment_id;
+    if (!canonical) continue;
+    for (const alias of [version.comment_id, version.comment_ref, version.hyperbeam_message_id, version.version_ref]) {
+      if (alias) canonicalByAlias.set(String(alias), String(canonical));
+    }
+  }
+  return collapsed.map((comment) => {
+    const parent = comment?.parent_id ? canonicalByAlias.get(String(comment.parent_id)) : undefined;
+    return parent && parent !== String(comment.parent_id) ? { ...comment, parent_id: parent } : comment;
+  });
 }
 
 async function fetchNativeCommentVersions(selectors: Record<string, any>): Promise<Array<any>> {
@@ -2789,7 +2814,9 @@ async function fetchNativeChannelClaimSearch(
     await Promise.all(
       Array.from(new Set(locatorSets.flat())).map((locator) => resolveImmutableClaimById(locator).catch(() => null))
     )
-  ).filter((claim): claim is Claim => Boolean(claim && claim.value_type === 'stream'));
+  )
+    .filter((claim): claim is Claim => Boolean(claim && claim.value_type === 'stream'))
+    .filter((claim) => nativeClaimMatchesSearchFilters(claim, params));
   const sorted = sortClaimSearchItems(claims, params);
   const start = (page - 1) * pageSize;
   return {
@@ -2799,6 +2826,30 @@ async function fetchNativeChannelClaimSearch(
     total_items: sorted.length,
     total_pages: Math.max(1, Math.ceil(sorted.length / pageSize)),
   };
+}
+
+// The channel-id index query cannot express tag or release-time selectors,
+// so callers like the "Upcoming" rails (which search for scheduled tags and
+// future release times) would otherwise receive every upload on the channel.
+function nativeClaimMatchesSearchFilters(claim: any, params: ClaimSearchOptions): boolean {
+  const claimTags = (((claim.value && claim.value.tags) || []) as Array<any>).map(String);
+  const anyTags = paramValues(params, 'any_tags', 'any-tags');
+  if (anyTags.length && !anyTags.some((tag) => claimTags.includes(tag))) return false;
+  const notTags = paramValues(params, 'not_tags', 'not-tags');
+  if (notTags.length && notTags.some((tag) => claimTags.includes(tag))) return false;
+  if ((params as any).has_no_source && claim.value?.source) return false;
+  if ((params as any).has_source && !claim.value?.source) return false;
+  const releaseTime = toNumber(claim.value?.release_time || claim.timestamp, 0);
+  for (const constraint of paramValues(params, 'release_time', 'release-time')) {
+    const match = String(constraint).match(/^([<>]=?)(\d+)$/);
+    if (!match) continue;
+    const bound = Number(match[2]);
+    if (match[1] === '>' && !(releaseTime > bound)) return false;
+    if (match[1] === '>=' && !(releaseTime >= bound)) return false;
+    if (match[1] === '<' && !(releaseTime < bound)) return false;
+    if (match[1] === '<=' && !(releaseTime <= bound)) return false;
+  }
+  return true;
 }
 
 function deduplicateClaimSearchItems(items: Array<Claim>): Array<Claim> {
@@ -2957,7 +3008,13 @@ export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
   const owner = await activeHyperbeamAccountOwner();
   if (!owner) return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
 
-  const request = nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA });
+  // Select by the account's channel id instead of scanning every upload on
+  // the node; attribution is mandatory at publish, so own uploads always
+  // carry it. Ownership is still verified per claim below.
+  const profileId = getHyperbeamAccount()?.id;
+  const request = nativeQueryRequest(
+    profileId ? { schema: NATIVE_UPLOAD_SCHEMA, 'channel-id': profileId } : { schema: NATIVE_UPLOAD_SCHEMA }
+  );
   const recordIds = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
   const claims = (await Promise.all(recordIds.map((id) => resolveImmutableClaimById(id).catch(() => null)))).filter(
     (claim) => claim?.is_my_output === true && verifiedNativeOwnerMatches(claim?.hyperbeam?.owner, owner)

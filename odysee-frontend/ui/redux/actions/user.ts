@@ -327,8 +327,32 @@ export function doAuthenticate(
     });
 
     if (hyperbeamNodeEnabled()) {
-      try {
-        const account = getHyperbeamAccount() ? await recoverHyperbeamAccount() : null;
+      // Recovery is a network round-trip whose failure modes (timeout, rate
+      // limit, an eventually-consistent query) are indistinguishable from a
+      // genuinely signed-out session. A single attempt here used to strand a
+      // valid saved account on a signed-out header until a full reload, so
+      // when a saved account exists retry past the node's 30s negative read
+      // cache before concluding it is gone.
+      const saved = getHyperbeamAccount();
+      const retryDelays = [3000, 8000, 20000];
+      let account = null;
+      let lastError = null;
+      for (let attempt = 0; attempt <= (saved ? retryDelays.length : 0); attempt++) {
+        if (attempt) await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt - 1]));
+        try {
+          account = saved ? await recoverHyperbeamAccount() : null;
+          lastError = null;
+          if (account || !saved) break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (lastError) {
+        dispatch({
+          type: ACTIONS.AUTHENTICATION_FAILURE,
+          data: { error: lastError },
+        });
+      } else {
         dispatch({
           type: ACTIONS.AUTHENTICATION_SUCCESS,
           data: {
@@ -342,11 +366,6 @@ export function doAuthenticate(
               : null,
             accessToken: null,
           },
-        });
-      } catch (error) {
-        dispatch({
-          type: ACTIONS.AUTHENTICATION_FAILURE,
-          data: { error },
         });
       }
       return;
