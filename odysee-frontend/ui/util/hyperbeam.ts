@@ -52,6 +52,17 @@ import {
   type NativePlaylistReference,
 } from 'util/nativePlaylistReferences';
 import {
+  NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES,
+  NATIVE_PRIVATE_PLAYLIST_PURPOSE,
+  nativePrivatePlaylistPlaintext,
+  nativePrivatePlaylistSnapshotMessage,
+  normalizeNativePrivatePlaylistEnvelope,
+  normalizeNativePrivatePlaylistSnapshot,
+  parseNativePrivatePlaylistPlaintext,
+  type NativePrivatePlaylistSnapshot,
+} from 'util/nativePrivatePlaylists';
+import {
   NATIVE_PREFERENCE_ALGORITHM,
   NATIVE_PREFERENCE_KEY_VERSION,
   NATIVE_PREFERENCE_REFERENCE_TYPE,
@@ -101,6 +112,8 @@ import {
   type NativeCommentControl,
 } from 'util/nativeCommentControls';
 import { FF_MAX_CHARS_IN_COMMENT } from 'constants/form-field';
+import { withRsaPrimes } from 'util/rsaJwk';
+import { decryptWeavemailEnvelope, encryptWeavemailEnvelope, type WalletKeyfile } from 'util/weavemail';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
@@ -111,6 +124,7 @@ const QUERY_DEVICE = '~query@1.0';
 const CACHE_DEVICE = '~cache@1.0';
 const SEARCH_DEVICE = '~search@1.0';
 const PREFERENCE_DEVICE = '~odysee-preference@1.0';
+const SECRET_DEVICE = '~secret@1.0';
 const SEARCH_MAX_LIMIT = 100;
 const LEGACY_UNSET_RELEASE_TIME = 2_147_483_647;
 const HYPERBEAM_AUTH_DEVICE_PROXY_BASE = '/$/api/hyperbeam-auth-device/v1';
@@ -709,6 +723,7 @@ export type NativePlaylistWriteParams = {
   languages?: Array<string>;
   items: Array<string>;
   reference_id?: string;
+  visibility?: 'private' | 'public';
 };
 
 export async function fetchHyperbeamPlaylistListMine(
@@ -775,16 +790,16 @@ export async function fetchHyperbeamPlaylistById(messageId: string): Promise<Cla
       resolved.reference.reference_id
     );
   }
-  const playlist = await fetchNativePlaylistById(messageId);
+  const playlist = await fetchNativePlaylistSnapshotById(messageId);
   if (!playlist) return null;
   const viewerOwner = await activeHyperbeamAccountOwner();
   return nativePlaylistClaim(playlist, viewerOwner === playlist.owner);
 }
 
-export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteParams): Promise<Claim> {
+export async function fetchHyperbeamPlaylistSave(params: NativePlaylistWriteParams): Promise<Claim> {
   const account = getHyperbeamAccount();
   const owner = await activeHyperbeamAccountOwner();
-  if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before publishing');
+  if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before saving playlists');
 
   let reference: NativePlaylistReference | null = null;
   let currentPlaylist: NativePlaylist | null = null;
@@ -800,19 +815,27 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
     currentPlaylist = resolved.playlist;
   }
 
+  const currentVisibility = currentPlaylist?.visibility === 'private' ? 'private' : currentPlaylist ? 'public' : null;
+  const visibility = params.visibility || currentVisibility || 'private';
+  if (currentVisibility === 'public' && visibility === 'private') {
+    throw new Error('A public playlist cannot be made private because its published history remains public');
+  }
+
   const timestamp = Math.max(Date.now(), (reference?.timestamp || 0) + 1);
-  const message = nativePlaylistMessage({
+  const playlistMessage = nativePlaylistMessage({
     ...params,
     profileId: account.id,
     profileName: account.name,
     createdAt: currentPlaylist?.created_at || timestamp,
     updatedAt: timestamp,
   });
-  validateNativePlaylistWrite(message, owner);
+  validateNativePlaylistWrite(playlistMessage, owner);
 
-  const messageId = await writeNativeMessage(message, 'playlist');
+  const message =
+    visibility === 'private' ? await nativePrivatePlaylistMessage(playlistMessage, owner) : playlistMessage;
+  const messageId = await writeNativeMessage(message, visibility === 'private' ? 'private playlist' : 'playlist');
   nativePlaylistQueryCache.clear();
-  const written = await fetchNativePlaylistById(messageId);
+  const written = await fetchNativePlaylistSnapshotById(messageId);
   if (!written || written.owner !== owner || written.message_id !== messageId) {
     throw new Error('HyperBEAM native playlist failed commitment or ownership verification');
   }
@@ -821,6 +844,7 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
     ? nativePlaylistReferenceSetMessage({
         profileId: account.id,
         profileName: account.name,
+        owner,
         referenceId: reference.reference_id,
         snapshotId: messageId,
         timestamp,
@@ -828,6 +852,7 @@ export async function fetchHyperbeamPlaylistPublish(params: NativePlaylistWriteP
     : nativePlaylistReferenceInitMessage({
         profileId: account.id,
         profileName: account.name,
+        owner,
         snapshotId: messageId,
         timestamp,
       });
@@ -896,7 +921,7 @@ async function fetchNativePlaylistForReference(
     'reference-id': init.reference_id,
   });
   const reference = projectNativePlaylistReference(init, candidates);
-  const playlist = await fetchNativePlaylistById(reference.reference_value);
+  const playlist = await fetchNativePlaylistSnapshotById(reference.reference_value);
   if (
     !playlist ||
     playlist.owner !== init.owner ||
@@ -963,6 +988,40 @@ async function fetchNativePlaylistById(id: string): Promise<NativePlaylist | nul
   return profile ? { ...playlist, profile_name: profile.name } : null;
 }
 
+async function fetchNativePlaylistSnapshotById(id: string): Promise<NativePlaylist | null> {
+  const publicPlaylist = await fetchNativePlaylistById(id);
+  if (publicPlaylist) return { ...publicPlaylist, visibility: 'public' };
+  return fetchNativePrivatePlaylistById(id);
+}
+
+async function fetchNativePrivatePlaylistById(id: string): Promise<NativePlaylist | null> {
+  if (!isNativeMessageId(id)) return null;
+  const normalizedId = id.replace(/^\/+/, '');
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  const snapshot = normalizeNativePrivatePlaylistSnapshot({
+    ...verified.payload,
+    'message-id': normalizedId,
+    'hyperbeam-owner': verified.owner,
+  });
+  if (!snapshot || snapshot.owner !== verified.owner) return null;
+  const viewerOwner = await activeHyperbeamAccountOwner();
+  if (!viewerOwner || viewerOwner !== snapshot.owner || snapshot.encrypted_for !== viewerOwner) return null;
+
+  let plaintext;
+  try {
+    const keyfile = await ownerWalletKeyfile(viewerOwner);
+    plaintext = await decryptWeavemailEnvelope(snapshot, keyfile, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES);
+  } catch {
+    return null;
+  }
+  const playlist = parseNativePrivatePlaylistPlaintext(plaintext, snapshot);
+  if (!playlist || playlist.owner !== viewerOwner) return null;
+  const profile = await verifiedNativePlaylistProfile(playlist);
+  return profile ? { ...playlist, profile_name: profile.name, visibility: 'private' } : null;
+}
+
 async function verifiedNativePlaylistProfile(playlist: NativePlaylist): Promise<{ name: string } | null> {
   const verified = await fetchVerifiedNativeMessage(playlist.profile_id);
   const name = value(verified?.payload || {}, 'name');
@@ -1007,6 +1066,25 @@ function nativePlaylistMessage(
   });
 }
 
+async function nativePrivatePlaylistMessage(
+  playlistMessage: Record<string, any>,
+  owner: string
+): Promise<Record<string, any>> {
+  const sealed = await encryptWeavemailEnvelope(
+    nativePrivatePlaylistPlaintext(playlistMessage),
+    (await ownerWalletKeyfile(owner)).n,
+    NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+  );
+  const envelope = normalizeNativePrivatePlaylistEnvelope({
+    ...sealed,
+    'encryption-format': NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT,
+    purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE,
+    owner,
+  });
+  if (!envelope) throw new Error('The browser produced an invalid private playlist encryption envelope');
+  return nativePrivatePlaylistSnapshotMessage(envelope);
+}
+
 function validateNativePlaylistWrite(message: Record<string, any>, owner: string) {
   const candidate = normalizeNativePlaylist({
     ...message,
@@ -1021,6 +1099,7 @@ function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean, referenc
   const creationTimestamp = Math.floor(playlist.created_at / 1000);
   const publicId = referenceId || playlist.message_id;
   const permanentUrl = `/$/playlist/${encodeURIComponent(publicId)}`;
+  const visibility = playlist.visibility === 'private' ? 'private' : 'public';
   return {
     claim_id: publicId,
     name: playlist.title,
@@ -1042,13 +1121,15 @@ function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean, referenc
     timestamp,
     confirmations: 1,
     is_my_output: isMine,
+    visibility,
     hyperbeam: {
-      schema: playlist.schema,
+      schema: playlist.storage_schema || playlist.schema,
       message_id: playlist.message_id,
       reference_id: referenceId,
       owner: playlist.owner,
       profile_id: playlist.profile_id,
       profile_name: playlist.profile_name,
+      visibility,
     },
   } as unknown as Claim;
 }
@@ -2204,26 +2285,63 @@ async function fetchPublicDeviceJson(path: string, body: Record<string, any>): P
   return parseDeviceJson(text);
 }
 
-async function fetchPreferenceDeviceJson(method: 'owner' | 'seal' | 'open', body: Record<string, any>): Promise<any> {
+function fetchPreferenceDeviceJson(method: 'owner' | 'seal' | 'open', body: Record<string, any>): Promise<any> {
+  return fetchAuthDeviceJson(PREFERENCE_DEVICE, method, body);
+}
+
+// The signed-in owner's hosted wallet, exported through the cookie-authenticated
+// secret@1.0 boundary and held in memory only. It is the WeaveMail recipient:
+// identity and key are the same wallet, so recovery follows the account.
+// Always requested bundled: an unbundled reply offloads its nested wallet record
+// into the node's public store (HyperBEAM hb_link offload), a bundled one does not.
+const walletKeyfiles = new Map<string, Promise<WalletKeyfile>>();
+
+function ownerWalletKeyfile(owner: string): Promise<WalletKeyfile> {
+  let pending = walletKeyfiles.get(owner);
+  if (!pending) {
+    pending = fetchAuthDeviceJson(SECRET_DEVICE, 'export', {}, { 'accept-bundle': 'true' }).then((exported) => {
+      const wallets = Array.isArray(exported)
+        ? exported
+        : exported?.wallet
+          ? [exported]
+          : Object.values(exported || {});
+      const entry = wallets.find((wallet) => wallet && value(wallet, 'address') === owner);
+      const keyfile = typeof entry?.wallet === 'string' ? JSON.parse(entry.wallet) : null;
+      if (!keyfile?.n || !keyfile?.d) throw new Error('The signed-in owner wallet is unavailable');
+      return withRsaPrimes(keyfile) as WalletKeyfile;
+    });
+    pending.catch(() => walletKeyfiles.delete(owner));
+    walletKeyfiles.set(owner, pending);
+  }
+  return pending;
+}
+
+async function fetchAuthDeviceJson(
+  device: string,
+  method: string,
+  body: Record<string, any>,
+  headers: Record<string, string> = {}
+): Promise<any> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) throw new Error('HyperBEAM node is not configured');
   const direct = typeof window === 'undefined' || isServedFromManifest();
   const url = direct
-    ? buildDeviceUrl(baseUrl, `${PREFERENCE_DEVICE}/${method}`)
-    : `${HYPERBEAM_AUTH_DEVICE_PROXY_BASE}/${PREFERENCE_DEVICE}/${method}`;
+    ? buildDeviceUrl(baseUrl, `${device}/${method}`)
+    : `${HYPERBEAM_AUTH_DEVICE_PROXY_BASE}/${device}/${method}`;
   const response = await fetch(url, {
     method: 'POST',
     credentials: 'include',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
+      ...headers,
     },
     body: JSON.stringify(body),
     signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
   });
   const text = await response.text();
   if (!response.ok) {
-    const error = new Error(`HyperBEAM preference ${method} failed with ${response.status}`);
+    const error = new Error(`HyperBEAM ${device} ${method} failed with ${response.status}`);
     Object.assign(error, { status: response.status, responseBody: text });
     throw error;
   }
@@ -2642,7 +2760,7 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
 
   const offset = (page - 1) * pageSize;
   const request = hyperbeamClaimSearchRequest(params, offset, pageSize);
-  const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, { q: '', ...request });
+  const response = await fetchPublicOrProxiedDeviceJson(`${SEARCH_DEVICE}/query`, { q: '', ...request });
   const locators = (await searchResultIds(responsePayload(response))).map(String).filter(Boolean);
   const items = (
     await Promise.all(locators.map((locator) => resolveImmutableClaimById(locator).catch(() => null)))
@@ -2806,7 +2924,7 @@ export async function fetchSearchIds(query: string, options: number | HyperbeamS
   const trimmed = String(query || '').trim();
   if (!trimmed) return [];
   const request = typeof options === 'number' ? { limit: options } : options;
-  const response = await fetchSearchDeviceJson(`${SEARCH_DEVICE}/query`, {
+  const response = await fetchPublicOrProxiedDeviceJson(`${SEARCH_DEVICE}/query`, {
     q: trimmed,
     limit: Math.max(1, Math.min(SEARCH_MAX_LIMIT, toNumber(request.limit, 20))),
     ...(request.offset ? { offset: Math.max(0, Math.min(10000, toNumber(request.offset, 0))) } : {}),
@@ -2835,7 +2953,7 @@ async function searchResultIds(result: any): Promise<Array<any>> {
   if (rootIndexed.length) return rootIndexed.map(searchHitId).filter(Boolean);
   const link = value(result, 'ids+link', 'ids-link');
   if (typeof link !== 'string' || !link) return [];
-  const linked = responsePayload(await fetchSearchDeviceJson(`${CACHE_DEVICE}/read`, { read: link }));
+  const linked = responsePayload(await fetchPublicOrProxiedDeviceJson(`${CACHE_DEVICE}/read`, { read: link }));
   const linkedIds = Array.isArray(linked) ? linked : searchIndexedValues(linked);
   return linkedIds.map(searchHitId).filter(Boolean);
 }
@@ -2847,7 +2965,7 @@ function searchHitId(hit: any): string | null {
   return typeof id === 'string' && id ? id : null;
 }
 
-async function fetchSearchDeviceJson(path: string, body: Record<string, any>): Promise<any> {
+async function fetchPublicOrProxiedDeviceJson(path: string, body: Record<string, any>): Promise<any> {
   if (isServedFromManifest()) return fetchPublicDeviceJson(path, body);
   const response = await fetch(`${HYPERBEAM_PUBLIC_DEVICE_PROXY_BASE}/${path}`, {
     method: 'POST',

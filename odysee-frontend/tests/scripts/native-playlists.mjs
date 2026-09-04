@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
   NATIVE_PLAYLIST_SCHEMA,
@@ -12,17 +13,17 @@ import {
 const owner = id('o');
 const profileId = id('p');
 const first = playlist({ id: id('a'), owner, createdAt: 100, items: [id('1')] });
-const republished = playlist({
+const laterSave = playlist({
   id: id('b'),
   owner,
   createdAt: 110,
   items: [id('2'), `${'a'.repeat(64)}:2`],
-  title: 'Republished snapshot',
+  title: 'Later saved snapshot',
 });
 
 assert.deepEqual(
-  immutableNativePlaylists([first, republished]),
-  [republished, first],
+  immutableNativePlaylists([first, laterSave]),
+  [laterSave, first],
   'each complete signed message remains an independently addressable playlist'
 );
 assert.deepEqual(
@@ -30,8 +31,8 @@ assert.deepEqual(
   [first],
   'duplicate physical reads of the same message ID are collapsed'
 );
-assert.notEqual(first.message_id, republished.message_id);
-assert.deepEqual(first.items, [id('1')], 'republishing cannot mutate the previous snapshot');
+assert.notEqual(first.message_id, laterSave.message_id);
+assert.deepEqual(first.items, [id('1')], 'a later save cannot mutate the previous snapshot');
 
 const legacyRevision = playlist({
   id: id('c'),
@@ -92,6 +93,16 @@ assert.equal(
 assert.ok(
   normalizeNativePlaylist({ ...first, description: 'Markdown\nwith formatting' }),
   'ordinary formatted descriptions remain valid'
+);
+
+const collectionSelectorSource = await readFile(
+  new URL('../../ui/redux/selectors/collections.ts', import.meta.url),
+  'utf8'
+);
+assert.match(
+  collectionSelectorSource,
+  /resolvedCollection\?\.visibility === 'private'/,
+  'a decrypted private playlist reached by a direct edit link must use the private item-resolution path'
 );
 
 console.log('native immutable playlist snapshot tests passed');

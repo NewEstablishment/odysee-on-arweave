@@ -1,5 +1,4 @@
 import { createSelector } from 'reselect';
-import { createCachedSelector } from 're-reselect';
 import { parseURI, buildURI } from 'util/lbryURI';
 import {
   selectClaimsById,
@@ -10,11 +9,6 @@ import {
 import { WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
 import { CHANNEL_ANONYMOUS } from 'constants/claim';
 import { SCHEDULED_LIVESTREAM_TAG } from 'constants/tags';
-import {
-  selectCollectionForId,
-  selectClaimIdsForCollectionId,
-  selectCollectionTitleForId,
-} from 'redux/selectors/collections';
 import { selectActiveChannelClaimId, selectIncognito } from 'redux/selectors/app';
 import { selectMembershipsListByCreatorId } from 'redux/selectors/memberships';
 import { filterMembershipTiersWithPerk, getRestrictivePerkName } from 'util/memberships';
@@ -266,24 +260,6 @@ export const selectActiveUploadActivity = createSelector(
 // ****************************************************************************
 export const selectIsScheduled = (state: State) =>
   selectState(state).tags.some((t) => t.name === SCHEDULED_LIVESTREAM_TAG);
-export const selectCollectionClaimUploadParamsForId = createCachedSelector(
-  selectCollectionForId,
-  selectCollectionTitleForId,
-  selectClaimIdsForCollectionId,
-  (collection, collectionTitle, collectionClaimIds) => {
-    const claims = collectionClaimIds && collectionClaimIds.filter(Boolean);
-    if (!collection) return undefined;
-    return {
-      name: collectionTitle,
-      title: collectionTitle,
-      description: collection.description,
-      thumbnail_url: collection.thumbnail?.url,
-      claims,
-      tags: collection.tags || [],
-      languages: collection.languages || [],
-    };
-  }
-)((state: State, collectionId: string) => collectionId);
 export const selectIsNonPublicVisibilityAllowed = (state: State) => {
   const channel = selectPublishFormValue(state, 'channel');
   return channel && channel !== CHANNEL_ANONYMOUS;

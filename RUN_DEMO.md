@@ -36,12 +36,12 @@ The architectural points worth emphasizing are:
 
 ## Presentation preflight
 
-Do this before the audience arrives. Avoid repeatedly refreshing the SPA: the
-stock per-IP limiter counts manifest assets and can temporarily return `429`
-after enough full reloads.
+Do this before the audience arrives. The checked-in demo configuration allows
+10,000 requests/minute per IP so the roughly 1,000-asset cold manifest load does
+not exhaust the stock bucket. Avoid unnecessary refresh loops all the same.
 
-Package the runtime once after a pull or any device change. Include the
-external reference device used by playlists and encrypted preferences:
+Package the runtime once after a pull or any device change. Playlists use the
+external reference device; private-playlist cryptography stays in the browser:
 
 ```sh
 HB_PORT=18734 rebar3 device preload \
@@ -149,15 +149,25 @@ revisioned-message kernel validates contiguous same-owner chains and handles
 fork/equivocation policy consistently for comments, controls, reactions,
 playlists, and subscriptions.
 
-### 6. Show a stable public playlist
+### 6. Show an encrypted private playlist
 
-Add the video to a playlist and publish it. Copy or open the
-`/$/playlist/<reference-id>` route. Reorder or change the list and republish if
-time allows; the public URL stays stable.
+Add the video to a new playlist. The create confirmation stays busy until the
+signed snapshot and stable reference are saved; there is no separate Publish
+button. New playlists are private by default: show the lock badge and absence
+of Share, refresh, then reorder or change the list and press Save. The route
+stays `/$/playlist/<reference-id>` and the decrypted contents survive refresh.
+
+Open Edit, select **Make this playlist public**, press Save, and accept the
+irreversible confirmation. The same route now shows Public and enables Share.
 
 What to say: each playlist version is a full immutable snapshot. The canonical
 `reference@1.0` init commitment is the stable ID, and authorized set messages
-advance its head without mutating history.
+advance its head without mutating history. Private versions contain only
+a WeaveMail-format envelope: the browser creates a fresh AES key and wraps it
+to the signed-in owner's own hosted wallet, exported in-session through the
+cookie-authenticated `~secret@1.0` boundary. The node only receives ciphertext
+and generic reference writes; there is no playlist crypto device. Save is the committed write, and conversion
+to public is one-way because public history cannot be hidden later.
 
 ### 7. Finish with encrypted preferences
 
@@ -229,10 +239,12 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:hyperbeam-upload-smoke
 - Upload metadata edit/delete still needs a complete append-only contract.
 - Browser identity is local to this node/browser and is not yet portable or
   recoverable on another deployment.
+- Private-playlist recovery follows the account: the recipient key is the
+  owner's hosted wallet, so it is exactly as portable as the identity itself.
 - Single HTTP ranges work; multipart byte ranges are not implemented.
-- The stock per-IP rate-limit bucket must be raised for production static
-  manifest traffic. If a local demo returns a full-page `Rate limit exceeded`,
-  stop refreshing and wait roughly one minute before reopening the same tab.
+- Production deployments must tune the per-IP rate-limit bucket together with
+  their static asset delivery and abuse controls; the demo uses 10,000
+  requests/minute specifically to accommodate cold manifest loads.
 - Homepage/category selections are node-signed HyperBEAM messages. The Odysee
   OTP application publishes an initial snapshot at node startup and installs
   the all-language hourly refresh through stock `cron@1.0`. Keep Meilisearch

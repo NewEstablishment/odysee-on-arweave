@@ -6,6 +6,7 @@ export type NativePlaylistReference = {
   reference_type: string;
   profile_id: string;
   profile_name?: string;
+  playlist_owner?: string;
   reference_id: string;
   reference_value: string;
   timestamp: number;
@@ -29,6 +30,7 @@ export function normalizeNativePlaylistReference(source: any): NativePlaylistRef
     reference_type: String(field(source, 'reference-type', 'reference_type') || ''),
     profile_id: String(field(source, 'profile-id', 'profile_id') || ''),
     profile_name: optionalString(field(source, 'profile-name', 'profile_name')),
+    playlist_owner: optionalString(field(source, 'playlist-owner', 'playlist_owner')),
     reference_id: explicitReferenceId || messageId,
     reference_value: String(field(source, 'reference-value', 'reference_value') || '').replace(/^\/+/, ''),
     timestamp: integer(field(source, 'timestamp'), -1),
@@ -45,6 +47,8 @@ export function normalizeNativePlaylistReference(source: any): NativePlaylistRef
     !isNativeMessageId(normalized.reference_value) ||
     !isNativeMessageId(normalized.message_id) ||
     !isNativeMessageId(normalized.owner) ||
+    (normalized.playlist_owner !== undefined &&
+      (!isNativeMessageId(normalized.playlist_owner) || normalized.playlist_owner !== normalized.owner)) ||
     normalized.timestamp < 0 ||
     (normalized.profile_name && !boundedText(normalized.profile_name, 200)) ||
     (authority && authority !== normalized.owner) ||
@@ -59,6 +63,7 @@ export function normalizeNativePlaylistReference(source: any): NativePlaylistRef
 export function nativePlaylistReferenceInitMessage(params: {
   profileId: string;
   profileName?: string;
+  owner: string;
   snapshotId: string;
   timestamp: number;
 }): Record<string, any> {
@@ -67,6 +72,7 @@ export function nativePlaylistReferenceInitMessage(params: {
     'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
     'profile-id': params.profileId,
     'profile-name': params.profileName,
+    'playlist-owner': params.owner,
     'reference-value': params.snapshotId,
     timestamp: params.timestamp,
   });
@@ -75,6 +81,7 @@ export function nativePlaylistReferenceInitMessage(params: {
 export function nativePlaylistReferenceSetMessage(params: {
   profileId: string;
   profileName?: string;
+  owner: string;
   referenceId: string;
   snapshotId: string;
   timestamp: number;
@@ -84,6 +91,7 @@ export function nativePlaylistReferenceSetMessage(params: {
     'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
     'profile-id': params.profileId,
     'profile-name': params.profileName,
+    'playlist-owner': params.owner,
     'reference-id': params.referenceId,
     'reference-value': params.snapshotId,
     timestamp: params.timestamp,
@@ -109,6 +117,7 @@ export function projectNativePlaylistReference(
       candidate.reference_id !== init.reference_id ||
       candidate.owner !== init.owner ||
       candidate.profile_id !== init.profile_id ||
+      (init.playlist_owner && candidate.playlist_owner !== init.playlist_owner) ||
       candidate.timestamp <= init.timestamp
     ) {
       return;

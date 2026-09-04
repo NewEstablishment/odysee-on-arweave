@@ -11,6 +11,7 @@ import { sortLanguageMap } from 'util/default-languages';
 import SUPPORTED_LANGUAGES from 'constants/supported_languages';
 import ThumbnailBrokenImage from 'component/selectThumbnail/thumbnail-broken.png';
 import { AVATAR_DEFAULT } from 'config';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 import * as ICONS from 'constants/icons';
 import * as PUBLISH from 'constants/publish';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
@@ -60,7 +61,7 @@ function UserFirstChannel(props: Props) {
   let thumbnailPreview;
 
   if (!params.thumbnailUrl) {
-    thumbnailPreview = AVATAR_DEFAULT;
+    thumbnailPreview = getThumbnailCdnUrl({ thumbnail: AVATAR_DEFAULT }) || undefined;
   } else if (thumbError) {
     thumbnailPreview = ThumbnailBrokenImage;
   } else {

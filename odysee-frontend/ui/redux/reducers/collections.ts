@@ -31,10 +31,8 @@ const defaultState: CollectionState = {
   queue: { ...defaultCollectionState, id: COLS.QUEUE_ID, name: COLS.QUEUE_NAME, type: COLS.COL_TYPES.PLAYLIST },
   resolvedIds: undefined,
   thumbnailClaimsFetchingCollectionIds: [],
-  autoPublishById: {},
-  autoPublishScheduledAtById: {},
-  publishingById: {},
-  publishErrorById: {},
+  savingById: {},
+  saveErrorById: {},
 };
 const collectionsReducer = handleActions(
   {
@@ -86,78 +84,53 @@ const collectionsReducer = handleActions(
       if (newUnpublishedList[collectionId]) delete newUnpublishedList[collectionId];
       if (newUpdatedList[collectionId]) delete newUpdatedList[collectionId];
       if (newUnsavedChangesList[collectionId]) delete newUnsavedChangesList[collectionId];
-      const newPublishingById = Object.assign({}, state.publishingById);
-      const newPublishErrorById = Object.assign({}, state.publishErrorById);
-      if (newPublishingById[collectionId]) delete newPublishingById[collectionId];
-      if (newPublishErrorById[collectionId]) delete newPublishErrorById[collectionId];
+      const newSavingById = Object.assign({}, state.savingById);
+      const newSaveErrorById = Object.assign({}, state.saveErrorById);
+      if (newSavingById[collectionId]) delete newSavingById[collectionId];
+      if (newSaveErrorById[collectionId]) delete newSaveErrorById[collectionId];
       return {
         ...state,
         edited: newEditList,
         unpublished: newUnpublishedList,
         updated: newUpdatedList,
         unsavedChanges: newUnsavedChangesList,
-        publishingById: newPublishingById,
-        publishErrorById: newPublishErrorById,
+        savingById: newSavingById,
+        saveErrorById: newSaveErrorById,
       };
     },
-    [ACTIONS.COLLECTION_PUBLISH_START]: (state, action) => {
+    [ACTIONS.COLLECTION_SAVE_START]: (state, action) => {
       const { collectionId } = action.data;
-      const newPublishErrorById = Object.assign({}, state.publishErrorById);
-      if (newPublishErrorById[collectionId]) delete newPublishErrorById[collectionId];
-      const newAutoPublishScheduledAtById = { ...state.autoPublishScheduledAtById };
-      delete newAutoPublishScheduledAtById[collectionId];
+      const newSaveErrorById = Object.assign({}, state.saveErrorById);
+      if (newSaveErrorById[collectionId]) delete newSaveErrorById[collectionId];
       return {
         ...state,
-        publishingById: { ...state.publishingById, [collectionId]: true },
-        publishErrorById: newPublishErrorById,
-        autoPublishScheduledAtById: newAutoPublishScheduledAtById,
+        savingById: { ...state.savingById, [collectionId]: true },
+        saveErrorById: newSaveErrorById,
       };
     },
-    [ACTIONS.COLLECTION_PUBLISH_SUCCESS]: (state, action) => {
-      const { collectionId, publishedCollectionId } = action.data;
-      const newPublishingById = { ...state.publishingById };
-      const newPublishErrorById = { ...state.publishErrorById };
-      delete newPublishingById[collectionId];
-      delete newPublishErrorById[collectionId];
+    [ACTIONS.COLLECTION_SAVE_SUCCESS]: (state, action) => {
+      const { collectionId, savedCollectionId } = action.data;
+      const newSavingById = { ...state.savingById };
+      const newSaveErrorById = { ...state.saveErrorById };
+      delete newSavingById[collectionId];
+      delete newSaveErrorById[collectionId];
 
-      if (publishedCollectionId && publishedCollectionId !== collectionId) {
-        delete newPublishingById[publishedCollectionId];
-        delete newPublishErrorById[publishedCollectionId];
+      if (savedCollectionId && savedCollectionId !== collectionId) {
+        delete newSavingById[savedCollectionId];
+        delete newSaveErrorById[savedCollectionId];
       }
 
-      return { ...state, publishingById: newPublishingById, publishErrorById: newPublishErrorById };
+      return { ...state, savingById: newSavingById, saveErrorById: newSaveErrorById };
     },
-    [ACTIONS.COLLECTION_PUBLISH_FAIL]: (state, action) => {
+    [ACTIONS.COLLECTION_SAVE_FAIL]: (state, action) => {
       const { collectionId, error } = action.data;
-      const newPublishingById = Object.assign({}, state.publishingById);
-      if (newPublishingById[collectionId]) delete newPublishingById[collectionId];
+      const newSavingById = Object.assign({}, state.savingById);
+      if (newSavingById[collectionId]) delete newSavingById[collectionId];
       return {
         ...state,
-        publishingById: newPublishingById,
-        publishErrorById: { ...state.publishErrorById, [collectionId]: String(error || 'Publish failed') },
+        savingById: newSavingById,
+        saveErrorById: { ...state.saveErrorById, [collectionId]: String(error || 'Save failed') },
       };
-    },
-    [ACTIONS.COLLECTION_AUTOPUBLISH_SET]: (state, action) => {
-      const { collectionId, enabled } = action.data;
-      const newAutoPublishScheduledAtById = { ...state.autoPublishScheduledAtById };
-      if (!enabled) delete newAutoPublishScheduledAtById[collectionId];
-      return {
-        ...state,
-        autoPublishById: { ...state.autoPublishById, [collectionId]: enabled },
-        autoPublishScheduledAtById: newAutoPublishScheduledAtById,
-      };
-    },
-    [ACTIONS.COLLECTION_AUTOPUBLISH_SCHEDULED]: (state, action) => {
-      const { collectionId, scheduledAt } = action.data;
-      const newAutoPublishScheduledAtById = { ...state.autoPublishScheduledAtById };
-
-      if (scheduledAt) {
-        newAutoPublishScheduledAtById[collectionId] = scheduledAt;
-      } else {
-        delete newAutoPublishScheduledAtById[collectionId];
-      }
-
-      return { ...state, autoPublishScheduledAtById: newAutoPublishScheduledAtById };
     },
     [ACTIONS.COLLECTION_DELETE]: (state, action) => {
       const { id, collectionKey } = action.data;
@@ -207,25 +180,6 @@ const collectionsReducer = handleActions(
         }
       });
       return newState;
-    },
-    [ACTIONS.USER_STATE_POPULATE]: (state, action) => {
-      const {
-        builtinCollections,
-        savedCollectionIds,
-        unpublishedCollections,
-        editedCollections,
-        updatedCollections,
-        autoPublishById,
-      } = action.data;
-      return {
-        ...state,
-        edited: editedCollections || state.edited,
-        updated: updatedCollections || state.updated,
-        unpublished: unpublishedCollections || state.unpublished,
-        builtin: builtinCollections || state.builtin,
-        savedIds: savedCollectionIds || state.savedIds,
-        autoPublishById: { ...state.autoPublishById, ...autoPublishById },
-      };
     },
     [ACTIONS.COLLECTION_ITEMS_RESOLVE_START]: (state, action) => {
       const collectionId = action.data;
