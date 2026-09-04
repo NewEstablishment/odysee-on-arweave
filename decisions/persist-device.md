@@ -66,13 +66,16 @@ message-id → readback by id → `~query@1.0` discovery).
   through the immutable route.
 - The upload index step targeted the dropped `~odysee-upload@1.0`
   device; it is now a plain committed native message (the comment
-  pattern), synthesized back into the claim shape the resolver reads.
+  pattern), then read back through the verified resolver so the published
+  claim carries the node-checked committer and channel attribution.
 
 ## Deliberately out of scope
 
-Upload **edit/delete** still target the dropped device: store-first
-mutability semantics (revisions of immutable records, tombstones) need a
-real design pass, not a drive-by. The UI's upload form and comment box
-remain login-gated (stock Odysee behavior; `Lbry.channel_sign` needs a
-real account + channel), so those surfaces were verified to the gate and
-the underlying native writes verified from the browser context directly.
+Upload **edit/delete** are append-only revision chains over the generic
+`/id` write path, mirroring comments (`ui/util/nativeUploadRevisions.ts`):
+an edit appends a metadata revision, a delete appends a tombstone, and the
+root id stays the claim id so URLs never change. The UI's upload form and
+comment box remain login-gated (stock Odysee behavior;
+`Lbry.channel_sign` needs a real account + channel), so those surfaces were
+verified to the gate and the underlying native writes verified from the
+browser context directly.

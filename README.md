@@ -418,6 +418,7 @@ pnpm run typecheck:tsc
 pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
+pnpm run test:hyperbeam-session
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
@@ -444,7 +445,6 @@ sequence.
 
 - Native view/subscriber counts, moderation delegates, and blocked-word
   settings are not implemented.
-- Upload edit/delete semantics still need a complete append-only design.
 - Mutable-name currentness still depends on an external locator; the evidence
   proves content integrity, not canonical-chain freshness.
 - HTTP multi-range responses are not implemented; browser single-range seeking

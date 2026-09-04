@@ -2,7 +2,7 @@ import * as ACTIONS from 'constants/action_types';
 import { MS } from 'constants/date-time';
 import { SIDEBAR_SUBS_DISPLAYED } from 'constants/subscriptions';
 import { doClaimSearch, doResolveUris } from 'redux/actions/claims';
-import { selectClaimForUri } from 'redux/selectors/claims';
+import { selectChannelForUri } from 'redux/selectors/claims';
 import { getChannelFromClaim } from 'util/claim';
 import { doToast } from 'redux/actions/notifications';
 import { selectSubscriptionIds, selectSubscriptionUris, selectSubscriptions } from 'redux/selectors/subscriptions';
@@ -38,20 +38,13 @@ export function doToggleSubscription(
     // without the claim id, which the native write rejects. Recover the
     // permanent URL from the already-resolved claim in the store.
     let subscriptionInput = subscription;
-    let hasChannelClaimId = false;
-    try {
-      hasChannelClaimId = Boolean(parseURI(subscription.uri).channelClaimId);
-    } catch {}
-    if (!hasChannelClaimId) {
-      const claim = selectClaimForUri(getState(), subscription.uri);
-      const channelClaim = claim && claim.value_type === 'channel' ? claim : getChannelFromClaim(claim);
-      if (channelClaim && channelClaim.permanent_url) {
-        subscriptionInput = {
-          ...subscription,
-          uri: channelClaim.permanent_url,
-          channelName: channelClaim.name || subscription.channelName,
-        };
-      }
+    const channelClaim = channelClaimId(subscription.uri) ? null : selectChannelForUri(getState(), subscription.uri);
+    if (channelClaim?.permanent_url) {
+      subscriptionInput = {
+        ...subscription,
+        uri: channelClaim.permanent_url,
+        channelName: channelClaim.name || subscription.channelName,
+      };
     }
 
     const authoritativeSubscription = isSubscribed

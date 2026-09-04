@@ -23,7 +23,8 @@ import { doMembershipMine } from 'redux/actions/memberships';
 import { selectDefaultChannelId } from 'redux/selectors/settings';
 import { ODYSEE_TIER_NAMES } from 'constants/memberships';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
-import { getHyperbeamAccount, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
+import { forgetHyperbeamAccount, getHyperbeamAccount, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
+import { recoverOnce } from 'util/hyperbeamSession';
 export let sessionStorageAvailable = false;
 const CHECK_INTERVAL = 200;
 const AUTH_WAIT_TIMEOUT = 10000;
@@ -327,47 +328,26 @@ export function doAuthenticate(
     });
 
     if (hyperbeamNodeEnabled()) {
-      // Recovery is a network round-trip whose failure modes (timeout, rate
-      // limit, an eventually-consistent query) are indistinguishable from a
-      // genuinely signed-out session. A single attempt here used to strand a
-      // valid saved account on a signed-out header until a full reload, so
-      // when a saved account exists retry past the node's 30s negative read
-      // cache before concluding it is gone.
-      const saved = getHyperbeamAccount();
-      const retryDelays = [3000, 8000, 20000];
+      // Recovery returns null only on the node's final answer (no session), so
+      // the saved account is then stale and dropped. Anything unverifiable
+      // throws instead: retried once, then reported, keeping the saved account.
       let account = null;
-      let lastError = null;
-      for (let attempt = 0; attempt <= (saved ? retryDelays.length : 0); attempt++) {
-        if (attempt) await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt - 1]));
+      if (getHyperbeamAccount()) {
         try {
-          account = saved ? await recoverHyperbeamAccount() : null;
-          lastError = null;
-          if (account || !saved) break;
+          account = await recoverOnce(recoverHyperbeamAccount);
         } catch (error) {
-          lastError = error;
+          dispatch({ type: ACTIONS.AUTHENTICATION_FAILURE, data: { error } });
+          return;
         }
+        if (!account) forgetHyperbeamAccount();
       }
-      if (lastError) {
-        dispatch({
-          type: ACTIONS.AUTHENTICATION_FAILURE,
-          data: { error: lastError },
-        });
-      } else {
-        dispatch({
-          type: ACTIONS.AUTHENTICATION_SUCCESS,
-          data: {
-            user: account
-              ? {
-                  id: account.id,
-                  name: account.name,
-                  has_verified_email: false,
-                  is_native: true,
-                }
-              : null,
-            accessToken: null,
-          },
-        });
-      }
+      dispatch({
+        type: ACTIONS.AUTHENTICATION_SUCCESS,
+        data: {
+          user: account ? { id: account.id, name: account.name, has_verified_email: false, is_native: true } : null,
+          accessToken: null,
+        },
+      });
       return;
     }
 

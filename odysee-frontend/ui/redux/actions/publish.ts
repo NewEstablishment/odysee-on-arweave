@@ -46,9 +46,8 @@ import uploadThumbnail from 'services/thumbnailUpload';
 import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import Lbry from 'lbry';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
-import { getAuthToken as getSavedAuthToken } from 'util/saved-passwords';
 // import LbryFirst from 'extras/lbry-first/lbry-first';
-import { isClaimNsfw, getChannelIdFromClaim, isStreamPlaceholderClaim } from 'util/claim';
+import { isClaimNsfw, getChannelIdFromClaim, isHyperbeamUploadClaim, isStreamPlaceholderClaim } from 'util/claim';
 import { MEMBERS_ONLY_CONTENT_TAG, SCHEDULED_TAGS, VISIBILITY_TAGS } from 'constants/tags';
 const PUBLISH_PATH_MAP = Object.freeze({
   file: PAGES.UPLOAD,
@@ -65,23 +64,6 @@ function publishErrorMessage(error: any): string {
     } catch {}
   }
   return __('Publish failed.');
-}
-
-function getAuthToken() {
-  const headers = Lbry.getApiRequestHeaders();
-  return headers && Object.keys(headers).includes(X_LBRY_AUTH_TOKEN)
-    ? headers[X_LBRY_AUTH_TOKEN]
-    : getSavedAuthToken() || '';
-}
-
-function isHyperbeamUploadClaim(claim) {
-  return (
-    claim?.hyperbeam?.device === 'odysee-upload@1.0' ||
-    claim?.hyperbeam?.device === '~odysee-upload@1.0' ||
-    // Claims resolved back from the node carry the payload type instead of a
-    // device marker.
-    claim?.hyperbeam?.native_type === 'upload'
-  );
 }
 
 function preserveBrowserFile(filePath: any, state: State) {
@@ -1402,11 +1384,11 @@ export const doPublish =
     }
 
     if (publishThroughHyperbeamEnabled) {
-      return publishThroughHyperbeam(publishFile, publishPayload, getAuthToken(), myChannels).then(success, fail);
+      return publishThroughHyperbeam(publishFile, publishPayload, myChannels).then(success, fail);
     }
 
     if (editThroughHyperbeamEnabled) {
-      return updateThroughHyperbeam(myClaimForUri, publishPayload, getAuthToken(), myChannels).then(success, fail);
+      return updateThroughHyperbeam(myClaimForUri, publishPayload, myChannels).then(success, fail);
     }
 
     return Lbry.publish(publishPayload).then((response: PublishResponse) => {

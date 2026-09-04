@@ -716,6 +716,12 @@ reducers[ACTIONS.ABANDON_CLAIM_STARTED] = (state: ClaimsState, action: any): Cla
   });
 };
 
+reducers[ACTIONS.ABANDON_CLAIM_FAILED] = (state: ClaimsState, action: any): ClaimsState => {
+  const abandoningById = Object.assign({}, state.abandoningById);
+  delete abandoningById[action.data.claimId];
+  return Object.assign({}, state, { abandoningById });
+};
+
 reducers[ACTIONS.UPDATE_PENDING_CLAIMS] = (state: ClaimsState, action: UpdatePendingClaimsAction): ClaimsState => {
   const { claims: pendingClaims, options } = action.data;
   const byIdDelta = {};

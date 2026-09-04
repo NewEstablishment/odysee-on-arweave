@@ -9,7 +9,7 @@ import {
 } from 'constants/tags';
 import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
-import { fetchHyperbeamUploadDelete, fetchHyperbeamUploadUpdate } from 'util/hyperbeam';
+import { fetchHyperbeamResolve, fetchHyperbeamUploadDelete, fetchHyperbeamUploadUpdate } from 'util/hyperbeam';
 
 const METADATA_KEYS = [
   'title',
@@ -60,14 +60,13 @@ export function canDeleteThroughHyperbeam(claim: any) {
 export async function updateThroughHyperbeam(
   claim: any,
   publishPayload: PublishParams,
-  _authToken?: string,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
   const updated = await fetchHyperbeamUploadUpdate(claim, publishMetadata(publishPayload));
   return normalizePublishResponse({ outputs: [updated] }, publishPayload, null, myChannels);
 }
 
-export async function deleteThroughHyperbeam(claim: any, _authToken?: string): Promise<void> {
+export async function deleteThroughHyperbeam(claim: any): Promise<void> {
   await fetchHyperbeamUploadDelete(claim);
 }
 
@@ -89,7 +88,6 @@ function hyperbeamClaimRecordId(claim: any) {
 export async function publishThroughHyperbeam(
   file: Blob,
   publishPayload: PublishParams,
-  _authToken: string,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
   // Every native upload is attributed to the signed-in profile: an anonymous
@@ -126,53 +124,28 @@ export async function publishThroughHyperbeam(
   const recordId = storeWriteId(indexJson);
   if (!recordId) throw new Error('HyperBEAM upload index did not return an ID.');
 
+  // Read the record back through the verified resolver so the claim carries
+  // the node-checked committer and channel attribution, not a client claim.
+  // Both writes are committed by now, so a missed readback is retried once
+  // and then reported without pretending the upload failed.
+  const uri = `lbry://immutable_${recordId}`;
+  let claim = (await fetchHyperbeamResolve({ urls: [uri] }))?.[uri];
+  if (!claim || claim.error) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    claim = (await fetchHyperbeamResolve({ urls: [uri] }))?.[uri];
+  }
+  if (!claim || claim.error) {
+    throw new Error(
+      `HyperBEAM stored upload ${recordId} but could not verify it yet. Check your uploads before publishing again.`
+    );
+  }
+
   return normalizePublishResponse(
-    synthesizedUploadResponse(recordId, dataId, uploadPayload),
+    { 'record-id': recordId, 'read-path': `/${dataId}`, outputs: [claim] },
     publishPayload,
     file,
     myChannels
   );
-}
-
-// The stored index message resolves back into a claim through the
-// immutable-id route (`immutableClaimFromHyperbeam`), so the publish
-// response is synthesized from the same fields the resolver reads.
-function synthesizedUploadResponse(recordId: string, dataId: string, uploadPayload: Record<string, any>) {
-  const metadata = uploadPayload.metadata || {};
-  return {
-    'record-id': recordId,
-    'read-path': `/${dataId}`,
-    outputs: [
-      {
-        name: uploadPayload.name,
-        normalized_name: uploadPayload.name,
-        claim_id: recordId,
-        value_type: 'stream',
-        confirmations: 1,
-        meta: {},
-        ...(metadata.channel ? { signing_channel: metadata.channel, is_channel_signature_valid: true } : {}),
-        value: {
-          title: metadata.title,
-          description: metadata.description,
-          ...(metadata.thumbnail_url ? { thumbnail: { url: metadata.thumbnail_url } } : {}),
-          ...(metadata.video ? { video: metadata.video } : {}),
-          ...(metadata.audio ? { audio: metadata.audio } : {}),
-          source: {
-            name: uploadPayload.filename,
-            size: String(uploadPayload.size || ''),
-            media_type: uploadPayload.content_type,
-          },
-        },
-        hyperbeam: {
-          device: 'odysee-upload@1.0',
-          'record-id': recordId,
-          record_id: recordId,
-          'data-id': dataId,
-          data_id: dataId,
-        },
-      },
-    ],
-  };
 }
 
 async function genericStoreWriteResponse(file: Blob) {
@@ -213,6 +186,10 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     'thumbnail-url': metadata.thumbnail_url,
     license: metadata.license,
     'release-time': metadata.release_time,
+    'video-duration': metadata.video?.duration,
+    'video-width': metadata.video?.width,
+    'video-height': metadata.video?.height,
+    'audio-duration': metadata.audio?.duration,
     'channel-id': channel.claim_id,
     'channel-name': channel.name,
     timestamp: Math.floor(Date.now() / 1000),
@@ -269,8 +246,8 @@ function normalizePublishResponse(
       : {}),
     confirmations: outputs[0].confirmations > 0 ? outputs[0].confirmations : 1,
     is_my_output: true,
-    is_channel_signature_valid: Boolean(signingChannel) || outputs[0].is_channel_signature_valid,
-    signing_channel: signingChannel ? channelSummary(signingChannel) : outputs[0].signing_channel,
+    is_channel_signature_valid: Boolean(outputs[0].is_channel_signature_valid),
+    signing_channel: outputs[0].signing_channel,
     streaming_url: mediaUrl,
     download_url: mediaUrl,
     hyperbeam: {

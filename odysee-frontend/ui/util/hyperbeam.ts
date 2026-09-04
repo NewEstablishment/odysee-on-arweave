@@ -108,6 +108,7 @@ import {
   type NativeSubscriptionOperation,
 } from 'util/nativeSubscriptions';
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
+import { sessionRejected } from 'util/hyperbeamSession';
 import { normalizeContentRestrictionResponse } from 'util/hyperbeamContentRestriction';
 import {
   hasNativeCommentControlAuthority,
@@ -166,8 +167,8 @@ const nativeSubscriptionQueryCache = new Map<
   { expiresAt: number; promise: Promise<Array<NativeSubscription>> }
 >();
 const nativeCommentTargetOwnerCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
-let activeAccountOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
-let nativePreferenceOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
+const activeAccountOwnerCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
+const nativePreferenceOwnerCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
 let nativePreferenceWriteQueue: Promise<void> = Promise.resolve();
 let hyperbeamNodeAddressPromise: Promise<string | null> | undefined;
 
@@ -488,25 +489,26 @@ async function writeNativePreference(key: string, preferenceValue: any): Promise
   return { [key]: preferenceValue };
 }
 
+// Null means the node rejected the session (util/hyperbeamSession); every
+// other failure propagates so callers can tell transient from final.
+async function fetchNativePreferenceOwnerStrict(): Promise<string | null> {
+  try {
+    const result = await fetchPreferenceDeviceJson('owner', {});
+    const owner = String(value(result, 'owner', 'body') || '');
+    return isNativeMessageId(owner) ? owner : null;
+  } catch (error) {
+    if (sessionRejected(error)) return null;
+    throw error;
+  }
+}
+
 async function fetchNativePreferenceOwner(): Promise<string | null> {
   const accountId = getHyperbeamAccount()?.id || '';
-  if (nativePreferenceOwnerCache?.accountId === accountId && nativePreferenceOwnerCache.expiresAt > Date.now()) {
-    return nativePreferenceOwnerCache.promise;
-  }
-  const promise = fetchPreferenceDeviceJson('owner', {})
-    .then((result) => {
-      const owner = String(value(result, 'owner', 'body') || '');
-      return isNativeMessageId(owner) ? owner : null;
-    })
-    .catch(() => null);
-  nativePreferenceOwnerCache = {
-    accountId,
-    expiresAt: Date.now() + HYPERBEAM_READ_CACHE_MS,
-    promise,
-  };
-  const owner = await promise;
-  if (!owner && nativePreferenceOwnerCache?.promise === promise) nativePreferenceOwnerCache = undefined;
-  return owner;
+  return cachedNativeQuery(nativePreferenceOwnerCache, accountId, async () => {
+    const owner = await fetchNativePreferenceOwnerStrict();
+    if (!owner) throw new Error('The HyperBEAM session has no owner');
+    return owner;
+  }).catch(() => null);
 }
 
 async function fetchNativePreferenceState(owner: string): Promise<NativePreferenceState | null> {
@@ -634,20 +636,16 @@ async function writeNativePreferenceMessage(message: Record<string, any>, label:
   return id;
 }
 
-export async function recoverHyperbeamAccountProfile(): Promise<{ name: string; id: string } | null> {
-  const owner = await fetchNativePreferenceOwner();
-  if (!owner) throw new Error('The HyperBEAM session could not be verified.');
+export async function recoverHyperbeamAccountProfile(
+  saved?: { name: string; id: string } | null
+): Promise<{ name: string; id: string } | null> {
+  const owner = await fetchNativePreferenceOwnerStrict();
+  if (!owner) return null;
+  // The saved profile proves itself by its own id; only an unknown or stale
+  // profile falls back to discovering the cookie's channels through the index.
+  if (saved && (await verifyHyperbeamAccountProfile(saved, owner))) return saved;
 
-  const paths = uniquePaths(
-    queryPaths(
-      await fetchPublicQueryJson(
-        nativeQueryRequest({
-          type: 'channel',
-        })
-      )
-    )
-  );
-
+  const paths = await fetchHyperbeamQueryPaths({ type: 'channel' });
   const profiles = (
     await Promise.all(
       paths.map(async (id) => {
@@ -662,20 +660,23 @@ export async function recoverHyperbeamAccountProfile(): Promise<{ name: string; 
       })
     )
   ).filter((profile): profile is { name: string; id: string } => Boolean(profile));
-  const preferredId = getHyperbeamAccount()?.id;
-  profiles.sort((left, right) => {
-    if (left.id === preferredId) return -1;
-    if (right.id === preferredId) return 1;
-    return left.id.localeCompare(right.id);
-  });
-  return profiles[0] || null;
+  // Reads under verification swallow transport errors, so an empty result is
+  // not a final answer: throw and let the caller keep its saved account.
+  const profile =
+    profiles.find((candidate) => candidate.id === saved?.id) ||
+    profiles.sort((left, right) => left.id.localeCompare(right.id))[0];
+  if (!profile) throw new Error('The HyperBEAM account could not be verified.');
+  return profile;
 }
 
-export async function verifyHyperbeamAccountProfile(account: { name: string; id: string }): Promise<boolean> {
+export async function verifyHyperbeamAccountProfile(
+  account: { name: string; id: string },
+  knownOwner?: string | null
+): Promise<boolean> {
   if (!account || !isNativeMessageId(account.id) || !account.name) return false;
   const [verified, cookieOwner] = await Promise.all([
     fetchVerifiedNativeMessage(account.id),
-    fetchNativePreferenceOwner(),
+    knownOwner || fetchNativePreferenceOwner(),
   ]);
   return Boolean(
     verified &&
@@ -1908,19 +1909,12 @@ async function verifiedNativeCommentProfile(payload: any, owner: string): Promis
 async function activeHyperbeamAccountOwner(): Promise<string | null> {
   const account = getHyperbeamAccount();
   if (!account || !isNativeMessageId(account.id)) return null;
-  if (activeAccountOwnerCache?.accountId === account.id && activeAccountOwnerCache.expiresAt > Date.now()) {
-    return activeAccountOwnerCache.promise;
-  }
-
-  const promise = Promise.all([verifyHyperbeamAccountProfile(account), fetchNativePreferenceOwner()]).then(
-    ([verified, cookieOwner]) => (verified ? cookieOwner : null)
+  if (!activeAccountOwnerCache.has(account.id)) activeAccountOwnerCache.clear();
+  return cachedNativeQuery(activeAccountOwnerCache, account.id, () =>
+    Promise.all([verifyHyperbeamAccountProfile(account), fetchNativePreferenceOwner()]).then(
+      ([verified, cookieOwner]) => (verified ? cookieOwner : null)
+    )
   );
-  activeAccountOwnerCache = {
-    accountId: account.id,
-    expiresAt: Date.now() + HYPERBEAM_READ_CACHE_MS,
-    promise,
-  };
-  return promise;
 }
 
 type NativeCommentControlState = {
@@ -3107,16 +3101,14 @@ export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
     return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
   }
 
+  const account = getHyperbeamAccount();
   const owner = await activeHyperbeamAccountOwner();
-  if (!owner) return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
+  if (!owner || !account) return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
 
   // Select by the account's channel id instead of scanning every upload on
   // the node; attribution is mandatory at publish, so own uploads always
   // carry it. Ownership is still verified per claim below.
-  const profileId = getHyperbeamAccount()?.id;
-  const request = nativeQueryRequest(
-    profileId ? { schema: NATIVE_UPLOAD_SCHEMA, 'channel-id': profileId } : { schema: NATIVE_UPLOAD_SCHEMA }
-  );
+  const request = nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA, 'channel-id': account.id });
   const recordIds = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
   const tips = (await fetchNativeUploadTips(recordIds)).filter((tip) => tip.state !== 'deleted');
   const claims = (
@@ -4257,7 +4249,9 @@ function immutableClaimFromHyperbeam(
       title,
       description,
       thumbnail: thumbnailObject(
-        value(existingValue, 'thumbnail') || value(payload, 'thumbnail') || value(decodedValue, 'thumbnail'),
+        value(existingValue, 'thumbnail') ||
+          value(payload, 'thumbnail', 'thumbnail-url', 'thumbnail_url') ||
+          value(decodedValue, 'thumbnail'),
         mediaUrl,
         mediaType
       ),
@@ -4271,10 +4265,13 @@ function immutableClaimFromHyperbeam(
         value(decodedValue, 'stream_type', 'stream-type') ||
         streamTypeFromMediaType(mediaType),
       tags: value(existingValue, 'tags') || value(decodedValue, 'tags'),
-      license: value(existingValue, 'license') || value(decodedValue, 'license'),
+      license: value(existingValue, 'license') || value(payload, 'license') || value(decodedValue, 'license'),
       release_time:
-        value(existingValue, 'release_time', 'release-time') || value(decodedValue, 'release_time', 'release-time'),
-      video: value(existingValue, 'video') || value(decodedValue, 'video'),
+        value(existingValue, 'release_time', 'release-time') ||
+        value(payload, 'release-time', 'release_time') ||
+        value(decodedValue, 'release_time', 'release-time'),
+      video: value(existingValue, 'video') || value(decodedValue, 'video') || nativeMediaValue(payload, 'video'),
+      audio: value(existingValue, 'audio') || value(decodedValue, 'audio') || nativeMediaValue(payload, 'audio'),
       source: compactParams({
         ...payloadSource,
         ...valueSource,
@@ -4917,6 +4914,13 @@ function streamTypeFromMediaType(mediaType: any): string | undefined {
   if (mediaType.startsWith('video/')) return 'video';
   if (mediaType.startsWith('audio/')) return 'audio';
   if (mediaType.startsWith('image/')) return 'image';
+}
+
+function nativeMediaValue(payload: any, kind: 'video' | 'audio'): any {
+  const duration = toNumber(value(payload, `${kind}-duration`), 0);
+  if (!duration) return undefined;
+  const width = toNumber(value(payload, `${kind}-width`), 0);
+  return { duration, ...(width ? { width, height: toNumber(value(payload, `${kind}-height`), 0) } : {}) };
 }
 
 function thumbnailObject(thumbnail: any, mediaUrl: string, mediaType: any): any {
