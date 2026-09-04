@@ -7,8 +7,9 @@ import {
   SCHEDULED_TAGS,
   VISIBILITY_TAGS,
 } from 'constants/tags';
-import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
+import { fetchHyperbeamUploadDelete, fetchHyperbeamUploadUpdate } from 'util/hyperbeam';
 
 const METADATA_KEYS = [
   'title',
@@ -54,57 +55,20 @@ export function canDeleteThroughHyperbeam(claim: any) {
   return Boolean(hyperbeamNodeBase() && hyperbeamClaimRecordId(claim));
 }
 
+// Edit and delete are append-only revision messages through the generic
+// `/id` write path (no app device): see ui/util/nativeUploadRevisions.ts.
 export async function updateThroughHyperbeam(
   claim: any,
   publishPayload: PublishParams,
   _authToken?: string,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
-  const recordId = hyperbeamClaimRecordId(claim);
-  if (!recordId) throw new Error('HyperBEAM record ID not found for this claim.');
-
-  const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
-  const request = hyperbeamDevicePostParams64(
-    HYPERBEAM_DEVICE.upload,
-    'update&!',
-    {
-      record_id: recordId,
-      metadata: {
-        ...publishMetadata(publishPayload),
-        ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
-      },
-    },
-    {}
-  );
-  if (!request) throw new Error('HyperBEAM upload device is not configured.');
-
-  const response = await request;
-  const json = await responseJson(response);
-  if (!response.ok) throw new Error(uploadDeviceErrorMessage(json, response.status));
-
-  return normalizePublishResponse(json, publishPayload, null, myChannels);
+  const updated = await fetchHyperbeamUploadUpdate(claim, publishMetadata(publishPayload));
+  return normalizePublishResponse({ outputs: [updated] }, publishPayload, null, myChannels);
 }
 
 export async function deleteThroughHyperbeam(claim: any, _authToken?: string): Promise<void> {
-  const recordId = hyperbeamClaimRecordId(claim);
-  if (!recordId) throw new Error('HyperBEAM record ID not found for this claim.');
-
-  const request = hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.upload, 'delete&!', { record_id: recordId }, {});
-  if (!request) throw new Error('HyperBEAM upload device is not configured.');
-
-  const response = await request;
-  const json = await responseJson(response);
-  if (!response.ok) throw new Error(uploadDeviceErrorMessage(json, response.status));
-}
-
-// The `~odysee-upload@1.0` edit/delete device has not shipped on the node
-// yet, so its routes answer 404/500; surface that as a capability gap rather
-// than a generic request failure.
-function uploadDeviceErrorMessage(json: any, status: number) {
-  if (status === 404 || status === 500) {
-    return 'Editing or deleting uploads is not supported by this node yet.';
-  }
-  return errorMessage(json, status);
+  await fetchHyperbeamUploadDelete(claim);
 }
 
 function hyperbeamClaimRecordId(claim: any) {

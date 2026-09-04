@@ -815,18 +815,6 @@ export const doPrepareEdit = (claim: StreamClaim, uri: string, claimType: string
     claimType,
   });
   return async (dispatch: Dispatch, getState: GetState) => {
-    // Native uploads cannot be edited until the node ships its
-    // ~odysee-upload@1.0 update device; the edit form would dead-end, so say
-    // so up front instead of opening it.
-    if (hyperbeamUploadEnabled() && isHyperbeamUploadClaim(claim)) {
-      dispatch(
-        doToast({
-          isError: true,
-          message: __('Editing uploads is not supported by this node yet.'),
-        })
-      );
-      return;
-    }
     const { name, amount, value = {} } = claim;
     const channelName = (claim && claim.signing_channel && claim.signing_channel.name) || null;
     const channelId = (claim && claim.signing_channel && claim.signing_channel.claim_id) || null;

@@ -821,7 +821,9 @@ function UploadForm(props: Props) {
         !!title &&
         !!name &&
         isNameValid(name) &&
-        !!thumbnail &&
+        // HyperBEAM uploads do not require a thumbnail (mirrors formValidLessFile);
+        // without this waiver the final submit silently bounces back here.
+        (!!thumbnail || hyperbeamUploadEnabled()) &&
         !isOverwritingExistingClaim &&
         !(thumbnailError && !thumbnailUploaded) &&
         uploadThumbnailStatus !== THUMBNAIL_STATUSES.IN_PROGRESS,

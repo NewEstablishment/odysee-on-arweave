@@ -57,6 +57,7 @@
     "test:hyperbeam-search-options": "node --experimental-strip-types tests/scripts/hyperbeam-search-options.mjs",
     "test:manifest-homepage": "node --test tests/scripts/manifest-homepage-materializer.test.mjs && node --experimental-strip-types tests/scripts/thumbnail-proxy.mjs",
     "test:native-comment-revisions": "node --experimental-strip-types tests/scripts/native-comment-revisions.mjs",
+    "test:native-upload-revisions": "node --experimental-strip-types tests/scripts/native-upload-revisions.mjs",
     "test:native-message-verification": "node --experimental-strip-types tests/scripts/native-message-verification.mjs",
     "test:native-cookie-comments": "node --experimental-strip-types tests/scripts/native-cookie-comments-smoke.mjs",
     "test:native-comment-controls": "node --experimental-strip-types tests/scripts/native-comment-controls.mjs",

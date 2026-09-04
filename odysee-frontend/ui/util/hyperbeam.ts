@@ -6,6 +6,16 @@ import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { hyperbeamClaimSearchRequest, type HyperbeamSearchRequest } from 'util/hyperbeamSearch';
 import { isHyperbeamUploadClaim } from 'util/claim';
+import {
+  collapseNativeUploadRevisions,
+  isNextNativeUploadRevision,
+  latestNativeUploadRevision,
+  nativeUploadRevisionMessage,
+  nativeUploadTipMetadata,
+  normalizeNativeUploadRevision,
+  type NativeUploadMetadata,
+  type NativeUploadRevision,
+} from 'util/nativeUploadRevisions';
 import { buildURI, parseURI } from 'util/lbryURI';
 import { hasLbryOutpointCommitment, lbryEvidenceCommitmentId } from 'util/lbryCommitment';
 import {
@@ -2810,9 +2820,15 @@ async function fetchNativeChannelClaimSearch(
       )
     )
   );
+  const tips = (await fetchNativeUploadTips(Array.from(new Set(locatorSets.flat())))).filter(
+    (tip) => tip.state !== 'deleted'
+  );
   const claims = (
     await Promise.all(
-      Array.from(new Set(locatorSets.flat())).map((locator) => resolveImmutableClaimById(locator).catch(() => null))
+      tips.map(async (tip) => {
+        const claim = await resolveImmutableClaimById(String(tip.record_id)).catch(() => null);
+        return claim ? overlayNativeUploadTip(claim, tip) : null;
+      })
     )
   )
     .filter((claim): claim is Claim => Boolean(claim && claim.value_type === 'stream'))
@@ -2997,6 +3013,92 @@ function sourceClaimQuery(params: ClaimSearchOptions): Record<string, any> {
 // List the active cookie identity's native uploads as claims. The match-index
 // discovers every `odysee-upload@1.0' record on the node, so ownership is
 // verified from each exact commitment before pagination.
+// ── Upload revisions (edit/delete as plain /id writes) ─────────────────────
+
+async function fetchNativeUploadRevisionItem(id: string): Promise<NativeUploadRevision | null> {
+  const normalizedId = String(id || '').replace(/^\/+/, '');
+  if (!isNativeMessageId(normalizedId)) return null;
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  return normalizeNativeUploadRevision(verified.payload, normalizedId, verified.owner);
+}
+
+async function fetchNativeUploadTips(ids: Array<string>): Promise<Array<NativeUploadRevision>> {
+  const items = (await Promise.all(ids.map((id) => fetchNativeUploadRevisionItem(id).catch(() => null)))).filter(
+    (item): item is NativeUploadRevision => Boolean(item)
+  );
+  return collapseNativeUploadRevisions(items);
+}
+
+// Root claims stay the source of truth for identity and media; an edited
+// tip only contributes metadata on top of them.
+function overlayNativeUploadTip(claim: any, tip: NativeUploadRevision): any {
+  if (!claim || !tip.revision) return claim;
+  const metadata = nativeUploadTipMetadata(tip);
+  return {
+    ...claim,
+    value: {
+      ...claim.value,
+      ...(metadata.title !== undefined ? { title: metadata.title } : {}),
+      ...(metadata.description !== undefined ? { description: metadata.description } : {}),
+      ...(metadata.license !== undefined ? { license: metadata.license } : {}),
+      ...(metadata.license_url !== undefined ? { license_url: metadata.license_url } : {}),
+      ...(metadata.release_time !== undefined ? { release_time: metadata.release_time } : {}),
+      ...(metadata.thumbnail_url ? { thumbnail: { url: metadata.thumbnail_url } } : {}),
+    },
+  };
+}
+
+async function fetchNativeUploadChainForClaim(claim: any): Promise<{
+  root: NativeUploadRevision;
+  tip: NativeUploadRevision;
+}> {
+  const hyperbeam = claim?.hyperbeam || {};
+  const rootId = String(
+    hyperbeam['record-id'] || hyperbeam.record_id || hyperbeam.immutable_id || hyperbeam['immutable-id'] || ''
+  );
+  if (!isNativeMessageId(rootId)) throw new Error('HyperBEAM record ID not found for this claim.');
+  const root = await fetchNativeUploadRevisionItem(rootId);
+  if (!root || root.revision_of) throw new Error('This upload could not be verified.');
+  const owner = await activeHyperbeamAccountOwner();
+  if (!owner || root.hyperbeam_owner !== owner) throw new Error('Only the uploader can modify this upload.');
+
+  const ids = root.data_id
+    ? uniquePaths(
+        queryPaths(
+          await fetchPublicQueryJson(nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA, 'data-id': root.data_id }))
+        )
+      )
+    : [rootId];
+  const revisions = (await Promise.all(ids.map((id) => fetchNativeUploadRevisionItem(id).catch(() => null)))).filter(
+    (item): item is NativeUploadRevision => Boolean(item && item.revision_of === root.record_id)
+  );
+  return { root, tip: latestNativeUploadRevision(root, revisions) };
+}
+
+export async function fetchHyperbeamUploadUpdate(claim: any, metadata: NativeUploadMetadata): Promise<any> {
+  const { root, tip } = await fetchNativeUploadChainForClaim(claim);
+  const message = nativeUploadRevisionMessage(root, tip, metadata, 'edit');
+  const messageId = await writeNativeMessage(message, 'upload revision');
+  const written = await fetchNativeUploadRevisionItem(messageId);
+  if (!written || !isNextNativeUploadRevision(root, tip, written)) {
+    throw new Error('HyperBEAM upload revision failed commitment or ownership verification');
+  }
+  const resolved = await resolveImmutableClaimById(String(root.record_id)).catch(() => null);
+  return overlayNativeUploadTip(resolved || claim, written);
+}
+
+export async function fetchHyperbeamUploadDelete(claim: any): Promise<void> {
+  const { root, tip } = await fetchNativeUploadChainForClaim(claim);
+  const message = nativeUploadRevisionMessage(root, tip, {}, 'delete');
+  const messageId = await writeNativeMessage(message, 'upload deletion');
+  const written = await fetchNativeUploadRevisionItem(messageId);
+  if (!written || !isNextNativeUploadRevision(root, tip, written)) {
+    throw new Error('HyperBEAM upload deletion failed commitment or ownership verification');
+  }
+}
+
 export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
   const page = toNumber(params?.page, 1);
   const pageSize = toNumber(params?.page_size, 20);
@@ -3016,9 +3118,15 @@ export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
     profileId ? { schema: NATIVE_UPLOAD_SCHEMA, 'channel-id': profileId } : { schema: NATIVE_UPLOAD_SCHEMA }
   );
   const recordIds = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
-  const claims = (await Promise.all(recordIds.map((id) => resolveImmutableClaimById(id).catch(() => null)))).filter(
-    (claim) => claim?.is_my_output === true && verifiedNativeOwnerMatches(claim?.hyperbeam?.owner, owner)
-  );
+  const tips = (await fetchNativeUploadTips(recordIds)).filter((tip) => tip.state !== 'deleted');
+  const claims = (
+    await Promise.all(
+      tips.map(async (tip) => {
+        const claim = await resolveImmutableClaimById(String(tip.record_id)).catch(() => null);
+        return claim ? overlayNativeUploadTip(claim, tip) : null;
+      })
+    )
+  ).filter((claim) => claim?.is_my_output === true && verifiedNativeOwnerMatches(claim?.hyperbeam?.owner, owner));
 
   const start = (page - 1) * pageSize;
   return {
