@@ -18,6 +18,7 @@ const thirdSnapshot = id('c');
 const initMessage = nativePlaylistReferenceInitMessage({
   profileId,
   profileName: 'Playlist owner',
+  owner,
   snapshotId: firstSnapshot,
   timestamp: 100,
 });
@@ -26,6 +27,7 @@ assert.deepEqual(initMessage, {
   'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
   'profile-id': profileId,
   'profile-name': 'Playlist owner',
+  'playlist-owner': owner,
   'reference-value': firstSnapshot,
   timestamp: 100,
 });
@@ -36,6 +38,7 @@ const update = reference(
   nativePlaylistReferenceSetMessage({
     profileId,
     profileName: 'Playlist owner',
+    owner,
     referenceId: init.reference_id,
     snapshotId: secondSnapshot,
     timestamp: 101,
@@ -47,6 +50,7 @@ assert.equal(projectNativePlaylistReference(init, [update]).reference_value, sec
 const foreign = reference(
   nativePlaylistReferenceSetMessage({
     profileId,
+    owner: id('x'),
     referenceId: init.reference_id,
     snapshotId: thirdSnapshot,
     timestamp: 999,
@@ -58,6 +62,7 @@ assert.equal(projectNativePlaylistReference(init, [update, foreign]).reference_v
 const stale = reference(
   nativePlaylistReferenceSetMessage({
     profileId,
+    owner,
     referenceId: init.reference_id,
     snapshotId: thirdSnapshot,
     timestamp: 100,
@@ -69,6 +74,7 @@ assert.equal(projectNativePlaylistReference(init, [stale]).reference_value, firs
 const conflictingA = reference(
   nativePlaylistReferenceSetMessage({
     profileId,
+    owner,
     referenceId: init.reference_id,
     snapshotId: secondSnapshot,
     timestamp: 102,
@@ -78,6 +84,7 @@ const conflictingA = reference(
 const conflictingB = reference(
   nativePlaylistReferenceSetMessage({
     profileId,
+    owner,
     referenceId: init.reference_id,
     snapshotId: thirdSnapshot,
     timestamp: 102,

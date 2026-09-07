@@ -32,6 +32,9 @@ The current implementation follows these decisions:
 - [`decisions/native-user-preferences.md`](decisions/native-user-preferences.md):
   private settings use encrypted immutable snapshots and a generic stable
   reference head.
+- [`decisions/private-playlists.md`](decisions/private-playlists.md): private
+  playlists use owner-bound encrypted snapshots and can advance the same
+  stable reference to a public snapshot exactly once.
 - [`docs/architecture.md`](docs/architecture.md): full trust, node-role, read,
   and write architecture.
 - [`docs/content-restrictions.md`](docs/content-restrictions.md): policy schema,
@@ -107,7 +110,7 @@ they are not alternate UI APIs.
 | Name or URI | Mutable lookup input, never immutable identity. |
 | Native comment revision | Its own immutable message ID, linked to a logical root comment. |
 | Native reaction revision | Its own immutable message ID, linked through stable logical reaction and version references. |
-| Native playlist snapshot | Any verified commitment ID for its immutable message. Republished payloads receive new exact-read IDs. |
+| Native playlist snapshot | Any verified commitment ID for its immutable message. Later saved payloads receive new exact-read IDs. |
 | Native preference snapshot | Its verified immutable message ID. |
 | Native preference state | The canonical `reference@1.0` init commitment ID; same-owner set messages advance its snapshot value. |
 
@@ -187,6 +190,11 @@ before transport and the browser fetch guard blocks the legacy SDK proxy as a
 second boundary. Livestream operations that still require a legacy channel
 signature remain unavailable until they have a native contract.
 
+The manifest does not poll the legacy Odysee degraded-performance endpoint.
+Historical remote thumbnail sources render directly in HyperBEAM mode;
+inherited `thumbnails.odycdn.com` optimizer URLs are unwrapped, and built-in
+wallpaper/placeholder assets are served from the manifest itself.
+
 Homepage and category `claim_search` requests map filters, ordering, and
 pagination to generic `search@1.0` requests, then hydrate the returned ordered
 immutable locators through exact reads. Native channel content uses a bounded
@@ -258,32 +266,56 @@ legacy reaction API.
 
 ### Playlists
 
-Public playlists pair cookie-signed immutable `odysee-playlist@1.0` snapshots
-with the pinned generic `reference@1.0` device. The reference init commitment
-is the stable public route `/$/playlist/<reference-id>`. The frontend uses
-generic stage-scoped `/id` writes, `query@1.0/only` discovery, and exact commitment
-hydration; it does not call the LBRY `collection_*` API.
+User-created playlists pair cookie-signed immutable snapshots with the pinned
+generic `reference@1.0` device. The reference init commitment is the stable
+route `/$/playlist/<reference-id>`. Public contents use
+`odysee-playlist@1.0`; private contents use an
+`odysee-private-playlist@1.0` WeaveMail RSA-OAEP/AES-256-GCM envelope whose
+decrypted payload has the same playlist contract. The frontend uses generic stage-scoped `/id`
+writes, `query@1.0/only` discovery, and exact commitment hydration; it does not
+call the LBRY `collection_*` API.
 
 - Every message contains a complete ordered snapshot of immutable native IDs
   and/or legacy `<txid>:<nout>` outpoints.
-- A republish after editing or reordering writes a new full snapshot and a
+- Every create or save writes a new full snapshot and a
   strictly newer same-owner reference set while keeping the share URL stable.
   Earlier snapshots remain immutable and exactly addressable.
+- New and copied playlists default to private. Their title, description,
+  thumbnail, tags, languages, profile metadata, and ordered item IDs are
+  ciphertext at rest, sealed to the owner's own hosted wallet; only that wallet
+  can open the snapshots, on any device that authenticates as the owner.
+- The reference declares and verifies its playlist owner so private discovery
+  is owner-scoped before decryption. A private playlist may be made public by
+  advancing the same reference to a plaintext `odysee-playlist@1.0` snapshot.
+  That conversion is one-way because prior public history cannot be hidden.
 - Readers hydrate and verify every discovered init/set commitment and the
   selected snapshot. The init committer is the authority; foreign writers,
   stale or tied updates, and foreign-owned snapshots are rejected.
 - Mutable 40-character claim IDs, names, and URIs are rejected as stored item
-  identity; the integration layer resolves local draft URIs before publish.
+  identity; the integration layer resolves browser-side URIs before saving.
 - Duplicate physical reads are deduplicated by their returned locator. The playlist
   and its claimed profile must verify under the same committer.
-- Queue, Watch Later, Favorites, and unpublished drafts stay local. Publishing
-  a draft creates a new public immutable snapshot.
+- Queue, Watch Later, and Favorites stay local. A temporary browser draft is
+  retained only when a committed save fails so the user can retry without
+  losing edits; playlist data is not stored in encrypted user preferences.
 
-Playlist UI retains list, local edit/reorder, explicit snapshot publish, play,
-shuffle, and share. Published delete remains hidden until it has an honest
-append-only contract. The UI has no
+Playlist UI retains list, edit/reorder, play, and shuffle; Share appears only
+for public playlists. There is no
+separate publish or republish step: Save is the committed HyperBEAM write, and
+ordinary add/remove actions save automatically. Saved deletion remains hidden
+until it has an honest append-only contract. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
+
+`ui/util/weavemail.ts` carries the shared WeaveMail 1.0 client primitives,
+vendored from permaweb/PermawebOS-Browser. It creates a fresh AES-256-GCM key
+for every snapshot and wraps that key with RSA-OAEP/SHA-256 to the owner's
+hosted wallet, which the browser exports in-session through the
+cookie-authenticated `~secret@1.0/export` boundary and holds in memory only.
+Encryption and decryption are entirely local: the node receives only the
+generic committed ciphertext snapshot and reference messages. There is no
+private-playlist or WeaveMail HTTP device, and the browser generates or
+persists no key of its own.
 
 ### User preferences
 
@@ -429,9 +461,13 @@ sequence.
   is supported for native immutable uploads and range-aware source stores.
 - The cookie account is local to a node/browser and is not yet a portable or
   recoverable production identity.
-- The stock global per-IP rate limiter counts manifest assets as requests. A
-  deployment must tune its default 1,000-request/minute bucket for the static
-  bundle or rapid full reloads can temporarily return `429` for the SPA itself.
+- Private-playlist recovery is therefore bounded by the same limit: the
+  recipient key is the hosted wallet, so private snapshots are recoverable
+  exactly where the account is.
+- The global per-IP rate limiter counts manifest assets as requests. The demo
+  configuration raises the bucket to 10,000 requests/minute because one cold
+  SPA load fetches roughly 1,000 assets; production deployments must tune this
+  jointly with their static delivery and abuse controls.
 - TEE deployment and attestation require infrastructure beyond ordinary local
   development.
 - Geographic enforcement requires the accepted upstream

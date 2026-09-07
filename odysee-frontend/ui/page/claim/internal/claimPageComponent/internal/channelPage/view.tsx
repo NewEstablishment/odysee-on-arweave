@@ -253,7 +253,7 @@ function ChannelPage(props: Props) {
                 pick: <Button button="link" navigate={`/$/${PAGES.PLAYLISTS}`} label={__('Pick')} />,
               }}
             >
-              You have unpublished playlists! %pick% one and publish it!
+              A playlist save needs attention. %pick% it to retry.
             </I18nMessage>
           </p>
         }

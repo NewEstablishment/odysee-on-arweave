@@ -1,6 +1,10 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "rate-limit-requests": 10000,
+  "rate-limit-period": 60,
+  "rate-limit-max": 10000,
+  "rate-limit-min": 0,
   "homepage-materializer": true,
   "homepage-refresh-interval": "1-hour",
   "homepage-category-pool-size": 36,

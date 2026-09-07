@@ -146,6 +146,7 @@ Use this ownership table before implementing a fix:
 | Node store stack, cookie hook, match index, or manifest publishing | `src/hb_odysee_node.erl`, `src/hb_odysee_ui.erl`, and `config.json`. |
 | Generic local full-text behavior | `src/dev_search.erl` and `src/hb_search.erl`. |
 | Authenticated preference encryption/decryption | `src/dev_odysee_preference.erl`; persistence and reference projection remain generic writes plus frontend hydration. |
+| Private-playlist envelope encryption | Shared WeaveMail client primitives in `odysee-frontend/ui/util/weavemail.ts` (vendored from PermawebOS-Browser), keyed to the owner's hosted wallet via `~secret@1.0/export`; persistence and reference projection remain generic writes plus frontend hydration. Do not add a private-playlist or WeaveMail HTTP device, and do not reimplement the envelope. |
 | Browser routing, hydration, upload/comment messages, and SDK-shaped Redux adaptation | `odysee-frontend/ui/lbry.ts`, `ui/util/hyperbeam.ts`, and related services. |
 | Rendering only | React components. |
 | Global or geographic content-policy evaluation | Upstream `blacklist@1.0`; keep an accepted patch under `patches/` until its merged revision is pinned. |
@@ -193,17 +194,30 @@ Reactions:
 
 Playlists:
 
-- Public playlists are generic `odysee-playlist@1.0` messages, not LBRY
-  collection claims and not a custom device.
+- Public playlists are generic `odysee-playlist@1.0` messages. Private
+  playlists are generic `odysee-private-playlist@1.0` ciphertext messages.
+  Neither is an LBRY collection claim or custom playlist write device.
 - Store ordered immutable native IDs or legacy outpoints only. Resolve local
-  draft URIs before publish; never persist mutable claim IDs as item identity.
+  browser URIs before save; never persist mutable claim IDs as item identity.
 - The pinned external `reference@1.0` init commitment supplies the stable
-  public playlist ID. Republish writes a new immutable full snapshot and a
+  public playlist ID. Every later save writes a new immutable full snapshot and a
   strictly newer same-owner set message while preserving the public URL.
 - Hydrate and verify every init, set, and selected snapshot. Authority comes
   from the init commitment's committer; reject foreign writers, stale or tied
   updates, and snapshots owned by another committer.
-- Keep Queue, Watch Later, Favorites, and unpublished drafts local. Do not
+- New and copied playlists default private. The browser exports the verified
+  owner's hosted wallet through `~secret@1.0/export`, holds it in memory only,
+  and uses the shared WeaveMail primitives in `ui/util/weavemail.ts` to seal
+  the AES-256-GCM envelope to that wallet before the generic write. Encryption
+  and decryption stay in the browser; no plaintext, content key,
+  private-playlist device, or WeaveMail HTTP route belongs on the node, and
+  the browser never generates or persists a key of its own.
+- Private-to-public conversion advances the existing reference to a plaintext
+  public snapshot and is irreversible. Never offer public-to-private because
+  already-public history cannot be revoked.
+- Keep Queue, Watch Later, Favorites, and failed-save recovery drafts local.
+  User-created playlist create/edit/add/remove operations always commit on
+  Save; do not expose a separate publish/republish action. Do not
   restore channel selection, URL names, bids, confirmations, support, or
   `collection_*` SDK calls. Public deletion remains deferred.
 
@@ -305,12 +319,13 @@ Meilisearch document must not mutate the underlying object.
   the generic committed-message path, not LBRY collection claims or a custom
   device.
 - Playlist items are ordered immutable native IDs or legacy outpoints. Resolve
-  draft URIs before publishing and reject mutable claim IDs as stored identity.
-- Editing a published playlist remains local until the user explicitly publishes
-  another independent snapshot with a new message ID and share URL.
-- Queue, Watch Later, Favorites, and unpublished drafts remain local. A stable
-  mutable playlist reference is deferred until the canonical reference-device
-  contract is available.
+  browser URIs before saving and reject mutable claim IDs as stored identity.
+- Creating or saving a user playlist commits a new immutable snapshot
+  automatically. The canonical `reference@1.0` init ID stays stable and later
+  same-owner set messages advance its head without changing the share URL.
+- Queue, Watch Later, Favorites, and failed-save recovery drafts remain local.
+  Do not expose explicit publish, republish, blockchain channel, bid, or claim
+  lifecycle controls.
 
 ### Follows and subscriptions
 

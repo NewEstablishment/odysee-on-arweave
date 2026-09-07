@@ -43,9 +43,6 @@ export const PLAYLIST_ICONS = {
 };
 export const LIST_TYPE = Object.freeze({
   ALL: 'All',
-  PRIVATE: 'Private',
-  PUBLIC: 'Public',
-  EDITED: 'Edited',
   SAVED: 'Saved',
 });
 export const PLAYLIST_SHOW_COUNT = Object.freeze({

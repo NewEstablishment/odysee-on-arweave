@@ -61,6 +61,7 @@ const HYPERBEAM_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 const HYPERBEAM_UPLOAD_MANIFEST_TYPE = 'application/vnd.odysee.hyperbeam-upload-manifest+json';
 const HYPERBEAM_UPLOAD_MANIFEST_KIND = 'odysee-hyperbeam-chunked-upload';
 const HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
+  '/~secret@1.0/export',
   '/~odysee-preference@1.0/owner',
   '/~odysee-preference@1.0/seal',
   '/~odysee-preference@1.0/open',
@@ -159,10 +160,13 @@ async function postHyperbeamAuthDevice(ctx) {
   const body = authToken ? { auth_token: authToken, ...requestBody } : requestBody;
 
   const cookie = ctx.get('cookie');
+  // A wallet export must always be bundled: an unbundled reply offloads the
+  // nested wallet record into the node's public store (HyperBEAM hb_link).
+  const acceptBundle = devicePath === '/~secret@1.0/export' ? 'true' : ctx.get('accept-bundle') || 'false';
   const response = await postJson(`${nodeUrl}${devicePath}`, body, {
     ...(cookie ? { cookie } : {}),
     accept: ctx.get('accept') || 'application/json',
-    'accept-bundle': ctx.get('accept-bundle') || 'false',
+    'accept-bundle': acceptBundle,
   });
 
   ctx.status = response.statusCode;

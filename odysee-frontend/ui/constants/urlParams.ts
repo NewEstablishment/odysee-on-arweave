@@ -24,9 +24,6 @@ export const COLLECTION_PAGE = Object.freeze({
   VIEWS: {
     // edit === private/local edits
     EDIT: 'edit',
-    // public === public edits/publish playlist
-    PUBLISH: 'publish',
-    PUBLIC: 'public',
   },
   TABS: {
     GENERAL: 'general',

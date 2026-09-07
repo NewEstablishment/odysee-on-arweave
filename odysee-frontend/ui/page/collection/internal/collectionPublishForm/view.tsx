@@ -1,7 +1,5 @@
 import React from 'react';
 import classnames from 'classnames';
-import * as MODALS from 'constants/modal_types';
-import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'component/common/tabs';
@@ -13,27 +11,20 @@ import SortButton from '../../internal/collectionActions/internal/sortButton';
 import CollectionItemsList from 'component/collectionItemsList';
 import Spinner from 'component/spinner';
 import BusyIndicator from 'component/common/busy-indicator';
-import Tooltip from 'component/common/tooltip';
 import CollectionGeneralTab from './internal/collectionGeneralTab';
 import withCollectionItems from 'hocs/withCollectionItems';
 import ErrorBubble from 'component/common/error-bubble';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { selectHasClaimForId } from 'redux/selectors/claims';
-import { selectCollectionClaimUploadParamsForId } from 'redux/selectors/publish';
 import {
   selectCollectionForId,
+  selectCollectionSaveParamsForId,
   selectCollectionHasEditsForId,
   selectHasUnavailableClaimIdsForCollectionId,
   selectCollectionHasUnsavedEditsForId,
 } from 'redux/selectors/collections';
-import {
-  doCollectionPublish,
-  doCollectionEdit,
-  doClearEditsForCollectionId,
-  doRemoveFromUnsavedChangesCollectionsForCollectionId,
-} from 'redux/actions/collections';
+import { doCollectionEdit, doRemoveFromUnsavedChangesCollectionsForCollectionId } from 'redux/actions/collections';
 import { doOpenModal } from 'redux/actions/app';
-import { doToast } from 'redux/actions/notifications';
+import * as MODALS from 'constants/modal_types';
 import './style.scss';
 export const PAGE_TAB_QUERY = `tab`;
 const TAB = {
@@ -56,15 +47,12 @@ type Props = {
   useIds?: boolean;
   collectionHasItemsResolved?: boolean;
 };
-export const CollectionFormContext = React.createContext<any>(undefined);
-
-const CollectionPublishForm = (props: Props) => {
+const CollectionEditForm = (props: Props) => {
   const { collectionId, onDoneForId, collectionHasItemsResolved } = props;
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { search } = useLocation();
-  const hasClaim = useAppSelector((state) => selectHasClaimForId(state, collectionId));
-  const collectionParams = useAppSelector((state) => selectCollectionClaimUploadParamsForId(state, collectionId));
+  const collectionParams = useAppSelector((state) => selectCollectionSaveParamsForId(state, collectionId));
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const collectionHasUnSavedEdits = useAppSelector((state) =>
     selectCollectionHasUnsavedEditsForId(state, collectionId)
@@ -74,39 +62,31 @@ const CollectionPublishForm = (props: Props) => {
     selectHasUnavailableClaimIdsForCollectionId(state, collectionId)
   );
   const effectiveSearch = search || (typeof window !== 'undefined' && window.location ? window.location.search : '');
-  const urlParams = new URLSearchParams(effectiveSearch);
-  const editing = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.EDIT;
-  const publishing = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLISH;
   const tabIndexFromUrl = getTabIndexFromSearch(effectiveSearch);
   const [thumbailError, setThumbnailError] = React.useState<string | undefined>();
   const initialParams = React.useRef(collectionParams);
-  const collectionResetPending = React.useRef(false);
-  const [formParams, setFormParams] = React.useState(collectionParams);
+  const [formParams, setFormParams] = React.useState<Record<string, any>>(collectionParams || {});
   const [optimisticTabIndex, setOptimisticTabIndex] = React.useState<number | null>(null);
   const [showItemsSpinner, setShowItemsSpinner] = React.useState(false);
-  const [publishPending, setPublishPending] = React.useState(false);
+  const [savePending, setSavePending] = React.useState(false);
   const tabIndex = optimisticTabIndex ?? tabIndexFromUrl;
-  const { claims } = formParams;
-  const hasClaims = claims && claims.length;
   const collectionHasStoredItems = Boolean(currentCollection?.items?.length);
   const shouldResolveCollectionItems = collectionHasStoredItems && !collectionHasItemsResolved;
   const itemError = shouldResolveCollectionItems
     ? __('Playlist items are still loading. Please try again in a moment.')
-    : publishing && !hasClaims
-      ? __('Cannot publish empty list')
+    : hasUnavailableClaims
+      ? __('Remove unavailable items before saving this playlist.')
       : undefined;
   const hasChanges =
-    (publishing && !hasClaim) ||
     collectionHasEdits ||
     collectionHasUnSavedEdits ||
     JSON.stringify(initialParams.current) !== JSON.stringify(formParams);
-  const publishingClaimWithNoChanges = publishing && hasClaim && !collectionHasEdits && !hasChanges;
 
-  function navigateToCollectionView() {
+  function navigateToCollectionView(savedCollectionId = collectionId) {
     if (onDoneForId) {
-      onDoneForId(collectionId);
+      onDoneForId(savedCollectionId);
     } else {
-      const target = `/$/${PAGES.PLAYLIST}/${collectionId}`;
+      const target = `/$/${PAGES.PLAYLIST}/${savedCollectionId}`;
       navigate(target, { replace: true });
     }
   }
@@ -114,15 +94,6 @@ const CollectionPublishForm = (props: Props) => {
   const updateFormParams = React.useCallback((newParams: {}) => {
     setFormParams((prevParams) => ({ ...prevParams, ...newParams }));
   }, []);
-
-  const collectionFormContext = React.useMemo(
-    () => ({
-      collectionId,
-      formParams,
-      updateFormParams,
-    }),
-    [collectionId, formParams, updateFormParams]
-  );
 
   const syncTabToUrl = React.useCallback(
     (nextTabIndex: number) => {
@@ -139,86 +110,58 @@ const CollectionPublishForm = (props: Props) => {
     [effectiveSearch, navigate]
   );
 
-  function handlePublish(params) {
-    setPublishPending(true);
-
-    const successCb = (playlistClaim) => {
-      setPublishPending(false);
-
-      if (playlistClaim) {
-        const playlistRef = playlistClaim.claim_id;
-        if (onDoneForId) onDoneForId(playlistRef);
-        else navigate(`/$/${PAGES.PLAYLIST}/${playlistRef}`, { replace: true });
-      }
-    };
-
-    dispatch(doCollectionPublish(params, collectionId))
-      .then(successCb)
-      .catch(() => setPublishPending(false));
-  }
-
   async function handleSubmitForm() {
-    if (shouldResolveCollectionItems) return;
+    if (shouldResolveCollectionItems || hasUnavailableClaims) return;
     if (!hasChanges) return navigateToCollectionView();
     const trimmedParams = { ...formParams };
     if (trimmedParams.title) trimmedParams.title = trimmedParams.title.trim();
-    if (editing && collectionHasItemsResolved && currentCollection?.items) {
+    if (collectionHasItemsResolved && currentCollection?.items) {
       trimmedParams.claims = currentCollection.items.filter((item) => typeof item === 'string');
     }
     setFormParams(trimmedParams);
 
-    if (editing) {
-      setPublishPending(true);
-      try {
-        const editSaved = await dispatch(doCollectionEdit(collectionId, trimmedParams));
-
-        if (editSaved) {
-          dispatch(doRemoveFromUnsavedChangesCollectionsForCollectionId(collectionId));
-          navigateToCollectionView();
-        }
-      } finally {
-        setPublishPending(false);
-      }
-      return;
-    }
-
-    if (hasUnavailableClaims) {
+    const convertsPrivatePlaylistToPublic =
+      (initialParams.current?.visibility || currentCollection?.visibility || 'private') === 'private' &&
+      trimmedParams.visibility === 'public';
+    if (convertsPrivatePlaylistToPublic) {
       dispatch(
         doOpenModal(MODALS.CONFIRM, {
-          title: __('Confirm Publish'),
-          subtitle: __(
-            'You are about to publish this playlist with unavailable items that will be removed (all other items will be unaffected). This action is permanent and cannot be undone.'
+          title: __('Make this playlist public?'),
+          body: __(
+            'The decrypted title, description, thumbnail, tags, and item list will be published. Public history cannot be made private again.'
           ),
+          checkboxLabel: __('I understand this cannot be reversed'),
+          labelOk: __('Make Public'),
           onConfirm: (closeModal) => {
-            handlePublish(trimmedParams);
             closeModal();
+            void persistForm(trimmedParams);
           },
         })
       );
-    } else {
-      handlePublish(trimmedParams);
+      return;
+    }
+
+    await persistForm(trimmedParams);
+  }
+
+  async function persistForm(trimmedParams: Record<string, any>) {
+    setSavePending(true);
+    try {
+      const saved = await dispatch(doCollectionEdit(collectionId, trimmedParams));
+      if (saved) {
+        dispatch(doRemoveFromUnsavedChangesCollectionsForCollectionId(collectionId));
+        navigateToCollectionView(saved.claim_id || collectionId);
+      }
+    } catch {
+      return;
+    } finally {
+      setSavePending(false);
     }
   }
 
   function handleCancelButton() {
     dispatch(doRemoveFromUnsavedChangesCollectionsForCollectionId(collectionId));
     navigateToCollectionView();
-  }
-
-  function handleClearUpdates() {
-    dispatch(
-      doToast({
-        message: __("Clear all local edits from this published playlist? You won't be able to undo this action later."),
-        actionText: __('Clear Updates'),
-        action: () => {
-          collectionResetPending.current = true;
-          dispatch(doClearEditsForCollectionId(collectionId));
-          navigateToCollectionView();
-        },
-        secondaryActionText: __('Cancel'),
-        secondaryAction: () => {},
-      })
-    );
   }
 
   function onTabChange(newTabIndex) {
@@ -235,13 +178,13 @@ const CollectionPublishForm = (props: Props) => {
     }
   }, [optimisticTabIndex, tabIndexFromUrl]);
 
-  // Reset the form to original collection state if the edits are cleared
   React.useEffect(() => {
-    if (collectionParams && collectionResetPending.current) {
-      setFormParams(collectionParams);
-      initialParams.current = collectionParams;
-      collectionResetPending.current = false;
-    } else if (collectionParams) {
+    if (collectionParams) {
+      if (!initialParams.current) {
+        initialParams.current = collectionParams;
+        setFormParams(collectionParams);
+        return;
+      }
       // Keep claims in formParams up to date
       setFormParams((prevParams) => {
         if (areArraysEqual(prevParams.claims, collectionParams.claims)) {
@@ -258,7 +201,7 @@ const CollectionPublishForm = (props: Props) => {
 
   return (
     <Form
-      className="main--contained collection-publish-form__wrapper"
+      className="main--contained collection-edit-form__wrapper"
       onSubmit={handleSubmitForm}
       errors={{
         ...(itemError
@@ -274,89 +217,65 @@ const CollectionPublishForm = (props: Props) => {
       }}
       disableSubmitOnEnter
     >
-      <CollectionFormContext.Provider value={collectionFormContext}>
-        <Tabs onChange={onTabChange} index={tabIndex}>
-          <TabList className="tabs__list--collection-edit-page">
-            <Tab>{__('General')}</Tab>
-            <Tab>
-              {__('Items')}
-              {showItemsSpinner && <Spinner type="small" />}
-            </Tab>
-          </TabList>
+      <Tabs onChange={onTabChange} index={tabIndex}>
+        <TabList className="tabs__list--collection-edit-page">
+          <Tab>{__('General')}</Tab>
+          <Tab>
+            {__('Items')}
+            {showItemsSpinner && <Spinner type="small" />}
+          </Tab>
+        </TabList>
 
-          <TabPanels>
-            <TabPanel>
-              {tabIndex === TAB.GENERAL && (
-                <CollectionGeneralTab
-                  collectionId={collectionId}
-                  formParams={formParams}
-                  setThumbnailError={setThumbnailError}
-                  updateFormParams={updateFormParams}
-                />
-              )}
-            </TabPanel>
-
-            <TabPanel>
-              {tabIndex === TAB.ITEMS && (
-                <>
-                  <div className={classnames('collection-actions')}>
-                    <SortButton collectionId={collectionId} />
-                  </div>
-                  <CollectionItemsList
-                    collectionId={collectionId}
-                    {...({ empty: __('This playlist has no items.'), showEdit: true, isEditPreview: true } as any)}
-                  />
-                </>
-              )}
-            </TabPanel>
-          </TabPanels>
-        </Tabs>
-
-        {hasUnavailableClaims && publishing && (
-          <ErrorBubble>
-            {__(
-              'This playlist has unavailable items and they will not be published. Make sure you want to continue before uploading.'
+        <TabPanels>
+          <TabPanel>
+            {tabIndex === TAB.GENERAL && (
+              <CollectionGeneralTab
+                collectionId={collectionId}
+                initialVisibility={currentCollection?.visibility || 'private'}
+                formParams={formParams}
+                setThumbnailError={setThumbnailError}
+                updateFormParams={updateFormParams}
+              />
             )}
-          </ErrorBubble>
-        )}
+          </TabPanel>
 
-        <div className="section__actions">
-          <Submit
-            {...({
-              button: 'primary',
-              disabled: publishingClaimWithNoChanges || publishPending || shouldResolveCollectionItems,
-              label: publishPending ? (
-                <BusyIndicator message={__('Submitting')} />
-              ) : editing ? (
-                __('Save')
-              ) : hasClaim ? (
-                __('Publish Snapshot')
-              ) : (
-                __('Publish')
-              ),
-            } as any)}
-          />
-          <Button button="link" label={__('Cancel')} onClick={handleCancelButton} />
+          <TabPanel>
+            {tabIndex === TAB.ITEMS && (
+              <>
+                <div className={classnames('collection-actions')}>
+                  <SortButton collectionId={collectionId} />
+                </div>
+                <CollectionItemsList
+                  collectionId={collectionId}
+                  {...({ empty: __('This playlist has no items.'), showEdit: true, isEditPreview: true } as any)}
+                />
+              </>
+            )}
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
 
-          {collectionHasEdits && (
-            <Tooltip title={__('Delete all edits from this published playlist')}>
-              <Button button="alt" icon={ICONS.REFRESH} label={__('Clear Updates')} onClick={handleClearUpdates} />
-            </Tooltip>
-          )}
-        </div>
+      {hasUnavailableClaims && <ErrorBubble>{__('Remove unavailable items before saving this playlist.')}</ErrorBubble>}
 
-        <FormErrors />
+      <div className="section__actions">
+        <Submit
+          {...({
+            button: 'primary',
+            disabled:
+              !collectionParams || savePending || shouldResolveCollectionItems || hasUnavailableClaims || !hasChanges,
+            label: savePending ? <BusyIndicator message={__('Saving')} /> : __('Save'),
+          } as any)}
+        />
+        <Button button="link" label={__('Cancel')} onClick={handleCancelButton} />
+      </div>
 
-        <p className="help">
-          {publishing
-            ? hasClaim
-              ? __('Publishing creates a new immutable snapshot while keeping this playlist link unchanged.')
-              : __('Publishing creates an immutable snapshot and a stable playlist link on this HyperBEAM node.')
-            : __('After saving, all changes will remain private')}
-        </p>
-      </CollectionFormContext.Provider>
+      <FormErrors />
+
+      <p className="help">
+        {__('Saving commits a new immutable snapshot while keeping this playlist link unchanged.')}
+      </p>
     </Form>
   );
 };
 
-export default withCollectionItems(CollectionPublishForm);
+export default withCollectionItems(CollectionEditForm);

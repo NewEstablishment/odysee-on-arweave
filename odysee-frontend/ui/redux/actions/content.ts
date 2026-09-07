@@ -358,6 +358,7 @@ export function doPlaylistAddAndAllowPlaying({
   collectionName,
   collectionId: id,
   sourceId,
+  visibility,
   createNew,
   createCb,
 }: {
@@ -365,6 +366,7 @@ export function doPlaylistAddAndAllowPlaying({
   collectionName: string;
   collectionId?: string;
   sourceId?: string;
+  visibility?: PlaylistVisibility;
   createNew?: boolean;
   createCb?: (id: string) => void;
 }) {
@@ -374,18 +376,16 @@ export function doPlaylistAddAndAllowPlaying({
     let collectionId = id;
 
     if (createNew) {
-      dispatch(
+      collectionId = await dispatch(
         doLocalCollectionCreate(
           {
             name: collectionName,
             items: uri ? [uri] : [],
             type: COL_TYPES.PLAYLIST,
             sourceId,
+            visibility: visibility || 'private',
           },
-          (newId) => {
-            collectionId = newId;
-            if (createCb) createCb(newId);
-          }
+          createCb
         )
       );
     } else if (collectionId && uri) {
@@ -408,7 +408,7 @@ export function doPlaylistAddAndAllowPlaying({
         );
         if (!queueEditSaved) return;
       } else {
-        dispatch(
+        await dispatch(
           doCollectionEdit(collectionId, {
             uris: [uri],
             remove,
@@ -418,7 +418,7 @@ export function doPlaylistAddAndAllowPlaying({
       }
     }
 
-    if (!uri && createNew) return;
+    if (!uri && createNew) return collectionId;
     const collectionPlayingId = selectPlayingCollectionId(state);
     const playingUri = selectPlayingUri(state);
     const isUriPlaying = uri && selectIsUriCurrentlyPlaying(state, uri);
@@ -536,6 +536,7 @@ export function doPlaylistAddAndAllowPlaying({
         })
       );
     }
+    return collectionId;
   };
 }
 export function doPlayUri(

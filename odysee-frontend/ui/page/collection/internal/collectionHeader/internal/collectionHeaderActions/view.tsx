@@ -9,7 +9,6 @@ import { COLLECTION_PAGE } from 'constants/urlParams';
 import { useNavigate } from 'react-router-dom';
 // import { ENABLE_FILE_REACTIONS } from 'config';
 // import ClaimRepostButton from 'component/claimRepostButton';
-import CollectionPublishButton from 'page/collection/internal/collectionActions/internal/publishButton';
 // import CollectionSubtitle from '../collectionSubtitle';
 import Tooltip from 'component/common/tooltip';
 import Spinner from 'component/spinner';
@@ -17,13 +16,14 @@ import Button from 'component/button';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   selectCollectionIsMine,
-  selectCollectionIsPublishingForId,
-  selectCollectionPublishErrorForId,
+  selectCollectionIsSavingForId,
+  selectCollectionSaveErrorForId,
   selectCollectionHasEditsForId,
   selectCollectionSavedForId,
+  selectCollectionVisibilityForId,
 } from 'redux/selectors/collections';
 import { doOpenModal } from 'redux/actions/app';
-import { doToggleCollectionSavedForId, doRetryCollectionPublish } from 'redux/actions/collections';
+import { doToggleCollectionSavedForId, doRetryCollectionSave } from 'redux/actions/collections';
 import { doToast } from 'redux/actions/notifications';
 type Props = {
   uri?: string;
@@ -38,10 +38,11 @@ function CollectionHeaderActions(props: Props) {
   const { uri, collectionId, isBuiltin, showEdit, setShowEdit } = props;
   const dispatch = useAppDispatch();
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
-  const isPublishing = useAppSelector((state) => selectCollectionIsPublishingForId(state, collectionId));
-  const publishError = useAppSelector((state) => selectCollectionPublishErrorForId(state, collectionId));
+  const isSaving = useAppSelector((state) => selectCollectionIsSavingForId(state, collectionId));
+  const saveError = useAppSelector((state) => selectCollectionSaveErrorForId(state, collectionId));
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
   const collectionSavedForId = useAppSelector((state) => selectCollectionSavedForId(state, collectionId));
+  const visibility = useAppSelector((state) => selectCollectionVisibilityForId(state, collectionId));
   const navigate = useNavigate();
   const hasPublicPlaylist = Boolean(uri);
   const isNotADefaultList = collectionId !== 'watchlater' && collectionId !== 'favorites';
@@ -65,24 +66,25 @@ function CollectionHeaderActions(props: Props) {
         <SectionElement>
           {!isBuiltin && (
             <>
-              {isMyCollection && <CollectionPublishButton uri={uri} collectionId={collectionId} showEdit={showEdit} />}
               {uri && (
                 <>
-                  {isPublishing && (
-                    <Tooltip title={__('Publishing playlist updates in the background')} arrow={false} enterDelay={100}>
+                  {isSaving && (
+                    <Tooltip title={__('Saving playlist updates')} arrow={false} enterDelay={100}>
                       <div className="pending-change">
                         <Spinner />
                       </div>
                     </Tooltip>
                   )}
-                  {collectionHasEdits && publishError && (
-                    <Tooltip title={__('Last publish failed. Open menu to retry.')} arrow={false} enterDelay={100}>
+                  {collectionHasEdits && saveError && (
+                    <Tooltip title={__('Last save failed. Open menu to retry.')} arrow={false} enterDelay={100}>
                       <div className="pending-change">
                         <Icon icon={ICONS.WARNING} />
                       </div>
                     </Tooltip>
                   )}
-                  <Button button="alt" icon={ICONS.SHARE} aria-label={__('Share playlist')} onClick={sharePlaylist} />
+                  {visibility === 'public' && (
+                    <Button button="alt" icon={ICONS.SHARE} aria-label={__('Share playlist')} onClick={sharePlaylist} />
+                  )}
                 </>
               )}
             </>
@@ -113,18 +115,18 @@ function CollectionHeaderActions(props: Props) {
                   </div>
                 </MenuItem>
               )}
-              {isMyCollection && !isBuiltin && hasPublicPlaylist && collectionHasEdits && publishError && (
+              {isMyCollection && !isBuiltin && collectionHasEdits && saveError && (
                 <MenuItem
                   className="comment__menu-option"
-                  onSelect={() => dispatch(doRetryCollectionPublish(collectionId))}
+                  onSelect={() => dispatch(doRetryCollectionSave(collectionId))}
                 >
                   <div className="menu__link">
                     <Icon aria-hidden icon={ICONS.REFRESH} />
-                    {__('Retry Publish Now')}
+                    {__('Retry Save')}
                   </div>
                 </MenuItem>
               )}
-              {!isMyCollection && hasPublicPlaylist && (
+              {!isMyCollection && hasPublicPlaylist && visibility === 'public' && (
                 <MenuItem
                   className="comment__menu-option"
                   onSelect={() => dispatch(doToggleCollectionSavedForId(collectionId))}

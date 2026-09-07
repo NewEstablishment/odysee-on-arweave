@@ -56,4 +56,21 @@ assert.doesNotMatch(
   'the bare discover route must not depend on a tag or moderator state'
 );
 
+const degradedPerformanceSource = await readFile(
+  new URL('../../web/effects/use-degraded-performance.ts', import.meta.url),
+  'utf8'
+);
+assert.match(
+  degradedPerformanceSource,
+  /if \(hyperbeamNodeEnabled\(\)\) return;/,
+  'HyperBEAM sessions must not call the legacy API status endpoint'
+);
+
+const wallpaperSource = await readFile(new URL('../../ui/component/wallpaper/view.tsx', import.meta.url), 'utf8');
+assert.doesNotMatch(
+  wallpaperSource,
+  /thumbnails\.odycdn\.com/,
+  'the normal page wallpaper must not load through the legacy thumbnail optimizer'
+);
+
 console.log('HyperBEAM legacy boundary tests passed');

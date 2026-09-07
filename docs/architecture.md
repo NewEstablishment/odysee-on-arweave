@@ -322,13 +322,31 @@ exact immutable read the comment document while older `comment`/`text` fields
 remain read-compatible.
 
 Comments, reactions, and subscriptions model changes as contiguous append-only
-revisions. Public playlists separate identity from content: each publish writes
-an immutable full `odysee-playlist@1.0` snapshot, while the pinned external
+revisions. Playlists separate identity from content: each save writes an
+immutable full public `odysee-playlist@1.0` snapshot or private
+`odysee-private-playlist@1.0` ciphertext snapshot, while the pinned external
 `reference@1.0` device supplies the stable public identity. Its init commitment
 is the playlist ID; later same-authority set messages point to new snapshots
-without mutating earlier content. Readers hydrate and verify every candidate,
+without mutating earlier content. Creating and editing user playlists therefore
+has no separate publish lifecycle: Save commits automatically. Readers hydrate and verify every candidate,
 derive authority from the init committer, and select only a strictly newer
 unambiguous set. Query order is never authority.
+
+New and copied playlists use private snapshots by default. The browser uses the
+shared WeaveMail 1.0 client primitives (vendored from PermawebOS-Browser): a
+fresh AES-256-GCM key per snapshot, wrapped with RSA-OAEP/SHA-256 to the
+owner's own hosted wallet. The wallet is exported in-session through the
+cookie-authenticated `~secret@1.0/export` boundary and held in memory only, so
+the recipient key is the identity itself and recovery follows the account. The
+public message reveals the encryption format, purpose, verified owner,
+ciphertext, wrapped key, IV, tag, and signature scope, but not playlist/profile
+metadata or items. There is no private-playlist or
+WeaveMail HTTP device. Owner-scoped reference discovery locates the ciphertext;
+exact commitment and committer verification happen before local decryption,
+and the decrypted payload schema provides the playlist domain check. Making a
+playlist public writes the plaintext public snapshot and advances the same
+reference. That transition is one-way because immutable public history cannot
+be made secret later.
 
 Private user preferences use the same separation. Each version is an immutable
 cookie-signed `odysee-preferences@1.0` message containing only an AES-256-GCM
