@@ -52,6 +52,9 @@ export function canUpdateThroughHyperbeam(claim: any, publishPayload: PublishPar
 }
 
 export function canDeleteThroughHyperbeam(claim: any) {
+  // The account profile is a channel claim with a record id too; it must
+  // never be fed into the upload-deletion path.
+  if (claim?.value_type === 'channel') return false;
   return Boolean(hyperbeamNodeBase() && hyperbeamClaimRecordId(claim));
 }
 

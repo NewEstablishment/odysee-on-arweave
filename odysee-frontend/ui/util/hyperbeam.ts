@@ -3884,6 +3884,31 @@ async function resolveImmutableClaimById(
     ? await fetchVerifiedNativeMessage(canonicalImmutableId, payload).catch(() => null)
     : null;
   if (isNativeRecord && !nativeRecord) return null;
+  // Uploads resolve through their revision chain: a bare revision message is
+  // not addressable as a claim, a deleted chain resolves to nothing, and an
+  // edited chain contributes the tip's metadata on top of the root claim.
+  let uploadTip: NativeUploadRevision | null = null;
+  if (
+    isNativeRecord &&
+    nativeRecord &&
+    value(payload, 'schema') === NATIVE_UPLOAD_SCHEMA &&
+    value(payload, 'type') === 'upload'
+  ) {
+    if (value(payload, 'revision-of', 'revision_of')) return null;
+    const root = normalizeNativeUploadRevision(payload, canonicalImmutableId, nativeRecord.owner);
+    if (root && root.data_id) {
+      const chainResponse = await fetchPublicQueryJson(
+        nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA, 'data-id': root.data_id })
+      ).catch(() => null);
+      const revisionIds = uniquePaths(queryPaths(chainResponse || {})).filter((id) => id !== canonicalImmutableId);
+      const revisions = (
+        await Promise.all(revisionIds.map((id) => fetchNativeUploadRevisionItem(id).catch(() => null)))
+      ).filter((item): item is NativeUploadRevision => Boolean(item && item.revision_of === root.record_id));
+      const tip = latestNativeUploadRevision(root, revisions);
+      if (tip.state === 'deleted') return null;
+      if (tip !== root) uploadTip = tip;
+    }
+  }
   let signingChannel = signingChannelId
     ? await fetchCachedImmutableChannelJsonOrNull(signingChannelId)
         .then(responsePayload)
@@ -3907,12 +3932,13 @@ async function resolveImmutableClaimById(
 
   if (name && claim.name !== name) return null;
   if (!nativeRecord) return claim;
+  const revisedClaim = uploadTip ? overlayNativeUploadTip(claim, uploadTip) : claim;
   const activeOwner = await activeHyperbeamAccountOwner();
   return {
-    ...claim,
+    ...revisedClaim,
     is_my_output: Boolean(activeOwner && activeOwner === nativeRecord.owner),
     hyperbeam: {
-      ...claim.hyperbeam,
+      ...revisedClaim.hyperbeam,
       owner: nativeRecord.owner,
       committers: nativeRecord.committers,
       commitment_verification: 'verified',

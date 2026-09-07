@@ -1391,6 +1391,14 @@ export const doPublish =
       return updateThroughHyperbeam(myClaimForUri, publishPayload, myChannels).then(success, fail);
     }
 
+    // The legacy SDK publish is fetch-guarded on a HyperBEAM node, so a
+    // publish that neither native path accepts (posts, livestream claims,
+    // paid/members-only/scheduled content) must fail loudly instead of
+    // "succeeding" against a stubbed response.
+    if (hyperbeamUploadEnabled()) {
+      return Promise.reject(new Error('This type of publish is not supported on this node yet.')).catch(fail);
+    }
+
     return Lbry.publish(publishPayload).then((response: PublishResponse) => {
       // TODO: Restore LbryFirst
       // if (!useLBRYUploader) {
