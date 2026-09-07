@@ -90,6 +90,7 @@ type Props = {
   showNullPlaceholder?: boolean;
   onHidden?: (arg0: any) => void;
   trailingPlaceholderCount?: number;
+  stablePaginationSlots?: boolean;
 };
 export default function ClaimList(props: Props) {
   const {
@@ -142,6 +143,7 @@ export default function ClaimList(props: Props) {
     isShortFromChannelPage,
     sectionTitle,
     trailingPlaceholderCount = 0,
+    stablePaginationSlots = false,
   } = props;
   const searchInLanguage = useAppSelector((state) => selectClientSetting(state, SETTINGS.SEARCH_IN_LANGUAGE));
   const isMobile = useIsMobile();
@@ -364,10 +366,16 @@ export default function ClaimList(props: Props) {
   );
   return tileLayout && !header ? (
     <>
-      <section ref={listRef} className={`claim-grid ${isShorts ? 'claim-shorts-grid' : ''}`}>
+      <section
+        ref={listRef}
+        className={classnames('claim-grid', {
+          'claim-shorts-grid': isShorts,
+          'claim-grid--stable-pagination': stablePaginationSlots,
+        })}
+      >
         {urisLength > 0 &&
           tileUris.map((uri, index) => {
-            const itemKey = getClaimListItemKey(uri, index);
+            const itemKey = stablePaginationSlots ? `claim-slot:${index}` : getClaimListItemKey(uri, index);
 
             if (uri) {
               const inj = getInjectedItem(index);
@@ -394,15 +402,23 @@ export default function ClaimList(props: Props) {
                       showNoSourceClaims={showNoSourceClaims}
                       isShortFromChannelPage={isShortFromChannelPage}
                       sectionTitle={sectionTitle}
+                      fadeInWhenLoaded={stablePaginationSlots}
                     />
                   )}
                 </React.Fragment>
               );
             }
           })}
-        {Array.from({ length: trailingPlaceholderCount }, (_, index) => (
-          <ClaimPreviewTile key={`trailing-placeholder:${index}`} placeholder="loading" pulse />
-        ))}
+        {Array.from({ length: trailingPlaceholderCount }, (_, index) => {
+          const slotIndex = tileUris.length + index;
+          const itemKey = stablePaginationSlots ? `claim-slot:${slotIndex}` : `trailing-placeholder:${index}`;
+
+          return (
+            <React.Fragment key={itemKey}>
+              <ClaimPreviewTile placeholder="pagination" pulse />
+            </React.Fragment>
+          );
+        })}
         {!timedOut && urisLength === 0 && !loading && !noEmpty && (
           <div className="empty main--empty">{empty || noResultMsg}</div>
         )}

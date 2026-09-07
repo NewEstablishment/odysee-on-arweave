@@ -6,7 +6,7 @@ import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 import { resolveHyperbeamPayloadOutpoint } from 'util/hyperbeamOutpoint';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { hyperbeamClaimSearchRequest, type HyperbeamSearchRequest } from 'util/hyperbeamSearch';
-import { isHyperbeamUploadClaim } from 'util/claim';
+import { isClaimNsfw, isHyperbeamUploadClaim } from 'util/claim';
 import { buildURI, parseURI } from 'util/lbryURI';
 import { hasLbryOutpointCommitment, lbryEvidenceCommitmentId } from 'util/lbryCommitment';
 import {
@@ -144,6 +144,18 @@ const nativeSubscriptionQueryCache = new Map<
   { expiresAt: number; promise: Promise<Array<NativeSubscription>> }
 >();
 const nativeCommentTargetOwnerCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
+type HomepageContinuationState = {
+  pages: Array<Array<Claim>>;
+  queued: Array<Claim>;
+  discovered: Set<string>;
+  sourcePage: number;
+  sourceExhausted: boolean;
+  pending: Promise<void>;
+};
+const HOMEPAGE_CONTINUATION_BATCH_SIZE = 36;
+const HOMEPAGE_COMPLETE_ROW_SIZE = 12;
+const HOMEPAGE_CONTINUATION_CACHE_LIMIT = 24;
+const homepageContinuationCache = new Map<string, HomepageContinuationState>();
 let activeAccountOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
 let nativePreferenceOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
 let nativePreferenceWriteQueue: Promise<void> = Promise.resolve();
@@ -155,6 +167,7 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const immutableSigningChannelIds = isObject(params?.immutable_signing_channel_ids)
     ? params.immutable_signing_channel_ids
     : {};
+  const immutableMediaMetadata = isObject(params?.immutable_media_metadata) ? params.immutable_media_metadata : {};
 
   // Every uri resolves through read-only store GETs against the node:
   // immutable-id routes (out_<txid>_<nout> / 43-char ids) read the message
@@ -164,7 +177,9 @@ export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
     urls.map(
       async (uri): Promise<[string, any]> => [
         uri,
-        await resolveStoreClaimForUri(uri, immutableSigningChannelIds[uri]).catch(() => null),
+        await resolveStoreClaimForUri(uri, immutableSigningChannelIds[uri])
+          .then((claim) => withClaimMediaMetadata(claim, immutableMediaMetadata[uri]))
+          .catch(() => null),
       ]
     )
   );
@@ -2182,6 +2197,26 @@ export function fetchHyperbeamNodeAddress(): Promise<string | null> {
   return hyperbeamNodeAddressPromise;
 }
 
+export async function fetchHyperbeamLocalNameId(name: string): Promise<string | null> {
+  const baseUrl = hyperbeamBaseUrl();
+  if (!baseUrl || !name) return null;
+
+  try {
+    const response = await fetch(buildDeviceUrl(baseUrl, `~local-name@1.0/${encodeDataPath(name)}/snapshot-id`), {
+      method: 'GET',
+      credentials: hyperbeamFetchCredentials(baseUrl),
+      headers: { accept: 'text/plain' },
+      signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const parsed = parseDeviceJson((await response.text()).trim());
+    const id = String(typeof parsed === 'string' ? parsed : value(parsed, 'body', 'value') || '').trim();
+    return isNativeMessageId(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchPublicDeviceJson(path: string, body: Record<string, any>): Promise<any> {
   const baseUrl = hyperbeamBaseUrl();
   if (!baseUrl) throw new Error('HyperBEAM node is not configured');
@@ -2663,59 +2698,156 @@ async function fetchHomepageEligibleSearchPage(
   page: number,
   pageSize: number
 ): Promise<ClaimSearchResponse> {
+  const state = homepageContinuationState(params, pageSize);
+  const run = state.pending
+    .catch(() => undefined)
+    .then(() => ensureHomepageContinuationPage(state, params, page, pageSize));
+  state.pending = run.then(
+    () => undefined,
+    () => undefined
+  );
+  await run;
+
+  const items = state.pages[page - 1] || [];
   const first = (page - 1) * pageSize;
-  const target = page * pageSize;
-  const batchSize = Math.max(36, pageSize);
-  const eligible: Array<Claim> = [];
-  const seen = new Set<string>();
-  const channelsByPage: Array<Set<string>> = [];
-  let offset = 0;
-  let sourceExhausted = false;
-
-  for (let batch = 0; batch < 20 && eligible.length < target; batch += 1) {
-    const sourcePage = Math.floor(offset / batchSize) + 1;
-    const query = sourceClaimQuery({ ...params, page: sourcePage, page_size: batchSize });
-    const response = await fetchStoreJsonOrNull(storePath('odysee/source-claims', JSON.stringify(query)));
-    const locators = paramValues(response, 'locators').map(String).filter(Boolean);
-    if (locators.length < batchSize) sourceExhausted = true;
-    offset += locators.length;
-
-    const claims = await Promise.all(locators.map((locator) => resolveImmutableClaimById(locator).catch(() => null)));
-    claims.forEach((claim) => {
-      if (!claim || !isHomepageEligibleClaim(claim, (params as any).homepage_include_future === true)) return;
-      const identity = String(claim.immutable_id || claim.claim_id || claim.canonical_url || '');
-      if (!identity || seen.has(identity)) return;
-      const pageIndex = Math.floor(eligible.length / pageSize);
-      const pageChannels = channelsByPage[pageIndex] || (channelsByPage[pageIndex] = new Set<string>());
-      const channelIdentity = String(
-        claim.signing_channel?.claim_id || claim.signing_channel?.immutable_id || claim.channel_id || ''
-      );
-      if (channelIdentity && pageChannels.has(channelIdentity)) return;
-      seen.add(identity);
-      if (channelIdentity) pageChannels.add(channelIdentity);
-      eligible.push(claim);
-    });
-    if (sourceExhausted) break;
-  }
-
-  const pageItems = eligible.slice(first, target);
-  const items =
-    sourceExhausted && pageItems.length < pageSize
-      ? pageItems.slice(0, Math.floor(pageItems.length / 12) * 12)
-      : pageItems;
-  const hasNextPage = eligible.length > target || !sourceExhausted;
+  const hasNextPage = items.length === pageSize && (!state.sourceExhausted || state.queued.length >= pageSize);
   return {
     items,
     page,
     page_size: pageSize,
-    total_items: Math.max(first + items.length, target + (hasNextPage ? 1 : 0)),
-    total_pages: hasNextPage ? page + 1 : Math.max(1, Math.ceil(eligible.length / pageSize)),
+    total_items: first + items.length + (hasNextPage ? 1 : 0),
+    total_pages: hasNextPage ? page + 1 : Math.max(1, page),
   };
+}
+
+function homepageContinuationState(params: ClaimSearchOptions, pageSize: number): HomepageContinuationState {
+  const key = homepageContinuationKey(params, pageSize);
+  const existing = homepageContinuationCache.get(key);
+  if (existing) {
+    homepageContinuationCache.delete(key);
+    homepageContinuationCache.set(key, existing);
+    return existing;
+  }
+
+  while (homepageContinuationCache.size >= HOMEPAGE_CONTINUATION_CACHE_LIMIT) {
+    const oldest = homepageContinuationCache.keys().next().value;
+    if (oldest === undefined) break;
+    homepageContinuationCache.delete(oldest);
+  }
+  const state: HomepageContinuationState = {
+    pages: [],
+    queued: [],
+    discovered: new Set(paramValues(params, 'homepage_exclude_ids')),
+    sourcePage: 1,
+    sourceExhausted: false,
+    pending: Promise.resolve(),
+  };
+  homepageContinuationCache.set(key, state);
+  return state;
+}
+
+function homepageContinuationKey(params: ClaimSearchOptions, pageSize: number): string {
+  const entries = Object.keys(params as any)
+    .filter((key) => key !== 'page' && key !== 'no_totals')
+    .sort()
+    .map((key) => [key, (params as any)[key]]);
+  return JSON.stringify({ pageSize, params: Object.fromEntries(entries) });
+}
+
+async function ensureHomepageContinuationPage(
+  state: HomepageContinuationState,
+  params: ClaimSearchOptions,
+  requestedPage: number,
+  pageSize: number
+): Promise<void> {
+  while (state.pages.length < requestedPage) {
+    const selected: Array<Claim> = [];
+    const deferred: Array<Claim> = [];
+    const selectedChannels = new Set<string>();
+
+    while (selected.length < pageSize) {
+      while (state.queued.length && selected.length < pageSize) {
+        const claim = state.queued.shift();
+        if (!claim) continue;
+        const channelIdentity = homepageClaimChannelIdentity(claim);
+        if (channelIdentity && selectedChannels.has(channelIdentity)) {
+          deferred.push(claim);
+          continue;
+        }
+        if (channelIdentity) selectedChannels.add(channelIdentity);
+        selected.push(claim);
+      }
+      if (selected.length === pageSize || state.sourceExhausted) break;
+      await appendHomepageContinuationBatch(state, params);
+    }
+
+    state.queued = [...deferred, ...state.queued];
+    if (selected.length !== pageSize) {
+      const completeCount = (params as any).homepage_allow_filtered_final_page
+        ? selected.length
+        : Math.floor(selected.length / HOMEPAGE_COMPLETE_ROW_SIZE) * HOMEPAGE_COMPLETE_ROW_SIZE;
+      if (completeCount > 0) state.pages.push(selected.slice(0, completeCount));
+      return;
+    }
+    state.pages.push(selected);
+  }
+}
+
+async function appendHomepageContinuationBatch(
+  state: HomepageContinuationState,
+  params: ClaimSearchOptions
+): Promise<void> {
+  const query = sourceClaimQuery({
+    ...params,
+    page: state.sourcePage,
+    page_size: HOMEPAGE_CONTINUATION_BATCH_SIZE,
+  });
+  const response = await fetchStoreJsonOrNull(storePath('odysee/source-claims', JSON.stringify(query)));
+  if (response === null) throw new Error(`Homepage continuation source page ${state.sourcePage} was unavailable`);
+
+  const entries = sourceClaimEntries(response);
+  state.sourcePage += 1;
+  if (entries.length < HOMEPAGE_CONTINUATION_BATCH_SIZE) state.sourceExhausted = true;
+  if (!entries.length) return;
+
+  const claims = await Promise.all(
+    entries.map(({ locator, channelLocator, sourceClaim }) =>
+      resolveImmutableClaimById(locator, undefined, channelLocator)
+        .then((claim) => withSourceClaimMediaMetadata(claim, sourceClaim))
+        .catch(() => null)
+    )
+  );
+  claims.forEach((claim) => {
+    if (!claim || !isHomepageEligibleClaim(claim, (params as any).homepage_include_future === true)) return;
+    if (!homepageClaimMatchesChannelConstraints(claim, params)) return;
+    const identity = String(claim.immutable_id || claim.claim_id || claim.canonical_url || '');
+    if (!identity || state.discovered.has(identity)) return;
+    state.discovered.add(identity);
+    state.queued.push(claim);
+  });
+}
+
+function homepageClaimMatchesChannelConstraints(claim: Claim, params: ClaimSearchOptions): boolean {
+  const channelId = String(claim.signing_channel?.claim_id || (claim as any).channel_id || '').toLowerCase();
+  if (!channelId) return false;
+
+  const allowed = paramValues(params, 'channel_ids', 'channel-ids').map((id) => id.toLowerCase());
+  if (allowed.length && !allowed.includes(channelId)) return false;
+
+  const excluded = paramValues(params, 'not_channel_ids', 'not-channel-ids').map((id) => id.toLowerCase());
+  return !excluded.includes(channelId);
+}
+
+function homepageClaimChannelIdentity(claim: Claim): string {
+  const source = claim as any;
+  return String(source.signing_channel?.immutable_id || source.signing_channel?.claim_id || source.channel_id || '');
 }
 
 function isHomepageEligibleClaim(claim: Claim, includeFuture = false): boolean {
   if ((claim as any).value_type === 'repost' || (claim as any)['value-type'] === 'repost') return false;
   if ((claim as any).reposted_claim || (claim as any)['reposted-claim']) return false;
+  if (isClaimNsfw(claim)) return false;
+  if (!claim.signing_channel?.claim_id) return false;
   const displayed: any = claim;
   const value = displayed?.value || {};
   const source = value.source || {};
@@ -2881,12 +3013,18 @@ async function fetchHyperbeamSourceClaimSearch(params: ClaimSearchOptions): Prom
   const pageSize = Math.max(1, toNumber(params.page_size, 20));
   const query = sourceClaimQuery({ ...params, page, page_size: pageSize });
   const response = await fetchStoreJsonOrNull(storePath('odysee/source-claims', JSON.stringify(query)));
-  const locators = paramValues(response, 'locators');
+  const entries = sourceClaimEntries(response);
   const claims = (
-    await Promise.all(locators.map((locator) => resolveImmutableClaimById(locator).catch(() => null)))
+    await Promise.all(
+      entries.map(({ locator, channelLocator, sourceClaim }) =>
+        resolveImmutableClaimById(locator, undefined, channelLocator)
+          .then((claim) => withSourceClaimMediaMetadata(claim, sourceClaim))
+          .catch(() => null)
+      )
+    )
   ).filter(Boolean) as Array<Claim>;
 
-  const hasNextPage = locators.length === pageSize;
+  const hasNextPage = entries.length === pageSize;
   const discoveredItems = (page - 1) * pageSize + claims.length;
   return {
     items: claims,
@@ -2897,29 +3035,91 @@ async function fetchHyperbeamSourceClaimSearch(params: ClaimSearchOptions): Prom
   };
 }
 
+function sourceClaimEntries(
+  response: any
+): Array<{ locator: string; channelLocator?: string; sourceClaim?: Record<string, any> }> {
+  const payload = responsePayload(response);
+  const explicit = paramValues(payload, 'locators');
+  if (explicit.length) return explicit.map((locator) => ({ locator }));
+
+  const items = value(payload, 'items');
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) => {
+    const locator =
+      value(item, 'immutable_id', 'immutable-id') || claimOutpoint(value(item, 'txid'), value(item, 'nout'));
+    if (!locator) return [];
+    const signingChannel = value(item, 'signing_channel', 'signing-channel');
+    const channelLocator = isObject(signingChannel)
+      ? claimOutpoint(value(signingChannel, 'txid'), value(signingChannel, 'nout')) ||
+        value(signingChannel, 'claim_id', 'claim-id') ||
+        undefined
+      : undefined;
+    return [{ locator: String(locator), channelLocator, sourceClaim: item }];
+  });
+}
+
+function withSourceClaimMediaMetadata(claim: any, sourceClaim?: Record<string, any>): any {
+  if (!claim || !sourceClaim) return claim;
+  const sourceValue = isObject(value(sourceClaim, 'value')) ? value(sourceClaim, 'value') : {};
+  return withClaimMediaMetadata(claim, sourceValue);
+}
+
+function withClaimMediaMetadata(claim: any, mediaMetadata?: Record<string, any>): any {
+  if (!claim || !mediaMetadata) return claim;
+  const sourceAudio = isObject(value(mediaMetadata, 'audio')) ? value(mediaMetadata, 'audio') : null;
+  const sourceVideo = isObject(value(mediaMetadata, 'video')) ? value(mediaMetadata, 'video') : null;
+  if (!sourceAudio && !sourceVideo) return claim;
+
+  const claimValue = isObject(claim.value) ? claim.value : {};
+  const claimAudio = isObject(value(claimValue, 'audio')) ? value(claimValue, 'audio') : {};
+  const claimVideo = isObject(value(claimValue, 'video')) ? value(claimValue, 'video') : {};
+  return {
+    ...claim,
+    value: {
+      ...claimValue,
+      ...(sourceAudio ? { audio: { ...sourceAudio, ...claimAudio } } : {}),
+      ...(sourceVideo ? { video: { ...sourceVideo, ...claimVideo } } : {}),
+    },
+  };
+}
+
 function sourceClaimQuery(params: ClaimSearchOptions): Record<string, any> {
   const supportedKeys = [
     'channel_ids',
     'claim_ids',
     'not_channel_ids',
     'claim_type',
+    'stream_types',
     'any_tags',
+    'all_tags',
+    'not_tags',
     'order_by',
     'any_languages',
     'page',
     'page_size',
     'limit_claims_per_channel',
     'duration',
+    'fee_amount',
+    'has_source',
+    'has_no_source',
+    'has_channel_signature',
+    'valid_channel_signature',
+    'reposted_claim_id',
     'timestamp',
     'release_time',
     'exclude_shorts',
   ];
-
-  return Object.fromEntries(
+  const query = Object.fromEntries(
     supportedKeys
       .map((key) => [key, value(params, key, key.replaceAll('_', '-'))])
       .filter(([, item]) => item !== undefined && item !== null && item !== '')
   );
+  const snapshotCreatedAt = toNumber((params as any).homepage_snapshot_created_at, 0);
+  if (snapshotCreatedAt > 0) {
+    delete query.timestamp;
+    query.release_time = `<${Math.floor(snapshotCreatedAt)}`;
+  }
+  return query;
 }
 
 // List the active cookie identity's native uploads as claims. The match-index
@@ -4106,6 +4306,7 @@ function immutableClaimFromHyperbeam(
       release_time:
         value(existingValue, 'release_time', 'release-time') || value(decodedValue, 'release_time', 'release-time'),
       video: value(existingValue, 'video') || value(decodedValue, 'video'),
+      audio: value(existingValue, 'audio') || value(decodedValue, 'audio'),
       source: compactParams({
         ...payloadSource,
         ...valueSource,
@@ -4154,10 +4355,18 @@ async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): P
   // requests cannot rely on wildcard-exposed custom response headers. The
   // node response still includes the evidence bytes and commitments. Native
   // multipart remains available to callers that explicitly request it.
-  const url = `${buildDeviceUrl(baseUrl, path)}${path.includes('?') ? '&' : '?'}accept-bundle=true`;
+  const cacheReadTarget = longCacheReadTarget(path);
+  const url = cacheReadTarget
+    ? `${buildDeviceUrl(baseUrl, `${CACHE_DEVICE}/read`)}?accept-bundle=true`
+    : `${buildDeviceUrl(baseUrl, path)}${path.includes('?') ? '&' : '?'}accept-bundle=true`;
   try {
     const response = await fetch(url, {
-      headers: preferJson ? { accept: 'application/json' } : undefined,
+      method: cacheReadTarget ? 'POST' : 'GET',
+      headers: {
+        ...(preferJson ? { accept: 'application/json' } : {}),
+        ...(cacheReadTarget ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(cacheReadTarget ? { body: JSON.stringify({ read: cacheReadTarget }) } : {}),
       signal: timeoutSignal(HYPERBEAM_TIMEOUT_MS),
     });
     const parsed = await parseStoreResponse(response);
@@ -4166,6 +4375,12 @@ async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): P
   } catch {
     return null;
   }
+}
+
+function longCacheReadTarget(path: string): string | null {
+  const prefix = `${CACHE_DEVICE}/read?`;
+  if (path.length < 4_096 || !path.startsWith(prefix)) return null;
+  return new URLSearchParams(path.slice(prefix.length)).get('read');
 }
 
 function fetchCachedStoreJsonOrNull(path: string, preferJson: boolean = true): Promise<any | null> {
@@ -4808,7 +5023,12 @@ function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> 
 
   const promise = (
     isOutpointId(id)
-      ? fetchImmutableJsonOrNull(id)
+      ? (() => {
+          const outpoint = outpointParts(id);
+          return outpoint
+            ? fetchStoreJsonOrNull(hyperbeamStoreReadPath(`odysee/claim-output/${outpoint.txid}/${outpoint.nout}`))
+            : Promise.resolve(null);
+        })()
       : isStandaloneImmutableId(id)
         ? fetchStoreJsonOrNull(encodeDataPath(id))
         : fetchStoreJsonOrNull(storePath('odysee/channel', id))

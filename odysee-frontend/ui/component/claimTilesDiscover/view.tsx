@@ -87,6 +87,7 @@ type Props = {
   };
   uris?: Array<string>;
   immutableSigningChannelIds?: Record<string, string>;
+  immutableMediaMetadata?: Record<string, Record<string, unknown>>;
   injectedItem?: ListInjectedItem;
   showNoSourceClaims?: boolean;
   renderProperties?: (arg0: Claim) => React.ReactNode | null | undefined;
@@ -305,6 +306,7 @@ function ClaimTilesDiscover(props: Props) {
     sectionTitle,
     uris: explicitUris,
     immutableSigningChannelIds,
+    immutableMediaMetadata,
     homepageOrder = 0,
   } = props;
   const dispatch = useAppDispatch();
@@ -452,7 +454,10 @@ function ClaimTilesDiscover(props: Props) {
   React.useEffect(() => {
     if (usesExplicitUris && hydrationPriority !== null && visibleExplicitUris.length) {
       const hydrationKey = visibleExplicitUris
-        .map((uri) => `${uri}:${immutableSigningChannelIds?.[uri] || ''}`)
+        .map(
+          (uri) =>
+            `${uri}:${immutableSigningChannelIds?.[uri] || ''}:${JSON.stringify(immutableMediaMetadata?.[uri] || {})}`
+        )
         .join('|');
       const scheduled = hydrationScheduleRef.current;
       if (scheduled?.key === hydrationKey && scheduled.priority >= hydrationPriority) return;
@@ -461,11 +466,19 @@ function ClaimTilesDiscover(props: Props) {
         Promise.resolve(
           doResolveUris(visibleExplicitUris, false, true, {
             immutable_signing_channel_ids: immutableSigningChannelIds,
+            immutable_media_metadata: immutableMediaMetadata,
           })
         )
       );
     }
-  }, [usesExplicitUris, hydrationPriority, visibleExplicitUris, immutableSigningChannelIds, doResolveUris]);
+  }, [
+    usesExplicitUris,
+    hydrationPriority,
+    visibleExplicitUris,
+    immutableSigningChannelIds,
+    immutableMediaMetadata,
+    doResolveUris,
+  ]);
   React.useEffect(() => {
     if (shouldPerformSearch) {
       const searchOptions = JSON.parse(optionsStringified);

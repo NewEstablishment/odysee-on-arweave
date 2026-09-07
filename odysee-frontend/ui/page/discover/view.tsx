@@ -61,6 +61,27 @@ function DiscoverPage(props: Props) {
   const tagsQuery = urlParams.get('t') || null;
   const orderParam = urlParams.get(CS.ORDER_BY_KEY);
   const tags = tagsQuery ? tagsQuery.split(',') : null;
+  const defaultOrderBy = getDefaultOrderBy();
+  const hasActiveCategoryFilter = [
+    CS.SORT_BY_KEY,
+    CS.FRESH_KEY,
+    CS.CONTENT_KEY,
+    CS.DURATION_KEY,
+    CS.LANGUAGE_KEY,
+    CS.TAGS_KEY,
+    CS.FEE_AMOUNT_KEY,
+    CS.CHANNEL_IDS_KEY,
+    CS.CLAIM_TYPE,
+    CS.REPOSTED_URI_KEY,
+  ].some((key) => urlParams.has(key));
+  const useCategorySnapshot = Boolean(
+    dynamicRouteProps?.categoryUris?.length &&
+    (!orderParam || orderParam === defaultOrderBy) &&
+    !hasActiveCategoryFilter
+  );
+  const filteredCategoryReleaseTime = urlParams.has(CS.FRESH_KEY)
+    ? undefined
+    : `<${Math.floor(dayjs().startOf('minute').unix())}`;
   const repostedClaimIsResolved = repostedUri && repostedClaim;
   const hideRepostRibbon = isCategory && !isWildWest;
   const hideMembersOnlyContent = isCategory && !isWildWest;
@@ -218,16 +239,22 @@ function DiscoverPage(props: Props) {
     >
       <ClaimSearchFilterContext.Provider value={claimSearchFilters}>
         <ClaimListDiscover
-          uris={dynamicRouteProps?.categoryUris}
-          immutableSigningChannelIds={dynamicRouteProps?.immutableSigningChannelIds}
+          key={`${dynamicRouteProps?.id || 'discover'}:${routerSearch || defaultOrderBy}`}
+          uris={useCategorySnapshot ? dynamicRouteProps?.categoryUris : undefined}
+          prefetchedUris={useCategorySnapshot ? dynamicRouteProps?.prefetchedCategoryUris : undefined}
+          immutableSigningChannelIds={useCategorySnapshot ? dynamicRouteProps?.immutableSigningChannelIds : undefined}
+          immutableMediaMetadata={useCategorySnapshot ? dynamicRouteProps?.immutableMediaMetadata : undefined}
           homepageEligible={dynamicRouteProps?.options?.homepageEligible}
+          allowFilteredFinalPage={hasActiveCategoryFilter}
           includeFuture={dynamicRouteProps?.options?.includeFuture}
-          pins={dynamicRouteProps?.categoryUris?.length ? undefined : getPins(dynamicRouteProps)}
+          snapshotCreatedAt={useCategorySnapshot ? dynamicRouteProps?.options?.snapshotCreatedAt : undefined}
+          snapshotClaimIds={useCategorySnapshot ? dynamicRouteProps?.options?.snapshotClaimIds : undefined}
+          pins={useCategorySnapshot ? undefined : getPins(dynamicRouteProps)}
           hideFilters={isWildWest ? true : hideFilter}
           header={repostedUri ? <span /> : undefined}
           subSection={getSubSection()}
           tileLayout={repostedUri ? false : tileLayout}
-          defaultOrderBy={getDefaultOrderBy()}
+          defaultOrderBy={defaultOrderBy}
           claimType={claimType ? [claimType] : dynamicRouteProps?.options?.claimType}
           defaultStreamType={undefined} // defaultStreamType={isCategory && !isWildWest ? [CS.FILE_VIDEO, CS.FILE_AUDIO, CS.FILE_DOCUMENT] : undefined} remove due to claim search bug with reposts
           headerLabel={getHeaderLabel()}
@@ -236,7 +263,7 @@ function DiscoverPage(props: Props) {
           hiddenNsfwMessage={<HiddenNsfw type="page" />}
           repostedClaimId={repostedClaim ? repostedClaim.claim_id : null} // TODO: find a better way to determine discover / wild west vs other modes release times
           // for now including && !tags so that
-          releaseTime={getReleaseTime()}
+          releaseTime={hasActiveCategoryFilter ? filteredCategoryReleaseTime : getReleaseTime()}
           feeAmount={undefined}
           channelIds={isExplore && exploreChannelsIds ? exploreChannelsIds : channelIds}
           excludedChannelIds={excludedChannelIds}

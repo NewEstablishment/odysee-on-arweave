@@ -1,4 +1,9 @@
-import { fetchHyperbeamNodeAddress, fetchHyperbeamQueryPaths, fetchVerifiedNativeMessage } from 'util/hyperbeam';
+import {
+  fetchHyperbeamLocalNameId,
+  fetchHyperbeamNodeAddress,
+  fetchHyperbeamQueryPaths,
+  fetchVerifiedNativeMessage,
+} from 'util/hyperbeam';
 import * as ICONS from 'constants/icons';
 
 export const HOMEPAGE_SNAPSHOT_SCHEMA = 'odysee-homepage@1.0';
@@ -21,8 +26,17 @@ type HomepageSnapshot = {
 };
 
 export async function fetchHomepageSnapshot(language: string): Promise<HomepageSnapshot | null> {
-  const expectedOwner = await fetchHyperbeamNodeAddress();
+  const [expectedOwner, currentSnapshotId] = await Promise.all([
+    fetchHyperbeamNodeAddress(),
+    fetchHyperbeamLocalNameId(`odysee-homepage-${language}`),
+  ]);
   if (!expectedOwner) return null;
+
+  if (currentSnapshotId) {
+    const current = await fetchVerifiedNativeMessage<HomepageSnapshot>(currentSnapshotId);
+    const normalized = current?.owner === expectedOwner ? normalizeHomepageSnapshot(current.payload) : null;
+    if (normalized && isHomepageSnapshot(normalized, language)) return normalized;
+  }
 
   const nowHour = Math.floor(Date.now() / 3_600_000);
   for (let age = 0; age < SNAPSHOT_LOOKBACK_HOURS; age += 1) {
@@ -52,7 +66,7 @@ function normalizeHomepageSnapshot(snapshot: HomepageSnapshot): HomepageSnapshot
   const categories = Object.fromEntries(
     Object.entries(homepage.categories || {})
       .filter(([key]) => key !== 'commitments' && key !== 'priv')
-      .map(([key, category]) => [key, normalizeHomepageCategory(category)])
+      .map(([key, category]) => [key, normalizeHomepageCategory(category, snapshot['created-at'])])
   );
   const featured = normalizeHomepageFeatured(homepage.featured);
 
@@ -76,7 +90,7 @@ function parseHomepageJson(raw: unknown): Record<string, any> | undefined {
   }
 }
 
-function normalizeHomepageCategory(category: any): any {
+function normalizeHomepageCategory(category: any, snapshotCreatedAt?: number): any {
   if (!category || typeof category !== 'object') return category;
 
   const snapshotImmutableIds = arrayValue(category, 'immutableIds', 'immutableids');
@@ -94,8 +108,13 @@ function normalizeHomepageCategory(category: any): any {
     sortOrder: numberValue(category, 'sortOrder', 'sortorder'),
     immutableIds,
     immutablePoolIds,
+    snapshotCreatedAt,
     immutableSigningChannelIds: restoreCaseSensitiveMap(
       objectValue(category, 'immutableSigningChannelIds', 'immutablesigningchannelids'),
+      allMediaIds
+    ),
+    immutableMediaMetadata: restoreCaseSensitiveObjectMap(
+      objectValue(category, 'immutableMediaMetadata', 'immutablemediametadata'),
       allMediaIds
     ),
   };
@@ -139,6 +158,26 @@ function restoreCaseSensitiveMap(mapping: any, canonicalIds: Array<string>): Rec
   );
 }
 
+function restoreCaseSensitiveObjectMap(
+  mapping: any,
+  canonicalIds: Array<string>
+): Record<string, Record<string, unknown>> {
+  if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return {};
+
+  const valuesByLowercaseId = new Map(
+    Object.entries(mapping)
+      .filter((entry): entry is [string, Record<string, unknown>] =>
+        Boolean(entry[1] && typeof entry[1] === 'object' && !Array.isArray(entry[1]))
+      )
+      .map(([id, value]) => [id.toLowerCase(), value])
+  );
+  return Object.fromEntries(
+    canonicalIds
+      .map((id) => [id, valuesByLowercaseId.get(id.toLowerCase())] as const)
+      .filter((entry): entry is readonly [string, Record<string, unknown>] => Boolean(entry[1]))
+  );
+}
+
 function arrayValue(value: any, canonical: string, normalized: string): Array<string> | undefined {
   const result = value?.[canonical] ?? value?.[normalized];
   return Array.isArray(result) ? result.map(String) : undefined;
@@ -167,13 +206,23 @@ export function mergeHomepageSnapshot(
   if (!snapshot) return configuredHomepage || null;
 
   const generated = snapshot.homepage || { categories: {} };
+  const configuredCategories = configuredHomepage?.categories || {};
+  const generatedCategories = Object.fromEntries(
+    Object.entries(generated.categories || {}).map(([key, category]) => [
+      key,
+      {
+        ...configuredCategories[key],
+        ...(category as Record<string, any>),
+      },
+    ])
+  );
   const localContent = configuredHomepage?.categories?.LOCAL_CONTENT;
   return {
     ...configuredHomepage,
     ...generated,
     categories: {
       ...(localContent ? { LOCAL_CONTENT: localContent } : {}),
-      ...generated.categories,
+      ...generatedCategories,
     },
   };
 }

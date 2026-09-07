@@ -25,7 +25,7 @@ import {
   selectClaimsByUri,
   selectClaimSearchByQuery,
   selectClaimSearchByQueryLastPageReached,
-  selectFetchingClaimSearch,
+  selectIsFetchingClaimSearchForQuery,
 } from 'redux/selectors/claims';
 import {
   doClaimSearch as doClaimSearchAction,
@@ -43,9 +43,14 @@ function resolveHideMembersOnly(global: any, override: any) {
 }
 type Props = {
   uris?: Array<string>;
+  prefetchedUris?: Array<string>;
   immutableSigningChannelIds?: Record<string, string>;
+  immutableMediaMetadata?: Record<string, Record<string, unknown>>;
   homepageEligible?: boolean;
+  allowFilteredFinalPage?: boolean;
   includeFuture?: boolean;
+  snapshotCreatedAt?: number;
+  snapshotClaimIds?: Array<string>;
   prefixUris?: Array<string>;
   pins?: {
     urls?: Array<string>;
@@ -216,9 +221,14 @@ function ClaimListDiscover(props: Props) {
     injectedItem,
     feeAmount,
     uris,
+    prefetchedUris,
     immutableSigningChannelIds,
+    immutableMediaMetadata,
     homepageEligible,
+    allowFilteredFinalPage,
     includeFuture,
+    snapshotCreatedAt,
+    snapshotClaimIds,
     prefixUris,
     pins,
     tileLayout,
@@ -255,8 +265,6 @@ function ClaimListDiscover(props: Props) {
   const claimSearchByQueryLastPageReached = useAppSelector(selectClaimSearchByQueryLastPageReached);
   const claimsByUri = useAppSelector(selectClaimsByUri);
   const claimsById = useAppSelector(selectById);
-  const fetchingClaimSearch = useAppSelector(selectFetchingClaimSearch);
-  const loading = props.loading !== undefined ? props.loading : fetchingClaimSearch;
   const showNsfw = useAppSelector(selectShowMatureContent);
   const hideMembersOnly = resolveHideMembersOnly(
     useAppSelector((state) => selectClientSetting(state, SETTINGS.HIDE_MEMBERS_ONLY_CONTENT)),
@@ -331,11 +339,21 @@ function ClaimListDiscover(props: Props) {
   const hideRepostsEffective = resolveHideReposts(hideReposts, hideRepostsOverride);
   const [finalUris, setFinalUris] = React.useState<string[]>();
   const [snapshotContinuationRequested, setSnapshotContinuationRequested] = React.useState(false);
+  const [revealedPrefetchedUriCount, setRevealedPrefetchedUriCount] = React.useState(0);
   const [paginationPending, setPaginationPending] = React.useState(false);
   const paginationUriCountRef = React.useRef<number | null>(null);
   const paginationTargetCountRef = React.useRef<number | null>(null);
   const paginationAdvancedPageRef = React.useRef<number | null>(null);
+  const paginationIntentRef = React.useRef(false);
+  const initialAutofillConsumedRef = React.useRef(false);
   const snapshotUrisKey = JSON.stringify(uris || []);
+  const prefetchedUrisKey = JSON.stringify(prefetchedUris || []);
+  const initialAutofillKey = `${pathname}:${snapshotUrisKey}`;
+  const initialAutofillKeyRef = React.useRef(initialAutofillKey);
+  if (initialAutofillKeyRef.current !== initialAutofillKey) {
+    initialAutofillKeyRef.current = initialAutofillKey;
+    initialAutofillConsumedRef.current = false;
+  }
   const langParam = urlParams.get(CS.LANGUAGE_KEY) || null;
   const searchInSelectedLang = searchInLanguage && !ignoreSearchInLanguage;
   const languageParams = resolveLangForClaimSearch(languageSetting, searchInSelectedLang, searchLanguages, langParam);
@@ -388,7 +406,11 @@ function ClaimListDiscover(props: Props) {
   const excludedIdsParam = excludedChannelIds;
   const feeAmountParam = urlParams.get('fee_amount') || feeAmount;
   const originalPageSize = 12;
-  const dynamicPageSize = isLargeScreen ? Math.ceil((originalPageSize / 2) * 6) : Math.ceil((originalPageSize / 2) * 4);
+  const dynamicPageSize = homepageEligible
+    ? 24
+    : isLargeScreen
+      ? Math.ceil((originalPageSize / 2) * 6)
+      : Math.ceil((originalPageSize / 2) * 4);
   const notTagInput: NotTagInput = {
     notTags,
     hiddenTags,
@@ -432,7 +454,10 @@ function ClaimListDiscover(props: Props) {
   };
 
   if (homepageEligible) options.homepage_eligible = true;
+  if (allowFilteredFinalPage) options.homepage_allow_filtered_final_page = true;
   if (includeFuture) options.homepage_include_future = true;
+  if (snapshotCreatedAt) options.homepage_snapshot_created_at = snapshotCreatedAt;
+  if (snapshotClaimIds?.length) options.homepage_exclude_ids = snapshotClaimIds;
 
   if (ENABLE_NO_SOURCE_CLAIMS && hasNoSource) {
     options.has_no_source = true;
@@ -582,6 +607,8 @@ function ClaimListDiscover(props: Props) {
 
   const hasMatureTags = tagsParam && tagsParam.split(',').some((t) => MATURE_TAGS.includes(t));
   const searchKey = createNormalizedClaimSearchKey(options);
+  const fetchingClaimSearch = useAppSelector((state) => selectIsFetchingClaimSearchForQuery(state, searchKey));
+  const loading = props.loading !== undefined ? props.loading : fetchingClaimSearch;
   const claimSearchResult = claimSearchByQuery[searchKey];
   const claimSearchResultLastPageReached = claimSearchByQueryLastPageReached[searchKey];
   const isUnfetchedClaimSearch = claimSearchResult === undefined;
@@ -693,7 +720,8 @@ function ClaimListDiscover(props: Props) {
 
     if (uris) {
       // --- direct uris
-      const mergedUris = Array.from(new Set([...uris, ...(claimSearchResult || [])]));
+      const revealedPrefetchedUris = (prefetchedUris || []).slice(0, revealedPrefetchedUriCount);
+      const mergedUris = Array.from(new Set([...uris, ...revealedPrefetchedUris, ...(claimSearchResult || [])]));
       const targetCount = paginationTargetCountRef.current;
       const newUris = targetCount === null ? mergedUris : mergedUris.slice(0, targetCount);
       injectPinUrls(newUris, orderParam, pins, resolvedPinUris);
@@ -726,6 +754,8 @@ function ClaimListDiscover(props: Props) {
     orderParam,
     pins,
     resolvedPinUris,
+    prefetchedUris,
+    revealedPrefetchedUriCount,
     uris,
     dynamicPageSize,
     page,
@@ -750,6 +780,22 @@ function ClaimListDiscover(props: Props) {
     }
 
     if (!infiniteScroll || paginationPending) return;
+
+    const shouldAutofillInitialPage = Boolean(
+      homepageEligible &&
+      !initialAutofillConsumedRef.current &&
+      finalUris?.length &&
+      finalUris.length <= originalPageSize
+    );
+    if (homepageEligible && !paginationIntentRef.current && !shouldAutofillInitialPage) return;
+    if (shouldAutofillInitialPage) initialAutofillConsumedRef.current = true;
+    paginationIntentRef.current = false;
+
+    const hiddenPrefetchedCount = Math.max(0, (prefetchedUris?.length || 0) - revealedPrefetchedUriCount);
+    if (uris && hiddenPrefetchedCount > 0) {
+      setRevealedPrefetchedUriCount((count) => count + Math.min(dynamicPageSize, hiddenPrefetchedCount));
+      return;
+    }
 
     if (uris && !snapshotContinuationRequested) {
       paginationUriCountRef.current = finalUris?.length || 0;
@@ -812,7 +858,31 @@ function ClaimListDiscover(props: Props) {
     paginationUriCountRef.current = null;
     paginationTargetCountRef.current = null;
     paginationAdvancedPageRef.current = null;
-  }, [nonPaginationOptionsKey, snapshotUrisKey]);
+    paginationIntentRef.current = false;
+    setRevealedPrefetchedUriCount(0);
+  }, [nonPaginationOptionsKey, prefetchedUrisKey, snapshotUrisKey]);
+  React.useEffect(() => {
+    if (!homepageEligible) return;
+    const markIntent = () => {
+      paginationIntentRef.current = true;
+    };
+    const markKeyboardIntent = (event: KeyboardEvent) => {
+      if (['ArrowDown', 'End', 'PageDown', ' '].includes(event.key)) markIntent();
+    };
+    const markScrollbarIntent = (event: PointerEvent) => {
+      if (event.clientX >= document.documentElement.clientWidth - 24) markIntent();
+    };
+    window.addEventListener('wheel', markIntent, { passive: true });
+    window.addEventListener('touchmove', markIntent, { passive: true });
+    window.addEventListener('pointerdown', markScrollbarIntent, { passive: true });
+    window.addEventListener('keydown', markKeyboardIntent);
+    return () => {
+      window.removeEventListener('wheel', markIntent);
+      window.removeEventListener('touchmove', markIntent);
+      window.removeEventListener('pointerdown', markScrollbarIntent);
+      window.removeEventListener('keydown', markKeyboardIntent);
+    };
+  }, [homepageEligible]);
   React.useEffect(() => {
     const targetCount = paginationTargetCountRef.current;
     if (targetCount === null || !finalUris || finalUris.length < targetCount) return;
@@ -861,9 +931,18 @@ function ClaimListDiscover(props: Props) {
     if (uris && finalUris?.length) {
       doResolveUris(finalUris, true, {
         immutable_signing_channel_ids: immutableSigningChannelIds || {},
+        immutable_media_metadata: immutableMediaMetadata || {},
       });
     }
-  }, [uris, finalUris, immutableSigningChannelIds, doResolveUris]);
+  }, [uris, finalUris, immutableSigningChannelIds, immutableMediaMetadata, doResolveUris]);
+  React.useEffect(() => {
+    if (uris && prefetchedUris?.length) {
+      doResolveUris(prefetchedUris, true, {
+        immutable_signing_channel_ids: immutableSigningChannelIds || {},
+        immutable_media_metadata: immutableMediaMetadata || {},
+      });
+    }
+  }, [uris, prefetchedUris, immutableSigningChannelIds, immutableMediaMetadata, doResolveUris]);
   React.useEffect(() => {
     if (channelIds) {
       doFetchOdyseeMembershipForChannelIds(channelIds);
@@ -929,7 +1008,8 @@ function ClaimListDiscover(props: Props) {
       ? dynamicPageSize
       : 0;
   const hasMoreResults = Boolean(
-    (uris && !snapshotContinuationRequested) || (claimSearchResult && !claimSearchResultLastPageReached)
+    (uris && (revealedPrefetchedUriCount < (prefetchedUris?.length || 0) || !snapshotContinuationRequested)) ||
+    (claimSearchResult && !claimSearchResultLastPageReached)
   );
   return (
     <React.Fragment>
@@ -967,6 +1047,7 @@ function ClaimListDiscover(props: Props) {
             isShortFromChannelPage={isShortFromChannelPage}
             sectionTitle={sectionTitle}
             trailingPlaceholderCount={showLoadingSkeleton ? trailingPlaceholderCount : 0}
+            stablePaginationSlots={homepageEligible}
           />
         </div>
       ) : (

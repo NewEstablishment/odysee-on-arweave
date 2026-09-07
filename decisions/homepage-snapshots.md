@@ -35,10 +35,12 @@ Lua resolver metadata must not become keys inside category, media-ID, or channel
 maps. Consumers verify the flat snapshot first and parse `homepage-json` only
 after verification; they continue to accept the older nested `homepage` field.
 
-Consumers discover snapshot locators with `query@1.0`, exact-read them, verify
-the commitment and require the node's own committer. The newest valid snapshot
-for the language wins. Failed refreshes do not replace or delete prior valid
-messages.
+Consumers first read the immutable snapshot ID from the
+`odysee-homepage-<language>` local-name pointer message, exact-read it, verify the
+commitment, and require the node's own committer. Existing deployments whose
+pointer still contains the snapshot message fall back to `query@1.0`
+discovery. The newest valid snapshot for the language wins. Failed refreshes
+do not replace or delete prior valid messages.
 
 ## Consequences
 

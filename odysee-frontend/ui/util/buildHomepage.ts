@@ -35,6 +35,8 @@ export type HomepageCat = {
   immutablePoolIds?: Array<string>;
   immutableChannelIds?: Array<string>;
   immutableSigningChannelIds?: Record<string, string>;
+  immutableMediaMetadata?: Record<string, Record<string, unknown>>;
+  snapshotCreatedAt?: number;
   unresolvedChannelIds?: Array<string>;
 };
 
@@ -154,9 +156,13 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
     uris: cat.immutableIds
       ? cat.immutableIds.map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri))
       : undefined,
-    categoryUris:
-      cat.immutablePoolIds || cat.immutableIds
-        ? (cat.immutablePoolIds || cat.immutableIds || [])
+    categoryUris: cat.immutableIds
+      ? cat.immutableIds.map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri))
+      : undefined,
+    prefetchedCategoryUris:
+      cat.immutablePoolIds && cat.immutableIds
+        ? cat.immutablePoolIds
+            .slice(cat.immutableIds.length)
             .map(hyperbeamImmutableUri)
             .filter((uri): uri is string => Boolean(uri))
         : undefined,
@@ -164,6 +170,12 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
       Object.entries(cat.immutableSigningChannelIds || {}).map(([mediaId, channelId]) => [
         hyperbeamImmutableUri(mediaId) || mediaId,
         channelId,
+      ])
+    ),
+    immutableMediaMetadata: Object.fromEntries(
+      Object.entries(cat.immutableMediaMetadata || {}).map(([mediaId, metadata]) => [
+        hyperbeamImmutableUri(mediaId) || mediaId,
+        metadata,
       ])
     ),
     hideByDefault: cat.hideByDefault,
@@ -178,11 +190,12 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
       searchLanguages: cat.searchLanguages,
       tags: cat.tags,
       duration: cat.duration || undefined,
-      excludeShorts: cat.exclude_shorts ? true : undefined,
       releaseTime: `>${getRelativeUnixTimestamp(cat.daysOfContent || 30, 'days', 'hour')}`,
       timestamp: cat.excludeFuture ? `<${Math.floor(Date.now() / 1000)}` : undefined,
       homepageEligible: true,
       includeFuture: cat.includeFuture,
+      snapshotCreatedAt: cat.snapshotCreatedAt,
+      snapshotClaimIds: cat.immutablePoolIds || cat.immutableIds,
     },
   };
 };

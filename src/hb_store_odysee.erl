@@ -862,13 +862,22 @@ source_claims_read_query(Query, StoreOpts, NodeOpts) ->
                 {<<"claim_ids">>, <<"claim_ids">>, list},
                 {<<"not_channel_ids">>, <<"not_channel_ids">>, list},
                 {<<"claim_type">>, <<"claim_type">>, list},
+                {<<"stream_types">>, <<"stream_types">>, list},
                 {<<"any_tags">>, <<"any_tags">>, list},
+                {<<"all_tags">>, <<"all_tags">>, list},
+                {<<"not_tags">>, <<"not_tags">>, list},
                 {<<"order_by">>, <<"order_by">>, list},
                 {<<"any_languages">>, <<"any_languages">>, list},
                 {<<"page">>, <<"page">>, integer},
                 {<<"page_size">>, <<"page_size">>, integer},
                 {<<"limit_claims_per_channel">>, <<"limit_claims_per_channel">>, integer},
-                {<<"duration">>, <<"duration">>, scalar},
+                {<<"duration">>, <<"duration">>, scalar_or_list},
+                {<<"fee_amount">>, <<"fee_amount">>, scalar},
+                {<<"has_source">>, <<"has_source">>, boolean},
+                {<<"has_no_source">>, <<"has_no_source">>, boolean},
+                {<<"has_channel_signature">>, <<"has_channel_signature">>, boolean},
+                {<<"valid_channel_signature">>, <<"valid_channel_signature">>, boolean},
+                {<<"reposted_claim_id">>, <<"reposted_claim_id">>, scalar},
                 {<<"timestamp">>, <<"timestamp">>, scalar},
                 {<<"release_time">>, <<"release_time">>, scalar},
                 {<<"exclude_shorts">>, <<"exclude_shorts">>, boolean}
@@ -913,6 +922,8 @@ source_search_value(boolean, 1) -> true;
 source_search_value(boolean, <<"1">>) -> true;
 source_search_value(boolean, _Value) -> false;
 source_search_value(scalar, Value) when is_binary(Value); is_integer(Value) -> Value;
+source_search_value(scalar_or_list, Value) when is_list(Value) -> Value;
+source_search_value(scalar_or_list, Value) when is_binary(Value); is_integer(Value) -> Value;
 source_search_value(_Kind, _Value) -> not_found.
 
 list_channel_search(Encoded, Req, StoreOpts, NodeOpts, Project) ->
@@ -1399,6 +1410,48 @@ direct_txid_get_returns_native_transaction_test() ->
     {ok, Msg} = hb_cache:read(TxID, #{ <<"store">> => [Store] }),
     ?assertEqual(TxID, maps:get(<<"txid">>, Msg)),
     ?assertEqual(hb_util:encode(Raw), maps:get(<<"raw">>, Msg)).
+
+source_claim_search_forwards_product_filters_test() ->
+    application:ensure_all_started(inets),
+    Response = hb_lbry_test_fixtures:proxy_result(#{ <<"items">> => [] }),
+    {ok, Server, Handle} = hb_mock_server:start([
+        {"/api/v1/proxy", proxy, {200, Response}}
+    ]),
+    try
+        Query = #{
+            <<"claim_type">> => [<<"stream">>],
+            <<"stream_types">> => [<<"audio">>],
+            <<"any_tags">> => [<<"music">>],
+            <<"all_tags">> => [<<"purchase">>],
+            <<"not_tags">> => [<<"mature">>],
+            <<"any_languages">> => [<<"en">>],
+            <<"order_by">> => [<<"effective_amount">>],
+            <<"duration">> => [<<">=60">>, <<"<=600">>],
+            <<"fee_amount">> => <<">0">>,
+            <<"has_source">> => true,
+            <<"has_no_source">> => false,
+            <<"has_channel_signature">> => true,
+            <<"valid_channel_signature">> => true,
+            <<"reposted_claim_id">> => <<"abc123">>,
+            <<"page">> => 2,
+            <<"page_size">> => 24
+        },
+        StoreOpts = #{
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        {ok, _} = source_claims_read_query(Query, StoreOpts, #{}),
+        [Req] = hb_mock_server:get_requests(Handle, proxy),
+        Sent = hb_json:decode(maps:get(<<"body">>, Req)),
+        Params = maps:get(<<"params">>, Sent),
+        maps:foreach(
+            fun(Key, Expected) -> ?assertEqual(Expected, maps:get(Key, Params)) end,
+            Query
+        ),
+        ?assertEqual(true, maps:get(<<"no_totals">>, Params))
+    after
+        hb_mock_server:stop(Handle)
+    end.
 
 direct_outpoint_get_returns_native_claim_output_test() ->
     Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),

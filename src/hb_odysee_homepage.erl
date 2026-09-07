@@ -292,10 +292,16 @@ node_opts() ->
 
 artifacts_are_content_addressable_test() ->
     Opts = #{<<"store">> => [hb_test_utils:test_store()]},
-    {ok, ModuleID} = publish(module_message(), Opts),
+    Module = module_message(),
+    {ok, ModuleID} = publish(Module, Opts),
     {ok, PlanID} = publish(plan_message(), Opts),
     ?assertMatch({ok, _}, hb_cache:read(ModuleID, Opts)),
     ?assertMatch({ok, _}, hb_cache:read(PlanID, Opts)),
+    Lua = maps:get(<<"body">>, Module),
+    ?assertNotEqual(nomatch, binary:match(Lua, <<"schema = \"odysee-homepage-pointer@1.0\"">>)),
+    ?assertNotEqual(nomatch, binary:match(Lua, <<"[\"snapshot-id\"] = published_id">>)),
+    ?assertNotEqual(nomatch, binary:match(Lua, <<"snapshot = committed">>)),
+    ?assertNotEqual(nomatch, binary:match(Lua, <<"state.allowed_channels[signing_claim_id]">>)),
     #{<<"homepages">> := Homepages} = plan_message(),
     ?assert(maps:is_key(<<"en">>, Homepages)),
     ?assert(maps:is_key(<<"pt-BR">>, Homepages)).
