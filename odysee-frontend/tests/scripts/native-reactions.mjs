@@ -10,10 +10,20 @@ import {
   normalizeNativeReaction,
   projectNativeReactions,
 } from '../../ui/util/nativeReactions.ts';
+import {
+  LEGACY_REACTION_SUMMARY_SCHEMA,
+  LEGACY_REACTION_SUMMARY_SIGNATURE_SCOPE,
+  LEGACY_REACTION_SUMMARY_TYPE,
+  linkedLegacyReactionForOwner,
+  normalizeLegacyReactionSummary,
+  projectMergedReactions,
+  selectLegacyReactionSummary,
+} from '../../ui/util/legacyReactions.ts';
 
 const target = 'content-target';
-const ownerA = 'owner-a';
-const ownerB = 'owner-b';
+const ownerA = id('o');
+const ownerB = id('p');
+const nodeOwner = id('n');
 const rootA = reaction({ id: id('a'), owner: ownerA, ref: 'reaction-owner-a', timestamp: 100 });
 const likeB = reaction({ id: id('b'), owner: ownerB, ref: 'reaction-owner-b', timestamp: 110 });
 const dislikeA = reaction({
@@ -111,6 +121,64 @@ assert.equal(nativeReactionToggleRemoves(rootA, 'like'), true);
 assert.equal(nativeReactionToggleRemoves(rootA, 'dislike'), false);
 assert.equal(nativeReactionToggleRemoves(removeA, 'dislike'), false);
 
+const legacySummary = normalizeLegacyReactionSummary({
+  schema: LEGACY_REACTION_SUMMARY_SCHEMA,
+  type: LEGACY_REACTION_SUMMARY_TYPE,
+  target,
+  subject: 'content',
+  like: 3,
+  dislike: 2,
+  'linked-reactions': [{ owner: ownerA, reaction: 'like' }],
+  'snapshot-at': 200,
+  source: 'legacy-odysee-db',
+  'signature-scope': LEGACY_REACTION_SUMMARY_SIGNATURE_SCOPE,
+  'message-id': id('s'),
+  'hyperbeam-owner': nodeOwner,
+});
+assert.ok(legacySummary);
+assert.equal(linkedLegacyReactionForOwner(legacySummary, ownerA), 'like');
+assert.deepEqual(projectMergedReactions([], legacySummary, ownerA), {
+  current: [],
+  my_reactions: { [target]: { like: 1, dislike: 0 } },
+  others_reactions: { [target]: { like: 2, dislike: 2 } },
+});
+assert.deepEqual(projectMergedReactions([rootA, dislikeA], legacySummary, ownerA).my_reactions, {
+  [target]: { like: 0, dislike: 1 },
+});
+assert.deepEqual(projectMergedReactions([rootA, dislikeA], legacySummary, ownerA).others_reactions, {
+  [target]: { like: 2, dislike: 2 },
+});
+assert.deepEqual(projectMergedReactions([rootA, dislikeA, removeA], legacySummary, ownerA).my_reactions, {
+  [target]: { like: 0, dislike: 0 },
+});
+assert.deepEqual(projectMergedReactions([rootA, dislikeA, removeA], legacySummary, ownerA).others_reactions, {
+  [target]: { like: 2, dislike: 2 },
+});
+assert.equal(selectLegacyReactionSummary([legacySummary], nodeOwner, target, 'content'), legacySummary);
+assert.equal(selectLegacyReactionSummary([legacySummary], ownerB, target, 'content'), null);
+const conflictingSummary = { ...legacySummary, message_id: id('t'), dislike: 3 };
+assert.equal(
+  selectLegacyReactionSummary([legacySummary, conflictingSummary], nodeOwner, target, 'content'),
+  null,
+  'conflicting summaries at the same snapshot must fail closed'
+);
+
+const removedRoot = reaction({
+  id: id('r'),
+  owner: ownerA,
+  ref: 'reaction-owner-a-removed-root',
+  reaction: 'like',
+  state: 'removed',
+  operation: 'remove',
+  timestamp: 210,
+});
+assert.ok(removedRoot, 'a linked legacy reaction can be removed with the first native event');
+assert.deepEqual(projectMergedReactions([removedRoot], legacySummary, ownerA), {
+  current: [removedRoot],
+  my_reactions: { [target]: { like: 0, dislike: 0 } },
+  others_reactions: { [target]: { like: 2, dislike: 2 } },
+});
+
 assert.equal(
   normalizeNativeReaction({ ...rootA, schema: 'forged-schema' }),
   null,
@@ -120,6 +188,11 @@ assert.equal(
   normalizeNativeReaction({ ...rootA, 'message-id': 'short', message_id: undefined }),
   null,
   'invalid immutable IDs must not be counted'
+);
+assert.equal(
+  normalizeLegacyReactionSummary({ ...legacySummary, like: 0 }),
+  null,
+  'a summary cannot link more likes than its aggregate contains'
 );
 
 console.log('native reaction projection tests passed');

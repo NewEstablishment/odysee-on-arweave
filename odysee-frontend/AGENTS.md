@@ -156,6 +156,10 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
   changes cannot inherit another account's UI state.
 - Never use claimed profile fields as authority and never call the legacy
   reaction API or a custom reaction device.
+- Historical reaction parity comes from verified, node-signed summaries backed
+  by an authoritative per-user database import. Count a linked legacy state
+  until that native owner writes a superseding native event; never infer an
+  identity link or treat a public aggregate as per-user evidence.
 
 Creator hide, pin, heart, and channel block/unblock are generic append-only
 comment-control messages authorized by the exact content committer. Moderation

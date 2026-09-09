@@ -291,6 +291,15 @@ ordinary committed messages, using stock HyperBEAM machinery end to end:
    Historical LBRY ownership remains governed by its separately verified
    source evidence.
 
+   Historical reaction migration is also append-only. The operator imports an
+   authoritative per-user database export as node-signed
+   `odysee-legacy-reaction@1.0` records and compact per-target summary
+   messages. Raw legacy user IDs are replaced with stable HMAC references
+   before persistence. A node-attested legacy-to-native owner mapping allows a
+   native reaction to supersede the imported state; absent that mapping the
+   identities remain separate. No aggregate API response is treated as user
+   evidence. See [reactions.md](reactions.md).
+
    The browser keeps only an active/saved profile hint. At authentication it
    asks the node for the cookie owner, exact-hydrates candidate channel
    profiles, and creates a native Redux user only for a same-committer match.

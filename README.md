@@ -107,6 +107,7 @@ they are not alternate UI APIs.
 | Name or URI | Mutable lookup input, never immutable identity. |
 | Native comment revision | Its own immutable message ID, linked to a logical root comment. |
 | Native reaction revision | Its own immutable message ID, linked through stable logical reaction and version references. |
+| Imported legacy reaction | Stable HMAC user reference plus target, advanced by node-signed append-only revisions. |
 | Native playlist snapshot | Any verified commitment ID for its immutable message. Republished payloads receive new exact-read IDs. |
 | Native preference snapshot | Its verified immutable message ID. |
 | Native preference state | The canonical `reference@1.0` init commitment ID; same-owner set messages advance its snapshot value. |
@@ -254,7 +255,12 @@ and verifies every commitment and committer before counting it.
   authority.
 
 There is no reaction application device and the browser does not call the
-legacy reaction API.
+legacy reaction API. Historical reactions are migrated from an authoritative
+per-user database export as node-signed generic messages. Stable HMAC user
+references preserve per-user state without publishing legacy user IDs, and an
+authoritative legacy-to-native owner mapping lets a later native event
+supersede the imported state without double-counting. See
+[`docs/reactions.md`](docs/reactions.md).
 
 ### Playlists
 

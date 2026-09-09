@@ -63,8 +63,10 @@ methods are not part of this system; native writes replace them
 
 `https://api.odysee.com` (`/file/view_count`, `/reaction/list`,
 `/subscription/sub_count`, account flows). Server-side counters with no
-verifiable representation. Progressive enhancement only: the UI may display
-them; nothing depends on them, and no store commits them.
+verifiable representation. The reaction endpoint is not used for historical
+migration because it cannot identify the contributing users. Reaction history
+instead comes from an authoritative per-user database export and is committed
+by the importing node as described in [reactions.md](reactions.md).
 
 ### chainquery / lighthouse / Meilisearch — discovery only
 
