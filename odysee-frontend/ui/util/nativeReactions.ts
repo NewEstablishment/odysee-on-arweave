@@ -77,8 +77,8 @@ export function isValidNativeReaction(reaction: NativeReaction): boolean {
     !reaction.revision_of &&
     !reaction.previous_version &&
     reaction.revision === 0 &&
-    reaction.operation === 'set' &&
-    reaction.state === 'active';
+    ((reaction.operation === 'set' && reaction.state === 'active') ||
+      (reaction.operation === 'remove' && reaction.state === 'removed'));
   const revisionIsValid =
     Boolean(
       reaction.revision_of &&

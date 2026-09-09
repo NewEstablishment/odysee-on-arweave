@@ -190,6 +190,10 @@ Reactions:
   duplicate roots must not inflate counts.
 - Never derive authority from claimed profile or channel fields and never call
   the legacy reaction API.
+- Historical parity uses node-signed generic messages produced from an
+  authoritative per-user database export. Imported user IDs must be HMAC
+  references, and only authoritative legacy-to-native owner mappings may let a
+  native event supersede an imported reaction.
 
 Playlists:
 
@@ -298,6 +302,8 @@ Meilisearch document must not mutate the underlying object.
   Reject forks and conflicting semantic duplicates, and project at most one
   active reaction per committer and target.
 - Browser actions must not call the legacy reaction API.
+- Historical summaries are accepted only from the serving node's verified
+  committer and must remain backed by append-only per-user import records.
 
 ### Playlists
 

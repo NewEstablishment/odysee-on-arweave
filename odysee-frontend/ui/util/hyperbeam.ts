@@ -34,6 +34,15 @@ import {
   type NativeReactionSubject,
 } from 'util/nativeReactions';
 import {
+  LEGACY_REACTION_SUMMARY_SCHEMA,
+  LEGACY_REACTION_SUMMARY_TYPE,
+  linkedLegacyReactionForOwner,
+  normalizeLegacyReactionSummary,
+  projectMergedReactions,
+  selectLegacyReactionSummary,
+  type LegacyReactionSummary,
+} from 'util/legacyReactions';
+import {
   NATIVE_PLAYLIST_SCHEMA,
   NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   NATIVE_PLAYLIST_TYPE,
@@ -128,6 +137,10 @@ const nativeCommentControlQueryCache = new Map<
   { expiresAt: number; promise: Promise<Array<NativeCommentControl>> }
 >();
 const nativeReactionQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativeReaction>> }>();
+const legacyReactionSummaryQueryCache = new Map<
+  string,
+  { expiresAt: number; promise: Promise<Array<LegacyReactionSummary>> }
+>();
 const recentNativeReactionWrites = new Map<string, Map<string, NativeReaction>>();
 const nativePlaylistQueryCache = new Map<string, { expiresAt: number; promise: Promise<Array<NativePlaylist>> }>();
 const nativePlaylistReferenceQueryCache = new Map<
@@ -1345,12 +1358,22 @@ async function nativeReactionList(
   subject: NativeReactionSubject
 ): Promise<ReactionListResponse> {
   const validTargets = Array.from(new Set(targets.filter(validNativeReactionTarget)));
-  const [collections, viewerOwner] = await Promise.all([
+  const [collections, summaryCollections, viewerOwner, nodeOwner] = await Promise.all([
     Promise.all(validTargets.map((target) => fetchNativeReactionCollection(target, subject))),
+    Promise.all(validTargets.map((target) => fetchLegacyReactionSummaryCollection(target, subject))),
     activeHyperbeamAccountOwner(),
+    fetchHyperbeamNodeAddress(),
   ]);
-  const projected = projectNativeReactions(collections.flat(), viewerOwner);
-  return reactionListResponse(validTargets, projected.my_reactions, projected.others_reactions);
+  const myReactions: ReactionListResponse['my_reactions'] = {};
+  const othersReactions: ReactionListResponse['others_reactions'] = {};
+
+  validTargets.forEach((target, index) => {
+    const summary = selectLegacyReactionSummary(summaryCollections[index], nodeOwner, target, subject);
+    const projected = projectMergedReactions(collections[index], summary, viewerOwner);
+    myReactions[target] = projected.my_reactions[target];
+    othersReactions[target] = projected.others_reactions[target];
+  });
+  return reactionListResponse(validTargets, myReactions, othersReactions);
 }
 
 async function writeNativeReaction(params: {
@@ -1365,17 +1388,27 @@ async function writeNativeReaction(params: {
     throw new Error('This native reaction type is not implemented');
   }
 
-  const [owner, existing] = await Promise.all([
+  const [owner, existing, summaryCollection, nodeOwner] = await Promise.all([
     activeHyperbeamAccountOwner(),
     fetchNativeReactionCollection(params.target, params.subject),
+    fetchLegacyReactionSummaryCollection(params.target, params.subject),
+    fetchHyperbeamNodeAddress(),
   ]);
   if (!owner) throw new Error('Sign up or log in with the HyperBEAM account before reacting');
 
+  const summary = selectLegacyReactionSummary(summaryCollection, nodeOwner, params.target, params.subject);
   const current = projectNativeReactions(existing, owner).current.find((reaction) => reaction.owner === owner);
+  const inheritedReaction = current
+    ? current.state === 'active'
+      ? current.reaction
+      : null
+    : linkedLegacyReactionForOwner(summary, owner);
   const shouldRemove = Boolean(
-    params.remove || (params.toggle && nativeReactionToggleRemoves(current, params.reaction))
+    params.remove ||
+    (params.toggle &&
+      (nativeReactionToggleRemoves(current, params.reaction) || (!current && inheritedReaction === params.reaction)))
   );
-  if (shouldRemove && (!current || current.state !== 'active' || current.reaction !== params.reaction)) {
+  if (shouldRemove && inheritedReaction !== params.reaction) {
     return { success: true, ...(await nativeReactionList([params.target], params.subject)) };
   }
 
@@ -1412,13 +1445,64 @@ async function writeNativeReaction(params: {
   // The committed message is already exact-read and verified above. Project
   // it immediately instead of requiring the match index to expose it in the
   // same event-loop turn. Query remains discovery only, never authority.
-  const projected = projectNativeReactions(mergeNativeReactionEvents(existing, [written]), owner);
+  const projected = projectMergedReactions(mergeNativeReactionEvents(existing, [written]), summary, owner);
 
   return {
     success: true,
     'message-id': messageId,
     ...reactionListResponse([params.target], projected.my_reactions, projected.others_reactions),
   };
+}
+
+async function fetchLegacyReactionSummaryCollection(
+  target: string,
+  subject: NativeReactionSubject
+): Promise<Array<LegacyReactionSummary>> {
+  const selectors = {
+    schema: LEGACY_REACTION_SUMMARY_SCHEMA,
+    type: LEGACY_REACTION_SUMMARY_TYPE,
+    target,
+    subject,
+  };
+  const request = nativeQueryRequest(selectors);
+  const key = stableJson(request);
+  return cachedNativeQuery(legacyReactionSummaryQueryCache, key, async () => {
+    const paths = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
+    const summaries = await resolveLegacyReactionSummaryPaths(paths);
+    return summaries.filter(
+      (summary) =>
+        summary.schema === selectors.schema &&
+        summary.type === selectors.type &&
+        summary.target === target &&
+        summary.subject === subject
+    );
+  });
+}
+
+async function resolveLegacyReactionSummaryPaths(paths: Array<string>): Promise<Array<LegacyReactionSummary>> {
+  const summaries: Array<LegacyReactionSummary | null> = Array.from({ length: paths.length }, () => null);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(paths.length, NATIVE_COMMENT_READ_CONCURRENCY) }, async () => {
+    while (cursor < paths.length) {
+      const index = cursor++;
+      summaries[index] = await fetchLegacyReactionSummaryById(paths[index]);
+    }
+  });
+  await Promise.all(workers);
+  return summaries.filter((summary): summary is LegacyReactionSummary => Boolean(summary));
+}
+
+async function fetchLegacyReactionSummaryById(id: string): Promise<LegacyReactionSummary | null> {
+  if (!isNativeMessageId(id)) return null;
+  const normalizedId = id.replace(/^\/+/, '');
+  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
+  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  if (!verified) return null;
+  return normalizeLegacyReactionSummary({
+    ...verified.payload,
+    'message-id': normalizedId,
+    'hyperbeam-owner': verified.owner,
+  });
 }
 
 async function fetchNativeReactionCollection(
