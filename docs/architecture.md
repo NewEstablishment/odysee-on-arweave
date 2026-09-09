@@ -376,9 +376,13 @@ representation, leaving the exact whole message as the verification surface.
 Generic `search@1.0` provides ranked locator discovery for homepage, category,
 and text-search requests. The frontend maps filters and sort before the query,
 preserves locator order, and exact-hydrates every result; Meilisearch remains
-an index, never an object or authority source. Native per-channel listings use
-bounded `query@1.0` discovery over upload records and the same exact hydration
-boundary.
+an index, never an object or authority source. Public native channel/Following
+listings use that same ranked index. An operator worker applies the shared
+verified upload revision projection before indexing one exact current locator
+per root. Owner libraries/account summaries retain exact query enumeration.
+See [native upload projection](../decisions/native-upload-projection.md) for
+metadata snapshots, explicit clears, serialized writes, current versus exact
+routes, and search-worker operation.
 
 Static manifests embed homepage presentation templates, not node-specific
 claim selections. The node stores its immutable Lua materializer and homepage

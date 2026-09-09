@@ -37,7 +37,6 @@ import { doUserHasPremium } from './user';
 import { fetchHyperbeamChannelListMine, fetchHyperbeamResolveClaimIds, fetchHyperbeamUploads } from 'util/hyperbeam';
 import { hyperbeamNodeEnabled, hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import { canDeleteThroughHyperbeam, deleteThroughHyperbeam } from 'services/hyperbeamUpload';
-import { getAuthToken } from 'util/saved-passwords';
 import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 let onChannelConfirmCallback;
 let checkPendingInterval;
@@ -694,15 +693,18 @@ export function doAbandonClaim(claim: Claim, cb: (arg0: string) => any) {
       const data = { claimId: claim.claim_id };
       dispatch({ type: ACTIONS.ABANDON_CLAIM_STARTED, data });
 
-      return deleteThroughHyperbeam(claim, getAuthToken() || undefined).then(
+      return deleteThroughHyperbeam(claim).then(
         () => {
           dispatch({ type: ACTIONS.ABANDON_CLAIM_SUCCEEDED, data });
           if (cb) cb(ABANDON_STATES.DONE);
           dispatch(doToast({ message: __('Successfully removed your upload.') }));
         },
-        () => {
+        (error) => {
+          // Without this the claim stays filtered out of every my-claims
+          // selector for the rest of the session.
+          dispatch({ type: ACTIONS.ABANDON_CLAIM_FAILED, data });
           if (cb) cb(ABANDON_STATES.ERROR);
-          dispatch(doToast({ message: __('Error abandoning your claim/support'), isError: true }));
+          dispatch(doToast({ message: error?.message || __('Error abandoning your claim/support'), isError: true }));
         }
       );
     }

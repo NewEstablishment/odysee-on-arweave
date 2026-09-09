@@ -62,7 +62,10 @@ HB_CONFIG=config.json \
 HB_PRELOADED_STORE=_build/device-local-store \
 rebar3 shell
 
-# Terminal 3: only when a fresh manifest is required.
+# Terminal 3: keep native upload search projection current.
+node --experimental-strip-types scripts/reindex-node-uploads-to-search.mjs --watch
+
+# Terminal 4: only when a fresh manifest is required.
 cd odysee-frontend
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 \
 pnpm run publish:manifest
@@ -209,6 +212,7 @@ pnpm run typecheck:tsc
 pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
+pnpm run test:hyperbeam-session
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
@@ -236,7 +240,6 @@ HYPERBEAM_BASE_URL=http://127.0.0.1:18801 pnpm run test:hyperbeam-upload-smoke
   baseline import.
 - Native aggregate subscriber counts, moderation delegates, and blocked-word
   settings are not implemented.
-- Upload metadata edit/delete still needs a complete append-only contract.
 - Browser identity is local to this node/browser and is not yet portable or
   recoverable on another deployment.
 - Private-playlist recovery follows the account: the recipient key is the

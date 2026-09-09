@@ -30,8 +30,9 @@ Full-text search calls generic `search@1.0` through `ui/util/hyperbeam.ts`.
 sort, limit, and offset. Hydrate the ordered immutable locators afterward;
 never implement ranking-affecting filters or pagination in a page component.
 Empty-query homepage/category discovery uses this same path. Native channel
-uploads use bounded exact `query@1.0` discovery because `channel-id` is not a
-generic full-text index selector.
+uploads in public discovery use the verified operator projection's
+`channel_claim_id` search selector. Exact query enumeration remains for owner
+library/account summaries; do not merge separately ranked native/legacy pages.
 
 Keep `/$/discover` mounted without tag or moderator prerequisites. Existing
 links use its query parameters for generic search filters; materialized named
@@ -110,6 +111,14 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
   `/id?0.%21=true&committers=all` with cookie credentials.
 - It writes a generic `odysee-upload@1.0` record after the data write.
 - The uploads page queries those records rather than `claim_list`.
+- Upload edits are full editable metadata snapshots; preserve explicit empty
+  strings/lists and tags/languages. New predecessor links use exact immutable
+  IDs. Serialize writes per node/owner/root and reverify stored locator hints.
+- Friendly name/root routes discover current uploads; exact version routes and
+  playlist IDs do not advance implicitly. Tombstones hide current discovery,
+  not immutable history or media bytes.
+- Keep upload search projection in the operator worker and shared revision
+  helpers. Do not put product state rules in generic search or React pages.
 - Do not run legacy TUS token, transcode, transmux, optimizer, bitrate, or file
   size gates for a raw node upload.
 - Do not persist `File`, pipeline-item, or remote-upload transient state.
@@ -283,6 +292,7 @@ pnpm run typecheck:tsc
 pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
+pnpm run test:hyperbeam-session
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
@@ -316,7 +326,8 @@ normal-flow request reaches a legacy host.
   dashboard is not yet implemented.
 - Native subscriber counts, moderation delegates, and blocked-word settings
   are not implemented.
-- Upload edit/delete needs a complete append-only native contract.
+- Upload conflicts stop at the last unambiguous version; automatic merging of
+  genuinely conflicting edits is not supported.
 - Only single HTTP byte ranges are supported; multipart range responses are not.
 - The cookie identity is node/browser-local and is not yet portable or
   recoverable. Preference recovery consequently remains local to the same hosted

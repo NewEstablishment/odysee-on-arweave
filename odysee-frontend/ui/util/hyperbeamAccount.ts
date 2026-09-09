@@ -7,12 +7,11 @@
 //
 // Session model:
 //   sign up  -> mint a FRESH cookie identity + a channel profile with the name.
-//   sign out -> keep the cookie (identity persists), just hide the account.
-//   log in   -> the cookie is still there, so restore the account.
-//
-// Future: swap the node's secret-provider from `~cookie@1.0' to an `oauth@1.0'
-// device for a portable, recoverable identity. This frontend contract is
-// unchanged.
+//   sign out -> keep the cookie (identity persists); hide the account, keep it
+//               as the login hint.
+//   log in   -> verify the cookie still owns the hinted profile or discover one
+//               it owns; no session shows an error and keeps the hint.
+//   boot     -> same check on a signed-in account; a final 401/403 forgets it.
 
 import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
 
@@ -33,22 +32,11 @@ function read(key: string): HyperbeamAccount | null {
 }
 
 export function getHyperbeamAccount(): HyperbeamAccount | null {
-  const account = read(ACCOUNT_KEY);
-  if (account && typeof localStorage !== 'undefined') {
-    localStorage.setItem(SAVED_KEY, JSON.stringify(account));
-  }
-  return account;
+  return read(ACCOUNT_KEY);
 }
 
 export function isHyperbeamSignedIn(): boolean {
   return Boolean(getHyperbeamAccount());
-}
-
-// The node cookie may be HttpOnly, so JavaScript cannot use document.cookie
-// to determine whether it is present. The saved profile is the browser's
-// signed-out-session marker; the node remains the authority on the next write.
-export function canLogInHyperbeam(): boolean {
-  return Boolean(read(SAVED_KEY));
 }
 
 function clearNodeCookies(): void {
@@ -76,15 +64,10 @@ export async function signUpHyperbeam(name: string): Promise<HyperbeamAccount> {
     credentials: 'include',
     headers: { accept: 'application/json', type: 'channel', name: trimmed },
   });
-  let id = response.headers.get('message-id') || '';
-  if (response.ok && !id) {
-    try {
-      id = String((await response.json())['message-id'] || '');
-    } catch (e) {}
-  }
-  if (!response.ok || !id) {
-    throw new Error(`Sign up failed (${response.status}).`);
-  }
+  const id =
+    response.headers.get('message-id') ||
+    (response.ok ? String((await response.json().catch(() => null))?.['message-id'] || '') : '');
+  if (!response.ok || !id) throw new Error(`Sign up failed (${response.status}).`);
 
   const account = { name: trimmed, id };
   const { verifyHyperbeamAccountProfile } = await import('util/hyperbeam');
@@ -92,30 +75,29 @@ export async function signUpHyperbeam(name: string): Promise<HyperbeamAccount> {
     throw new Error('The new HyperBEAM account could not be verified against this browser session.');
   }
   localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
-  localStorage.setItem(SAVED_KEY, JSON.stringify(account));
   return account;
-}
-
-// A saved profile is only a UI hint. Login always asks the node to prove that
-// the opaque cookie owns the exact committed profile before restoring it.
-export async function logInHyperbeam(): Promise<HyperbeamAccount | null> {
-  return recoverHyperbeamAccount();
 }
 
 export async function recoverHyperbeamAccount(): Promise<HyperbeamAccount | null> {
   const { recoverHyperbeamAccountProfile } = await import('util/hyperbeam');
-  const account = await recoverHyperbeamAccountProfile();
-  if (!account) return null;
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
-  localStorage.setItem(SAVED_KEY, JSON.stringify(account));
+  const account = await recoverHyperbeamAccountProfile(read(ACCOUNT_KEY) || read(SAVED_KEY));
+  if (account) localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
   return account;
 }
 
 // Sign out without destroying the identity: hide the account but keep the
-// cookie so `logInHyperbeam' can restore it. Remember the account for that.
+// cookie so `recoverHyperbeamAccount' can restore it. Remember it for that.
 export function signOutHyperbeam(): void {
   if (typeof localStorage === 'undefined') return;
   const current = read(ACCOUNT_KEY);
   if (current) localStorage.setItem(SAVED_KEY, JSON.stringify(current));
   localStorage.removeItem(ACCOUNT_KEY);
+}
+
+// The node no longer knows this browser's identity (e.g. its store was
+// reset): nothing can be restored, so stop presenting the account.
+export function forgetHyperbeamAccount(): void {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.removeItem(ACCOUNT_KEY);
+  localStorage.removeItem(SAVED_KEY);
 }

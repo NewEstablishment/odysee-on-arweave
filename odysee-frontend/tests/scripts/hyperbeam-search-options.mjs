@@ -101,4 +101,25 @@ assert.deepEqual(hyperbeamClaimSearchRequest({ claim_type: 'stream', nsfw: true 
 assert.equal(earliestReleaseTime('today', 200_000), 113_600);
 assert.equal(earliestReleaseTime('', 200_000), null);
 
+const following = hyperbeamClaimSearchRequest(
+  {
+    channel_ids: ['native-channel', 'legacy-channel'],
+    any_tags: ['science'],
+    all_tags: ['tutorial'],
+    not_tags: ['mature'],
+    stream_types: ['video'],
+    order_by: ['^release_time'],
+  },
+  24,
+  12
+);
+assert.equal(following.offset, 24);
+assert.equal(following.limit, 12);
+assert.deepEqual(following.sort, ['release_time:asc']);
+assert.ok(following.filter.includes('channel_claim_id IN ["native-channel", "legacy-channel"]'));
+assert.ok(following.filter.includes('tags IN ["science"]'));
+assert.ok(following.filter.includes('tags = "tutorial"'));
+assert.ok(following.filter.includes('tags NOT IN ["mature"]'));
+assert.ok(following.filter.includes('media_type IN ["video"]'));
+
 console.log('HyperBEAM search option tests passed');
