@@ -156,6 +156,12 @@ helpers before creating another transport or normalization path.
 
 ## Native identity and writes
 
+Upload revision/search ownership is clarified by
+`decisions/native-upload-projection.md`: generic immutable writes, verified
+shared projection, and an operator search worker. Public channel/Following
+search uses the shared indexed corpus and server-side filters/pagination.
+Older upload-device/SSR instructions below do not override that decision.
+
 The native browser identity is the node's `secret-*` cookie, minted by
 `cookie@1.0` on the first committed write. Local storage contains display
 metadata only and grants no authority.

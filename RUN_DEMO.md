@@ -62,7 +62,10 @@ HB_CONFIG=config.json \
 HB_PRELOADED_STORE=_build/device-local-store \
 rebar3 shell
 
-# Terminal 3: only when a fresh manifest is required.
+# Terminal 3: keep native upload search projection current.
+node --experimental-strip-types scripts/reindex-node-uploads-to-search.mjs --watch
+
+# Terminal 4: only when a fresh manifest is required.
 cd odysee-frontend
 HYPERBEAM_BASE_URL=http://127.0.0.1:18801 \
 pnpm run publish:manifest

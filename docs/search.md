@@ -26,7 +26,6 @@ presentation.
     {
       "field": "schema",
       "values": [
-        "odysee-upload@1.0",
         "odysee-channel@1.0",
         "odysee-playlist@1.0",
         "odysee-comment@1.0"
@@ -80,8 +79,20 @@ post-filtering from corrupting ranking or page boundaries.
 ## Operations
 
 Run Meilisearch separately at the configured URL. The generic hook handles
-new native writes; the importer handles historical backfill and uses staged,
+non-upload eligible writes; the importer handles historical backfill and uses staged,
 checkpointed rebuilds so a live index is not replaced in place.
+
+Native uploads use the [verified upload projection](../decisions/native-upload-projection.md).
+Run one `node --experimental-strip-types scripts/reindex-node-uploads-to-search.mjs
+--watch` process per index. A one-shot invocation reconciles existing native
+documents; `--dry-run` performs discovery/verification without index writes.
+The default refresh interval is five seconds (`--interval-ms` overrides it).
+Set `HYPERBEAM_BASE_URL`, `MEILI_URL`, `MEILI_INDEX`, and optional operator index
+credentials through the environment. Restart older nodes with the updated
+marker configuration before running the worker, or their raw upload hooks can
+race the projection. Current upload locators, tags, language, channel, release
+time and media filters are indexed before pagination; browser pages do not
+merge separately ranked native/legacy prefixes.
 
 The focused backend unit tests do not require a live Meilisearch service.
 Set `SEARCH_LIVE=1` only when intentionally exercising the live write/query

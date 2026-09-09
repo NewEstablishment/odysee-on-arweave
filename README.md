@@ -192,15 +192,29 @@ wallpaper/placeholder assets are served from the manifest itself.
 
 Homepage and category `claim_search` requests map filters, ordering, and
 pagination to generic `search@1.0` requests, then hydrate the returned ordered
-immutable locators through exact reads. Native channel content uses a bounded
-`query@1.0` lookup over `odysee-upload@1.0` messages because channel ownership
-is verified from exact records rather than inferred from the search index.
+immutable locators through exact reads. Public native channel and Following
+content uses the same search index after verified upload projection. Owner
+libraries/account summaries use exact query and verified revision projection.
 The compatibility `/$/discover` route remains available for tag, type, order,
 and freshness links; named materialized categories use their own `/$/<name>`
 routes.
 
 There is no legacy transcoder or TUS preparation path in HyperBEAM mode.
 Transient `File` and pipeline objects are excluded from persisted Redux state.
+
+Upload metadata edits and deletes are generic same-owner revisions. Full metadata
+snapshots preserve explicit clears, tags and languages; deletes hide current
+discovery while preserving immutable history. Exact version routes stay exact.
+Run the operator upload search worker alongside Meilisearch so only verified
+current snapshots enter ranked discovery:
+
+```sh
+node --experimental-strip-types scripts/reindex-node-uploads-to-search.mjs --watch
+```
+
+See [upload projection](decisions/native-upload-projection.md) for identity,
+concurrency, search ownership and validation. The worker uses `HYPERBEAM_BASE_URL`,
+`MEILI_URL`, `MEILI_INDEX` and optional `MEILI_MASTER_KEY`/`ODYSEE_SEARCH_API_KEY`.
 
 ### Comments
 

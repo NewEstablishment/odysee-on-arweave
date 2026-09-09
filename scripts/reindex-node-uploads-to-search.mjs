@@ -1,109 +1,137 @@
-// Re-populates the full-text search index from the node's own stores by
-// replaying every native upload through `~search@1.0/write` — the same hook
-// the node fires on cache writes. Needed whenever the Meilisearch database
-// is recreated (e.g. an incompatible Meilisearch upgrade): cache-write
-// indexing only covers new writes, and nothing rebuilds history on boot.
-//
-// Upload edit/delete revisions are collapsed first: a deleted chain is not
-// indexed at all, and an edited chain is indexed once, as the root document
-// carrying the newest metadata.
-//
-// Usage: node scripts/reindex-node-uploads-to-search.mjs [--node-url http://127.0.0.1:18801]
+// Operator reconciliation of native upload search documents. --watch keeps it current.
+import { setTimeout as delay } from "node:timers/promises";
+import { collectUploads, uploadSearchDocuments } from "./native-upload-search.mjs";
 
 const args = process.argv.slice(2);
-const nodeUrl = (valueOf('--node-url') || process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18801').replace(
-  /\/+$/,
-  ''
-);
+const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
+const node = option(
+  "--node-url",
+  process.env.HYPERBEAM_BASE_URL || "http://127.0.0.1:18801",
+).replace(/\/+$/, "");
+const meili = (process.env.MEILI_URL || "http://127.0.0.1:7700").replace(/\/+$/, "");
+const index = encodeURIComponent(process.env.MEILI_INDEX || "odysee_claims");
+const key = process.env.MEILI_MASTER_KEY || process.env.ODYSEE_SEARCH_API_KEY;
+const headers = {
+  "content-type": "application/json",
+  ...(key ? { authorization: "Bearer " + key } : {}),
+};
+const interval = Number(option("--interval-ms", "5000"));
+if (!Number.isFinite(interval) || interval < 1000)
+  throw new Error("interval-ms must be at least 1000");
 
-function valueOf(flag) {
-  const index = args.indexOf(flag);
-  return index >= 0 ? args[index + 1] : undefined;
-}
-
-async function queryPaths(selectors) {
-  const response = await fetch(`${nodeUrl}/~query@1.0/only`, {
-    method: 'POST',
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({
-      ...selectors,
-      only: Object.keys(selectors),
-      return: 'paths',
-      'cache-control': ['no-store', 'no-cache'],
-    }),
+async function api(path, method = "GET", body) {
+  const response = await fetch(meili + path, {
+    method,
+    headers,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(30000),
   });
-  if (!response.ok) throw new Error(`query failed with ${response.status}`);
-  const body = await response.json();
-  return Object.entries(body)
-    .filter(([key]) => key !== 'status')
-    .map(([, value]) => String(value));
+  if (!response.ok)
+    throw Object.assign(new Error("Search operation failed (" + response.status + ")"), {
+      status: response.status,
+    });
+  return response.json();
 }
 
-async function readMessage(id) {
-  const response = await fetch(`${nodeUrl}/${encodeURIComponent(id)}/serialize~json@1.0`, {
-    headers: { accept: 'application/json' },
-  });
-  if (!response.ok) throw new Error(`read ${id} failed with ${response.status}`);
-  const payload = await response.json();
-  delete payload.commitments;
-  return payload;
+async function complete(task) {
+  if (task.taskUid === undefined) throw new Error("Search did not acknowledge a task");
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    const state = await api("/tasks/" + task.taskUid);
+    if (state.status === "succeeded") return;
+    if (["failed", "canceled"].includes(state.status)) throw new Error("Search task failed");
+    await delay(200);
+  }
+  throw new Error("Search task timed out");
 }
 
-async function writeToSearch(payload) {
-  const response = await fetch(`${nodeUrl}/~search@1.0/write`, {
-    method: 'POST',
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ body: payload }),
-  });
-  if (!response.ok) throw new Error(`search write failed with ${response.status}`);
-}
-
-const ids = await queryPaths({ schema: 'odysee-upload@1.0', type: 'upload' });
-console.log(`found ${ids.length} upload messages`);
-
-const messages = new Map();
-for (const id of ids) {
+async function reconcile() {
+  const documents = uploadSearchDocuments(await collectUploads(node));
+  if (args.includes("--dry-run")) {
+    console.log(
+      JSON.stringify({ activeUploads: documents.length, locators: documents.map((doc) => doc.id) }),
+    );
+    return;
+  }
+  const base = "/indexes/" + index;
+  let settings;
   try {
-    messages.set(id, await readMessage(id));
+    settings = await api(base + "/settings");
   } catch (error) {
-    console.warn(`skipping unreadable ${id}: ${error.message}`);
+    if (error.status !== 404) throw error;
+    await complete(
+      await api("/indexes", "POST", { uid: decodeURIComponent(index), primaryKey: "search_id" }),
+    );
+    settings = await api(base + "/settings");
   }
-}
-
-// Group revisions under their roots and pick each chain's effective state.
-const revisionsByRoot = new Map();
-for (const [id, payload] of messages) {
-  const rootRef = payload['revision-of'];
-  if (!rootRef) continue;
-  const list = revisionsByRoot.get(rootRef) || [];
-  list.push({ id, payload });
-  revisionsByRoot.set(rootRef, list);
-}
-
-let indexed = 0;
-let deleted = 0;
-for (const [id, payload] of messages) {
-  if (payload['revision-of']) continue; // revisions are not standalone documents
-  const revisions = (revisionsByRoot.get(id) || []).sort(
-    (left, right) => Number(left.payload.revision || 0) - Number(right.payload.revision || 0)
+  const required = [
+    "schema",
+    "source_system",
+    "search_id",
+    "claim_type",
+    "channel_claim_id",
+    "media_type",
+    "tags",
+    "language",
+    "release_time",
+    "nsfw",
+    "fee",
+    "duration",
+    "has_source",
+  ];
+  const filterableAttributes = [
+    ...new Set([...(settings.filterableAttributes || []), ...required]),
+  ];
+  const sortableAttributes = [
+    ...new Set([...(settings.sortableAttributes || []), "release_time", "effective_amount"]),
+  ];
+  if (
+    JSON.stringify(filterableAttributes) !== JSON.stringify(settings.filterableAttributes) ||
+    JSON.stringify(sortableAttributes) !== JSON.stringify(settings.sortableAttributes)
+  ) {
+    await complete(
+      await api(base + "/settings", "PATCH", { filterableAttributes, sortableAttributes }),
+    );
+  }
+  const existing = [];
+  for (let offset = 0; ; offset += 1000) {
+    const page = await api(base + "/documents/fetch", "POST", {
+      filter: 'schema = "odysee-upload@1.0"',
+      offset,
+      limit: 1000,
+    });
+    existing.push(...page.results);
+    if (page.results.length < 1000) break;
+  }
+  const same = (a, b) =>
+    JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b || {}).sort());
+  const byKey = new Map(existing.map((doc) => [doc.search_id, doc]));
+  const changed = documents.filter((doc) => !same(doc, byKey.get(doc.search_id)));
+  // Replace full documents; PATCH would retain cleared fields.
+  for (let i = 0; i < changed.length; i += 500)
+    await complete(await api(base + "/documents", "POST", changed.slice(i, i + 500)));
+  const keep = new Set(documents.map((doc) => doc.search_id));
+  const obsolete = existing.filter((doc) => !keep.has(doc.search_id)).map((doc) => doc.search_id);
+  for (let i = 0; i < obsolete.length; i += 500)
+    await complete(await api(base + "/documents/delete-batch", "POST", obsolete.slice(i, i + 500)));
+  console.log(
+    JSON.stringify({
+      activeUploads: documents.length,
+      replaced: changed.length,
+      removedObsoleteSearchDocuments: obsolete.length,
+    }),
   );
-  const tip = revisions[revisions.length - 1];
-  if (tip && tip.payload.state === 'deleted') {
-    deleted += 1;
-    continue;
-  }
-  const document = { ...payload };
-  if (tip) {
-    for (const key of ['title', 'description', 'thumbnail-url', 'license', 'release-time']) {
-      if (tip.payload[key] !== undefined) document[key] = tip.payload[key];
+}
+
+do {
+  try {
+    await reconcile();
+  } catch (error) {
+    console.error(error.message);
+    if (!args.includes("--watch")) {
+      process.exitCode = 1;
+      break;
     }
   }
-  try {
-    await writeToSearch(document);
-    indexed += 1;
-  } catch (error) {
-    console.warn(`index failed for ${id}: ${error.message}`);
-  }
-}
-
-console.log(`indexed ${indexed} uploads, skipped ${deleted} deleted chains`);
+  if (args.includes("--watch")) await delay(interval);
+} while (args.includes("--watch"));

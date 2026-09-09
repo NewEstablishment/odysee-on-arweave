@@ -4,7 +4,7 @@
 // stays the claim id, so URLs never change; readers collapse each chain to
 // its tip and hide deleted tips. Chain legality is enforced client-side
 // against the verified committer, mirroring `nativeCommentRevisions`.
-import { collapseChains, type CollapseSpec } from './revisionedMessage.ts';
+import { nativeMessageVersionRef } from './nativeMessageVerification.ts';
 
 export const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
 
@@ -73,6 +73,8 @@ export function normalizeNativeUploadRevision(
     license: stringField(payload, 'license'),
     license_url: stringField(payload, 'license-url', 'license_url'),
     release_time: numberField(payload, 'release-time', 'release_time'),
+    tags: listField(payload, 'tags'),
+    languages: listField(payload, 'languages'),
   };
 }
 
@@ -84,9 +86,14 @@ export function nativeUploadRevisionMessage(
 ): Record<string, any> {
   if (!root.record_id || !root.hyperbeam_owner) throw new Error('Upload root is not verifiable');
   if (current.state === 'deleted') throw new Error('This upload has already been deleted');
-  const currentId = current.version_ref || current.hyperbeam_message_id;
+  const currentId = current.hyperbeam_message_id || current.version_ref;
   if (!currentId) throw new Error('Current upload version is missing an ID');
 
+  const snapshot = {
+    ...nativeUploadTipMetadata(root),
+    ...defined(nativeUploadTipMetadata(current)),
+    ...defined(metadata),
+  };
   const message: Record<string, any> = {
     schema: NATIVE_UPLOAD_SCHEMA,
     type: 'upload',
@@ -98,38 +105,33 @@ export function nativeUploadRevisionMessage(
     timestamp: root.timestamp,
     'revision-of': root.record_id,
     'previous-version': currentId,
-    'version-ref': nativeUploadVersionRef(),
+    'version-ref': nativeMessageVersionRef(),
     revision: revisionNumber(current) + 1,
     'revision-timestamp': Math.floor(Date.now() / 1000),
     operation,
     state: operation === 'delete' ? 'deleted' : 'active',
     ...(operation === 'edit'
       ? {
-          title: metadata.title,
-          description: metadata.description,
-          'thumbnail-url': metadata.thumbnail_url,
-          license: metadata.license,
-          'license-url': metadata.license_url,
-          'release-time': metadata.release_time,
+          'metadata-mode': 'snapshot',
+          title: snapshot.title ?? '',
+          description: snapshot.description ?? '',
+          'thumbnail-url': snapshot.thumbnail_url ?? '',
+          license: snapshot.license ?? '',
+          'license-url': snapshot.license_url ?? '',
+          'release-time': snapshot.release_time ?? root.timestamp ?? 0,
+          tags: snapshot.tags ?? [],
+          languages: snapshot.languages ?? [],
         }
       : {}),
   };
-  return Object.fromEntries(
-    Object.entries(message).filter(([, value]) => value !== undefined && value !== null && value !== '')
-  );
+  return Object.fromEntries(Object.entries(message).filter(([, value]) => value !== undefined && value !== null));
 }
 
-const uploadChainSpec: CollapseSpec<NativeUploadRevision> = {
-  rootRef: (upload) => upload.record_id || '',
-  revisionOf: (upload) => upload.revision_of,
-  isNext: isNextNativeUploadRevision,
-  versionIdentity: (upload) => String(upload.hyperbeam_message_id || upload.record_id || ''),
-  equivocation: 'none',
-};
-
 export function collapseNativeUploadRevisions(uploads: Array<NativeUploadRevision>): Array<NativeUploadRevision> {
-  const identified = uploads.filter((upload) => upload.hyperbeam_message_id || upload.record_id);
-  return collapseChains(identified, uploadChainSpec);
+  return uploads
+    .filter((item) => !item.revision_of && item.hyperbeam_owner)
+    .map((root) => latestNativeUploadRevision(root, uploads))
+    .filter((tip, index, tips) => tips.findIndex((item) => item.record_id === tip.record_id) === index);
 }
 
 export function latestNativeUploadRevision(
@@ -138,9 +140,17 @@ export function latestNativeUploadRevision(
 ): NativeUploadRevision {
   let current = root;
   while (true) {
-    const candidates = revisions.filter((revision) => isNextNativeUploadRevision(root, current, revision));
+    const candidates = uniqueNativeUploadVersions(
+      revisions.filter((revision) => isNextNativeUploadRevision(root, current, revision))
+    );
     if (candidates.length !== 1) return current;
-    current = candidates[0];
+    // Old revisions were sparse patches. New revisions carry full snapshots;
+    // merging defined values also gives old chains consistent read semantics.
+    current = {
+      ...candidates[0],
+      ...defined(nativeUploadTipMetadata(current)),
+      ...defined(nativeUploadTipMetadata(candidates[0])),
+    } as NativeUploadRevision;
   }
 }
 
@@ -162,13 +172,16 @@ export function isNextNativeUploadRevision(
     root.hyperbeam_owner &&
     candidate.hyperbeam_owner === root.hyperbeam_owner &&
     candidate.revision_of === rootId &&
-    candidate.previous_version === currentId &&
+    [currentId, current.hyperbeam_message_id, ...(current.message_aliases || [])].includes(
+      candidate.previous_version
+    ) &&
     revisionNumber(candidate) === revisionNumber(current) + 1 &&
     operationIsValid &&
     candidate.data_id === root.data_id &&
     candidate.channel_id === root.channel_id &&
     candidate.name === root.name &&
-    Number(candidate.timestamp) === Number(root.timestamp)
+    Number(candidate.timestamp) === Number(root.timestamp) &&
+    Number.isSafeInteger(Number(candidate.revision))
   );
 }
 
@@ -181,6 +194,8 @@ export function nativeUploadTipMetadata(tip: NativeUploadRevision): NativeUpload
     license: tip.license,
     license_url: tip.license_url,
     release_time: tip.release_time,
+    tags: tip.tags,
+    languages: tip.languages,
   };
 }
 
@@ -189,9 +204,49 @@ function revisionNumber(upload: NativeUploadRevision): number {
   return Number.isFinite(revision) && revision >= 0 ? revision : 0;
 }
 
-function nativeUploadVersionRef(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+export function uniqueNativeUploadVersions(items: Array<NativeUploadRevision>): Array<NativeUploadRevision> {
+  const bySemantics = new Map<string, NativeUploadRevision>();
+  for (const item of items) {
+    const { hyperbeam_message_id: _id, message_aliases: _aliases, ...semantic } = item;
+    const key = JSON.stringify(
+      Object.keys(semantic)
+        .sort()
+        .map((field) => [field, semantic[field]])
+    );
+    const existing = bySemantics.get(key);
+    if (!existing) bySemantics.set(key, item);
+    else
+      bySemantics.set(key, {
+        ...existing,
+        message_aliases: [
+          ...new Set(
+            [
+              existing.hyperbeam_message_id,
+              item.hyperbeam_message_id,
+              ...(existing.message_aliases || []),
+              ...(item.message_aliases || []),
+            ].filter(Boolean)
+          ),
+        ],
+      });
+  }
+  return [...bySemantics.values()];
+}
+
+function defined<T extends Record<string, any>>(record: T): Partial<T> {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Partial<T>;
+}
+
+function listField(source: Record<string, any>, key: string): Array<string> | undefined {
+  const raw = source[key];
+  if (raw === undefined) return undefined;
+  if (Array.isArray(raw)) return raw.map(String);
+  if (raw && typeof raw === 'object')
+    return Object.keys(raw)
+      .filter((key) => /^[1-9]\d*$/.test(key))
+      .sort((a, b) => Number(a) - Number(b))
+      .map((key) => String(raw[key]));
+  return raw === '' ? [] : [String(raw)];
 }
 
 function field(source: Record<string, any>, ...keys: Array<string>): any {

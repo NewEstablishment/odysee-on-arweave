@@ -65,6 +65,15 @@ export async function updateThroughHyperbeam(
   publishPayload: PublishParams,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
+  if (
+    hasValue(publishPayload.remote_url) ||
+    hasValue(publishPayload.fee_amount) ||
+    hasValue(publishPayload.fee_currency) ||
+    publishPayload.optimize_file ||
+    hasUnsupportedTags(publishPayload.tags)
+  ) {
+    throw new Error('Native upload edits support public metadata only.');
+  }
   const updated = await fetchHyperbeamUploadUpdate(claim, publishMetadata(publishPayload));
   return normalizePublishResponse({ outputs: [updated] }, publishPayload, null, myChannels);
 }
@@ -181,13 +190,22 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     name: uploadPayload.name,
     filename: uploadPayload.filename,
     'content-type': uploadPayload.content_type,
+    // Also carry the media type under a non-reserved key: when the message
+    // has any list field (tags/languages) the node serializes it as
+    // multipart/form-data, and that HTTP Content-Type header shadows the
+    // message's own `content-type` field, so the resolver would otherwise
+    // never see `video/*` and would render the upload as a plain file.
+    'media-type': uploadPayload.content_type,
     'source-size': String(uploadPayload.size || ''),
     'data-id': dataId,
     'streaming-url': `/${dataId}`,
     title: metadata.title,
     description: metadata.description,
+    tags: metadata.tags,
+    languages: metadata.languages,
     'thumbnail-url': metadata.thumbnail_url,
     license: metadata.license,
+    'license-url': metadata.license_url,
     'release-time': metadata.release_time,
     'video-duration': metadata.video?.duration,
     'video-width': metadata.video?.width,
@@ -215,7 +233,8 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
 function publishMetadata(publishPayload: PublishParams) {
   const payload = publishPayload as any;
   return METADATA_KEYS.reduce<Record<string, any>>((metadata, key) => {
-    if (hasValue(payload[key])) metadata[key] = payload[key];
+    // Empty strings and lists are explicit clears; only absent values are omitted.
+    if (payload[key] !== undefined && payload[key] !== null) metadata[key] = payload[key];
     return metadata;
   }, {});
 }

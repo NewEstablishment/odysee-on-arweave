@@ -6,6 +6,7 @@ import { resolveHyperbeamNodeBase } from 'util/hyperbeamNode';
 import { isServedFromManifest } from 'util/manifest-prefix';
 import { hyperbeamClaimSearchRequest, type HyperbeamSearchRequest } from 'util/hyperbeamSearch';
 import { isHyperbeamUploadClaim } from 'util/claim';
+import { rememberUploadVersion, serializeUploadWrite, uploadVersionHints } from 'util/nativeUploadWrites';
 import {
   collapseNativeUploadRevisions,
   isNextNativeUploadRevision,
@@ -13,6 +14,7 @@ import {
   nativeUploadRevisionMessage,
   nativeUploadTipMetadata,
   normalizeNativeUploadRevision,
+  uniqueNativeUploadVersions,
   type NativeUploadMetadata,
   type NativeUploadRevision,
 } from 'util/nativeUploadRevisions';
@@ -253,9 +255,8 @@ async function fetchUploadClaimByName(uri: string): Promise<any | null> {
 
   const request = nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA, name });
   const recordIds = uniquePaths(queryPaths(await fetchPublicQueryJson(request)));
-  const claims = (
-    await Promise.all(recordIds.map((recordId) => resolveImmutableClaimById(recordId).catch(() => null)))
-  ).filter(Boolean);
+  const tips = (await fetchNativeUploadTips(recordIds)).filter((tip) => tip.state !== 'deleted');
+  const claims = (await Promise.all(tips.map((tip) => resolveNativeUploadTip(tip)))).filter(Boolean);
   claims.sort((left, right) => {
     const timestampDelta = toNumber(right?.timestamp, 0) - toNumber(left?.timestamp, 0);
     return timestampDelta || String(right?.immutable_id || '').localeCompare(String(left?.immutable_id || ''));
@@ -570,8 +571,7 @@ async function fetchNativePreferenceReferenceCollection(
 async function fetchNativePreferenceReferenceMessageById(id: string): Promise<NativePreferenceReference | null> {
   if (!isNativeMessageId(id)) return null;
   const normalizedId = id.replace(/^\/+/, '');
-  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
-  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  const verified = await fetchVerifiedNativeMessage(normalizedId);
   if (!verified) return null;
   return normalizeNativePreferenceReference({
     ...verified.payload,
@@ -2744,41 +2744,6 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
   const claimIds = paramValues(params, 'claim_ids', 'claim-ids', 'claim_id', 'claim-id');
   if (claimIds.length) return fetchHyperbeamResolveClaimIds({ ...params, claim_ids: claimIds });
 
-  const channelIds = paramValues(params, 'channel_ids', 'channel-ids', 'channel_id', 'channel-id');
-  if (channelIds.length) {
-    const nativeChannelIds = channelIds.filter(isNativeMessageId);
-    const legacyChannelIds = channelIds.filter(isClaimId);
-    if (nativeChannelIds.length && !legacyChannelIds.length) {
-      return fetchNativeChannelClaimSearch(params, nativeChannelIds);
-    }
-    if (legacyChannelIds.length && !nativeChannelIds.length) {
-      return fetchHyperbeamSourceClaimSearch({ ...params, channel_ids: legacyChannelIds });
-    }
-    if (nativeChannelIds.length && legacyChannelIds.length) {
-      const page = Math.max(1, toNumber(params.page, 1));
-      const pageSize = Math.max(1, toNumber(params.page_size, 20));
-      const requestedSize = page * pageSize;
-      const [native, historical] = await Promise.all([
-        fetchNativeChannelClaimSearch({ ...params, page: 1, page_size: requestedSize }, nativeChannelIds),
-        fetchHyperbeamSourceClaimSearch({
-          ...params,
-          page: 1,
-          page_size: requestedSize,
-          channel_ids: legacyChannelIds,
-        }),
-      ]);
-      const merged = sortClaimSearchItems(deduplicateClaimSearchItems([...native.items, ...historical.items]), params);
-      const start = (page - 1) * pageSize;
-      return {
-        items: merged.slice(start, start + pageSize),
-        page,
-        page_size: pageSize,
-        total_items: merged.length,
-        total_pages: Math.max(1, Math.ceil(merged.length / pageSize)),
-      };
-    }
-  }
-
   const page = Math.max(1, toNumber(params.page, 1));
   const pageSize = toNumber(params.page_size, 20);
   const offset = (page - 1) * pageSize;
@@ -2820,8 +2785,7 @@ async function fetchNativeChannelClaimSearch(
   const claims = (
     await Promise.all(
       tips.map(async (tip) => {
-        const claim = await resolveImmutableClaimById(String(tip.record_id)).catch(() => null);
-        return claim ? overlayNativeUploadTip(claim, tip) : null;
+        return resolveNativeUploadTip(tip);
       })
     )
   )
@@ -2860,15 +2824,6 @@ function nativeClaimMatchesSearchFilters(claim: any, params: ClaimSearchOptions)
     if (match[1] === '<=' && !(releaseTime <= bound)) return false;
   }
   return true;
-}
-
-function deduplicateClaimSearchItems(items: Array<Claim>): Array<Claim> {
-  const byId = new Map<string, Claim>();
-  items.forEach((claim) => {
-    const id = String((claim as any).immutable_id || claim.claim_id || '');
-    if (id && !byId.has(id)) byId.set(id, claim);
-  });
-  return Array.from(byId.values());
 }
 
 function sortClaimSearchItems(items: Array<Claim>, params: ClaimSearchOptions): Array<Claim> {
@@ -2958,52 +2913,6 @@ function searchIndexedValues(source: any): Array<any> {
     .map((key) => source[key]);
 }
 
-async function fetchHyperbeamSourceClaimSearch(params: ClaimSearchOptions): Promise<ClaimSearchResponse> {
-  const page = Math.max(1, toNumber(params.page, 1));
-  const pageSize = Math.max(1, toNumber(params.page_size, 20));
-  const query = sourceClaimQuery({ ...params, page, page_size: pageSize });
-  const response = await fetchStoreJsonOrNull(storePath('odysee/source-claims', JSON.stringify(query)));
-  const locators = paramValues(response, 'locators');
-  const claims = (
-    await Promise.all(locators.map((locator) => resolveImmutableClaimById(locator).catch(() => null)))
-  ).filter(Boolean) as Array<Claim>;
-
-  const hasNextPage = locators.length === pageSize;
-  const discoveredItems = (page - 1) * pageSize + claims.length;
-  return {
-    items: claims,
-    page,
-    page_size: pageSize,
-    total_items: discoveredItems + (hasNextPage ? 1 : 0),
-    total_pages: hasNextPage ? page + 1 : page,
-  };
-}
-
-function sourceClaimQuery(params: ClaimSearchOptions): Record<string, any> {
-  const supportedKeys = [
-    'channel_ids',
-    'claim_ids',
-    'not_channel_ids',
-    'claim_type',
-    'any_tags',
-    'order_by',
-    'any_languages',
-    'page',
-    'page_size',
-    'limit_claims_per_channel',
-    'duration',
-    'timestamp',
-    'release_time',
-    'exclude_shorts',
-  ];
-
-  return Object.fromEntries(
-    supportedKeys
-      .map((key) => [key, value(params, key, key.replaceAll('_', '-'))])
-      .filter(([, item]) => item !== undefined && item !== null && item !== '')
-  );
-}
-
 // List the active cookie identity's native uploads as claims. The match-index
 // discovers every `odysee-upload@1.0' record on the node, so ownership is
 // verified from each exact commitment before pagination.
@@ -3012,8 +2921,9 @@ function sourceClaimQuery(params: ClaimSearchOptions): Record<string, any> {
 async function fetchNativeUploadRevisionItem(id: string): Promise<NativeUploadRevision | null> {
   const normalizedId = String(id || '').replace(/^\/+/, '');
   if (!isNativeMessageId(normalizedId)) return null;
-  const result = await fetchCachedImmutableJsonOrNull(normalizedId);
-  const verified = await fetchVerifiedNativeMessage(normalizedId, storePayload(result));
+  // Compact JSON retains links for lists/multiline metadata. Hydrate the
+  // complete exact bundle before projecting or copying fields into a save.
+  const verified = await fetchVerifiedNativeMessage(normalizedId);
   if (!verified) return null;
   return normalizeNativeUploadRevision(verified.payload, normalizedId, verified.owner);
 }
@@ -3022,13 +2932,28 @@ async function fetchNativeUploadTips(ids: Array<string>): Promise<Array<NativeUp
   const items = (await Promise.all(ids.map((id) => fetchNativeUploadRevisionItem(id).catch(() => null)))).filter(
     (item): item is NativeUploadRevision => Boolean(item)
   );
-  return collapseNativeUploadRevisions(items);
+  const roots = items.filter((item) => !item.revision_of);
+  const acknowledged = (
+    await Promise.all(
+      roots.flatMap((root) => uploadVersionHints(uploadWriteKey(root)).map(fetchNativeUploadRevisionItem))
+    )
+  ).filter((item): item is NativeUploadRevision => Boolean(item));
+  return collapseNativeUploadRevisions([...items, ...acknowledged]);
+}
+
+function uploadWriteKey(root: NativeUploadRevision): string {
+  return `hyperbeam-upload-versions:${hyperbeamBaseUrl()}:${root.hyperbeam_owner}:${root.record_id}`;
+}
+
+async function resolveNativeUploadTip(tip: NativeUploadRevision): Promise<any | null> {
+  if (tip.state === 'deleted') return null;
+  return resolveImmutableClaimById(String(tip.hyperbeam_message_id));
 }
 
 // Root claims stay the source of truth for identity and media; an edited
 // tip only contributes metadata on top of them.
 function overlayNativeUploadTip(claim: any, tip: NativeUploadRevision): any {
-  if (!claim || !tip.revision) return claim;
+  if (!claim) return claim;
   const metadata = nativeUploadTipMetadata(tip);
   return {
     ...claim,
@@ -3039,7 +2964,9 @@ function overlayNativeUploadTip(claim: any, tip: NativeUploadRevision): any {
       ...(metadata.license !== undefined ? { license: metadata.license } : {}),
       ...(metadata.license_url !== undefined ? { license_url: metadata.license_url } : {}),
       ...(metadata.release_time !== undefined ? { release_time: metadata.release_time } : {}),
-      ...(metadata.thumbnail_url ? { thumbnail: { url: metadata.thumbnail_url } } : {}),
+      ...(metadata.thumbnail_url !== undefined ? { thumbnail: { url: metadata.thumbnail_url } } : {}),
+      ...(metadata.tags !== undefined ? { tags: metadata.tags } : {}),
+      ...(metadata.languages !== undefined ? { languages: metadata.languages } : {}),
     },
   };
 }
@@ -3065,32 +2992,44 @@ async function fetchNativeUploadChainForClaim(claim: any): Promise<{
         )
       )
     : [rootId];
-  const revisions = (await Promise.all(ids.map((id) => fetchNativeUploadRevisionItem(id).catch(() => null)))).filter(
+  const revisionIds = [...new Set([...ids, ...uploadVersionHints(uploadWriteKey(root))])];
+  const revisions = (await Promise.all(revisionIds.map((id) => fetchNativeUploadRevisionItem(id)))).filter(
     (item): item is NativeUploadRevision => Boolean(item && item.revision_of === root.record_id)
   );
-  return { root, tip: latestNativeUploadRevision(root, revisions) };
+  const tip = latestNativeUploadRevision(root, revisions);
+  if (uniqueNativeUploadVersions(revisions.filter((item) => isNextNativeUploadRevision(root, tip, item))).length > 1) {
+    throw new Error('This upload has conflicting edits. Resolve the conflict before saving again.');
+  }
+  return { root, tip };
 }
 
 export async function fetchHyperbeamUploadUpdate(claim: any, metadata: NativeUploadMetadata): Promise<any> {
-  const { root, tip } = await fetchNativeUploadChainForClaim(claim);
-  const message = nativeUploadRevisionMessage(root, tip, metadata, 'edit');
-  const messageId = await writeNativeMessage(message, 'upload revision');
-  const written = await fetchNativeUploadRevisionItem(messageId);
-  if (!written || !isNextNativeUploadRevision(root, tip, written)) {
-    throw new Error('HyperBEAM upload revision failed commitment or ownership verification');
-  }
-  const resolved = await resolveImmutableClaimById(String(root.record_id)).catch(() => null);
-  return overlayNativeUploadTip(resolved || claim, written);
+  const initial = await fetchNativeUploadChainForClaim(claim);
+  return serializeUploadWrite(uploadWriteKey(initial.root), async () => {
+    const { root, tip } = await fetchNativeUploadChainForClaim(claim);
+    const message = nativeUploadRevisionMessage(root, tip, metadata, 'edit');
+    const messageId = await writeNativeMessage(message, 'upload revision');
+    const written = await fetchNativeUploadRevisionItem(messageId);
+    if (!written || !isNextNativeUploadRevision(root, tip, written)) {
+      throw new Error('HyperBEAM upload revision failed commitment or ownership verification');
+    }
+    rememberUploadVersion(uploadWriteKey(root), messageId);
+    return resolveNativeUploadTip(written);
+  });
 }
 
 export async function fetchHyperbeamUploadDelete(claim: any): Promise<void> {
-  const { root, tip } = await fetchNativeUploadChainForClaim(claim);
-  const message = nativeUploadRevisionMessage(root, tip, {}, 'delete');
-  const messageId = await writeNativeMessage(message, 'upload deletion');
-  const written = await fetchNativeUploadRevisionItem(messageId);
-  if (!written || !isNextNativeUploadRevision(root, tip, written)) {
-    throw new Error('HyperBEAM upload deletion failed commitment or ownership verification');
-  }
+  const initial = await fetchNativeUploadChainForClaim(claim);
+  return serializeUploadWrite(uploadWriteKey(initial.root), async () => {
+    const { root, tip } = await fetchNativeUploadChainForClaim(claim);
+    const message = nativeUploadRevisionMessage(root, tip, {}, 'delete');
+    const messageId = await writeNativeMessage(message, 'upload deletion');
+    const written = await fetchNativeUploadRevisionItem(messageId);
+    if (!written || !isNextNativeUploadRevision(root, tip, written)) {
+      throw new Error('HyperBEAM upload deletion failed commitment or ownership verification');
+    }
+    rememberUploadVersion(uploadWriteKey(root), messageId);
+  });
 }
 
 export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
@@ -3114,8 +3053,7 @@ export async function fetchHyperbeamUploads(params: any): Promise<any | null> {
   const claims = (
     await Promise.all(
       tips.map(async (tip) => {
-        const claim = await resolveImmutableClaimById(String(tip.record_id)).catch(() => null);
-        return claim ? overlayNativeUploadTip(claim, tip) : null;
+        return resolveNativeUploadTip(tip);
       })
     )
   ).filter((claim) => claim?.is_my_output === true && verifiedNativeOwnerMatches(claim?.hyperbeam?.owner, owner));
@@ -3859,6 +3797,20 @@ async function fetchHyperbeamImmutableResolve(uri: string, immutableSigningChann
     name = parsed.streamName || parsed.claimName;
   } catch {}
   if (name && immutableIdFromRouteToken(String(name))) name = undefined;
+  // Friendly name#root links are logical upload routes. immutable_<ID>
+  // routes and playlist item IDs always read that exact version.
+  if (name && isNativeMessageId(immutableId)) {
+    const root = await fetchNativeUploadRevisionItem(immutableId);
+    if (root && !root.revision_of && root.name === name) {
+      const paths = await fetchHyperbeamQueryPaths({ schema: NATIVE_UPLOAD_SCHEMA, 'data-id': root.data_id });
+      const items = (
+        await Promise.all(
+          [...new Set([...paths, ...uploadVersionHints(uploadWriteKey(root))])].map(fetchNativeUploadRevisionItem)
+        )
+      ).filter((item): item is NativeUploadRevision => Boolean(item));
+      return resolveNativeUploadTip(latestNativeUploadRevision(root, items));
+    }
+  }
   return resolveImmutableClaimById(immutableId, name, immutableSigningChannelId);
 }
 
@@ -3884,29 +3836,53 @@ async function resolveImmutableClaimById(
     ? await fetchVerifiedNativeMessage(canonicalImmutableId, payload).catch(() => null)
     : null;
   if (isNativeRecord && !nativeRecord) return null;
-  // Uploads resolve through their revision chain: a bare revision message is
-  // not addressable as a claim, a deleted chain resolves to nothing, and an
-  // edited chain contributes the tip's metadata on top of the root claim.
-  let uploadTip: NativeUploadRevision | null = null;
+  // A revision is an exact snapshot. Verify its ancestry, but never query a
+  // later head to replace an exact ID (including an old playlist item).
   if (
     isNativeRecord &&
     nativeRecord &&
     value(payload, 'schema') === NATIVE_UPLOAD_SCHEMA &&
     value(payload, 'type') === 'upload'
   ) {
-    if (value(payload, 'revision-of', 'revision_of')) return null;
-    const root = normalizeNativeUploadRevision(payload, canonicalImmutableId, nativeRecord.owner);
-    if (root && root.data_id) {
-      const chainResponse = await fetchPublicQueryJson(
-        nativeQueryRequest({ schema: NATIVE_UPLOAD_SCHEMA, 'data-id': root.data_id })
-      ).catch(() => null);
-      const revisionIds = uniquePaths(queryPaths(chainResponse || {})).filter((id) => id !== canonicalImmutableId);
-      const revisions = (
-        await Promise.all(revisionIds.map((id) => fetchNativeUploadRevisionItem(id).catch(() => null)))
-      ).filter((item): item is NativeUploadRevision => Boolean(item && item.revision_of === root.record_id));
+    const version = await fetchNativeUploadRevisionItem(canonicalImmutableId);
+    if (version?.revision_of) {
+      const root = await fetchNativeUploadRevisionItem(version.revision_of);
+      if (!root || root.revision_of || root.hyperbeam_owner !== version.hyperbeam_owner) return null;
+      const revisions = [version];
+      let ancestor = version;
+      const visited = new Set<string>();
+      while (Number(ancestor.revision) > 1) {
+        const previous = String(ancestor.previous_version || '');
+        if (!previous || visited.has(previous)) return null;
+        visited.add(previous);
+        // New revisions link exact IDs. Legacy UUID predecessors use exact
+        // query only to locate their independently verified message.
+        const ids = isNativeMessageId(previous)
+          ? [previous]
+          : await fetchHyperbeamQueryPaths({ schema: NATIVE_UPLOAD_SCHEMA, 'version-ref': previous });
+        const candidates = uniqueNativeUploadVersions(
+          (await Promise.all(ids.map(fetchNativeUploadRevisionItem))).filter((item): item is NativeUploadRevision =>
+            Boolean(item && isNextNativeUploadRevision(root, item, ancestor))
+          )
+        );
+        if (candidates.length !== 1) return null;
+        ancestor = candidates[0];
+        revisions.push(ancestor);
+      }
       const tip = latestNativeUploadRevision(root, revisions);
-      if (tip.state === 'deleted') return null;
-      if (tip !== root) uploadTip = tip;
+      if (tip.version_ref !== version.version_ref || tip.revision !== version.revision || tip.state === 'deleted')
+        return null;
+      const original = await resolveImmutableClaimById(String(root.record_id));
+      if (!original) return null;
+      const logicalUri = `lbry://${root.name}#${root.record_id}`;
+      return {
+        ...overlayNativeUploadTip(original, tip),
+        immutable_id: canonicalImmutableId,
+        canonical_url: logicalUri,
+        permanent_url: logicalUri,
+        short_url: logicalUri,
+        hyperbeam: { ...original.hyperbeam, 'record-id': root.record_id, immutable_id: canonicalImmutableId },
+      };
     }
   }
   let signingChannel = signingChannelId
@@ -3932,7 +3908,13 @@ async function resolveImmutableClaimById(
 
   if (name && claim.name !== name) return null;
   if (!nativeRecord) return claim;
-  const revisedClaim = uploadTip ? overlayNativeUploadTip(claim, uploadTip) : claim;
+  const uploadMessage =
+    value(payload, 'schema') === NATIVE_UPLOAD_SCHEMA
+      ? await fetchVerifiedNativeMessage(canonicalImmutableId)
+      : nativeRecord;
+  const upload =
+    uploadMessage && normalizeNativeUploadRevision(uploadMessage.payload, canonicalImmutableId, nativeRecord.owner);
+  const revisedClaim = upload ? overlayNativeUploadTip(claim, upload) : claim;
   const activeOwner = await activeHyperbeamAccountOwner();
   return {
     ...revisedClaim,
@@ -4199,6 +4181,11 @@ function immutableClaimFromHyperbeam(
     value(valueSource, 'media_type', 'media-type') ||
     value(decodedSource, 'media_type', 'media-type') ||
     (isMediaContentType(payloadContentType) ? payloadContentType : undefined) ||
+    // A native upload message carries a field named `content-type`, which the
+    // node shadows with the multipart/form-data response header whenever the
+    // message has a list field; recover the real media type from the stored
+    // file name in that case.
+    mediaTypeFromFileName(value(payload, 'filename', 'file-name', 'file_name')) ||
     (device === 'lbry-stream@1.0' && sdHash ? 'video/mp4' : undefined);
   const explicitMediaUrl = absoluteHyperbeamUrl(
     value(payload, 'streaming_url', 'streaming-url', 'download_url', 'download-url') ||
@@ -4933,6 +4920,32 @@ function isRouteClaimModifier(claimId: string) {
 
 function isMediaContentType(contentType: any): boolean {
   return typeof contentType === 'string' && /^(video|audio|image)\//i.test(contentType);
+}
+
+const MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mkv: 'video/x-matroska',
+  ogv: 'video/ogg',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac',
+  aac: 'audio/aac',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+};
+
+function mediaTypeFromFileName(fileName: any): string | undefined {
+  if (typeof fileName !== 'string') return undefined;
+  const extension = fileName.split('.').pop();
+  return extension ? MEDIA_TYPE_BY_EXTENSION[extension.toLowerCase()] : undefined;
 }
 
 function streamTypeFromMediaType(mediaType: any): string | undefined {
