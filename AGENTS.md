@@ -156,6 +156,11 @@ helpers before creating another transport or normalization path.
 
 ## Native identity and writes
 
+Profile display-name, bio and avatar/banner edits use owner-signed generic
+metadata revisions while preserving the root profile ID and handle. See
+`decisions/native-profile-revisions.md`; keep authentication/Google linking
+separate and preserve exact historical snapshots.
+
 Upload revision/search ownership is clarified by
 `decisions/native-upload-projection.md`: generic immutable writes, verified
 shared projection, and an operator search worker. Public channel/Following

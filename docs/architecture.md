@@ -254,6 +254,12 @@ Two mitigations, in order of preference today:
 
 ## Writes
 
+Native profile metadata uses contiguous owner-signed full revisions rooted in
+the existing profile ID; friendly channel routes project current metadata and
+exact historical reads do not advance. See
+[profile revisions](../decisions/native-profile-revisions.md). This does not
+change authentication or Google-account linking.
+
 There is no custom write device. Uploads, comments, reactions, playlists,
 subscriptions, encrypted preference snapshots, and moderation events are
 ordinary committed messages, using stock HyperBEAM machinery end to end:

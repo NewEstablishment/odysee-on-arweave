@@ -85,6 +85,13 @@ is sent on native writes.
 
 ## Reads, playback, and hydration
 
+Native profile edits belong in the integration boundary and use generic
+`odysee-profile-revision@1.0` snapshots. Preserve the root profile ID/handle;
+only display name, bio and immutable avatar/banner IDs change. Verify contiguous
+same-owner ancestry and preserve exact historical routes. See
+`../decisions/native-profile-revisions.md`. Do not route edits to legacy channel
+updates or modify Google authentication for this feature.
+
 Historical reads use store paths through generic cache/message routes. Native
 reads use exact committed IDs. Mutable names and claim IDs are locators only.
 

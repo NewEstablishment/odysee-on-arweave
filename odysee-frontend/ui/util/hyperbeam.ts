@@ -8,6 +8,14 @@ import { hyperbeamClaimSearchRequest, type HyperbeamSearchRequest } from 'util/h
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { rememberUploadVersion, serializeUploadWrite, uploadVersionHints } from 'util/nativeUploadWrites';
 import {
+  NATIVE_PROFILE_SCHEMA,
+  normalizeProfileVersion,
+  profileRevisionMessage,
+  projectProfileVersion,
+  type ProfileMetadata,
+  type ProfileVersion,
+} from 'util/nativeProfileRevisions';
+import {
   collapseNativeUploadRevisions,
   isNextNativeUploadRevision,
   latestNativeUploadRevision,
@@ -219,7 +227,7 @@ async function resolveStoreClaimForUri(uri: string, immutableSigningChannelId?: 
 
   const nativeChannel = nativeChannelIdentityFromUri(uri);
   if (nativeChannel) {
-    const claim = await resolveImmutableClaimById(nativeChannel.id).catch(() => null);
+    const claim = await fetchHyperbeamProfile(nativeChannel.id).catch(() => null);
     return claim?.value_type === 'channel' && claim.name.replace(/^@/, '') === safeClaimName(nativeChannel.name)
       ? claim
       : null;
@@ -688,6 +696,139 @@ export async function verifyHyperbeamAccountProfile(
   );
 }
 
+function profileWriteKey(id: string): string {
+  return `hyperbeam-profile-versions:${hyperbeamBaseUrl()}:${id}`;
+}
+
+async function readProfileVersion(id: string): Promise<ProfileVersion | null> {
+  const verified = await fetchVerifiedNativeMessage(id);
+  return verified ? normalizeProfileVersion(verified.payload, id, verified.owner) : null;
+}
+
+async function profileRoot(id: string): Promise<{ claim: any; root: ProfileVersion }> {
+  const evidence = await fetchVerifiedNativeMessage(id);
+  if (!evidence || value(evidence.payload, 'type') !== 'channel') throw new Error('Profile root could not be verified');
+  const claim = await resolveImmutableClaimById(id);
+  if (!claim || claim.value_type !== 'channel' || !claim.hyperbeam?.owner)
+    throw new Error('Profile could not be verified');
+  return {
+    claim,
+    root: {
+      id,
+      profile_id: id,
+      owner: claim.hyperbeam.owner,
+      previous_version: '',
+      revision: 0,
+      title: claim.value.title || claim.name,
+      description: claim.value.description || '',
+      avatar_id: '',
+      banner_id: '',
+    },
+  };
+}
+
+async function currentProfileVersion(root: ProfileVersion): Promise<ProfileVersion> {
+  const paths = await fetchHyperbeamQueryPaths({ schema: NATIVE_PROFILE_SCHEMA, 'profile-id': root.profile_id });
+  const candidates = await Promise.all(
+    [...new Set([...paths, ...uploadVersionHints(profileWriteKey(root.id))])].map(readProfileVersion)
+  );
+  return projectProfileVersion(
+    root,
+    candidates.filter((entry): entry is ProfileVersion => Boolean(entry))
+  );
+}
+
+function overlayProfile(claim: any, version: ProfileVersion): any {
+  const image = (id: string) => (id ? { url: `${hyperbeamBaseUrl()}/${id}` } : undefined);
+  return {
+    ...claim,
+    value: {
+      ...claim.value,
+      title: version.title,
+      description: version.description,
+      ...(version.revision > 0 ? { thumbnail: image(version.avatar_id), cover: image(version.banner_id) } : {}),
+    },
+    hyperbeam: {
+      ...claim.hyperbeam,
+      profile_id: version.profile_id,
+      profile_version: version.id,
+      profile_revision: version.revision,
+      avatar_id: version.avatar_id,
+      banner_id: version.banner_id,
+    },
+  };
+}
+
+// Friendly channel routes project metadata; direct immutable reads never advance.
+export async function fetchHyperbeamProfile(id: string): Promise<any> {
+  const { claim, root } = await profileRoot(id);
+  return overlayProfile(claim, await currentProfileVersion(root));
+}
+
+export async function fetchHyperbeamProfileSave(
+  id: string,
+  previousId: string,
+  metadata: ProfileMetadata
+): Promise<any> {
+  return serializeUploadWrite(profileWriteKey(id), async () => {
+    const { claim, root } = await profileRoot(id);
+    const owner = await activeHyperbeamAccountOwner();
+    if (!owner || root.owner !== owner) throw new Error('Only the profile owner can edit this profile');
+    const head = await currentProfileVersion(root);
+    if (head.id !== previousId) throw new Error('This profile changed. Reload the editor before saving.');
+    const messageId = await writeNativeMessage(profileRevisionMessage(head, metadata), 'profile revision');
+    const written = await readProfileVersion(messageId);
+    if (!written || projectProfileVersion(head, [written]).id !== messageId)
+      throw new Error('Profile save could not be verified');
+    rememberUploadVersion(profileWriteKey(id), messageId);
+    const selected = await currentProfileVersion(root);
+    if (
+      selected.revision !== written.revision ||
+      selected.title !== written.title ||
+      selected.description !== written.description ||
+      selected.avatar_id !== written.avatar_id ||
+      selected.banner_id !== written.banner_id
+    )
+      throw new Error('Conflicting profile update. Reload before retrying.');
+    return overlayProfile(claim, selected);
+  });
+}
+
+async function exactProfileRevision(id: string): Promise<any | null> {
+  const version = await readProfileVersion(id);
+  if (!version) return null;
+  const { claim, root } = await profileRoot(version.profile_id);
+  const chain = [version];
+  let ancestor = version;
+  const seen = new Set([id]);
+  while (ancestor.revision > 1) {
+    if (seen.has(ancestor.previous_version)) return null;
+    seen.add(ancestor.previous_version);
+    const previous = await readProfileVersion(ancestor.previous_version);
+    if (
+      !previous ||
+      previous.revision !== ancestor.revision - 1 ||
+      previous.owner !== root.owner ||
+      previous.profile_id !== root.id
+    )
+      return null;
+    chain.push(previous);
+    ancestor = previous;
+  }
+  if (projectProfileVersion(root, chain).id !== id) return null;
+  const exact = overlayProfile(claim, version);
+  return {
+    ...exact,
+    claim_id: id,
+    immutable_id: id,
+    is_my_output: false,
+    canonical_url: immutableUri(id),
+    permanent_url: immutableUri(id),
+    short_url: immutableUri(id),
+    hyperbeam: { ...exact.hyperbeam, immutable_id: id, profile_historical: true },
+  };
+}
+
 export async function fetchHyperbeamChannelListMine(
   page: number = 1,
   pageSize: number = 99999
@@ -697,7 +838,7 @@ export async function fetchHyperbeamChannelListMine(
   if (!account || !owner) return { items: [], page, page_size: pageSize, total_items: 0, total_pages: 0 };
 
   const [claim, uploads] = await Promise.all([
-    resolveImmutableClaimById(account.id),
+    fetchHyperbeamProfile(account.id),
     fetchNativeChannelClaimSearch({ page: 1, page_size: 100 }, [account.id]).catch(() => ({
       items: [],
       page: 1,
@@ -3909,6 +4050,7 @@ async function resolveImmutableClaimById(
   }
   const payload = storePayload(result);
   const canonicalImmutableId = lbryClaimCommitmentId(payload) || immutableId;
+  if (value(payload, 'schema') === NATIVE_PROFILE_SCHEMA) return exactProfileRevision(canonicalImmutableId);
   const decodedClaim = decodeClaimMetadata(payload);
   const nativeSigningChannelId = value(payload, 'channel-id', 'channel_id');
   const signingChannelId = immutableSigningChannelId || nativeSigningChannelId || decodedClaim?.signedChannelId;

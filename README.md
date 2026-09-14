@@ -159,6 +159,12 @@ message. The reply exposes the stored ID in `message-id`.
 
 ### Uploads
 
+Native profiles support owner-authorized display-name, bio, avatar and banner
+editing through generic append-only metadata snapshots. The original profile
+ID and handle remain stable; exact historical reads are preserved. See
+[profile revisions](decisions/native-profile-revisions.md). Google account
+linking and recovery remain a separate authentication workstream.
+
 The browser posts raw file bytes directly to the same stage-scoped `/id` write.
 It then writes a generic
 `odysee-upload@1.0` index record that links the name and metadata to the
@@ -316,8 +322,8 @@ call the LBRY `collection_*` API.
 Playlist UI retains list, edit/reorder, play, and shuffle; Share appears only
 for public playlists. There is no
 separate publish or republish step: Save is the committed HyperBEAM write, and
-ordinary add/remove actions save automatically. Saved deletion remains hidden
-until it has an honest append-only contract. The UI has no
+ordinary add/remove actions save automatically. Saved deletion uses the
+verified tombstone/reference contract described above. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
 

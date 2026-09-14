@@ -138,10 +138,8 @@ function ChannelPage(props: Props) {
     currentView = hideAboutTab ? CHANNEL_PAGE.VIEWS.DISCUSSION : CHANNEL_PAGE.VIEWS.ABOUT;
   }
 
-  // Native channel profiles have no update path yet (the profile message is
-  // the identity), so the legacy edit view — which also exposes Delete
-  // Channel — is unreachable, deep links included.
-  const editing = currentView === CHANNEL_PAGE.VIEWS.EDIT && !hyperbeamNodeEnabled();
+  const canEditProfile = channelIsMine && !claim.hyperbeam?.profile_historical;
+  const editing = currentView === CHANNEL_PAGE.VIEWS.EDIT && canEditProfile;
   const { channelName } = parseURI(uri);
   const { permanent_url: permanentUrl } = claim;
   const claimId = claim.claim_id;
@@ -414,7 +412,17 @@ function ChannelPage(props: Props) {
   }, [hideShorts, currentView, uri, navigate, isEmbedPath]);
 
   if (editing) {
-    return <ChannelEdit uri={uri} onDone={() => navigate(-1)} disabled={false} />;
+    return (
+      <ChannelEdit
+        uri={uri}
+        onDone={() =>
+          hyperbeamNodeEnabled()
+            ? navigate(`?${CHANNEL_PAGE.QUERIES.VIEW}=${CHANNEL_PAGE.VIEWS.ABOUT}`, { replace: true })
+            : navigate(-1)
+        }
+        disabled={false}
+      />
+    );
   }
 
   function handleViewMore(section: any) {
@@ -531,7 +539,7 @@ function ChannelPage(props: Props) {
               </Tooltip>
             </div>
             <div className="channel__edit">
-              {channelIsMine && !hyperbeamNodeEnabled() && (
+              {canEditProfile && (
                 <>
                   {pending ? (
                     <span>{__('Your changes will be live in a few minutes')}</span>
