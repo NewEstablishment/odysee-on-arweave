@@ -7,6 +7,7 @@ import { isServedFromManifest } from 'util/manifest-prefix';
 import { hyperbeamClaimSearchRequest, type HyperbeamSearchRequest } from 'util/hyperbeamSearch';
 import { isHyperbeamUploadClaim } from 'util/claim';
 import { rememberUploadVersion, serializeUploadWrite, uploadVersionHints } from 'util/nativeUploadWrites';
+import { cachedNativeRead } from 'util/nativeReadCache';
 import {
   NATIVE_PROFILE_SCHEMA,
   normalizeProfileVersion,
@@ -1040,7 +1041,9 @@ export async function fetchHyperbeamPlaylistDelete(referenceId: string): Promise
   return serializeUploadWrite(playlistWriteKey(referenceId), async () => {
     const owner = await activeHyperbeamAccountOwner();
     const init = await fetchNativePlaylistReferenceById(referenceId);
-    if (!owner || !init || init.owner !== owner) throw new Error('Only the playlist owner can delete this playlist');
+    if (!owner || !init)
+      throw new Error('Could not verify playlist ownership. Check your connection and sign-in, then retry.');
+    if (init.owner !== owner) throw new Error('Only the playlist owner can delete this playlist');
     nativePlaylistReferenceQueryCache.clear();
     const current = await fetchNativePlaylistForReference(init);
     if (!current) throw new Error('Playlist could not be verified. Nothing was deleted.');
@@ -2255,22 +2258,7 @@ function cachedNativeQuery<T>(
   key: string,
   load: () => Promise<T>
 ): Promise<T> {
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.promise;
-
-  let promise: Promise<T>;
-  promise = load()
-    .then((result) => {
-      const current = cache.get(key);
-      if (current?.promise === promise) current.expiresAt = Date.now() + NATIVE_COMMENT_QUERY_CACHE_MS;
-      return result;
-    })
-    .catch((error) => {
-      if (cache.get(key)?.promise === promise) cache.delete(key);
-      throw error;
-    });
-  cache.set(key, { expiresAt: Number.POSITIVE_INFINITY, promise });
-  return promise;
+  return cachedNativeRead(cache, key, load, NATIVE_COMMENT_QUERY_CACHE_MS);
 }
 
 async function resolveNativeCommentControlPaths(paths: Array<string>): Promise<Array<NativeCommentControl>> {
@@ -4178,17 +4166,12 @@ async function withCompatibilityDate(claim: any): Promise<any> {
 }
 
 function fetchCachedImmutableJsonOrNull(id: string): Promise<any | null> {
-  const key = `immutable:${id}`;
-  const now = Date.now();
-  const cached = storeReadCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
-
-  const promise = fetchImmutableJsonOrNull(id).catch((error) => {
-    storeReadCache.delete(key);
-    throw error;
-  });
-  storeReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
-  return promise;
+  return cachedNativeRead(
+    storeReadCache,
+    `immutable:${id}`,
+    () => fetchImmutableJsonOrNull(id),
+    HYPERBEAM_READ_CACHE_MS
+  );
 }
 
 export async function fetchVerifiedNativeMessage<T extends Record<string, any> = Record<string, any>>(
@@ -4573,16 +4556,7 @@ async function fetchStoreJsonOrNull(path: string, preferJson: boolean = true): P
 
 function fetchCachedStoreJsonOrNull(path: string, preferJson: boolean = true): Promise<any | null> {
   const key = `store:${preferJson ? 'json' : 'native'}:${path}`;
-  const now = Date.now();
-  const cached = storeReadCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
-
-  const promise = fetchStoreJsonOrNull(path, preferJson).catch((error) => {
-    storeReadCache.delete(key);
-    throw error;
-  });
-  storeReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
-  return promise;
+  return cachedNativeRead(storeReadCache, key, () => fetchStoreJsonOrNull(path, preferJson), HYPERBEAM_READ_CACHE_MS);
 }
 
 // Stock HyperBEAM does not resolve bare store paths; arbitrary store paths
@@ -5238,22 +5212,17 @@ function fetchImmutableBundleOrNull(id: string): Promise<any | null> {
 
 function fetchCachedImmutableChannelJsonOrNull(id: string): Promise<any | null> {
   const key = `immutable-channel:${id}`;
-  const now = Date.now();
-  const cached = storeReadCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.promise;
-
-  const promise = (
-    isOutpointId(id)
-      ? fetchImmutableJsonOrNull(id)
-      : isStandaloneImmutableId(id)
-        ? fetchStoreJsonOrNull(encodeDataPath(id))
-        : fetchStoreJsonOrNull(storePath('odysee/channel', id))
-  ).catch((error) => {
-    storeReadCache.delete(key);
-    throw error;
-  });
-  storeReadCache.set(key, { expiresAt: now + HYPERBEAM_READ_CACHE_MS, promise });
-  return promise;
+  return cachedNativeRead(
+    storeReadCache,
+    key,
+    () =>
+      isOutpointId(id)
+        ? fetchImmutableJsonOrNull(id)
+        : isStandaloneImmutableId(id)
+          ? fetchStoreJsonOrNull(encodeDataPath(id))
+          : fetchStoreJsonOrNull(storePath('odysee/channel', id)),
+    HYPERBEAM_READ_CACHE_MS
+  );
 }
 
 function timeoutSignal(ms: number): AbortSignal | undefined {

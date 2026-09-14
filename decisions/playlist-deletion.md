@@ -39,6 +39,18 @@ history limitation, and removes local state only after exact verified readback.
 Errors retain the confirmation and show a retryable error. The UI does not offer
 restore or public-to-private conversion.
 
+Offline retry: unavailable owner/reference evidence must never be cached as a
+successful negative read. Shared native reads deduplicate in-flight requests and
+cache successful values, including empty query lists, but evict null/undefined
+results and errors. A stale completion cannot evict a newer cache entry. The
+deletion guard distinguishes unavailable verification from a verified foreign
+owner; neither can authorize a write. Retry re-reads evidence without a reload
+or waiting for the 30-second TTL. Google authentication and node storage policy
+are unchanged.
+The offline status banner is loaded with the app: lazy-loading it on the first
+offline event suspended the UI while its chunk was unreachable, hiding the
+confirmation. Offline recovery must not require downloading its own UI.
+
 Validation: `test:native-playlists`, `test:native-cookie-playlists`, and
 `tests/specs/native/hyperbeam-playlist-deletion.spec.ts` cover the contract and
 private/public browser lifecycle. Set `HYPERBEAM_MANIFEST_URL` for browser tests.
@@ -48,5 +60,9 @@ build and formatting/lint pass (six pre-existing warnings). Isolated signed-cook
 lifecycles pass for playlists, comments, reactions, subscriptions and preferences.
 Chromium checks cover private/public deletion, library and stable-URL refresh,
 fresh readers, exact historical access, and retry after a failed reference write.
+That original write-503 test did not cover offline preflight. The added browser
+regression expires warm reads before going offline, asserts no write and a
+retryable verification message, then reconnects and requires completion within
+30 seconds without reloading, for both private and public playlists.
 No backend source changed; backend suites were not rerun for this slice. This
 does not certify production deployment, replication or physical data removal.

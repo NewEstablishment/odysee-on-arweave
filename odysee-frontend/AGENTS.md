@@ -70,6 +70,12 @@ is sent on native writes.
 
 ## Identity and account UI
 
+- Shared native read caches must evict unavailable (`null`/`undefined`) evidence
+  and rejected reads. Do not turn a transient verification failure into cached
+  denial or grant authority from stale display metadata. Preserve in-flight
+  deduplication and cache valid empty query results. Offline retry must re-read
+  owner/reference evidence without a page reload or TTL wait.
+
 - The node's `cookie@1.0` provider mints identity on the first committed write.
 - Its private non-volatile wallet store lets the same cookie recover the same
   committer across node restarts.

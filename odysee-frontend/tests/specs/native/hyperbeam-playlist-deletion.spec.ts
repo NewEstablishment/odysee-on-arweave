@@ -3,7 +3,11 @@ import { expect, test } from '@playwright/test';
 const manifest = String(process.env.HYPERBEAM_MANIFEST_URL || '').replace(/\/+$/, '');
 
 for (const visibility of ['private', 'public']) {
-  test(`${visibility} playlist deletion preserves exact history and survives refresh`, async ({ page, browser }) => {
+  test(`${visibility} playlist deletion preserves exact history and survives refresh`, async ({
+    page,
+    browser,
+    context,
+  }) => {
     test.skip(!manifest, 'Set HYPERBEAM_MANIFEST_URL to an isolated node manifest.');
     test.setTimeout(120_000);
     const title = `${visibility}-delete-${Date.now()}`;
@@ -40,6 +44,33 @@ for (const visibility of ['private', 'public']) {
     await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
     await page.getByRole('dialog', { name: 'Confirm Playlist Delete' }).getByRole('textbox').fill(title);
+    // Expire warm successful preflight reads before the outage. After restoring
+    // networking, retry must finish before a poisoned 30-second entry expires.
+    await page.waitForTimeout(31000);
+    let offlineWrites = 0;
+    const countWrites = (request) => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === '/id') offlineWrites++;
+    };
+    page.on('request', countWrites);
+    await context.setOffline(true);
+    try {
+      await expect(page.getByText('You are offline. Check your internet connection.', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Delete', exact: true }).click();
+      await expect(
+        page
+          .getByText('Could not verify playlist ownership. Check your connection and sign-in, then retry.', {
+            exact: true,
+          })
+          .first()
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeEnabled();
+      await expect(page.getByRole('dialog', { name: 'Confirm Playlist Delete' })).toBeVisible();
+      expect(offlineWrites).toBe(0);
+    } finally {
+      await context.setOffline(false);
+      page.off('request', countWrites);
+    }
+    const onlineAt = Date.now();
     if (visibility === 'public') {
       let failOnce = true;
       await page.route('**/id?*', async (route) => {
@@ -62,6 +93,7 @@ for (const visibility of ['private', 'public']) {
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
     expect((await deletionResponse).ok()).toBe(true);
     await expect(page).toHaveURL(/#\/\$\/playlists$/, { timeout: 20000 });
+    expect(Date.now() - onlineAt).toBeLessThan(30000);
     await expect(page.getByText(title, { exact: true })).toHaveCount(0);
     await page.reload();
     await expect(page.getByText(title, { exact: true })).toHaveCount(0);

@@ -22,6 +22,8 @@ import usePrevious from 'effects/use-previous';
 import usePersistedState from 'effects/use-persisted-state';
 import useConnectionStatus from 'effects/use-connection-status';
 import Spinner from 'component/spinner';
+// Offline feedback cannot depend on fetching its first-use component chunk.
+import Nag from 'component/nag';
 import { BeforeUnload, Unload } from 'util/beforeUnload';
 import { platform } from 'util/platform';
 import {
@@ -100,13 +102,6 @@ const Router = lazyImport(
     import(
       'component/router/index'
       /* webpackChunkName: "router" */
-    )
-);
-const Nag = lazyImport(
-  () =>
-    import(
-      'component/nag'
-      /* webpackChunkName: "nag" */
     )
 );
 const NagContinueFirstRun = lazyImport(
