@@ -17,8 +17,8 @@ import {
   selectCollectionSaveErrorForId,
   selectCollectionSavedForId,
 } from 'redux/selectors/collections';
-import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { doOpenModal } from 'redux/actions/app';
+import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { doEnableCollectionShuffle } from 'redux/actions/content';
 import { doRetryCollectionSave, doToggleCollectionSavedForId } from 'redux/actions/collections';
 
@@ -33,7 +33,7 @@ function CollectionMenuList(props: Props) {
   const navigate = useNavigate();
 
   const collectionName = useAppSelector((state) => selectCollectionTitleForId(state, collectionId));
-  const claimId = useAppSelector((state) => (selectClaimForClaimId(state, collectionId) || {}).claim_id);
+  const claim = useAppSelector((state) => selectClaimForClaimId(state, collectionId));
   const isBuiltin = useAppSelector((state) => selectIsCollectionBuiltInForId(state, collectionId));
   const collectionEmpty = useAppSelector((state) => selectCollectionIsEmptyForId(state, collectionId));
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
@@ -108,7 +108,7 @@ function CollectionMenuList(props: Props) {
                     </div>
                   </MenuItem>
                 )}
-                {!claimId && (
+                {(!claim || claim.hyperbeam?.reference_id) && (
                   <MenuItem
                     className="comment__menu-option"
                     onSelect={() =>

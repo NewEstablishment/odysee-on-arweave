@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { nativePlaylistDeletionMessage, playlistDeletionSnapshot } from '../../ui/util/nativePlaylistDeletion.ts';
 
 import {
   NATIVE_PLAYLIST_SCHEMA,
@@ -297,6 +298,75 @@ assert.deepEqual(
   immutableNativePlaylists(recordsB).map((playlist) => playlist.created_at),
   [now + 3]
 );
+
+// An independent private reference allows deletion without public conversion.
+const privateDeleteInitWrite = await write(
+  nativePlaylistReferenceInitMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    owner: ownerA,
+    snapshotId: privateSnapshot.id,
+    timestamp: now + 1000,
+  }),
+  profileA.cookie
+);
+const privateDeleteInit = await hydrateReference(privateDeleteInitWrite.id);
+await checkDeletion(privateDeleteInit, privateDeleteInit, []);
+await checkDeletion(init, referenceHead, references);
+assert.ok(await verified(first.id), 'public exact history remains committed');
+assert.ok(await verified(privateSnapshot.id), 'private exact history remains committed');
+const preservedPrivate = await decryptWeavemailEnvelope(
+  privateEnvelope,
+  walletA,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+);
+assert.equal(preservedPrivate, privatePlaintext, 'private historical bytes remain decryptable');
+
+async function checkDeletion(root, head, earlier) {
+  const timestamp = Math.max(now + 2000, head.timestamp + 1);
+  const payload = nativePlaylistDeletionMessage(head, timestamp);
+  const marker = await write(payload, profileA.cookie);
+  assert.ok(await verified(marker.id));
+  const setPayload = nativePlaylistReferenceSetMessage({
+    profileId: root.profile_id,
+    profileName: root.profile_name,
+    owner: ownerA,
+    referenceId: root.reference_id,
+    snapshotId: marker.id,
+    timestamp,
+    deleted: true,
+    previousReference: head.message_id,
+  });
+  const foreign = await write({ ...setPayload, 'playlist-owner': ownerB }, profileB.cookie);
+  assert.ok(await verified(foreign.id));
+  const foreignRef = await hydrateReference(foreign.id);
+  assert.equal(playlistDeletionSnapshot(payload, marker.id, ownerA, root, foreignRef), null);
+  const committed = await write(setPayload, profileA.cookie);
+  assert.ok(await verified(committed.id));
+  const paths = await queryUntilTimestamps(
+    { 'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE, 'reference-id': root.reference_id },
+    [timestamp]
+  );
+  assert.ok(paths.length > 0);
+  const deletion = await hydrateReference(committed.id);
+  const exactPayload = unwrap(await read(marker.id));
+  assert.ok(playlistDeletionSnapshot(exactPayload, marker.id, await committer(marker.id), root, deletion));
+  const projected = projectNativePlaylistReference(root, [...earlier, head, foreignRef, deletion]);
+  assert.equal(projected.playlist_state, 'deleted');
+  assert.equal(
+    projectNativePlaylistReference(root, [...earlier, head, { ...deletion, timestamp: root.timestamp }]).playlist_state,
+    undefined
+  );
+  assert.equal(
+    projectNativePlaylistReference(root, [
+      ...earlier,
+      head,
+      deletion,
+      { ...head, is_init: false, timestamp: timestamp + 1 },
+    ]).playlist_state,
+    'deleted'
+  );
+}
 
 console.log(
   JSON.stringify({

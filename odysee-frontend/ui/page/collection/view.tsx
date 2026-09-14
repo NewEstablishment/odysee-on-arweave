@@ -129,6 +129,17 @@ const CollectionPage = (props: Props) => {
     }
   }, [collectionId, dispatch, shouldResolveCollectionItems]);
 
+  if (claim?.hyperbeam?.deleted) {
+    return (
+      <Page noSideNavigation={isEmbedPath}>
+        <div className="main--empty">
+          <h1>{__('Playlist deleted')}</h1>
+          <p>{__('This playlist was deleted by its owner. Previously shared snapshots may still be available.')}</p>
+        </div>
+      </Page>
+    );
+  }
+
   if (geoRestriction) {
     return (
       <Page noSideNavigation={isEmbedPath}>

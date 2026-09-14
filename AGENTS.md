@@ -225,7 +225,9 @@ Playlists:
   User-created playlist create/edit/add/remove operations always commit on
   Save; do not expose a separate publish/republish action. Do not
   restore channel selection, URL names, bids, confirmations, support, or
-  `collection_*` SDK calls. Public deletion remains deferred.
+  `collection_*` SDK calls. Deletion uses a same-owner metadata-free tombstone
+  and generic reference set; see `decisions/playlist-deletion.md`. The stable
+  URL becomes deleted while exact public/private snapshots retain their access rules.
 
 User preferences:
 

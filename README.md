@@ -275,6 +275,11 @@ legacy reaction API.
 
 ### Playlists
 
+Owners can delete saved playlists through a signed deletion snapshot and a
+strictly newer reference set. Libraries hide the playlist; its stable URL shows
+a deleted state. Exact historical snapshots remain readable with their original
+public/private access rules. See [playlist deletion](decisions/playlist-deletion.md).
+
 User-created playlists pair cookie-signed immutable snapshots with the pinned
 generic `reference@1.0` device. The reference init commitment is the stable
 route `/$/playlist/<reference-id>`. Public contents use

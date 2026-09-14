@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { nativePlaylistDeletionMessage, playlistDeletionSnapshot } from '../../ui/util/nativePlaylistDeletion.ts';
 
 import {
   NATIVE_PLAYLIST_REFERENCE_TYPE,
@@ -108,6 +109,62 @@ assert.equal(
 );
 
 console.log('native playlist reference tests passed');
+
+const deletionId = id('D');
+const deletionPayload = nativePlaylistDeletionMessage(update, 103);
+const deletion = reference(
+  nativePlaylistReferenceSetMessage({
+    profileId,
+    owner,
+    referenceId: init.reference_id,
+    snapshotId: deletionId,
+    timestamp: 103,
+    deleted: true,
+    previousReference: update.message_id,
+  }),
+  { messageId: id('X'), owner }
+);
+assert.ok(playlistDeletionSnapshot(deletionPayload, deletionId, owner, init, deletion));
+assert.equal(playlistDeletionSnapshot(deletionPayload, deletionId, id('z'), init, deletion), null);
+assert.equal(
+  playlistDeletionSnapshot({ ...deletionPayload, 'reference-id': id('z') }, deletionId, owner, init, deletion),
+  null
+);
+assert.equal(
+  playlistDeletionSnapshot({ ...deletionPayload, 'deleted-at': 102 }, deletionId, owner, init, deletion),
+  null
+);
+assert.equal(deletionPayload.title, undefined, 'private metadata is not copied to the tombstone');
+assert.equal(deletionPayload['items-json'], undefined);
+assert.equal(projectNativePlaylistReference(init, [update, deletion]).playlist_state, 'deleted');
+assert.equal(
+  projectNativePlaylistReference(init, [update, { ...update, message_id: id('0') }, deletion]).playlist_state,
+  'deleted',
+  'equivalent predecessor commitment aliases do not invalidate deletion'
+);
+assert.equal(
+  projectNativePlaylistReference(init, [update, { ...deletion, owner: id('z') }]).message_id,
+  update.message_id
+);
+assert.equal(
+  projectNativePlaylistReference(init, [update, { ...deletion, timestamp: 99 }]).message_id,
+  update.message_id
+);
+assert.equal(
+  projectNativePlaylistReference(init, [update, { ...deletion, previous_reference: init.message_id }]).message_id,
+  update.message_id,
+  'stale predecessor cannot delete a newer head'
+);
+assert.equal(
+  projectNativePlaylistReference(init, [update, deletion, { ...update, timestamp: 200 }]).playlist_state,
+  'deleted',
+  'later saves cannot resurrect a deleted reference'
+);
+assert.equal(
+  projectNativePlaylistReference(init, [update, deletion, { ...update, timestamp: 103 }]).message_id,
+  update.message_id,
+  'tied delete and save fail closed'
+);
 
 function reference(message, { messageId, owner: messageOwner }) {
   const normalized = normalizeNativePlaylistReference({

@@ -192,8 +192,9 @@ instead of falling back to legacy services.
   writers, stale or tied updates, and foreign-owned snapshots.
 - Queue, Watch Later, Favorites, and failed-save recovery drafts remain local.
   Creating, editing, adding to, or removing from a user playlist commits
-  automatically; do not expose a separate publish or republish action. Public
-  deletion is not exposed.
+  automatically; do not expose a separate publish or republish action. Deletion
+  uses an owner-signed metadata-free tombstone and same-owner reference set;
+  see `../decisions/playlist-deletion.md`. Preserve exact historical reads.
 - New and copied playlists default private. `ui/util/weavemail.ts` carries the
   shared WeaveMail 1.0 client primitives (vendored from PermawebOS-Browser; do
   not reimplement them). The recipient key is the verified owner's hosted

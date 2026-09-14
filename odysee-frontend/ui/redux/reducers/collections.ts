@@ -134,6 +134,23 @@ const collectionsReducer = handleActions(
     },
     [ACTIONS.COLLECTION_DELETE]: (state, action) => {
       const { id, collectionKey } = action.data;
+      if (action.data.deletedClaim) {
+        const next = { ...state };
+        for (const key of [
+          COLS.KEYS.UNPUBLISHED,
+          COLS.KEYS.EDITED,
+          COLS.KEYS.UPDATED,
+          COLS.KEYS.UNSAVED_CHANGES,
+          'savingById',
+          'saveErrorById',
+        ]) {
+          next[key] = { ...state[key] };
+          delete next[key][id];
+        }
+        next.savedIds = state.savedIds.filter((entry) => entry !== id);
+        next.lastUsedCollectionIds = state.lastUsedCollectionIds.filter((entry) => entry !== id);
+        return next;
+      }
       const collectionsByIdForKey = Object.assign({}, state[collectionKey]);
       if (collectionsByIdForKey[id]) delete collectionsByIdForKey[id];
       return {

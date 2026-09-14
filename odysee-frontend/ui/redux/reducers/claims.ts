@@ -11,6 +11,19 @@ import { getChannelIdFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import { claimToStoredCollection } from 'util/collections';
 import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const reducers = {};
+reducers[ACTIONS.COLLECTION_DELETE] = (state: ClaimsState, action: any): ClaimsState => {
+  const { id, deletedClaim } = action.data;
+  if (!deletedClaim) return state;
+  const resolvedCollectionsById = { ...state.resolvedCollectionsById };
+  delete resolvedCollectionsById[id];
+  return {
+    ...state,
+    byId: { ...state.byId, [id]: deletedClaim },
+    resolvedCollectionsById,
+    myCollectionClaimIds: state.myCollectionClaimIds?.filter((entry) => entry !== id),
+    myClaims: state.myClaims?.filter((entry) => entry !== id),
+  };
+};
 const defaultState: ClaimsState = {
   byId: {},
   claimsByUri: {},
@@ -481,7 +494,9 @@ reducers[ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED] = (state: ClaimsState, action:
   const pendingByIdDelta = {};
   const myClaimIds = new Set(state.myClaims);
   const newResolvedCollectionsById = Object.assign({}, state.resolvedCollectionsById);
-  let newMyCollectionClaimIds = state.myCollectionClaimIds && new Set(state.myCollectionClaimIds);
+  let newMyCollectionClaimIds = action.data.replaceNativePlaylists
+    ? new Set<string>()
+    : state.myCollectionClaimIds && new Set(state.myCollectionClaimIds);
   let urlsForCurrentPage = [];
   claims.forEach((claim: Claim) => {
     const {

@@ -53,6 +53,7 @@ import {
   normalizeNativePlaylist,
   type NativePlaylist,
 } from 'util/nativePlaylists';
+import { nativePlaylistDeletionMessage, playlistDeletionSnapshot } from 'util/nativePlaylistDeletion';
 import {
   NATIVE_PLAYLIST_REFERENCE_TYPE,
   REFERENCE_DEVICE,
@@ -769,6 +770,7 @@ export async function fetchHyperbeamPlaylistListMine(
   }>;
   const referencedSnapshotIds = new Set(referenced.flatMap(({ snapshotIds }) => snapshotIds));
   const items = referenced
+    .filter(({ playlist }) => playlist.state !== 'deleted')
     .map(({ reference, playlist }) => nativePlaylistClaim(playlist, true, reference.reference_id))
     .concat(
       snapshots
@@ -805,7 +807,15 @@ export async function fetchHyperbeamPlaylistById(messageId: string): Promise<Cla
   return nativePlaylistClaim(playlist, viewerOwner === playlist.owner);
 }
 
+function playlistWriteKey(referenceId: string): string {
+  return `hyperbeam-playlist-versions:${hyperbeamBaseUrl()}:${referenceId}`;
+}
+
 export async function fetchHyperbeamPlaylistSave(params: NativePlaylistWriteParams): Promise<Claim> {
+  return serializeUploadWrite(playlistWriteKey(params.reference_id || 'create'), () => saveHyperbeamPlaylist(params));
+}
+
+async function saveHyperbeamPlaylist(params: NativePlaylistWriteParams): Promise<Claim> {
   const account = getHyperbeamAccount();
   const owner = await activeHyperbeamAccountOwner();
   if (!account || !owner) throw new Error('Sign up or log in with the HyperBEAM account before saving playlists');
@@ -820,6 +830,7 @@ export async function fetchHyperbeamPlaylistSave(params: NativePlaylistWritePara
     }
     const resolved = await fetchNativePlaylistForReference(current);
     if (!resolved) throw new Error('Playlist reference does not resolve to a verified snapshot');
+    if (resolved.playlist.state === 'deleted') throw new Error('This playlist has been deleted');
     reference = resolved.reference;
     currentPlaylist = resolved.playlist;
   }
@@ -880,7 +891,59 @@ export async function fetchHyperbeamPlaylistSave(params: NativePlaylistWritePara
   ) {
     throw new Error('HyperBEAM playlist reference failed commitment or ownership verification');
   }
+  rememberUploadVersion(playlistWriteKey(referenceId), referenceMessageId);
   return nativePlaylistClaim(written, true, referenceId);
+}
+
+export async function fetchHyperbeamPlaylistDelete(referenceId: string): Promise<Claim> {
+  return serializeUploadWrite(playlistWriteKey(referenceId), async () => {
+    const owner = await activeHyperbeamAccountOwner();
+    const init = await fetchNativePlaylistReferenceById(referenceId);
+    if (!owner || !init || init.owner !== owner) throw new Error('Only the playlist owner can delete this playlist');
+    nativePlaylistReferenceQueryCache.clear();
+    const current = await fetchNativePlaylistForReference(init);
+    if (!current) throw new Error('Playlist could not be verified. Nothing was deleted.');
+    if (current.playlist.state === 'deleted') return nativePlaylistClaim(current.playlist, true, referenceId);
+    const timestamp = Math.max(Date.now(), current.reference.timestamp + 1);
+    const snapshotId = await writeNativeMessage(
+      nativePlaylistDeletionMessage(current.reference, timestamp),
+      'playlist deletion'
+    );
+    const set = nativePlaylistReferenceSetMessage({
+      profileId: init.profile_id,
+      profileName: init.profile_name,
+      owner,
+      referenceId,
+      snapshotId,
+      timestamp,
+      deleted: true,
+      previousReference: current.reference.message_id,
+    });
+    const evidence = await fetchVerifiedNativeMessage(snapshotId);
+    const expected = {
+      ...current.reference,
+      reference_value: snapshotId,
+      timestamp,
+      is_init: false,
+      playlist_state: 'deleted' as const,
+      previous_reference: current.reference.message_id,
+    };
+    const deleted = evidence && playlistDeletionSnapshot(evidence.payload, snapshotId, evidence.owner, init, expected);
+    if (!deleted) throw new Error('Playlist deletion snapshot could not be verified');
+    const setId = await writeNativeMessage(set, 'playlist deletion reference');
+    const verifiedSet = await fetchNativePlaylistReferenceMessageById(setId);
+    if (!verifiedSet || !playlistDeletionSnapshot(evidence.payload, snapshotId, evidence.owner, init, verifiedSet)) {
+      throw new Error('Playlist deletion reference could not be verified');
+    }
+    rememberUploadVersion(playlistWriteKey(referenceId), setId);
+    nativePlaylistReferenceQueryCache.clear();
+    nativePlaylistQueryCache.clear();
+    const selected = await fetchNativePlaylistForReference(init);
+    if (!selected || selected.playlist.state !== 'deleted') {
+      throw new Error('The playlist changed while deleting. Refresh and try again.');
+    }
+    return nativePlaylistClaim(deleted, true, referenceId);
+  });
 }
 
 async function fetchNativePlaylistReferenceCollection(
@@ -925,12 +988,30 @@ async function fetchNativePlaylistForReference(
   if (!init.is_init) return null;
   // `device` stays out of the selectors (unindexed system key); the device is
   // verified per candidate during normalization.
-  const candidates = await fetchNativePlaylistReferenceCollection({
+  const discovered = await fetchNativePlaylistReferenceCollection({
     'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
     'reference-id': init.reference_id,
   });
+  // Locator hints bridge query lag, but every hinted reference is reverified.
+  const hinted = await Promise.all(
+    uploadVersionHints(playlistWriteKey(init.reference_id)).map(fetchNativePlaylistReferenceMessageById)
+  );
+  const deletions = new Map<string, NativePlaylist>();
+  const candidates: NativePlaylistReference[] = [];
+  for (const candidate of [...discovered, ...hinted].filter(Boolean)) {
+    if (candidate.playlist_state === 'deleted') {
+      const evidence = await fetchVerifiedNativeMessage(candidate.reference_value);
+      const deletion =
+        evidence &&
+        playlistDeletionSnapshot(evidence.payload, candidate.reference_value, evidence.owner, init, candidate);
+      if (!deletion) continue;
+      deletions.set(candidate.message_id, deletion);
+    }
+    candidates.push(candidate);
+  }
   const reference = projectNativePlaylistReference(init, candidates);
-  const playlist = await fetchNativePlaylistSnapshotById(reference.reference_value);
+  const playlist =
+    deletions.get(reference.message_id) || (await fetchNativePlaylistSnapshotById(reference.reference_value));
   if (
     !playlist ||
     playlist.owner !== init.owner ||
@@ -1133,6 +1214,7 @@ function nativePlaylistClaim(playlist: NativePlaylist, isMine: boolean, referenc
     visibility,
     hyperbeam: {
       schema: playlist.storage_schema || playlist.schema,
+      deleted: playlist.state === 'deleted',
       message_id: playlist.message_id,
       reference_id: referenceId,
       owner: playlist.owner,
