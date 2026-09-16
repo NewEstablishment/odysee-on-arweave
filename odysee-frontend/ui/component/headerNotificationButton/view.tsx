@@ -30,6 +30,9 @@ import { selectUser, selectUserVerifiedEmail } from 'redux/selectors/user';
 import { doGetMembershipSupportersList as doGetMembershipSupportersListAction } from 'redux/actions/memberships';
 import usePersistedState from 'effects/use-persisted-state';
 import useBrowserNotifications from '$web/component/browserNotificationSettings/use-browser-notifications';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { selectNotificationError, selectIsFetchingNotifications } from 'redux/selectors/notifications';
+import { doNotificationList } from 'redux/actions/notifications';
 const creatorIcon = (channelUrl, channelThumbnail) => (
   <UriIndicator
     uri={channelUrl}
@@ -74,20 +77,25 @@ export default function NotificationHeaderButton() {
   const unseenCount = useAppSelector(selectUnseenNotificationCount);
   const user = useAppSelector(selectUser);
   const authenticated = useAppSelector(selectUserVerifiedEmail);
-  const readNotification = (ids: Array<number>) => dispatch(doReadNotifications(ids));
-  const seeNotification = (ids: Array<string>) => dispatch(doSeeNotifications(ids));
-  const deleteNotification = (id: number) => dispatch(doDeleteNotification(id));
+  const notificationError = useAppSelector(selectNotificationError);
+  const fetching = useAppSelector(selectIsFetchingNotifications);
+  const native = hyperbeamNodeEnabled();
+  const readNotification = (ids: Array<string | number>) => dispatch(doReadNotifications(ids));
+  const seeNotification = (ids: Array<string | number>) => dispatch(doSeeNotifications(ids));
+  const deleteNotification = (id: string | number) => dispatch(doDeleteNotification(id));
   const doSeeAllNotifications = () => dispatch(doSeeAllNotificationsAction());
   const doGetMembershipSupportersList = () => dispatch(doGetMembershipSupportersListAction());
   const list = notifications.slice(0, 20);
-  const notificationsEnabled = authenticated && (ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui));
+  const notificationsEnabled = native
+    ? Boolean(user?.is_native)
+    : authenticated && (ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui));
   const [anchorEl, setAnchorEl] = React.useState(null);
   const [clicked, setClicked] = React.useState(false);
   const open = Boolean(anchorEl);
 
   const handleClick = (event) => {
-    doSeeAllNotifications();
     if (unseenCount > 0) doSeeAllNotifications();
+    if (native) dispatch(doNotificationList());
     setAnchorEl(!anchorEl ? event.currentTarget : null);
   };
 
@@ -197,7 +205,7 @@ export default function NotificationHeaderButton() {
       const { id, is_read: isRead } = notification;
 
       if (!isRead) {
-        seeNotification([String(id)]);
+        if (!native) seeNotification([id]);
         readNotification([id]);
       }
 
@@ -256,7 +264,7 @@ export default function NotificationHeaderButton() {
     notificationsEnabled && (
       <>
         <Tooltip title={__('Notifications')}>
-          <Button className="header__navigationItem--icon" onClick={handleClick}>
+          <Button className="header__navigationItem--icon" aria-label={__('Notifications')} onClick={handleClick}>
             <Icon size={18} icon={ICONS.NOTIFICATION} aria-hidden />
             <NotificationBubble />
           </Button>
@@ -265,12 +273,20 @@ export default function NotificationHeaderButton() {
         <ClickAwayListener onClickAway={handleClickAway}>
           <MuiMenu {...menuProps}>
             <div className="menu__list--notifications-list">
+              {notificationError && (
+                <div role="alert">
+                  {__('Unable to load notifications.')}{' '}
+                  <Button button="link" label={__('Retry')} onClick={() => dispatch(doNotificationList())} />
+                </div>
+              )}
               {list.map((notification) => {
                 return menuEntry(notification);
               })}
-              {list.length === 0 && (
+              {list.length === 0 && !notificationError && (
                 <div className="menu__list--notification-empty">
-                  <div className="menu__list--notification-empty-title">{__('No notifications')}</div>
+                  <div className="menu__list--notification-empty-title">
+                    {fetching ? __('Loading notifications…') : __('No notifications')}
+                  </div>
                   <div className="menu__list--notification-empty-text">
                     {__("You don't have any notifications yet, but they will be here when you do!")}
                   </div>
@@ -281,7 +297,7 @@ export default function NotificationHeaderButton() {
             <NavLink onClick={handleClose} to={`/$/${PAGES.NOTIFICATIONS}`}>
               <div className="menu__list--notifications-more">
                 {__('View all')}
-                <PushPromptInDrawer />
+                {!native && <PushPromptInDrawer />}
               </div>
             </NavLink>
           </MuiMenu>

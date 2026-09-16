@@ -62,8 +62,8 @@ const creatorIcon = (channelUrl, channelThumbnail) => (
 function Notification(props: Props) {
   const { menuButton = false, notification } = props;
   const dispatch = useAppDispatch();
-  const doReadNotificationsAction = (ids: Array<number>) => dispatch(doReadNotifications(ids));
-  const doDeleteNotification = (id: number) => dispatch(doDeleteNotificationAction(id));
+  const doReadNotificationsAction = (ids: Array<string | number>) => dispatch(doReadNotifications(ids));
+  const doDeleteNotification = (id: string | number) => dispatch(doDeleteNotificationAction(id));
   const doGetMembershipSupportersList = () => dispatch(doGetMembershipSupportersListAction());
   const { notification_rule, notification_parameters, is_read } = notification;
   const navigate = useNavigate();

@@ -340,6 +340,17 @@ claim ID.
 Subscriber counts remain a separate derived aggregation and are not part of
 this slice.
 
+### In-app notifications
+
+The inbox derives replies to a viewer's native comments and uploads from
+bell-enabled native follows using generic queries and exact verified reads.
+Read, seen, and dismissed state is a union of encrypted, cookie-signed
+`odysee-notification-receipt@1.0` messages. The existing stateless seal/open
+boundary protects receipt contents; it owns no notification storage.
+
+See [`aidocs/native-notifications.md`](aidocs/native-notifications.md) for the
+receipt contract, lifecycle, limits, and browser validation workflow.
+
 ## Static manifest frontend
 
 Production is a static SPA published as an Arweave path manifest and served by
@@ -401,6 +412,7 @@ pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
 pnpm run test:native-preferences
+pnpm run test:native-notifications
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```

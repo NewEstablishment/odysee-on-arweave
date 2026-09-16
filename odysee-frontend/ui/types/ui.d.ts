@@ -71,7 +71,7 @@ type ToastParams = {
 };
 
 type WebNotification = {
-  id: number;
+  id: string | number;
   notification_rule: string;
   notification_parameters: {
     device: { target: string; title: string; text: string };

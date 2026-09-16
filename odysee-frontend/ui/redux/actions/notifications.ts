@@ -8,6 +8,56 @@ import {
   selectNotificationCategories,
 } from 'redux/selectors/notifications';
 import { doResolveUris } from 'redux/actions/claims';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
+import { fetchHyperbeamNotifications, updateHyperbeamNotifications, resetHyperbeamNotifications } from 'util/hyperbeam';
+import type { NotificationReceiptOperation } from 'util/nativeNotifications';
+
+export function doResetNativeNotifications(profile?: string) {
+  resetHyperbeamNotifications();
+  return { type: ACTIONS.NOTIFICATION_NATIVE_RESET, data: { profile } };
+}
+
+function doNativeNotificationList() {
+  return async (dispatch: Dispatch) => {
+    const profile = getHyperbeamAccount()?.id;
+    if (!profile) return;
+    dispatch({ type: ACTIONS.NOTIFICATION_LIST_STARTED, data: { profile } });
+    try {
+      const notifications = await fetchHyperbeamNotifications();
+      if (getHyperbeamAccount()?.id !== profile) return;
+      dispatch({
+        type: ACTIONS.NOTIFICATION_LIST_COMPLETED,
+        data: { profile, newNotifications: notifications, filterRule: false },
+      });
+    } catch (error) {
+      dispatch({ type: ACTIONS.NOTIFICATION_LIST_FAILED, data: { profile, error: error.message } });
+    }
+  };
+}
+
+function doNativeNotificationUpdate(ids: Array<string | number>, operation: NotificationReceiptOperation) {
+  return async (dispatch: Dispatch) => {
+    const profile = getHyperbeamAccount()?.id;
+    if (!profile || !ids.length) return;
+    try {
+      await updateHyperbeamNotifications(ids, operation);
+      if (getHyperbeamAccount()?.id !== profile) return;
+      if (operation === 'dismiss') {
+        for (const notificationId of ids)
+          dispatch({ type: ACTIONS.NOTIFICATION_DELETE_COMPLETED, data: { profile, notificationId } });
+      } else {
+        dispatch({
+          type: operation === 'read' ? ACTIONS.NOTIFICATION_READ_COMPLETED : ACTIONS.NOTIFICATION_SEEN_COMPLETED,
+          data: { profile, notificationIds: ids },
+        });
+      }
+    } catch (error) {
+      if (getHyperbeamAccount()?.id !== profile) return;
+      dispatch(doToast({ isError: true, message: __('Unable to save notification changes. Please try again.') }));
+    }
+  };
+}
 export function doToast(params: ToastParams) {
   if (!params) {
     throw Error("'params' object is required to create a toast notification");
@@ -46,6 +96,7 @@ export function doDismissError() {
   };
 }
 export function doNotificationList(types?: Array<string> | null, resolve: boolean = true) {
+  if (hyperbeamNodeEnabled()) return doNativeNotificationList();
   return async (dispatch: Dispatch) => {
     dispatch({
       type: ACTIONS.NOTIFICATION_LIST_STARTED,
@@ -106,6 +157,19 @@ export function doNotificationList(types?: Array<string> | null, resolve: boolea
 export function doNotificationCategories() {
   return async (dispatch: Dispatch, getState: GetState) => {
     const state = getState();
+    if (hyperbeamNodeEnabled()) {
+      dispatch({
+        type: ACTIONS.NOTIFICATION_CATEGORIES_COMPLETED,
+        data: {
+          notificationCategories: [
+            { name: 'All', types: [] },
+            { name: 'Replies', types: [RULE.COMMENT_REPLY] },
+            { name: 'New uploads', types: [RULE.NEW_CONTENT] },
+          ],
+        },
+      });
+      return;
+    }
     const categoriesFetched = Boolean(selectNotificationCategories(state));
 
     if (!categoriesFetched) {
@@ -126,7 +190,7 @@ const getUnreadIds = (list) => list.filter((n) => !n.is_read).map((n) => n.id);
 
 const getUnseenIds = (list) => list.filter((n) => !n.is_seen).map((n) => n.id);
 
-export function doReadNotifications(notificationsIds: Array<number>) {
+export function doReadNotifications(notificationsIds: Array<string | number>) {
   return (dispatch: Dispatch, getState: GetState) => {
     const state = getState();
     const notifications = selectNotifications(state);
@@ -146,6 +210,7 @@ export function doReadNotifications(notificationsIds: Array<number>) {
       ids = Array.from(new Set([...getUnreadIds(notifications), ...getUnreadIds(notificationsFiltered)]));
     }
 
+    if (hyperbeamNodeEnabled()) return dispatch(doNativeNotificationUpdate(ids, 'read'));
     dispatch({
       type: ACTIONS.NOTIFICATION_READ_STARTED,
     });
@@ -171,7 +236,8 @@ export function doReadNotifications(notificationsIds: Array<number>) {
       });
   };
 }
-export function doSeeNotifications(notificationIds: Array<string>) {
+export function doSeeNotifications(notificationIds: Array<string | number>) {
+  if (hyperbeamNodeEnabled()) return doNativeNotificationUpdate(notificationIds, 'seen');
   return (dispatch: Dispatch) => {
     dispatch({
       type: ACTIONS.NOTIFICATION_SEEN_STARTED,
@@ -212,7 +278,8 @@ export function doSeeAllNotifications() {
     dispatch(doSeeNotifications(unseenIds));
   };
 }
-export function doDeleteNotification(notificationId: number) {
+export function doDeleteNotification(notificationId: string | number) {
+  if (hyperbeamNodeEnabled()) return doNativeNotificationUpdate([notificationId], 'dismiss');
   return (dispatch: Dispatch) => {
     Lbryio.call('notification', 'delete', {
       notification_ids: notificationId,
