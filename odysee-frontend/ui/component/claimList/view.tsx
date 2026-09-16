@@ -45,6 +45,7 @@ type Props = {
   empty?: string | React.ReactNode;
   defaultSort?: boolean;
   onScrollBottom?: (arg0?: any) => void;
+  hasMore?: boolean;
   page?: number;
   pageSize?: number;
   // If using the default header, this is a unique ID needed to persist the state of the filter setting
@@ -103,6 +104,7 @@ export default function ClaimList(props: Props) {
     type,
     header,
     onScrollBottom,
+    hasMore,
     page,
     pageSize,
     showHiddenByUser,
@@ -252,11 +254,12 @@ export default function ClaimList(props: Props) {
     return claim.name.length === 24 && !claim.name.includes(' ') && claim.value.author === 'Spee.ch';
   }, []);
   useEffect(() => {
+    let active = true;
     const handleScroll = debounce((e) => {
-      if (page && pageSize && onScrollBottom) {
+      if (active && page && pageSize && onScrollBottom) {
         const mainEl = document.querySelector(`.${MAIN_CLASS}`);
 
-        if (mainEl && !loading && urisLength >= pageSize) {
+        if (mainEl && !loading && (hasMore ?? urisLength >= pageSize)) {
           const ROUGH_TILE_HEIGHT_PX = 200;
           const mainBoundingRect = mainEl.getBoundingClientRect();
           const contentWrapperAtBottomOfPage = mainBoundingRect.bottom - ROUGH_TILE_HEIGHT_PX <= window.innerHeight;
@@ -270,9 +273,14 @@ export default function ClaimList(props: Props) {
 
     if (onScrollBottom) {
       window.addEventListener('scroll', handleScroll);
-      return () => window.removeEventListener('scroll', handleScroll);
+      // A sparse hydrated page may not fill the viewport or produce a scroll.
+      if (hasMore === true) handleScroll();
+      return () => {
+        window.removeEventListener('scroll', handleScroll);
+        active = false;
+      };
     }
-  }, [loading, onScrollBottom, urisLength, pageSize, page]);
+  }, [loading, onScrollBottom, urisLength, pageSize, page, hasMore]);
 
   const getClaimPreview = (uri: string, index: number, draggableProvided?: any) => (
     <ClaimPreview

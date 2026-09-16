@@ -7,6 +7,7 @@
 // - Sean
 import * as ACTIONS from 'constants/action_types';
 import mergeClaim from 'util/merge-claim';
+import { searchPageHasMore } from 'util/searchPagination';
 import { getChannelIdFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import { claimToStoredCollection } from 'util/collections';
 import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
@@ -1044,7 +1045,7 @@ reducers[ACTIONS.CLAIM_SEARCH_COMPLETED] = (state: ClaimsState, action: any): Cl
   const claimSearchByQueryMiscInfo = { ...state.claimSearchByQueryMiscInfo };
   const newResolvingIds = new Set(state.resolvingIds);
   const newFailedToResolveIds = new Set(state.failedToResolveIds);
-  const { append, query, urls, page, pageSize, totalItems, totalPages } = action.data;
+  const { append, query, urls, page, pageSize, totalItems, totalPages, hasMore } = action.data;
 
   if (append) {
     // todo: check for duplicate urls when concatenating?
@@ -1054,14 +1055,14 @@ reducers[ACTIONS.CLAIM_SEARCH_COMPLETED] = (state: ClaimsState, action: any): Cl
     claimSearchByQuery[query] = urls;
   }
 
-  // the returned number of urls is less than the page size, so we're on the last page
-  claimSearchByQueryLastPageReached[query] = urls.length < pageSize;
+  claimSearchByQueryLastPageReached[query] = !searchPageHasMore(hasMore, urls.length, pageSize);
   delete fetchingClaimSearchByQuery[query];
   claimSearchByQueryMiscInfo[query] = {
     page,
     pageSize,
     totalItems,
     totalPages,
+    hasMore,
   };
   const { claim_ids: claimIds } = JSON.parse(query);
 

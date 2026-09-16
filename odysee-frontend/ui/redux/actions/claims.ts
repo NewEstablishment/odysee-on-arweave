@@ -1131,6 +1131,7 @@ export function doClaimSearch(
             pageSize: options.page_size,
             totalItems: data.total_items,
             totalPages: data.total_pages,
+            hasMore: data.has_more,
           },
         },
       ];

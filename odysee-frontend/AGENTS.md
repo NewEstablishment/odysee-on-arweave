@@ -33,6 +33,10 @@ Empty-query homepage/category discovery uses this same path. Native channel
 uploads in public discovery use the verified operator projection's
 `channel_claim_id` search selector. Exact query enumeration remains for owner
 library/account summaries; do not merge separately ranked native/legacy pages.
+Discovery pagination must survive missing hydrated records: preserve explicit
+`has_more` and the completed discovery page through Redux and scroll handling.
+Following resets list state when followed channel IDs change. See
+`../docs/following-feed-acceptance.md` for controlled versus live acceptance.
 
 Keep `/$/discover` mounted without tag or moderator prerequisites. Existing
 links use its query parameters for generic search filters; materialized named

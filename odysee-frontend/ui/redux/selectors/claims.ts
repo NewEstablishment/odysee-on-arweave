@@ -952,6 +952,10 @@ export const selectClaimSearchByQueryLastPageReached = createSelector(
   selectState,
   (state) => state.claimSearchByQueryLastPageReached || EMPTY_OBJECT
 );
+export const selectClaimSearchPageInfo = createSelector(
+  selectState,
+  (state) => state.claimSearchByQueryMiscInfo || EMPTY_OBJECT
+);
 export const selectShortUrlForUri = (state: State, uri: string) => {
   const claim = selectClaimForUri(state, uri);
   return claim && claim.short_url;

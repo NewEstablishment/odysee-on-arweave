@@ -201,6 +201,10 @@ pagination to generic `search@1.0` requests, then hydrate the returned ordered
 immutable locators through exact reads. Public native channel and Following
 content uses the same search index after verified upload projection. Owner
 libraries/account summaries use exact query and verified revision projection.
+Following preserves discovery pagination when individual records cannot be
+hydrated and resets list state when followed channels change. See the
+[Following acceptance notes](docs/following-feed-acceptance.md) for tested
+boundaries and the remaining live mixed-source rehearsal.
 The compatibility `/$/discover` route remains available for tag, type, order,
 and freshness links; named materialized categories use their own `/$/<name>`
 routes.

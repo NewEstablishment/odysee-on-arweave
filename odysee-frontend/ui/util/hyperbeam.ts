@@ -2970,6 +2970,7 @@ export async function fetchHyperbeamSearch(params: ClaimSearchOptions): Promise<
     items,
     page,
     page_size: pageSize,
+    has_more: hasNextPage,
     total_items: discoveredItems + (hasNextPage ? 1 : 0),
     total_pages: hasNextPage ? page + 1 : page,
   };
