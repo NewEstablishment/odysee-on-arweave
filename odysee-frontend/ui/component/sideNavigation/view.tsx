@@ -347,7 +347,7 @@ function SideNavigation(props: Props) {
       hideForUnauth: true,
     },
   ];
-  const notificationsEnabled = ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui);
+  const notificationsEnabled = user?.is_native || ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui);
   // A HyperBEAM cookie account is a signed-in identity even though it never
   // carries the legacy verified email.
   const isAuthenticated = Boolean(email) || isHyperbeamSignedIn();

@@ -101,6 +101,7 @@ import {
   type NativeCommentControl,
 } from 'util/nativeCommentControls';
 import { FF_MAX_CHARS_IN_COMMENT } from 'constants/form-field';
+import { createNativeNotificationInbox, type NotificationReceiptOperation } from 'util/nativeNotifications';
 
 const HYPERBEAM_TIMEOUT_MS = 15000;
 const HYPERBEAM_READ_CACHE_MS = 30 * 1000;
@@ -160,6 +161,79 @@ let activeAccountOwnerCache: { accountId: string; expiresAt: number; promise: Pr
 let nativePreferenceOwnerCache: { accountId: string; expiresAt: number; promise: Promise<string | null> } | undefined;
 let nativePreferenceWriteQueue: Promise<void> = Promise.resolve();
 let hyperbeamNodeAddressPromise: Promise<string | null> | undefined;
+
+const nativeNotificationInbox = createNativeNotificationInbox({
+  account: () => getHyperbeamAccount()?.id,
+  identity: async () => {
+    const account = getHyperbeamAccount();
+    const owner = await activeHyperbeamAccountOwner();
+    return account && owner ? { id: account.id, owner } : null;
+  },
+  query: fetchHyperbeamQueryPaths,
+  read: fetchVerifiedNativeMessage,
+  subscriptions: (profile) =>
+    fetchNativeSubscriptionCollection({
+      schema: NATIVE_SUBSCRIPTION_SCHEMA,
+      type: NATIVE_SUBSCRIPTION_TYPE,
+      'profile-id': profile,
+    }),
+  ownComments: (profile) =>
+    fetchNativeCommentCollection({ schema: 'odysee-comment@1.0', type: 'comment', author: profile }),
+  comments: async (target) => {
+    const versions = await fetchNativeCommentVersions({
+      schema: 'odysee-comment@1.0',
+      type: 'comment',
+      'claim-id': target,
+    });
+    const aliases = new Map<string, string>();
+    for (const version of versions) {
+      for (const alias of [
+        version.comment_id,
+        version.hyperbeam_message_id,
+        version.version_ref,
+        version.comment_ref,
+      ]) {
+        if (alias) aliases.set(alias, version.comment_id);
+      }
+    }
+    const projected = await projectNativeCommentCollection(collapseNativeCommentRevisions(versions));
+    return projected.items.map((comment) => ({
+      ...comment,
+      parent_id: aliases.get(comment.parent_id) || comment.parent_id,
+      channel_url:
+        comment.hyperbeam_profile_id && comment.channel_name
+          ? buildURI(
+              { channelName: comment.channel_name.replace(/^@/, ''), channelClaimId: comment.hyperbeam_profile_id },
+              true
+            )
+          : undefined,
+    }));
+  },
+  claim: resolveImmutableClaimById,
+  channelUri: (id, name) => buildURI({ channelName: name.replace(/^@/, ''), channelClaimId: id }, true),
+  seal: async (plaintext) => {
+    const envelope = nativePreferenceEnvelope(await fetchPreferenceDeviceJson('seal', { plaintext }));
+    if (!envelope) throw new Error('Notification encryption returned an invalid envelope.');
+    return envelope;
+  },
+  open: async (envelope) => {
+    const result = await fetchPreferenceDeviceJson('open', envelope);
+    return String(value(result, 'plaintext', 'body') || '');
+  },
+  write: (message) => writeNativeMessage(message, 'notification receipt'),
+});
+
+export function fetchHyperbeamNotifications() {
+  return nativeNotificationInbox.list();
+}
+
+export function updateHyperbeamNotifications(ids: Array<string | number>, operation: NotificationReceiptOperation) {
+  return nativeNotificationInbox.update(ids, operation);
+}
+
+export function resetHyperbeamNotifications() {
+  nativeNotificationInbox.reset();
+}
 
 export async function fetchHyperbeamResolve(params: any): Promise<any | null> {
   const urls = urlsFromResolveParams(params);

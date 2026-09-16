@@ -69,7 +69,9 @@
     "test:native-cookie-preferences": "node --experimental-strip-types tests/scripts/native-cookie-preferences-smoke.mjs",
     "test:native-subscriptions": "node --experimental-strip-types tests/scripts/native-subscriptions.mjs",
     "test:native-cookie-subscriptions": "node --experimental-strip-types tests/scripts/native-cookie-subscriptions-smoke.mjs",
-    "test:static-manifest": "node --experimental-strip-types tests/scripts/hyperbeam-node-routing.mjs && node --experimental-strip-types tests/scripts/hyperbeam-legacy-boundary.mjs && node --test build/static-manifest.test.mjs"
+    "test:static-manifest": "node --experimental-strip-types tests/scripts/hyperbeam-node-routing.mjs && node --experimental-strip-types tests/scripts/hyperbeam-legacy-boundary.mjs && node --test build/static-manifest.test.mjs",
+    "test:native-notifications": "node --experimental-strip-types --test tests/scripts/native-notifications.mjs",
+    "test:native-cookie-notifications": "node tests/scripts/native-cookie-notifications-smoke.mjs"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.2",

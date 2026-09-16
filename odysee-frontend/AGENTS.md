@@ -232,6 +232,24 @@ instead of falling back to legacy services.
   save during index lag advances the same reference rather than forking a
   second init or restoring a stale snapshot.
 
+## Notifications
+
+- Derive the inbox from exact-verified native comments, uploads, and current
+  bell-enabled subscriptions. Self activity and suppressed comments do not notify.
+- Receipt IDs use the logical comment reference or immutable upload ID.
+- Seen, read, and dismiss actions append encrypted
+  `odysee-notification-receipt@1.0` messages through the generic cookie-signed
+  write. Reuse authenticated seal/open only for cryptography; no notification
+  device or notification fields in the shared preference blob.
+- Verify and decrypt exact receipt readback before acknowledging. Merge
+  receipt batches by union, retain acknowledged writes through index lag, and
+  clear private state on account changes.
+- The app polls while visible and on focus. Browser push, email, and legacy
+  notification import are outside this contract.
+- Run `test:native-notifications` and the browser test
+  `test:native-cookie-notifications`; its Vite/node setup is documented in
+  `../aidocs/native-notifications.md`.
+
 ## Analytics
 
 - `analytics@1.0` is a generic observational device. Odysee playback maps to
@@ -268,6 +286,7 @@ pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
 pnpm run test:native-preferences
+pnpm run test:native-notifications
 pnpm run test:manifest-homepage
 pnpm run test:static-manifest
 pnpm run build:manifest
