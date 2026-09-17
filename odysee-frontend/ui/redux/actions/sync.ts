@@ -572,12 +572,6 @@ type SharedData = {
     settings?: any;
     app_welcome_version?: number;
     sharing_3P?: boolean;
-    unpublishedCollections: CollectionGroup;
-    editedCollections: CollectionGroup;
-    updatedCollections: UpdatedCollectionGroup;
-    builtinCollections: CollectionGroup;
-    savedCollectionIds: Array<string>;
-    autoPublishById?: Record<string, boolean>;
     lastViewedAnnouncement?: LastViewedAnnouncement;
   };
 };
@@ -595,12 +589,6 @@ function extractUserState(rawObj: SharedData) {
       settings,
       app_welcome_version,
       sharing_3P,
-      unpublishedCollections,
-      editedCollections,
-      updatedCollections,
-      builtinCollections,
-      savedCollectionIds,
-      autoPublishById,
       lastViewedAnnouncement,
     } = rawObj.value;
     return {
@@ -644,36 +632,6 @@ function extractUserState(rawObj: SharedData) {
             sharing_3P,
           }
         : {}),
-      ...(hasOwn('unpublishedCollections')
-        ? {
-            unpublishedCollections,
-          }
-        : {}),
-      ...(hasOwn('editedCollections')
-        ? {
-            editedCollections,
-          }
-        : {}),
-      ...(hasOwn('updatedCollections')
-        ? {
-            updatedCollections,
-          }
-        : {}),
-      ...(hasOwn('builtinCollections')
-        ? {
-            builtinCollections,
-          }
-        : {}),
-      ...(hasOwn('savedCollectionIds')
-        ? {
-            savedCollectionIds,
-          }
-        : {}),
-      ...(hasOwn('autoPublishById')
-        ? {
-            autoPublishById,
-          }
-        : {}),
       ...(hasOwn('lastViewedAnnouncement')
         ? {
             lastViewedAnnouncement,
@@ -696,12 +654,6 @@ export function doPopulateSharedUserState(sharedSettings: any) {
       settings,
       app_welcome_version,
       sharing_3P,
-      unpublishedCollections,
-      editedCollections,
-      updatedCollections,
-      builtinCollections,
-      savedCollectionIds,
-      autoPublishById,
       lastViewedAnnouncement,
     } = extractUserState(sharedSettings);
     dispatch({
@@ -715,12 +667,6 @@ export function doPopulateSharedUserState(sharedSettings: any) {
         settings,
         welcomeVersion: app_welcome_version,
         allowAnalytics: sharing_3P,
-        unpublishedCollections,
-        editedCollections,
-        updatedCollections,
-        builtinCollections,
-        savedCollectionIds,
-        autoPublishById,
         lastViewedAnnouncement,
       },
     });

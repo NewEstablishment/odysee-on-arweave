@@ -12,6 +12,7 @@ type Collection = {
   sourceId?: string;
   key?: string;
   itemCount?: number;
+  visibility?: PlaylistVisibility;
   [key: string]: any;
 };
 
@@ -24,10 +25,11 @@ type CollectionEditParams = {
   name?: string;
   description?: string;
   thumbnail?: { url: string };
+  visibility?: PlaylistVisibility;
   [key: string]: any;
 };
 
-type CollectionPublishCreateParams = {
+type CollectionSaveParams = {
   name: string;
   bid?: string;
   claims: Array<string>;
@@ -37,11 +39,8 @@ type CollectionPublishCreateParams = {
   tags?: Array<string>;
   languages?: Array<string>;
   channel_id?: string;
+  visibility?: PlaylistVisibility;
   [key: string]: any;
-};
-
-type CollectionPublishUpdateParams = CollectionPublishCreateParams & {
-  claim_id: string;
 };
 
 type CollectionLocalCreateParams = {
@@ -49,11 +48,11 @@ type CollectionLocalCreateParams = {
   items: Array<string>;
   type: string;
   sourceId?: string;
+  visibility?: PlaylistVisibility;
 };
 
+type PlaylistVisibility = 'private' | 'public';
 type CollectionType = string;
-type CollectionGroup = Record<string, Collection>;
-type UpdatedCollectionGroup = Record<string, Collection>;
 type CollectionState = {
   [key: string]: any;
 };

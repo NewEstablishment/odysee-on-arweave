@@ -15,7 +15,6 @@ import {
   selectIsFetchingMyCollections,
   selectMyPublishedCollections,
   selectMyUnpublishedCollections,
-  selectMyEditedCollections,
   selectMyUpdatedCollections,
   selectSavedCollectionIds,
   selectSavedCollections,
@@ -36,7 +35,6 @@ export default function CollectionsListMine(props: Props) {
   const dispatch = useAppDispatch();
   const publishedCollections = useAppSelector(selectMyPublishedCollections);
   const unpublishedCollections = useAppSelector(selectMyUnpublishedCollections);
-  const editedCollections = useAppSelector(selectMyEditedCollections);
   const updatedCollections = useAppSelector(selectMyUpdatedCollections);
   const savedCollections = useAppSelector(selectSavedCollections);
   const savedCollectionIds = useAppSelector(selectSavedCollectionIds);
@@ -53,7 +51,10 @@ export default function CollectionsListMine(props: Props) {
         value: urlParams.get(sortByParam),
       }
     : persistedOption;
-  const defaultFilterType = urlParams.get(COLS.FILTER_TYPE_KEY) || 'All';
+  const requestedFilterType = urlParams.get(COLS.FILTER_TYPE_KEY);
+  const defaultFilterType = Object.values(COLS.LIST_TYPE).includes(requestedFilterType as any)
+    ? requestedFilterType
+    : COLS.LIST_TYPE.ALL;
   const defaultSearchTerm = urlParams.get(COLS.SEARCH_TERM_KEY) || '';
   const [filterType, setFilterType] = React.useState(defaultFilterType);
   const [searchText, setSearchText] = React.useState(defaultSearchTerm);
@@ -61,7 +62,6 @@ export default function CollectionsListMine(props: Props) {
   const [filterParamsChanged, setFilterParamsChanged] = React.useState(false);
   const unpublishedCollectionsList = Object.keys(unpublishedCollections || {}) as any;
   const publishedList = Object.keys(publishedCollections || {}) as any;
-  const editedList = Object.keys(editedCollections || {}) as any;
   const savedList = Object.keys(savedCollections || {}) as any;
   const dedupeCollectionIds = React.useCallback((ids: Array<string>) => Array.from(new Set(ids)), []);
   const collectionsToShow = React.useMemo(() => {
@@ -69,19 +69,7 @@ export default function CollectionsListMine(props: Props) {
 
     switch (filterType) {
       case COLS.LIST_TYPE.ALL:
-        collections = unpublishedCollectionsList.concat(publishedList).concat(savedList);
-        break;
-
-      case COLS.LIST_TYPE.PRIVATE:
-        collections = unpublishedCollectionsList;
-        break;
-
-      case COLS.LIST_TYPE.PUBLIC:
-        collections = publishedList;
-        break;
-
-      case COLS.LIST_TYPE.EDITED:
-        collections = editedList;
+        collections = unpublishedCollectionsList.concat(publishedList);
         break;
 
       case COLS.LIST_TYPE.SAVED:
@@ -94,7 +82,7 @@ export default function CollectionsListMine(props: Props) {
     }
 
     return dedupeCollectionIds(collections);
-  }, [dedupeCollectionIds, editedList, filterType, publishedList, savedList, unpublishedCollectionsList]);
+  }, [dedupeCollectionIds, filterType, publishedList, savedList, unpublishedCollectionsList]);
   const playlistShowCount = isMobile ? COLS.PLAYLIST_SHOW_COUNT.MOBILE : COLS.PLAYLIST_SHOW_COUNT.DEFAULT;
   const page = (collectionsToShow.length > playlistShowCount && Number(urlParams.get('page'))) || 1;
   const firstItemIndexForPage = playlistShowCount * (page - 1);

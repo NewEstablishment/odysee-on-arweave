@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { getAuthToken } from 'util/saved-passwords';
 import { X_LBRY_AUTH_TOKEN } from 'constants/token';
 import fetchWithTimeout from 'util/fetch';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 const STATUS_GENERAL_STATE = {
   // internal/status/status.go#L44
   OK: 'ok',
@@ -33,6 +34,8 @@ const getParams = (user) => {
 export function useDegradedPerformance(onDegradedPerformanceCallback, user, doSetAssignedLbrynetServer) {
   const hasUser = user !== undefined && user !== null;
   useEffect(() => {
+    if (hyperbeamNodeEnabled()) return;
+
     if (hasUser) {
       // The status endpoint is the only endpoint at "v2" currently
       // This should be moved into the config once more endpoints are using it

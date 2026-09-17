@@ -14,13 +14,13 @@ import {
   selectCollectionIsEmptyForId,
   selectCollectionIsMine,
   selectCollectionHasEditsForId,
-  selectCollectionPublishErrorForId,
+  selectCollectionSaveErrorForId,
   selectCollectionSavedForId,
 } from 'redux/selectors/collections';
-import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { doOpenModal } from 'redux/actions/app';
+import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { doEnableCollectionShuffle } from 'redux/actions/content';
-import { doRetryCollectionPublish, doToggleCollectionSavedForId } from 'redux/actions/collections';
+import { doRetryCollectionSave, doToggleCollectionSavedForId } from 'redux/actions/collections';
 
 type Props = {
   inline?: boolean;
@@ -33,12 +33,12 @@ function CollectionMenuList(props: Props) {
   const navigate = useNavigate();
 
   const collectionName = useAppSelector((state) => selectCollectionTitleForId(state, collectionId));
-  const claimId = useAppSelector((state) => (selectClaimForClaimId(state, collectionId) || {}).claim_id);
+  const claim = useAppSelector((state) => selectClaimForClaimId(state, collectionId));
   const isBuiltin = useAppSelector((state) => selectIsCollectionBuiltInForId(state, collectionId));
   const collectionEmpty = useAppSelector((state) => selectCollectionIsEmptyForId(state, collectionId));
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
-  const publishError = useAppSelector((state) => selectCollectionPublishErrorForId(state, collectionId));
+  const saveError = useAppSelector((state) => selectCollectionSaveErrorForId(state, collectionId));
   const collectionSavedForId = useAppSelector((state) => selectCollectionSavedForId(state, collectionId));
 
   return (
@@ -88,19 +88,6 @@ function CollectionMenuList(props: Props) {
 
             {!isBuiltin && isMyCollection && (
               <>
-                {!collectionEmpty && (
-                  <MenuItem
-                    className="comment__menu-option"
-                    onSelect={() =>
-                      navigate(`/$/${PAGES.PLAYLIST}/${collectionId}?${CP.QUERIES.VIEW}=${CP.VIEWS.PUBLISH}`)
-                    }
-                  >
-                    <div className="menu__link">
-                      <Icon aria-hidden iconColor={'red'} icon={ICONS.PUBLISH} />
-                      {claimId ? __('Publish Snapshot') : __('Publish')}
-                    </div>
-                  </MenuItem>
-                )}
                 <MenuItem
                   className="comment__menu-option"
                   onSelect={() => navigate(`/$/${PAGES.PLAYLIST}/${collectionId}?${CP.QUERIES.VIEW}=${CP.VIEWS.EDIT}`)}
@@ -110,18 +97,18 @@ function CollectionMenuList(props: Props) {
                     {__('Edit')}
                   </div>
                 </MenuItem>
-                {claimId && collectionHasEdits && publishError && (
+                {collectionHasEdits && saveError && (
                   <MenuItem
                     className="comment__menu-option"
-                    onSelect={() => dispatch(doRetryCollectionPublish(collectionId))}
+                    onSelect={() => dispatch(doRetryCollectionSave(collectionId))}
                   >
                     <div className="menu__link">
                       <Icon aria-hidden icon={ICONS.REFRESH} />
-                      {__('Retry Publish Now')}
+                      {__('Retry Save')}
                     </div>
                   </MenuItem>
                 )}
-                {!claimId && (
+                {(!claim || claim.hyperbeam?.reference_id) && (
                   <MenuItem
                     className="comment__menu-option"
                     onSelect={() =>

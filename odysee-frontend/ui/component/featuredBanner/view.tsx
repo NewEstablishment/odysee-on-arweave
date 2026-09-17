@@ -11,6 +11,7 @@ import ClaimPreviewTile from 'component/claimPreviewTile';
 import ChannelThumbnail from 'component/channelThumbnail';
 import SubscribeButton from 'component/subscribeButton';
 import { hyperbeamImmutableUri, hyperbeamImmutableWebPath } from 'util/hyperbeam-route';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 import './style.lazy.scss';
 
 type Props = {
@@ -201,7 +202,14 @@ export default function FeaturedBanner(props: Props) {
                   title={item.label}
                 >
                   <img
-                    src={'https://thumbnails.odycdn.com/optimize/s:' + imageWidth + ':0/quality:95/plain/' + item.image}
+                    src={
+                      getThumbnailCdnUrl({
+                        thumbnail: item.image,
+                        width: imageWidth,
+                        height: 0,
+                        quality: 95,
+                      }) || undefined
+                    }
                     style={{ width: width }}
                   />
                 </NavLink>

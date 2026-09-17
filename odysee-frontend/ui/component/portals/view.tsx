@@ -9,6 +9,7 @@ import './style.lazy.scss';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { doSetClientSetting as doSetClientSettingAction } from 'redux/actions/settings';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 type HomepageOrder = {
   active: Array<string> | null | undefined;
   hidden: Array<string> | null | undefined;
@@ -143,12 +144,12 @@ export default function Portals(props: Props) {
         kill: kill,
       })}
       style={{
-        backgroundImage:
-          'url(https://thumbnails.odycdn.com/optimize/s:' +
-          imageWidth +
-          ':0/quality:95/plain/' +
-          mainPortal.background +
-          ')',
+        backgroundImage: `url(${getThumbnailCdnUrl({
+          thumbnail: mainPortal.background,
+          width: imageWidth,
+          height: 0,
+          quality: 95,
+        })})`,
       }}
       onMouseEnter={() => setPause(true)}
       onMouseLeave={() => setPause(false)}
@@ -197,7 +198,9 @@ export default function Portals(props: Props) {
                       width: tileWidth - 12,
                       height: tileWidth - 12,
                     }}
-                    src={'https://thumbnails.odycdn.com/optimize/s:237:0/quality:95/plain/' + portal.image}
+                    src={
+                      getThumbnailCdnUrl({ thumbnail: portal.image, width: 237, height: 0, quality: 95 }) || undefined
+                    }
                   />
                 </div>
                 <div

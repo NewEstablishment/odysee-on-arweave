@@ -258,8 +258,9 @@ export default function ClaimList(props: Props) {
     return claim.name.length === 24 && !claim.name.includes(' ') && claim.value.author === 'Spee.ch';
   }, []);
   useEffect(() => {
+    let active = true;
     const handleScroll = debounce((e) => {
-      if (page && pageSize && onScrollBottom) {
+      if (active && page && pageSize && onScrollBottom) {
         const mainEl = document.querySelector(`.${MAIN_CLASS}`);
 
         const canLoadMore = hasMore === undefined ? urisLength >= pageSize : hasMore;
@@ -278,10 +279,14 @@ export default function ClaimList(props: Props) {
 
     if (onScrollBottom) {
       window.addEventListener('scroll', handleScroll);
+      // A sparse hydrated page may not fill the viewport or produce a scroll.
       handleScroll();
-      return () => window.removeEventListener('scroll', handleScroll);
+      return () => {
+        window.removeEventListener('scroll', handleScroll);
+        active = false;
+      };
     }
-  }, [hasMore, loading, onScrollBottom, urisLength, pageSize, page]);
+  }, [loading, onScrollBottom, urisLength, pageSize, page, hasMore]);
 
   const getClaimPreview = (uri: string, index: number, draggableProvided?: any) => (
     <ClaimPreview

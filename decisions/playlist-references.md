@@ -10,10 +10,12 @@ store-first and generic-write contracts.
 
 ## Decision
 
-- Playlist content remains a complete immutable `odysee-playlist@1.0` message.
-- Initial publish writes the snapshot and then a canonical `reference@1.0` init.
+- Playlist content remains a complete immutable snapshot: plaintext
+  `odysee-playlist@1.0` when public or owner-bound
+  `odysee-private-playlist@1.0` ciphertext when private.
+- Initial playlist save writes the snapshot and then a canonical `reference@1.0` init.
   The init commitment ID is the stable public playlist ID.
-- Republish writes a new snapshot and then a set carrying `reference-id`, the
+- Every later save writes a new snapshot and then a set carrying `reference-id`, the
   new snapshot ID as `reference-value`, and a strictly greater timestamp.
 - The cookie committer that signed the init owns the Odysee playlist reference.
   Profile fields are discovery/display metadata and cannot grant authority.
@@ -24,6 +26,10 @@ store-first and generic-write contracts.
   match index does not expose the canonical Arweave position tie-breaker.
 - If the snapshot write succeeds but the reference write fails, the previous
   head remains valid and the new immutable snapshot is merely unreferenced.
+- References bind `playlist-owner` to the verified init/set committer. New and
+  copied playlists default private. Private-to-public conversion writes a
+  public snapshot and advances the same reference; public-to-private is
+  rejected because immutable public history remains readable.
 
 The canonical device is a pinned external OTP dependency. A minimal tracked
 upstream patch keeps reserved message verification and committer operations on
@@ -31,8 +37,9 @@ the original reference record; it does not add product behavior to the device.
 
 ## Consequences
 
-Playlist links survive publish, edit, and reorder while every historical state
-remains independently addressable. Query indexes still locate candidates but do
-not determine ownership or current state. Queue, Watch Later, Favorites, and
-unpublished drafts remain local, and public deletion is a separate future event
-contract.
+Playlist links survive edit and reorder while every historical state remains
+independently addressable. The UI does not expose separate publish or republish
+actions: creating or saving a user playlist performs the committed write.
+Query indexes still locate candidates but do not determine ownership or current
+state. Queue, Watch Later, Favorites, and failed-save recovery drafts remain
+local, and public deletion is a separate future event contract.

@@ -1,6 +1,7 @@
 // import * as ICONS from 'constants/icons';
 import React from 'react';
 import I18nMessage from 'component/i18nMessage';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 type Props = {
   href?: string;
   image?: string;
@@ -32,9 +33,12 @@ export default function HelpHub(props: Props) {
       {image && (
         <img
           src={
-            'https://thumbnails.odycdn.com/optimize/s:46:0/quality:95/plain/https://static.odycdn.com/images/helpHub_' +
-            image +
-            '.png'
+            getThumbnailCdnUrl({
+              thumbnail: `https://static.odycdn.com/images/helpHub_${image}.png`,
+              width: 46,
+              height: 0,
+              quality: 95,
+            }) || undefined
           }
         />
       )}

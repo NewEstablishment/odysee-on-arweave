@@ -41,8 +41,9 @@ import {
   selectCollectionIsEmptyForId,
   selectCollectionTypeForId,
   selectCollectionHasEditsForId,
-  selectCollectionIsPublishingForId,
-  selectCollectionPublishErrorForId,
+  selectCollectionIsSavingForId,
+  selectCollectionSaveErrorForId,
+  selectCollectionVisibilityForId,
 } from 'redux/selectors/collections';
 type Props = {
   uri?: string;
@@ -76,8 +77,9 @@ function CollectionPreview(props: Props) {
     firstCollectionItemUrl ? selectThumbnailForUri(state, firstCollectionItemUrl) : ''
   );
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
-  const isPublishing = useAppSelector((state) => selectCollectionIsPublishingForId(state, collectionId));
-  const publishError = useAppSelector((state) => selectCollectionPublishErrorForId(state, collectionId));
+  const isSaving = useAppSelector((state) => selectCollectionIsSavingForId(state, collectionId));
+  const saveError = useAppSelector((state) => selectCollectionSaveErrorForId(state, collectionId));
+  const visibility = useAppSelector((state) => selectCollectionVisibilityForId(state, collectionId));
   const navigate = useNavigate();
   if (collectionType === 'featuredChannels') return null;
   const previewThumbnail = thumbnail || thumbnailFromSecondaryClaim || thumbnailFromClaim;
@@ -137,20 +139,15 @@ function CollectionPreview(props: Props) {
               <h2>
                 {isBuiltin && <Icon icon={COLLECTIONS_CONSTS.PLAYLIST_ICONS[collectionId]} />}
                 {usedCollectionName}
-                {collectionHasEdits && <Icon icon={ICONS.PUBLISH} />}
-                {isPublishing && (
-                  <Tooltip title={__('Publishing immutable playlist snapshot')} arrow={false} enterDelay={100}>
+                {isSaving && (
+                  <Tooltip title={__('Saving playlist')} arrow={false} enterDelay={100}>
                     <div className="pending-change">
                       <Spinner />
                     </div>
                   </Tooltip>
                 )}
-                {collectionHasEdits && publishError && (
-                  <Tooltip
-                    title={__('Last publish failed. Open playlist and retry publish.')}
-                    arrow={false}
-                    enterDelay={100}
-                  >
+                {collectionHasEdits && saveError && (
+                  <Tooltip title={__('Last save failed. Open the playlist and retry.')} arrow={false} enterDelay={100}>
                     <span>
                       <Icon icon={ICONS.WARNING} />
                     </span>
@@ -164,7 +161,7 @@ function CollectionPreview(props: Props) {
           <div className="info">
             <div className="meta">
               <CollectionItemCount collectionId={collectionId} />
-              {hasClaim ? <CollectionPublicIcon /> : <CollectionPrivateIcon />}
+              {visibility === 'public' ? <CollectionPublicIcon /> : <CollectionPrivateIcon />}
 
               <div className="create-at">
                 {collectionCreatedAt && (

@@ -5,6 +5,7 @@ import React from 'react';
 import { MATURE_TAGS } from 'constants/tags';
 import { resolveLangForClaimSearch } from 'util/default-languages';
 import { createNormalizedClaimSearchKey } from 'util/claim';
+import { searchPageNeedsFetch } from 'util/searchPagination';
 import { CsOptHelper } from 'util/claim-search';
 import Button from 'component/button';
 import dayjs from 'util/dayjs';
@@ -25,6 +26,7 @@ import {
   selectClaimsByUri,
   selectClaimSearchByQuery,
   selectClaimSearchByQueryLastPageReached,
+  selectClaimSearchPageInfo,
   selectIsFetchingClaimSearchForQuery,
 } from 'redux/selectors/claims';
 import {
@@ -263,6 +265,7 @@ function ClaimListDiscover(props: Props) {
   const followedTags = useAppSelector(selectFollowedTags);
   const claimSearchByQuery = useAppSelector(selectClaimSearchByQuery);
   const claimSearchByQueryLastPageReached = useAppSelector(selectClaimSearchByQueryLastPageReached);
+  const claimSearchPageInfo = useAppSelector(selectClaimSearchPageInfo);
   const claimsByUri = useAppSelector(selectClaimsByUri);
   const claimsById = useAppSelector(selectById);
   const showNsfw = useAppSelector(selectShowMatureContent);
@@ -611,6 +614,7 @@ function ClaimListDiscover(props: Props) {
   const loading = props.loading !== undefined ? props.loading : fetchingClaimSearch;
   const claimSearchResult = claimSearchByQuery[searchKey];
   const claimSearchResultLastPageReached = claimSearchByQueryLastPageReached[searchKey];
+  const searchPageInfo = claimSearchPageInfo[searchKey];
   const isUnfetchedClaimSearch = claimSearchResult === undefined;
   // uncomment to fix an item on a page
   //   const fixUri = 'lbry://@corbettreport#0/lbryodysee#5';
@@ -634,10 +638,10 @@ function ClaimListDiscover(props: Props) {
   let effectivePage = page;
 
   if (didSearchCriteriaChange) {
-    if (didNavigateForward) {
+    if (didNavigateForward || !claimSearchResult) {
       effectivePage = 1;
     } else if (claimSearchResult) {
-      effectivePage = Math.max(1, Math.ceil(claimSearchResult.length / dynamicPageSize));
+      effectivePage = searchPageInfo?.page || Math.max(1, Math.ceil(claimSearchResult.length / dynamicPageSize));
     }
   }
 
@@ -660,10 +664,12 @@ function ClaimListDiscover(props: Props) {
           didNavigateForward ||
           (!loading &&
             !claimSearchResultLastPageReached &&
-            claimSearchResult &&
-            claimSearchResult.length &&
-            claimSearchResult.length < dynamicPageSize * options.page &&
-            claimSearchResult.length % dynamicPageSize === 0));
+            (typeof searchPageInfo?.hasMore === 'boolean'
+              ? searchPageNeedsFetch(options.page, searchPageInfo.page)
+              : claimSearchResult &&
+                claimSearchResult.length &&
+                claimSearchResult.length < dynamicPageSize * options.page &&
+                claimSearchResult.length % dynamicPageSize === 0)));
 
   // Don't use the query from createNormalizedClaimSearchKey for the effect since that doesn't include page & release_time
   const timedOutMessage = (
@@ -892,6 +898,15 @@ function ClaimListDiscover(props: Props) {
     paginationAdvancedPageRef.current = null;
     setPaginationPending(false);
   }, [finalUris]);
+  React.useEffect(() => {
+    // Ranked discovery completes a page even when some locators cannot hydrate.
+    // Snapshot continuation still fills its requested visible-tile target.
+    if (uris || loading || searchPageInfo?.page !== page || typeof searchPageInfo?.hasMore !== 'boolean') return;
+    paginationUriCountRef.current = null;
+    paginationTargetCountRef.current = null;
+    paginationAdvancedPageRef.current = null;
+    setPaginationPending(false);
+  }, [uris, loading, page, searchPageInfo]);
   React.useEffect(() => {
     if (paginationUriCountRef.current === null || loading || !claimSearchResultLastPageReached) return;
 

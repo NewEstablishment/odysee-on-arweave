@@ -6,6 +6,12 @@ const LEGACY_ONLY_SDK_METHODS = new Set([
   'blob_list',
   'channel_sign',
   'channel_list',
+  // The native profile IS the channel; legacy channel mutation can never
+  // apply to it, so fail these loudly instead of via a stubbed response.
+  'channel_create',
+  'channel_update',
+  'channel_abandon',
+  'channel_import',
   'claim_list',
   'file_list',
   'preference_get',

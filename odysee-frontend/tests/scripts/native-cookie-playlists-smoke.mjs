@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { nativePlaylistDeletionMessage, playlistDeletionSnapshot } from '../../ui/util/nativePlaylistDeletion.ts';
 
 import {
   NATIVE_PLAYLIST_SCHEMA,
@@ -13,6 +14,17 @@ import {
   normalizeNativePlaylistReference,
   projectNativePlaylistReference,
 } from '../../ui/util/nativePlaylistReferences.ts';
+import {
+  NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES,
+  NATIVE_PRIVATE_PLAYLIST_PURPOSE,
+  nativePrivatePlaylistPlaintext,
+  nativePrivatePlaylistSnapshotMessage,
+  normalizeNativePrivatePlaylistEnvelope,
+  normalizeNativePrivatePlaylistSnapshot,
+  parseNativePrivatePlaylistPlaintext,
+} from '../../ui/util/nativePrivatePlaylists.ts';
+import { decryptWeavemailEnvelope, encryptWeavemailEnvelope } from '../../ui/util/weavemail.ts';
 
 const nodeBase = String(process.env.HYPERBEAM_BASE_URL || 'http://127.0.0.1:18801').replace(/\/+$/, '');
 const now = Date.now();
@@ -23,6 +35,126 @@ const profileB = await write({ type: 'channel', name: profileNameB });
 const ownerA = await committer(profileA.id);
 const ownerB = await committer(profileB.id);
 assert.notEqual(ownerA, ownerB);
+// The recipient key is the owner's hosted wallet, exported by the node for the
+// cookie that owns it. No key is generated or stored in the browser.
+const walletA = await exportWallet(profileA.cookie, ownerA);
+const walletB = await exportWallet(profileB.cookie, ownerB);
+assert.notEqual(walletA.n, walletB.n);
+
+const privateTimestamp = now + 10;
+const privateTitle = `Private playlist ${now}`;
+const privatePlaintext = nativePrivatePlaylistPlaintext(
+  playlistMessage({
+    profile: profileA.id,
+    profileName: profileNameA,
+    title: privateTitle,
+    items: [profileA.id, profileB.id],
+    createdAt: privateTimestamp,
+  })
+);
+const privateSeal = await encryptWeavemailEnvelope(
+  privatePlaintext,
+  walletA.n,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+);
+const privateEnvelope = normalizeNativePrivatePlaylistEnvelope({
+  ...privateSeal,
+  'encryption-format': NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT,
+  purpose: NATIVE_PRIVATE_PLAYLIST_PURPOSE,
+  owner: ownerA,
+});
+assert.ok(privateEnvelope);
+assert.equal(privateEnvelope.encryption_format, NATIVE_PRIVATE_PLAYLIST_ENCRYPTION_FORMAT);
+assert.equal(privateEnvelope.owner, ownerA);
+
+const privateSnapshot = await write(nativePrivatePlaylistSnapshotMessage(privateEnvelope), profileA.cookie);
+assert.equal(await verified(privateSnapshot.id), true);
+assert.equal(await committer(privateSnapshot.id), ownerA);
+const privateSnapshotPayload = unwrap(await read(privateSnapshot.id));
+assert.equal(JSON.stringify(privateSnapshotPayload).includes(privateTitle), false);
+assert.equal(JSON.stringify(privateSnapshotPayload).includes(profileA.id), false);
+const privateSnapshotRecord = normalizeNativePrivatePlaylistSnapshot({
+  ...privateSnapshotPayload,
+  'message-id': privateSnapshot.id,
+  'hyperbeam-owner': ownerA,
+});
+assert.ok(privateSnapshotRecord);
+
+const openedPrivate = await decryptWeavemailEnvelope(
+  privateSnapshotRecord,
+  walletA,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+);
+const decryptedPrivate = parseNativePrivatePlaylistPlaintext(openedPrivate, privateSnapshotRecord);
+assert.equal(decryptedPrivate?.title, privateTitle);
+assert.deepEqual(decryptedPrivate?.items, [profileA.id, profileB.id]);
+assert.equal(decryptedPrivate?.owner, ownerA);
+
+await assert.rejects(
+  decryptWeavemailEnvelope(privateSnapshotRecord, walletB, NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES),
+  /failed authentication/,
+  'another owner wallet must not decrypt the playlist'
+);
+await assert.rejects(
+  decryptWeavemailEnvelope(
+    { ...privateSnapshotRecord, ciphertext: tamper(privateSnapshotRecord.ciphertext) },
+    walletA,
+    NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+  ),
+  /failed authentication/,
+  'authenticated encryption must reject modified ciphertext'
+);
+
+const privateReference = await write(
+  nativePlaylistReferenceInitMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    owner: ownerA,
+    snapshotId: privateSnapshot.id,
+    timestamp: privateTimestamp,
+  }),
+  profileA.cookie
+);
+const publicConversionTimestamp = privateTimestamp + 1;
+const publicConversion = await write(
+  playlistMessage({
+    profile: profileA.id,
+    profileName: profileNameA,
+    title: privateTitle,
+    items: [profileA.id, profileB.id],
+    createdAt: publicConversionTimestamp,
+  }),
+  profileA.cookie
+);
+const publicConversionReference = await write(
+  nativePlaylistReferenceSetMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    owner: ownerA,
+    referenceId: privateReference.id,
+    snapshotId: publicConversion.id,
+    timestamp: publicConversionTimestamp,
+  }),
+  profileA.cookie
+);
+const privateReferencePaths = await queryUntilTimestamps(
+  {
+    'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
+    'reference-id': privateReference.id,
+  },
+  [publicConversionTimestamp]
+);
+const privateReferenceInit = await hydrateReference(privateReference.id);
+assert.ok(privateReferenceInit?.is_init);
+const privateReferenceCandidates = (await Promise.all(privateReferencePaths.map(hydrateReference))).filter(Boolean);
+const convertedHead = projectNativePlaylistReference(privateReferenceInit, privateReferenceCandidates);
+assert.equal(convertedHead.reference_id, privateReference.id, 'visibility conversion preserves the stable URL');
+assert.equal(
+  convertedHead.reference_value,
+  publicConversion.id,
+  'the stable reference advances to plaintext public data'
+);
+assert.equal(await verified(publicConversionReference.id), true);
 
 const first = await write(
   playlistMessage({
@@ -40,6 +172,7 @@ const playlistReference = await write(
   nativePlaylistReferenceInitMessage({
     profileId: profileA.id,
     profileName: profileNameA,
+    owner: ownerA,
     snapshotId: first.id,
     timestamp: now,
   }),
@@ -52,25 +185,26 @@ assert.equal(
 );
 assert.equal(await committer(playlistReference.id), ownerA);
 
-const republished = await write(
+const laterSave = await write(
   playlistMessage({
     profile: profileA.id,
     profileName: profileNameA,
-    title: 'Republished immutable snapshot',
+    title: 'Later saved immutable snapshot',
     items: [profileB.id, profileA.id],
     createdAt: now + 1,
   }),
   profileA.cookie
 );
-assert.equal(await verified(republished.id), true);
-assert.equal(await committer(republished.id), ownerA);
-assert.notEqual(first.id, republished.id, 'republishing must produce a new immutable playlist ID');
+assert.equal(await verified(laterSave.id), true);
+assert.equal(await committer(laterSave.id), ownerA);
+assert.notEqual(first.id, laterSave.id, 'a later save must produce a new immutable playlist ID');
 const referenceUpdate = await write(
   nativePlaylistReferenceSetMessage({
     profileId: profileA.id,
     profileName: profileNameA,
+    owner: ownerA,
     referenceId: playlistReference.id,
-    snapshotId: republished.id,
+    snapshotId: laterSave.id,
     timestamp: now + 1,
   }),
   profileA.cookie
@@ -82,6 +216,7 @@ const forgedReferenceUpdate = await write(
   nativePlaylistReferenceSetMessage({
     profileId: profileA.id,
     profileName: profileNameA,
+    owner: ownerB,
     referenceId: playlistReference.id,
     snapshotId: profileB.id,
     timestamp: now + 999,
@@ -102,14 +237,14 @@ const init = references.find((reference) => reference.message_id === playlistRef
 assert.ok(init?.is_init);
 const referenceHead = projectNativePlaylistReference(init, references);
 assert.equal(referenceHead.reference_id, playlistReference.id, 'the playlist URL remains the init message ID');
-assert.equal(referenceHead.reference_value, republished.id, 'the valid owner update selects the new snapshot');
+assert.equal(referenceHead.reference_value, laterSave.id, 'the valid owner update selects the new snapshot');
 assert.equal(referenceHead.owner, ownerA, 'a foreign committer cannot move the reference');
 
 const firstPayload = unwrap(await read(first.id));
-const republishedPayload = unwrap(await read(republished.id));
+const laterSavePayload = unwrap(await read(laterSave.id));
 assert.deepEqual(JSON.parse(firstPayload['items-json']), [profileA.id, profileB.id]);
-assert.deepEqual(JSON.parse(republishedPayload['items-json']), [profileB.id, profileA.id]);
-for (const payload of [firstPayload, republishedPayload]) {
+assert.deepEqual(JSON.parse(laterSavePayload['items-json']), [profileB.id, profileA.id]);
+for (const payload of [firstPayload, laterSavePayload]) {
   assert.equal(payload['playlist-ref'], undefined);
   assert.equal(payload['version-ref'], undefined);
   assert.equal(payload['revision-of'], undefined);
@@ -141,17 +276,18 @@ const other = await write(
 
 const pathsA = await queryUntilCreatedAts(
   { schema: NATIVE_PLAYLIST_SCHEMA, type: 'playlist', 'profile-id': profileA.id },
-  [now, now + 1, now + 2]
+  [now, now + 1, now + 2, publicConversionTimestamp]
 );
 const recordsA = (await Promise.all(pathsA.map(hydrateVerified))).filter(Boolean);
 const snapshotsA = immutableNativePlaylists(recordsA);
 assert.deepEqual(
   snapshotsA.map((playlist) => playlist.created_at),
-  [now + 1, now],
-  'owner listing keeps both immutable snapshots and rejects a foreign signer claiming the profile'
+  [publicConversionTimestamp, now + 1, now],
+  'owner listing keeps every valid immutable snapshot and rejects a foreign signer claiming the profile'
 );
-assert.deepEqual(snapshotsA[0].items, [profileB.id, profileA.id]);
-assert.deepEqual(snapshotsA[1].items, [profileA.id, profileB.id]);
+assert.deepEqual(snapshotsA[0].items, [profileA.id, profileB.id]);
+assert.deepEqual(snapshotsA[1].items, [profileB.id, profileA.id]);
+assert.deepEqual(snapshotsA[2].items, [profileA.id, profileB.id]);
 
 const pathsB = await queryUntilCreatedAts(
   { schema: NATIVE_PLAYLIST_SCHEMA, type: 'playlist', 'profile-id': profileB.id },
@@ -163,12 +299,81 @@ assert.deepEqual(
   [now + 3]
 );
 
+// An independent private reference allows deletion without public conversion.
+const privateDeleteInitWrite = await write(
+  nativePlaylistReferenceInitMessage({
+    profileId: profileA.id,
+    profileName: profileNameA,
+    owner: ownerA,
+    snapshotId: privateSnapshot.id,
+    timestamp: now + 1000,
+  }),
+  profileA.cookie
+);
+const privateDeleteInit = await hydrateReference(privateDeleteInitWrite.id);
+await checkDeletion(privateDeleteInit, privateDeleteInit, []);
+await checkDeletion(init, referenceHead, references);
+assert.ok(await verified(first.id), 'public exact history remains committed');
+assert.ok(await verified(privateSnapshot.id), 'private exact history remains committed');
+const preservedPrivate = await decryptWeavemailEnvelope(
+  privateEnvelope,
+  walletA,
+  NATIVE_PRIVATE_PLAYLIST_MAX_PLAINTEXT_BYTES
+);
+assert.equal(preservedPrivate, privatePlaintext, 'private historical bytes remain decryptable');
+
+async function checkDeletion(root, head, earlier) {
+  const timestamp = Math.max(now + 2000, head.timestamp + 1);
+  const payload = nativePlaylistDeletionMessage(head, timestamp);
+  const marker = await write(payload, profileA.cookie);
+  assert.ok(await verified(marker.id));
+  const setPayload = nativePlaylistReferenceSetMessage({
+    profileId: root.profile_id,
+    profileName: root.profile_name,
+    owner: ownerA,
+    referenceId: root.reference_id,
+    snapshotId: marker.id,
+    timestamp,
+    deleted: true,
+    previousReference: head.message_id,
+  });
+  const foreign = await write({ ...setPayload, 'playlist-owner': ownerB }, profileB.cookie);
+  assert.ok(await verified(foreign.id));
+  const foreignRef = await hydrateReference(foreign.id);
+  assert.equal(playlistDeletionSnapshot(payload, marker.id, ownerA, root, foreignRef), null);
+  const committed = await write(setPayload, profileA.cookie);
+  assert.ok(await verified(committed.id));
+  const paths = await queryUntilTimestamps(
+    { 'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE, 'reference-id': root.reference_id },
+    [timestamp]
+  );
+  assert.ok(paths.length > 0);
+  const deletion = await hydrateReference(committed.id);
+  const exactPayload = unwrap(await read(marker.id));
+  assert.ok(playlistDeletionSnapshot(exactPayload, marker.id, await committer(marker.id), root, deletion));
+  const projected = projectNativePlaylistReference(root, [...earlier, head, foreignRef, deletion]);
+  assert.equal(projected.playlist_state, 'deleted');
+  assert.equal(
+    projectNativePlaylistReference(root, [...earlier, head, { ...deletion, timestamp: root.timestamp }]).playlist_state,
+    undefined
+  );
+  assert.equal(
+    projectNativePlaylistReference(root, [
+      ...earlier,
+      head,
+      deletion,
+      { ...head, is_init: false, timestamp: timestamp + 1 },
+    ]).playlist_state,
+    'deleted'
+  );
+}
+
 console.log(
   JSON.stringify({
     owner_a: ownerA,
     owner_b: ownerB,
     first_playlist_id: first.id,
-    republished_playlist_id: republished.id,
+    later_save_playlist_id: laterSave.id,
     playlist_reference_id: playlistReference.id,
     reference_update_id: referenceUpdate.id,
     forged_reference_update_id: forgedReferenceUpdate.id,
@@ -176,6 +381,12 @@ console.log(
     other_playlist_id: other.id,
     owner_a_discovery_locators: pathsA,
     owner_b_discovery_locators: pathsB,
+    private_snapshot_id: privateSnapshot.id,
+    private_reference_id: privateReference.id,
+    public_conversion_snapshot_id: publicConversion.id,
+    public_conversion_reference_id: publicConversionReference.id,
+    encrypted_private_playlist_verified: true,
+    private_to_public_reference_verified: true,
     immutable_exact_reads_verified: true,
     owner_listing_verified: true,
   })
@@ -196,6 +407,11 @@ function playlistMessage({ profile, profileName, title, items, createdAt }) {
     'created-at': createdAt,
     'signature-scope': NATIVE_PLAYLIST_SIGNATURE_SCOPE,
   };
+}
+
+function tamper(value) {
+  const first = value[0] === 'A' ? 'B' : 'A';
+  return `${first}${value.slice(1)}`;
 }
 
 async function hydrateReference(id) {
@@ -308,6 +524,22 @@ async function queryUntilTimestamps(selectors, expectedTimestamps) {
   assert.fail(
     `query did not discover every reference message: ${JSON.stringify({ selectors, expectedTimestamps, paths })}`
   );
+}
+
+async function exportWallet(cookie, expectedOwner) {
+  const response = await fetch(`${nodeBase}/~secret@1.0/export`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'accept-bundle': 'true', 'content-type': 'application/json', cookie },
+    body: '{}',
+  });
+  assert.equal(response.ok, true, 'the cookie owner must be able to export its hosted wallet');
+  const exported = unwrap(parse(await response.text()));
+  const wallets = (Array.isArray(exported) ? exported : Object.values(exported || {})).filter(
+    (wallet) => wallet && typeof wallet.wallet === 'string'
+  );
+  assert.equal(wallets.length, 1, 'the export must contain exactly one wallet record');
+  assert.equal(wallets[0].address, expectedOwner, 'the exported wallet must be the cookie owner');
+  return JSON.parse(wallets[0].wallet);
 }
 
 function cookiePair(setCookie) {

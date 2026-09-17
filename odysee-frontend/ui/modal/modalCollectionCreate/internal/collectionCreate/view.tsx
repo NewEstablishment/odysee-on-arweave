@@ -20,7 +20,7 @@ const CollectionCreate = (props: Props) => {
     if (sourceId && newCollectionId) {
       linkParams = {
         linkText: __('View Page'),
-        linkTarget: `/${PAGES.PLAYLIST}/${newCollectionId}`,
+        linkTarget: `/$/${PAGES.PLAYLIST}/${newCollectionId}`,
       };
     }
 
@@ -40,8 +40,8 @@ const CollectionCreate = (props: Props) => {
       title={sourceId ? __('Copy Playlist') : __('Create a Playlist')}
       subtitle={
         sourceId
-          ? __('The copied playlist will be private and you will be able to edit its contents at any time.')
-          : __('You will be able to add content to this playlist using the Save button while viewing content.')
+          ? __('The copied playlist is saved to HyperBEAM immediately and remains editable through its stable link.')
+          : __('Create the playlist once; later changes are saved to HyperBEAM automatically.')
       }
       actions={<FormNewCollection closeForm={handleClose} onlyCreate sourceId={sourceId} />}
     />

@@ -69,6 +69,7 @@ function ChannelsFollowingPage() {
           />
 
           <ClaimListDiscover
+            key={JSON.stringify([...channelIds].sort((a, b) => a.localeCompare(b)))}
             streamType={CS.CONTENT_ALL}
             tileLayout={tileLayout}
             headerLabel={

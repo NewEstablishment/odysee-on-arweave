@@ -6,6 +6,7 @@ import { lazyImport } from 'util/lazyImport';
 import { useAppSelector } from 'redux/hooks';
 import { selectHomepageData } from 'redux/selectors/settings';
 import { selectUser } from 'redux/selectors/user';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 import './style.scss';
 
 const Portals = lazyImport(
@@ -55,7 +56,7 @@ function PortalPage() {
       <Page className="portal-wrapper" fullWidthPage>
         <div className="portal-header">
           <img
-            src={'https://thumbnails.odycdn.com/optimize/s:237:0/quality:95/plain/' + portal.image}
+            src={getThumbnailCdnUrl({ thumbnail: portal.image, width: 237, height: 0, quality: 95 }) || undefined}
             style={{
               background: `rgba(` + portal.css.rgb + `,1)`,
             }}
