@@ -23,6 +23,7 @@ import {
   selectCollectionVisibilityForId,
 } from 'redux/selectors/collections';
 import { doOpenModal } from 'redux/actions/app';
+import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { doToggleCollectionSavedForId, doRetryCollectionSave } from 'redux/actions/collections';
 import { doToast } from 'redux/actions/notifications';
 type Props = {
@@ -38,6 +39,7 @@ function CollectionHeaderActions(props: Props) {
   const { uri, collectionId, isBuiltin, showEdit, setShowEdit } = props;
   const dispatch = useAppDispatch();
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
+  const claim = useAppSelector((state) => selectClaimForClaimId(state, collectionId));
   const isSaving = useAppSelector((state) => selectCollectionIsSavingForId(state, collectionId));
   const saveError = useAppSelector((state) => selectCollectionSaveErrorForId(state, collectionId));
   const collectionHasEdits = useAppSelector((state) => selectCollectionHasEditsForId(state, collectionId));
@@ -160,7 +162,7 @@ function CollectionHeaderActions(props: Props) {
                   {__('Copy')}
                 </div>
               </MenuItem>
-              {isMyCollection && isNotADefaultList && !hasPublicPlaylist && (
+              {isMyCollection && !isBuiltin && isNotADefaultList && (!claim || claim.hyperbeam?.reference_id) && (
                 <MenuItem
                   className="comment__menu-option"
                   onSelect={() =>

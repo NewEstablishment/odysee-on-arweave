@@ -32,7 +32,7 @@ import {
 import { doClearClaimSearch, doResolveUris } from 'redux/actions/claims';
 import { doClearPurchasedUriSuccess } from 'redux/actions/file';
 import { selectFollowedTags } from 'redux/selectors/tags';
-import { selectUserAuthenticated, selectUser, hasLegacyOdyseePremium } from 'redux/selectors/user';
+import { selectUserAuthenticated, selectUser, selectUserIsNative, hasLegacyOdyseePremium } from 'redux/selectors/user';
 import { selectClientSettings, selectHomepageData } from 'redux/selectors/settings';
 import { doSignOut } from 'redux/actions/app';
 import { selectUnseenNotificationCount } from 'redux/selectors/notifications';
@@ -263,6 +263,7 @@ function SideNavigation(props: Props) {
   const purchaseSuccess = useAppSelector(selectPurchaseUriSuccess);
   const unseenCount = useAppSelector(selectUnseenNotificationCount);
   const user = useAppSelector(selectUser);
+  const isNative = useAppSelector(selectUserIsNative);
   const hasMembership = useAppSelector(hasLegacyOdyseePremium);
   const subscriptionUris = useAppSelector(selectSubscriptionUris) || [];
   const MOBILE_PUBLISH: Array<SideNavLink> = [
@@ -286,18 +287,24 @@ function SideNavigation(props: Props) {
     },
   ];
   const MOBILE_LINKS: Array<SideNavLink> = [
-    {
-      title: 'New Channel',
-      link: `/$/${PAGES.CHANNEL_NEW}`,
-      icon: ICONS.CHANNEL,
-      hideForUnauth: true,
-    },
-    {
-      title: 'Sync YouTube Channel',
-      link: `/$/${PAGES.YOUTUBE_SYNC}`,
-      icon: ICONS.YOUTUBE,
-      hideForUnauth: true,
-    },
+    // One cookie identity = one channel natively; legacy channel creation
+    // can only fail, so don't offer it.
+    ...(isNative
+      ? []
+      : [
+          {
+            title: 'New Channel',
+            link: `/$/${PAGES.CHANNEL_NEW}`,
+            icon: ICONS.CHANNEL,
+            hideForUnauth: true,
+          },
+          {
+            title: 'Sync YouTube Channel',
+            link: `/$/${PAGES.YOUTUBE_SYNC}`,
+            icon: ICONS.YOUTUBE,
+            hideForUnauth: true,
+          },
+        ]),
     {
       title: 'Uploads',
       link: `/$/${PAGES.UPLOADS}`,
@@ -347,7 +354,9 @@ function SideNavigation(props: Props) {
       hideForUnauth: true,
     },
   ];
-  const notificationsEnabled = ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui);
+  // Native sessions have no notification backend; the inbox would always be
+  // empty, so hide the entry point (mirrors headerProfileMenuButton).
+  const notificationsEnabled = !isNative && (ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui));
   // A HyperBEAM cookie account is a signed-in identity even though it never
   // carries the legacy verified email.
   const isAuthenticated = Boolean(email) || isHyperbeamSignedIn();

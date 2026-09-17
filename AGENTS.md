@@ -156,6 +156,17 @@ helpers before creating another transport or normalization path.
 
 ## Native identity and writes
 
+Profile display-name, bio and avatar/banner edits use owner-signed generic
+metadata revisions while preserving the root profile ID and handle. See
+`decisions/native-profile-revisions.md`; keep authentication/Google linking
+separate and preserve exact historical snapshots.
+
+Upload revision/search ownership is clarified by
+`decisions/native-upload-projection.md`: generic immutable writes, verified
+shared projection, and an operator search worker. Public channel/Following
+search uses the shared indexed corpus and server-side filters/pagination.
+Older upload-device/SSR instructions below do not override that decision.
+
 The native browser identity is the node's `secret-*` cookie, minted by
 `cookie@1.0` on the first committed write. Local storage contains display
 metadata only and grants no authority.
@@ -219,7 +230,9 @@ Playlists:
   User-created playlist create/edit/add/remove operations always commit on
   Save; do not expose a separate publish/republish action. Do not
   restore channel selection, URL names, bids, confirmations, support, or
-  `collection_*` SDK calls. Public deletion remains deferred.
+  `collection_*` SDK calls. Deletion uses a same-owner metadata-free tombstone
+  and generic reference set; see `decisions/playlist-deletion.md`. The stable
+  URL becomes deleted while exact public/private snapshots retain their access rules.
 
 User preferences:
 
@@ -437,6 +450,7 @@ pnpm run typecheck:tsc
 pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
+pnpm run test:hyperbeam-session
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists

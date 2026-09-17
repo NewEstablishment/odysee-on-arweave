@@ -60,8 +60,8 @@ function ChannelThumbnail(props: Props) {
   const odyseeMembership = useAppSelector((state) => selectUserOdyseeMembership(state, getChannelIdFromClaim(claim)));
   const [thumbLoadError, setThumbLoadError] = React.useState(ThumbUploadError);
   const shouldResolve = !isResolving && claim === undefined;
-  const thumbnail = rawThumbnail && rawThumbnail.trim().replace(/^http:\/\//i, 'https://');
-  const thumbnailPreview = rawThumbnailPreview && rawThumbnailPreview.trim().replace(/^http:\/\//i, 'https://');
+  const thumbnail = rawThumbnail && rawThumbnail.trim();
+  const thumbnailPreview = rawThumbnailPreview && rawThumbnailPreview.trim();
   const defaultAvatar = AVATAR_DEFAULT || Gerbil;
   const channelThumbnail = thumbnailPreview || thumbnail || defaultAvatar;
   const isAnimated = channelThumbnail && (channelThumbnail.endsWith('gif') || channelThumbnail.endsWith('webp'));

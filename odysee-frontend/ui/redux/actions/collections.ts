@@ -30,7 +30,11 @@ import * as COLS from 'constants/collections';
 import { resolveAuxParams, resolveCollectionType, getClaimIdsInCollectionClaim } from 'util/collections';
 import { getClaimOutpoint, getThumbnailFromClaim } from 'util/claim';
 import { doToast } from 'redux/actions/notifications';
-import { fetchHyperbeamPlaylistListMine, fetchHyperbeamPlaylistSave } from 'util/hyperbeam';
+import {
+  fetchHyperbeamPlaylistListMine,
+  fetchHyperbeamPlaylistSave,
+  fetchHyperbeamPlaylistDelete,
+} from 'util/hyperbeam';
 const FETCH_BATCH_SIZE = 50;
 const nativePlaylistSaveQueues = new Map<string, Promise<Claim | null>>();
 const nativePlaylistReferenceAliases = new Map<string, string>();
@@ -63,7 +67,7 @@ export const doFetchCollectionListMine =
         batchActions(
           {
             type: ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED,
-            data: { result },
+            data: { result, replaceNativePlaylists: true },
           },
           { type: ACTIONS.COLLECTION_LIST_MINE_COMPLETE }
         )
@@ -280,8 +284,14 @@ export const doCollectionDelete =
     const state = getState();
     const claim = selectClaimForClaimId(state, collectionId);
 
+    if (COLS.BUILTIN_PLAYLISTS.includes(collectionId)) throw new Error('Built-in playlists cannot be deleted');
     if (claim) {
-      throw new Error('Saved playlists are immutable and cannot be deleted yet.');
+      if (!claim.hyperbeam?.reference_id) throw new Error('Only a saved native playlist reference can be deleted');
+      // Finish earlier UI saves before taking the same integration-layer lock.
+      await nativePlaylistSaveQueues.get(collectionId)?.catch(() => null);
+      const deletedClaim = await fetchHyperbeamPlaylistDelete(claim.hyperbeam.reference_id);
+      dispatch({ type: ACTIONS.COLLECTION_DELETE, data: { id: collectionId, deletedClaim } });
+      return;
     }
     if (collectionKey) {
       dispatch({

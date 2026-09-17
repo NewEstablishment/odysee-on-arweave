@@ -159,6 +159,12 @@ message. The reply exposes the stored ID in `message-id`.
 
 ### Uploads
 
+Native profiles support owner-authorized display-name, bio, avatar and banner
+editing through generic append-only metadata snapshots. The original profile
+ID and handle remain stable; exact historical reads are preserved. See
+[profile revisions](decisions/native-profile-revisions.md). Google account
+linking and recovery remain a separate authentication workstream.
+
 The browser posts raw file bytes directly to the same stage-scoped `/id` write.
 It then writes a generic
 `odysee-upload@1.0` index record that links the name and metadata to the
@@ -192,15 +198,33 @@ wallpaper/placeholder assets are served from the manifest itself.
 
 Homepage and category `claim_search` requests map filters, ordering, and
 pagination to generic `search@1.0` requests, then hydrate the returned ordered
-immutable locators through exact reads. Native channel content uses a bounded
-`query@1.0` lookup over `odysee-upload@1.0` messages because channel ownership
-is verified from exact records rather than inferred from the search index.
+immutable locators through exact reads. Public native channel and Following
+content uses the same search index after verified upload projection. Owner
+libraries/account summaries use exact query and verified revision projection.
+Following preserves discovery pagination when individual records cannot be
+hydrated and resets list state when followed channels change. See the
+[Following acceptance notes](docs/following-feed-acceptance.md) for tested
+boundaries and the remaining live mixed-source rehearsal.
 The compatibility `/$/discover` route remains available for tag, type, order,
 and freshness links; named materialized categories use their own `/$/<name>`
 routes.
 
 There is no legacy transcoder or TUS preparation path in HyperBEAM mode.
 Transient `File` and pipeline objects are excluded from persisted Redux state.
+
+Upload metadata edits and deletes are generic same-owner revisions. Full metadata
+snapshots preserve explicit clears, tags and languages; deletes hide current
+discovery while preserving immutable history. Exact version routes stay exact.
+Run the operator upload search worker alongside Meilisearch so only verified
+current snapshots enter ranked discovery:
+
+```sh
+node --experimental-strip-types scripts/reindex-node-uploads-to-search.mjs --watch
+```
+
+See [upload projection](decisions/native-upload-projection.md) for identity,
+concurrency, search ownership and validation. The worker uses `HYPERBEAM_BASE_URL`,
+`MEILI_URL`, `MEILI_INDEX` and optional `MEILI_MASTER_KEY`/`ODYSEE_SEARCH_API_KEY`.
 
 ### Comments
 
@@ -261,6 +285,11 @@ legacy reaction API.
 
 ### Playlists
 
+Owners can delete saved playlists through a signed deletion snapshot and a
+strictly newer reference set. Libraries hide the playlist; its stable URL shows
+a deleted state. Exact historical snapshots remain readable with their original
+public/private access rules. See [playlist deletion](decisions/playlist-deletion.md).
+
 User-created playlists pair cookie-signed immutable snapshots with the pinned
 generic `reference@1.0` device. The reference init commitment is the stable
 route `/$/playlist/<reference-id>`. Public contents use
@@ -297,8 +326,8 @@ call the LBRY `collection_*` API.
 Playlist UI retains list, edit/reorder, play, and shuffle; Share appears only
 for public playlists. There is no
 separate publish or republish step: Save is the committed HyperBEAM write, and
-ordinary add/remove actions save automatically. Saved deletion remains hidden
-until it has an honest append-only contract. The UI has no
+ordinary add/remove actions save automatically. Saved deletion uses the
+verified tombstone/reference contract described above. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
 
@@ -418,6 +447,7 @@ pnpm run typecheck:tsc
 pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
+pnpm run test:hyperbeam-session
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
@@ -444,7 +474,6 @@ sequence.
 
 - Native view/subscriber counts, moderation delegates, and blocked-word
   settings are not implemented.
-- Upload edit/delete semantics still need a complete append-only design.
 - Mutable-name currentness still depends on an external locator; the evidence
   proves content integrity, not canonical-chain freshness.
 - HTTP multi-range responses are not implemented; browser single-range seeking

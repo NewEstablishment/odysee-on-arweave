@@ -9,6 +9,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import RightSideActions from './internal/rightSideActions/view';
 import { useAppDispatch } from 'redux/hooks';
 import { doClearClaimSearch, doFetchClaimListMine } from 'redux/actions/claims';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 type Props = {
   filterType: string;
   setFilterType: (type: string) => void;
@@ -47,18 +48,27 @@ export default function ClaimListHeader(props: Props) {
             {/* Filter Options */}
             <div className="claim-search__menu-group">
               <div className="claim-search__menu-subgroup">
-                {Object.values(FILE_LIST.FILE_TYPE).map((info: FilterInfo) => (
-                  <Button
-                    button="alt"
-                    key={info.label}
-                    label={__(info.label)}
-                    aria-label={info.ariaLabel}
-                    onClick={() => handleFilterTypeChange(info.key)}
-                    className={classnames(`button-toggle`, `button-toggle__upload-type-filter`, {
-                      'button-toggle--active': filterType === info.key,
-                    })}
-                  />
-                ))}
+                {Object.values(FILE_LIST.FILE_TYPE)
+                  // Native uploads have no reposts, unlisted/scheduled tags,
+                  // or paid tiers yet; those filters can only ever be empty.
+                  .filter(
+                    (info: FilterInfo) =>
+                      !hyperbeamUploadEnabled() ||
+                      info.key === FILE_LIST.FILE_TYPE.ALL.key ||
+                      info.key === FILE_LIST.FILE_TYPE.UPLOADS.key
+                  )
+                  .map((info: FilterInfo) => (
+                    <Button
+                      button="alt"
+                      key={info.label}
+                      label={__(info.label)}
+                      aria-label={info.ariaLabel}
+                      onClick={() => handleFilterTypeChange(info.key)}
+                      className={classnames(`button-toggle`, `button-toggle__upload-type-filter`, {
+                        'button-toggle--active': filterType === info.key,
+                      })}
+                    />
+                  ))}
               </div>
             </div>
           </div>

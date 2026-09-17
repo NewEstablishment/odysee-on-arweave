@@ -58,6 +58,7 @@ import { doOpenModal } from 'redux/actions/app';
 import { selectLanguage, selectClientSetting } from 'redux/selectors/settings';
 import { selectMembershipMineFetched, selectUserOdyseeMembership } from 'redux/selectors/memberships';
 import { getThumbnailFromClaim, isClaimNsfw } from 'util/claim';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 import { doMembershipMine as doMembershipMineAction } from 'redux/actions/memberships';
 import { PREFERENCE_EMBED } from 'constants/tags';
 const HiddenNsfwClaims = lazyImport(
@@ -137,7 +138,8 @@ function ChannelPage(props: Props) {
     currentView = hideAboutTab ? CHANNEL_PAGE.VIEWS.DISCUSSION : CHANNEL_PAGE.VIEWS.ABOUT;
   }
 
-  const editing = currentView === CHANNEL_PAGE.VIEWS.EDIT;
+  const canEditProfile = channelIsMine && !claim.hyperbeam?.profile_historical;
+  const editing = currentView === CHANNEL_PAGE.VIEWS.EDIT && canEditProfile;
   const { channelName } = parseURI(uri);
   const { permanent_url: permanentUrl } = claim;
   const claimId = claim.claim_id;
@@ -410,7 +412,17 @@ function ChannelPage(props: Props) {
   }, [hideShorts, currentView, uri, navigate, isEmbedPath]);
 
   if (editing) {
-    return <ChannelEdit uri={uri} onDone={() => navigate(-1)} disabled={false} />;
+    return (
+      <ChannelEdit
+        uri={uri}
+        onDone={() =>
+          hyperbeamNodeEnabled()
+            ? navigate(`?${CHANNEL_PAGE.QUERIES.VIEW}=${CHANNEL_PAGE.VIEWS.ABOUT}`, { replace: true })
+            : navigate(-1)
+        }
+        disabled={false}
+      />
+    );
   }
 
   function handleViewMore(section: any) {
@@ -527,7 +539,7 @@ function ChannelPage(props: Props) {
               </Tooltip>
             </div>
             <div className="channel__edit">
-              {channelIsMine && (
+              {canEditProfile && (
                 <>
                   {pending ? (
                     <span>{__('Your changes will be live in a few minutes')}</span>
@@ -641,7 +653,9 @@ function ChannelPage(props: Props) {
                 {editing ? __('Editing Your Channel') : __('About --[tab title in Channel Page]--')}
               </Tab>
               <Tab aria-selected={tabIndex === 8} disabled={editing} onClick={() => onTabChange(8)}>
-                {channelIsMine && __('Settings')}
+                {/* Creator settings writes are legacy-only; the tab would render
+                    toggles that silently bounce back on a native channel. */}
+                {channelIsMine && !hyperbeamNodeEnabled() && __('Settings')}
               </Tab>
             </TabList>
           </div>
@@ -710,7 +724,7 @@ function ChannelPage(props: Props) {
               )}
             </TabPanel>
             <TabPanel>
-              {channelIsMine && activeView === CHANNEL_PAGE.VIEWS.SETTINGS && (
+              {channelIsMine && !hyperbeamNodeEnabled() && activeView === CHANNEL_PAGE.VIEWS.SETTINGS && (
                 <CreatorSettingsTab activeChannelClaim={claim} />
               )}
             </TabPanel>

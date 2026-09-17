@@ -49,7 +49,7 @@ forever (committed messages are immutable, historical shapes never go away).
 | `odysee-subscription@1.0` | `subscription-ref` = `<owner>.<channel-ref>`, deterministic |
 | `odysee-playlist@1.0` | none: immutable snapshots, every save is a new message |
 | `odysee-private-playlist@1.0` | none: owner-bound encrypted immutable snapshots, every save is a new message |
-| `odysee-upload@1.0` | none yet: revisions are the planned model for edit/delete |
+| `odysee-upload@1.0` | `version-ref`, random per revision; edit appends metadata, delete appends a tombstone |
 
 ## Identity and verification
 

@@ -66,7 +66,6 @@
     {
       "field": "schema",
       "values": [
-        "odysee-upload@1.0",
         "odysee-channel@1.0",
         "odysee-playlist@1.0",
         "odysee-comment@1.0"

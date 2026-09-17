@@ -7,7 +7,9 @@ import {
   SCHEDULED_TAGS,
   VISIBILITY_TAGS,
 } from 'constants/tags';
-import { HYPERBEAM_DEVICE, hyperbeamDevicePostParams64, hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { getHyperbeamAccount } from 'util/hyperbeamAccount';
+import { fetchHyperbeamResolve, fetchHyperbeamUploadDelete, fetchHyperbeamUploadUpdate } from 'util/hyperbeam';
 
 const METADATA_KEYS = [
   'title',
@@ -50,64 +52,63 @@ export function canUpdateThroughHyperbeam(claim: any, publishPayload: PublishPar
 }
 
 export function canDeleteThroughHyperbeam(claim: any) {
+  // The account profile is a channel claim with a record id too; it must
+  // never be fed into the upload-deletion path.
+  if (claim?.value_type === 'channel') return false;
   return Boolean(hyperbeamNodeBase() && hyperbeamClaimRecordId(claim));
 }
 
+// Edit and delete are append-only revision messages through the generic
+// `/id` write path (no app device): see ui/util/nativeUploadRevisions.ts.
 export async function updateThroughHyperbeam(
   claim: any,
   publishPayload: PublishParams,
-  _authToken?: string,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
-  const recordId = hyperbeamClaimRecordId(claim);
-  if (!recordId) throw new Error('HyperBEAM record ID not found for this claim.');
-
-  const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
-  const request = hyperbeamDevicePostParams64(
-    HYPERBEAM_DEVICE.upload,
-    'update&!',
-    {
-      record_id: recordId,
-      metadata: {
-        ...publishMetadata(publishPayload),
-        ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
-      },
-    },
-    {}
-  );
-  if (!request) throw new Error('HyperBEAM upload device is not configured.');
-
-  const response = await request;
-  const json = await responseJson(response);
-  if (!response.ok) throw new Error(errorMessage(json, response.status));
-
-  return normalizePublishResponse(json, publishPayload, null, myChannels);
+  if (
+    hasValue(publishPayload.remote_url) ||
+    hasValue(publishPayload.fee_amount) ||
+    hasValue(publishPayload.fee_currency) ||
+    publishPayload.optimize_file ||
+    hasUnsupportedTags(publishPayload.tags)
+  ) {
+    throw new Error('Native upload edits support public metadata only.');
+  }
+  const updated = await fetchHyperbeamUploadUpdate(claim, publishMetadata(publishPayload));
+  return normalizePublishResponse({ outputs: [updated] }, publishPayload, null, myChannels);
 }
 
-export async function deleteThroughHyperbeam(claim: any, _authToken?: string): Promise<void> {
-  const recordId = hyperbeamClaimRecordId(claim);
-  if (!recordId) throw new Error('HyperBEAM record ID not found for this claim.');
-
-  const request = hyperbeamDevicePostParams64(HYPERBEAM_DEVICE.upload, 'delete&!', { record_id: recordId }, {});
-  if (!request) throw new Error('HyperBEAM upload device is not configured.');
-
-  const response = await request;
-  const json = await responseJson(response);
-  if (!response.ok) throw new Error(errorMessage(json, response.status));
+export async function deleteThroughHyperbeam(claim: any): Promise<void> {
+  await fetchHyperbeamUploadDelete(claim);
 }
 
 function hyperbeamClaimRecordId(claim: any) {
   const hyperbeam = claim?.hyperbeam;
-  return hyperbeam?.['record-id'] || hyperbeam?.record_id || hyperbeam?.['data-id'] || hyperbeam?.data_id || '';
+  // record-id/record_id come from a fresh publish response; a claim resolved
+  // from the node after a reload carries the same id as immutable_id.
+  return (
+    hyperbeam?.['record-id'] ||
+    hyperbeam?.record_id ||
+    hyperbeam?.['data-id'] ||
+    hyperbeam?.data_id ||
+    hyperbeam?.immutable_id ||
+    hyperbeam?.['immutable-id'] ||
+    ''
+  );
 }
 
 export async function publishThroughHyperbeam(
   file: Blob,
   publishPayload: PublishParams,
-  _authToken: string,
   myChannels?: Array<ChannelClaim> | null
 ): Promise<PublishResponse> {
+  // Every native upload is attributed to the signed-in profile: an anonymous
+  // index message can never be claimed by a channel later, so without an
+  // account the upload would be permanently orphaned.
+  const account = getHyperbeamAccount();
+  if (!account) throw new Error('Sign in with your account before publishing.');
   const signingChannel = signingChannelFromPayload(publishPayload, myChannels);
+  const channel = signingChannel ? channelSummary(signingChannel) : { claim_id: account.id, name: account.name };
   const uploadPayload = {
     filename: fileName(file, publishPayload),
     content_type: file.type || publishPayload.content_type || 'application/octet-stream',
@@ -116,7 +117,7 @@ export async function publishThroughHyperbeam(
     metadata: {
       ...publishMetadata(publishPayload),
       ...(await fileMediaMetadata(file)),
-      ...(signingChannel ? { channel: channelSummary(signingChannel) } : {}),
+      channel,
     },
   };
   const storeResponse = await genericStoreWriteResponse(file);
@@ -135,52 +136,28 @@ export async function publishThroughHyperbeam(
   const recordId = storeWriteId(indexJson);
   if (!recordId) throw new Error('HyperBEAM upload index did not return an ID.');
 
+  // Read the record back through the verified resolver so the claim carries
+  // the node-checked committer and channel attribution, not a client claim.
+  // Both writes are committed by now, so a missed readback is retried once
+  // and then reported without pretending the upload failed.
+  const uri = `lbry://immutable_${recordId}`;
+  let claim = (await fetchHyperbeamResolve({ urls: [uri] }))?.[uri];
+  if (!claim || claim.error) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    claim = (await fetchHyperbeamResolve({ urls: [uri] }))?.[uri];
+  }
+  if (!claim || claim.error) {
+    throw new Error(
+      `HyperBEAM stored upload ${recordId} but could not verify it yet. Check your uploads before publishing again.`
+    );
+  }
+
   return normalizePublishResponse(
-    synthesizedUploadResponse(recordId, dataId, uploadPayload),
+    { 'record-id': recordId, 'read-path': `/${dataId}`, outputs: [claim] },
     publishPayload,
     file,
     myChannels
   );
-}
-
-// The stored index message resolves back into a claim through the
-// immutable-id route (`immutableClaimFromHyperbeam`), so the publish
-// response is synthesized from the same fields the resolver reads.
-function synthesizedUploadResponse(recordId: string, dataId: string, uploadPayload: Record<string, any>) {
-  const metadata = uploadPayload.metadata || {};
-  return {
-    'record-id': recordId,
-    'read-path': `/${dataId}`,
-    outputs: [
-      {
-        name: uploadPayload.name,
-        normalized_name: uploadPayload.name,
-        claim_id: recordId,
-        value_type: 'stream',
-        confirmations: 1,
-        meta: {},
-        value: {
-          title: metadata.title,
-          description: metadata.description,
-          ...(metadata.thumbnail_url ? { thumbnail: { url: metadata.thumbnail_url } } : {}),
-          ...(metadata.video ? { video: metadata.video } : {}),
-          ...(metadata.audio ? { audio: metadata.audio } : {}),
-          source: {
-            name: uploadPayload.filename,
-            size: String(uploadPayload.size || ''),
-            media_type: uploadPayload.content_type,
-          },
-        },
-        hyperbeam: {
-          device: 'odysee-upload@1.0',
-          'record-id': recordId,
-          record_id: recordId,
-          'data-id': dataId,
-          data_id: dataId,
-        },
-      },
-    ],
-  };
 }
 
 async function genericStoreWriteResponse(file: Blob) {
@@ -213,14 +190,27 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     name: uploadPayload.name,
     filename: uploadPayload.filename,
     'content-type': uploadPayload.content_type,
+    // Also carry the media type under a non-reserved key: when the message
+    // has any list field (tags/languages) the node serializes it as
+    // multipart/form-data, and that HTTP Content-Type header shadows the
+    // message's own `content-type` field, so the resolver would otherwise
+    // never see `video/*` and would render the upload as a plain file.
+    'media-type': uploadPayload.content_type,
     'source-size': String(uploadPayload.size || ''),
     'data-id': dataId,
     'streaming-url': `/${dataId}`,
     title: metadata.title,
     description: metadata.description,
+    tags: metadata.tags,
+    languages: metadata.languages,
     'thumbnail-url': metadata.thumbnail_url,
     license: metadata.license,
+    'license-url': metadata.license_url,
     'release-time': metadata.release_time,
+    'video-duration': metadata.video?.duration,
+    'video-width': metadata.video?.width,
+    'video-height': metadata.video?.height,
+    'audio-duration': metadata.audio?.duration,
     'channel-id': channel.claim_id,
     'channel-name': channel.name,
     timestamp: Math.floor(Date.now() / 1000),
@@ -243,7 +233,8 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
 function publishMetadata(publishPayload: PublishParams) {
   const payload = publishPayload as any;
   return METADATA_KEYS.reduce<Record<string, any>>((metadata, key) => {
-    if (hasValue(payload[key])) metadata[key] = payload[key];
+    // Empty strings and lists are explicit clears; only absent values are omitted.
+    if (payload[key] !== undefined && payload[key] !== null) metadata[key] = payload[key];
     return metadata;
   }, {});
 }
@@ -277,8 +268,8 @@ function normalizePublishResponse(
       : {}),
     confirmations: outputs[0].confirmations > 0 ? outputs[0].confirmations : 1,
     is_my_output: true,
-    is_channel_signature_valid: Boolean(signingChannel) || outputs[0].is_channel_signature_valid,
-    signing_channel: signingChannel ? channelSummary(signingChannel) : outputs[0].signing_channel,
+    is_channel_signature_valid: Boolean(outputs[0].is_channel_signature_valid),
+    signing_channel: outputs[0].signing_channel,
     streaming_url: mediaUrl,
     download_url: mediaUrl,
     hyperbeam: {

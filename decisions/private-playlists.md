@@ -34,6 +34,9 @@ the generic committed-message and reference contracts.
   requires explicit irreversible confirmation. Public-to-private is rejected
   because an immutable public snapshot cannot be made secret.
 - Queue, Watch Later, Favorites, and failed-save recovery drafts remain local.
+- Owner deletion advances the reference to a metadata-free terminal marker;
+  it does not expose private titles/items or erase ciphertext history. See
+  [playlist deletion](playlist-deletion.md).
 
 ## Consequences
 
