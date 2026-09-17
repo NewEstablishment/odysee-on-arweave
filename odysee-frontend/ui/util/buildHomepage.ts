@@ -28,12 +28,15 @@ export type HomepageCat = {
   duration?: string;
   exclude_shorts?: boolean;
   excludeFuture?: boolean;
+  includeFuture?: boolean;
   mixIn?: Array<string>;
   hideByDefault?: boolean;
   immutableIds?: Array<string>;
   immutablePoolIds?: Array<string>;
   immutableChannelIds?: Array<string>;
   immutableSigningChannelIds?: Record<string, string>;
+  immutableMediaMetadata?: Record<string, Record<string, unknown>>;
+  snapshotCreatedAt?: number;
   unresolvedChannelIds?: Array<string>;
 };
 
@@ -153,9 +156,13 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
     uris: cat.immutableIds
       ? cat.immutableIds.map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri))
       : undefined,
-    categoryUris:
-      cat.immutablePoolIds || cat.immutableIds
-        ? (cat.immutablePoolIds || cat.immutableIds || [])
+    categoryUris: cat.immutableIds
+      ? cat.immutableIds.map(hyperbeamImmutableUri).filter((uri): uri is string => Boolean(uri))
+      : undefined,
+    prefetchedCategoryUris:
+      cat.immutablePoolIds && cat.immutableIds
+        ? cat.immutablePoolIds
+            .slice(cat.immutableIds.length)
             .map(hyperbeamImmutableUri)
             .filter((uri): uri is string => Boolean(uri))
         : undefined,
@@ -165,20 +172,30 @@ export const getHomepageRowForCat = (key: string, cat: HomepageCat) => {
         channelId,
       ])
     ),
+    immutableMediaMetadata: Object.fromEntries(
+      Object.entries(cat.immutableMediaMetadata || {}).map(([mediaId, metadata]) => [
+        hyperbeamImmutableUri(mediaId) || mediaId,
+        metadata,
+      ])
+    ),
     hideByDefault: cat.hideByDefault,
     hideSort: cat.hideSort,
     options: {
-      claimType: cat.claimType || ['stream', 'repost'],
+      claimType: cat.claimType || ['stream'],
       channelIds,
       excludedChannelIds: cat.excludedChannelIds,
       orderBy: orderValue,
       pageSize: cat.pageSize || undefined,
-      limitClaimsPerChannel: limitClaims,
+      limitClaimsPerChannel: limitClaims || 1,
       searchLanguages: cat.searchLanguages,
+      tags: cat.tags,
       duration: cat.duration || undefined,
-      excludeShorts: cat.exclude_shorts ? true : undefined,
       releaseTime: `>${getRelativeUnixTimestamp(cat.daysOfContent || 30, 'days', 'hour')}`,
       timestamp: cat.excludeFuture ? `<${Math.floor(Date.now() / 1000)}` : undefined,
+      homepageEligible: true,
+      includeFuture: cat.includeFuture,
+      snapshotCreatedAt: cat.snapshotCreatedAt,
+      snapshotClaimIds: cat.immutablePoolIds || cat.immutableIds,
     },
   };
 };
@@ -216,7 +233,7 @@ export function GetLinksData(
       hideSort: false,
       options: {
         orderBy: CS.ORDER_BY_NEW,
-        claimType: ['stream', 'repost'],
+        claimType: ['stream'],
         releaseTime:
           subscribedChannelIds.length > 20
             ? `>${getRelativeUnixTimestamp(9, 'months', 'week')}`
@@ -224,6 +241,7 @@ export function GetLinksData(
         pageSize: getPageSize(subscribedChannelIds.length > 3 ? (subscribedChannelIds.length > 6 ? 12 : 8) : 4, true),
         streamTypes: null,
         channelIds: subscribedChannelIds,
+        homepageEligible: true,
       },
     };
     rowData.push(RECENT_FROM_FOLLOWING); // const SHORTS_SECTION = {

@@ -178,7 +178,12 @@ creator controls.
 Direct immutable responses honor RFC 7233 single byte ranges. The generic
 cache read forwards range fields to range-aware source stores, while the HTTP
 boundary derives a `206` slice for locally stored immutable bodies and removes
-whole-object commitment headers from that partial representation.
+whole-object commitment headers from that partial representation. Historical
+LBRY open-ended ranges use a bounded, descriptor-aligned one-blob window by
+default, avoiding overlap between adjacent browser requests without making
+startup or a seek wait for a large response to be fully materialized; explicit
+ranges retain their exact bounds. The browser also avoids generating
+scrub-preview sprites by seeking a second hidden player across HyperBEAM media.
 
 Native channel profiles are normalized at the frontend integration boundary
 into the same claim shape consumed by Redux and channel pages. Their permanent
@@ -396,6 +401,17 @@ claim ID.
 Subscriber counts remain a separate derived aggregation and are not part of
 this slice.
 
+### In-app notifications
+
+The inbox derives replies to a viewer's native comments and uploads from
+bell-enabled native follows using generic queries and exact verified reads.
+Read, seen, and dismissed state is a union of encrypted, cookie-signed
+`odysee-notification-receipt@1.0` messages. The existing stateless seal/open
+boundary protects receipt contents; it owns no notification storage.
+
+See [`aidocs/native-notifications.md`](aidocs/native-notifications.md) for the
+receipt contract, lifecycle, limits, and browser validation workflow.
+
 ## Static manifest frontend
 
 Production is a static SPA published as an Arweave path manifest and served by
@@ -410,14 +426,19 @@ cache. The Lua computation discovers locators through the configured stores,
 exact-hydrates the selected claims and channels, and publishes one node-signed
 `odysee-homepage@1.0` snapshot per language. It first publishes the configured
 startup language, then stock `cron@1.0` runs the complete all-language refresh
-hourly. A failed refresh leaves the previous committed snapshots available.
+every hour. A failed refresh leaves the previous committed snapshots
+available.
 
 The browser discovers snapshots with generic `query@1.0`, exact-reads each
 candidate, verifies its commitment and node committer, and uses the newest
 valid snapshot. Homepage rows and their matching category routes share each
 category's ordered immutable pool. The optional `homepage-local-content`
 configuration adds a locally indexed category without changing the generic
-search device or the frontend templates.
+search device or the frontend templates. Both signed category snapshots and
+the separately materialized Local content row reject exact-hydrated media that
+lack a usable thumbnail. Signed language snapshots also reject future-dated
+media, while Local content intentionally retains scheduled streams. Homepage
+media discovery is stream-only; repost wrappers are not published.
 
 ```sh
 cd odysee-frontend
@@ -453,6 +474,7 @@ pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
 pnpm run test:native-preferences
+pnpm run test:native-notifications
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```

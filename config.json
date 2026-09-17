@@ -25,6 +25,7 @@
       ],
       "origins": [],
       "visitor-id-mode": "persistent",
+      "node-baseline-writer": true,
       "engagement-threshold-ms": 30000,
       "engagement-dedupe-window-ms": 86400000
     }
@@ -108,7 +109,7 @@
       "store-module": "hb_store_lmdb",
       "name": "cache-odysee-demo",
       "ao-types": "store-module=\"atom\", capacity=\"integer\"",
-      "capacity": 8589934592
+      "capacity": 34359738368
     },
     {
       "store-module": "hb_store_lmdb",
@@ -147,7 +148,7 @@
       "store-module": "hb_store_lmdb",
       "name": "cache-odysee-demo",
       "ao-types": "store-module=\"atom\", capacity=\"integer\"",
-      "capacity": 8589934592
+      "capacity": 34359738368
     }
   ],
   "on": {

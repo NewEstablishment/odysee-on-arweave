@@ -27,6 +27,10 @@ function analyticsBase() {
   return hyperbeamDeviceBase(HYPERBEAM_DEVICE.analytics);
 }
 
+function viewCountBase() {
+  return hyperbeamDeviceBase(HYPERBEAM_DEVICE.file);
+}
+
 export function analyticsTrackingEnabled() {
   return Boolean(trackingKey() && analyticsBase());
 }
@@ -100,14 +104,26 @@ export function sendAnalyticsAction(name: string, subjectId?: string, keepalive 
 export async function fetchAnalyticsCounts(subjectIds: string[]) {
   const orderedIds = subjectIds.map(String).filter(Boolean);
   if (orderedIds.length === 0) return [];
-  if (!analyticsTrackingEnabled()) return orderedIds.map(() => 0);
+  const base = viewCountBase();
+  const key = trackingKey();
+  if (!base || !key) return orderedIds.map(() => 0);
 
   const totals = new Map<string, number>();
   const uniqueIds = Array.from(new Set(orderedIds));
 
   for (let index = 0; index < uniqueIds.length; index += MAX_COUNTS_PER_REQUEST) {
     const chunk = uniqueIds.slice(index, index + MAX_COUNTS_PER_REQUEST);
-    const result = await analyticsPost('counts', { 'subject-ids': chunk });
+    const response = await fetch(`${base}/view-count`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ key, 'claim-ids': chunk }),
+    });
+    if (!response.ok) throw new Error(`odysee-file@1.0/view-count returned ${response.status}`);
+    const result = await response.json();
     const counts: CountResponse[] = Array.isArray(result?.counts) ? result.counts : [];
 
     counts.forEach((count) => {

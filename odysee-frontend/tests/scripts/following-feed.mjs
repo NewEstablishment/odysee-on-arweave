@@ -129,4 +129,26 @@ const pageContext = {
 };
 vm.runInNewContext(ts.transpile(`${component.slice(pageStart, pageEnd)}\nresult = effectivePage;`), pageContext);
 assert.equal(pageContext.result, 1, 'new sort/channel criteria start at page one even after POP navigation');
+// Category continuation waits for visible tiles; ordinary ranked feeds must
+// release that wait once the discovery page completes, even with missing tiles.
+const pendingStart = component.indexOf('// Ranked discovery completes a page');
+const pendingEnd = component.indexOf('}, [uris, loading, page, searchPageInfo]);', pendingStart);
+assert.ok(pendingStart >= 0 && pendingEnd > pendingStart);
+for (const snapshotUris of [undefined, ['snapshot-tile']]) {
+  const pendingContext = {
+    uris: snapshotUris,
+    loading: false,
+    page: 2,
+    searchPageInfo: { page: 2, hasMore: true },
+    paginationUriCountRef: { current: 23 },
+    paginationTargetCountRef: { current: 47 },
+    paginationAdvancedPageRef: { current: 2 },
+    released: false,
+  };
+  pendingContext.setPaginationPending = (pending) => {
+    pendingContext.released = !pending;
+  };
+  vm.runInNewContext(`(() => { ${component.slice(pendingStart, pendingEnd)} })()`, pendingContext);
+  assert.equal(pendingContext.released, !snapshotUris, 'only ranked feeds release the visible-tile wait');
+}
 console.log('Following feed controlled mixed-source ordering/pagination/unfollow/refresh tests passed');

@@ -378,6 +378,14 @@ HTTP delivery supports one RFC 7233 byte range. Range-aware cache/source stores
 receive the requested bounds directly; locally materialized immutable bodies
 are sliced at the HTTP boundary and returned as an unsigned derived `206`
 representation, leaving the exact whole message as the verification surface.
+For historical LBRY media, an open-ended browser range remains bounded to one
+plaintext source blob by default and ends on the verified descriptor's blob
+boundary when possible. The next request therefore starts at the next source
+blob instead of refetching an overlap. Explicit closed ranges and the final
+end-of-file window remain exact, and every fetched encrypted blob is still
+hash-verified before decryption. The frontend does not synthesize scrub-preview
+sprites from HyperBEAM media, because doing so would create a hidden second
+player that competes with playback by seeking across the external source.
 
 Generic `search@1.0` provides ranked locator discovery for homepage, category,
 and text-search requests. The frontend maps filters and sort before the query,
@@ -389,20 +397,30 @@ per root. Owner libraries/account summaries retain exact query enumeration.
 See [native upload projection](../decisions/native-upload-projection.md) for
 metadata snapshots, explicit clears, serialized writes, current versus exact
 routes, and search-worker operation.
+Watch-page related content is also a generic full-text search: a bounded
+tag-and-title query plus a server-side current-claim exclusion replaces the
+legacy recommendation endpoint, while exact hydration remains unchanged.
 
 Static manifests embed homepage presentation templates, not node-specific
 claim selections. The node stores its immutable Lua materializer and homepage
 plan, runs the computation against its own configured stores, and publishes
 node-signed `odysee-homepage@1.0` snapshots. Stock `cron@1.0` refreshes all
-languages hourly. The browser uses `query@1.0` only for locator discovery, then
-exact-hydrates and verifies the node committer before using a snapshot. There
-is no SSR timer or filesystem snapshot authority.
+languages every hour. The browser uses `query@1.0` only for locator discovery,
+then exact-hydrates and verifies the node committer before using a snapshot.
+There is no SSR timer or filesystem snapshot authority. Homepage selection
+accepts only exact-hydrated audio, video, image, and Markdown blog-post streams
+with a usable thumbnail, and rejects media whose effective release time is in
+the future; the separate manifest-local content selection applies the same
+media and thumbnail eligibility before emitting immutable IDs while retaining
+scheduled content.
 
 Observational analytics are recorded by the reusable `analytics@1.0` device.
 Odysee maps playback to generic subject engagement in the frontend, while the
-device exposes only aggregate counts and wallet-authenticated reports. A
-one-time owner-authenticated baseline preserves historical view totals; native
-qualified engagement is added after cutover. These analytics remain
+device exposes only aggregate counts and wallet-authenticated reports. The
+Odysee file adapter lazily imports a missing historical view baseline with the
+node signer when a legacy claim is first hydrated for view display. Operators
+can also perform a one-time owner-authenticated bulk import before retiring the
+legacy source. Native qualified engagement is added after cutover. These analytics remain
 non-authoritative signals and do not affect content verification.
 
 Other legacy-only interactive surfaces with no verifiable representation —

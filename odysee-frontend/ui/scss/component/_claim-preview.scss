@@ -1465,6 +1465,26 @@
   align-items: flex-start;
 }
 
+.claim-grid--stable-pagination {
+  overflow-anchor: none;
+}
+
+@keyframes claim-placeholder-reveal {
+  from {
+    opacity: 0.35;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .claim-preview--placeholder-reveal {
+    animation: claim-placeholder-reveal 120ms ease-out both;
+  }
+}
+
 .claim-shorts-grid {
   @media (max-width: $breakpoint-small) {
     display: flex;

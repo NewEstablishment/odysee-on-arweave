@@ -25,11 +25,14 @@ only the location to `hb_cache:read/2`, so a store-backed media read never
 sees the range and reassembles the whole object — a 653 MB video timed out.
 `hb_store:read` already accepts a request map and `hb_store_odysee`'s
 `request_range/2` already honors the fields; this only wires the range
-through. Ranged media then returns 206 with a *targeted blob fetch*
-(~3s cold for a 1 MB slice, seek anywhere) instead of a full-object read.
-Verified live: `start`/`end` and `range: bytes=X-Y` both yield 206 with
-`Content-Range`; non-range reads are unchanged. Applies cleanly to the
-pinned dep (`git apply --check` verified).
+through. Ranged media then returns 206 with a *targeted blob fetch* instead of
+a full-object read. The application separately keeps open-ended reads bounded:
+its current default covers one plaintext blob and aligns the response end to
+the verified descriptor stride, so adjacent browser requests do not fetch the
+same source blob twice or wait for a large response to be materialized.
+Explicit `start`/`end` and `range: bytes=X-Y` reads retain exact bounds and
+`Content-Range`; non-range reads are unchanged. Applies cleanly to the pinned
+dep (`git apply --check` verified).
 
 This is preferred over slicing a full reassembly in `hb_http:encode_reply`:
 forwarding the range lets the store fetch only the blobs the slice needs,

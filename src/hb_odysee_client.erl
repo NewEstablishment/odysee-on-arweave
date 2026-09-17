@@ -6,11 +6,13 @@
 %%% `{failure, Reason}' so callers can distinguish "not found" from
 %%% "proxy unavailable".
 -module(hb_odysee_client).
--export([call/3, claim/2, claim_search/2, resolve/2, transaction_show/2]).
+-export([call/3, claim/2, claim_search/2, resolve/2, transaction_show/2, view_counts/2]).
 
 -define(DEFAULT_PROXY_NODE, <<"https://api.na-backend.odysee.com">>).
 -define(PROXY_PATH, <<"/api/v1/proxy">>).
 -define(DEFAULT_PROXY_TIMEOUT, 10000).
+-define(DEFAULT_API_NODE, <<"https://api.odysee.com">>).
+-define(VIEW_TOKEN_KEY(Node), {?MODULE, view_token, Node}).
 
 claim(ClaimIDOrName, Opts) ->
     case valid_claim_id(ClaimIDOrName) of
@@ -46,6 +48,18 @@ resolve(NameOrURL, Opts) ->
 
 transaction_show(TxID, Opts) ->
     call(<<"transaction_show">>, #{ <<"txid">> => hb_util:to_lower(TxID) }, Opts).
+
+%% @doc Return authoritative legacy view totals in the requested order. The
+%% anonymous service token is kept in node memory only and is never written to
+%% a message or store.
+view_counts(ClaimIDs, Opts) when is_list(ClaimIDs) ->
+    Node = hb_maps:get(<<"odysee-api-node">>, Opts, ?DEFAULT_API_NODE, Opts),
+    case legacy_api_token(Node, Opts) of
+        {ok, Token} ->
+            legacy_view_counts(Node, Token, ClaimIDs, Opts);
+        Error ->
+            Error
+    end.
 
 call(Method, Params, Opts) ->
     Body =
@@ -118,6 +132,105 @@ decode_proxy_response(RespBody) ->
     catch
         _:_ ->
             {error, invalid_proxy_json}
+    end.
+
+legacy_api_token(Node, Opts) ->
+    Key = ?VIEW_TOKEN_KEY(Node),
+    case persistent_term:get(Key, undefined) of
+        Token when is_binary(Token), Token =/= <<>> ->
+            {ok, Token};
+        _ ->
+            global:trans(
+                {{?MODULE, view_token, Node}, self()},
+                fun() -> create_legacy_api_token(Node, Key, Opts) end
+            )
+    end.
+
+create_legacy_api_token(Node, Key, Opts) ->
+    case persistent_term:get(Key, undefined) of
+        Token when is_binary(Token), Token =/= <<>> ->
+            {ok, Token};
+        _ ->
+            AppID0 = <<"odyseecom", (hb_util:to_hex(crypto:strong_rand_bytes(32)))/binary>>,
+            AppID = binary:part(AppID0, 0, min(66, byte_size(AppID0))),
+            case legacy_api_call(
+                Node,
+                <<"/user/new">>,
+                #{ <<"auth_token">> => <<>>, <<"language">> => <<"en">>, <<"app_id">> => AppID },
+                Opts
+            ) of
+                {ok, #{ <<"auth_token">> := Token }} when is_binary(Token), Token =/= <<>> ->
+                    persistent_term:put(Key, Token),
+                    {ok, Token};
+                {ok, #{ <<"data">> := #{ <<"auth_token">> := Token }}}
+                        when is_binary(Token), Token =/= <<>> ->
+                    persistent_term:put(Key, Token),
+                    {ok, Token};
+                {ok, Other} ->
+                    {error, {missing_auth_token, Other}};
+                Error ->
+                    Error
+            end
+    end.
+
+legacy_view_counts(_Node, _Token, [], _Opts) ->
+    {ok, []};
+legacy_view_counts(Node, Token, ClaimIDs, Opts) ->
+    CSV = iolist_to_binary(lists:join(<<",">>, ClaimIDs)),
+    case legacy_api_call(
+        Node,
+        <<"/file/view_count">>,
+        #{ <<"auth_token">> => Token, <<"claim_id">> => CSV },
+        Opts
+    ) of
+        {ok, Counts} when is_list(Counts), length(Counts) =:= length(ClaimIDs) ->
+            {ok, Counts};
+        {ok, Other} ->
+            {error, {invalid_view_counts, Other}};
+        Error ->
+            Error
+    end.
+
+legacy_api_call(Node, Path, Fields, Opts) ->
+    Body = uri_string:compose_query(maps:to_list(Fields)),
+    Timeout = hb_maps:get(
+        <<"odysee-api-timeout">>,
+        Opts,
+        hb_maps:get(<<"lbry-proxy-timeout">>, Opts, ?DEFAULT_PROXY_TIMEOUT, Opts),
+        Opts
+    ),
+    HTTPOpts =
+        Opts#{
+            <<"http-client">> => hb_maps:get(<<"http-client">>, Opts, hackney, Opts),
+            <<"http-client-connect-timeout">> => min(Timeout, 5000),
+            <<"http-client-hackney-recv-timeout">> => Timeout,
+            <<"http-retry">> => hb_maps:get(<<"lbry-proxy-retries">>, Opts, 0, Opts)
+        },
+    Request = #{
+        peer => Node,
+        path => Path,
+        method => <<"POST">>,
+        headers => #{ <<"content-type">> => <<"application/x-www-form-urlencoded">> },
+        body => Body
+    },
+    case request_with_timeout(Request, HTTPOpts, Timeout) of
+        {ok, 200, _Headers, RespBody} ->
+            decode_legacy_api_response(RespBody);
+        {ok, Status, _Headers, RespBody} when Status < 500 ->
+            {error, {http_status, Status, RespBody}};
+        {ok, Status, _Headers, RespBody} ->
+            {failure, {http_status, Status, RespBody}};
+        {error, Reason} ->
+            {failure, Reason}
+    end.
+
+decode_legacy_api_response(RespBody) ->
+    try hb_json:decode(RespBody) of
+        #{ <<"success">> := true, <<"data">> := Data } -> {ok, Data};
+        #{ <<"success">> := false } = Error -> {error, Error};
+        Other -> {error, {invalid_legacy_api_response, Other}}
+    catch
+        _:_ -> {error, invalid_legacy_api_json}
     end.
 
 ensure_lbry_url(<<"lbry://", _/binary>> = URL) ->

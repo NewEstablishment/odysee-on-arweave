@@ -157,7 +157,8 @@ schedule(ModuleID, PlanID, Opts) ->
         <<"module">> => ModuleID,
         <<"device-sandbox">> => [
             <<"cache@1.0">>, <<"json@1.0">>, <<"message@1.0">>,
-            <<"httpsig@1.0">>, <<"relay@1.0">>, <<"search@1.0">>
+            <<"httpsig@1.0">>, <<"local-name@1.0">>, <<"meta@1.0">>,
+            <<"search@1.0">>
         ],
         <<"path">> => <<"every">>,
         <<"cron-path">> => <<"refresh">>,
@@ -207,7 +208,20 @@ start_initial_refresh(ModuleID, PlanID, Opts) ->
     ok.
 
 refresh_summary({ok, Snapshots}) when is_map(Snapshots) ->
-    {ok, maps:keys(Snapshots)};
+    Published = maps:filtermap(
+        fun(Language, Snapshot) when is_map(Snapshot) ->
+            case {
+                maps:get(<<"language">>, Snapshot, undefined),
+                maps:get(<<"id">>, Snapshot, undefined)
+            } of
+                {Language, ID} when is_binary(ID), byte_size(ID) =:= 43 -> {true, ID};
+                _ -> false
+            end;
+           (_, _) -> false
+        end,
+        Snapshots
+    ),
+    {ok, Published};
 refresh_summary({error, Failures}) when is_map(Failures) ->
     Normalized = maps:map(fun(_Language, Value) -> normalize_failure(Value) end, Failures),
     LanguageFailures = maps:filter(fun(_Language, Value) -> is_list(Value) end, Normalized),
@@ -229,17 +243,9 @@ normalize_failure(Value) ->
 
 refresh_request(PlanID, Opts) ->
     PoolSize = hb_opts:get(<<"homepage-category-pool-size">>, ?DEFAULT_POOL_SIZE, Opts),
-    PublishNode =
-        case hb_opts:get(<<"homepage-publish-node">>, not_found, Opts) of
-            not_found ->
-                Port = hb_opts:get(port, 8734, Opts),
-                <<"http://127.0.0.1:", (integer_to_binary(Port))/binary>>;
-            Configured -> Configured
-        end,
     #{
         <<"path">> => <<"refresh">>,
         <<"plan-id">> => PlanID,
-        <<"publish-node">> => PublishNode,
         <<"category-pool-size">> => PoolSize
     }.
 
@@ -249,7 +255,8 @@ run_refresh(ModuleID, PlanID, Opts, Overrides) ->
         <<"module">> => ModuleID,
         <<"device-sandbox">> => [
             <<"cache@1.0">>, <<"json@1.0">>, <<"message@1.0">>,
-            <<"httpsig@1.0">>, <<"relay@1.0">>, <<"search@1.0">>
+            <<"httpsig@1.0">>, <<"local-name@1.0">>, <<"meta@1.0">>,
+            <<"search@1.0">>
         ]
     },
     Req = maps:merge(refresh_request(PlanID, Opts), Overrides),
@@ -285,10 +292,16 @@ node_opts() ->
 
 artifacts_are_content_addressable_test() ->
     Opts = #{<<"store">> => [hb_test_utils:test_store()]},
-    {ok, ModuleID} = publish(module_message(), Opts),
+    Module = module_message(),
+    {ok, ModuleID} = publish(Module, Opts),
     {ok, PlanID} = publish(plan_message(), Opts),
     ?assertMatch({ok, _}, hb_cache:read(ModuleID, Opts)),
     ?assertMatch({ok, _}, hb_cache:read(PlanID, Opts)),
+    Lua = maps:get(<<"body">>, Module),
+    ?assertNotEqual(nomatch, binary:match(Lua, <<"schema = \"odysee-homepage-pointer@1.0\"">>)),
+    ?assertNotEqual(nomatch, binary:match(Lua, <<"[\"snapshot-id\"] = published_id">>)),
+    ?assertNotEqual(nomatch, binary:match(Lua, <<"snapshot = committed">>)),
+    ?assertNotEqual(nomatch, binary:match(Lua, <<"state.allowed_channels[signing_claim_id]">>)),
     #{<<"homepages">> := Homepages} = plan_message(),
     ?assert(maps:is_key(<<"en">>, Homepages)),
     ?assert(maps:is_key(<<"pt-BR">>, Homepages)).

@@ -168,11 +168,27 @@ function updateIfValueChanged(original, delta, key, newValue) {
  * @param newClaim
  */
 function updateIfClaimChanged(original, delta, key, newClaim) {
-  const claim = preserveExistingChannelMeta(original[key], newClaim);
+  const claim = preserveExistingMediaMeta(original[key], preserveExistingChannelMeta(original[key], newClaim));
 
   if (!original[key] || claimHasNewData(original[key], claim)) {
     delta[key] = claim;
   }
+}
+
+function preserveExistingMediaMeta(originalClaim, newClaim) {
+  const originalAudio = originalClaim?.value?.audio;
+  if (!originalAudio || !newClaim?.value) return newClaim;
+
+  return {
+    ...newClaim,
+    value: {
+      ...newClaim.value,
+      audio: {
+        ...originalAudio,
+        ...newClaim.value.audio,
+      },
+    },
+  };
 }
 
 function preserveExistingChannelMeta(originalClaim, newClaim) {
@@ -1048,11 +1064,9 @@ reducers[ACTIONS.CLAIM_SEARCH_COMPLETED] = (state: ClaimsState, action: any): Cl
   const { append, query, urls, page, pageSize, totalItems, totalPages, hasMore } = action.data;
 
   if (append) {
-    // todo: check for duplicate urls when concatenating?
-    claimSearchByQuery[query] =
-      claimSearchByQuery[query] && claimSearchByQuery[query].length ? claimSearchByQuery[query].concat(urls) : urls;
+    claimSearchByQuery[query] = Array.from(new Set([...(claimSearchByQuery[query] || []), ...urls]));
   } else {
-    claimSearchByQuery[query] = urls;
+    claimSearchByQuery[query] = Array.from(new Set(urls));
   }
 
   claimSearchByQueryLastPageReached[query] = !searchPageHasMore(hasMore, urls.length, pageSize);

@@ -1035,7 +1035,9 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
     value(claim, 'claim_id', 'claim-id') ||
     claimIdFromSignatureInput(value(payload, 'signature-input'));
   const txid = value(payload, 'txid') || immutableOutpoint?.txid;
-  const nout = value(payload, 'nout') || immutableOutpoint?.nout;
+  // Preserve output zero so legacy evidence remains addressable by outpoint
+  // instead of being mistaken for a native immutable upload.
+  const nout = value(payload, 'nout') ?? immutableOutpoint?.nout;
   const outpoint =
     typeof txid === 'string' && (typeof nout === 'number' || typeof nout === 'string') ? `${txid}:${nout}` : null;
   const storeId = immutableId || outpoint || value(payload, 'id') || sourceClaimId;

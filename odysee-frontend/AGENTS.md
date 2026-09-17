@@ -281,14 +281,34 @@ instead of falling back to legacy services.
   save during index lag advances the same reference rather than forking a
   second init or restoring a stale snapshot.
 
+## Notifications
+
+- Derive the inbox from exact-verified native comments, uploads, and current
+  bell-enabled subscriptions. Self activity and suppressed comments do not notify.
+- Receipt IDs use the logical comment reference or immutable upload ID.
+- Seen, read, and dismiss actions append encrypted
+  `odysee-notification-receipt@1.0` messages through the generic cookie-signed
+  write. Reuse authenticated seal/open only for cryptography; no notification
+  device or notification fields in the shared preference blob.
+- Verify and decrypt exact receipt readback before acknowledging. Merge
+  receipt batches by union, retain acknowledged writes through index lag, and
+  clear private state on account changes.
+- The app polls while visible and on focus. Browser push, email, and legacy
+  notification import are outside this contract.
+- Run `test:native-notifications` and the browser test
+  `test:native-cookie-notifications`; its Vite/node setup is documented in
+  `../aidocs/native-notifications.md`.
+
 ## Analytics
 
 - `analytics@1.0` is a generic observational device. Odysee playback maps to
   its engagement lifecycle through `ui/analytics/hyperbeam.ts` and
   `ui/analytics/watchman.ts`.
 - Browser playback and view-count code must not call the legacy Watchman or
-  view-count APIs. Public counts are aggregates; reports and historical
-  baseline imports require wallet authentication.
+  view-count APIs. Public counts are aggregates. A narrow node-side Odysee file
+  adapter may obtain a missing historical count and submit a node-signed
+  immutable baseline when the configured analytics site explicitly enables
+  its node signer; reports remain wallet-authenticated.
 - Analytics are non-authoritative signals and must never affect content
   identity, verification, discovery order, or access.
 
@@ -316,6 +336,7 @@ pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
 pnpm run test:native-preferences
+pnpm run test:native-notifications
 pnpm run test:manifest-homepage
 pnpm run test:static-manifest
 pnpm run build:manifest
@@ -338,8 +359,8 @@ normal-flow request reaches a legacy host.
 
 ## Current limitations
 
-- View totals combine an owner-imported historical baseline with qualified
-  generic `analytics@1.0` engagement. The device does not serve a dashboard;
+- View totals combine a node- or owner-imported historical baseline with
+  qualified generic `analytics@1.0` engagement. The device does not serve a dashboard;
   the upstream dashboard is an independently hosted frontend. An Odysee-owned
   dashboard is not yet implemented.
 - Native subscriber counts, moderation delegates, and blocked-word settings

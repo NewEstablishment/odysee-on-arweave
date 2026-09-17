@@ -62,6 +62,7 @@ type Props = {
   onClickHandledByParent?: boolean;
   isShortFromChannelPage?: boolean;
   sectionTitle?: HomepageTitles;
+  fadeInWhenLoaded?: boolean;
 };
 
 // preview image cards used in related video functionality, channel overview page and homepage
@@ -80,6 +81,7 @@ function ClaimPreviewTile(props: Props) {
     onClickHandledByParent,
     isShortFromChannelPage,
     sectionTitle,
+    fadeInWhenLoaded,
   } = props;
   const dispatch = useAppDispatch();
   // -- redux selectors --
@@ -212,6 +214,25 @@ function ClaimPreviewTile(props: Props) {
   }
 
   const [tileHover, setTileHover] = React.useState(false);
+  const isPlaceholder = Boolean(placeholder || claim === undefined);
+  const wasPlaceholder = React.useRef(isPlaceholder);
+  const [isRevealing, setIsRevealing] = React.useState(false);
+  const startedReveal = Boolean(fadeInWhenLoaded && wasPlaceholder.current && !isPlaceholder);
+  const revealFromPlaceholder = startedReveal || isRevealing;
+
+  React.useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (fadeInWhenLoaded && wasPlaceholder.current && !isPlaceholder) {
+      setIsRevealing(true);
+      timer = setTimeout(() => setIsRevealing(false), 120);
+    } else if (isPlaceholder) {
+      setIsRevealing(false);
+    }
+    wasPlaceholder.current = isPlaceholder;
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [fadeInWhenLoaded, isPlaceholder]);
 
   // **************************************************************************
   // **************************************************************************
@@ -238,11 +259,12 @@ function ClaimPreviewTile(props: Props) {
         }
       : {};
 
-  if (placeholder || claim === undefined) {
+  if (isPlaceholder) {
     return (
       <li
         className={classnames('placeholder claim-preview--tile', {
           pulse: pulse,
+          'placeholder--pagination': placeholder === 'pagination',
         })}
       >
         <div
@@ -280,6 +302,7 @@ function ClaimPreviewTile(props: Props) {
         'claim-preview__wrapper--live': isLivestreamActive,
         'claim-preview__wrapper--short': isShort && sectionTitle === 'Shorts',
         'claim-preview__wrapper--short-cover': isShort && isShortFromChannelPage,
+        'claim-preview--placeholder-reveal': revealFromPlaceholder,
       })}
     >
       {/* Use div instead of NavLink to avoid invalid <a> nesting with hover action buttons */}

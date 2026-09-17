@@ -25,8 +25,9 @@
     "dev:usagi-local": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development USE_LOCAL_USAGI=true vp dev",
     "dev:ssr": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development node scripts/dev-web-server.mjs",
     "dev:ssr:usagi-local": "node scripts/fix-homepage-extensions.cjs && cross-env NODE_ENV=development USE_LOCAL_USAGI=true node scripts/dev-web-server.mjs",
+    "materialize:local-content": "node scripts/materialize-manifest-homepage.mjs",
     "build": "vp build",
-    "build:manifest": "cross-env NODE_ENV=production CUSTOM_HOMEPAGE=true HOMEPAGE_LOCAL_CONTENT=true HYPERBEAM_STATIC_MANIFEST=true vp build && node build/check-static-manifest.mjs",
+    "build:manifest": "pnpm run materialize:local-content && cross-env NODE_ENV=production CUSTOM_HOMEPAGE=true HOMEPAGE_LOCAL_CONTENT=true HYPERBEAM_STATIC_MANIFEST=true vp build && node build/check-static-manifest.mjs",
     "build:usagi-local": "cross-env USE_LOCAL_USAGI=true vp build",
     "publish:manifest": "pnpm run build:manifest && node build/static-manifest.mjs",
     "preview": "vp preview",
@@ -73,7 +74,9 @@
     "test:native-cookie-preferences": "node --experimental-strip-types tests/scripts/native-cookie-preferences-smoke.mjs",
     "test:native-subscriptions": "node --experimental-strip-types tests/scripts/native-subscriptions.mjs",
     "test:native-cookie-subscriptions": "node --experimental-strip-types tests/scripts/native-cookie-subscriptions-smoke.mjs",
-    "test:static-manifest": "node --experimental-strip-types tests/scripts/hyperbeam-node-routing.mjs && node --experimental-strip-types tests/scripts/hyperbeam-legacy-boundary.mjs && node --test build/static-manifest.test.mjs"
+    "test:static-manifest": "node --experimental-strip-types tests/scripts/hyperbeam-node-routing.mjs && node --experimental-strip-types tests/scripts/hyperbeam-legacy-boundary.mjs && node --test build/static-manifest.test.mjs",
+    "test:native-notifications": "node --experimental-strip-types --test tests/scripts/native-notifications.mjs",
+    "test:native-cookie-notifications": "node tests/scripts/native-cookie-notifications-smoke.mjs"
   },
   "dependencies": {
     "@codemirror/language": "^6.12.2",

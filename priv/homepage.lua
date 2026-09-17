@@ -5,6 +5,13 @@ local DEFAULT_POOL_SIZE = 36
 local SEARCH_PAGE_SIZE = 36
 local MAX_SEARCH_PAGES = 15
 local STORE_READ_ATTEMPTS = 1
+local MATURE_TAG_LIST = {
+    "porn", "porno", "nsfw", "mature", "xxx", "sex", "creampie", "blowjob",
+    "handjob", "boobs", "big boobs", "big dick", "pussy", "cumshot", "anal",
+    "hard fucking", "ass", "fuck", "hentai"
+}
+local MATURE_TAGS = {}
+for _, tag in ipairs(MATURE_TAG_LIST) do MATURE_TAGS[tag] = true end
 
 local function copy(value)
     if type(value) ~= "table" then return value end
@@ -63,11 +70,70 @@ local function decode_json(body)
 end
 
 local function encode_json(value)
-    local base = copy(value)
-    base.device = "json@1.0"
-    local status, encoded = ao.resolve(base, "serialize")
-    if status ~= "ok" or type(encoded) ~= "table" then return nil end
-    return encoded.body
+    local function escape(text)
+        return string.gsub(tostring(text), '[%z\1-\31\\"]', function(character)
+            if character == '"' then return '\\"' end
+            if character == '\\' then return '\\\\' end
+            if character == '\b' then return '\\b' end
+            if character == '\f' then return '\\f' end
+            if character == '\n' then return '\\n' end
+            if character == '\r' then return '\\r' end
+            if character == '\t' then return '\\t' end
+            return string.format('\\u%04x', string.byte(character))
+        end)
+    end
+
+    local function encode(item, active)
+        local item_type = type(item)
+        if item == nil then return "null" end
+        if item_type == "boolean" then return item and "true" or "false" end
+        if item_type == "number" then
+            if item ~= item or item == math.huge or item == -math.huge then return nil end
+            return tostring(item)
+        end
+        if item_type == "string" then return '"' .. escape(item) .. '"' end
+        if item_type ~= "table" or active[item] then return nil end
+
+        active[item] = true
+        local count = 0
+        local highest = 0
+        local indexed = true
+        for key, _ in pairs(item) do
+            count = count + 1
+            if type(key) ~= "number" or key < 1 or key ~= math.floor(key) then
+                indexed = false
+            elseif key > highest then
+                highest = key
+            end
+        end
+
+        local parts = {}
+        if indexed and count > 0 and highest == count then
+            for index = 1, highest do
+                local encoded = encode(item[index], active)
+                if encoded == nil then active[item] = nil return nil end
+                table.insert(parts, encoded)
+            end
+            active[item] = nil
+            return "[" .. table.concat(parts, ",") .. "]"
+        end
+
+        local keys = {}
+        for key, _ in pairs(item) do
+            if type(key) ~= "string" then active[item] = nil return nil end
+            table.insert(keys, key)
+        end
+        table.sort(keys)
+        for _, key in ipairs(keys) do
+            local encoded = encode(item[key], active)
+            if encoded == nil then active[item] = nil return nil end
+            table.insert(parts, '"' .. escape(key) .. '":' .. encoded)
+        end
+        active[item] = nil
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+
+    return encode(value, {})
 end
 
 local function percent_encode(value)
@@ -101,11 +167,84 @@ local function resolve_field(message, key)
     return value
 end
 
+local function display_claim(item)
+    if type(item) ~= "table" then return nil end
+    local reposted = item.reposted_claim or item["reposted-claim"]
+    if type(reposted) == "table" then return reposted end
+    return item
+end
+
+local function is_repost(item)
+    if type(item) ~= "table" then return false end
+    local value_type = item.value_type or item["value-type"]
+    return value_type == "repost" or
+        type(item.reposted_claim or item["reposted-claim"]) == "table"
+end
+
+local function has_usable_thumbnail(item)
+    local displayed = display_claim(item)
+    local value = resolve_field(displayed, "value")
+    if type(value) ~= "table" then return false end
+    local thumbnail = resolve_field(value, "thumbnail")
+    local url = type(thumbnail) == "table" and (thumbnail.url or thumbnail["url"]) or thumbnail
+    return type(url) == "string" and string.match(url, "%S") ~= nil
+end
+
+local function has_supported_media(item)
+    local displayed = display_claim(item)
+    local value = resolve_field(displayed, "value")
+    if type(value) ~= "table" then return false end
+    local source = resolve_field(value, "source")
+    if type(source) ~= "table" then return false end
+    local sd_hash = source.sd_hash or source["sd-hash"]
+    local media_type = source.media_type or source["media-type"]
+    local stream_type = value.stream_type or value["stream-type"]
+    if type(sd_hash) ~= "string" or sd_hash == "" or type(media_type) ~= "string" then return false end
+    media_type = string.lower(media_type)
+    return string.match(media_type, "^video/") ~= nil or
+        string.match(media_type, "^audio/") ~= nil or
+        string.match(media_type, "^image/") ~= nil or
+        (stream_type == "document" and string.match(media_type, "^text/markdown") ~= nil)
+end
+
+local function has_mature_tag(item)
+    local displayed = display_claim(item)
+    local value = resolve_field(displayed, "value")
+    local tags = type(value) == "table" and resolve_field(value, "tags") or nil
+    for _, raw_tag in ipairs(array(tags)) do
+        local tag = string.lower(tostring(raw_tag))
+        tag = string.gsub(tag, "^%s+", "")
+        tag = string.gsub(tag, "%s+$", "")
+        if MATURE_TAGS[tag] then return true end
+    end
+    return false
+end
+
+local function effective_release_time(item)
+    local displayed = display_claim(item)
+    local value = resolve_field(displayed, "value")
+    local release_time = type(value) == "table" and
+        (value.release_time or value["release-time"]) or nil
+    if release_time == nil and type(displayed) == "table" then
+        release_time = displayed.release_time or displayed["release-time"] or displayed.timestamp
+    end
+    return tonumber(release_time)
+end
+
+local function is_homepage_eligible(item, now)
+    if is_repost(item) then return false end
+    if has_mature_tag(item) then return false end
+    if not has_supported_media(item) then return false end
+    if not has_usable_thumbnail(item) then return false end
+    local release_time = effective_release_time(item)
+    return release_time == nil or release_time <= now
+end
+
 local function source_search(query)
     local normalized = copy(query)
     for _, key in ipairs({
         "channel_ids", "claim_ids", "not_channel_ids", "claim_type",
-        "any_tags", "order_by", "any_languages"
+        "any_tags", "not_tags", "order_by", "any_languages"
     }) do
         if type(normalized[key]) == "table" then
             local values = {}
@@ -126,12 +265,8 @@ end
 local function is_materializable_media(item)
     if type(item) ~= "table" then return false end
     local value_type = item.value_type or item["value-type"]
-    if value_type == "repost" then return true end
     if value_type ~= "stream" then return false end
-    local value = item.value
-    local source = type(value) == "table" and value.source or nil
-    local sd_hash = type(source) == "table" and (source.sd_hash or source["sd-hash"]) or nil
-    return type(sd_hash) == "string" and sd_hash ~= ""
+    return has_supported_media(item)
 end
 
 local function is_channel(item)
@@ -184,12 +319,19 @@ local function exact_id(id)
     return id
 end
 
+local function exact_homepage_id(id, now)
+    if type(id) ~= "string" or id == "" then return nil end
+    local response = store_read(id)
+    if response == nil or not is_homepage_eligible(response, now) then return nil end
+    return id
+end
+
 local function local_search(category, pool_size)
     local status, result = ao.resolve({
         path = "/~search@1.0/query",
         q = "",
         limit = math.min(100, pool_size),
-        filter = { 'claim_type IN ["stream", "repost"]', "nsfw = 0" },
+        filter = { 'claim_type IN ["stream"]', "nsfw = 0" },
         sort = { "release_time:desc" },
         ["cache-control"] = { "no-store", "no-cache" }
     })
@@ -198,8 +340,10 @@ local function local_search(category, pool_size)
     local ids = {}
     local seen = {}
     for _, raw_id in ipairs(array(result)) do
-        local id = exact_id(tostring(raw_id))
-        if id ~= nil and not seen[id] then
+        local candidate_id = tostring(raw_id)
+        local candidate = store_read(candidate_id)
+        local id = candidate ~= nil and candidate_id or nil
+        if id ~= nil and is_homepage_eligible(candidate, os.time()) and not seen[id] then
             seen[id] = true
             table.insert(ids, id)
         end
@@ -217,8 +361,7 @@ local function category_query(category, now, page, page_size, relaxed)
     if order == "new" then order_by = { "release_time" } end
     if order == "top" then order_by = { "effective_amount" } end
 
-    local claim_types = array(category.claimType or { "stream", "repost" })
-    local channel_only = #claim_types == 1 and claim_types[1] == "channel"
+    local claim_types = { "stream" }
     local days = positive(category.daysOfContent, 30)
     if relaxed then days = math.max(days * 4, 365) end
     local query = {
@@ -226,46 +369,79 @@ local function category_query(category, now, page, page_size, relaxed)
         order_by = order_by,
         page = page,
         page_size = page_size,
-        exclude_shorts = category.exclude_shorts == true
+        exclude_shorts = true,
+        not_tags = MATURE_TAG_LIST
     }
 
-    if not relaxed then
-        if type(category.channelIds) == "table" and #category.channelIds > 0 then
-            query.channel_ids = category.channelIds
-        end
-        if type(category.excludedChannelIds) == "table" and #category.excludedChannelIds > 0 then
-            query.not_channel_ids = category.excludedChannelIds
-        end
+    if type(category.channelIds) == "table" and #category.channelIds > 0 then
+        query.channel_ids = category.channelIds
+    end
+    if type(category.excludedChannelIds) == "table" and #category.excludedChannelIds > 0 then
+        query.not_channel_ids = category.excludedChannelIds
     end
     if type(category.tags) == "table" and #category.tags > 0 then query.any_tags = category.tags end
     if type(category.searchLanguages) == "table" and #category.searchLanguages > 0 then
         query.any_languages = category.searchLanguages
     end
     if category.duration ~= nil then query.duration = category.duration end
-    if not channel_only then
-        query.timestamp = ">" .. tostring(now - days * 86400)
-        query.release_time = "<" .. tostring(now)
-    end
-    if category.channelLimit ~= nil and category.channelLimit ~= "auto" then
-        query.limit_claims_per_channel = tonumber(category.channelLimit)
-    end
+    query.timestamp = ">" .. tostring(now - days * 86400)
+    query.release_time = "<" .. tostring(now)
+    query.limit_claims_per_channel = 1
     return query
 end
 
-local function append_candidate(state, item)
+local function remove_id(ids, id)
+    for index = #ids, 1, -1 do
+        if ids[index] == id then table.remove(ids, index) end
+    end
+end
+
+local function source_claim_id(item)
+    if type(item) ~= "table" then return nil end
+    local id = item.claim_id or item["claim-id"]
+    if type(id) ~= "string" then return nil end
+    return string.lower(id)
+end
+
+local function media_metadata(item)
+    if type(item) ~= "table" or type(item.value) ~= "table" then return nil end
+    local metadata = {}
+    for _, kind in ipairs({ "audio", "video" }) do
+        local media = item.value[kind]
+        local duration = type(media) == "table" and tonumber(media.duration) or nil
+        if duration ~= nil and duration > 0 then
+            metadata[kind] = { duration = duration }
+        end
+    end
+    if next(metadata) == nil then return nil end
+    return metadata
+end
+
+local function append_candidate(state, item, replace_channel, explicitly_configured)
+    if not is_homepage_eligible(item, state.now) then return nil end
     local source_locator = outpoint(item)
-    if source_locator == nil or state.seen[source_locator] then return nil end
+    if source_locator == nil then return nil end
+    if state.seen[source_locator] ~= nil then return state.seen[source_locator] end
     local signing = channel(item)
+    if signing == nil then return nil end
+    local signing_claim_id = source_claim_id(signing)
+    if state.allowed_channels ~= nil and explicitly_configured ~= true and
+        (signing_claim_id == nil or state.allowed_channels[signing_claim_id] ~= true) then
+        return nil
+    end
     local signing_source_locator = nil
     local signing_id = nil
     if signing ~= nil then
         signing_source_locator = outpoint(signing)
         if signing_source_locator == nil then return nil end
     end
+    local existing_channel_media = signing_source_locator ~= nil and
+        state.seen_channels[signing_source_locator] or nil
+    if existing_channel_media ~= nil and replace_channel ~= true then return nil end
 
     local exact_media = exact_outpoint(item, "media")
     if exact_media == nil then return nil end
-    if exact_id(exact_media) == nil then return nil end
+    if exact_homepage_id(exact_media, state.now) == nil then return nil end
     if signing ~= nil then
         signing_id = state.warmed_channels[signing_source_locator]
         if signing_id == nil then
@@ -276,38 +452,54 @@ local function append_candidate(state, item)
         end
     end
 
+    if existing_channel_media ~= nil and existing_channel_media ~= exact_media then
+        remove_id(state.ids, existing_channel_media)
+        local previous_source = state.source_by_media[existing_channel_media]
+        if previous_source ~= nil then state.seen[previous_source] = nil end
+        state.source_by_media[existing_channel_media] = nil
+        state.channels[existing_channel_media] = nil
+        state.media_metadata[existing_channel_media] = nil
+    end
     state.seen[source_locator] = exact_media
+    state.source_by_media[exact_media] = source_locator
     table.insert(state.ids, exact_media)
-    if signing_id ~= nil then state.channels[exact_media] = signing_id end
+    if signing_id ~= nil then
+        state.channels[exact_media] = signing_id
+        state.seen_channels[signing_source_locator] = exact_media
+    end
+    local metadata = media_metadata(item)
+    if metadata ~= nil then state.media_metadata[exact_media] = metadata end
     return exact_media
-end
-
-local function claim_id(item)
-    if type(item) ~= "table" then return nil end
-    return item.claim_id or item["claim-id"]
 end
 
 local function insert_pinned(state, pinned_claim_ids, pinned_items)
     if #pinned_claim_ids == 0 then return end
     local by_claim_id = {}
     for _, item in ipairs(pinned_items) do
-        local id = claim_id(item)
+        local id = source_claim_id(item)
         if type(id) == "string" then by_claim_id[id] = item end
     end
 
     local pinned_locators = {}
+    local pinned_channels = {}
     for _, id in ipairs(pinned_claim_ids) do
-        local item = by_claim_id[id]
+        local item = by_claim_id[string.lower(tostring(id))]
         if item ~= nil then
-            local immutable_id = append_candidate(state, item)
-            if immutable_id ~= nil then table.insert(pinned_locators, immutable_id) end
+            local signing_source_locator = outpoint(channel(item))
+            if signing_source_locator == nil or not pinned_channels[signing_source_locator] then
+                local immutable_id = append_candidate(state, item, true, true)
+                if immutable_id ~= nil then
+                    table.insert(pinned_locators, immutable_id)
+                    if signing_source_locator ~= nil then
+                        pinned_channels[signing_source_locator] = true
+                    end
+                end
+            end
         end
     end
 
     for _, locator in ipairs(pinned_locators) do
-        for index = #state.ids, 1, -1 do
-            if state.ids[index] == locator then table.remove(state.ids, index) end
-        end
+        remove_id(state.ids, locator)
     end
     local position = math.min(3, #state.ids + 1)
     for index = #pinned_locators, 1, -1 do
@@ -319,7 +511,24 @@ local function collect_category(category, now, pool_size)
     if category.source == "search" then return local_search(category, pool_size) end
     local page_size = positive(category.pageSize, DEFAULT_PAGE_SIZE)
     local target = math.max(page_size, pool_size)
-    local state = { ids = {}, channels = {}, seen = {}, warmed_channels = {} }
+    local allowed_channels = nil
+    if type(category.channelIds) == "table" and #category.channelIds > 0 then
+        allowed_channels = {}
+        for _, id in ipairs(category.channelIds) do
+            allowed_channels[string.lower(tostring(id))] = true
+        end
+    end
+    local state = {
+        now = now,
+        allowed_channels = allowed_channels,
+        ids = {},
+        channels = {},
+        seen = {},
+        seen_channels = {},
+        source_by_media = {},
+        media_metadata = {},
+        warmed_channels = {}
+    }
     local pages = math.min(MAX_SEARCH_PAGES, math.max(1, math.ceil((target * 3) / SEARCH_PAGE_SIZE)))
 
     for page = 1, pages do
@@ -359,7 +568,8 @@ local function collect_category(category, now, pool_size)
     return {
         immutableIds = visible,
         immutablePoolIds = state.ids,
-        immutableSigningChannelIds = state.channels
+        immutableSigningChannelIds = state.channels,
+        immutableMediaMetadata = state.media_metadata
     }
 end
 
@@ -367,15 +577,19 @@ local function category_delta(category, selection)
     local result = {}
     local keys = {
         "name", "sortOrder", "icon", "label", "description", "image", "pageSize",
-        "order", "claimType", "tags", "searchLanguages", "duration", "exclude_shorts", "source"
+        "order", "claimType", "tags", "searchLanguages", "duration", "exclude_shorts", "source",
+        "channelIds", "excludedChannelIds", "daysOfContent", "pinnedClaimIds", "pinnedUrls",
+        "excludeFuture", "includeFuture", "optional", "hideByDefault", "hideSort"
     }
     for _, key in ipairs(keys) do
         if category[key] ~= nil then result[key] = copy(category[key]) end
     end
     result.pageSize = positive(category.pageSize, DEFAULT_PAGE_SIZE)
+    result.claimType = { "stream" }
     result.immutableIds = selection.immutableIds
     result.immutablePoolIds = selection.immutablePoolIds
     result.immutableSigningChannelIds = selection.immutableSigningChannelIds
+    result.immutableMediaMetadata = selection.immutableMediaMetadata
     return result
 end
 
@@ -431,8 +645,8 @@ local function materialize_featured(items, now)
                 local signing_id = signing and exact_outpoint(signing, "channel") or nil
                 if signing_id ~= nil and exact_id(signing_id) == nil then signing_id = nil end
                 local signing_locator = outpoint(signing)
-                local id = exact_outpoint(item, "media")
-                if id ~= nil and exact_id(id) == nil then id = nil end
+                local id = is_homepage_eligible(item, now) and exact_outpoint(item, "media") or nil
+                if id ~= nil and exact_homepage_id(id, now) == nil then id = nil end
                 if id ~= nil and signing_id ~= nil and same_text(signing_locator, banner_locator) then
                     table.insert(media, id)
                     channels[id] = signing_id
@@ -483,6 +697,8 @@ local function as_message(message)
 end
 
 local function persist_snapshot(language, homepage, now)
+    local homepage_json = encode_json(homepage)
+    if type(homepage_json) ~= "string" then return nil, "homepage encoding failed" end
     local hash_input = copy(homepage)
     local hash_status, content_hash = ao.resolve(
         as_message(hash_input),
@@ -498,50 +714,74 @@ local function persist_snapshot(language, homepage, now)
         ["content-hash"] = content_hash,
         ["category-count"] = #ordered_categories(homepage.categories),
         complete = true,
-        homepage = homepage
+        ["homepage-json"] = homepage_json
     }
     local commit_status, committed = ao.resolve(
         as_message(snapshot),
-        { path = "commit", committers = "all" }
+        {
+            path = "commit",
+            committers = "all",
+            bundle = true,
+            ["commitment-device"] = "httpsig@1.0",
+            type = "rsa-pss-sha512"
+        }
     )
     if commit_status ~= "ok" or type(committed) ~= "table" then
         return nil, "snapshot commitment failed"
     end
-    -- `priv` is Lua execution state attached by the enclosing resolver. It is
-    -- not part of the committed snapshot and cannot be nested in another
-    -- signed message.
     committed.priv = nil
 
-    local publish_node = _G.homepage_publish_node
-    if type(publish_node) ~= "string" or publish_node == "" then
-        return nil, "homepage publish node is required"
+    local id_status, published_id = ao.resolve(
+        as_message(committed),
+        { path = "id", committers = "all" }
+    )
+    if id_status ~= "ok" or type(published_id) ~= "string" or #published_id ~= 43 then
+        return nil, "snapshot immutable ID failed"
     end
     local write_request = {
-        path = string.gsub(publish_node, "/$", "") .. "/~cache@1.0/write",
-        method = "POST",
-        body = committed
+        path = "register",
+        key = "odysee-homepage-" .. language,
+        value = {
+            schema = "odysee-homepage-pointer@1.0",
+            ["snapshot-id"] = published_id,
+            snapshot = committed
+        }
     }
     local request_status, signed_request = ao.resolve(
         write_request,
-        { "as", "message@1.0", { path = "commit", committers = "all" } }
+        {
+            "as",
+            "message@1.0",
+            {
+                path = "commit",
+                committers = "all",
+                bundle = true,
+                ["commitment-device"] = "httpsig@1.0",
+                type = "rsa-pss-sha512"
+            }
+        }
     )
     if request_status ~= "ok" or type(signed_request) ~= "table" then
         return nil, {
-            stage = "cache write commitment",
+            stage = "snapshot cache-write commitment",
             status = request_status,
             result = signed_request
         }
     end
+    signed_request.priv = nil
     local write_status, write_result = ao.resolve(
-        { device = "relay@1.0" },
-        { path = "call", target = "body", body = signed_request }
+        { device = "local-name@1.0" },
+        signed_request
     )
-    if write_status ~= "ok" then return nil, "cache relay failed: " .. tostring(write_result) end
-    return committed, nil
+    if write_status ~= "ok" then return nil, "snapshot registration failed: " .. tostring(write_result) end
+    -- Returning the full snapshot here would make the enclosing Lua result a
+    -- second discoverable snapshot with the Lua resolver's own commitment.
+    -- Keep refresh output as an operational summary; the published ID above is
+    -- the sole snapshot identity.
+    return { id = published_id, language = language }, nil
 end
 
 function refresh(base, req, opts)
-    _G.homepage_publish_node = req["publish-node"]
     local plan = req.homepages
     if type(plan) ~= "table" then
         local plan_id = req["plan-id"]

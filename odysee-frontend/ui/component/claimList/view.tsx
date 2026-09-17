@@ -89,6 +89,8 @@ type Props = {
   placeholder?: string;
   showNullPlaceholder?: boolean;
   onHidden?: (arg0: any) => void;
+  trailingPlaceholderCount?: number;
+  stablePaginationSlots?: boolean;
 };
 export default function ClaimList(props: Props) {
   const {
@@ -140,6 +142,8 @@ export default function ClaimList(props: Props) {
     setHasActive,
     isShortFromChannelPage,
     sectionTitle,
+    trailingPlaceholderCount = 0,
+    stablePaginationSlots = false,
   } = props;
   const searchInLanguage = useAppSelector((state) => selectClientSetting(state, SETTINGS.SEARCH_IN_LANGUAGE));
   const isMobile = useIsMobile();
@@ -259,7 +263,9 @@ export default function ClaimList(props: Props) {
       if (active && page && pageSize && onScrollBottom) {
         const mainEl = document.querySelector(`.${MAIN_CLASS}`);
 
-        if (mainEl && !loading && (hasMore ?? urisLength >= pageSize)) {
+        const canLoadMore = hasMore === undefined ? urisLength >= pageSize : hasMore;
+
+        if (mainEl && !loading && canLoadMore) {
           const ROUGH_TILE_HEIGHT_PX = 200;
           const mainBoundingRect = mainEl.getBoundingClientRect();
           const contentWrapperAtBottomOfPage = mainBoundingRect.bottom - ROUGH_TILE_HEIGHT_PX <= window.innerHeight;
@@ -274,7 +280,7 @@ export default function ClaimList(props: Props) {
     if (onScrollBottom) {
       window.addEventListener('scroll', handleScroll);
       // A sparse hydrated page may not fill the viewport or produce a scroll.
-      if (hasMore === true) handleScroll();
+      handleScroll();
       return () => {
         window.removeEventListener('scroll', handleScroll);
         active = false;
@@ -365,10 +371,16 @@ export default function ClaimList(props: Props) {
   );
   return tileLayout && !header ? (
     <>
-      <section ref={listRef} className={`claim-grid ${isShorts ? 'claim-shorts-grid' : ''}`}>
+      <section
+        ref={listRef}
+        className={classnames('claim-grid', {
+          'claim-shorts-grid': isShorts,
+          'claim-grid--stable-pagination': stablePaginationSlots,
+        })}
+      >
         {urisLength > 0 &&
           tileUris.map((uri, index) => {
-            const itemKey = getClaimListItemKey(uri, index);
+            const itemKey = stablePaginationSlots ? `claim-slot:${index}` : getClaimListItemKey(uri, index);
 
             if (uri) {
               const inj = getInjectedItem(index);
@@ -395,12 +407,23 @@ export default function ClaimList(props: Props) {
                       showNoSourceClaims={showNoSourceClaims}
                       isShortFromChannelPage={isShortFromChannelPage}
                       sectionTitle={sectionTitle}
+                      fadeInWhenLoaded={stablePaginationSlots}
                     />
                   )}
                 </React.Fragment>
               );
             }
           })}
+        {Array.from({ length: trailingPlaceholderCount }, (_, index) => {
+          const slotIndex = tileUris.length + index;
+          const itemKey = stablePaginationSlots ? `claim-slot:${slotIndex}` : `trailing-placeholder:${index}`;
+
+          return (
+            <React.Fragment key={itemKey}>
+              <ClaimPreviewTile placeholder="pagination" pulse />
+            </React.Fragment>
+          );
+        })}
         {!timedOut && urisLength === 0 && !loading && !noEmpty && (
           <div className="empty main--empty">{empty || noResultMsg}</div>
         )}

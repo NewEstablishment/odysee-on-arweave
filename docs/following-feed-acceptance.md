@@ -49,6 +49,13 @@ frontend contract suites and signed-cookie subscription lifecycle pass locally.
 Backend suites were not rerun: this slice changes only frontend integration,
 Redux/list state and test/documentation files.
 
+September 17 master integration: Chromium passes with 66 uploads across three
+pages and missing locators on both full pages. Completed ranked pages release
+the category continuation's visible-tile wait. Native signing-channel URLs
+remain channel URLs after upload hydration, keeping Follow available after
+unfollow. See [merge validation](pr10-merge-validation.md) for the broader checks
+and remaining environment limits.
+
 ## Remaining live acceptance
 
 The local 18812 validation node has local stores only, with no running populated

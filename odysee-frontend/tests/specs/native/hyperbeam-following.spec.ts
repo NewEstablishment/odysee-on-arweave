@@ -23,7 +23,7 @@ test('Following paginates past unavailable locators and persists unfollow after 
       profiles.push({ id: await write({ type: 'channel', name }), name });
     }
     const dataId = await write({ body: 'Following acceptance media fixture' });
-    for (let i = 0; i < 42; i++) {
+    for (let i = 0; i < 66; i++) {
       const profile = profiles[i % 2];
       const title = `Feed item ${String(i).padStart(2, '0')} ${stamp}`;
       const id = await write({
@@ -55,7 +55,7 @@ test('Following paginates past unavailable locators and persists unfollow after 
       if (request.sort?.[0] === 'release_time:asc') ranked = [...ranked].reverse();
       const ids = ranked.slice(request.offset || 0, (request.offset || 0) + request.limit).map((record) => record.id);
       // A stale locator on page one must not hide page two.
-      if (!request.offset && channels.length === 2 && ids.length > 3) ids[3] = 'z'.repeat(43);
+      if ((request.offset || 0) < 48 && channels.length === 2 && ids.length > 3) ids[3] = 'z'.repeat(43);
       if (emptyFirstPage && !request.offset && channels.length === 2) ids.fill('z'.repeat(43));
       await route.fulfill({ json: ids });
     });
@@ -80,10 +80,18 @@ test('Following paginates past unavailable locators and persists unfollow after 
     await expect(feed.getByText(records[0].title, { exact: true }).first()).toBeVisible({ timeout: 30000 });
     await page.mouse.wheel(0, 20000);
     await expect.poll(() => requests.some((request) => request.offset > 0), { timeout: 20000 }).toBe(true);
-    await expect(feed.getByText(records[41].title, { exact: true }).first()).toBeVisible({ timeout: 30000 });
+    await expect
+      .poll(
+        async () => {
+          await page.mouse.wheel(0, 20000);
+          return feed.getByText(records[65].title, { exact: true }).first().isVisible();
+        },
+        { timeout: 30000 }
+      )
+      .toBe(true);
     const newestTitles = await feed.locator('.claim-preview__title').allTextContents();
     expect(newestTitles.filter((title) => title.includes('Feed item')).map((title) => title.trim())).toEqual(
-      records.filter((_, index) => index !== 3).map((record) => record.title)
+      records.filter((_, index) => index !== 3 && index !== 27).map((record) => record.title)
     );
     emptyFirstPage = true;
     await page.reload();
@@ -91,7 +99,7 @@ test('Following paginates past unavailable locators and persists unfollow after 
     await expect(feed.getByText(records[41].title, { exact: true }).first()).toBeVisible({ timeout: 30000 });
     emptyFirstPage = false;
     await page.goto(`${manifest}/#/$/following?order=new&sort=old`);
-    await expect(feed.getByText(records[41].title, { exact: true }).first()).toBeVisible({ timeout: 30000 });
+    await expect(feed.getByText(records[65].title, { exact: true }).first()).toBeVisible({ timeout: 30000 });
     await expect
       .poll(
         async () => {
@@ -100,7 +108,7 @@ test('Following paginates past unavailable locators and persists unfollow after 
         },
         { timeout: 20000 }
       )
-      .toBe(records[41].title);
+      .toBe(records[65].title);
     expect(requests.some((request) => request.sort?.[0] === 'release_time:asc')).toBe(true);
     await page.goto(`${manifest}/#/$/following?order=new&sort=new`);
     await page.reload();

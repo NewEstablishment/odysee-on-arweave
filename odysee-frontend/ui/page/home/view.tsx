@@ -229,7 +229,8 @@ function HomePage() {
     pinUrls,
     pinnedClaimIds,
     uris,
-    immutableSigningChannelIds
+    immutableSigningChannelIds,
+    immutableMediaMetadata
   ) {
     if (id === 'BANNER') {
       if (index === undefined) {
@@ -287,6 +288,7 @@ function HomePage() {
           homepageOrder={index}
           uris={uris}
           immutableSigningChannelIds={immutableSigningChannelIds}
+          immutableMediaMetadata={immutableMediaMetadata}
           showNoSourceClaims={ENABLE_NO_SOURCE_CLAIMS}
           hideMembersOnly={id !== 'FOLLOWING'}
           hasSource
@@ -401,6 +403,7 @@ function HomePage() {
           undefined,
           undefined,
           undefined,
+          undefined,
           undefined
         )}
 
@@ -418,6 +421,7 @@ function HomePage() {
               pinnedClaimIds,
               uris,
               immutableSigningChannelIds,
+              immutableMediaMetadata,
               options = {},
             },
             index
@@ -439,7 +443,8 @@ function HomePage() {
                   pinUrls,
                   pinnedClaimIds,
                   uris,
-                  immutableSigningChannelIds
+                  immutableSigningChannelIds,
+                  immutableMediaMetadata
                 )}
                 {bannerForPosition && (
                   <CustomBanner

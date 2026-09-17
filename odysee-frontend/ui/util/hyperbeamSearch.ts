@@ -14,6 +14,7 @@ const TIME_FILTER = 'time_filter';
 const MIN_DURATION = 'min_duration';
 const MAX_DURATION = 'max_duration';
 const SORT = 'sort_by';
+const RELATED_TO = 'related_to';
 
 export function hyperbeamSearchRequest(
   options: Record<string, any>,
@@ -30,6 +31,9 @@ export function hyperbeamSearchRequest(
 
   if (options[INCLUDE_MATURE] === false) filter.push('nsfw = 0');
   if (options[PRICE_FILTER_FREE]) filter.push('fee = 0');
+
+  const relatedClaimId = String(options[RELATED_TO] || '').trim();
+  if (relatedClaimId) filter.push(`claim_id != ${JSON.stringify(relatedClaimId)}`);
 
   const language = String(options[LANGUAGE] || '').trim();
   if (language) filter.push(equalityFilter('language', language));

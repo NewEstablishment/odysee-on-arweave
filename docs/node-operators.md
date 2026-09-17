@@ -48,6 +48,12 @@ Notes:
 - Store opts cross the wire JSON-encoded: booleans and integers may arrive as
   binaries (`<<"true">>`, `<<"128">>`). The store modules normalize; any new
   opt must too.
+- `odysee-default-range-size` is the strict byte cap for an open-ended
+  historical-media response. It defaults to `2097151` bytes (one standard
+  LBRY plaintext blob); the store rounds the response down to a verified
+  descriptor blob boundary when possible. Lower values reduce per-viewer
+  transient memory at the cost of more browser and source requests. Explicit
+  closed ranges are unaffected.
 - Device availability: for development, `rebar3 device local` runs a node
   with the working-tree device compiled in; deployed seed nodes should pin
   the *published* implementation exactly as serving nodes do (below), so
