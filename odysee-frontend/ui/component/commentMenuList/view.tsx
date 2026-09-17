@@ -14,7 +14,14 @@ import React from 'react';
 import { useIsMobile } from 'effects/use-screensize';
 import { formatLbryUrlForWeb } from 'util/url';
 import { doChannelMute } from 'redux/actions/blocked';
-import { doCommentPin, doCommentModAddDelegate, doCommentModRemoveDelegate } from 'redux/actions/comments';
+import {
+  doCommentPin,
+  doCommentModAddDelegate,
+  doCommentModRemoveDelegate,
+  doCommentReset,
+  doCommentList,
+} from 'redux/actions/comments';
+import { fetchHyperbeamCommentVisibility } from 'util/hyperbeam';
 import { doOpenModal, doSetActiveChannel } from 'redux/actions/app';
 import { doClearPlayingUri } from 'redux/actions/content';
 import { doToast } from 'redux/actions/notifications';
@@ -79,6 +86,7 @@ function CommentMenuList(props: Props) {
   } = props;
 
   const dispatch = useAppDispatch();
+  const [hiding, setHiding] = React.useState(false);
   const claim = useAppSelector((state) => selectClaimForUri(state, uri));
   const authorClaim = useAppSelector((state) => selectClaimForUri(state, authorUri));
   const authorCanonicalUri = (authorClaim && authorClaim.canonical_url) || '';
@@ -239,6 +247,29 @@ function CommentMenuList(props: Props) {
       )}
 
       {/* Administration & moderation */}
+      {hyperbeamNodeEnabled() && activeChannelIsCreator && commentId && !isLiveComment && (
+        <MenuItem
+          disabled={hiding}
+          className="comment__menu-option menu__link"
+          onSelect={async () => {
+            if (hiding) return;
+            setHiding(true);
+            try {
+              await fetchHyperbeamCommentVisibility(commentId, true);
+              dispatch(doCommentReset(claim.claim_id));
+              await dispatch(doCommentList(uri, undefined));
+              dispatch(doToast({ message: __('Comment hidden. Restore it from Hidden comments.') }));
+            } catch {
+              dispatch(doToast({ isError: true, message: __('Unable to hide this comment. Please retry.') }));
+            } finally {
+              setHiding(false);
+            }
+          }}
+        >
+          <Icon aria-hidden icon={ICONS.EYE_OFF} />
+          {__('Hide comment')}
+        </MenuItem>
+      )}
       {activeChannelIsCreator && !commentIsMine && (
         <div className="comment__menu-title">
           <Icon aria-hidden icon={ICONS.BADGE_STREAMER} className={'icon'} />
@@ -262,7 +293,8 @@ function CommentMenuList(props: Props) {
           {__('Dismiss Pin')}
         </MenuItem>
       )}
-      {activeChannelIsCreator &&
+      {!hyperbeamNodeEnabled() &&
+        activeChannelIsCreator &&
         activeChannelClaim &&
         activeChannelClaim.permanent_url !== authorUri &&
         !authorIsModerator && (
@@ -280,7 +312,7 @@ function CommentMenuList(props: Props) {
             </span>
           </MenuItem>
         )}
-      {activeChannelIsCreator && authorIsModerator && (
+      {!hyperbeamNodeEnabled() && activeChannelIsCreator && authorIsModerator && (
         <MenuItem className="comment__menu-option" onSelect={removeModerator}>
           <div className="menu__link">
             <Icon aria-hidden icon={ICONS.REMOVE} />

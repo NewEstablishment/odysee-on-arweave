@@ -452,6 +452,9 @@ not require SSR, a browser timer, a local JSON file, or a separate scheduler.
 
 ## Local validation
 
+For the full human-run Chrome matrix, fixtures, failure recovery, and release
+sign-off format, use the [master Chrome acceptance kit](docs/chrome-master-acceptance.md).
+
 Backend:
 
 ```sh

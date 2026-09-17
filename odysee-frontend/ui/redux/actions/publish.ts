@@ -130,7 +130,9 @@ export const doPublishDesktop = (filePath?: any, preview?: boolean) => {
     const memberRestrictionStatus = selectMemberRestrictionStatus(state);
     const claim = makeSelectClaimForUri(editingUri)(state) || {};
     const hasSourceFile = claim.value && claim.value.source;
-    const redirectToLivestream = noFileParam && !hasSourceFile && !remoteUrl;
+    // Native metadata edits legitimately have no new File. They must never
+    // enter the legacy no-file livestream redirect after a successful write.
+    const redirectToLivestream = !hyperbeamUploadEnabled() && noFileParam && !hasSourceFile && !remoteUrl;
 
     const publishSuccess = (successResponse, lbryFirstError) => {
       const state: State = getState();

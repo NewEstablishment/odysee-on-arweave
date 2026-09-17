@@ -9,6 +9,7 @@ import { hyperbeamClaimSearchRequest, type HyperbeamSearchRequest } from 'util/h
 import { isClaimNsfw, isHyperbeamUploadClaim } from 'util/claim';
 import { rememberUploadVersion, serializeUploadWrite, uploadVersionHints } from 'util/nativeUploadWrites';
 import { cachedNativeRead } from 'util/nativeReadCache';
+import { readNativeWriteBack } from 'util/nativeReadback';
 import {
   NATIVE_PROFILE_SCHEMA,
   normalizeProfileVersion,
@@ -559,7 +560,7 @@ async function writeNativePreference(key: string, preferenceValue: any): Promise
   const snapshotMessage = nativePreferenceSnapshotMessage(envelope, timestamp);
   const snapshotId = await writeNativePreferenceMessage(snapshotMessage, 'preference snapshot');
   nativePreferenceReferenceQueryCache.clear();
-  const snapshot = await fetchNativePreferenceSnapshotById(snapshotId);
+  const snapshot = await readNativeWriteBack(() => fetchNativePreferenceSnapshotById(snapshotId));
   if (!snapshot || snapshot.owner !== owner || snapshot.updated_at !== timestamp) {
     throw new Error('HyperBEAM preference snapshot failed commitment or ownership verification');
   }
@@ -569,7 +570,7 @@ async function writeNativePreference(key: string, preferenceValue: any): Promise
     : nativePreferenceReferenceInitMessage(snapshotId, timestamp, owner);
   const referenceMessageId = await writeNativePreferenceMessage(referenceMessage, 'preference reference');
   nativePreferenceReferenceQueryCache.clear();
-  const reference = await fetchNativePreferenceReferenceMessageById(referenceMessageId);
+  const reference = await readNativeWriteBack(() => fetchNativePreferenceReferenceMessageById(referenceMessageId));
   const referenceId = current?.reference.reference_id || referenceMessageId;
   if (
     !reference ||
@@ -1928,7 +1929,7 @@ async function fetchNativeCommentSource(params: CommentListParams): Promise<Comm
     );
   }
   const childCounts = nativeCommentChildCounts(visibleComments);
-  const items = projected.items
+  const items = (params.hidden || params.visible === false ? projected.items : visibleComments)
     .filter((comment) => nativeCommentMatchesParams(comment, params))
     .map((comment) => ({
       ...comment,
@@ -2139,9 +2140,19 @@ function nativeCommentText(raw: any): string {
 async function fetchNativeCommentById(id: string): Promise<any | null> {
   const comment = await fetchNativeCommentByIdRaw(id);
   if (!comment) return null;
-  const projected = await projectNativeCommentCollection([comment]);
-  const item = projected.items[0];
-  return item && !item.removed && !item.hidden && !item.blocked ? item : null;
+  const chain = [comment];
+  const seen = new Set([comment.comment_id]);
+  let parent = comment.parent_id;
+  while (parent) {
+    if (seen.has(parent)) return null;
+    seen.add(parent);
+    const ancestor = await fetchNativeCommentByIdRaw(parent);
+    if (!ancestor || ancestor.claim_id !== comment.claim_id) return null;
+    chain.push(ancestor);
+    parent = ancestor.parent_id;
+  }
+  const projected = await projectNativeCommentCollection(chain);
+  return projected.items.some((item) => item.removed || item.hidden || item.blocked) ? null : projected.items[0];
 }
 
 async function fetchNativeCommentByIdRaw(id: string): Promise<any | null> {
@@ -2834,6 +2845,45 @@ export async function fetchHyperbeamCommentPin(params: CommentPinParams): Promis
     params.remove ? 'comment unpin' : 'comment pin'
   );
   return { items: { ...comment, is_pinned: !params.remove } } as unknown as CommentPinResponse;
+}
+
+export async function fetchHyperbeamCommentVisibility(commentId: string, hidden: boolean): Promise<void> {
+  const comment = await fetchNativeCommentByIdRaw(commentId);
+  if (!comment || comment.state === 'deleted') throw new Error('Native comment is unavailable');
+  const owner = await nativeCommentTargetOwner(comment.claim_id);
+  const actor = await activeHyperbeamAccountOwner();
+  if (!owner || actor !== owner) throw new Error('Only the content owner can hide or restore this comment');
+  await writeNativeCommentControl(
+    nativeCommentControlMessage({
+      control: 'visibility',
+      action: hidden ? 'hidden' : 'visible',
+      authority: 'owner',
+      target: comment.claim_id,
+      owner,
+      actor,
+      actorName: getHyperbeamAccount()?.name || actor,
+      commentId: comment.comment_id,
+    }),
+    hidden ? 'comment hide' : 'comment restore'
+  );
+}
+
+export async function fetchHyperbeamHiddenComments(target: string, page = 1): Promise<CommentListResponse> {
+  const owner = await nativeCommentTargetOwner(target);
+  if (!owner || (await activeHyperbeamAccountOwner()) !== owner) {
+    throw new Error('Only the content owner can manage hidden comments');
+  }
+  const params = { claim_id: target, hidden: true, page, page_size: 20 } as CommentListParams;
+  const projected = await projectNativeCommentCollection(
+    await fetchNativeCommentCollection(nativeCommentSelectors(params))
+  );
+  const items = projected.items.filter((comment) => comment.hidden && !comment.removed);
+  return paginateNativeComments(params, {
+    items,
+    totalItems: items.length,
+    totalFilteredItems: items.length,
+    hasHiddenComments: items.length > 0,
+  });
 }
 
 export async function fetchHyperbeamCommentAbandon(

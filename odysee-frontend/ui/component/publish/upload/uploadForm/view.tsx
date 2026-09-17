@@ -75,6 +75,7 @@ import { selectModal, selectActiveChannelClaim, selectIncognito } from 'redux/se
 import { selectClientSetting } from 'redux/selectors/settings';
 import { makeSelectFileRenderModeForUri } from 'redux/selectors/content';
 import { doFetchCreatorSettings } from 'redux/actions/comments';
+import { doClearPlayingUri } from 'redux/actions/content';
 import { selectUploadTemplatesForChannelId } from 'redux/selectors/comments';
 
 const loadSelectThumbnail = () => import('component/selectThumbnail' /* webpackChunkName: "selectThumbnail" */);
@@ -92,6 +93,12 @@ function UploadForm(props: Props) {
   const { disabled = false } = props;
   const dispatch = useAppDispatch();
   const reduxStore = useStore();
+
+  // Entering create/edit is an explicit task switch. Stop the previous viewer
+  // instead of leaving its draggable overlay above the wizard's navigation.
+  useEffect(() => {
+    dispatch(doClearPlayingUri());
+  }, [dispatch]);
 
   const publishFormValues = useAppSelector(selectPublishFormValues);
   const myClaimForUri = useAppSelector((state) => selectMyClaimForUri(state, true));

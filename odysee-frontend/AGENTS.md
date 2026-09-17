@@ -193,6 +193,12 @@ comment-control messages authorized by the exact content committer. Moderation
 delegates and blocked-word settings remain unsupported; fail explicitly
 instead of falling back to legacy services.
 
+Creator Hide/Unhide uses the existing owner visibility control, not author
+deletion. The owner-only Hidden comments review panel uses a separate local
+list so suppressed bodies do not enter the public Redux thread. Include hidden
+replies in review; suppress descendants of hidden parents in public lists and
+logical comment links. Exact historical message reads remain unchanged.
+
 ## Playlists
 
 - Public playlists are generic `odysee-playlist@1.0` messages and private
@@ -313,6 +319,9 @@ instead of falling back to legacy services.
   identity, verification, discovery order, or access.
 
 ## Publish and route guards
+
+- Entering the upload/create or metadata-edit wizard clears previous playback;
+  its floating viewer must not cover Next/Update controls.
 
 - A configured HyperBEAM node enables native upload routes even without a
   legacy verified-email account.

@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { localManifestAssets } from './local-manifest-assets';
 
 const manifest = String(process.env.HYPERBEAM_MANIFEST_URL || '').replace(/\/+$/, '');
 test('native upload edit clears metadata, refreshes, and preserves exact history', async ({ page }) => {
   test.skip(!manifest, 'Set HYPERBEAM_MANIFEST_URL to an isolated node manifest.');
   test.setTimeout(120_000);
   const suffix = Date.now().toString(36);
+  await localManifestAssets(page.context(), manifest);
   await page.goto(`${manifest}/#/$/signup`);
   await page.locator('input[name="hyperbeam_name"]').fill(`upload-test-${suffix}`);
   await page.getByRole('button', { name: 'Create account' }).click();
@@ -47,8 +49,9 @@ test('native upload edit clears metadata, refreshes, and preserves exact history
   await page.locator('input[name="content_title"]').fill(`Edited ${suffix}`);
   await page.getByRole('textbox', { name: /What is your content about/ }).fill('');
   await page.locator('input[name="content_title"]').blur();
-  const miniPlayerClose = page.getByRole('button', { name: 'Close', exact: true });
-  if (await miniPlayerClose.isVisible()) await miniPlayerClose.click();
+  // Entering the wizard must remove the floating player without a manual
+  // close or forced click; it previously intercepted the Next button.
+  await expect(page.locator('.content__viewer--floating')).toHaveCount(0);
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   const response = page.waitForResponse(
@@ -65,6 +68,12 @@ test('native upload edit clears metadata, refreshes, and preserves exact history
   expect(revision.tags).toContain('revision-regression');
   expect(revision.languages).toContain('fr');
   const revisionId = saved.headers()['message-id'];
+  // A write response precedes readback and the success callback. Wait for the
+  // user-visible acknowledgement before navigating away from that callback.
+  const success = page.getByRole('dialog');
+  await expect(success.getByRole('heading', { name: 'Success', exact: true })).toBeVisible({ timeout: 20000 });
+  await success.getByRole('button', { name: 'Close', exact: true }).first().click();
+  await expect(page).not.toHaveURL(/#\/\$\/livestream/);
   await page.goto(`${manifest}/#/$/id/${revisionId}`);
   await expect(page.getByText(`Edited ${suffix}`, { exact: true }).first()).toBeVisible({ timeout: 20000 });
   await page.reload();
