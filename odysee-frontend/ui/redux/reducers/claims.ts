@@ -7,10 +7,24 @@
 // - Sean
 import * as ACTIONS from 'constants/action_types';
 import mergeClaim from 'util/merge-claim';
+import { searchPageHasMore } from 'util/searchPagination';
 import { getChannelIdFromClaim, isHyperbeamUploadClaim } from 'util/claim';
 import { claimToStoredCollection } from 'util/collections';
 import { hyperbeamImmutableUriFromClaim } from 'util/hyperbeam-route';
 const reducers = {};
+reducers[ACTIONS.COLLECTION_DELETE] = (state: ClaimsState, action: any): ClaimsState => {
+  const { id, deletedClaim } = action.data;
+  if (!deletedClaim) return state;
+  const resolvedCollectionsById = { ...state.resolvedCollectionsById };
+  delete resolvedCollectionsById[id];
+  return {
+    ...state,
+    byId: { ...state.byId, [id]: deletedClaim },
+    resolvedCollectionsById,
+    myCollectionClaimIds: state.myCollectionClaimIds?.filter((entry) => entry !== id),
+    myClaims: state.myClaims?.filter((entry) => entry !== id),
+  };
+};
 const defaultState: ClaimsState = {
   byId: {},
   claimsByUri: {},
@@ -154,11 +168,27 @@ function updateIfValueChanged(original, delta, key, newValue) {
  * @param newClaim
  */
 function updateIfClaimChanged(original, delta, key, newClaim) {
-  const claim = preserveExistingChannelMeta(original[key], newClaim);
+  const claim = preserveExistingMediaMeta(original[key], preserveExistingChannelMeta(original[key], newClaim));
 
   if (!original[key] || claimHasNewData(original[key], claim)) {
     delta[key] = claim;
   }
+}
+
+function preserveExistingMediaMeta(originalClaim, newClaim) {
+  const originalAudio = originalClaim?.value?.audio;
+  if (!originalAudio || !newClaim?.value) return newClaim;
+
+  return {
+    ...newClaim,
+    value: {
+      ...newClaim.value,
+      audio: {
+        ...originalAudio,
+        ...newClaim.value.audio,
+      },
+    },
+  };
 }
 
 function preserveExistingChannelMeta(originalClaim, newClaim) {
@@ -481,7 +511,9 @@ reducers[ACTIONS.FETCH_CLAIM_LIST_MINE_COMPLETED] = (state: ClaimsState, action:
   const pendingByIdDelta = {};
   const myClaimIds = new Set(state.myClaims);
   const newResolvedCollectionsById = Object.assign({}, state.resolvedCollectionsById);
-  let newMyCollectionClaimIds = state.myCollectionClaimIds && new Set(state.myCollectionClaimIds);
+  let newMyCollectionClaimIds = action.data.replaceNativePlaylists
+    ? new Set<string>()
+    : state.myCollectionClaimIds && new Set(state.myCollectionClaimIds);
   let urlsForCurrentPage = [];
   claims.forEach((claim: Claim) => {
     const {
@@ -714,6 +746,12 @@ reducers[ACTIONS.ABANDON_CLAIM_STARTED] = (state: ClaimsState, action: any): Cla
   return Object.assign({}, state, {
     abandoningById,
   });
+};
+
+reducers[ACTIONS.ABANDON_CLAIM_FAILED] = (state: ClaimsState, action: any): ClaimsState => {
+  const abandoningById = Object.assign({}, state.abandoningById);
+  delete abandoningById[action.data.claimId];
+  return Object.assign({}, state, { abandoningById });
 };
 
 reducers[ACTIONS.UPDATE_PENDING_CLAIMS] = (state: ClaimsState, action: UpdatePendingClaimsAction): ClaimsState => {
@@ -1023,24 +1061,22 @@ reducers[ACTIONS.CLAIM_SEARCH_COMPLETED] = (state: ClaimsState, action: any): Cl
   const claimSearchByQueryMiscInfo = { ...state.claimSearchByQueryMiscInfo };
   const newResolvingIds = new Set(state.resolvingIds);
   const newFailedToResolveIds = new Set(state.failedToResolveIds);
-  const { append, query, urls, page, pageSize, totalItems, totalPages } = action.data;
+  const { append, query, urls, page, pageSize, totalItems, totalPages, hasMore } = action.data;
 
   if (append) {
-    // todo: check for duplicate urls when concatenating?
-    claimSearchByQuery[query] =
-      claimSearchByQuery[query] && claimSearchByQuery[query].length ? claimSearchByQuery[query].concat(urls) : urls;
+    claimSearchByQuery[query] = Array.from(new Set([...(claimSearchByQuery[query] || []), ...urls]));
   } else {
-    claimSearchByQuery[query] = urls;
+    claimSearchByQuery[query] = Array.from(new Set(urls));
   }
 
-  // the returned number of urls is less than the page size, so we're on the last page
-  claimSearchByQueryLastPageReached[query] = urls.length < pageSize;
+  claimSearchByQueryLastPageReached[query] = !searchPageHasMore(hasMore, urls.length, pageSize);
   delete fetchingClaimSearchByQuery[query];
   claimSearchByQueryMiscInfo[query] = {
     page,
     pageSize,
     totalItems,
     totalPages,
+    hasMore,
   };
   const { claim_ids: claimIds } = JSON.parse(query);
 

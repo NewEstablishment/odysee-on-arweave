@@ -6,6 +6,7 @@ import {
   verifiedNativeOwnerMatches,
   verifyNativeMessage,
 } from '../../ui/util/nativeMessageVerification.ts';
+import { hasLbryOutpointCommitment, lbryEvidenceCommitmentId } from '../../ui/util/lbryCommitment.ts';
 
 const messageId = 'a'.repeat(43);
 const payload = { schema: 'example@1.0', type: 'example' };
@@ -17,6 +18,52 @@ const dependencies = {
 
 assert.equal(isNativeMessageId(messageId), true);
 assert.equal(isNativeMessageId('short'), false);
+assert.equal(
+  hasLbryOutpointCommitment(
+    {
+      commitments: {
+        [messageId]: {
+          'commitment-device': 'lbry@1.0',
+          'native-id': `${'b'.repeat(64)}00000000`,
+          'native-id-type': 'outpoint',
+        },
+      },
+    },
+    messageId
+  ),
+  true
+);
+assert.equal(hasLbryOutpointCommitment({ commitments: {} }, messageId), false);
+assert.equal(
+  lbryEvidenceCommitmentId(
+    {
+      commitments: {
+        [messageId]: {
+          'commitment-device': 'lbry@1.0',
+          'native-id-type': 'outpoint',
+          evidence: 'channel',
+        },
+      },
+    },
+    'channel'
+  ),
+  messageId
+);
+assert.equal(
+  lbryEvidenceCommitmentId(
+    {
+      commitments: {
+        [messageId]: {
+          'commitment-device': 'lbry@1.0',
+          'native-id-type': 'outpoint',
+          evidence: 'claim',
+        },
+      },
+    },
+    'channel'
+  ),
+  null
+);
 assert.deepEqual(await verifyNativeMessage(`/${messageId}`, dependencies), {
   messageId,
   payload,

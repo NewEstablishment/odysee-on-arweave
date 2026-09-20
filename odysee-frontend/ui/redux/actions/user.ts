@@ -3,7 +3,6 @@ import Lbry from 'lbry';
 import { doFetchChannelListMine } from 'redux/actions/claims';
 import { batchActions } from 'util/batch-actions';
 import * as ACTIONS from 'constants/action_types';
-import { doFetchGeoBlockedList } from 'redux/actions/blocked';
 import { doClaimRewardType, doRewardList } from 'redux/actions/rewards';
 import {
   selectEmailToVerify,
@@ -17,14 +16,15 @@ import { selectIsRewardApproved } from 'redux/selectors/rewards';
 import { doToast } from 'redux/actions/notifications';
 import rewards from 'rewards';
 import { Lbryio } from 'lbryinc';
-import { DOMAIN, LOCALE_API } from 'config';
+import { DOMAIN } from 'config';
 import { getDefaultLanguage } from 'util/default-languages';
 import { LocalStorage, LS } from 'util/storage';
 import { doMembershipMine } from 'redux/actions/memberships';
 import { selectDefaultChannelId } from 'redux/selectors/settings';
 import { ODYSEE_TIER_NAMES } from 'constants/memberships';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
-import { getHyperbeamAccount, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
+import { forgetHyperbeamAccount, getHyperbeamAccount, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
+import { recoverOnce } from 'util/hyperbeamSession';
 export let sessionStorageAvailable = false;
 const CHECK_INTERVAL = 200;
 const AUTH_WAIT_TIMEOUT = 10000;
@@ -360,34 +360,31 @@ export function doAuthenticate(
     // account (when saved) IS the user, and signed-out is null, not undefined.
     if (hyperbeamNodeEnabled()) {
       stage = 'hyperbeam-account-recovery';
-      try {
-        const account = getHyperbeamAccount() ? await recoverHyperbeamAccount() : null;
-        finish({
-          type: ACTIONS.AUTHENTICATION_SUCCESS,
-          data: {
-            user: account
-              ? {
-                  id: account.id,
-                  name: account.name,
-                  has_verified_email: false,
-                  is_native: true,
-                }
-              : null,
-            accessToken: null,
-          },
-        });
-      } catch (error) {
-        finish({
-          type: ACTIONS.AUTHENTICATION_FAILURE,
-          data: { error },
-        });
+      // Recovery returns null only on the node's final answer (no session), so
+      // the saved account is then stale and dropped. Anything unverifiable
+      // throws instead: retried once, then reported, keeping the saved account.
+      let account = null;
+      if (getHyperbeamAccount()) {
+        try {
+          account = await recoverOnce(recoverHyperbeamAccount);
+        } catch (error) {
+          finish({ type: ACTIONS.AUTHENTICATION_FAILURE, data: { error } });
+          return;
+        }
+        if (!account) forgetHyperbeamAccount();
       }
+      finish({
+        type: ACTIONS.AUTHENTICATION_SUCCESS,
+        data: {
+          user: account ? { id: account.id, name: account.name, has_verified_email: false, is_native: true } : null,
+          accessToken: null,
+        },
+      });
       return;
     }
 
     checkAuthBusy()
       .then(() => {
-        dispatch(doFetchGeoBlockedList());
         stage = 'authenticate-account';
         return authenticateOdyseeAccount(DOMAIN, getDefaultLanguage(), dispatch, (s) => {
           stage = s;
@@ -1194,40 +1191,6 @@ export function doCheckYoutubeTransfer() {
         dispatch({
           type: ACTIONS.USER_YOUTUBE_IMPORT_FAILURE,
           data: String(error),
-        });
-      });
-  };
-}
-export function doFetchUserLocale(isRetry = false) {
-  return (dispatch) => {
-    fetch(LOCALE_API)
-      .then(async (res) => {
-        let json: Record<string, any> = {};
-
-        try {
-          json = await res.json();
-        } catch (e) {}
-
-        const locale = json.data || {}; // [flow] local: LocaleInfo
-
-        dispatch({
-          type: ACTIONS.USER_FETCH_LOCALE_DONE,
-          data: locale,
-        });
-      })
-      .catch((e) => {
-        if (!isRetry) {
-          // If failed, retry one more time after N seconds. This removes the
-          // need to fetch at each component level. If it failed twice, probably
-          // don't need to fetch anymore.
-          setTimeout(() => {
-            dispatch(doFetchUserLocale(true));
-          }, 10000);
-        }
-
-        dispatch({
-          type: ACTIONS.USER_FETCH_LOCALE_DONE,
-          data: {},
         });
       });
   };

@@ -4,7 +4,11 @@ import { COL_TYPES } from 'constants/collections';
 import { getLocalizedNameForCollectionId } from 'util/collections';
 import Icon from 'component/common/icon';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { selectCollectionForId, selectCollectionForIdHasClaimUrl } from 'redux/selectors/collections';
+import {
+  selectCollectionForId,
+  selectCollectionForIdHasClaimUrl,
+  selectCollectionIsSavingForId,
+} from 'redux/selectors/collections';
 import { selectClaimIsPendingForId } from 'redux/selectors/claims';
 import { doPlaylistAddAndAllowPlaying } from 'redux/actions/content';
 type Props = {
@@ -19,6 +23,7 @@ function CollectionSelectItem(props: Props) {
   const collection = useAppSelector((state) => selectCollectionForId(state, collectionId));
   const collectionHasClaim = useAppSelector((state) => selectCollectionForIdHasClaimUrl(state, collectionId, uri));
   const collectionPending = useAppSelector((state) => selectClaimIsPendingForId(state, collectionId));
+  const collectionSaving = useAppSelector((state) => selectCollectionIsSavingForId(state, collectionId));
   const id = collection.id;
   const name = getLocalizedNameForCollectionId(id) || collection.name;
 
@@ -40,7 +45,7 @@ function CollectionSelectItem(props: Props) {
     <li className="collection-select__item">
       <FormField
         checked={collectionHasClaim}
-        disabled={collectionPending}
+        disabled={collectionPending || collectionSaving}
         icon={icon}
         type="checkbox"
         name={`select-${id}`}

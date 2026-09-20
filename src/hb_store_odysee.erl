@@ -38,7 +38,11 @@
 -export([read/3, type/3, resolve/3, list/3]).
 -export([write/3, group/3, link/3]).
 
--define(DEFAULT_RANGE_SIZE, 1048576).
+%% Open-ended browser ranges remain bounded to one standard LBRY plaintext
+%% blob. The bridge aligns the actual end using the verified descriptor's
+%% `plain-blob-stride', avoiding overlap without making a seek wait for a large
+%% response to be fully materialized.
+-define(DEFAULT_RANGE_SIZE, 2_097_151).
 
 start(_StoreOpts, _Req, _NodeOpts) ->
     ok.
@@ -159,9 +163,9 @@ read_live(<<"odysee/media/stream-id/", Encoded/binary>>, Req, StoreOpts, NodeOpt
 read_live(<<"odysee/media/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts) ->
     media_from_stream_path(<<"odysee/stream/", Encoded/binary>>, Req, StoreOpts, NodeOpts);
 read_live(<<"odysee/media/sd-hash/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
-    media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
+    direct_media_hash_response(SDHash, Req, StoreOpts, NodeOpts);
 read_live(<<"odysee/media/descriptor/", SDHash/binary>>, Req, StoreOpts, NodeOpts) ->
-    media_response(#{ <<"sd-hash">> => SDHash }, Req, store_node_opts(StoreOpts, NodeOpts));
+    direct_media_hash_response(SDHash, Req, StoreOpts, NodeOpts);
 read_live(Path, _Req, StoreOpts, NodeOpts) ->
     read_live(Path, StoreOpts, NodeOpts).
 
@@ -480,6 +484,27 @@ media_from_stream_path(Path, Req, StoreOpts, NodeOpts) ->
         media_response(Source, Req, store_node_opts(StoreOpts, NodeOpts))
     end.
 
+direct_media_hash_response(SDHash, Req, StoreOpts, NodeOpts) ->
+    case content_policy_configured(NodeOpts) of
+        false ->
+            media_response(
+                #{ <<"sd-hash">> => SDHash },
+                Req,
+                store_node_opts(StoreOpts, NodeOpts)
+            );
+        true -> {error, not_found}
+    end.
+
+content_policy_configured(Opts) ->
+    configured_provider_value(hb_opts:get(blacklist_providers, false, Opts))
+        orelse configured_provider_value(hb_opts:get(blacklist_country_providers, false, Opts)).
+
+configured_provider_value(false) -> false;
+configured_provider_value(undefined) -> false;
+configured_provider_value([]) -> false;
+configured_provider_value(Value) when is_map(Value) -> map_size(Value) > 0;
+configured_provider_value(_) -> true.
+
 %% @doc Extract the media source locator from committed stream evidence: the
 %% signed `sd-hash' plus the size, media type, and file name from the
 %% committed claim `value'.
@@ -497,6 +522,8 @@ stream_media_source(Stream, Opts) ->
             <<"content-type">> =>
                 hb_maps:get(<<"media_type">>, Source, undefined, Opts),
             <<"claim-id">> => hb_maps:get(<<"claim-id">>, Stream, undefined, Opts),
+            <<"signing-channel-id">> =>
+                hb_maps:get(<<"signing-channel-id">>, Stream, undefined, Opts),
             <<"filename">> => hb_maps:get(<<"name">>, Source, undefined, Opts)
         },
         {ok, maps:filter(fun(_Key, Value) -> present_optional(Value) end, Source0)}
@@ -509,7 +536,9 @@ stream_media_source(Stream, Opts) ->
 %% hot playback is a bare immutable read that never re-fetches blobs.
 %% Explicit ranges (store request `start'/`end' keys or a `range' header
 %% value) yield a bounded 206 slice; HTTP `Range' headers do not reach
-%% store reads through `~cache@1.0/read'.
+%% store reads through `~cache@1.0/read'. A range must therefore be
+%% forwarded through `~cache@1.0/read' as `start'/`end'/`range' request
+%% fields (patches/dev-cache-forward-range.patch does this).
 media_response(Source, Req, Opts) ->
     case request_range(Req, Opts) of
         full ->
@@ -529,6 +558,8 @@ media_response(Source, Req, Opts) ->
                     full_media_response(Source, Opts)
             end;
         {ok, Start, End} -> ranged_media_response(Source, Start, End, Opts);
+        {window, Start, MaxBytes} ->
+            windowed_media_response(Source, Start, MaxBytes, Opts);
         Error -> Error
     end.
 
@@ -652,32 +683,66 @@ ranged_media_response(Source, Start, End, Opts) ->
         SDHash = hb_maps:get(<<"sd-hash">>, Source, not_found, Opts),
         {ok, Result} ?=
             hb_odysee_bridge:stream_range(SDHash, BoundedStart, BoundedEnd, Opts),
-        Body = maps:get(<<"bytes">>, Result),
-        ActualEnd = maps:get(<<"end">>, Result),
-        Total = hb_maps:get(<<"byte-size">>, Source, undefined, Opts),
-        {ok,
-            maps:merge(
-                #{
-                    <<"status">> => 206,
-                    <<"content-type">> =>
-                        hb_maps:get(
-                            <<"content-type">>,
-                            Source,
-                            <<"application/octet-stream">>,
-                            Opts
-                        ),
-                    <<"content-length">> => byte_size(Body),
-                    <<"accept-ranges">> => <<"bytes">>,
-                    <<"content-range">> => content_range(BoundedStart, ActualEnd, Total),
-                    <<"sd-hash">> => hb_util:to_lower(SDHash),
-                    <<"start">> => BoundedStart,
-                    <<"end">> => ActualEnd,
-                    <<"requested-end">> => maps:get(<<"requested-end">>, Result),
-                    <<"body">> => Body
-                },
-                media_metadata(Source, Total)
-            )}
+        media_range_response(Source, SDHash, BoundedStart, Result, Opts)
     end.
+
+windowed_media_response(Source, Start, MaxBytes, Opts) ->
+    maybe
+        true ?= is_integer(MaxBytes) andalso MaxBytes > 0 orelse {error, invalid_range},
+        MaxEnd = Start + MaxBytes - 1,
+        {ok, BoundedStart, BoundedEnd} ?= bounded_range(Source, Start, MaxEnd),
+        SDHash = hb_maps:get(<<"sd-hash">>, Source, not_found, Opts),
+        {ok, Result} ?=
+            stream_window_result(
+                Source,
+                SDHash,
+                BoundedStart,
+                BoundedEnd,
+                Opts
+            ),
+        media_range_response(Source, SDHash, BoundedStart, Result, Opts)
+    end.
+
+%% At a known end-of-file there is no following response to overlap, so retain
+%% the exact final byte instead of rounding down to an earlier blob boundary.
+stream_window_result(Source, SDHash, Start, MaxEnd, Opts) ->
+    case range_reaches_eof(Source, MaxEnd) of
+        true -> hb_odysee_bridge:stream_range(SDHash, Start, MaxEnd, Opts);
+        false -> hb_odysee_bridge:stream_window(SDHash, Start, MaxEnd, Opts)
+    end.
+
+range_reaches_eof(Source, End) ->
+    case hb_maps:get(<<"byte-size">>, Source, undefined, #{}) of
+        Size when is_integer(Size), Size > 0 -> End == Size - 1;
+        _ -> false
+    end.
+
+media_range_response(Source, SDHash, BoundedStart, Result, Opts) ->
+    Body = maps:get(<<"bytes">>, Result),
+    ActualEnd = maps:get(<<"end">>, Result),
+    Total = hb_maps:get(<<"byte-size">>, Source, undefined, Opts),
+    {ok,
+        maps:merge(
+            #{
+                <<"status">> => 206,
+                <<"content-type">> =>
+                    hb_maps:get(
+                        <<"content-type">>,
+                        Source,
+                        <<"application/octet-stream">>,
+                        Opts
+                    ),
+                <<"content-length">> => byte_size(Body),
+                <<"accept-ranges">> => <<"bytes">>,
+                <<"content-range">> => content_range(BoundedStart, ActualEnd, Total),
+                <<"sd-hash">> => hb_util:to_lower(SDHash),
+                <<"start">> => BoundedStart,
+                <<"end">> => ActualEnd,
+                <<"requested-end">> => maps:get(<<"requested-end">>, Result),
+                <<"body">> => Body
+            },
+            media_metadata(Source, Total)
+        )}.
 
 request_range(Req, Opts) ->
     case {
@@ -698,9 +763,7 @@ parse_range(<<"bytes=", Spec/binary>>, Opts) ->
         [StartBin, EndBin] when byte_size(StartBin) > 0 ->
             maybe
                 {ok, Start} ?= non_negative_integer(StartBin),
-                {ok, End} ?= range_end(Start, EndBin, Opts),
-                true ?= End >= Start orelse {error, invalid_range},
-                {ok, Start, End}
+                parsed_range_end(Start, EndBin, Opts)
             end;
         _ ->
             {error, invalid_range}
@@ -708,13 +771,29 @@ parse_range(<<"bytes=", Spec/binary>>, Opts) ->
 parse_range(_Range, _Opts) ->
     {error, invalid_range}.
 
-range_end(Start, <<>>, Opts) ->
-    {ok, Start + default_range_size(Opts) - 1};
-range_end(_Start, EndBin, _Opts) ->
-    non_negative_integer(EndBin).
+parsed_range_end(Start, <<>>, Opts) ->
+    case default_range_size(Opts) of
+        MaxBytes when is_integer(MaxBytes), MaxBytes > 0 ->
+            {window, Start, MaxBytes};
+        _ ->
+            {error, invalid_range}
+    end;
+parsed_range_end(Start, EndBin, _Opts) ->
+    maybe
+        {ok, End} ?= non_negative_integer(EndBin),
+        true ?= End >= Start orelse {error, invalid_range},
+        {ok, Start, End}
+    end.
 
 default_range_size(Opts) ->
-    hb_maps:get(<<"odysee-default-range-size">>, Opts, ?DEFAULT_RANGE_SIZE, Opts).
+    integer_or_undefined(
+        hb_maps:get(
+            <<"odysee-default-range-size">>,
+            Opts,
+            ?DEFAULT_RANGE_SIZE,
+            Opts
+        )
+    ).
 
 bounded_range(Source, Start, End) ->
     case hb_maps:get(<<"byte-size">>, Source, undefined, #{}) of
@@ -747,6 +826,8 @@ media_metadata(Source, Total) ->
         {Key, Value} <- [
             {<<"byte-size">>, Total},
             {<<"claim-id">>, hb_maps:get(<<"claim-id">>, Source, undefined, #{})},
+            {<<"signing-channel-id">>,
+                hb_maps:get(<<"signing-channel-id">>, Source, undefined, #{})},
             {<<"filename">>, hb_maps:get(<<"filename">>, Source, undefined, #{})}
         ],
         present_optional(Value)
@@ -891,13 +972,22 @@ source_claims_read_query(Query, StoreOpts, NodeOpts) ->
                 {<<"claim_ids">>, <<"claim_ids">>, list},
                 {<<"not_channel_ids">>, <<"not_channel_ids">>, list},
                 {<<"claim_type">>, <<"claim_type">>, list},
+                {<<"stream_types">>, <<"stream_types">>, list},
                 {<<"any_tags">>, <<"any_tags">>, list},
+                {<<"all_tags">>, <<"all_tags">>, list},
+                {<<"not_tags">>, <<"not_tags">>, list},
                 {<<"order_by">>, <<"order_by">>, list},
                 {<<"any_languages">>, <<"any_languages">>, list},
                 {<<"page">>, <<"page">>, integer},
                 {<<"page_size">>, <<"page_size">>, integer},
                 {<<"limit_claims_per_channel">>, <<"limit_claims_per_channel">>, integer},
-                {<<"duration">>, <<"duration">>, scalar},
+                {<<"duration">>, <<"duration">>, scalar_or_list},
+                {<<"fee_amount">>, <<"fee_amount">>, scalar},
+                {<<"has_source">>, <<"has_source">>, boolean},
+                {<<"has_no_source">>, <<"has_no_source">>, boolean},
+                {<<"has_channel_signature">>, <<"has_channel_signature">>, boolean},
+                {<<"valid_channel_signature">>, <<"valid_channel_signature">>, boolean},
+                {<<"reposted_claim_id">>, <<"reposted_claim_id">>, scalar},
                 {<<"timestamp">>, <<"timestamp">>, scalar},
                 {<<"release_time">>, <<"release_time">>, scalar},
                 {<<"exclude_shorts">>, <<"exclude_shorts">>, boolean}
@@ -942,6 +1032,8 @@ source_search_value(boolean, 1) -> true;
 source_search_value(boolean, <<"1">>) -> true;
 source_search_value(boolean, _Value) -> false;
 source_search_value(scalar, Value) when is_binary(Value); is_integer(Value) -> Value;
+source_search_value(scalar_or_list, Value) when is_list(Value) -> Value;
+source_search_value(scalar_or_list, Value) when is_binary(Value); is_integer(Value) -> Value;
 source_search_value(_Kind, _Value) -> not_found.
 
 list_channel_search(Encoded, Req, StoreOpts, NodeOpts, Project) ->
@@ -1429,6 +1521,48 @@ direct_txid_get_returns_native_transaction_test() ->
     ?assertEqual(TxID, maps:get(<<"txid">>, Msg)),
     ?assertEqual(hb_util:encode(Raw), maps:get(<<"raw">>, Msg)).
 
+source_claim_search_forwards_product_filters_test() ->
+    application:ensure_all_started(inets),
+    Response = hb_lbry_test_fixtures:proxy_result(#{ <<"items">> => [] }),
+    {ok, Server, Handle} = hb_mock_server:start([
+        {"/api/v1/proxy", proxy, {200, Response}}
+    ]),
+    try
+        Query = #{
+            <<"claim_type">> => [<<"stream">>],
+            <<"stream_types">> => [<<"audio">>],
+            <<"any_tags">> => [<<"music">>],
+            <<"all_tags">> => [<<"purchase">>],
+            <<"not_tags">> => [<<"mature">>],
+            <<"any_languages">> => [<<"en">>],
+            <<"order_by">> => [<<"effective_amount">>],
+            <<"duration">> => [<<">=60">>, <<"<=600">>],
+            <<"fee_amount">> => <<">0">>,
+            <<"has_source">> => true,
+            <<"has_no_source">> => false,
+            <<"has_channel_signature">> => true,
+            <<"valid_channel_signature">> => true,
+            <<"reposted_claim_id">> => <<"abc123">>,
+            <<"page">> => 2,
+            <<"page_size">> => 24
+        },
+        StoreOpts = #{
+            <<"lbry-proxy-node">> => Server,
+            <<"http-client">> => httpc
+        },
+        {ok, _} = source_claims_read_query(Query, StoreOpts, #{}),
+        [Req] = hb_mock_server:get_requests(Handle, proxy),
+        Sent = hb_json:decode(maps:get(<<"body">>, Req)),
+        Params = maps:get(<<"params">>, Sent),
+        maps:foreach(
+            fun(Key, Expected) -> ?assertEqual(Expected, maps:get(Key, Params)) end,
+            Query
+        ),
+        ?assertEqual(true, maps:get(<<"no_totals">>, Params))
+    after
+        hb_mock_server:stop(Handle)
+    end.
+
 direct_outpoint_get_returns_native_claim_output_test() ->
     Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
     TxID = dev_lbry_tx:txid(Raw),
@@ -1641,6 +1775,109 @@ full_media_read_attaches_operator_attestation_test() ->
         ),
     ?assertEqual(200, maps:get(<<"status">>, Bare)),
     ?assertEqual(error, maps:find(<<"media-attestation">>, Bare)).
+
+open_ended_range_preserves_bounded_window_intent_test() ->
+    ?assertEqual(
+        {window, 0, ?DEFAULT_RANGE_SIZE},
+        request_range(#{ <<"range">> => <<"bytes=0-">> }, #{})
+    ),
+    ?assertEqual(
+        {window, 17, 4096},
+        request_range(
+            #{ <<"range">> => <<"bytes=17-">> },
+            #{ <<"odysee-default-range-size">> => 4096 }
+        )
+    ),
+    ?assertEqual(
+        {window, 17, 4096},
+        request_range(
+            #{ <<"range">> => <<"bytes=17-">> },
+            #{ <<"odysee-default-range-size">> => <<"4096">> }
+        )
+    ),
+    ?assertEqual(
+        {error, invalid_range},
+        request_range(
+            #{ <<"range">> => <<"bytes=17-">> },
+            #{ <<"odysee-default-range-size">> => 0 }
+        )
+    ).
+
+explicit_closed_range_remains_exact_test() ->
+    ?assertEqual(
+        {ok, 17, 31},
+        request_range(#{ <<"range">> => <<"bytes=17-31">> }, #{})
+    ),
+    ?assertEqual(
+        {error, invalid_range},
+        request_range(#{ <<"range">> => <<"bytes=31-17">> }, #{})
+    ).
+
+open_ended_final_short_stream_returns_exact_eof_test() ->
+    Plaintext = <<"hello verified legacy stream">>,
+    {Raw, SDHash, BlobHash, Ciphertext} =
+        hb_lbry_test_fixtures:sample_descriptor(Plaintext),
+    Source = #{
+        <<"sd-hash">> => SDHash,
+        <<"byte-size">> => byte_size(Plaintext),
+        <<"content-type">> => <<"video/mp4">>
+    },
+    Opts = #{
+        <<"lbry-blob-store">> => #{
+            <<"fixtures">> => #{
+                SDHash => Raw,
+                BlobHash => Ciphertext
+            }
+        }
+    },
+    {ok, Msg} = media_response(
+        Source,
+        #{ <<"range">> => <<"bytes=0-">> },
+        Opts
+    ),
+    End = byte_size(Plaintext) - 1,
+    ?assertEqual(206, maps:get(<<"status">>, Msg)),
+    ?assertEqual(Plaintext, maps:get(<<"body">>, Msg)),
+    ?assertEqual(byte_size(Plaintext), maps:get(<<"content-length">>, Msg)),
+    ?assertEqual(
+        content_range(0, End, byte_size(Plaintext)),
+        maps:get(<<"content-range">>, Msg)
+    ),
+    ?assertEqual(End, maps:get(<<"requested-end">>, Msg)).
+
+direct_media_hash_is_disabled_with_policy_providers_test() ->
+    SDHash = <<"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef">>,
+    Store = #{ <<"store-module">> => ?MODULE },
+    ?assertEqual(
+        {error, not_found},
+        read(
+            Store,
+            #{ <<"read">> => <<"odysee/media/sd-hash/", SDHash/binary>> },
+            #{ <<"blacklist-providers">> => [<<"policy-id">>] }
+        )
+    ),
+    ?assertEqual(
+        {error, not_found},
+        read(
+            Store,
+            #{ <<"read">> => <<"odysee/media/sd-hash/", SDHash/binary>> },
+            #{
+                <<"blacklist-country-providers">> =>
+                    #{ <<"DE">> => [<<"policy-id">>] }
+            }
+        )
+    ).
+
+signed_stream_media_metadata_includes_channel_test() ->
+    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
+    {ok, Stream} = dev_lbry_commitment:stream_claim_message(Raw, 0),
+    {ok, Source} = stream_media_source(Stream, #{}),
+    ChannelID = maps:get(<<"signing-channel-id">>, Stream),
+    ?assertEqual(ChannelID, maps:get(<<"signing-channel-id">>, Source)),
+    ?assertEqual(
+        ChannelID,
+        maps:get(<<"signing-channel-id">>, media_metadata(Source, 1))
+    ).
 
 bare_channel_id_claims_list_returns_claim_ids_test() ->
     ChannelID = <<"fb364ef587872515f545a5b4b3182b58073f230f">>,

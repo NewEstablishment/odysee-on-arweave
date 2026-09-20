@@ -2,6 +2,7 @@ import * as ACTIONS from 'constants/action_types';
 import { MS } from 'constants/date-time';
 import { SIDEBAR_SUBS_DISPLAYED } from 'constants/subscriptions';
 import { doClaimSearch, doResolveUris } from 'redux/actions/claims';
+import { selectChannelForUri } from 'redux/selectors/claims';
 import { getChannelFromClaim } from 'util/claim';
 import { doToast } from 'redux/actions/notifications';
 import { selectSubscriptionIds, selectSubscriptionUris, selectSubscriptions } from 'redux/selectors/subscriptions';
@@ -33,11 +34,24 @@ export function doToggleSubscription(
       return;
     }
 
+    // Some call sites (previews, context menus) only have a short channel URI
+    // without the claim id, which the native write rejects. Recover the
+    // permanent URL from the already-resolved claim in the store.
+    let subscriptionInput = subscription;
+    const channelClaim = channelClaimId(subscription.uri) ? null : selectChannelForUri(getState(), subscription.uri);
+    if (channelClaim?.permanent_url) {
+      subscriptionInput = {
+        ...subscription,
+        uri: channelClaim.permanent_url,
+        channelName: channelClaim.name || subscription.channelName,
+      };
+    }
+
     const authoritativeSubscription = isSubscribed
-      ? matchingNativeSubscription(selectSubscriptions(getState()) || [], subscription)
+      ? matchingNativeSubscription(selectSubscriptions(getState()) || [], subscriptionInput)
       : null;
     const normalizedSubscription = {
-      ...subscription,
+      ...subscriptionInput,
       ...authoritativeSubscription,
       notificationsDisabled: nativeSubscriptionNotificationsDisabled(
         authoritativeSubscription?.notificationsDisabled ?? subscription.notificationsDisabled

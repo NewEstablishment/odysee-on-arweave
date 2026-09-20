@@ -47,6 +47,7 @@ import { selectIsClaimingInitialRewards, selectHasClaimedInitialRewards } from '
 import { selectModal, selectActiveChannelClaim, selectIncognito } from 'redux/selectors/app';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { selectBalance } from 'redux/selectors/wallet';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 const SelectThumbnail = lazyImport(() => import('component/selectThumbnail' /* webpackChunkName: "selectThumbnail" */));
 const PublishPrice = lazyImport(
@@ -266,7 +267,7 @@ function LivestreamForm(props: Props) {
   }, [activeChannelName, activeChannelId, incognito]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchLivestreams(channelId?: string, channelName?: string) {
-    if (!channelId || !channelName) {
+    if (hyperbeamNodeEnabled() || !channelId || !channelName) {
       setCheckingLivestreams(false);
       return;
     }

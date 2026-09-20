@@ -5,6 +5,7 @@ import Button from 'component/button';
 import * as ICONS from 'constants/icons';
 // import twemoji from 'twemoji';
 import Tooltip from 'component/common/tooltip';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 type Props = {
   title?: string | React.ReactNode;
   subtitle?: string | React.ReactNode;
@@ -82,8 +83,12 @@ function Card(props: Props) {
         <div
           className="background"
           style={{
-            backgroundImage:
-              'url(https://thumbnails.odycdn.com/optimize/s:390:0/quality:85/plain/' + backgroundImage + ')',
+            backgroundImage: `url(${getThumbnailCdnUrl({
+              thumbnail: backgroundImage,
+              width: 390,
+              height: 0,
+              quality: 85,
+            })})`,
           }}
         />
       )}

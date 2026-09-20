@@ -10,11 +10,12 @@ export const FormContext = React.createContext<any>(undefined);
 export const Form = (props: Props) => {
   const { children, errors, disableSubmitOnEnter, onSubmit, ...otherProps } = props;
   const pressedEnter = React.useRef(false);
-  const [formErrors, setFormErrors] = React.useState(errors);
-  const hasFormErrors = formErrors && Object.values(formErrors).length > 0;
+  const [fieldErrors, setFieldErrors] = React.useState({});
+  const formErrors = { ...errors, ...fieldErrors };
+  const hasFormErrors = Object.values(formErrors).length > 0;
 
   function updateFormErrors(errorKey, newError) {
-    setFormErrors((prevErrors) => {
+    setFieldErrors((prevErrors) => {
       const newErrors = Object.assign({}, prevErrors);
 
       if (newError) {

@@ -4,8 +4,6 @@ import { getOldFormatForLbryUri } from 'util/lbryURI';
 
 const initialState: BlocklistState = {
   blockedChannels: [],
-  geoBlockedList: undefined,
-  gblFetchFailed: false,
 };
 
 const blockedSlice = createSlice({
@@ -22,13 +20,6 @@ const blockedSlice = createSlice({
         } else {
           state.blockedChannels.unshift(uri);
         }
-      })
-      .addCase(ACTIONS.FETCH_GBL_DONE, (state, action: any) => {
-        state.gblFetchFailed = false;
-        state.geoBlockedList = action.data;
-      })
-      .addCase(ACTIONS.FETCH_GBL_FAILED, (state) => {
-        state.gblFetchFailed = true;
       })
       .addCase(ACTIONS.USER_STATE_POPULATE, (state, action: any) => {
         const { blocked } = action.data;

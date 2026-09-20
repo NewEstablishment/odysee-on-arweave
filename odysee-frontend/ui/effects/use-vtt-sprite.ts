@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { isHyperbeamPlaybackUrl } from 'util/playback-url';
 
 const THUMB_WIDTH = 160;
 const THUMB_HEIGHT = 90;
@@ -7,6 +8,14 @@ const COLUMNS = 10;
 const UPDATE_EVERY_N_FRAMES = 5;
 
 const storyboardCache = new Map<string, string>();
+
+export function shouldGenerateVttSprite(
+  sourceUrl: string | null | undefined,
+  duration: number | null | undefined,
+  hasNativeStoryboard: boolean
+): boolean {
+  return Boolean(sourceUrl && duration && duration >= 10 && !hasNativeStoryboard && !isHyperbeamPlaybackUrl(sourceUrl));
+}
 
 let blackFrameUrl: string | null = null;
 function getBlackFrameUrl(): string {
@@ -67,7 +76,7 @@ export default function useVttSprite(
   const blobUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
-    if (!sourceUrl || !duration || duration < 10 || hasNativeStoryboard || generatingRef.current) {
+    if (!shouldGenerateVttSprite(sourceUrl, duration, hasNativeStoryboard) || generatingRef.current) {
       return;
     }
 

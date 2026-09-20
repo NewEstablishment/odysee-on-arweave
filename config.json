@@ -1,6 +1,20 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "rate-limit-requests": 10000,
+  "rate-limit-period": 60,
+  "rate-limit-max": 10000,
+  "rate-limit-min": 0,
+  "homepage-materializer": true,
+  "homepage-refresh-interval": "1-hour",
+  "homepage-category-pool-size": 36,
+  "homepage-initial-category-pool-size": 12,
+  "homepage-initial-language": "en",
+  "homepage-source-timeout": 10000,
+  "lbry-proxy-timeout": 5000,
+  "lbry-proxy-retries": 0,
+  "relay-block-internal": false,
+  "relay-allowed-hosts": ["127.0.0.1"],
   "analytics-sites": [
     {
       "key": "odysee",
@@ -11,6 +25,7 @@
       ],
       "origins": [],
       "visitor-id-mode": "persistent",
+      "node-baseline-writer": true,
       "engagement-threshold-ms": 30000,
       "engagement-dedupe-window-ms": 86400000
     }
@@ -52,7 +67,6 @@
     {
       "field": "schema",
       "values": [
-        "odysee-upload@1.0",
         "odysee-channel@1.0",
         "odysee-playlist@1.0",
         "odysee-comment@1.0"
@@ -95,7 +109,7 @@
       "store-module": "hb_store_lmdb",
       "name": "cache-odysee-demo",
       "ao-types": "store-module=\"atom\", capacity=\"integer\"",
-      "capacity": 4294967296
+      "capacity": 34359738368
     },
     {
       "store-module": "hb_store_lmdb",
@@ -134,7 +148,7 @@
       "store-module": "hb_store_lmdb",
       "name": "cache-odysee-demo",
       "ao-types": "store-module=\"atom\", capacity=\"integer\"",
-      "capacity": 4294967296
+      "capacity": 34359738368
     }
   ],
   "on": {

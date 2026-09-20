@@ -261,9 +261,16 @@ async function hyperbeamNodeWarmImmutableChannels(ids) {
 
 function isHydratedChannelEvidence(payload) {
   if (!payload || typeof payload !== 'object') return false;
-  const channelId = value(payload, 'channel-id', 'channel_id', 'public-key', 'public_key');
+  const channelId = value(payload, 'channel-id', 'channel_id', 'claim-id', 'claim_id');
+  const publicKey = value(payload, 'public-key', 'public_key');
+  const rawClaim = value(payload, 'claim');
   const channelValue = value(payload, 'value');
-  return Boolean(channelId && channelValue && typeof channelValue === 'object');
+  return Boolean(
+    channelId &&
+    publicKey &&
+    ((rawClaim && (typeof rawClaim === 'string' || typeof rawClaim === 'object')) ||
+      (channelValue && typeof channelValue === 'object'))
+  );
 }
 
 async function hyperbeamNodeQueueImmutableClaims(ids) {
@@ -1028,7 +1035,9 @@ function immutableClaimFromHyperbeam(result, immutableId, fallbackName) {
     value(claim, 'claim_id', 'claim-id') ||
     claimIdFromSignatureInput(value(payload, 'signature-input'));
   const txid = value(payload, 'txid') || immutableOutpoint?.txid;
-  const nout = value(payload, 'nout') || immutableOutpoint?.nout;
+  // Preserve output zero so legacy evidence remains addressable by outpoint
+  // instead of being mistaken for a native immutable upload.
+  const nout = value(payload, 'nout') ?? immutableOutpoint?.nout;
   const outpoint =
     typeof txid === 'string' && (typeof nout === 'number' || typeof nout === 'string') ? `${txid}:${nout}` : null;
   const storeId = immutableId || outpoint || value(payload, 'id') || sourceClaimId;
@@ -1598,4 +1607,5 @@ module.exports = {
   hyperbeamNodeWarmImmutableClaim,
   hyperbeamNodeWarmImmutableClaims,
   hyperbeamNodeWarmImmutableChannels,
+  isHydratedChannelEvidence,
 };

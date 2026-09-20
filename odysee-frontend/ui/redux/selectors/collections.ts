@@ -1,10 +1,8 @@
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import { createSelector } from 'reselect';
-import { COLLECTION_PAGE } from 'constants/urlParams';
 import {
   selectClaimForUri,
   selectClaimForClaimId,
-  selectClaimIsPendingForId,
   selectClaimsById,
   selectClaimIdsByUri,
   selectMyCollectionClaimIds,
@@ -28,9 +26,6 @@ import { EMPTY_OBJECT } from 'redux/selectors/empty';
 
 const selectState = (state: State) => state.collections || EMPTY_OBJECT;
 
-const selectRouterSearchString = (state: State) =>
-  (state.router && state.router.location && state.router.location.search) || '';
-
 const TIMESTAMP_MS_THRESHOLD = 1e12;
 
 const toMilliseconds = (timestamp: any): number => {
@@ -53,19 +48,11 @@ export const selectIsFetchingMyCollections = (state: State) => selectState(state
 export const selectCollectionIdsWithItemsResolved = (state: State) => selectState(state).resolvedIds;
 export const selectThumbnailClaimsFetchingCollectionIds = (state: State) =>
   selectState(state).thumbnailClaimsFetchingCollectionIds;
-export const selectCollectionAutoPublishMap = (state: State) => selectState(state).autoPublishById || EMPTY_OBJECT;
-export const selectCollectionPublishingMap = (state: State) => selectState(state).publishingById || EMPTY_OBJECT;
-export const selectCollectionPublishErrorMap = (state: State) => selectState(state).publishErrorById || EMPTY_OBJECT;
-export const selectCollectionAutoPublishForId = (state: State, id: string) =>
-  Boolean(selectCollectionAutoPublishMap(state)[id]);
-export const selectCollectionAutoPublishScheduledAtMap = (state: State) =>
-  selectState(state).autoPublishScheduledAtById || EMPTY_OBJECT;
-export const selectCollectionAutoPublishScheduledAtForId = (state: State, id: string) =>
-  selectCollectionAutoPublishScheduledAtMap(state)[id] || null;
-export const selectCollectionIsPublishingForId = (state: State, id: string) =>
-  Boolean(selectCollectionPublishingMap(state)[id]);
-export const selectCollectionPublishErrorForId = (state: State, id: string) =>
-  selectCollectionPublishErrorMap(state)[id];
+export const selectCollectionSavingMap = (state: State) => selectState(state).savingById || EMPTY_OBJECT;
+export const selectCollectionSaveErrorMap = (state: State) => selectState(state).saveErrorById || EMPTY_OBJECT;
+export const selectCollectionIsSavingForId = (state: State, id: string) =>
+  Boolean(selectCollectionSavingMap(state)[id]);
+export const selectCollectionSaveErrorForId = (state: State, id: string) => selectCollectionSaveErrorMap(state)[id];
 export const selectAreThumbnailClaimsFetchingForCollectionIds = (state: State, ids: string) =>
   selectThumbnailClaimsFetchingCollectionIds(state).includes(ids);
 const selectCollectionIdsWithItemsResolvedSet = createSelector(
@@ -95,7 +82,7 @@ export const selectSavedCollections = createSelector(
     return savedCollections;
   }
 );
-export const selectHasLocalSyncCollections = createSelector(
+export const selectHasLocalCollections = createSelector(
   selectMyUnpublishedCollections,
   selectMyEditedCollections,
   selectSavedCollections,
@@ -107,9 +94,9 @@ export const selectHasLocalSyncCollections = createSelector(
   }
 );
 export const selectHasCollections = (state: State) => {
-  const hasLocalSyncCollections = selectHasLocalSyncCollections(state);
+  const hasLocalCollections = selectHasLocalCollections(state);
   const publishedCollectionIds = selectMyCollectionClaimIds(state);
-  return hasLocalSyncCollections || (publishedCollectionIds && publishedCollectionIds.length > 0);
+  return hasLocalCollections || (publishedCollectionIds && publishedCollectionIds.length > 0);
 };
 export const selectEditedCollectionForId = (state: State, id: string) => selectMyEditedCollections(state)[id];
 export const selectCollectionHasEditsForId = (state: State, id: string) =>
@@ -133,6 +120,10 @@ export const selectCollectionTitleForId = (state: State, id: string) => {
 export const selectCollectionDescriptionForId = (state: State, id: string) => {
   const collection = selectCollectionForId(state, id);
   return collection?.description;
+};
+export const selectCollectionVisibilityForId = (state: State, id: string): PlaylistVisibility => {
+  const collection = selectCollectionForId(state, id);
+  return collection?.visibility || collection?.hyperbeam?.visibility || 'private';
 };
 export const selectResolvedCollectionForId = (state: State, id: string) => selectResolvedCollectionsById(state)[id];
 export const selectUnpublishedCollectionForId = (state: State, id: string) => selectMyUnpublishedCollections(state)[id];
@@ -188,23 +179,6 @@ export const selectMyPublicLocalCollections = createSelector(
     return myPublicLocalCollections;
   }
 );
-export const selectMyPublicCollectionForId = (state: State, id: string) => {
-  const myCollectionClaimsById = selectMyPublishedCollections(state);
-  return myCollectionClaimsById && myCollectionClaimsById[id];
-};
-export const selectIsMyCollectionPublishedForId = (state: State, id: string) =>
-  Boolean(selectMyPublicCollectionForId(state, id));
-export const selectPublishedCollectionNotEditedForId = createSelector(
-  selectIsMyCollectionPublishedForId,
-  selectCollectionHasEditsForId,
-  (isPublished, hasEdits) => isPublished && !hasEdits
-);
-export const selectIsMyPublicCollectionNotEditedForId = (state: State, id: string) => {
-  const publicCollection = selectMyPublicCollectionForId(state, id);
-  if (!publicCollection) return publicCollection;
-  const hasEdits = selectCollectionHasEditsForId(state, id);
-  return Boolean(publicCollection && !hasEdits);
-};
 export const selectAreCollectionItemsFetchingForId = (state: State, id: string) =>
   selectCollectionItemsFetchingIds(state).includes(id);
 export const selectCollectionsById = createSelector(
@@ -226,15 +200,9 @@ export const selectCollectionsById = createSelector(
 export const selectCollectionForId = createSelector(
   (state, id) => id,
   selectCollectionsById,
-  selectResolvedCollectionsById,
-  selectRouterSearchString,
-  (id, collectionsById, resolved, search) => {
+  (id, collectionsById) => {
     if (!id) return id;
-    const collection = collectionsById[id];
-    const urlParams = new URLSearchParams(search);
-    const isOnPublicView = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLIC;
-    if (isOnPublicView) return resolved[id] || collection;
-    return collection;
+    return collectionsById[id];
   }
 );
 export const selectIsCollectionBuiltInForId = (state: State, id: string) => selectBuiltinCollections(state)[id];
@@ -395,43 +363,25 @@ export const selectCountForCollectionId = (state: State, id: string) =>
 // Has private === either is private or is public with private edits
 export const selectHasPrivateCollectionForId = (state: State, id: string) => {
   const unpublishedCollection = selectUnpublishedCollectionForId(state, id);
+  const resolvedCollection = selectResolvedCollectionForId(state, id);
   if (unpublishedCollection) return true;
   if (COLLECTIONS_CONSTS.BUILTIN_PLAYLISTS.includes(id)) return true;
-
-  if (selectCollectionHasEditsForId(state, id) || selectCollectionHasUnsavedEditsForId(state, id)) {
-    const urlParams = new URLSearchParams(selectRouterSearchString(state));
-    const isOnPublicView = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLIC;
-    if (!isOnPublicView) return true;
+  if (resolvedCollection?.visibility === 'private' || resolvedCollection?.hyperbeam?.visibility === 'private') {
+    return true;
   }
+
+  if (selectCollectionHasEditsForId(state, id) || selectCollectionHasUnsavedEditsForId(state, id)) return true;
 
   return false;
 };
 // Is private === only private (doesn't include public with private edits)
 export const selectIsCollectionPrivateForId = (state: State, id: string) =>
-  Boolean(selectUnpublishedCollectionForId(state, id) || COLLECTIONS_CONSTS.BUILTIN_PLAYLISTS.includes(id));
-export const SYNC_STATUS = {
-  UNKNOWN: 'unknown',
-  PUBLISHING: 'publishing',
-  PENDING_CONFIRMATION: 'pending_confirmation',
-  PUBLISH_FAILED: 'publish_failed',
-  LOCAL_CHANGES: 'local_changes',
-  PRIVATE_LOCAL: 'private_local',
-  PUBLIC_SYNCED: 'public_synced',
-};
-export const selectCollectionSyncStatusForId = (state: State, id: string) => {
-  if (!id) return SYNC_STATUS.UNKNOWN;
-  const isPublishing = selectCollectionIsPublishingForId(state, id);
-  if (isPublishing) return SYNC_STATUS.PUBLISHING;
-  const isPending = selectClaimIsPendingForId(state, id);
-  if (isPending) return SYNC_STATUS.PENDING_CONFIRMATION;
-  const publishError = selectCollectionPublishErrorForId(state, id);
-  if (publishError) return SYNC_STATUS.PUBLISH_FAILED;
-  const hasEdits = selectCollectionHasEditsForId(state, id) || selectCollectionHasUnsavedEditsForId(state, id);
-  if (hasEdits) return SYNC_STATUS.LOCAL_CHANGES;
-  if (selectIsCollectionPrivateForId(state, id)) return SYNC_STATUS.PRIVATE_LOCAL;
-  if (selectIsMyCollectionPublishedForId(state, id)) return SYNC_STATUS.PUBLIC_SYNCED;
-  return SYNC_STATUS.UNKNOWN;
-};
+  Boolean(
+    selectUnpublishedCollectionForId(state, id) ||
+    COLLECTIONS_CONSTS.BUILTIN_PLAYLISTS.includes(id) ||
+    selectResolvedCollectionForId(state, id)?.visibility === 'private' ||
+    selectResolvedCollectionForId(state, id)?.hyperbeam?.visibility === 'private'
+  );
 export const selectClaimIdsForCollectionId = createSelector(
   selectHasPrivateCollectionForId,
   selectItemsForCollectionId,
@@ -467,6 +417,25 @@ export const selectHasUnavailableClaimIdsForCollectionId = createSelector(
   selectClaimIdsForCollectionId,
   (claimIds) => claimIds && claimIds.includes(null)
 );
+export const selectCollectionSaveParamsForId = createCachedSelector(
+  selectCollectionForId,
+  selectCollectionTitleForId,
+  selectClaimIdsForCollectionId,
+  (collection, collectionTitle, collectionClaimIds) => {
+    const claims = collectionClaimIds && collectionClaimIds.filter(Boolean);
+    if (!collection) return undefined;
+    return {
+      name: collectionTitle,
+      title: collectionTitle,
+      description: collection.description,
+      thumbnail_url: collection.thumbnail?.url,
+      claims,
+      tags: collection.tags || [],
+      languages: collection.languages || [],
+      visibility: collection.visibility || collection.hyperbeam?.visibility || 'private',
+    };
+  }
+)((state: State, collectionId: string) => collectionId);
 const _prevCollectionUrls = new Map<string, Array<string>>();
 const selectClaimsByImmutableLocator = createSelector(selectClaimsById, (claimsById) => {
   const claimsByLocator: Record<string, Claim> = {};
@@ -482,13 +451,26 @@ export const selectUrlsForCollectionId = createCachedSelector(
   selectItemsForCollectionId,
   selectClaimsById,
   selectClaimsByImmutableLocator,
-  (collectionId, itemCount, items, claimsById, claimsByLocator) => {
+  selectCollectionHasItemsResolvedForId,
+  selectClaimIdsByUri,
+  (collectionId, itemCount, items, claimsById, claimsByLocator, itemsResolved, claimIdsByUri) => {
     if (!items) return items;
     const uris: string[] = [];
     let notFetched;
     items.forEach((item) => {
       if (isPermanentUrl(item) || isCanonicalUrl(item)) {
         uris.push(item);
+      } else if (claimIdsByUri && item in claimIdsByUri) {
+        // Private collections store their items as immutable permanent URLs
+        // ("lbry://immutable_<id>"). Those parse as neither a permanent nor a
+        // canonical URL, and the locator map is keyed by the bare id, so the
+        // entry matched nothing and was dropped from the rendered playlist.
+        const claimId = claimIdsByUri[item];
+        if (claimId === undefined) {
+          notFetched = true;
+        } else if (claimId !== null) {
+          uris.push(item);
+        }
       } else {
         const claim = claimsById[item] || claimsByLocator[item];
 
@@ -502,7 +484,11 @@ export const selectUrlsForCollectionId = createCachedSelector(
       }
     });
 
-    if (notFetched && (!Number.isInteger(itemCount) || itemCount > uris.length)) {
+    // `undefined` means "still loading" to consumers. Only claim it while the
+    // collection's item resolve is genuinely outstanding: an item whose claim the
+    // search never returns stays `undefined` in `claimsById` forever, so once the
+    // resolve has completed we return what we have instead of spinning for good.
+    if (notFetched && !itemsResolved && (!Number.isInteger(itemCount) || itemCount > uris.length)) {
       return undefined;
     }
 

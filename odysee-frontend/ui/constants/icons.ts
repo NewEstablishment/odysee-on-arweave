@@ -52,6 +52,7 @@ export const LIFESTYLE = 'Lifestyle';
 export const GHOST = 'Ghost';
 export const SPIRITUALITY = 'Spirituality';
 export const HORROR = 'Horror';
+export const LOCAL_CONTENT = 'LocalContent';
 // Badges
 export const BADGE_MOD = 'BadgeMod';
 export const BADGE_ADMIN = 'BadgeAdmin';

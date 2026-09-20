@@ -36,7 +36,7 @@ const CollectionHeader = (props: Props) => {
   const collectionId = collection?.id;
   const claim = useAppSelector((state) => collectionId && selectClaimForId(state, collectionId));
   const uri = (claim && (claim.canonical_url || claim.permanent_url)) || null;
-  const hasClaim = Boolean(claim);
+  const isPublic = collection?.visibility === 'public' || collection?.hyperbeam?.visibility === 'public';
   const isNotADefaultList = collection.id !== 'watchlater' && collection.id !== 'favorites';
   const backgroundImage =
     collection && collection.thumbnail && collection.thumbnail.url
@@ -100,7 +100,7 @@ const CollectionHeader = (props: Props) => {
                 >
                   <CollectionItemCount collectionId={collectionId} />
                 </div>
-                {hasClaim ? (
+                {isPublic ? (
                   <div
                     className="collection-header__meta-entry"
                     style={

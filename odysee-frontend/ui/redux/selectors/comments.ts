@@ -1,12 +1,11 @@
 import { createSelector } from 'reselect';
 import { createCachedSelector } from 're-reselect';
-import { selectGeoBlockLists, selectMutedChannels } from 'redux/selectors/blocked';
+import { selectMutedChannels } from 'redux/selectors/blocked';
 import { selectShowMatureContent } from 'redux/selectors/settings';
 // Inlined from search selectors to break circular dependency:
 // search.ts -> content.ts -> file_info.ts -> livestream.ts -> comments.ts -> search.ts
 const selectMentionSearchResults = (state: State): Array<string> => state.search.results;
 const selectMentionQuery = (state: State): string => state.search.mentionQuery;
-import { selectUserLocale } from 'redux/selectors/user';
 // Direct imports to avoid circular dependency: comments -> lbryinc/index -> redux/actions/sync -> lbryinc
 import { selectBlackListedData } from 'lbryinc/redux/selectors/blacklist';
 import { selectFilteredData } from 'lbryinc/redux/selectors/filtered';
@@ -169,8 +168,6 @@ const filterCommentsDepOnList = {
   blackListedData: selectBlackListedData,
   filteredData: selectFilteredData,
   showMatureContent: selectShowMatureContent,
-  geoBlockList: selectGeoBlockLists,
-  locale: selectUserLocale,
   delegatorsById: selectModerationDelegatorsById,
 };
 const filterCommentsPropKeys = Object.keys(filterCommentsDepOnList);
@@ -295,8 +292,6 @@ const filterComments = (comments: Array<CommentData>, claimId: string | undefine
     blackListedData,
     filteredData,
     showMatureContent,
-    geoBlockList,
-    locale,
     delegatorsById,
   } = filterProps;
   const contentClaim = claimsById[claimId];
@@ -365,11 +360,7 @@ const filterComments = (comments: Array<CommentData>, claimId: string | undefine
         }
 
         if (channelClaim) {
-          const geoRestriction: GeoRestriction | null | undefined = getGeoRestrictionForClaim(
-            channelClaim,
-            locale,
-            geoBlockList
-          );
+          const geoRestriction: GeoRestriction | null | undefined = getGeoRestrictionForClaim(channelClaim);
 
           if (geoRestriction) {
             return false;

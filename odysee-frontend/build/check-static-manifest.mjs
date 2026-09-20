@@ -30,16 +30,16 @@ if (assetFiles.some((file) => !/^[A-Za-z0-9_.-]+$/.test(path.basename(file.path)
   fail('an emitted asset name contains a HyperBEAM-reserved character');
 }
 
-const homepageLocator = homepageModule.match(/["']([A-Za-z0-9_-]{43})["']/)?.[1];
-if (!homepageLocator) fail('materialized homepage data is missing');
-let homepageBundled = false;
+const localContentLocator = homepageModule.match(/["']([A-Za-z0-9_-]{43}|[0-9a-f]{64}:[0-9]+)["']/i)?.[1];
+if (!localContentLocator) fail('materialized local-content data is missing');
+let localContentBundled = false;
 for (const file of assetFiles.filter((file) => file.path.endsWith('.js'))) {
-  if ((await fs.readFile(file.absolutePath, 'utf8')).includes(homepageLocator)) {
-    homepageBundled = true;
+  if ((await fs.readFile(file.absolutePath, 'utf8')).includes(localContentLocator)) {
+    localContentBundled = true;
     break;
   }
 }
-if (!homepageBundled) fail('materialized homepage locators were not bundled');
+if (!localContentBundled) fail('materialized local-content locators were not bundled');
 
 const templateAssetUrls = [...serverTemplate.matchAll(/(?:src|href)="([^"]*assets\/[^"]+)"/g)].map((match) => match[1]);
 if (!templateAssetUrls.length || templateAssetUrls.some((url) => !url.startsWith('/public/assets/'))) {

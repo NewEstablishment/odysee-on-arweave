@@ -39,6 +39,7 @@ export function claimToStoredCollection(claim: CollectionClaim) {
     profileId: (claim as any).hyperbeam?.profile_id,
     profileName: (claim as any).hyperbeam?.profile_name,
     hyperbeam: (claim as any).hyperbeam,
+    visibility: (claim as any).visibility || (claim as any).hyperbeam?.visibility || 'public',
     createdAt,
     updatedAt,
     type: resolveCollectionType(claim.value.tags),

@@ -72,7 +72,6 @@ import {
   doUpdateIsNightAsync,
   doLoadBuiltInHomepageData,
 } from 'redux/actions/settings';
-import { doFetchUserLocale } from 'redux/actions/user';
 import { Lbryio, doBlackListedDataSubscribe, doFilteredDataSubscribe } from 'lbryinc';
 import { store, persistor } from 'store';
 import app from './app';
@@ -280,8 +279,9 @@ function AppWrapper() {
   useEffect(() => {
     if (persistDone) {
       app.store.dispatch(doDaemonReady());
-      app.store.dispatch(doLoadBuiltInHomepageData());
-      app.store.dispatch(doFetchHomepages());
+      Promise.resolve(app.store.dispatch(doLoadBuiltInHomepageData())).finally(() => {
+        app.store.dispatch(doFetchHomepages());
+      });
 
       const cancelAfterPaint = scheduleAfterPaint(() => {
         if (DEFAULT_LANGUAGE) {
@@ -291,7 +291,6 @@ function AppWrapper() {
         app.store.dispatch(doUpdateIsNightAsync());
         app.store.dispatch(doBlackListedDataSubscribe());
         app.store.dispatch(doFilteredDataSubscribe());
-        app.store.dispatch(doFetchUserLocale());
         analytics.event.startup(Date.now());
       });
       const cancelIdle = scheduleWhenIdle(() => {

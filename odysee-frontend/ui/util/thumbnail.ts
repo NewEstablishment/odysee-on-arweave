@@ -28,7 +28,7 @@ export function getThumbnailCdnUrl(props: Props) {
     return typeof thumbnail === 'string' ? thumbnail : null;
   }
 
-  const directUrl = directImageUrl(thumbnail, trustedImageBases());
+  const directUrl = directImageUrl(thumbnail, trustedImageBases(), hyperbeamImagesDirect());
   if (directUrl) return directUrl;
   if (!THUMBNAIL_CDN_URL) return thumbnail;
 
@@ -49,7 +49,8 @@ export function getThumbnailCdnUrl(props: Props) {
   }
 }
 export function getImageProxyUrl(thumbnail: string | null | undefined) {
-  const directUrl = typeof thumbnail === 'string' ? directImageUrl(thumbnail, trustedImageBases()) : null;
+  const directUrl =
+    typeof thumbnail === 'string' ? directImageUrl(thumbnail, trustedImageBases(), hyperbeamImagesDirect()) : null;
   if (directUrl) return directUrl;
   if (
     IMAGE_PROXY_URL &&
@@ -62,6 +63,10 @@ export function getImageProxyUrl(thumbnail: string | null | undefined) {
   }
 
   return typeof thumbnail === 'string' ? thumbnail : null;
+}
+
+function hyperbeamImagesDirect() {
+  return Boolean(HYPERBEAM_BASE_URL || ODYSEE_HYPERBEAM_NODE_API);
 }
 
 function trustedImageBases(): Array<string> {

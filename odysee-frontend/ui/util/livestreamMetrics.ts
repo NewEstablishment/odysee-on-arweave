@@ -1,4 +1,5 @@
 import { LIVESTREAM_SERVER_API } from 'config';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 // -- Types --
 
@@ -48,7 +49,7 @@ export async function fetchStreamMetrics(
   signingTs: string,
   signal?: AbortSignal
 ): Promise<StreamMetrics | null> {
-  if (!LIVESTREAM_SERVER_API || !channelClaimId || !signature || !signingTs) return null;
+  if (hyperbeamNodeEnabled() || !LIVESTREAM_SERVER_API || !channelClaimId || !signature || !signingTs) return null;
 
   const encodedName = encodeURIComponent(channelName);
   const url =

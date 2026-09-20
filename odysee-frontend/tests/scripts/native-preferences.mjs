@@ -5,6 +5,7 @@ import {
   NATIVE_PREFERENCE_KEY_VERSION,
   NATIVE_PREFERENCE_REFERENCE_TYPE,
   canonicalNativePreferenceReference,
+  latestNativePreferenceState,
   nativePreferencePlaintext,
   nativePreferenceReferenceInitMessage,
   nativePreferenceReferenceSetMessage,
@@ -80,34 +81,66 @@ assert.throws(
   /JSON-compatible/
 );
 
-const initMessage = nativePreferenceReferenceInitMessage(snapshotId, 100);
+const initMessage = nativePreferenceReferenceInitMessage(snapshotId, 100, owner);
 assert.deepEqual(initMessage, {
   device: 'reference@1.0',
   'reference-type': NATIVE_PREFERENCE_REFERENCE_TYPE,
+  'preference-owner': owner,
   'reference-value': snapshotId,
   timestamp: 100,
 });
-assert.throws(() => nativePreferenceReferenceInitMessage('invalid', 100), /reference fields are invalid/);
-assert.throws(() => nativePreferenceReferenceSetMessage('invalid', snapshotId, 101), /reference ID is invalid/);
+assert.throws(() => nativePreferenceReferenceInitMessage('invalid', 100, owner), /reference fields are invalid/);
+assert.throws(() => nativePreferenceReferenceInitMessage(snapshotId, 100, 'invalid'), /reference fields are invalid/);
+assert.throws(() => nativePreferenceReferenceSetMessage('invalid', snapshotId, 101, owner), /reference ID is invalid/);
 const init = reference(initMessage, id('r'), owner);
-const update = reference(nativePreferenceReferenceSetMessage(init.reference_id, nextSnapshotId, 101), id('u'), owner);
+const update = reference(
+  nativePreferenceReferenceSetMessage(init.reference_id, nextSnapshotId, 101, owner),
+  id('u'),
+  owner
+);
 assert.equal(projectNativePreferenceReference(init, [update]).reference_value, nextSnapshotId);
 
-const foreign = reference(nativePreferenceReferenceSetMessage(init.reference_id, id('f'), 999), id('a'), id('x'));
+const foreign = reference(
+  nativePreferenceReferenceSetMessage(init.reference_id, id('f'), 999, id('x')),
+  id('a'),
+  id('x')
+);
 assert.equal(projectNativePreferenceReference(init, [update, foreign]).reference_value, nextSnapshotId);
 
-const conflict = reference(nativePreferenceReferenceSetMessage(init.reference_id, id('c'), 101), id('b'), owner);
+const conflict = reference(nativePreferenceReferenceSetMessage(init.reference_id, id('c'), 101, owner), id('b'), owner);
 assert.equal(
   projectNativePreferenceReference(init, [update, conflict]).reference_value,
   snapshotId,
   'equal-timestamp preference conflicts fail closed'
 );
 
-const laterDuplicateInit = reference(nativePreferenceReferenceInitMessage(id('d'), 200), id('z'), owner);
+const laterDuplicateInit = reference(nativePreferenceReferenceInitMessage(id('d'), 200, owner), id('z'), owner);
 assert.equal(
   canonicalNativePreferenceReference([laterDuplicateInit, init], owner)?.message_id,
   init.message_id,
   'the oldest same-owner init is the deterministic canonical preference reference'
+);
+assert.equal(
+  normalizeNativePreferenceReference({ ...initMessage, 'message-id': id('q'), 'hyperbeam-owner': id('x') }),
+  null,
+  'the queryable preference owner must match the verified committer'
+);
+
+const initialState = { reference: init, snapshot, preferences: { shared } };
+const localUpdateState = {
+  reference: update,
+  snapshot: { ...snapshot, message_id: nextSnapshotId, updated_at: 101 },
+  preferences: { shared, 'enable-sync': true },
+};
+assert.equal(
+  latestNativePreferenceState(initialState, localUpdateState),
+  localUpdateState,
+  'a verified local update wins while the discovery index still returns the older reference'
+);
+assert.equal(
+  latestNativePreferenceState(null, localUpdateState),
+  localUpdateState,
+  'a verified local init remains authoritative until the discovery index catches up'
 );
 
 console.log('native preference contract tests passed');

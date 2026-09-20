@@ -592,19 +592,6 @@ function ClaimMenuListInner(props: Props) {
                     )}
                     {isMyCollection && (
                       <>
-                        {!collectionEmpty && (
-                          <MenuItem
-                            className="comment__menu-option"
-                            onSelect={() =>
-                              navigate(`/$/${PAGES.PLAYLIST}/${collectionId}?${CP.QUERIES.VIEW}=${CP.VIEWS.PUBLISH}`)
-                            }
-                          >
-                            <div className="menu__link">
-                              <Icon aria-hidden iconColor={'red'} icon={ICONS.PUBLISH} />
-                              {__('Publish Snapshot')}
-                            </div>
-                          </MenuItem>
-                        )}
                         <MenuItem
                           className="comment__menu-option"
                           onSelect={() =>

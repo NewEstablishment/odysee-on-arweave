@@ -1,9 +1,8 @@
 import dayjs from 'util/dayjs';
 import { CHANNEL_CREATION_LIMIT } from 'config';
 import { normalizeURI, parseURI, isURIValid, buildURI } from 'util/lbryURI';
-import { selectGeoBlockLists } from 'redux/selectors/blocked';
 import { selectArweaveTipDataForId } from 'redux/selectors/payments';
-import { selectUserLocale, selectYoutubeChannels } from 'redux/selectors/user';
+import { selectYoutubeChannels } from 'redux/selectors/user';
 import { selectSupportsByOutpoint } from 'redux/selectors/wallet';
 import { createSelector } from 'reselect';
 import { createCachedSelector } from 're-reselect';
@@ -466,17 +465,6 @@ export const selectGenericClaimPublishUpdateMetadataForId = (state: State, claim
       : {}),
   };
   return genericUploadMetadata;
-};
-export const selectCollectionClaimPublishUpdateMetadataForId = (state: State, claimId: ClaimId) => {
-  const claimMetadata = selectGenericClaimPublishUpdateMetadataForId(state, claimId);
-  if (!claimMetadata) return claimMetadata;
-  const collectionClaimIds = selectClaimForClaimId(state, claimId).value?.claims;
-  if (!collectionClaimIds) return collectionClaimIds;
-  const collectionPublishUpdateMetadata: CollectionPublishUpdateParams = {
-    ...claimMetadata,
-    claims: collectionClaimIds,
-  };
-  return collectionPublishUpdateMetadata;
 };
 export const makeSelectMetadataForUri = (uri: string) =>
   createSelector(makeSelectClaimForUri(uri), (claim) => {
@@ -964,6 +952,10 @@ export const selectClaimSearchByQueryLastPageReached = createSelector(
   selectState,
   (state) => state.claimSearchByQueryLastPageReached || EMPTY_OBJECT
 );
+export const selectClaimSearchPageInfo = createSelector(
+  selectState,
+  (state) => state.claimSearchByQueryMiscInfo || EMPTY_OBJECT
+);
 export const selectShortUrlForUri = (state: State, uri: string) => {
   const claim = selectClaimForUri(state, uri);
   return claim && claim.short_url;
@@ -1082,17 +1074,8 @@ export const selectIsMyChannelCountOverLimit = createSelector(
   }
 );
 
-/**
- * selectGeoRestrictionForUri
- * @returns {undefined|null|GeoConfig} undefined = pending fetch; null = no restrictions; GeoConfig = blocked reason
- */
-export const selectGeoRestrictionForUri = createCachedSelector(
-  selectClaimForUri,
-  selectGeoBlockLists,
-  selectUserLocale,
-  (claim, geoBlockLists, locale: LocaleInfo) => {
-    return getGeoRestrictionForClaim(claim, locale, geoBlockLists);
-  }
+export const selectGeoRestrictionForUri = createCachedSelector(selectClaimForUri, (claim) =>
+  getGeoRestrictionForClaim(claim)
 )((state, uri) => String(uri));
 export const selectClaimRepostedAmountForUri = (state: State, uri: string) => {
   const claim = selectClaimForUri(state, uri);

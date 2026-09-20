@@ -43,7 +43,7 @@ export default function HeaderProfileMenuButton() {
     dispatch(doSetClientSetting(SETTINGS.THEME, currentTheme === 'dark' ? 'light' : 'dark', authenticated));
   };
   const signOut = () => dispatch(doSignOut());
-  const notificationsEnabled = !isNative && (ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui));
+  const notificationsEnabled = isNative || ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui);
   const [anchorEl, setAnchorEl] = React.useState(null);
   const [clicked, setClicked] = React.useState(false);
   const open = Boolean(anchorEl);

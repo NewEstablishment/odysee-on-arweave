@@ -117,11 +117,11 @@ createStore(enableBatching(persistedReducer), {}, composeEnhancers(applyMiddlewa
 
 ### Moderation & Blocking
 
-| Slice       | Reducer Path                | Persisted                   | Key State                           |
-| ----------- | --------------------------- | --------------------------- | ----------------------------------- |
-| `blocked`   | `redux/reducers/blocked.ts` | Partial (`blockedChannels`) | `blockedChannels`, `geoBlockedList` |
-| `blacklist` | `lbryinc` (external)        | No                          | External package                    |
-| `filtered`  | `lbryinc` (external)        | No                          | External package                    |
+| Slice       | Reducer Path                | Persisted                   | Key State         |
+| ----------- | --------------------------- | --------------------------- | ----------------- |
+| `blocked`   | `redux/reducers/blocked.ts` | Partial (`blockedChannels`) | `blockedChannels` |
+| `blacklist` | `lbryinc` (external)        | No                          | External package  |
+| `filtered`  | `lbryinc` (external)        | No                          | External package  |
 
 ### Livestream
 

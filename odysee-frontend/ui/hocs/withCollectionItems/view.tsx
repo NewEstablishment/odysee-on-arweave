@@ -7,6 +7,7 @@ import {
   selectUrlsForCollectionId,
   selectUrlsForCollectionIdNonDeleted,
   selectClaimIdsForCollectionId,
+  selectCollectionForId,
   selectCollectionHasItemsResolvedForId,
   selectCountForCollectionId,
 } from 'redux/selectors/collections';
@@ -35,6 +36,7 @@ const withCollectionItems = <P extends Props>(Component: React.ComponentType<P &
         : selectUrlsForCollectionId(state, collectionId)
     );
     const collectionIds = useAppSelector((state) => selectClaimIdsForCollectionId(state, collectionId));
+    const collection = useAppSelector((state) => selectCollectionForId(state, collectionId));
     const collectionHasItemsResolved = useAppSelector((state) =>
       selectCollectionHasItemsResolvedForId(state, collectionId)
     );
@@ -42,7 +44,8 @@ const withCollectionItems = <P extends Props>(Component: React.ComponentType<P &
     const collectionItemCount = typeof rawCollectionItemCount === 'number' ? rawCollectionItemCount : 0;
 
     const collectionItems = useIds ? collectionIds : collectionUrls;
-    const shouldFetchCollectionItems = collectionItems === undefined || !collectionHasItemsResolved;
+    const shouldFetchCollectionItems =
+      Boolean(collection) && (collectionItems === undefined || !collectionHasItemsResolved);
     const hasNoResolvedItems = Array.isArray(collectionItems) && collectionItems.length === 0;
     const shouldKeepLoading =
       collectionItems === undefined || (!collectionHasItemsResolved && collectionItemCount > 0 && hasNoResolvedItems);

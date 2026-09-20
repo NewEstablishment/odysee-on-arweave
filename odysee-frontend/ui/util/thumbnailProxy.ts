@@ -1,5 +1,24 @@
-export function directImageUrl(source: string, trustedBases: Array<string> = []): string | null {
+const THUMBNAIL_PROXY_HOST = 'thumbnails.odycdn.com';
+
+export function unwrapThumbnailProxyUrl(source: string): string | null {
   const value = String(source || '').trim();
+  const marker = '/plain/';
+
+  try {
+    const url = new URL(value);
+    const markerIndex = value.indexOf(marker);
+    if (url.hostname !== THUMBNAIL_PROXY_HOST || markerIndex === -1) return null;
+
+    const innerUrl = value.slice(markerIndex + marker.length);
+    return /^https?:\/\//i.test(innerUrl) ? innerUrl : null;
+  } catch {
+    return null;
+  }
+}
+
+export function directImageUrl(source: string, trustedBases: Array<string> = [], allowRemote = false): string | null {
+  const rawValue = String(source || '').trim();
+  const value = (allowRemote && unwrapThumbnailProxyUrl(rawValue)) || rawValue;
   if (!value) return null;
   if (value.startsWith('/') || value.startsWith('data:') || value.startsWith('blob:')) return value;
 
@@ -21,7 +40,10 @@ export function directImageUrl(source: string, trustedBases: Array<string> = [])
     } catch {}
   }
 
-  return isPrivateHostname(candidate.hostname) ? candidate.toString() : null;
+  if (isPrivateHostname(candidate.hostname)) return candidate.toString();
+  if (!allowRemote) return null;
+  if (candidate.protocol === 'http:') candidate.protocol = 'https:';
+  return candidate.toString();
 }
 
 function isPrivateHostname(hostname: string): boolean {

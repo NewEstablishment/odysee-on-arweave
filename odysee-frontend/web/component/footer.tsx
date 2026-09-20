@@ -55,6 +55,9 @@ export default function Footer() {
         <li className="footer__link">
           <Button label={__('Privacy Policy')} href="https://odysee.com/$/privacypolicy" />
         </li>
+        <li className="footer__link">
+          <Button label={__('IP Geolocation by DB-IP')} href="https://db-ip.com" target="_blank" />
+        </li>
         <li className="footer__link" id="gdprPrivacyFooter">
           <Button label={__('Cookie Settings')} onClick={() => window.Optanon && window.Optanon.ToggleInfoDisplay()} />
         </li>

@@ -12,7 +12,7 @@ export default function NotificationBubble(props: Props) {
   const { inline = false } = props;
   const unseenCount = useAppSelector(selectUnseenNotificationCount);
   const user = useAppSelector(selectUser);
-  const notificationsEnabled = ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui);
+  const notificationsEnabled = user?.is_native || ENABLE_UI_NOTIFICATIONS || (user && user.experimental_ui);
 
   if (!notificationsEnabled) {
     return null;

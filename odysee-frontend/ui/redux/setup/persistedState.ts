@@ -47,7 +47,6 @@ const FILTERS = {
     'updated',
     'pending',
     'lastUsedCollectionIds',
-    'autoPublishById',
   ]),
 };
 const whiteListedReducers = [

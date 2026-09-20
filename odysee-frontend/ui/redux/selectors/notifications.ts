@@ -20,6 +20,8 @@ export const makeSelectNotificationForCommentId = (id) =>
     return match;
   });
 export const selectIsFetchingNotifications = (state) => selectState(state).fetchingNotifications;
+export const selectNotificationError = (state) => selectState(state).notificationError;
+export const selectNotificationsLoaded = (state) => selectState(state).notificationsLoaded;
 export const selectUnreadNotificationCount = createSelector(selectNotifications, (notifications) => {
   return notifications ? notifications.filter((notification) => !notification.is_read).length : 0;
 });

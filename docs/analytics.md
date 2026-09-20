@@ -52,7 +52,8 @@ registration flow:
       "origins": ["https://example.com"],
       "visitor-id-mode": "persistent",
       "engagement-threshold-ms": 30000,
-      "engagement-dedupe-window-ms": 86400000
+      "engagement-dedupe-window-ms": 86400000,
+      "node-baseline-writer": false
     }
   ]
 }
@@ -102,7 +103,9 @@ headers), and a ready-to-paste `snippet`.
 - `counts`: ordered public aggregates for up to 100 subjects
 - `subjects`: owner/viewer-authenticated paginated subject aggregates used by
   the Events dashboard
-- `baseline`: owner-authenticated immutable baseline import
+- `baseline`: signature-authenticated immutable baseline import; the owner is
+  always allowed, and a configured node signer is allowed only when
+  `node-baseline-writer` is true for that site
 - `sites`: authenticated site list
 - `report`: authenticated daily report
 

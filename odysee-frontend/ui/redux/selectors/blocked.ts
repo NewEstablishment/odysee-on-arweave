@@ -6,7 +6,6 @@ import { EMPTY_OBJECT } from 'redux/selectors/empty';
 const selectState = (state: State) => state.blocked || EMPTY_OBJECT;
 
 export const selectMutedChannels = (state: State) => selectState(state).blockedChannels;
-export const selectGeoBlockLists = (state: State) => selectState(state).geoBlockedList;
 export const makeSelectChannelIsMuted = (uri: string) =>
   createSelector(selectMutedChannels, (state: Array<string>) => {
     return state.includes(uri);
@@ -26,6 +25,4 @@ export const selectMutedAndBlockedChannelIds = createSelector(
     return Container.Arr.useStableEmpty([...uniqueSet].sort((a, b) => a.localeCompare(b)));
   }
 );
-export const selectGblAvailable = (state: State) => {
-  return state.blocked.gblFetchFailed === false && state.user.localeFailed === false;
-};
+export const selectGblAvailable = () => true;

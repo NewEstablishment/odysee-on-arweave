@@ -556,10 +556,15 @@
   }
 }
 
+// The zoom-in runs as a one-shot animation rather than a transition between
+// `scale(0)` and a `--after-open` class. react-modal only adds that class a
+// frame after mount, so anything that remounts the portal content in between
+// (the lazy modal chunks re-suspending) left the content stuck at `scale(0)`:
+// invisible, unclickable, while the overlay still swallowed every click.
+// Resting state is now untransformed, so a missed class can no longer hide it.
 .ReactModal__Overlay {
   .ReactModal__Content {
-    transform: scale(0);
-    transition: transform 0.2s;
+    animation: modal-zoom-in 0.2s ease-out;
   }
   .button--close {
     margin: 0;
@@ -577,10 +582,18 @@
   }
 }
 
-.ReactModal__Overlay--after-open {
-  .ReactModal__Content {
+@keyframes modal-zoom-in {
+  from {
+    transform: scale(0.92);
+  }
+  to {
     transform: scale(1);
-    transition: transform 0.4s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ReactModal__Overlay .ReactModal__Content {
+    animation: none;
   }
 }
 

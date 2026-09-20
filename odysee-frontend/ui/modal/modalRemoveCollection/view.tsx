@@ -31,20 +31,31 @@ function ModalRemoveCollection(props: Props) {
     if (simplify) {
       return (
         <>
-          <p>{__('This will permanently delete the list.')}</p>
+          <p>
+            {__(
+              'This removes the playlist from your library and marks its shared link as deleted. Previously shared snapshots and media are not erased.'
+            )}
+          </p>
           <p>{`"${collectionName}"`}</p>
         </>
       );
     } else {
       return hasClaim ? (
         <>
-          <p>{__('This will permanently delete the list.')}</p>
+          <p>
+            {__(
+              'This removes the playlist from your library and marks its shared link as deleted. Previously shared snapshots and media are not erased.'
+            )}
+          </p>
           <p>
             {__('Type "%list_name%" to confirm.', {
               list_name: collectionName,
             })}
           </p>
           <FormField
+            label={__('Playlist name')}
+            name="delete_playlist_name"
+            aria-label={__('Playlist name')}
             value={confirmName}
             type={'text'}
             onChange={(e) => setConfirmName(e.target.value)}
@@ -66,7 +77,12 @@ function ModalRemoveCollection(props: Props) {
   }
 
   return (
-    <Modal isOpen contentLabel={__('Confirm Playlist Delete')} type="card" onAborted={() => dispatch(doHideModal())}>
+    <Modal
+      isOpen
+      contentLabel={__('Confirm Playlist Delete')}
+      type="card"
+      onAborted={() => !deleting && dispatch(doHideModal())}
+    >
       <Card
         title={__('Delete Playlist')}
         body={
@@ -93,7 +109,7 @@ function ModalRemoveCollection(props: Props) {
                 }
               }}
             />
-            <Button button="link" label={__('Cancel')} onClick={() => dispatch(doHideModal())} />
+            <Button button="link" label={__('Cancel')} disabled={deleting} onClick={() => dispatch(doHideModal())} />
           </div>
         }
       />

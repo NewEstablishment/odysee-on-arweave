@@ -21,7 +21,10 @@ import Yrbl from 'component/yrbl';
 import usePrevious from 'effects/use-previous';
 import usePersistedState from 'effects/use-persisted-state';
 import useConnectionStatus from 'effects/use-connection-status';
+import useNativeNotifications from 'effects/use-native-notifications';
 import Spinner from 'component/spinner';
+// Offline feedback cannot depend on fetching its first-use component chunk.
+import Nag from 'component/nag';
 import { BeforeUnload, Unload } from 'util/beforeUnload';
 import { platform } from 'util/platform';
 import {
@@ -100,13 +103,6 @@ const Router = lazyImport(
     import(
       'component/router/index'
       /* webpackChunkName: "router" */
-    )
-);
-const Nag = lazyImport(
-  () =>
-    import(
-      'component/nag'
-      /* webpackChunkName: "nag" */
     )
 );
 const NagContinueFirstRun = lazyImport(
@@ -270,6 +266,7 @@ function App() {
   const sanitizedReferrerParam = rawReferrerParam && rawReferrerParam.replace(':', '#');
   const embedPath = isEmbedPath(pathname);
   const hyperbeamAccountId = getHyperbeamAccount()?.id;
+  useNativeNotifications(!embedPath && user?.is_native ? hyperbeamAccountId : undefined);
   const shouldHideNag = embedPath || pathname.startsWith(`/$/${PAGES.AUTH_VERIFY}`);
   const userId = user && user.id;
   const hasMyChannels = myChannelClaimIds && myChannelClaimIds.length > 0;

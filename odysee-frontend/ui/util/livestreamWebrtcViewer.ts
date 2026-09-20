@@ -10,6 +10,9 @@
  * 5. Media flows via RTCPeerConnection
  */
 
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { hyperbeamLegacyRealtimeBlocked } from 'util/hyperbeamLegacyBoundary';
+
 const VIEWER_DEBUG = process.env.NODE_ENV === 'development';
 
 export type WebrtcViewerResult = {
@@ -69,6 +72,10 @@ function applyReceiverCodecPreferences(pc: RTCPeerConnection): void {
 }
 
 export async function startWebrtcViewer(signalingUrl: string, signal?: AbortSignal): Promise<WebrtcViewerResult> {
+  if (hyperbeamLegacyRealtimeBlocked(hyperbeamNodeEnabled())) {
+    throw new Error('Legacy livestream signaling is unavailable in HyperBEAM mode.');
+  }
+
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new DOMException('Aborted', 'AbortError'));

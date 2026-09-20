@@ -60,7 +60,7 @@ assert.equal(firstSnapshotPayload.plaintext, undefined);
 assert.equal(firstSnapshotPayload.shared, undefined);
 
 const referenceInit = await writePreference(
-  nativePreferenceReferenceInitMessage(firstSnapshot.id, now),
+  nativePreferenceReferenceInitMessage(firstSnapshot.id, now, ownerA),
   profileA.cookie
 );
 assert.equal(await verified(referenceInit.id), true);
@@ -100,7 +100,7 @@ const secondSnapshot = await writePreference(
   profileA.cookie
 );
 const referenceSet = await writePreference(
-  nativePreferenceReferenceSetMessage(referenceInit.id, secondSnapshot.id, now + 1),
+  nativePreferenceReferenceSetMessage(referenceInit.id, secondSnapshot.id, now + 1, ownerA),
   profileA.cookie
 );
 assert.equal(await verified(secondSnapshot.id), true);
@@ -108,11 +108,27 @@ assert.equal(await verified(referenceSet.id), true);
 assert.equal(await committer(secondSnapshot.id), ownerA);
 assert.equal(await committer(referenceSet.id), ownerA);
 
+const foreignSeal = await seal(firstPreferences, profileB.cookie);
+const foreignSnapshot = await writePreference(
+  nativePreferenceSnapshotMessage(envelope(foreignSeal.payload), now + 2),
+  profileB.cookie
+);
+const foreignReference = await writePreference(
+  nativePreferenceReferenceInitMessage(foreignSnapshot.id, now + 2, ownerB),
+  profileB.cookie
+);
+
 const referencePaths = await queryUntilTimestamps(
   {
     'reference-type': NATIVE_PREFERENCE_REFERENCE_TYPE,
+    'preference-owner': ownerA,
   },
   [now, now + 1]
+);
+assert.equal(
+  referencePaths.includes(`/${foreignReference.id}`) || referencePaths.includes(foreignReference.id),
+  false,
+  "owner-scoped preference discovery must not return another signed-in user's reference"
 );
 const references = (await Promise.all(referencePaths.map(hydrateReference))).filter(Boolean);
 const init = references.find((reference) => reference.message_id === referenceInit.id);

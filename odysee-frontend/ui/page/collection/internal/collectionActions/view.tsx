@@ -1,8 +1,6 @@
 import { COL_TYPES } from 'constants/collections';
 import React from 'react';
 import { useIsMobile } from 'effects/use-screensize';
-import { COLLECTION_PAGE } from 'constants/urlParams';
-import { useLocation } from 'react-router-dom';
 import FileReactions from 'component/fileReactions';
 import classnames from 'classnames';
 import { ENABLE_FILE_REACTIONS } from 'config';
@@ -37,11 +35,8 @@ function CollectionActions(props: Props) {
   const collectionEmpty = useAppSelector((state) => selectCollectionIsEmptyForId(state, collectionId));
   const collectionSavedForId = useAppSelector((state) => selectCollectionSavedForId(state, collectionId));
   const collectionType = useAppSelector((state) => selectCollectionTypeForId(state, collectionId));
-  const { search } = useLocation();
   const isMobile = useIsMobile();
   const showPlaybackButtons = !collectionEmpty && collectionType === COL_TYPES.PLAYLIST;
-  const urlParams = new URLSearchParams(search);
-  const isOnPublicView = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLIC;
   return (
     <>
       <div
@@ -58,7 +53,7 @@ function CollectionActions(props: Props) {
           )}
         </SectionElement>
 
-        {!isOnPublicView && showEdit && <SortButton collectionId={collectionId} />}
+        {showEdit && <SortButton collectionId={collectionId} />}
       </div>
     </>
   );

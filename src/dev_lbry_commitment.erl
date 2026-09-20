@@ -407,9 +407,18 @@ stream_claim_message(Raw, Nout, Ancestry) ->
         % `value' is decoded and committed by claim_output_message above; carry
         % it into the stream commitment's committed set so it stays verifiable.
         ValueKeys = case maps:is_key(<<"value">>, ClaimMsg) of true -> [<<"value">>]; false -> [] end,
-        Msg = ClaimMsg#{
-            <<"sd-hash">> => SDHash
-        },
+        SigningChannelFields = case maps:get(<<"signed">>, Envelope, false) of
+            true -> #{
+                <<"signing-channel-id">> =>
+                    maps:get(<<"signing-channel-id">>, Envelope)
+            };
+            false -> #{}
+        end,
+        SigningChannelKeys = maps:keys(SigningChannelFields),
+        Msg = maps:merge(
+            ClaimMsg#{ <<"sd-hash">> => SDHash },
+            SigningChannelFields
+        ),
         {ok,
             share_committed_keys(
                 with_commitment(
@@ -417,7 +426,10 @@ stream_claim_message(Raw, Nout, Ancestry) ->
                     <<"stream">>,
                     Type,
                     {<<"sd-hash">>, binary:decode_hex(SDHash)},
-                    lists:sort(claim_committed_list(Ancestry) ++ [<<"sd-hash">>] ++ ValueKeys),
+                    lists:sort(
+                        claim_committed_list(Ancestry) ++ [<<"sd-hash">>] ++
+                            ValueKeys ++ SigningChannelKeys
+                    ),
                     #{
                         <<"claim-id">> => ClaimID,
                         <<"claim-op">> => ClaimOp,
@@ -797,6 +809,13 @@ co_evidence_vouched(Base, Req, Envelope, Opts) ->
                 Base,
                 Opts
             ),
+        ok ?=
+            vouch_signing_channel_id(
+                lists:member(<<"signing-channel-id">>, Keys),
+                Base,
+                Envelope,
+                Opts
+            ),
         ok
     else
         {error, _} = Error -> Error;
@@ -849,12 +868,26 @@ vouch_channel_evidence(true, Base, Opts) ->
         false -> {error, unvouched_channel_evidence}
     end.
 
+vouch_signing_channel_id(false, _Base, _Envelope, _Opts) ->
+    ok;
+vouch_signing_channel_id(true, Base, Envelope, Opts) ->
+    case maps:get(<<"signed">>, Envelope, false) of
+        true ->
+            case maps:get(<<"signing-channel-id">>, Envelope) =:=
+                    lower_field(Base, <<"signing-channel-id">>, Opts) of
+                true -> ok;
+                false -> {error, signing_channel_id_mismatch}
+            end;
+        false -> {error, unsigned_claim}
+    end.
+
 allowed_evidence_keys(<<"claim">>) ->
     claim_evidence_keys();
 allowed_evidence_keys(<<"channel">>) ->
     claim_evidence_keys() ++ [<<"channel-id">>, <<"public-key">>];
 allowed_evidence_keys(<<"stream">>) ->
-    claim_evidence_keys() ++ [<<"channel-evidence">>, <<"sd-hash">>];
+    claim_evidence_keys() ++
+        [<<"channel-evidence">>, <<"sd-hash">>, <<"signing-channel-id">>];
 allowed_evidence_keys(_) ->
     [].
 
@@ -1613,9 +1646,14 @@ relabel_evidence(Msg, Evidence) ->
 stream_claim_message_carries_both_commitments_test() ->
     Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
     {ok, Msg} = stream_claim_message(Raw, 0),
+    Envelope = maps:get(<<"claim-envelope">>, Msg),
     ?assertEqual(
         <<"3da16b833f169c21caeb62ca66111227413f30f63c9d2f52f2a787643e086c334ee6949e05875cfe94a816aba02e492e">>,
         maps:get(<<"sd-hash">>, Msg)
+    ),
+    ?assertEqual(
+        maps:get(<<"signing-channel-id">>, Envelope),
+        maps:get(<<"signing-channel-id">>, Msg)
     ),
     Commitments = maps:get(<<"commitments">>, Msg),
     ?assertEqual(2, map_size(Commitments)),
@@ -1672,6 +1710,18 @@ stream_claim_message_shares_committed_keys_test() ->
         ],
     ?assertEqual(KeysA, KeysB),
     ?assert(lists:member(<<"sd-hash">>, KeysA)).
+
+stream_claim_message_rejects_tampered_signing_channel_id_test() ->
+    Raw = binary:decode_hex(dev_lbry_tx:task0_tx_hex()),
+    {ok, Msg} = stream_claim_message(Raw, 0),
+    Tampered = Msg#{
+        <<"signing-channel-id">> =>
+            <<"0000000000000000000000000000000000000000">>
+    },
+    ?assertEqual(
+        false,
+        hb_message:verify(Tampered, #{ <<"commitment-ids">> => <<"all">> }, #{})
+    ).
 
 committed_key_stuffing_fails_verification_test() ->
     % The committed list is not bound by the commitment ID, so a forged list

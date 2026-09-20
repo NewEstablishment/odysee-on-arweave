@@ -13,7 +13,7 @@ import {
 } from 'util/hyperbeam';
 import { ODYSEE_HYPERBEAM_NODE_API, PROXY_URL_NO_CF } from 'config';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
-import { hyperbeamSdkMethodBlocked } from 'util/hyperbeamLegacyBoundary';
+import { hyperbeamSdkMethodBlocked, legacyOnlySdkMethod } from 'util/hyperbeamLegacyBoundary';
 
 import 'proxy-polyfill';
 
@@ -357,10 +357,6 @@ export function apiCall(
 }
 
 function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null {
-  if (hyperbeamSdkMethodBlocked(method, hyperbeamNodeEnabled())) {
-    return Promise.reject(new Error(`HyperBEAM does not support legacy SDK method ${method}`));
-  }
-
   if (ODYSEE_HYPERBEAM_NODE_API) {
     const startupResult = hyperbeamStartupSdkResult(method, params);
     if (startupResult) return startupResult;
@@ -368,7 +364,10 @@ function hyperbeamNodeSdkCall(method: string, params: any): Promise<any> | null 
 
   const localResult = hyperbeamLocalSdkResult(method, params);
   if (localResult) return localResult;
-  if (LEGACY_ONLY_SDK_METHODS.has(method)) return null;
+  if (hyperbeamSdkMethodBlocked(method, hyperbeamNodeEnabled())) {
+    return Promise.reject(new Error(`HyperBEAM does not support legacy SDK method ${method}`));
+  }
+  if (legacyOnlySdkMethod(method)) return null;
 
   switch (method) {
     case 'resolve':
@@ -397,38 +396,6 @@ function hyperbeamStartupSdkResult(method: string, params: any): Promise<any> | 
       return null;
   }
 }
-
-const LEGACY_ONLY_SDK_METHODS = new Set([
-  'account_list',
-  'address_is_mine',
-  'address_list',
-  'address_unused',
-  'blob_list',
-  'channel_sign',
-  'channel_list',
-  'claim_list',
-  'file_list',
-  'preference_get',
-  'preference_set',
-  'purchase_list',
-  'settings_clear',
-  'settings_get',
-  'settings_set',
-  'stream_list',
-  'sync_get',
-  'sync_set',
-  'sync_apply',
-  'sync_hash',
-  'transaction_list',
-  'txo_list',
-  'wallet_balance',
-  'wallet_decrypt',
-  'wallet_encrypt',
-  'wallet_list',
-  'wallet_lock',
-  'wallet_status',
-  'wallet_unlock',
-]);
 
 function requireHyperbeamResult(method: string) {
   return (result: any) => {

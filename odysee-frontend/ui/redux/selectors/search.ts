@@ -62,7 +62,7 @@ export const selectRecommendedContentRawForUri = createCachedSelector(
 
     if (claim?.value?.title) {
       const options = getRecommendationSearchOptions(matureEnabled, isMature, claim.claim_id, language);
-      const normalizedSearchQuery = getRecommendationSearchKey(claim.value.title, options);
+      const normalizedSearchQuery = getRecommendationSearchKey(claim.value.title, options, claim.value.tags);
       return searchUrisByQuery[normalizedSearchQuery];
     }
 
@@ -203,7 +203,7 @@ export const selectRecommendedMetaForClaimId = createCachedSelector(
       const title = claim.value.title;
       const language = searchInLanguage ? languageSetting : null;
       const options = getRecommendationSearchOptions(matureEnabled, isMature, claim.claim_id, language);
-      const normalizedSearchQuery = getRecommendationSearchKey(title, options);
+      const normalizedSearchQuery = getRecommendationSearchKey(title, options, claim.value.tags);
       const searchResult = searchUrisByQuery[normalizedSearchQuery];
 
       if (searchResult) {

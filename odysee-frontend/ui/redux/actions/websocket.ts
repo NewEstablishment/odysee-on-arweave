@@ -5,6 +5,8 @@ import { doFetchChannelIsLiveForId } from 'redux/actions/livestream';
 import { selectLivestreamInfoAlreadyFetchedForCreatorId } from 'redux/selectors/livestream';
 import { selectClaimForId, selectChannelClaimIdForUri, selectProtectedContentTagForUri } from 'redux/selectors/claims';
 import { SOCKETY_SERVER_API } from 'config';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { hyperbeamLegacyRealtimeBlocked } from 'util/hyperbeamLegacyBoundary';
 const NOTIFICATION_WS_URL = `${SOCKETY_SERVER_API}/internal?id=`;
 const COMMENT_WS_URL = `${SOCKETY_SERVER_API}/commentron?id=`;
 const COMMENT_WS_SUBCATEGORIES = {
@@ -24,6 +26,8 @@ const getCommentSocketUrlForCommenter = (claimId, channelName) => {
 };
 
 export const doSocketConnect = (url, cb, type) => {
+  if (hyperbeamLegacyRealtimeBlocked(hyperbeamNodeEnabled())) return false;
+
   function connectToSocket() {
     // If already connected or connecting, don't tear down and reopen
     const existing = sockets[url];
@@ -69,6 +73,7 @@ export const doSocketConnect = (url, cb, type) => {
   }
 
   connectToSocket();
+  return true;
 };
 export const doSocketDisconnect = (url) => (dispatch) => {
   if (sockets[url] !== undefined && sockets[url] !== null) {
@@ -127,7 +132,7 @@ export const doCommentSocketConnect =
       subCategory === COMMENT_WS_SUBCATEGORIES.COMMENTER
         ? getCommentSocketUrlForCommenter(claimIdForSocketUrl, channelName)
         : getCommentSocketUrl(claimIdForSocketUrl, channelName);
-    doSocketConnect(
+    const socketStarted = doSocketConnect(
       url,
       (response) => {
         if (response.type === 'delta') {
@@ -200,7 +205,7 @@ export const doCommentSocketConnect =
       dispatch(doFetchChannelIsLiveForId(creatorId));
     }
 
-    dispatch(doSetSocketConnection(true, claimId, subCategory || COMMENT_WS_SUBCATEGORIES.VIEWER));
+    dispatch(doSetSocketConnection(socketStarted, claimId, subCategory || COMMENT_WS_SUBCATEGORIES.VIEWER));
   };
 export const doCommentSocketDisconnect = (claimId, channelName, subCategory) => (dispatch, getState) => {
   const state = getState();

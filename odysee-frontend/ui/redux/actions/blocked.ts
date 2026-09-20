@@ -1,5 +1,4 @@
 import * as ACTIONS from 'constants/action_types';
-import { GEO_BLOCK_API } from 'config';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { doAlertWaitingForSync } from 'redux/actions/app';
 import { doToast } from 'redux/actions/notifications';
@@ -35,31 +34,5 @@ export function doChannelMute(uri: string, showLink: boolean = true) {
 export function doChannelUnmute(uri: string, showLink: boolean = true) {
   return (dispatch: Dispatch) => {
     return dispatch(doToggleMuteChannel(uri, showLink, true));
-  };
-}
-export function doFetchGeoBlockedList() {
-  return (dispatch: Dispatch) => {
-    dispatch({
-      type: ACTIONS.FETCH_GBL_STARTED,
-    });
-    fetch(GEO_BLOCK_API)
-      .then(async (res) => {
-        let json = {};
-
-        try {
-          json = await res.json();
-        } catch (e) {}
-
-        const geoBlockList = (json as any).data || {};
-        dispatch({
-          type: ACTIONS.FETCH_GBL_DONE,
-          data: geoBlockList,
-        });
-      })
-      .catch(() => {
-        dispatch({
-          type: ACTIONS.FETCH_GBL_FAILED,
-        });
-      });
   };
 }

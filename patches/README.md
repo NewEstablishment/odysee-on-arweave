@@ -5,6 +5,9 @@ compilation and should land upstream before their hooks are removed. Any
 proposal beyond this list must take the form of a terse (<= 20 lines, test +
 fix) branch on a dependency worktree, and only for defects demonstrably owned
 by that dependency rather than this application.
+An explicitly accepted generic upstream feature may be larger when it preserves
+backward compatibility and includes its complete dependency and test surface.
+Sections state when a staged patch is not yet activated by this application.
 
 ## 1. `hyperbeam-is-id-lbry-claim-ids.patch`
 
@@ -22,11 +25,14 @@ only the location to `hb_cache:read/2`, so a store-backed media read never
 sees the range and reassembles the whole object — a 653 MB video timed out.
 `hb_store:read` already accepts a request map and `hb_store_odysee`'s
 `request_range/2` already honors the fields; this only wires the range
-through. Ranged media then returns 206 with a *targeted blob fetch*
-(~3s cold for a 1 MB slice, seek anywhere) instead of a full-object read.
-Verified live: `start`/`end` and `range: bytes=X-Y` both yield 206 with
-`Content-Range`; non-range reads are unchanged. Applies cleanly to the
-pinned dep (`git apply --check` verified).
+through. Ranged media then returns 206 with a *targeted blob fetch* instead of
+a full-object read. The application separately keeps open-ended reads bounded:
+its current default covers one plaintext blob and aligns the response end to
+the verified descriptor stride, so adjacent browser requests do not fetch the
+same source blob twice or wait for a large response to be materialized.
+Explicit `start`/`end` and `range: bytes=X-Y` reads retain exact bounds and
+`Content-Range`; non-range reads are unchanged. Applies cleanly to the pinned
+dep (`git apply --check` verified).
 
 This is preferred over slicing a full reassembly in `hb_http:encode_reply`:
 forwarding the range lets the store fetch only the blobs the slice needs,
@@ -86,3 +92,38 @@ HyperBEAM's `hb_beamr` driver passes `long *` and `char **` values to the OTP
 `const char **`. Current compilers reject those incompatible pointers. This
 patch uses the API's declared types and makes the WebAssembly memory bounds
 check overflow-safe; it does not change the driver protocol.
+
+## 7. `hb-http-single-range.patch`
+
+HyperBEAM's HTTP layer otherwise ignores a browser `Range` header when the
+resolved message body has already been materialized, returning a full `200`
+response that cannot seek reliably. This patch implements one satisfiable
+RFC 7233 byte range for binary `GET` responses, returns `206` with exact
+`Accept-Ranges`, `Content-Range`, and `Content-Length` fields, and returns
+`416` for malformed or unsatisfiable ranges. It removes whole-message digest
+and signature headers from the derived partial representation; the complete
+immutable message remains the verification surface. Multipart ranges are not
+implemented.
+
+## 8. `blacklist-content-restrictions.patch`
+
+Expand upstream `blacklist@1.0` from a request-only newline-ID blacklist into a
+backward-compatible generic content-policy device. Structured policy snapshots
+support typed subjects, global/country/continent/country-group denies, optional
+trusted signers and expiry, atomic replacement, and request plus response
+enforcement. The existing newline-delimited HyperBEAM ID format is unchanged.
+Global sources are checked before location resolution. ISO-code-keyed country
+providers support separate signed sources and compact JSON entries containing
+`id`, optional `type`, optional `country`, and `reason`.
+
+Country attributes are resolved locally from an operator-supplied MMDB through
+Locus. The HTTP layer supplies the private direct socket peer; `X-Real-IP` is
+used only for an explicit trusted proxy. DB-IP's EU membership field is exposed
+as the `EU` country group and remains distinct from the European continent.
+
+The patch compiles on the pinned dependency and its upstream device suite
+covers legacy compatibility, country rules, EU membership, unavailable
+locations, country-source selection, global short-circuiting, trusted-proxy
+handling, generation replacement, and one-million-rule parsing. The feature is
+not activated in `config.json` until upstream merges it and this repository
+pins the merged revision.

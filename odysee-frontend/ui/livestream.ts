@@ -1,4 +1,5 @@
 import { LIVESTREAM_SERVER_API } from 'config';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 const Livestream = {
   url: LIVESTREAM_SERVER_API,
   enabled: Boolean(LIVESTREAM_SERVER_API),
@@ -35,6 +36,10 @@ function makeRequest(url, options) {
 }
 
 Livestream.call = (resource, action, params = {}, method = 'post') => {
+  if (hyperbeamNodeEnabled()) {
+    return Promise.reject(new Error(__('Legacy livestream APIs are unavailable in HyperBEAM mode')));
+  }
+
   if (!Livestream.enabled) {
     return Promise.reject(new Error(__('Odysee internal API is disabled')));
   }

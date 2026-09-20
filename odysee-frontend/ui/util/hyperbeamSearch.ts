@@ -14,6 +14,7 @@ const TIME_FILTER = 'time_filter';
 const MIN_DURATION = 'min_duration';
 const MAX_DURATION = 'max_duration';
 const SORT = 'sort_by';
+const RELATED_TO = 'related_to';
 
 export function hyperbeamSearchRequest(
   options: Record<string, any>,
@@ -30,6 +31,9 @@ export function hyperbeamSearchRequest(
 
   if (options[INCLUDE_MATURE] === false) filter.push('nsfw = 0');
   if (options[PRICE_FILTER_FREE]) filter.push('fee = 0');
+
+  const relatedClaimId = String(options[RELATED_TO] || '').trim();
+  if (relatedClaimId) filter.push(`claim_id != ${JSON.stringify(relatedClaimId)}`);
 
   const language = String(options[LANGUAGE] || '').trim();
   if (language) filter.push(equalityFilter('language', language));
@@ -88,8 +92,17 @@ export function hyperbeamClaimSearchRequest(
   const languages = stringList(options.any_languages || options.language);
   if (languages.length) filter.push(inFilter('language', languages));
 
-  const channelIds = stringList(options.channel_ids || options.channelIds);
+  const channelIds = stringList(
+    options.channel_ids || options.channelIds || options.channel_id || options['channel-id']
+  );
   if (channelIds.length) filter.push(inFilter('channel_claim_id', channelIds));
+  const anyTags = stringList(options.any_tags);
+  if (anyTags.length) filter.push(inFilter('tags', anyTags));
+  for (const tag of stringList(options.all_tags)) filter.push(equalityFilter('tags', tag));
+  const notTags = stringList(options.not_tags);
+  if (notTags.length) filter.push(`tags NOT IN [${notTags.map((tag) => JSON.stringify(tag)).join(', ')}]`);
+  const mediaTypes = stringList(options.stream_types || options.media_type);
+  if (mediaTypes.length) filter.push(inFilter('media_type', mediaTypes));
 
   const releaseTime = numericComparison('release_time', options.release_time);
   const timestamp = numericComparison('release_time', options.timestamp);

@@ -62,6 +62,7 @@ import { selectUserHasValidMembershipForCreatorId } from 'redux/selectors/member
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
+import NativeHiddenComments from './internal/nativeHiddenComments';
 
 const DEBOUNCE_SCROLL_HANDLER_MS = 200;
 const COMMENT_REACTION_REQUEST_CACHE_MS = 30 * 1000;
@@ -424,6 +425,9 @@ export default function CommentList(props: Props) {
       actions={
         <>
           <CommentCreate uri={uri} />
+          {hyperbeamNodeEnabled() && claimIsMine && activeChannelId === channelId && (
+            <NativeHiddenComments key={`${claimId}:${activeChannelId}`} target={claimId} onRestore={refreshComments} />
+          )}
 
           {threadCommentId && threadComment && (
             <span className="comment__actions comment__thread-links">

@@ -27,11 +27,18 @@ The current implementation follows these decisions:
   reads are store reads; native writes are generic committed messages.
 - [`decisions/single-commitment-device.md`](decisions/single-commitment-device.md):
   one `lbry@1.0` verification device covers all LBRY evidence kinds.
+- [`decisions/content-restrictions.md`](decisions/content-restrictions.md):
+  content policy and geographic enforcement belong to the serving node.
 - [`decisions/native-user-preferences.md`](decisions/native-user-preferences.md):
   private settings use encrypted immutable snapshots and a generic stable
   reference head.
+- [`decisions/private-playlists.md`](decisions/private-playlists.md): private
+  playlists use owner-bound encrypted snapshots and can advance the same
+  stable reference to a public snapshot exactly once.
 - [`docs/architecture.md`](docs/architecture.md): full trust, node-role, read,
   and write architecture.
+- [`docs/content-restrictions.md`](docs/content-restrictions.md): policy schema,
+  offline country data, node configuration, and rollout.
 - [`ARCHITECTURE_READ_PATH.md`](ARCHITECTURE_READ_PATH.md): traced HTTP read
   path with implementation references.
 - [`RUN_DEMO.md`](RUN_DEMO.md): local operation and end-to-end examples.
@@ -68,6 +75,7 @@ The application minimizes custom device surface:
 | `search@1.0` | Generic local full-text indexing and lookup. It is not an Odysee SDK proxy. |
 | `analytics@1.0` | Generic page analytics, qualified engagement counters, and authenticated baseline import. |
 | `odysee-auth@1.0` | Compatibility authentication helper where an existing session must be translated. It is not the native account model. |
+| `blacklist@1.0` (upstream) | Enforces node-selected global and geographic content policy on request and response hooks. |
 | `odysee-preference@1.0` | Authenticated seal/open boundary for private preference ciphertext. It stores no state and owns no reference semantics. |
 
 There are no `odysee-claim@1.0`, `odysee-stream@1.0`,
@@ -101,7 +109,7 @@ they are not alternate UI APIs.
 | Name or URI | Mutable lookup input, never immutable identity. |
 | Native comment revision | Its own immutable message ID, linked to a logical root comment. |
 | Native reaction revision | Its own immutable message ID, linked through stable logical reaction and version references. |
-| Native playlist snapshot | Any verified commitment ID for its immutable message. Republished payloads receive new exact-read IDs. |
+| Native playlist snapshot | Any verified commitment ID for its immutable message. Later saved payloads receive new exact-read IDs. |
 | Native preference snapshot | Its verified immutable message ID. |
 | Native preference state | The canonical `reference@1.0` init commitment ID; same-owner set messages advance its snapshot value. |
 
@@ -150,6 +158,12 @@ message. The reply exposes the stored ID in `message-id`.
 
 ### Uploads
 
+Native profiles support owner-authorized display-name, bio, avatar and banner
+editing through generic append-only metadata snapshots. The original profile
+ID and handle remain stable; exact historical reads are preserved. See
+[profile revisions](decisions/native-profile-revisions.md). Google account
+linking and recovery remain a separate authentication workstream.
+
 The browser posts raw file bytes directly to the same stage-scoped `/id` write.
 It then writes a generic
 `odysee-upload@1.0` index record that links the name and metadata to the
@@ -163,7 +177,12 @@ creator controls.
 Direct immutable responses honor RFC 7233 single byte ranges. The generic
 cache read forwards range fields to range-aware source stores, while the HTTP
 boundary derives a `206` slice for locally stored immutable bodies and removes
-whole-object commitment headers from that partial representation.
+whole-object commitment headers from that partial representation. Historical
+LBRY open-ended ranges use a bounded, descriptor-aligned one-blob window by
+default, avoiding overlap between adjacent browser requests without making
+startup or a seek wait for a large response to be fully materialized; explicit
+ranges retain their exact bounds. The browser also avoids generating
+scrub-preview sprites by seeking a second hidden player across HyperBEAM media.
 
 Native channel profiles are normalized at the frontend integration boundary
 into the same claim shape consumed by Redux and channel pages. Their permanent
@@ -176,17 +195,40 @@ before transport and the browser fetch guard blocks the legacy SDK proxy as a
 second boundary. Livestream operations that still require a legacy channel
 signature remain unavailable until they have a native contract.
 
+The manifest does not poll the legacy Odysee degraded-performance endpoint.
+Historical remote thumbnail sources render directly in HyperBEAM mode;
+inherited `thumbnails.odycdn.com` optimizer URLs are unwrapped, and built-in
+wallpaper/placeholder assets are served from the manifest itself.
+
 Homepage and category `claim_search` requests map filters, ordering, and
 pagination to generic `search@1.0` requests, then hydrate the returned ordered
-immutable locators through exact reads. Native channel content uses a bounded
-`query@1.0` lookup over `odysee-upload@1.0` messages because channel ownership
-is verified from exact records rather than inferred from the search index.
+immutable locators through exact reads. Public native channel and Following
+content uses the same search index after verified upload projection. Owner
+libraries/account summaries use exact query and verified revision projection.
+Following preserves discovery pagination when individual records cannot be
+hydrated and resets list state when followed channels change. See the
+[Following acceptance notes](docs/following-feed-acceptance.md) for tested
+boundaries and the remaining live mixed-source rehearsal.
 The compatibility `/$/discover` route remains available for tag, type, order,
 and freshness links; named materialized categories use their own `/$/<name>`
 routes.
 
 There is no legacy transcoder or TUS preparation path in HyperBEAM mode.
 Transient `File` and pipeline objects are excluded from persisted Redux state.
+
+Upload metadata edits and deletes are generic same-owner revisions. Full metadata
+snapshots preserve explicit clears, tags and languages; deletes hide current
+discovery while preserving immutable history. Exact version routes stay exact.
+Run the operator upload search worker alongside Meilisearch so only verified
+current snapshots enter ranked discovery:
+
+```sh
+node --experimental-strip-types scripts/reindex-node-uploads-to-search.mjs --watch
+```
+
+See [upload projection](decisions/native-upload-projection.md) for identity,
+concurrency, search ownership and validation. The worker uses `HYPERBEAM_BASE_URL`,
+`MEILI_URL`, `MEILI_INDEX` and optional `MEILI_MASTER_KEY`/`ODYSEE_SEARCH_API_KEY`.
 
 ### Comments
 
@@ -206,6 +248,24 @@ match index, then the frontend hydrates and verifies exact immutable IDs.
 
 The normal UI does not call Commentron, the legacy LBRY API, or an Odysee SDK
 proxy for comments.
+
+### Content restrictions
+
+The serving node enforces content restrictions through the generic upstream
+`blacklist@1.0` device. Policies can name HyperBEAM messages or typed LBRY
+claim, channel, outpoint, and hash subjects. Country, continent, and country-
+group conditions are resolved from the direct request peer against a local
+MMDB database; no browser or node request is sent to an Odysee location API.
+Operators can keep the main blacklist global and configure separate signed
+sources by ISO country code. Global rules are checked first; the node resolves
+the viewer country only for a subject with regional entries and then evaluates
+the applicable country source from its refreshed local policy generation.
+
+The browser renders node `451` and affected `503 location-unavailable`
+responses. It does not download policy lists or determine the viewer's locale.
+Historical media is addressed through stream evidence so the response hook can
+evaluate its committed claim and signing-channel identifiers. See
+[`docs/content-restrictions.md`](docs/content-restrictions.md).
 
 ### Reactions
 
@@ -229,32 +289,61 @@ legacy reaction API.
 
 ### Playlists
 
-Public playlists pair cookie-signed immutable `odysee-playlist@1.0` snapshots
-with the pinned generic `reference@1.0` device. The reference init commitment
-is the stable public route `/$/playlist/<reference-id>`. The frontend uses
-generic stage-scoped `/id` writes, `query@1.0/only` discovery, and exact commitment
-hydration; it does not call the LBRY `collection_*` API.
+Owners can delete saved playlists through a signed deletion snapshot and a
+strictly newer reference set. Libraries hide the playlist; its stable URL shows
+a deleted state. Exact historical snapshots remain readable with their original
+public/private access rules. See [playlist deletion](decisions/playlist-deletion.md).
+
+User-created playlists pair cookie-signed immutable snapshots with the pinned
+generic `reference@1.0` device. The reference init commitment is the stable
+route `/$/playlist/<reference-id>`. Public contents use
+`odysee-playlist@1.0`; private contents use an
+`odysee-private-playlist@1.0` WeaveMail RSA-OAEP/AES-256-GCM envelope whose
+decrypted payload has the same playlist contract. The frontend uses generic stage-scoped `/id`
+writes, `query@1.0/only` discovery, and exact commitment hydration; it does not
+call the LBRY `collection_*` API.
 
 - Every message contains a complete ordered snapshot of immutable native IDs
   and/or legacy `<txid>:<nout>` outpoints.
-- A republish after editing or reordering writes a new full snapshot and a
+- Every create or save writes a new full snapshot and a
   strictly newer same-owner reference set while keeping the share URL stable.
   Earlier snapshots remain immutable and exactly addressable.
+- New and copied playlists default to private. Their title, description,
+  thumbnail, tags, languages, profile metadata, and ordered item IDs are
+  ciphertext at rest, sealed to the owner's own hosted wallet; only that wallet
+  can open the snapshots, on any device that authenticates as the owner.
+- The reference declares and verifies its playlist owner so private discovery
+  is owner-scoped before decryption. A private playlist may be made public by
+  advancing the same reference to a plaintext `odysee-playlist@1.0` snapshot.
+  That conversion is one-way because prior public history cannot be hidden.
 - Readers hydrate and verify every discovered init/set commitment and the
   selected snapshot. The init committer is the authority; foreign writers,
   stale or tied updates, and foreign-owned snapshots are rejected.
 - Mutable 40-character claim IDs, names, and URIs are rejected as stored item
-  identity; the integration layer resolves local draft URIs before publish.
+  identity; the integration layer resolves browser-side URIs before saving.
 - Duplicate physical reads are deduplicated by their returned locator. The playlist
   and its claimed profile must verify under the same committer.
-- Queue, Watch Later, Favorites, and unpublished drafts stay local. Publishing
-  a draft creates a new public immutable snapshot.
+- Queue, Watch Later, and Favorites stay local. A temporary browser draft is
+  retained only when a committed save fails so the user can retry without
+  losing edits; playlist data is not stored in encrypted user preferences.
 
-Playlist UI retains list, local edit/reorder, explicit snapshot publish, play,
-shuffle, and share. Published delete remains hidden until it has an honest
-append-only contract. The UI has no
+Playlist UI retains list, edit/reorder, play, and shuffle; Share appears only
+for public playlists. There is no
+separate publish or republish step: Save is the committed HyperBEAM write, and
+ordinary add/remove actions save automatically. Saved deletion uses the
+verified tombstone/reference contract described above. The UI has no
 blockchain channel picker, URL-name reservation, bid/stake, pending
 confirmation, support/tip, report, or abandon-claim flow.
+
+`ui/util/weavemail.ts` carries the shared WeaveMail 1.0 client primitives,
+vendored from permaweb/PermawebOS-Browser. It creates a fresh AES-256-GCM key
+for every snapshot and wraps that key with RSA-OAEP/SHA-256 to the owner's
+hosted wallet, which the browser exports in-session through the
+cookie-authenticated `~secret@1.0/export` boundary and holds in memory only.
+Encryption and decryption are entirely local: the node receives only the
+generic committed ciphertext snapshot and reference messages. There is no
+private-playlist or WeaveMail HTTP device, and the browser generates or
+persists no key of its own.
 
 ### User preferences
 
@@ -269,10 +358,10 @@ newer same-owner set message. Earlier snapshots remain exactly addressable.
   does not persist snapshots, implement references, or return wallet material.
 - Seal/open responses are `no-store, private`. Cookies and plaintext never
   enter a committed preference message or the match index.
-- `query@1.0` returns reference locators. The frontend hydrates and verifies
-  the exact init, set, and selected snapshot messages, derives authority from
-  their commitment committers, and rejects foreign writers, stale/tied heads,
-  and owner mismatches.
+- `query@1.0` returns reference locators scoped by the authenticated owner. The
+  frontend hydrates and verifies the exact init, set, and selected snapshot
+  messages, requires the indexed owner to equal their commitment committer,
+  and rejects foreign writers, stale/tied heads, and owner mismatches.
 - Native shared preferences retain settings, tags, welcome state, analytics
   sharing choice, and announcement state. They intentionally exclude follows,
   blocked/moderation state, coin-swap data, and local/private collections,
@@ -285,7 +374,8 @@ newer same-owner set message. Earlier snapshots remain exactly addressable.
   hydration rather than starting the legacy wallet-sync loop.
 - Saving verifies the two exact immutable writes and returns without requiring
   the asynchronous query listener to expose the new reference in the same
-  request turn.
+  request turn. The newest exact-verified state is retained per owner so a
+  second queued save during index lag advances the same reference.
 
 ### Subscriptions
 
@@ -310,6 +400,17 @@ claim ID.
 Subscriber counts remain a separate derived aggregation and are not part of
 this slice.
 
+### In-app notifications
+
+The inbox derives replies to a viewer's native comments and uploads from
+bell-enabled native follows using generic queries and exact verified reads.
+Read, seen, and dismissed state is a union of encrypted, cookie-signed
+`odysee-notification-receipt@1.0` messages. The existing stateless seal/open
+boundary protects receipt contents; it owns no notification storage.
+
+See [`aidocs/native-notifications.md`](aidocs/native-notifications.md) for the
+receipt contract, lifecycle, limits, and browser validation workflow.
+
 ## Static manifest frontend
 
 Production is a static SPA published as an Arweave path manifest and served by
@@ -317,14 +418,26 @@ the node's generic `manifest@1.0` hook. Manifest builds use hash routing,
 relative assets, and node-safe content types. No production SSR or proxy tier
 is part of the product data path.
 
-Before Vite starts, `build:manifest` queries the configured node's generic
-`search@1.0` surface, verifies every returned immutable locator with an exact
-read, and materializes the ranked homepage/category database into the static
-bundle. This requires a reachable node with a populated Meilisearch index; the
-build fails instead of publishing an empty homepage. The generated
-`custom/homepages/v2/index.ts` is ignored build input and must not be edited by
-hand. `CUSTOM_HOMEPAGE=true` is part of the script rather than a caller-supplied
-flag.
+The bundle contains the language-specific presentation templates, but not a
+node's claim selection. At node startup the Odysee OTP application publishes
+the immutable homepage plan and Lua materializer into the local HyperBEAM
+cache. The Lua computation discovers locators through the configured stores,
+exact-hydrates the selected claims and channels, and publishes one node-signed
+`odysee-homepage@1.0` snapshot per language. It first publishes the configured
+startup language, then stock `cron@1.0` runs the complete all-language refresh
+every hour. A failed refresh leaves the previous committed snapshots
+available.
+
+The browser discovers snapshots with generic `query@1.0`, exact-reads each
+candidate, verifies its commitment and node committer, and uses the newest
+valid snapshot. Homepage rows and their matching category routes share each
+category's ordered immutable pool. The optional `homepage-local-content`
+configuration adds a locally indexed category without changing the generic
+search device or the frontend templates. Both signed category snapshots and
+the separately materialized Local content row reject exact-hydrated media that
+lack a usable thumbnail. Signed language snapshots also reject future-dated
+media, while Local content intentionally retains scheduled streams. Homepage
+media discovery is stream-only; repost wrappers are not published.
 
 ```sh
 cd odysee-frontend
@@ -333,10 +446,13 @@ pnpm run publish:manifest
 ```
 
 `ODYSEE_HYPERBEAM_NODE_API` is baked into the manifest build and should use the
-same origin as the served frontend for cookie writes. The materializer accepts
-`HYPERBEAM_BASE_URL` as an explicit build-time node override.
+same origin as the served frontend for cookie writes. Homepage generation does
+not require SSR, a browser timer, a local JSON file, or a separate scheduler.
 
 ## Local validation
+
+For the full human-run Chrome matrix, fixtures, failure recovery, and release
+sign-off format, use the [master Chrome acceptance kit](docs/chrome-master-acceptance.md).
 
 Backend:
 
@@ -354,11 +470,13 @@ pnpm run typecheck:tsc
 pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
+pnpm run test:hyperbeam-session
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
 pnpm run test:native-preferences
+pnpm run test:native-notifications
 pnpm run test:static-manifest
 pnpm run build:manifest
 ```
@@ -380,18 +498,24 @@ sequence.
 
 - Native view/subscriber counts, moderation delegates, and blocked-word
   settings are not implemented.
-- Upload edit/delete semantics still need a complete append-only design.
 - Mutable-name currentness still depends on an external locator; the evidence
   proves content integrity, not canonical-chain freshness.
 - HTTP multi-range responses are not implemented; browser single-range seeking
   is supported for native immutable uploads and range-aware source stores.
 - The cookie account is local to a node/browser and is not yet a portable or
   recoverable production identity.
-- The stock global per-IP rate limiter counts manifest assets as requests. A
-  deployment must tune its default 1,000-request/minute bucket for the static
-  bundle or rapid full reloads can temporarily return `429` for the SPA itself.
+- Private-playlist recovery is therefore bounded by the same limit: the
+  recipient key is the hosted wallet, so private snapshots are recoverable
+  exactly where the account is.
+- The global per-IP rate limiter counts manifest assets as requests. The demo
+  configuration raises the bucket to 10,000 requests/minute because one cold
+  SPA load fetches roughly 1,000 assets; production deployments must tune this
+  jointly with their static delivery and abuse controls.
 - TEE deployment and attestation require infrastructure beyond ordinary local
   development.
+- Geographic enforcement requires the accepted upstream
+  `blacklist@1.0` expansion to land, a new pinned HyperBEAM revision, and a
+  locally installed country MMDB on each enforcing node.
 
 Do not hide these gaps by restoring direct browser calls to legacy services or
 by rebuilding a fleet of product-specific devices.

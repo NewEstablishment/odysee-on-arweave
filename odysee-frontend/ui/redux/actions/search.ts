@@ -16,6 +16,7 @@ import {
 import { selectUser } from 'redux/selectors/user';
 import { getSearchQueryString } from 'util/query-params';
 import { getRecommendationSearchOptions, getShortsRecommendationSearchOptions } from 'util/search';
+import { getRecommendationSearchQuery } from 'util/relatedSearch';
 import { fetchSearchIds } from 'util/hyperbeam';
 import { hyperbeamImmutableUri } from 'util/hyperbeam-route';
 import { hyperbeamSearchRequest } from 'util/hyperbeamSearch';
@@ -167,21 +168,6 @@ export const doSearch =
       // leaving the results spinner running forever.
       data: { query: queryWithOptions },
     });
-
-    if (searchOptions.hasOwnProperty(SEARCH_OPTIONS.RELATED_TO)) {
-      dispatch({
-        type: ACTIONS.SEARCH_SUCCESS,
-        data: {
-          query: queryWithOptions,
-          from: from,
-          size: size,
-          uris: [],
-          poweredBy: '',
-          uuid: '',
-        },
-      });
-      return;
-    }
 
     const start = Number(from) || 0;
     const count = Number(size) || 20;
@@ -340,10 +326,11 @@ export const doFetchRecommendedContent =
         options['uuid'] = fyp.uuid;
       }
 
-      const { title } = claim.value;
+      const { title, tags } = claim.value;
+      const searchQuery = getRecommendationSearchQuery(title, tags);
 
-      if (title && options) {
-        dispatch(doSearch(title, options));
+      if (searchQuery && options) {
+        dispatch(doSearch(searchQuery, options));
       }
     }
   };
