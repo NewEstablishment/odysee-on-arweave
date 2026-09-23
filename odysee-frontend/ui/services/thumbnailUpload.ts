@@ -1,34 +1,14 @@
 import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { uploadNativeImage } from 'util/nativeImageUpload';
 
 // A thumbnail is just bytes. Store it through the same committed-write endpoint
 // as a video (a stage-0 committed POST /id) and reference the node-served image by its id. The
 // legacy /$/api/hyperbeam-thumbnail endpoint does not exist on a HyperBEAM node.
-export default async function uploadThumbnail(data: FormData): Promise<any> {
+export default async function uploadThumbnail(data: FormData): Promise<{ type: 'success'; message: string }> {
   const file = data.get('file-input');
   if (!(file instanceof Blob)) throw new Error('Thumbnail upload requires a file.');
 
-  const base = hyperbeamNodeBase();
-  if (!base) throw new Error('No HyperBEAM node configured for thumbnail upload.');
-
-  const response = await fetch(`${base}/id?0.%21=true&committers=all`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      accept: 'application/json',
-      'content-type': file.type || 'image/jpeg',
-    },
-    body: file,
-  });
-
-  let id = response.headers.get('message-id') || '';
-  if (response.ok && !id) {
-    try {
-      id = String((await response.json())['message-id'] || '');
-    } catch (e) {}
-  }
-  if (!response.ok || !id) {
-    throw new Error(`Thumbnail upload failed (${response.status}).`);
-  }
-
-  return { type: 'success', message: `${base}/${id}` };
+  // The thumbnail picker already supports GIF; profiles deliberately do not.
+  const { url } = await uploadNativeImage(file, hyperbeamNodeBase(), true);
+  return { type: 'success', message: url };
 }

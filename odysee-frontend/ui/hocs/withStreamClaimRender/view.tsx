@@ -263,6 +263,17 @@ const withStreamClaimRender = (StreamClaimComponent: FunctionalComponentParam) =
       uri,
     ]);
     React.useEffect(() => {
+      // The floating renderer consumes playback selected elsewhere. It must
+      // not start that URI again on a route change: its stale effect can run
+      // after the upload wizard has deliberately cleared playback.
+      if (isFloatingContext) {
+        // A queue/next action may select a new URI before its media is loaded.
+        // Keep sourcing it, without reselecting playback from this renderer.
+        if (canViewFile && !isLivestreamClaim && !isCollectionClaim && !streamingUrl) {
+          dispatch(doFileGetForUri(uri, fileGetOptions));
+        }
+        return;
+      }
       const decodedPathname = decodeURIComponent(pathname);
       const uriChannel = decodedPathname.substring(decodedPathname.indexOf('/@') + 2, decodedPathname.indexOf(':'));
       let cut = decodedPathname.substring(decodedPathname.indexOf('/') + 1, decodedPathname.length);
@@ -276,8 +287,6 @@ const withStreamClaimRender = (StreamClaimComponent: FunctionalComponentParam) =
 
       if (canViewFile) {
         if (isHome) {
-          // Floating player should never re-bootstrap playback on homepage transitions.
-          if (isFloatingContext) return;
           // Don't let home feed items hijack an already-active floating player.
           if (hasDifferentUriAlreadyPlaying) return;
 
@@ -321,7 +330,7 @@ const withStreamClaimRender = (StreamClaimComponent: FunctionalComponentParam) =
           updateClaim('!uriIsActive & !playingUriIsActive & sourceLoaded');
         }
       } // eslint-disable-next-line react-hooks/exhaustive-deps -- SIGH
-    }, [pathname, sourceLoaded, canViewFile, uri, embedded, claimLinkId, forceRenderStream]);
+    }, [pathname, sourceLoaded, canViewFile, uri, embedded, claimLinkId, forceRenderStream, isFloatingContext]);
     // Ensure non-video embeds (e.g. markdown) fetch their source in embed mode
     React.useEffect(() => {
       if (canViewFile && renderMode === 'md' && !streamingUrl) {

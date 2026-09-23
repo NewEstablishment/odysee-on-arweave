@@ -1,5 +1,11 @@
 # Native QA fixes — September 17, 2026
 
+September 18 follow-up: the real-media regression exposed an additional floating
+renderer route-effect race, and Hide acceptance now waits for positive public
+thread hydration. See [QA closeout](qa-closeout-2026-09-18.md) for the correction
+and latest validation; the original invalid-media edit fixture did not establish
+the real playing-video-to-upload transition.
+
 Implemented on master `15f3674`, without changing node configuration or Google
 authentication. The earlier manual acceptance document/README edits are preserved.
 

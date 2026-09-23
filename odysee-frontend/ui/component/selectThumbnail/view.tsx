@@ -1,6 +1,7 @@
 import * as MODALS from 'constants/modal_types';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
-import { DOMAIN, THUMBNAIL_CDN_SIZE_LIMIT_BYTES } from 'config';
+import { DOMAIN } from 'config';
+import { NATIVE_IMAGE_MAX_BYTES } from 'util/nativeImageUpload';
 import * as React from 'react';
 import { FormField } from 'component/common/form';
 import FileSelector from 'component/common/file-selector';
@@ -255,7 +256,7 @@ function SelectThumbnail(props: Props) {
                     ? __('Please wait for thumbnail to finish uploading')
                     : __('Upload your thumbnail to %domain%. Recommended ratio is 16:9, %max_size%MB max.', {
                         domain: DOMAIN,
-                        max_size: THUMBNAIL_CDN_SIZE_LIMIT_BYTES / (1024 * 1024),
+                        max_size: NATIVE_IMAGE_MAX_BYTES / (1024 * 1024),
                       })}
                 </p>
               )}

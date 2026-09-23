@@ -1,5 +1,5 @@
 import React from 'react';
-import { THUMBNAIL_CDN_SIZE_LIMIT_BYTES } from 'config';
+import { NATIVE_IMAGE_MAX_BYTES } from 'util/nativeImageUpload';
 import FileSelector from 'component/common/file-selector';
 import { FormField, Form } from 'component/common/form';
 import Button from 'component/button';
@@ -154,7 +154,7 @@ function SelectAsset(props: Props) {
     return uploadThumbnail(data)
       .then((json) => {
         return json.type === 'success'
-          ? onSuccess(`${json.message}`)
+          ? onSuccess(json.message)
           : uploadError(
               json.message || __('There was an error in the upload. The format or extension might not be supported.')
             );
@@ -373,8 +373,8 @@ function SelectAsset(props: Props) {
                   setUploadErrorMsg('');
                   setImagePreview(URL.createObjectURL(file as any));
 
-                  if (file.size >= THUMBNAIL_CDN_SIZE_LIMIT_BYTES) {
-                    const maxSizeMB = THUMBNAIL_CDN_SIZE_LIMIT_BYTES / (1024 * 1024);
+                  if (file.size > NATIVE_IMAGE_MAX_BYTES) {
+                    const maxSizeMB = NATIVE_IMAGE_MAX_BYTES / (1024 * 1024);
                     setUploadErrorMsg(
                       __('Thumbnail size over %max_size%MB, please edit and reupload.', {
                         max_size: maxSizeMB,

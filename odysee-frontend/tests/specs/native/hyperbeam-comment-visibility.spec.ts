@@ -65,8 +65,10 @@ test('creator hides and restores foreign roots and replies without deleting immu
     });
     const rootText = `Foreign root ${stamp}`;
     const replyText = `Foreign reply ${stamp}`;
+    const visibleText = `Visible sentinel ${stamp}`;
     const root = await write(foreign.request, makeComment(rootText, rootRef, null));
     await write(foreign.request, makeComment(replyText, `reply-${stamp}`, rootRef));
+    await write(foreign.request, makeComment(visibleText, `sentinel-${stamp}`, null));
     const url = `${manifest}/#/$/id/${video}`;
     await page.goto(url);
     const rootRow = page
@@ -76,15 +78,33 @@ test('creator hides and restores foreign roots and replies without deleting immu
     await expect(rootRow).toBeVisible({ timeout: 30000 });
     await rootRow.locator('.comment__menu .menu__button').first().click();
     await expect(page.getByRole('menuitem', { name: 'Add as moderator', exact: true })).toHaveCount(0);
+    const hideWrite = page.waitForResponse((response) => {
+      if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/id') return false;
+      try {
+        const body = response.request().postDataJSON();
+        return (
+          body.schema === 'odysee-comment-control@1.0' && body.control === 'visibility' && body.action === 'hidden'
+        );
+      } catch {
+        return false;
+      }
+    });
     await page.getByRole('menuitem', { name: 'Hide comment', exact: true }).click();
+    expect((await hideWrite).ok()).toBe(true);
     await expect(page.getByText(rootText, { exact: true })).toHaveCount(0, { timeout: 20000 });
     await page.reload();
+    await expect(page.locator('li.comment').getByText(visibleText, { exact: true })).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('li.comment').getByText(rootText, { exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Hidden comments', exact: true }).click();
     const review = page.getByRole('region', { name: 'Hidden comments', exact: true });
     await expect(review.getByText(rootText, { exact: true })).toBeVisible({ timeout: 30000 });
     const visitor = await guest.newPage();
     await visitor.goto(url);
-    await expect(visitor.getByText(`Hide video ${stamp}`, { exact: true }).first()).toBeVisible({ timeout: 30000 });
+    // A visible sibling proves comment discovery/projection finished; the video
+    // title alone can render before the thread has even started loading.
+    await expect(visitor.locator('li.comment').getByText(visibleText, { exact: true })).toBeVisible({ timeout: 30000 });
+    await visitor.reload();
+    await expect(visitor.locator('li.comment').getByText(visibleText, { exact: true })).toBeVisible({ timeout: 30000 });
     await expect(visitor.getByRole('button', { name: 'Hidden comments', exact: true })).toHaveCount(0);
     await expect(visitor.getByText(rootText, { exact: true })).toHaveCount(0);
     await expect(visitor.getByText(replyText, { exact: true })).toHaveCount(0);

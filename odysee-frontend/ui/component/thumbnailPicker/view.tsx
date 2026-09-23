@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { THUMBNAIL_CDN_SIZE_LIMIT_BYTES } from 'config';
+import { NATIVE_IMAGE_MAX_BYTES } from 'util/nativeImageUpload';
 import { Input, BlobSource, VideoSampleSink, ALL_FORMATS } from 'odysee-media-usagi';
 import type { VideoSample } from 'odysee-media-usagi';
 import Button from 'component/button';
@@ -451,7 +451,7 @@ function ThumbnailPicker(props: Props) {
     setUploading(true);
     try {
       let file = new File([frame.blob], 'thumbnail.jpeg', { type: 'image/jpeg' });
-      if (file.size > THUMBNAIL_CDN_SIZE_LIMIT_BYTES) {
+      if (file.size > NATIVE_IMAGE_MAX_BYTES) {
         const lowerBlob = await reEncodeBlob(frame.blobUrl, 0.7);
         if (lowerBlob) {
           file = new File([lowerBlob], 'thumbnail.jpeg', { type: 'image/jpeg' });
@@ -497,7 +497,7 @@ function ThumbnailPicker(props: Props) {
         type: 'image/jpeg',
       });
 
-      if (file.size > THUMBNAIL_CDN_SIZE_LIMIT_BYTES) {
+      if (file.size > NATIVE_IMAGE_MAX_BYTES) {
         // Re-encode at lower quality
         const lowerBlob = await reEncodeBlob(frame.blobUrl, 0.7);
         if (lowerBlob) {

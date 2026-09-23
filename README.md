@@ -46,6 +46,10 @@ The current implementation follows these decisions:
 When an older branch or document conflicts with these decisions and the current
 code, this store-first architecture wins.
 
+Research proposals, not adopted architecture: [authentication landscape and
+meeting brief](docs/auth-research/expanded/README.md) compares legacy magic-link
+migration, decentralized identity/custody, recovery and user-adoption options.
+
 ## Repository layout
 
 | Path | Responsibility |
@@ -200,6 +204,12 @@ The manifest does not poll the legacy Odysee degraded-performance endpoint.
 Historical remote thumbnail sources render directly in HyperBEAM mode;
 inherited `thumbnails.odycdn.com` optimizer URLs are unwrapped, and built-in
 wallpaper/placeholder assets are served from the manifest itself.
+
+Native thumbnails, avatars and banners share validated generic image uploads.
+The [image storage and migration notes](docs/image-storage-migration.md) cover
+the offline legacy inventory tool, tested boundaries and remaining byte-import,
+portable-reference and production-storage work. Remote URL rendering is not
+legacy image migration.
 
 Homepage and category `claim_search` requests map filters, ordering, and
 pagination to generic `search@1.0` requests, then hydrate the returned ordered

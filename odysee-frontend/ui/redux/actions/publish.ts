@@ -6,7 +6,8 @@ import * as PAGES from 'constants/pages';
 import { BITRATE, NO_FILE, PAYWALL } from 'constants/publish';
 import * as PUBLISH_TYPES from 'constants/publish_types';
 import { batchActions } from 'util/batch-actions';
-import { THUMBNAIL_CDN_SIZE_LIMIT_BYTES, WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
+import { WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
+import { NATIVE_IMAGE_MAX_BYTES } from 'util/nativeImageUpload';
 import { doCheckPendingClaims, doResolveClaimIds } from 'redux/actions/claims';
 import { selectProtectedContentMembershipsForContentClaimId } from 'redux/selectors/memberships';
 import { doSaveMembershipRestrictionsForContent, doMembershipContentforStreamClaimId } from 'redux/actions/memberships';
@@ -771,8 +772,8 @@ export const doUploadThumbnail =
         return null;
       }
 
-      if (size && size >= THUMBNAIL_CDN_SIZE_LIMIT_BYTES) {
-        const maxSizeMB = THUMBNAIL_CDN_SIZE_LIMIT_BYTES / (1024 * 1024);
+      if (size && size > NATIVE_IMAGE_MAX_BYTES) {
+        const maxSizeMB = NATIVE_IMAGE_MAX_BYTES / (1024 * 1024);
         uploadError(
           __('Thumbnail size over %max_size%MB, please edit and reupload.', {
             max_size: maxSizeMB,

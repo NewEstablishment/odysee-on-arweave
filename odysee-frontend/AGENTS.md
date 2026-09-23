@@ -142,6 +142,11 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Thumbnail bytes use the same generic committed-ID write path. Do not require
   a server-held cache-writer key or an SSR thumbnail bridge in this
   architecture.
+- Thumbnails and profile images share `ui/util/nativeImageUpload.ts` preflight
+  and transport. Keep profile PNG/JPEG/WebP restrictions and thumbnail GIF
+  support explicit. This browser check does not enforce node upload policy.
+  Run `test:native-images` and `test:native-images:browser`; the latter uses a
+  fixture, not a live-node editor lifecycle. See `../docs/image-storage-migration.md`.
 - Node, loopback, private-network, relative, `data:`, and `blob:` image sources
   must bypass external thumbnail optimizers. Preserve the configured node
   scheme when rendering these URLs.
@@ -322,6 +327,10 @@ logical comment links. Exact historical message reads remain unchanged.
 
 - Entering the upload/create or metadata-edit wizard clears previous playback;
   its floating viewer must not cover Next/Update controls.
+- The floating stream renderer must not bootstrap playback on route changes;
+  a stale route effect can otherwise undo the wizard's clear action. Regression
+  coverage must start real media, observe the floating player on another route,
+  then enter Upload through same-document navigation and click Next normally.
 
 - A configured HyperBEAM node enables native upload routes even without a
   legacy verified-email account.
