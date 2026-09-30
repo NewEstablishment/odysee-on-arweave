@@ -6,6 +6,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { punctuationMarks } from 'util/remark-lbry';
 import { selectClaimForUri, selectIsUriResolving } from 'redux/selectors/claims';
 import { doResolveUri as doResolveUriAction } from 'redux/actions/claims';
+import { CLAIM_LINK_CLASS } from './classes';
 type Props = {
   uri: string;
   parentCommentId?: string;
@@ -64,7 +65,7 @@ const ClaimLink = (props: Props) => {
 
   if (allowPreview) {
     return (
-      <div className="claim-link">
+      <div className={CLAIM_LINK_CLASS} data-claim-link>
         <ClaimLinkPreview
           uri={uri}
           title={claim?.value?.title}

@@ -2,6 +2,7 @@ import * as PAGES from 'constants/pages';
 import * as SETTINGS from 'constants/settings';
 import React from 'react';
 import classnames from 'classnames';
+import { USER_SIGNUP_HOISTED_CLASS } from './classes';
 import { useLocation, useNavigate } from 'react-router-dom';
 import UserEmailNew from 'component/userEmailNew';
 import UserEmailVerify from 'component/userEmailVerify';
@@ -30,6 +31,7 @@ import { selectBalance } from 'redux/selectors/wallet';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { selectInterestedInYoutubeSync } from 'redux/selectors/app';
 import { doToggleInterestedInYoutubeSync } from 'redux/actions/app';
+import { PAGE_MAIN_CONTAINED_CLASS, PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 const YoutubeTransferStatus = lazyImport(
   () =>
     import(
@@ -256,7 +258,7 @@ function UserSignUp() {
       </div>
     ),
     showLoadingSpinner && (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     ),
@@ -300,8 +302,8 @@ function UserSignUp() {
 
   return (
     <section
-      className={classnames('main--contained', {
-        'main--hoisted': isScrollable,
+      className={classnames(PAGE_MAIN_CONTAINED_CLASS, {
+        [USER_SIGNUP_HOISTED_CLASS]: isScrollable,
       })}
     >
       {componentToRender}

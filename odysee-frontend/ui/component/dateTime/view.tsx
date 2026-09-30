@@ -5,6 +5,7 @@ import { useAppSelector } from 'redux/hooks';
 import { selectDateForUri } from 'redux/selectors/claims';
 import * as SETTINGS from 'constants/settings';
 import { selectClientSetting } from 'redux/selectors/settings';
+import { DATE_TIME_CLASS } from './classes';
 
 const DEFAULT_MIN_UPDATE_DELTA_MS = 60 * 1000;
 
@@ -45,7 +46,7 @@ function DateTimeInner({
 
   const clockFormat = clock24h ? 'HH:mm' : 'hh:mm A';
   return (
-    <span className="date_time" title={timeAgo && dayjs(date).format(`LL ${clockFormat}`)}>
+    <span className={DATE_TIME_CLASS} title={timeAgo && dayjs(date).format(`LL ${clockFormat}`)}>
       {date
         ? timeAgo
           ? getTimeAgoStr(date, showFutureDate, genericSeconds)

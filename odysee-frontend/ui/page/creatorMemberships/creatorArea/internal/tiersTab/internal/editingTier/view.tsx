@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import { FormField } from 'component/common/form';
 import { useIsMobile } from 'effects/use-screensize';
@@ -13,6 +14,11 @@ import {
 } from 'redux/actions/memberships';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { selectAPIArweaveDefaultAddress } from 'redux/selectors/payments';
+import { CREATOR_MEMBERSHIP_CLASSES } from '../../../../classes';
+import { CREATOR_TIER_EDITOR_CLASSES } from '../../classes';
+import { MEMBERSHIP_TIER_CLASSES } from 'component/joinMembershipCard/internal/previewPage/internal/membershipTier/classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { FORM_FIELD_PRICE_AMOUNT_CLASS } from 'component/common/form-components/form-field-classes';
 
 const getIsInputEmpty = (value: string) => !value || value.length <= 2 || !/\S/.test(value);
 
@@ -226,7 +232,7 @@ function MembershipEditTier(props: Props) {
     [roughHeaderHeight]
   );
   return (
-    <div className="membership-tier__wrapper-edit" ref={editTierWrapperRef}>
+    <div className={CREATOR_TIER_EDITOR_CLASSES.form} data-membership-tier-editor ref={editTierWrapperRef}>
       <FormField
         max={30}
         type="text"
@@ -253,9 +259,9 @@ function MembershipEditTier(props: Props) {
       <fieldset-section>
         <label htmlFor="tier_name">{__('Odysee Perks (Permanent)')}</label>
       </fieldset-section>
-      <div className="membership-tier__perks">
+      <div className={MEMBERSHIP_TIER_CLASSES.perks}>
         <div className="membership-tier__perks-content">
-          <ul>
+          <ul className={MEMBERSHIP_TIER_CLASSES.perksList}>
             {membershipOdyseePerks.map((tierPerk) => {
               const isPermanent = MEMBERSHIP_CONSTS.PERMANENT_TIER_PERKS.includes(tierPerk.id);
               const isShownInEdit = perksIdsShownInEditForm.includes(tierPerk.id);
@@ -290,7 +296,14 @@ function MembershipEditTier(props: Props) {
               } else {
                 if (isShownInEdit) {
                   if (!isEditable) {
-                    return <li key={tierPerk.description}>{__(tierPerk.description)}</li>;
+                    return (
+                      <li
+                        className={`${MEMBERSHIP_TIER_CLASSES.perksItem} ${MEMBERSHIP_TIER_CLASSES.perksItemTierColor}`}
+                        key={tierPerk.description}
+                      >
+                        {__(tierPerk.description)}
+                      </li>
+                    );
                   } else {
                     return (
                       <FormField
@@ -326,7 +339,7 @@ function MembershipEditTier(props: Props) {
       </div>
 
       <FormField
-        className="form-field--price-amount"
+        className={FORM_FIELD_PRICE_AMOUNT_CLASS}
         type="number"
         name="tier_contribution"
         step="0.01"
@@ -338,7 +351,7 @@ function MembershipEditTier(props: Props) {
         disabled={hasSubscribers}
       />
 
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <Button
           disabled={nameError || descriptionError || priceError || isSubmitting}
           button="primary"
@@ -348,10 +361,10 @@ function MembershipEditTier(props: Props) {
         <Button button="link" label={__('Cancel')} onClick={onCancel} />
       </div>
       {(nameError || descriptionError || saveError || priceLowerThanMin || priceHigherThanMax) && (
-        <div className="section__actions">
+        <div className={SECTION_CLASSES.actions}>
           {/* <p className="help"> */}
-          <div className={'errorColumn'}>
-            <div className="error__text">
+          <div className={CREATOR_MEMBERSHIP_CLASSES.errorColumn}>
+            <div className={ERROR_TEXT_CLASS}>
               {nameError
                 ? __('A membership name is required.')
                 : descriptionError
@@ -359,7 +372,7 @@ function MembershipEditTier(props: Props) {
                   : undefined}
               {saveError && __(saveError)}
             </div>
-            <div className="error__text">
+            <div className={ERROR_TEXT_CLASS}>
               {hasSubscribers
                 ? __(`This membership has subscribers, you can't update the price currently.`)
                 : priceLowerThanMin

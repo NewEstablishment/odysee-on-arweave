@@ -4,6 +4,8 @@ import React from 'react';
 import Spinner from 'component/spinner';
 import { selectIsFetchingCommentsForParentId, selectRepliesForParentId } from 'redux/selectors/comments';
 import { useAppSelector } from 'redux/hooks';
+import { COMMENT_NESTED_ACTIONS_CLASS, COMMENT_REPLIES_CLASS } from './classes';
+import { URI_INDICATOR_CLASS } from 'component/uriIndicator/classes';
 
 // ****************************************************************************
 // ****************************************************************************
@@ -44,8 +46,8 @@ export default function CommentsReplies(props: Props) {
   const fetchedReplies = useAppSelector((state) => selectRepliesForParentId(state, parentId));
   const isFetching = useAppSelector((state) => selectIsFetchingCommentsForParentId(state, parentId));
   return !numDirectReplies ? null : (
-    <div className="comment__replies-container">
-      <ul className="comment__replies">
+    <div className="tw:m-0 tw:overflow-x-hidden">
+      <ul className={COMMENT_REPLIES_CLASS}>
         {fetchedReplies.map((comment) => (
           <CommentView
             key={comment.comment_id}
@@ -64,16 +66,18 @@ export default function CommentsReplies(props: Props) {
       {fetchedReplies.length > 0 &&
         hasMore &&
         (isFetching ? (
-          <span className="comment__actions--nested comment__replies-loading--more">
+          <span
+            className={`${COMMENT_NESTED_ACTIONS_CLASS} comment__replies-loading--more tw:items-start tw:[transform:translate(var(--spacing-xs))]`}
+          >
             <Spinner text={__('Loading')} type="small" />
           </span>
         ) : (
-          <div className="comment__actions--nested">
+          <div className={COMMENT_NESTED_ACTIONS_CLASS}>
             <Button
               button="link"
               label={__('Show more')}
               onClick={() => onShowMore && onShowMore()}
-              className="button--uri-indicator"
+              className={URI_INDICATOR_CLASS}
             />
           </div>
         ))}

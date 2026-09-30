@@ -4,7 +4,7 @@ import Icon from 'component/common/icon';
 import { icons as customIcons } from 'component/common/icon-custom';
 import classnames from 'classnames';
 import { platform } from 'util/platform';
-import './style.scss';
+import { LIVESTREAM_SOURCE_SELECTOR_CLASSES as C } from './classes';
 
 const OdyseePlay = customIcons[ICONS.PLAY];
 const OdyseeRepeat = customIcons[ICONS.REPEAT];
@@ -14,9 +14,9 @@ function TruncatedLabel({ label }: { label: string }) {
   const base = match ? match[1] : label;
   const suffix = match ? match[2] : '';
   return (
-    <span className="livestream-sources__item-label" title={label}>
-      <span className="livestream-sources__item-label-base">{base}</span>
-      {suffix && <span className="livestream-sources__item-label-suffix">{suffix}</span>}
+    <span className={C.itemLabel} title={label}>
+      <span className={C.itemLabelBase}>{base}</span>
+      {suffix && <span className={C.itemLabelSuffix}>{suffix}</span>}
     </span>
   );
 }
@@ -252,12 +252,9 @@ export default function LivestreamSourceSelector(props: Props) {
     const videoEl = isActive && getVideoElement ? getVideoElement(source.deviceId) : null;
     if (videoEl) {
       return (
-        <div
-          key={source.deviceId}
-          className="livestream-sources__item livestream-sources__item--audio livestream-sources__item--active"
-        >
-          <button className="livestream-sources__item-toggle" onClick={() => onToggleVideo(source)} disabled={disabled}>
-            <span className="livestream-sources__checkbox livestream-sources__checkbox--checked" />
+        <div key={source.deviceId} className={classnames(C.item, C.itemAudio, C.itemActive)}>
+          <button className={C.itemToggle} onClick={() => onToggleVideo(source)} disabled={disabled}>
+            <span className={classnames(C.checkbox, C.checkboxChecked)} />
             <TruncatedLabel label={source.label} />
           </button>
           <MediaPlayerControls element={videoEl} />
@@ -267,18 +264,18 @@ export default function LivestreamSourceSelector(props: Props) {
     return (
       <button
         key={source.deviceId}
-        className={classnames('livestream-sources__item', {
-          'livestream-sources__item--active': isActive,
+        className={classnames(C.item, {
+          [C.itemActive]: isActive,
         })}
         onClick={() => onToggleVideo(source)}
         disabled={disabled}
       >
         {source.kind === 'image' || source.kind === 'videofile' ? (
-          <span className="livestream-sources__add-icon">+</span>
+          <span className={C.addIcon}>+</span>
         ) : (
           <span
-            className={classnames('livestream-sources__checkbox', {
-              'livestream-sources__checkbox--checked': isActive,
+            className={classnames(C.checkbox, {
+              [C.checkboxChecked]: isActive,
             })}
           />
         )}
@@ -353,17 +350,17 @@ export default function LivestreamSourceSelector(props: Props) {
     return (
       <div
         key={source.deviceId}
-        className={classnames('livestream-sources__item livestream-sources__item--audio', {
-          'livestream-sources__item--active': isActive,
+        className={classnames(C.item, C.itemAudio, {
+          [C.itemActive]: isActive,
         })}
       >
-        <button className="livestream-sources__item-toggle" onClick={() => onToggleAudio(source)} disabled={disabled}>
+        <button className={C.itemToggle} onClick={() => onToggleAudio(source)} disabled={disabled}>
           {isPicker ? (
-            <span className="livestream-sources__add-icon">+</span>
+            <span className={C.addIcon}>+</span>
           ) : (
             <span
-              className={classnames('livestream-sources__checkbox', {
-                'livestream-sources__checkbox--checked': isActive,
+              className={classnames(C.checkbox, {
+                [C.checkboxChecked]: isActive,
               })}
             />
           )}
@@ -384,12 +381,10 @@ export default function LivestreamSourceSelector(props: Props) {
             </svg>
           )}
           <TruncatedLabel label={source.label} />
-          {isActive && onAudioVolumeChange && (
-            <span className="livestream-sources__volume-value">{Math.round(volume * 100)}%</span>
-          )}
+          {isActive && onAudioVolumeChange && <span className={C.volumeValue}>{Math.round(volume * 100)}%</span>}
           {isActive && onToggleAudioMute && (
             <span
-              className="livestream-sources__mute-btn"
+              className={C.muteButton}
               role="button"
               onClick={(e) => {
                 e.stopPropagation();
@@ -443,7 +438,7 @@ export default function LivestreamSourceSelector(props: Props) {
               step={0.01}
               value={volume}
               onChange={(e) => onAudioVolumeChange(source.deviceId, parseFloat(e.target.value))}
-              className="livestream-sources__volume-slider"
+              className={C.volumeSlider}
             />
             {getAudioLevel && <MeterBar getLevel={() => getAudioLevel(source.deviceId)} resetSignal={volume} />}
           </>
@@ -456,10 +451,10 @@ export default function LivestreamSourceSelector(props: Props) {
     if (!onMasterVolumeChange || activeAudioIds.size < 2) return null;
     const v = masterVolume ?? 1;
     return (
-      <div className="livestream-sources__item livestream-sources__item--audio livestream-sources__item--master">
-        <div className="livestream-sources__item-toggle livestream-sources__item-toggle--static">
-          <span className="livestream-sources__item-label">{__('Master')}</span>
-          <span className="livestream-sources__volume-value">{Math.round(v * 100)}%</span>
+      <div className={classnames(C.item, C.itemAudio, C.itemMaster)}>
+        <div className={classnames(C.itemToggle, C.itemToggleStatic)}>
+          <span className={C.itemLabel}>{__('Master')}</span>
+          <span className={C.volumeValue}>{Math.round(v * 100)}%</span>
         </div>
         <input
           type="range"
@@ -468,7 +463,7 @@ export default function LivestreamSourceSelector(props: Props) {
           step={0.01}
           value={v}
           onChange={(e) => onMasterVolumeChange(parseFloat(e.target.value))}
-          className="livestream-sources__volume-slider"
+          className={C.volumeSlider}
         />
         {getMasterAudioLevel && <MeterBar getLevel={getMasterAudioLevel} resetSignal={v} />}
       </div>
@@ -476,19 +471,19 @@ export default function LivestreamSourceSelector(props: Props) {
   }
 
   return (
-    <div className="livestream-sources">
+    <div className={C.root}>
       {needsCameraPermission && onRequestCameraPermission && (
         <button
           type="button"
-          className="livestream-sources__permission-btn"
+          className={C.permissionButton}
           onClick={onRequestCameraPermission}
           disabled={cameraPermissionRequesting}
         >
           {cameraPermissionRequesting ? __('Requesting...') : __('Allow Camera & Mic access')}
         </button>
       )}
-      <div className="livestream-sources__box">
-        <h3 className="livestream-sources__title">
+      <div className={C.box}>
+        <h3 className={C.title}>
           <svg
             width="14"
             height="14"
@@ -505,13 +500,13 @@ export default function LivestreamSourceSelector(props: Props) {
           {__('Video')}
         </h3>
         {activeVideoSources.length > 0 && (
-          <div className="livestream-sources__subbox">
-            <span className="livestream-sources__subbox-label">{__('Active')}</span>
-            <div className="livestream-sources__list">
+          <div className={C.subbox}>
+            <span className={C.subboxLabel}>{__('Active')}</span>
+            <div className={C.list}>
               {activeVideoSources.map((source, idx) => (
                 <div
                   key={source.deviceId}
-                  className="livestream-sources__active-row"
+                  className={C.activeRow}
                   draggable
                   onDragStart={() => {
                     dragSourceRef.current = source.deviceId;
@@ -525,12 +520,12 @@ export default function LivestreamSourceSelector(props: Props) {
                   }}
                 >
                   <div
-                    className="livestream-sources__item livestream-sources__item--active"
+                    className={classnames(C.item, C.itemActive, C.activeRowItem)}
                     onClick={() => onSelectLayer?.(source.deviceId)}
                   >
                     {source.kind === 'image' ? (
                       <span
-                        className="livestream-sources__remove-icon"
+                        className={C.removeIcon}
                         onClick={(e) => {
                           e.stopPropagation();
                           onToggleVideo(source);
@@ -540,7 +535,7 @@ export default function LivestreamSourceSelector(props: Props) {
                       </span>
                     ) : (
                       <span
-                        className="livestream-sources__checkbox livestream-sources__checkbox--checked"
+                        className={classnames(C.checkbox, C.checkboxChecked)}
                         onClick={(e) => {
                           e.stopPropagation();
                           onToggleVideo(source);
@@ -597,7 +592,7 @@ export default function LivestreamSourceSelector(props: Props) {
                   {onToggleLayerVisible && (
                     <button
                       type="button"
-                      className="livestream-sources__visibility-btn"
+                      className={C.visibilityButton}
                       onClick={(e) => {
                         e.stopPropagation();
                         onToggleLayerVisible(source.deviceId);
@@ -635,9 +630,9 @@ export default function LivestreamSourceSelector(props: Props) {
                       )}
                     </button>
                   )}
-                  <div className="livestream-sources__reorder-btns">
+                  <div className={C.reorderButtons}>
                     <button
-                      className="livestream-sources__reorder-btn"
+                      className={C.reorderButton}
                       disabled={idx === 0}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -657,7 +652,7 @@ export default function LivestreamSourceSelector(props: Props) {
                       </svg>
                     </button>
                     <button
-                      className="livestream-sources__reorder-btn"
+                      className={C.reorderButton}
                       disabled={idx === activeVideoSources.length - 1}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -682,50 +677,46 @@ export default function LivestreamSourceSelector(props: Props) {
             </div>
           </div>
         )}
-        <div className="livestream-sources__subbox">
-          <span className="livestream-sources__subbox-label">{__('Available')}</span>
-          <div className="livestream-sources__list">
+        <div className={C.subbox}>
+          <span className={C.subboxLabel}>{__('Available')}</span>
+          <div className={C.list}>
             {inactiveVideoSources.map(renderVideoItem)}
             {inactiveVideoSources.length === 0 && videoSources.length > 0 && (
-              <span className="livestream-sources__empty">{__('All sources active')}</span>
+              <span className={C.empty}>{__('All sources active')}</span>
             )}
-            {videoSources.length === 0 && (
-              <span className="livestream-sources__empty">{__('No video sources found')}</span>
-            )}
+            {videoSources.length === 0 && <span className={C.empty}>{__('No video sources found')}</span>}
           </div>
         </div>
       </div>
 
-      <div className="livestream-sources__box">
-        <h3 className="livestream-sources__title">
+      <div className={C.box}>
+        <h3 className={C.title}>
           <Icon icon={ICONS.AUDIO} size={14} />
           {__('Audio')}
         </h3>
         {activeAudioSources.length > 0 && (
-          <div className="livestream-sources__subbox">
-            <span className="livestream-sources__subbox-label">{__('Active')}</span>
-            <div className="livestream-sources__list">
+          <div className={C.subbox}>
+            <span className={C.subboxLabel}>{__('Active')}</span>
+            <div className={C.list}>
               {renderMasterRow()}
               {activeAudioSources.map(renderAudioItem)}
             </div>
           </div>
         )}
-        <div className="livestream-sources__subbox">
-          <span className="livestream-sources__subbox-label">{__('Available')}</span>
-          <div className="livestream-sources__list">
+        <div className={C.subbox}>
+          <span className={C.subboxLabel}>{__('Available')}</span>
+          <div className={C.list}>
             {inactiveAudioSources.map(renderAudioItem)}
             {inactiveAudioSources.length === 0 && audioSources.length > 0 && (
-              <span className="livestream-sources__empty">{__('All sources active')}</span>
+              <span className={C.empty}>{__('All sources active')}</span>
             )}
-            {audioSources.length === 0 && (
-              <span className="livestream-sources__empty">{__('No audio sources found')}</span>
-            )}
+            {audioSources.length === 0 && <span className={C.empty}>{__('No audio sources found')}</span>}
           </div>
         </div>
       </div>
 
-      <div className="livestream-sources__box">
-        <h3 className="livestream-sources__title">
+      <div className={C.box}>
+        <h3 className={C.title}>
           <svg
             width="14"
             height="14"
@@ -743,13 +734,13 @@ export default function LivestreamSourceSelector(props: Props) {
           </svg>
           {__('Widgets')}
         </h3>
-        <div className="livestream-sources__subbox">
-          <div className="livestream-sources__list">
-            <div className="livestream-sources__active-row">
+        <div className={C.subbox}>
+          <div className={C.list}>
+            <div className={C.activeRow}>
               <button
                 type="button"
-                className={classnames('livestream-sources__item', {
-                  'livestream-sources__item--active': activeWidgetIds?.has('__widget_chat__'),
+                className={classnames(C.item, C.activeRowItem, {
+                  [C.itemActive]: activeWidgetIds?.has('__widget_chat__'),
                 })}
                 onClick={() => {
                   if (activeWidgetIds?.has('__widget_chat__')) {
@@ -761,8 +752,8 @@ export default function LivestreamSourceSelector(props: Props) {
                 disabled={disabled || !onToggleWidget}
               >
                 <span
-                  className={classnames('livestream-sources__checkbox', {
-                    'livestream-sources__checkbox--checked': activeWidgetIds?.has('__widget_chat__'),
+                  className={classnames(C.checkbox, {
+                    [C.checkboxChecked]: activeWidgetIds?.has('__widget_chat__'),
                   })}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -775,7 +766,7 @@ export default function LivestreamSourceSelector(props: Props) {
               {activeWidgetIds?.has('__widget_chat__') && onToggleLayerVisible && (
                 <button
                   type="button"
-                  className="livestream-sources__visibility-btn"
+                  className={C.visibilityButton}
                   onClick={(e) => {
                     e.stopPropagation();
                     onToggleLayerVisible('__widget_chat__');
@@ -861,9 +852,9 @@ function MeterBar({ getLevel, resetSignal }: { getLevel: () => number; resetSign
   }, [getLevel]);
 
   return (
-    <div className="livestream-sources__meter">
-      <div className="livestream-sources__meter-fill" ref={fillRef} />
-      <div className="livestream-sources__meter-peak" ref={peakRef} />
+    <div className={C.meter}>
+      <div className={C.meterFill} ref={fillRef} />
+      <div className={C.meterPeak} ref={peakRef} />
     </div>
   );
 }
@@ -908,12 +899,12 @@ function MediaPlayerControls({ element }: { element: HTMLMediaElement }) {
   };
 
   return (
-    <div className="livestream-sources__player">
-      <div className="livestream-sources__player-row">
-        <div className="livestream-sources__player-buttons">
+    <div className={C.player}>
+      <div className={C.playerRow}>
+        <div className={C.playerButtons}>
           <button
             type="button"
-            className="livestream-sources__player-btn"
+            className={C.playerButton}
             onClick={() => (element.paused ? element.play() : element.pause())}
             title={paused ? __('Play') : __('Pause')}
           >
@@ -928,7 +919,7 @@ function MediaPlayerControls({ element }: { element: HTMLMediaElement }) {
           </button>
           <button
             type="button"
-            className="livestream-sources__player-btn"
+            className={C.playerButton}
             onClick={() => {
               element.pause();
               element.currentTime = 0;
@@ -941,8 +932,8 @@ function MediaPlayerControls({ element }: { element: HTMLMediaElement }) {
           </button>
           <button
             type="button"
-            className={classnames('livestream-sources__player-btn', {
-              'livestream-sources__player-btn--active': loop,
+            className={classnames(C.playerButton, {
+              [C.playerButtonActive]: loop,
             })}
             onClick={() => {
               element.loop = !element.loop;
@@ -953,7 +944,7 @@ function MediaPlayerControls({ element }: { element: HTMLMediaElement }) {
             <OdyseeRepeat size={12} color="currentColor" />
           </button>
         </div>
-        <span className="livestream-sources__player-time">
+        <span className={C.playerTime}>
           {formatTime(progress)} / {formatTime(duration)}
         </span>
       </div>
@@ -1008,17 +999,17 @@ function PlayerProgress({
 
   return (
     <div
-      className="livestream-sources__seek"
+      className={C.seek}
       ref={trackRef}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
-      <div className="livestream-sources__seek-track">
-        <div className="livestream-sources__seek-fill" style={{ width: `${fillPct}%` }} />
+      <div className={C.seekTrack}>
+        <div className={C.seekFill} style={{ width: `${fillPct}%` }} />
       </div>
-      <div className="livestream-sources__seek-thumb" style={{ left: `${fillPct}%` }} />
+      <div className={C.seekThumb} style={{ left: `${fillPct}%` }} />
     </div>
   );
 }

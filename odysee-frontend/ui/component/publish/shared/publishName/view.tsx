@@ -4,6 +4,7 @@ import { INVALID_NAME_ERROR } from 'constants/claim';
 import React, { useState, useEffect } from 'react';
 import { isNameValid } from 'util/lbryURI';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_DISABLED_PREFIX_CLASS } from 'component/common/form-components/fieldset-group-classes';
 import NameHelpText from './name-help-text';
 import { useIsMobile } from 'effects/use-screensize';
 import useThrottle from 'effects/use-throttle';
@@ -17,6 +18,7 @@ import {
   selectCurrentUploads,
 } from 'redux/selectors/publish';
 import { selectActiveChannelClaim, selectIncognito } from 'redux/selectors/app';
+import { FORM_FIELD_HELP_CLASS } from 'component/common/help-classes';
 type Props = {
   uri?: string | null | undefined;
   onChange?: () => void;
@@ -108,7 +110,7 @@ function PublishName(props: Props) {
   }, [name, blurred]);
   return (
     <div>
-      <fieldset-group class="fieldset-group--smushed fieldset-group--disabled-prefix">
+      <fieldset-group class={FIELDSET_GROUP_DISABLED_PREFIX_CLASS}>
         <fieldset-section>
           <label>{__('URL')}</label>
           <div className="form-field__prefix">{prefix}</div>
@@ -124,7 +126,7 @@ function PublishName(props: Props) {
           autoComplete="off"
         />
       </fieldset-group>
-      <div className="form-field__help">
+      <div className={FORM_FIELD_HELP_CLASS}>
         <NameHelpText
           uri={uri}
           isStillEditing={shouldLockName}

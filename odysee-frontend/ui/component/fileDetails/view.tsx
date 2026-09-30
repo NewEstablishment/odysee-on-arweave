@@ -3,6 +3,8 @@ import { formatBytes } from 'util/format-bytes';
 import { useAppSelector } from 'redux/hooks';
 import { makeSelectMetadataForUri, selectClaimForUri } from 'redux/selectors/claims';
 import { makeSelectFileInfoForUri } from 'redux/selectors/file_info';
+import { FILE_DETAIL_CLASS } from './classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 
 type Props = {
   uri: string;
@@ -14,7 +16,7 @@ const FileDetails = React.memo(function FileDetails({ uri }: Props) {
   const metadata = useAppSelector((state) => makeSelectMetadataForUri(uri)(state));
 
   if (!claim || !metadata) {
-    return <span className="empty">{__('Empty claim or metadata info.')}</span>;
+    return <span className={EMPTY_CLASS}>{__('Empty claim or metadata info.')}</span>;
   }
 
   const { license, license_url } = metadata;
@@ -26,17 +28,17 @@ const FileDetails = React.memo(function FileDetails({ uri }: Props) {
   return (
     <>
       {license !== 'None' && (
-        <div className="file-detail">
-          <span className="file-detail__label">{__('License')}</span>
-          <span className="file-detail__value">{license}</span>
-          {license_url && <span className="file-detail__value">{license_url}</span>}
+        <div className={FILE_DETAIL_CLASS} data-file-detail>
+          <span className="tw:text-app-text">{__('License')}</span>
+          <span className="tw:text-app-text-subtitle">{license}</span>
+          {license_url && <span className="tw:text-app-text-subtitle">{license_url}</span>}
         </div>
       )}
 
       {fileSize && (
-        <div className="file-detail">
-          <span className="file-detail__label">{__('File size')}</span>
-          <span className="file-detail__value">{fileSize}</span>
+        <div className={FILE_DETAIL_CLASS} data-file-detail>
+          <span className="tw:text-app-text">{__('File size')}</span>
+          <span className="tw:text-app-text-subtitle">{fileSize}</span>
         </div>
       )}
     </>

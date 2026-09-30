@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Button from 'component/button';
 import { Form, FormField } from 'component/common/form';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   update: (arg0: [string, string]) => void;
 };
@@ -32,7 +33,7 @@ function ServerInputRow(props: Props) {
 
   return (
     <Form onSubmit={onSubmit}>
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <FormField
           type="text"
           label={__('Host')}
@@ -40,7 +41,7 @@ function ServerInputRow(props: Props) {
           value={hostString}
           onChange={(e) => setHostString(e.target.value)}
         />
-        <span className="form-field__conjuction">:</span>
+        <span className="tw:pt-app-m">:</span>
         <FormField
           type="number"
           label={__('Port')}
@@ -50,7 +51,7 @@ function ServerInputRow(props: Props) {
         />
       </div>
 
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <Button type="submit" button="primary" label={__('Add')} disabled={!validServerString} />
       </div>
     </Form>

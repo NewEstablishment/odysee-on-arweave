@@ -4,7 +4,11 @@ import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
 import Button from 'component/button';
 import Spinner from 'component/spinner';
-import './style.scss';
+
+const WIZARD_STEP_CLASS_NAME =
+  'tw:flex tw:flex-1 tw:items-center tw:justify-center tw:gap-app-xs tw:whitespace-nowrap tw:px-app-m tw:py-app-s tw:text-app-body tw:text-app-text tw:[border-top:0] tw:[border-right:1px_solid_var(--color-border)] tw:[border-bottom:0] tw:[border-left:0] tw:last:[border-right:0] tw:enabled:hover:bg-[var(--color-header-button)] tw:upto-small:p-app-xs';
+const WIZARD_STEP_NUMBER_CLASS_NAME =
+  'tw:flex tw:size-[24px] tw:shrink-0 tw:items-center tw:justify-center tw:rounded-[50%] tw:text-app-xsmall tw:font-bold';
 
 type Step = {
   label: string;
@@ -85,44 +89,55 @@ export default function PublishWizard(props: Props) {
   const panels = React.Children.toArray(children);
 
   return (
-    <div className="publish-wizard">
-      <div className="publish-wizard__header">
-        <div className="publish-wizard__steps">
+    <div className="tw:flex tw:flex-col">
+      <div className="tw:mb-app-m">
+        <div className="tw:flex tw:items-center tw:overflow-hidden tw:rounded-app tw:border tw:border-app-border tw:bg-app-card">
           {steps.map((step, i) => {
             const isBlocked = i > activeStep && i > firstInvalidStep;
             return (
               <button
                 key={i}
                 type="button"
-                className={classnames('publish-wizard__step', {
-                  'publish-wizard__step--active': i === activeStep,
-                  'publish-wizard__step--completed': i < activeStep,
-                  'publish-wizard__step--upcoming': i > activeStep,
-                  'publish-wizard__step--blocked': isBlocked,
-                })}
+                className={classnames(
+                  WIZARD_STEP_CLASS_NAME,
+                  i === activeStep ? 'tw:bg-[var(--color-header-button)] tw:font-bold' : 'tw:[background:none]',
+                  isBlocked ? 'tw:cursor-default tw:opacity-40' : 'tw:cursor-pointer'
+                )}
                 onClick={() => handleStepClick(i)}
                 disabled={isBlocked}
               >
-                <span className="publish-wizard__step-number">
+                <span
+                  className={classnames(
+                    WIZARD_STEP_NUMBER_CLASS_NAME,
+                    i < activeStep
+                      ? 'tw:bg-app-primary tw:text-white'
+                      : i === activeStep
+                        ? 'tw:bg-app-border tw:bg-[image:var(--color-odysee-gradient)] tw:text-white'
+                        : 'tw:bg-app-border tw:text-app-text-subtitle'
+                  )}
+                >
                   {i < activeStep ? <Icon icon={ICONS.COMPLETE} size={12} /> : i + 1}
                 </span>
-                <span className="publish-wizard__step-label">{__(step.label)}</span>
+                <span className="tw:upto-small:hidden">{__(step.label)}</span>
               </button>
             );
           })}
         </div>
 
         {uploadProgress !== null && uploadProgress !== undefined && uploadProgress < 100 && (
-          <div className="publish-wizard__upload-progress">
-            <div className="publish-wizard__upload-progress-bar" style={{ width: `${uploadProgress}%` }} />
+          <div className="tw:mt-[-1px] tw:h-[3px] tw:overflow-hidden tw:rounded-[0_0_var(--border-radius)_var(--border-radius)] tw:bg-app-border">
+            <div
+              className="tw:h-full tw:bg-[image:var(--color-odysee-gradient)] tw:[transition:width_0.3s_ease]"
+              style={{ width: `${uploadProgress}%` }}
+            />
           </div>
         )}
       </div>
 
-      <div className="publish-wizard__content">
+      <div className="tw:flex-1">
         <React.Suspense
           fallback={
-            <div className="publish-wizard__loading">
+            <div className="tw:flex tw:min-h-[12rem] tw:items-center tw:justify-center">
               <Spinner type="small" />
             </div>
           }
@@ -131,13 +146,13 @@ export default function PublishWizard(props: Props) {
         </React.Suspense>
       </div>
 
-      <div className="publish-wizard__footer">
-        <div className="publish-wizard__footer-left">
+      <div className="tw:mt-app-m tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-app-s tw:upto-small:mb-app-m">
+        <div className="tw:flex tw:items-center tw:gap-app-s">
           {!isFirstStep && <Button button="alt" label={__('Back')} onClick={handleBack} />}
         </div>
-        <div className="publish-wizard__footer-right">
+        <div className="tw:flex tw:items-center tw:gap-app-s">
           {isLastStep ? (
-            <div className="publish-wizard__publish-group">
+            <div className="tw:flex tw:items-center tw:[&>.button-surface--primary]:rounded-l-none tw:upto-xsmall:w-full tw:upto-xsmall:justify-center">
               {publishFooterLeft}
               <Button
                 button="primary"

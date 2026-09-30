@@ -6,6 +6,7 @@ import { Form } from 'component/common/form';
 import Card from 'component/common/card';
 import { useAppSelector } from 'redux/hooks';
 import { selectFollowedTags } from 'redux/selectors/tags';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 type Props = {
   onContinue: () => void;
@@ -22,7 +23,7 @@ function UserTagFollowIntro(props: Props) {
       actions={
         <React.Fragment>
           <Form onSubmit={onContinue}>
-            <div className="section__actions--between">
+            <div className={SECTION_CLASSES.actionsBetween}>
               <span />
               <Button
                 button={followedTags.length < 1 ? 'alt' : 'primary'}
@@ -31,7 +32,7 @@ function UserTagFollowIntro(props: Props) {
               />
             </div>
           </Form>
-          <div className="section__body">
+          <div className={SECTION_CLASSES.body}>
             <TagsSelect hideHeader limitShow={300} help={false} showClose={false} title={__('Follow new tags')} />
             {followingCount > 0 && (
               <Nag

@@ -15,6 +15,7 @@ import {
 } from 'redux/selectors/user';
 import { doUserInviteNew } from 'redux/actions/user';
 import { selectMyChannelClaims } from 'redux/selectors/claims';
+import { COLUMNS_CLASS, COLUMN_CLASS } from 'component/common/layout-classes';
 
 function lookupUrlByClaimName(name: string, channels: ChannelClaim[]) {
   const claim = channels.find((channel: ChannelClaim) => channel.name === name);
@@ -74,8 +75,8 @@ function InviteNew() {
   }, [topChannel, handleReferralChange]);
 
   return (
-    <div className={'columns'}>
-      <div className="column">
+    <div className={COLUMNS_CLASS}>
+      <div className={COLUMN_CLASS}>
         <Card
           title={__('Invites')}
           subtitle={
@@ -111,7 +112,7 @@ function InviteNew() {
           }
         />
       </div>
-      <div className="column">
+      <div className={COLUMN_CLASS}>
         <Card
           title={__('Invite by email')}
           subtitle={<I18nMessage tokens={{}}>Invite someone you know by email.</I18nMessage>}

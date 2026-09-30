@@ -1,0 +1,1 @@
+export const CHANNEL_NEW_PAGE_CLASS = String.raw`channelPage-new-wrapper tw:!ml-[calc(var(--side-nav-width--micro)*-1)] tw:!w-[calc(100%+var(--side-nav-width--micro))] tw:[&_.card\_\_body.card\_\_body--no-title_.button-surface--primary]:mb-app-m tw:[&_.card-fixed-bottom]:w-full tw:upto-small:!ml-0 tw:upto-small:!w-full`;

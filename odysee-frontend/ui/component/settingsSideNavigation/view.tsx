@@ -5,6 +5,19 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import classnames from 'classnames';
 import Button from 'component/button';
+import {
+  NAVIGATION_ABSOLUTE_CLASS,
+  NAVIGATION_CLASS,
+  NAVIGATION_LINK_CLASS,
+  NAVIGATION_LINKS_ABSOLUTE_CLASS,
+  NAVIGATION_LINKS_CLASS,
+  NAVIGATION_LINKS_MICRO_CLASS,
+  NAVIGATION_MICRO_CLASS,
+  NAVIGATION_SETTINGS_LINKS_CLASS,
+  NAVIGATION_WRAPPER_ABSOLUTE_CLASS,
+  NAVIGATION_WRAPPER_CLASS,
+  NAVIGATION_WRAPPER_MICRO_CLASS,
+} from 'component/sideNavigation/classes';
 import { useIsSmallScreen } from 'effects/use-screensize';
 type SideNavLink = {
   title: string;
@@ -89,21 +102,21 @@ export default function SettingsSideNavigation() {
 
   return (
     <div
-      className={classnames('navigation__wrapper', {
-        'navigation__wrapper--micro': microNavigation,
-        'navigation__wrapper--absolute': isAbsolute,
+      className={classnames(NAVIGATION_WRAPPER_CLASS, {
+        [NAVIGATION_WRAPPER_MICRO_CLASS]: microNavigation,
+        [NAVIGATION_WRAPPER_ABSOLUTE_CLASS]: isAbsolute,
       })}
     >
       <nav
         aria-label={'Sidebar'}
-        className={classnames('navigation', {
-          'navigation--micro': microNavigation,
+        className={classnames(NAVIGATION_CLASS, {
+          [NAVIGATION_MICRO_CLASS]: microNavigation,
         })}
       >
         <div>
           <ul
-            className={classnames('navigation-links navigation-links--settings', {
-              'navigation-links--micro': !sidebarOpen,
+            className={classnames(NAVIGATION_LINKS_CLASS, NAVIGATION_SETTINGS_LINKS_CLASS, {
+              [NAVIGATION_LINKS_MICRO_CLASS]: !sidebarOpen,
             })}
           >
             {SIDE_LINKS.map((linkProps) => {
@@ -114,7 +127,7 @@ export default function SettingsSideNavigation() {
                     label={__(linkProps.title)}
                     title={__(linkProps.title)}
                     icon={linkProps.icon}
-                    className={classnames('navigation-link', {})}
+                    className={NAVIGATION_LINK_CLASS}
                     onClick={getOnClickHandler(linkProps.section)}
                   />
                   {linkProps.extra}
@@ -127,9 +140,9 @@ export default function SettingsSideNavigation() {
 
       {isSmallScreen && sidebarOpen && (
         <>
-          <nav className={classnames('navigation--absolute')}>
+          <nav className={classnames(NAVIGATION_CLASS, NAVIGATION_ABSOLUTE_CLASS)}>
             <div>
-              <ul className="navigation-links--absolute">
+              <ul className={classnames(NAVIGATION_LINKS_CLASS, NAVIGATION_LINKS_ABSOLUTE_CLASS)}>
                 {SIDE_LINKS.map((linkProps) => {
                   const { link, route, ...passedProps } = linkProps;
                   return (
@@ -139,7 +152,7 @@ export default function SettingsSideNavigation() {
                         label={__(linkProps.title)}
                         title={__(linkProps.title)}
                         icon={linkProps.icon}
-                        className={classnames('navigation-link', {})}
+                        className={NAVIGATION_LINK_CLASS}
                         onClick={getOnClickHandler(linkProps.section)}
                       />
                       {linkProps.extra}

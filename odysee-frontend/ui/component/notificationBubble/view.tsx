@@ -5,6 +5,7 @@ import { buildUnseenCountStr } from 'util/notifications';
 import { useAppSelector } from 'redux/hooks';
 import { selectUnseenNotificationCount } from 'redux/selectors/notifications';
 import { selectUser } from 'redux/selectors/user';
+import { NOTIFICATION_BUBBLE_CLASSES as C } from './classes';
 type Props = {
   inline?: boolean;
 };
@@ -30,14 +31,14 @@ export default function NotificationBubble(props: Props) {
 
   return (
     <span
-      className={classnames('notification__bubble', {
-        'notification__bubble--inline': inline,
-        'notification__bubble-hidden': unseenCount === 0,
+      className={classnames(C.base, {
+        [C.inline]: inline,
+        [C.hidden]: unseenCount === 0,
       })}
     >
       <span
         className={classnames('notification__count', {
-          'notification__bubble--small': unseenCount > 9,
+          [C.small]: unseenCount > 9,
         })}
       >
         {buildUnseenCountStr(unseenCount)}

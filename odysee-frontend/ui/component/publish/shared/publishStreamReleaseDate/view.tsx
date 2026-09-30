@@ -1,4 +1,9 @@
 import React from 'react';
+import {
+  PUBLISH_DATE_PICKER_INPUT_CLASS,
+  PUBLISH_FORM_FIELD_CALENDAR_CLASS,
+  PUBLISH_FORM_FIELD_DATE_PICKER_CLASS,
+} from '../release-date-classes';
 import { FormField } from 'component/common/form';
 import DatePicker from 'react-datepicker';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -8,6 +13,8 @@ import { doUpdatePublishForm } from 'redux/actions/publish';
 import { selectClientSetting, selectLanguage } from 'redux/selectors/settings';
 import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
+import { FORM_FIELD_HINT_COMPACT_CLASS } from 'component/common/form-components/form-field-classes';
+import { PUBLISH_ROW_CLASS } from '../publish-row-classes';
 
 function linuxTimestampToDate(linuxTimestamp: number) {
   return new Date(linuxTimestamp * 1000);
@@ -74,7 +81,7 @@ const PublishStreamReleaseDate = (props: Props) => {
 
   return (
     <>
-      <div className="publish-row">
+      <div className={PUBLISH_ROW_CLASS}>
         <label
           htmlFor="date-picker-input"
           style={{
@@ -84,7 +91,7 @@ const PublishStreamReleaseDate = (props: Props) => {
           {__('When do you want to go live?')}
         </label>
 
-        <div className={'w-full flex flex-col mt-s md:mt-0 md:h-12 md:items-center md:flex-row'}>
+        <div className="tw:mt-app-s tw:flex tw:w-full tw:flex-col tw:small:mt-0 tw:small:h-12 tw:small:flex-row tw:small:items-center">
           <FormField
             type="radio"
             name="anytime"
@@ -94,7 +101,7 @@ const PublishStreamReleaseDate = (props: Props) => {
             label={__('Anytime')}
           />
 
-          <div className={'md:ml-m mt-s md:mt-0'}>
+          <div className="tw:mt-app-s tw:small:mt-0 tw:small:ml-app-m">
             <FormField
               type="radio"
               name="scheduled_time"
@@ -105,15 +112,15 @@ const PublishStreamReleaseDate = (props: Props) => {
             />
           </div>
           {publishLater && (
-            <div className="form-field-date-picker mb-0 controls md:ml-m">
+            <div className={`${PUBLISH_FORM_FIELD_DATE_PICKER_CLASS} controls tw:mb-0 tw:small:ml-app-m`}>
               <DatePicker
                 selected={releaseTime ? linuxTimestampToDate(releaseTime) : null}
                 onChange={onDateTimePickerChanged}
                 showTimeSelect
                 dateFormat={clock24h ? 'yyyy-MM-dd HH:mm' : 'yyyy-MM-dd h:mm aa'}
                 timeFormat={clock24h ? 'HH:mm' : 'h:mm aa'}
-                className="date-picker-input w-full md:w-auto mt-s md:mt-0"
-                calendarClassName="form-field-calendar"
+                className={`${PUBLISH_DATE_PICKER_INPUT_CLASS} tw:mt-app-s tw:w-full tw:small:mt-0 tw:small:w-auto`}
+                calendarClassName={PUBLISH_FORM_FIELD_CALENDAR_CLASS}
                 minDate={todayStart}
                 maxDate={new Date(9999, 11, 31)}
                 isClearable={false}
@@ -122,16 +129,7 @@ const PublishStreamReleaseDate = (props: Props) => {
           )}
         </div>
 
-        <p
-          className={'form-field__hint mt-m'}
-          style={{
-            fontSize: 'var(--font-xsmall)',
-            color: 'var(--color-text-subtitle)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--spacing-xs)',
-          }}
-        >
+        <p className={`${FORM_FIELD_HINT_COMPACT_CLASS} tw:mt-app-m tw:flex tw:items-center tw:gap-app-xs`}>
           <Icon icon={ICONS.INFO} size={12} />
           <span>{helpText}</span>
         </p>

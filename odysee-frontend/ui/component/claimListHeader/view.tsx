@@ -11,6 +11,7 @@ import usePersistentUserParam from 'effects/use-persistent-user-param';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { FormField } from 'component/common/form';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS, BUTTON_TOGGLE_MORE_CLASS } from 'component/button/classes';
 import { toCapitalCase } from 'util/string';
 import SEARCHABLE_LANGUAGES from 'constants/searchable_languages';
 import { ClaimSearchFilterContext } from 'contexts/claimSearchFilterContext';
@@ -19,6 +20,7 @@ import debounce from 'util/debounce';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClientSetting, selectShowMatureContent, selectLanguage } from 'redux/selectors/settings';
 import { doSetClientSetting as doSetClientSettingAction } from 'redux/actions/settings';
+import { CLAIM_LIST_HEADER_CLASSES as C } from './classes';
 type Props = {
   defaultTags: string;
   tags?: string;
@@ -251,11 +253,11 @@ function ClaimListHeader(props: Props) {
 
   return (
     <>
-      <div className="claim-search__wrapper clh__wrapper">
-        <div className="claim-search__header">
-          <div className="claim-search__top">
+      <div className={C.wrapper}>
+        <div className={C.header}>
+          <div className={C.top}>
             {!hideFilters && (
-              <div className="claim-search__menu-group">
+              <div className={C.menuGroup}>
                 {CS.ORDER_BY_TYPES.map((type) => (
                   <Button
                     key={type}
@@ -266,8 +268,8 @@ function ClaimListHeader(props: Props) {
                         value: type,
                       })
                     }
-                    className={classnames(`button-toggle button-toggle--${type}`, {
-                      'button-toggle--active': orderParam === type,
+                    className={classnames(BUTTON_TOGGLE_CLASS, `button-toggle--${type}`, {
+                      [BUTTON_TOGGLE_ACTIVE_CLASS]: orderParam === type,
                     })}
                     disabled={!!orderBy}
                     icon={toCapitalCase(type)}
@@ -277,7 +279,7 @@ function ClaimListHeader(props: Props) {
                 ))}
               </div>
             )}
-            <div className="claim-search__menu-group">
+            <div className={C.menuGroup}>
               {tileLayout !== undefined && !hideLayoutButton && (
                 <>
                   <Button
@@ -285,8 +287,8 @@ function ClaimListHeader(props: Props) {
                       doSetClientSetting(SETTINGS.TILE_LAYOUT, true);
                     }}
                     button="alt"
-                    className={classnames(`button-toggle button-toggle--top`, {
-                      'button-toggle--active': tileLayout,
+                    className={classnames(BUTTON_TOGGLE_CLASS, 'button-toggle--top', {
+                      [BUTTON_TOGGLE_ACTIVE_CLASS]: tileLayout,
                     })}
                     aria-label={__('Change to tile layout')}
                     icon={ICONS.VIEW_TILES}
@@ -296,8 +298,8 @@ function ClaimListHeader(props: Props) {
                       doSetClientSetting(SETTINGS.TILE_LAYOUT, false);
                     }}
                     button="alt"
-                    className={classnames(`button-toggle button-toggle--top`, {
-                      'button-toggle--active': !tileLayout,
+                    className={classnames(BUTTON_TOGGLE_CLASS, 'button-toggle--top', {
+                      [BUTTON_TOGGLE_ACTIVE_CLASS]: !tileLayout,
                     })}
                     aria-label={__('Change to list layout')}
                     icon={ICONS.VIEW_LIST}
@@ -307,7 +309,7 @@ function ClaimListHeader(props: Props) {
             </div>
             <>
               {showHideAnonymous && (
-                <div className="claim-search__menu-group hide-anonymous-checkbox">
+                <div className={`${C.menuGroup} ${C.hideAnonymous}`}>
                   <FormField
                     label={__('Hide anonymous')}
                     name="hide_anonymous"
@@ -318,14 +320,14 @@ function ClaimListHeader(props: Props) {
                 </div>
               )}
             </>
-            <div className="claim-search__menu-group stretch">
+            <div className={`${C.menuGroup} ${C.menuGroupStretch}`}>
               {!hideAdvancedFilter && (
                 <Button
                   button="alt"
                   aria-label={__('More')}
-                  className={classnames(`button-toggle button-toggle--top button-toggle--more`, {
-                    'button-toggle--custom': isFiltered(),
-                    'button-toggle--active button-toggle--bottom-arrow': expanded,
+                  className={classnames(BUTTON_TOGGLE_CLASS, 'button-toggle--top', BUTTON_TOGGLE_MORE_CLASS, {
+                    [C.toggleCustom]: isFiltered(),
+                    [`${BUTTON_TOGGLE_ACTIVE_CLASS} ${C.toggleBottomArrow}`]: expanded,
                   })}
                   icon={ICONS.SLIDERS}
                   onClick={() => setExpanded(!expanded)}
@@ -335,21 +337,21 @@ function ClaimListHeader(props: Props) {
               {filterCtx?.liftUpTagSearch && <TagSearch standalone urlParams={urlParams} handleChange={handleChange} />}
             </div>
           </div>
-          {meta && !isMobile && <div className="section__actions--no-margin">{meta}</div>}
+          {meta && !isMobile && <div className={C.meta}>{meta}</div>}
         </div>
 
         <div
-          className={classnames('claim-search__filters-wrapper', {
-            'claim-search__filters-wrapper-expanded': expanded,
+          className={classnames(C.filtersWrapper, {
+            [C.filtersWrapperExpanded]: expanded,
           })}
         >
-          <div className="claim-search__filters">
-            <div className="claim-search__menus">
+          <div className={C.filters}>
+            <div className={C.menus}>
               {/* FRESHNESS FIELD */}
               {orderParam === CS.ORDER_BY_TOP && (
-                <div className="claim-search__input-container">
+                <div className={C.inputContainer}>
                   <FormField
-                    className={classnames('claim-search__dropdown', {
+                    className={classnames(C.dropdown, {
                       'claim-search__dropdown--selected': freshnessParam !== defaultFreshness,
                     })}
                     type="select"
@@ -385,12 +387,12 @@ function ClaimListHeader(props: Props) {
               {/* CONTENT_TYPES FIELD - display using same logic as showDuration */}
               {showDuration && (
                 <div
-                  className={classnames('claim-search__input-container', {
+                  className={classnames(C.inputContainer, {
                     'claim-search__input-container--selected': contentTypeParam,
                   })}
                 >
                   <FormField
-                    className={classnames('claim-search__dropdown', {
+                    className={classnames(C.dropdown, {
                       'claim-search__dropdown--selected': contentTypeParam,
                     })}
                     type="select"
@@ -430,9 +432,9 @@ function ClaimListHeader(props: Props) {
               {/* DURATIONS FIELD */}
               {showDuration && (
                 <>
-                  <div className={'claim-search__input-container'}>
+                  <div className={C.inputContainer}>
                     <FormField
-                      className={classnames('claim-search__dropdown', {
+                      className={classnames(C.dropdown, {
                         'claim-search__dropdown--selected': durationParam,
                       })}
                       label={__('Duration --[length of audio or video]--')}
@@ -467,8 +469,8 @@ function ClaimListHeader(props: Props) {
                     </FormField>
                   </div>
                   {durationParam === CS.DURATION.CUSTOM && (
-                    <div className="claim-search__duration-inputs-container">
-                      <div className="claim-search__input-container">
+                    <div className={C.durationInputs}>
+                      <div className={C.inputContainer}>
                         <FormField
                           label={__('Min Minutes')}
                           type="number"
@@ -480,7 +482,7 @@ function ClaimListHeader(props: Props) {
                           }}
                         />
                       </div>
-                      <div className="claim-search__input-container">
+                      <div className={C.inputContainer}>
                         <FormField
                           label={__('Max Minutes')}
                           type="number"
@@ -500,9 +502,9 @@ function ClaimListHeader(props: Props) {
               {/* LANGUAGE FIELD - hidden for now */}
 
               {/* PAID FIELD */}
-              <div className={'claim-search__input-container'}>
+              <div className={C.inputContainer}>
                 <FormField
-                  className={classnames('claim-search__dropdown', {
+                  className={classnames(C.dropdown, {
                     'claim-search__dropdown--selected':
                       feeAmountParam === CS.FEE_AMOUNT_ONLY_FREE || feeAmountParam === CS.FEE_AMOUNT_ONLY_PAID,
                   })}
@@ -528,9 +530,9 @@ function ClaimListHeader(props: Props) {
 
               {/* SORT FIELD */}
               {orderParam === CS.ORDER_BY_NEW && (
-                <div className={'claim-search__input-container'}>
+                <div className={C.inputContainer}>
                   <FormField
-                    className={classnames('claim-search__dropdown', {
+                    className={classnames(C.dropdown, {
                       'claim-search__dropdown--selected': sortByParam,
                     })}
                     label={__('Sort By')}
@@ -556,32 +558,27 @@ function ClaimListHeader(props: Props) {
               )}
 
               {channelIdsInUrl && (
-                <div className={'claim-search__input-container'}>
+                <div className={C.inputContainer}>
                   <label>{__('Advanced Filters from URL')}</label>
-                  <Button
-                    button="alt"
-                    className="claim-search__filter-button"
-                    label={__('Clear')}
-                    onClick={handleAdvancedReset}
-                  />
+                  <Button button="alt" className={C.filterButton} label={__('Clear')} onClick={handleAdvancedReset} />
                 </div>
               )}
             </div>
-            <div className="claim-search__menus">
+            <div className={C.menus}>
               {filterCtx.repost && (
-                <div className="claim-search__input-container">
+                <div className={C.inputContainer}>
                   <AdditionalFilters filterCtx={filterCtx} contentType={contentTypeParam} />
                 </div>
               )}
               {!filterCtx.isChannelSearch && (
-                <div className="claim-search__input-container">
+                <div className={C.inputContainer}>
                   {!filterCtx?.liftUpTagSearch && <TagSearch urlParams={urlParams} handleChange={handleChange} />}
                 </div>
               )}
             </div>
           </div>
         </div>
-        {meta && isMobile && <div className="section__actions--no-margin">{meta}</div>}
+        {meta && isMobile && <div className={C.meta}>{meta}</div>}
       </div>
 
       {hasMatureTags && hiddenNsfwMessage}

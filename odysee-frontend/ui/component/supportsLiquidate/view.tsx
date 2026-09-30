@@ -1,11 +1,13 @@
 import * as ICONS from 'constants/icons';
 import React, { useEffect, useState } from 'react';
 import CreditAmount from 'component/common/credit-amount';
+import { SUPPORTS_RANGE_LABEL_CLASS } from './classes';
 import Button from 'component/button';
 import { Form, FormField } from 'component/common/form';
 import Card from 'component/common/card';
 import I18nMessage from 'component/i18nMessage';
 import ErrorText from 'component/common/error-text';
+import { ERROR_NO_OVERFLOW_CLASS } from 'component/common/error-classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   selectBalance,
@@ -17,6 +19,7 @@ import {
 } from 'redux/selectors/wallet';
 import { makeSelectClaimForUri } from 'redux/selectors/claims';
 import { doSupportAbandonForClaim } from 'redux/actions/wallet';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 type Props = {
   uri: string;
@@ -136,7 +139,7 @@ const SupportsLiquidate = (props: Props) => {
       actions={
         <React.Fragment>
           {abandonClaimError ? (
-            <div className="error__wrapper--no-overflow">
+            <div className={ERROR_NO_OVERFLOW_CLASS}>
               <ErrorText>{abandonClaimError}</ErrorText>
             </div>
           ) : (
@@ -166,7 +169,7 @@ const SupportsLiquidate = (props: Props) => {
                       value={sliderPosition}
                       onChange={(e) => handleChange((e.target.value / 100) * previewBalance, true)}
                     />
-                    <label className="range__label">
+                    <label className={SUPPORTS_RANGE_LABEL_CLASS}>
                       <span>0</span>
                       <span>{!isNaN(previewBalance) && Number(previewBalance / 2).toFixed(2)}</span>
                       <span>{!isNaN(previewBalance) && Number(previewBalance).toFixed(2)}</span>
@@ -182,7 +185,7 @@ const SupportsLiquidate = (props: Props) => {
               </div>
             </>
           )}
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               disabled={error}
               button="primary"

@@ -5,6 +5,7 @@ import * as SETTINGS from 'constants/settings';
 import React from 'react';
 import ClaimListDiscover from 'component/claimListDiscover';
 import Page from 'component/page';
+import { PAGE_TITLE_CLASS } from 'component/page/classes';
 import Button from 'component/button';
 import Icon from 'component/common/icon';
 import { filterActiveLivestreamUris } from 'util/livestream';
@@ -22,6 +23,7 @@ import {
 import { selectSubscriptionIds } from 'redux/selectors/subscriptions';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { doFetchAllActiveLivestreamsForQuery as doFetchAllActiveLivestreamsForQueryAction } from 'redux/actions/livestream';
+import { CHANNELS_FOLLOWING_PAGE_CLASS } from './classes';
 
 const ChannelsFollowingDiscoverPage = lazyImport(
   () =>
@@ -58,7 +60,7 @@ function ChannelsFollowingPage() {
       <ChannelsFollowingDiscoverPage />
     </React.Suspense>
   ) : (
-    <Page noFooter fullWidthPage={tileLayout} className="main__channelsFollowing">
+    <Page noFooter fullWidthPage={tileLayout} className={CHANNELS_FOLLOWING_PAGE_CLASS}>
       {!fetchingActiveLivestreams && (
         <>
           <UpcomingClaims
@@ -73,7 +75,7 @@ function ChannelsFollowingPage() {
             streamType={CS.CONTENT_ALL}
             tileLayout={tileLayout}
             headerLabel={
-              <h1 className="page__title">
+              <h1 className={PAGE_TITLE_CLASS}>
                 <Icon icon={ICONS.SUBSCRIBE} />
                 <label>{__('Following')}</label>
               </h1>

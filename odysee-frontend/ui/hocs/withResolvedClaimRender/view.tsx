@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import Comments from 'comments';
 import Spinner from 'component/spinner';
@@ -23,6 +24,7 @@ import { selectUser, selectUserVerifiedEmail } from 'redux/selectors/user';
 import { doResolveUri } from 'redux/actions/claims';
 import { doBeginPublish } from 'redux/actions/publish';
 import { doOpenModal } from 'redux/actions/app';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 type Props = {
   uri: string;
@@ -79,7 +81,7 @@ const withResolvedClaimRender = (ClaimRenderComponent: FunctionalComponentParam)
       () =>
         ({ text }: { text: string }) => (
           <Wrapper>
-            <div className="main--empty">
+            <div className={PAGE_MAIN_EMPTY_CLASS}>
               <Spinner delayed={delayed} text={text} />
             </div>
           </Wrapper>
@@ -124,11 +126,11 @@ const withResolvedClaimRender = (ClaimRenderComponent: FunctionalComponentParam)
 
       return (
         <Wrapper>
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Yrbl
               title={isChannel ? __('Channel Not Found') : __('No Content Found')}
               subtitle={
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   {!isChannel && (
                     <Button
                       button="primary" // label={__(isChannel ? 'Claim this handle' : 'Publish Something')} -- only support non-channels for now
@@ -162,7 +164,7 @@ const withResolvedClaimRender = (ClaimRenderComponent: FunctionalComponentParam)
       if (!gblAvailable) {
         return (
           <Wrapper>
-            <div className="main--empty">
+            <div className={PAGE_MAIN_EMPTY_CLASS}>
               <Yrbl
                 title={__('Oops! Something went wrong.')}
                 subtitle={
@@ -189,7 +191,7 @@ const withResolvedClaimRender = (ClaimRenderComponent: FunctionalComponentParam)
 
       return (
         <Wrapper>
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Yrbl
               title={__(isChannel ? 'Channel unavailable' : 'Content unavailable')}
               subtitle={__('Reach out to the creator to obtain the full URL for access.')}
@@ -205,7 +207,7 @@ const withResolvedClaimRender = (ClaimRenderComponent: FunctionalComponentParam)
       if (geoRestriction) {
         return (
           <Wrapper>
-            <div className="main--empty">
+            <div className={PAGE_MAIN_EMPTY_CLASS}>
               <Yrbl
                 title={__(isChannel ? 'Channel unavailable' : 'Content unavailable')}
                 subtitle={geoRestriction.message ? __(geoRestriction.message) : ''}
@@ -223,7 +225,7 @@ const withResolvedClaimRender = (ClaimRenderComponent: FunctionalComponentParam)
       if (geoRestriction) {
         return (
           <Wrapper>
-            <div className="main--empty">
+            <div className={PAGE_MAIN_EMPTY_CLASS}>
               <Yrbl
                 title={__(isChannel ? 'Channel unavailable' : 'Content unavailable')}
                 subtitle={geoRestriction.message ? __(geoRestriction.message) : ''}
@@ -238,14 +240,14 @@ const withResolvedClaimRender = (ClaimRenderComponent: FunctionalComponentParam)
       if (isClaimBlackListed) {
         return (
           <Wrapper>
-            <div className="main--empty">
+            <div className={PAGE_MAIN_EMPTY_CLASS}>
               <Card
                 title={uri}
                 subtitle={__(
                   'In response to a complaint we received under the US Digital Millennium Copyright Act, we have blocked access to this content from our applications. Content may also be blocked due to DMCA Red Flag rules which are obvious copyright violations we come across, are discussed in public channels, or reported to us.'
                 )}
                 actions={
-                  <div className="section__actions">
+                  <div className={SECTION_CLASSES.actions}>
                     <Button button="link" href="https://help.odysee.tv/copyright/" label={__('Read More')} />
                   </div>
                 }
@@ -258,7 +260,7 @@ const withResolvedClaimRender = (ClaimRenderComponent: FunctionalComponentParam)
       if (isClaimFiltered) {
         return (
           <Wrapper>
-            <div className="main--empty">
+            <div className={PAGE_MAIN_EMPTY_CLASS}>
               <Card
                 title={uri}
                 subtitle={__('This content violates the terms and conditions of Odysee and has been filtered.')}

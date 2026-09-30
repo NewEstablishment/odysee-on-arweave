@@ -11,6 +11,8 @@ import Spinner from 'component/spinner';
 import { useAppDispatch } from 'redux/hooks';
 import { doClearEmailEntry, doUserFetch } from 'redux/actions/user';
 import { doToast } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PAGE_MAIN_SIGN_IN_CLASS } from 'component/page/classes';
 
 function UserPasswordReset() {
   const dispatch = useAppDispatch();
@@ -63,7 +65,7 @@ function UserPasswordReset() {
   }
 
   return (
-    <section className="main__sign-in">
+    <section className={PAGE_MAIN_SIGN_IN_CLASS}>
       <Card
         title={__('Choose a new password')}
         subtitle={__('Setting a new password for %email%', {
@@ -81,7 +83,7 @@ function UserPasswordReset() {
                 onChange={(e) => setPassword(e.target.value)}
               />
 
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button
                   button="primary"
                   type="submit"

@@ -42,6 +42,22 @@ import { formatLbryUrlForWeb, generateShareUrl } from 'util/url';
 const CTX_SHARE_DOMAIN = 'https://odysee.com';
 import { generateEmbedUrl, generateEmbedIframeData } from 'util/web';
 import { doToast } from 'redux/actions/notifications';
+import classnames from 'classnames';
+import { CAST_CLASSES } from './cast-classes';
+import { CHAPTER_CLASSES } from './chapter-classes';
+import { CLICK_TO_PLAY_CLASS, CLICK_TO_PLAY_FLOATING_CLASS } from './components/interaction-overlay-classes';
+import { CONTEXT_MENU_CLASSES } from './context-menu-classes';
+import { EMBED_HEADER_CLASSES } from './embed-header-classes';
+import { LIVE_BUTTON_CLASSES } from './live-button-classes';
+import { P2P_CLASSES } from './p2p-classes';
+import { PLAYER_BUTTON_CLASSES } from './player-button-classes';
+import { VOLUME_CONTROL_CLASSES } from './volume-control-classes';
+import { CONTROL_LAYOUT_CLASSES } from './control-layout-classes';
+import { MOBILE_CONTROL_LAYOUT_CLASSES } from './mobile-control-layout-classes';
+import { SLIDER_PREVIEW_CLASSES } from './slider-preview-classes';
+import { PROGRESS_CONTROL_CLASSES } from './progress-control-classes';
+import { MEDIA_SETTINGS_MENU_CLASSES } from './settings-menu-classes';
+import { PLAYER_SKIN_CLASSES } from './skin-classes';
 
 // HLS.js attaches these properties to media elements at runtime
 interface HlsMediaElement extends HTMLMediaElement {
@@ -65,6 +81,24 @@ const OdyseeCast = (props: React.SVGProps<SVGSVGElement>) => (
     <path d="M2 8v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5" />
     <path d="M2 16a5 5 0 0 1 5 5M2 12a9 9 0 0 1 9 9" />
     <circle cx={2} cy={20} r={1.5} fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const OdyseeTheater = ({ active = false }: { active?: boolean }) => (
+  <svg
+    className={classnames('media-icon', PLAYER_BUTTON_CLASSES.theaterIcon)}
+    width={19}
+    height={19}
+    fill="none"
+    stroke="#fff"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    strokeWidth={2}
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+  >
+    <rect width={20} height={18} x={2} y={3} rx={2} ry={2} />
+    <path fill="#fff" d={active ? 'M6 7h7v4H6z' : 'M6 7h12v7H6z'} />
   </svg>
 );
 
@@ -121,33 +155,36 @@ function CastProgressBar({ castState, castActions }) {
   return (
     <div
       ref={trackRef}
-      className="media-slider media-slider--time odysee-time-slider odysee-cast-slider"
+      className={classnames('media-slider media-slider--time', PROGRESS_CONTROL_CLASSES.slider, CAST_CLASSES.slider)}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
       style={{ cursor: 'pointer' }}
     >
-      <div className="media-slider__track odysee-slider__track">
-        <div className="media-slider__fill odysee-slider__fill" style={{ width: `${displayFrac * 100}%` }} />
+      <div className={classnames('media-slider__track', PROGRESS_CONTROL_CLASSES.track, CAST_CLASSES.sliderTrack)}>
+        <div
+          className={classnames('media-slider__fill', PROGRESS_CONTROL_CLASSES.fill, CAST_CLASSES.sliderFill)}
+          style={{ width: `${displayFrac * 100}%` }}
+        />
         {hoverFrac !== null && (
-          <div className="odysee-cast-slider__hover-fill" style={{ width: `${hoverFrac * 100}%` }} />
+          <div className={CAST_CLASSES.sliderHoverFill} style={{ width: `${hoverFrac * 100}%` }} />
         )}
       </div>
       <div
-        className="media-slider__thumb odysee-slider__thumb"
+        className={classnames('media-slider__thumb', PROGRESS_CONTROL_CLASSES.thumb, CAST_CLASSES.sliderThumb)}
         style={{ left: `${displayFrac * 100}%`, display: 'block' }}
       />
       {hoverFrac !== null && (
         <div
-          className="odysee-slider-preview"
+          className={SLIDER_PREVIEW_CLASSES.root}
           style={{
             position: 'absolute',
             left: `${hoverFrac * 100}%`,
             transform: 'translateX(-50%)',
           }}
         >
-          <span className="odysee-slider-preview__time">{formatCastTime(hoverFrac * castState.duration)}</span>
+          <span className={SLIDER_PREVIEW_CLASSES.time}>{formatCastTime(hoverFrac * castState.duration)}</span>
         </div>
       )}
     </div>
@@ -186,11 +223,10 @@ function CastVolumeSlider({ castState, castActions }) {
   return (
     <div
       ref={trackRef}
-      className="media-slider media-volume-slider"
+      className={classnames('media-slider', VOLUME_CONTROL_CLASSES.slider)}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      style={{ cursor: 'pointer' }}
     >
       <div className="media-slider__track">
         <div className="media-slider__fill" style={{ width: `${castState.volume * 100}%` }} />
@@ -458,6 +494,16 @@ function useQualityLevels({
   };
 }
 
+function SettingsToggle({ on }: { on: boolean }) {
+  return (
+    <span className={classnames(MEDIA_SETTINGS_MENU_CLASSES.toggle, on && MEDIA_SETTINGS_MENU_CLASSES.toggleOn)}>
+      <span
+        className={classnames(MEDIA_SETTINGS_MENU_CLASSES.toggleKnob, on && MEDIA_SETTINGS_MENU_CLASSES.toggleKnobOn)}
+      />
+    </span>
+  );
+}
+
 function SettingsMenuContent({
   isMarkdownOrComment,
   isLivestream,
@@ -493,8 +539,7 @@ function SettingsMenuContent({
   );
 
   const isShorts =
-    !!document.querySelector('.shorts-page__container') ||
-    !!document.querySelector('.content__viewer--shorts-floating');
+    !!document.querySelector('.shorts-page__container') || !!document.querySelector('[data-floating-shorts-player]');
   const [looped, setLooped] = usePersistedState('video-loop', false);
   React.useEffect(() => {
     if (media) media.loop = looped;
@@ -537,10 +582,10 @@ function SettingsMenuContent({
 
   if (view === 'quality') {
     return (
-      <div key="quality" className="media-settings-menu">
-        <button type="button" className="media-settings-menu__back" onClick={() => setView('main')}>
+      <div key="quality" className={MEDIA_SETTINGS_MENU_CLASSES.menu}>
+        <button type="button" className={MEDIA_SETTINGS_MENU_CLASSES.back} onClick={() => setView('main')}>
           <svg
-            className="media-settings-menu__back-icon"
+            className={MEDIA_SETTINGS_MENU_CLASSES.backIcon}
             width={12}
             height={12}
             viewBox="0 0 24 24"
@@ -561,9 +606,12 @@ function SettingsMenuContent({
             <button
               key={level.index}
               type="button"
-              className={`media-settings-menu__option ${
-                currentLevel === level.index ? 'media-settings-menu__option--selected' : ''
-              }`}
+              className={classnames(
+                MEDIA_SETTINGS_MENU_CLASSES.option,
+                currentLevel === level.index
+                  ? MEDIA_SETTINGS_MENU_CLASSES.optionSelected
+                  : MEDIA_SETTINGS_MENU_CLASSES.optionHover
+              )}
               onClick={() => {
                 selectQuality(level.index);
                 setView('main');
@@ -575,9 +623,10 @@ function SettingsMenuContent({
         {!isLivestream && quality.hasOriginalSource && (
           <button
             type="button"
-            className={`media-settings-menu__option ${
-              currentLevel === -2 ? 'media-settings-menu__option--selected' : ''
-            }`}
+            className={classnames(
+              MEDIA_SETTINGS_MENU_CLASSES.option,
+              currentLevel === -2 ? MEDIA_SETTINGS_MENU_CLASSES.optionSelected : MEDIA_SETTINGS_MENU_CLASSES.optionHover
+            )}
             onClick={() => {
               selectQuality(-2);
               setView('main');
@@ -588,9 +637,10 @@ function SettingsMenuContent({
         )}
         <button
           type="button"
-          className={`media-settings-menu__option ${
-            currentLevel === -1 ? 'media-settings-menu__option--selected' : ''
-          }`}
+          className={classnames(
+            MEDIA_SETTINGS_MENU_CLASSES.option,
+            currentLevel === -1 ? MEDIA_SETTINGS_MENU_CLASSES.optionSelected : MEDIA_SETTINGS_MENU_CLASSES.optionHover
+          )}
           onClick={() => {
             selectQuality(-1);
             setView('main');
@@ -604,10 +654,10 @@ function SettingsMenuContent({
 
   if (view === 'speed') {
     return (
-      <div key="speed" className="media-settings-menu">
-        <button type="button" className="media-settings-menu__back" onClick={() => setView('main')}>
+      <div key="speed" className={MEDIA_SETTINGS_MENU_CLASSES.menu}>
+        <button type="button" className={MEDIA_SETTINGS_MENU_CLASSES.back} onClick={() => setView('main')}>
           <svg
-            className="media-settings-menu__back-icon"
+            className={MEDIA_SETTINGS_MENU_CLASSES.backIcon}
             width={12}
             height={12}
             viewBox="0 0 24 24"
@@ -625,7 +675,10 @@ function SettingsMenuContent({
           <button
             key={r}
             type="button"
-            className={`media-settings-menu__option ${r === rate ? 'media-settings-menu__option--selected' : ''}`}
+            className={classnames(
+              MEDIA_SETTINGS_MENU_CLASSES.option,
+              r === rate ? MEDIA_SETTINGS_MENU_CLASSES.optionSelected : MEDIA_SETTINGS_MENU_CLASSES.optionHover
+            )}
             onClick={() => handleSelectRate(r)}
           >
             {`${r}x`}
@@ -636,11 +689,11 @@ function SettingsMenuContent({
   }
 
   return (
-    <div key="main" className="media-settings-menu">
+    <div key="main" className={MEDIA_SETTINGS_MENU_CLASSES.menu}>
       {!isMobileDevice && !isExternalEmbedPlayback && !isShorts && (
-        <button type="button" className="media-settings-menu__item" onClick={handleShowShortcuts}>
+        <button type="button" className={MEDIA_SETTINGS_MENU_CLASSES.item} onClick={handleShowShortcuts}>
           <svg
-            className="media-settings-menu__icon"
+            className={MEDIA_SETTINGS_MENU_CLASSES.icon}
             width={16}
             height={16}
             viewBox="0 0 24 24"
@@ -653,23 +706,26 @@ function SettingsMenuContent({
             <rect x={2} y={4} width={20} height={16} rx={2} />
             <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
           </svg>
-          <span className="media-settings-menu__label">{__('Keyboard shortcuts')}</span>
+          <span className={MEDIA_SETTINGS_MENU_CLASSES.label}>{__('Keyboard shortcuts')}</span>
         </button>
       )}
       {!isMobileDevice && (
-        <button type="button" className="media-settings-menu__item" onClick={handleSnapshot}>
-          <OdyseeCamera className="media-settings-menu__icon" size={16} color="currentColor" />
-          <span className="media-settings-menu__label">{__('Take snapshot')}</span>
+        <button type="button" className={MEDIA_SETTINGS_MENU_CLASSES.item} onClick={handleSnapshot}>
+          <OdyseeCamera className={MEDIA_SETTINGS_MENU_CLASSES.icon} size={16} color="currentColor" />
+          <span className={MEDIA_SETTINGS_MENU_CLASSES.label}>{__('Take snapshot')}</span>
         </button>
       )}
       {!isExternalEmbedPlayback && (
         <button
           type="button"
-          className={`media-settings-menu__item ${isFloating ? 'media-settings-menu__item--disabled' : ''}`}
+          className={classnames(
+            MEDIA_SETTINGS_MENU_CLASSES.item,
+            isFloating && MEDIA_SETTINGS_MENU_CLASSES.itemDisabled
+          )}
           onClick={isFloating ? undefined : handleToggleFloating}
         >
           <svg
-            className="media-settings-menu__icon"
+            className={MEDIA_SETTINGS_MENU_CLASSES.icon}
             width={16}
             height={16}
             viewBox="0 0 24 24"
@@ -683,16 +739,14 @@ function SettingsMenuContent({
             <rect x="2" y="3" width="20" height="14" rx="2" />
             <rect x="7.5" y="6.5" width="9" height="7" rx="1" fill="currentColor" stroke="none" />
           </svg>
-          <span className="media-settings-menu__label">{__('Floating Player')}</span>
-          <span className={`media-settings-toggle ${localFloating ? 'media-settings-toggle--on' : ''}`}>
-            <span className="media-settings-toggle__knob" />
-          </span>
+          <span className={MEDIA_SETTINGS_MENU_CLASSES.label}>{__('Floating Player')}</span>
+          <SettingsToggle on={localFloating} />
         </button>
       )}
       {!isExternalEmbedPlayback && (
-        <button type="button" className="media-settings-menu__item" onClick={handleToggleAutoplay}>
+        <button type="button" className={MEDIA_SETTINGS_MENU_CLASSES.item} onClick={handleToggleAutoplay}>
           <svg
-            className="media-settings-menu__icon"
+            className={MEDIA_SETTINGS_MENU_CLASSES.icon}
             width={16}
             height={16}
             viewBox="0 0 24 24"
@@ -706,33 +760,27 @@ function SettingsMenuContent({
             <circle cx="12" cy="12" r="10" />
             <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
           </svg>
-          <span className="media-settings-menu__label">{__('Autoplay')}</span>
-          <span className={`media-settings-toggle ${localAutoplay ? 'media-settings-toggle--on' : ''}`}>
-            <span className="media-settings-toggle__knob" />
-          </span>
+          <span className={MEDIA_SETTINGS_MENU_CLASSES.label}>{__('Autoplay')}</span>
+          <SettingsToggle on={localAutoplay} />
         </button>
       )}
       {!isExternalEmbedPlayback && !isMarkdownOrComment && onToggleAutoplayNext && !isShorts && (
-        <button type="button" className="media-settings-menu__item" onClick={handleToggleAutoplayNext}>
-          <OdyseeAutoplayNext className="media-settings-menu__icon" size={16} />
-          <span className="media-settings-menu__label">{__('Autoplay Next')}</span>
-          <span className={`media-settings-toggle ${localAutoplayNext ? 'media-settings-toggle--on' : ''}`}>
-            <span className="media-settings-toggle__knob" />
-          </span>
+        <button type="button" className={MEDIA_SETTINGS_MENU_CLASSES.item} onClick={handleToggleAutoplayNext}>
+          <OdyseeAutoplayNext className={MEDIA_SETTINGS_MENU_CLASSES.icon} size={16} />
+          <span className={MEDIA_SETTINGS_MENU_CLASSES.label}>{__('Autoplay Next')}</span>
+          <SettingsToggle on={localAutoplayNext} />
         </button>
       )}
       {!isExternalEmbedPlayback && !isShorts && (
-        <button type="button" className="media-settings-menu__item" onClick={handleToggleLoop}>
-          <OdyseeRepeat className="media-settings-menu__icon" size={16} color="currentColor" />
-          <span className="media-settings-menu__label">{__('Loop')}</span>
-          <span className={`media-settings-toggle ${looped ? 'media-settings-toggle--on' : ''}`}>
-            <span className="media-settings-toggle__knob" />
-          </span>
+        <button type="button" className={MEDIA_SETTINGS_MENU_CLASSES.item} onClick={handleToggleLoop}>
+          <OdyseeRepeat className={MEDIA_SETTINGS_MENU_CLASSES.icon} size={16} color="currentColor" />
+          <span className={MEDIA_SETTINGS_MENU_CLASSES.label}>{__('Loop')}</span>
+          <SettingsToggle on={looped} />
         </button>
       )}
-      <button type="button" className="media-settings-menu__item" onClick={() => setView('speed')}>
+      <button type="button" className={MEDIA_SETTINGS_MENU_CLASSES.item} onClick={() => setView('speed')}>
         <svg
-          className="media-settings-menu__icon"
+          className={MEDIA_SETTINGS_MENU_CLASSES.icon}
           width={16}
           height={16}
           viewBox="0 0 24 24"
@@ -746,18 +794,18 @@ function SettingsMenuContent({
           <path d="M12 12l4-4" />
           <circle cx={12} cy={12} r={1.5} fill="currentColor" stroke="none" />
         </svg>
-        <span className="media-settings-menu__label">{__('Playback Speed')}</span>
-        <span className="media-settings-menu__value">{rateLabel}</span>
+        <span className={MEDIA_SETTINGS_MENU_CLASSES.label}>{__('Playback Speed')}</span>
+        <span className={MEDIA_SETTINGS_MENU_CLASSES.value}>{rateLabel}</span>
       </button>
       {!isCasting && (
         <button
           type="button"
-          className="media-settings-menu__item"
+          className={MEDIA_SETTINGS_MENU_CLASSES.item}
           disabled={levels.length === 0}
           onClick={() => setView('quality')}
         >
           <svg
-            className="media-settings-menu__icon"
+            className={MEDIA_SETTINGS_MENU_CLASSES.icon}
             width={16}
             height={16}
             viewBox="0 0 24 24"
@@ -777,15 +825,15 @@ function SettingsMenuContent({
             <line x1={9} y1={8} x2={15} y2={8} />
             <line x1={17} y1={16} x2={23} y2={16} />
           </svg>
-          <span className="media-settings-menu__label">{__('Quality')}</span>
-          <span className="media-settings-menu__value">{levels.length > 0 ? currentLabel : __('Original')}</span>
+          <span className={MEDIA_SETTINGS_MENU_CLASSES.label}>{__('Quality')}</span>
+          <span className={MEDIA_SETTINGS_MENU_CLASSES.value}>{levels.length > 0 ? currentLabel : __('Original')}</span>
         </button>
       )}
     </div>
   );
 }
 
-function ClickToPlay({ onTogglePlay }) {
+function ClickToPlay({ onTogglePlay, isFloating }) {
   const media = Player.useMedia();
   const settingsWasOpenRef = useRef(false);
   const clickTimerRef = useRef(null);
@@ -831,7 +879,13 @@ function ClickToPlay({ onTogglePlay }) {
     }
   }, []);
 
-  return <div className="odysee-click-to-play" onClick={handleClick} onDoubleClick={handleDblClick} />;
+  return (
+    <div
+      className={classnames(CLICK_TO_PLAY_CLASS, isFloating && CLICK_TO_PLAY_FLOATING_CLASS)}
+      onClick={handleClick}
+      onDoubleClick={handleDblClick}
+    />
+  );
 }
 
 function useLiveTimeFormat() {
@@ -864,9 +918,9 @@ function ChapterMarkers({ chapters }) {
   if (!chapters || chapters.length < 2 || !duration) return null;
 
   return (
-    <div className="odysee-chapter-markers">
+    <div className={CHAPTER_CLASSES.markers}>
       {chapters.slice(1).map((ch, i) => (
-        <div key={i} className="odysee-chapter-marker" style={{ left: `${(ch.time / duration) * 100}%` }} />
+        <div key={i} className={CHAPTER_CLASSES.marker} style={{ left: `${(ch.time / duration) * 100}%` }} />
       ))}
     </div>
   );
@@ -888,12 +942,12 @@ function ChapterPill({ chapters }) {
   if (!activeChapter) return null;
 
   return (
-    <div className="media-surface odysee-controls odysee-chapter-pill">
+    <div className={classnames('media-surface odysee-controls', CHAPTER_CLASSES.pill)}>
       <Btn
-        className="media-button--icon odysee-chapter-pill__btn"
+        className={classnames('media-button--icon', CHAPTER_CLASSES.pillButton)}
         onClick={() => window.dispatchEvent(new CustomEvent('toggleChaptersCard'))}
       >
-        <span className="odysee-chapter-pill__label">{activeChapter.label}</span>
+        <span className={CHAPTER_CLASSES.pillLabel}>{activeChapter.label}</span>
       </Btn>
     </div>
   );
@@ -943,23 +997,23 @@ function LiveButton() {
   return (
     <button
       type="button"
-      className={`odysee-live-button ${atEdge ? 'odysee-live-button--at-edge' : ''}`}
+      className={classnames(LIVE_BUTTON_CLASSES.root, atEdge && LIVE_BUTTON_CLASSES.atEdge)}
       onClick={seekToLive}
     >
-      <span className="odysee-live-button__dot" />
+      <span className={LIVE_BUTTON_CLASSES.dot} />
       {__('LIVE')}
     </button>
   );
 }
 
-function P2PTrafficGlyph({ transferDirection }) {
+function P2PTrafficGlyph({ transferDirection, active = false }) {
   if (!transferDirection || transferDirection === 'none') return null;
 
   return (
-    <span className="media-p2p-indicator__traffic" aria-hidden="true">
+    <span className={P2P_CLASSES.traffic} aria-hidden="true">
       {(transferDirection === 'download' || transferDirection === 'both') && (
         <svg
-          className="media-p2p-indicator__arrow media-p2p-indicator__arrow--down"
+          className={classnames(P2P_CLASSES.arrow, active && P2P_CLASSES.arrowActive)}
           width="10"
           height="10"
           viewBox="0 0 10 10"
@@ -976,7 +1030,7 @@ function P2PTrafficGlyph({ transferDirection }) {
       )}
       {(transferDirection === 'upload' || transferDirection === 'both') && (
         <svg
-          className="media-p2p-indicator__arrow media-p2p-indicator__arrow--up"
+          className={classnames(P2P_CLASSES.arrow, active && P2P_CLASSES.arrowActive)}
           width="10"
           height="10"
           viewBox="0 0 10 10"
@@ -1043,10 +1097,14 @@ function P2PControl({ isLivestream, p2pEnabled, p2pUiState, compact = false, onT
       : peerLabel;
 
   return (
-    <div className={`media-p2p-control media-p2p-control--${status} ${compact ? 'media-p2p-control--compact' : ''}`}>
+    <div className={classnames(P2P_CLASSES.control, compact && P2P_CLASSES.controlCompact)}>
       <button
         type="button"
-        className={`media-button media-button--icon media-button--p2p ${p2pEnabled ? 'media-button--p2p-active' : ''}`}
+        className={classnames(
+          P2P_CLASSES.button,
+          p2pEnabled && P2P_CLASSES.buttonEnabled,
+          status === 'active' && P2P_CLASSES.buttonActive
+        )}
         aria-label={buttonLabel}
         title={buttonLabel}
         onClick={onToggle}
@@ -1066,15 +1124,24 @@ function P2PControl({ isLivestream, p2pEnabled, p2pUiState, compact = false, onT
       </button>
       {showIndicator && (
         <span
-          className={`media-p2p-indicator ${
-            status === 'active' ? 'media-p2p-indicator--active' : ''
-          } ${compact ? 'media-p2p-indicator--compact' : ''}`}
+          className={classnames(
+            P2P_CLASSES.indicator,
+            status === 'peered' && P2P_CLASSES.indicatorPeered,
+            status === 'active' && P2P_CLASSES.indicatorActive,
+            compact && P2P_CLASSES.indicatorCompact
+          )}
           title={indicatorTitle}
         >
-          <span className="media-p2p-indicator__dot" />
-          <span className="media-p2p-indicator__label">{compact ? String(peerCount || 1) : peerLabel}</span>
-          <P2PTrafficGlyph transferDirection={transferDirection} />
-          {throughputLabel && <span className="media-p2p-indicator__speed">{throughputLabel}</span>}
+          <span className={classnames(P2P_CLASSES.dot, status === 'active' && P2P_CLASSES.dotActive)} />
+          <span className={classnames(P2P_CLASSES.label, compact && P2P_CLASSES.labelCompact)}>
+            {compact ? String(peerCount || 1) : peerLabel}
+          </span>
+          <P2PTrafficGlyph transferDirection={transferDirection} active={status === 'active'} />
+          {throughputLabel && (
+            <span className={classnames(P2P_CLASSES.speed, compact && P2P_CLASSES.speedCompact)}>
+              {throughputLabel}
+            </span>
+          )}
         </span>
       )}
     </div>
@@ -1126,8 +1193,7 @@ export default function OdyseeSkin(props) {
   const isMobileDevice = platform.isMobile();
   const isMobileSize = useIsMobile();
   const isShorts =
-    !!document.querySelector('.shorts-page__container') ||
-    !!document.querySelector('.content__viewer--shorts-floating');
+    !!document.querySelector('.shorts-page__container') || !!document.querySelector('[data-floating-shorts-player]');
   const isEmbeddedPlayback = Boolean(embedded || isEmbedPath(window.location.pathname));
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1147,9 +1213,13 @@ export default function OdyseeSkin(props) {
   const isVerticalVideo = originalVideoWidth && originalVideoHeight && originalVideoHeight > originalVideoWidth;
   const isExternalEmbedPlayback = Boolean(externalEmbed || isEmbedPath(window.location.pathname));
   const isOdyseeEmbeddedPlayback = Boolean(isEmbeddedPlayback && (!isExternalEmbedPlayback || isMarkdownOrComment));
-  const settingsPopoverClassName = `media-popover media-popover--settings ${
-    isEmbeddedPlayback ? 'media-popover--settings-embed' : ''
-  } ${isExternalEmbedPlayback ? 'media-popover--settings-external-embed' : ''}`;
+  const hasMobileControls = isMobileDevice || (isMobileSize && isFullscreen);
+  const settingsPopoverClassName = classnames(
+    'media-popover',
+    MEDIA_SETTINGS_MENU_CLASSES.popover,
+    isEmbeddedPlayback && MEDIA_SETTINGS_MENU_CLASSES.popoverEmbed,
+    isExternalEmbedPlayback && MEDIA_SETTINGS_MENU_CLASSES.popoverExternalEmbed
+  );
 
   // Detect portrait video from actual stream dimensions and add class to container
   const media = Player.useMedia();
@@ -1211,7 +1281,7 @@ export default function OdyseeSkin(props) {
     if (!isFloating && !isSafari && !noPopoverAPI) return;
     let cancelled = false;
     let observer: MutationObserver | null = null;
-    const triggerSel = isFloating ? '.content__viewer--floating .media-button--settings' : '.media-button--settings';
+    const triggerSel = isFloating ? '[data-floating-player] .media-button--settings' : '.media-button--settings';
     const fix = () => {
       if (cancelled) return false;
       const popup = document.querySelector<HTMLElement>('.media-popover--settings');
@@ -1283,15 +1353,6 @@ export default function OdyseeSkin(props) {
 
   React.useEffect(() => {
     if (typeof HTMLElement.prototype.showPopover === 'function') return;
-    const parent = document.querySelector('.video-js-parent');
-    if (parent) {
-      if (settingsOpen) parent.classList.add('video-js-parent--popover-open');
-      else parent.classList.remove('video-js-parent--popover-open');
-    }
-  }, [settingsOpen]);
-
-  React.useEffect(() => {
-    if (typeof HTMLElement.prototype.showPopover === 'function') return;
     if (typeof MutationObserver === 'undefined') return;
     const controls = document.querySelector('.media-controls');
     const progressBar = document.querySelector('.odysee-progress-bar');
@@ -1339,7 +1400,7 @@ export default function OdyseeSkin(props) {
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement)?.closest?.('.odysee-context-menu')) return;
+    if ((e.target as HTMLElement)?.closest?.('[data-odysee-context-menu]')) return;
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY });
   }, []);
@@ -1463,31 +1524,36 @@ export default function OdyseeSkin(props) {
   return (
     <Player.Container
       onContextMenu={handleContextMenu}
-      className={`media-default-skin media-default-skin--video odysee-skin ${
-        isCasting ? 'odysee-skin--casting' : ''
-      } ${isVertical && isShorts ? 'odysee-skin--portrait' : ''} ${className || ''}`}
+      className={classnames(
+        'media-default-skin media-default-skin--video',
+        PLAYER_SKIN_CLASSES.root,
+        isCasting && PLAYER_SKIN_CLASSES.casting,
+        isVertical && isShorts && PLAYER_SKIN_CLASSES.portrait,
+        hasMobileControls && PLAYER_SKIN_CLASSES.mobileControls,
+        className
+      )}
       {...rest}
     >
       {children}
 
-      <ClickToPlay onTogglePlay={isCasting ? castTogglePlay : undefined} />
+      <ClickToPlay isFloating={isFloating} onTogglePlay={isCasting ? castTogglePlay : undefined} />
 
       {isCasting &&
         castState &&
         castState.deviceName &&
         (isMobileDevice ? (
-          <div className="odysee-cast-indicator odysee-cast-indicator--mobile">
+          <div className={classnames(CAST_CLASSES.indicator, CAST_CLASSES.indicatorMobile)}>
             <OdyseeCast />
             <span>{castState.deviceName}</span>
           </div>
         ) : (
-          <div className="odysee-cast-indicator">
-            <span className="odysee-cast-indicator__label">
+          <div className={CAST_CLASSES.indicator}>
+            <span className={CAST_CLASSES.indicatorLabel}>
               <OdyseeCast />
               <span>{__('Casting to')}</span>
             </span>
-            <span className="odysee-cast-indicator__device">{castState.deviceName}</span>
-            <button type="button" className="odysee-cast-indicator__stop" onClick={onCastToggle}>
+            <span className={CAST_CLASSES.indicatorDevice}>{castState.deviceName}</span>
+            <button type="button" className={CAST_CLASSES.indicatorStop} onClick={onCastToggle}>
               {__('End Casting')}
             </button>
           </div>
@@ -1502,35 +1568,38 @@ export default function OdyseeSkin(props) {
       />
 
       {/* Progress Bar — above the control bar */}
-      <div className="odysee-progress-bar" style={media ? undefined : { pointerEvents: 'none', opacity: 0.5 }}>
+      <div
+        className={PROGRESS_CONTROL_CLASSES.root}
+        style={media ? undefined : { pointerEvents: 'none', opacity: 0.5 }}
+      >
         {isCasting && castState ? (
           <CastProgressBar castState={castState} castActions={castActions} />
         ) : (
-          <TimeSlider.Root className="media-slider media-slider--time odysee-time-slider">
-            <Slider.Track className="media-slider__track odysee-slider__track">
-              <Slider.Fill className="media-slider__fill odysee-slider__fill" />
-              <Slider.Buffer className="media-slider__buffer odysee-slider__buffer" />
+          <TimeSlider.Root className={classnames('media-slider media-slider--time', PROGRESS_CONTROL_CLASSES.slider)}>
+            <Slider.Track className={classnames('media-slider__track', PROGRESS_CONTROL_CLASSES.track)}>
+              <Slider.Fill className={classnames('media-slider__fill', PROGRESS_CONTROL_CLASSES.fill)} />
+              <Slider.Buffer className={classnames('media-slider__buffer', PROGRESS_CONTROL_CLASSES.buffer)} />
               {chapters.length > 0 && <ChapterMarkers chapters={chapters} />}
             </Slider.Track>
-            <Slider.Thumb className="media-slider__thumb odysee-slider__thumb" />
-            <Slider.Preview className="odysee-slider-preview">
+            <Slider.Thumb className={classnames('media-slider__thumb', PROGRESS_CONTROL_CLASSES.thumb)} />
+            <Slider.Preview className={SLIDER_PREVIEW_CLASSES.root}>
               {!isVertical ? (
-                <div className="odysee-slider-preview__thumbnail-frame">
-                  <Slider.Thumbnail className="odysee-slider-preview__thumbnail" />
+                <div className={SLIDER_PREVIEW_CLASSES.thumbnailFrame}>
+                  <Slider.Thumbnail className={SLIDER_PREVIEW_CLASSES.thumbnailInFrame} />
                 </div>
               ) : (
-                <Slider.Thumbnail className="odysee-slider-preview__thumbnail" />
+                <Slider.Thumbnail className={SLIDER_PREVIEW_CLASSES.thumbnail} />
               )}
               {chapters.length > 0 && (
                 <Slider.Value
                   type="pointer"
                   format={chapterFormatFn(chapters)}
-                  className="odysee-slider-preview__chapter"
+                  className={SLIDER_PREVIEW_CLASSES.chapter}
                 />
               )}
               <Slider.Value
                 type="pointer"
-                className="odysee-slider-preview__time"
+                className={SLIDER_PREVIEW_CLASSES.time}
                 format={isLivestream ? liveTimeFormat : undefined}
               />
             </Slider.Preview>
@@ -1539,14 +1608,17 @@ export default function OdyseeSkin(props) {
       </div>
 
       <Controls.Root
-        className={`media-controls ${
-          isMobileDevice || (isMobileSize && isFullscreen) ? 'odysee-mobile-controls' : 'odysee-controls-row'
-        } ${settingsOpen ? 'media-controls--popover-open' : ''}`}
+        className={classnames(
+          'media-controls',
+          hasMobileControls ? MOBILE_CONTROL_LAYOUT_CLASSES.root : CONTROL_LAYOUT_CLASSES.row,
+          isCasting && CONTROL_LAYOUT_CLASSES.casting,
+          settingsOpen && CONTROL_LAYOUT_CLASSES.popoverOpen
+        )}
         style={media ? undefined : { pointerEvents: 'none', opacity: 0.5 }}
       >
-        {isMobileDevice || (isMobileSize && isFullscreen) ? (
+        {hasMobileControls ? (
           <>
-            <div className="media-surface odysee-mobile-controls__top">
+            <div className={classnames('media-surface', MOBILE_CONTROL_LAYOUT_CLASSES.top)}>
               <CaptionsButton
                 render={(p) => (
                   <Btn {...p} className="media-button--icon media-button--captions">
@@ -1596,9 +1668,10 @@ export default function OdyseeSkin(props) {
                 <>
                   <button
                     type="button"
-                    className={`media-button media-button--icon ${
-                      activePanel === 'info' ? 'media-button--active' : ''
-                    }`}
+                    className={classnames(
+                      'media-button media-button--icon',
+                      activePanel === 'info' && PLAYER_BUTTON_CLASSES.active
+                    )}
                     onClick={() =>
                       window.dispatchEvent(
                         new CustomEvent('fullscreen-panel', {
@@ -1612,9 +1685,10 @@ export default function OdyseeSkin(props) {
                   {chapters.length > 0 && !isEmbeddedPlayback && (
                     <button
                       type="button"
-                      className={`media-button media-button--icon ${
-                        activePanel === 'chapters' ? 'media-button--active' : ''
-                      }`}
+                      className={classnames(
+                        'media-button media-button--icon',
+                        activePanel === 'chapters' && PLAYER_BUTTON_CLASSES.active
+                      )}
                       onClick={() =>
                         window.dispatchEvent(
                           new CustomEvent('fullscreen-panel', {
@@ -1645,9 +1719,10 @@ export default function OdyseeSkin(props) {
                   )}
                   <button
                     type="button"
-                    className={`media-button media-button--icon ${
-                      activePanel === 'comments' || activePanel === 'chat' ? 'media-button--active' : ''
-                    }`}
+                    className={classnames(
+                      'media-button media-button--icon',
+                      (activePanel === 'comments' || activePanel === 'chat') && PLAYER_BUTTON_CLASSES.active
+                    )}
                     onClick={() =>
                       window.dispatchEvent(
                         new CustomEvent('fullscreen-panel', {
@@ -1664,9 +1739,10 @@ export default function OdyseeSkin(props) {
                   </button>
                   <button
                     type="button"
-                    className={`media-button media-button--icon ${
-                      activePanel === 'related' ? 'media-button--active' : ''
-                    }`}
+                    className={classnames(
+                      'media-button media-button--icon',
+                      activePanel === 'related' && PLAYER_BUTTON_CLASSES.active
+                    )}
                     onClick={() =>
                       window.dispatchEvent(
                         new CustomEvent('fullscreen-panel', {
@@ -1696,14 +1772,20 @@ export default function OdyseeSkin(props) {
                     render={
                       <button
                         type="button"
-                        className={`media-button media-button--icon media-button--settings ${
-                          settingsOpen ? 'media-button--settings-open' : ''
-                        }`}
+                        className={classnames(
+                          'media-button media-button--icon',
+                          PLAYER_BUTTON_CLASSES.settings,
+                          settingsOpen && PLAYER_BUTTON_CLASSES.settingsOpen
+                        )}
                         aria-label={__('Settings')}
                       >
-                        <OdyseeSettings className="media-icon media-icon--settings" size={18} color="currentColor" />
+                        <OdyseeSettings
+                          className={classnames('media-icon', PLAYER_BUTTON_CLASSES.settingsIcon)}
+                          size={18}
+                          color="currentColor"
+                        />
                         {(quality.isHD || (quality.levels.length === 0 && (originalVideoHeight || 0) >= 720)) && (
-                          <span className="media-hd-badge">HD</span>
+                          <span className={PLAYER_BUTTON_CLASSES.hdBadge}>HD</span>
                         )}
                       </button>
                     }
@@ -1732,8 +1814,14 @@ export default function OdyseeSkin(props) {
               )}
             </div>
 
-            <div className="odysee-mobile-controls__bottom">
-              <div className="media-surface odysee-mobile-controls__time">
+            <div className={MOBILE_CONTROL_LAYOUT_CLASSES.bottom}>
+              <div
+                className={classnames(
+                  'media-surface',
+                  MOBILE_CONTROL_LAYOUT_CLASSES.capsule,
+                  MOBILE_CONTROL_LAYOUT_CLASSES.time
+                )}
+              >
                 {isCasting && castState ? (
                   <Btn
                     className="media-button--icon media-button--mute"
@@ -1810,21 +1898,33 @@ export default function OdyseeSkin(props) {
                 )}
               </div>
 
-              <div className="media-surface odysee-mobile-controls__fs">
+              <div
+                className={classnames(
+                  'media-surface',
+                  MOBILE_CONTROL_LAYOUT_CLASSES.capsule,
+                  MOBILE_CONTROL_LAYOUT_CLASSES.fullscreen
+                )}
+              >
                 {isEmbeddedPlayback && (
                   <Popover.Root side="top" open={settingsOpen} onOpenChange={(open) => setSettingsOpen(open)}>
                     <Popover.Trigger
                       render={
                         <button
                           type="button"
-                          className={`media-button media-button--icon media-button--settings ${
-                            settingsOpen ? 'media-button--settings-open' : ''
-                          }`}
+                          className={classnames(
+                            'media-button media-button--icon',
+                            PLAYER_BUTTON_CLASSES.settings,
+                            settingsOpen && PLAYER_BUTTON_CLASSES.settingsOpen
+                          )}
                           aria-label={__('Settings')}
                         >
-                          <OdyseeSettings className="media-icon media-icon--settings" size={18} color="currentColor" />
+                          <OdyseeSettings
+                            className={classnames('media-icon', PLAYER_BUTTON_CLASSES.settingsIcon)}
+                            size={18}
+                            color="currentColor"
+                          />
                           {(quality.isHD || (quality.levels.length === 0 && (originalVideoHeight || 0) >= 720)) && (
-                            <span className="media-hd-badge">HD</span>
+                            <span className={PLAYER_BUTTON_CLASSES.hdBadge}>HD</span>
                           )}
                         </button>
                       }
@@ -1853,7 +1953,11 @@ export default function OdyseeSkin(props) {
                 )}
                 {castAvailable && onCastToggle && (
                   <Btn
-                    className={`media-button--icon media-button--cast ${isCasting ? 'media-button--cast-active' : ''}`}
+                    className={classnames(
+                      'media-button--icon',
+                      PLAYER_BUTTON_CLASSES.cast,
+                      isCasting && PLAYER_BUTTON_CLASSES.castActive
+                    )}
                     aria-label={isCasting ? 'Stop casting' : 'Cast'}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1934,8 +2038,14 @@ export default function OdyseeSkin(props) {
           </>
         ) : (
           <>
-            <div className="odysee-controls-group--left">
-              <div className="media-surface odysee-controls odysee-controls--left">
+            <div className={CONTROL_LAYOUT_CLASSES.leftGroup}>
+              <div
+                className={classnames(
+                  'media-surface odysee-controls',
+                  CONTROL_LAYOUT_CLASSES.side,
+                  CONTROL_LAYOUT_CLASSES.left
+                )}
+              >
                 {!isMarkdownOrComment && canPlayPrevious && onPlayPrevious && (
                   <Tooltip.Root side="top">
                     <Tooltip.Trigger
@@ -1952,7 +2062,7 @@ export default function OdyseeSkin(props) {
                 {isCasting && castState ? (
                   castState.playerState !== 'PLAYING' && castState.playerState !== 'PAUSED' ? (
                     <Btn className="media-button--icon media-button--play">
-                      <div className="odysee-cast-spinner" />
+                      <div className={CAST_CLASSES.spinner} />
                     </Btn>
                   ) : (
                     <Tooltip.Root side="top">
@@ -2037,7 +2147,7 @@ export default function OdyseeSkin(props) {
                   </Tooltip.Root>
                 )}
 
-                <div className="media-volume-group">
+                <div className={VOLUME_CONTROL_CLASSES.group}>
                   {isCasting && castState ? (
                     <Btn
                       className="media-button--icon media-button--mute"
@@ -2116,7 +2226,7 @@ export default function OdyseeSkin(props) {
                       <CastVolumeSlider castState={castState} castActions={castActions} />
                     ) : (
                       <VolumeSlider.Root
-                        className="media-slider media-volume-slider"
+                        className={classnames('media-slider', VOLUME_CONTROL_CLASSES.slider)}
                         orientation="horizontal"
                         thumbAlignment="edge"
                       >
@@ -2148,7 +2258,7 @@ export default function OdyseeSkin(props) {
               {chapters.length > 0 && !isFloating && !isEmbeddedPlayback && <ChapterPill chapters={chapters} />}
             </div>
 
-            <div className="media-surface odysee-controls odysee-controls--right">
+            <div className={classnames('media-surface odysee-controls', CONTROL_LAYOUT_CLASSES.side)}>
               <Tooltip.Root side="top">
                 <Tooltip.Trigger
                   render={
@@ -2217,14 +2327,20 @@ export default function OdyseeSkin(props) {
                   render={
                     <button
                       type="button"
-                      className={`media-button media-button--icon media-button--settings ${
-                        settingsOpen ? 'media-button--settings-open' : ''
-                      }`}
+                      className={classnames(
+                        'media-button media-button--icon',
+                        PLAYER_BUTTON_CLASSES.settings,
+                        settingsOpen && PLAYER_BUTTON_CLASSES.settingsOpen
+                      )}
                       aria-label={__('Settings')}
                     >
-                      <OdyseeSettings className="media-icon media-icon--settings" size={18} color="currentColor" />
+                      <OdyseeSettings
+                        className={classnames('media-icon', PLAYER_BUTTON_CLASSES.settingsIcon)}
+                        size={18}
+                        color="currentColor"
+                      />
                       {(quality.isHD || (quality.levels.length === 0 && (originalVideoHeight || 0) >= 720)) && (
-                        <span className="media-hd-badge">HD</span>
+                        <span className={PLAYER_BUTTON_CLASSES.hdBadge}>HD</span>
                       )}
                     </button>
                   }
@@ -2256,9 +2372,11 @@ export default function OdyseeSkin(props) {
                   <Tooltip.Trigger
                     render={
                       <Btn
-                        className={`media-button--icon media-button--cast ${
-                          isCasting ? 'media-button--cast-active' : ''
-                        }`}
+                        className={classnames(
+                          'media-button--icon',
+                          PLAYER_BUTTON_CLASSES.cast,
+                          isCasting && PLAYER_BUTTON_CLASSES.castActive
+                        )}
                         aria-label={isCasting ? 'Stop casting' : 'Cast'}
                         onClick={onCastToggle}
                       >
@@ -2341,14 +2459,10 @@ export default function OdyseeSkin(props) {
                     render={
                       <button
                         type="button"
-                        className="media-button media-button--icon media-button--theater"
+                        className={classnames('media-button media-button--icon', PLAYER_BUTTON_CLASSES.theaterButton)}
                         onClick={onToggleTheaterMode}
                       >
-                        <span
-                          className={`media-icon media-icon--theater ${
-                            videoTheaterMode ? 'media-icon--theater-active' : ''
-                          }`}
-                        />
+                        <OdyseeTheater active={videoTheaterMode} />
                       </button>
                     }
                   />
@@ -2419,16 +2533,15 @@ export default function OdyseeSkin(props) {
         )}
       </Controls.Root>
 
-      {!isEmbeddedPlayback && <div className="media-overlay" />}
+      {!isEmbeddedPlayback && (
+        <div className={classnames('media-overlay', hasMobileControls && PLAYER_SKIN_CLASSES.mobileOverlay)} />
+      )}
 
       {isEmbeddedPlayback && (
-        <div
-          className={`odysee-embed-header ${isOdyseeEmbeddedPlayback ? 'odysee-embed-header--odysee' : ''}`}
-          style={isOdyseeEmbeddedPlayback ? { justifyContent: 'flex-end' } : undefined}
-        >
+        <div className={classnames(EMBED_HEADER_CLASSES.root, isOdyseeEmbeddedPlayback && EMBED_HEADER_CLASSES.odysee)}>
           {!isOdyseeEmbeddedPlayback && (
             <a
-              className="odysee-embed-header__title"
+              className={EMBED_HEADER_CLASSES.title}
               href={uri ? URL + formatLbryUrlForWeb(uri) : URL}
               target="_blank"
               rel="noopener noreferrer"
@@ -2436,13 +2549,7 @@ export default function OdyseeSkin(props) {
               {title}
             </a>
           )}
-          <a
-            className="odysee-embed-header__logo"
-            href={URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={isOdyseeEmbeddedPlayback ? { marginLeft: 'auto' } : undefined}
-          >
+          <a className={EMBED_HEADER_CLASSES.logo} href={URL} target="_blank" rel="noopener noreferrer">
             <Logo type="embed" />
           </a>
         </div>
@@ -2455,19 +2562,20 @@ export default function OdyseeSkin(props) {
       {contextMenu && (
         <div
           ref={contextMenuRef}
-          className="odysee-context-menu"
+          className={CONTEXT_MENU_CLASSES.root}
+          data-odysee-context-menu
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <button type="button" className="odysee-context-menu__item" onClick={ctxToggleLoop}>
-            <OdyseeRepeat className="odysee-context-menu__icon" size={14} color="currentColor" />
-            <span className="odysee-context-menu__label">{__('Loop')}</span>
-            {looped && <span className="odysee-context-menu__check">✓</span>}
+          <button type="button" className={CONTEXT_MENU_CLASSES.item} onClick={ctxToggleLoop}>
+            <OdyseeRepeat className={CONTEXT_MENU_CLASSES.icon} size={14} color="currentColor" />
+            <span className={CONTEXT_MENU_CLASSES.label}>{__('Loop')}</span>
+            {looped && <span className={CONTEXT_MENU_CLASSES.check}>✓</span>}
           </button>
           {pipSupported && !isMobileDevice && (
-            <button type="button" className="odysee-context-menu__item" onClick={ctxTogglePip}>
+            <button type="button" className={CONTEXT_MENU_CLASSES.item} onClick={ctxTogglePip}>
               <svg
-                className="odysee-context-menu__icon"
+                className={CONTEXT_MENU_CLASSES.icon}
                 width={14}
                 height={14}
                 viewBox="0 0 24 24"
@@ -2481,22 +2589,22 @@ export default function OdyseeSkin(props) {
                 <rect x="2" y="3" width="20" height="14" rx="2" />
                 <rect x="13" y="10" width="8" height="6" rx="1" fill="currentColor" stroke="none" />
               </svg>
-              <span className="odysee-context-menu__label">{__('Miniplayer')}</span>
+              <span className={CONTEXT_MENU_CLASSES.label}>{__('Miniplayer')}</span>
             </button>
           )}
           {castAvailable && onCastToggle && (
-            <button type="button" className="odysee-context-menu__item" onClick={ctxCast}>
+            <button type="button" className={CONTEXT_MENU_CLASSES.item} onClick={ctxCast}>
               <OdyseeCast width={14} height={14} />
-              <span className="odysee-context-menu__label">{isCasting ? __('Stop casting') : __('Cast')}</span>
+              <span className={CONTEXT_MENU_CLASSES.label}>{isCasting ? __('Stop casting') : __('Cast')}</span>
             </button>
           )}
           {!isExternalEmbedPlayback && (onToggleAutoplayMedia || (onToggleAutoplayNext && !isShorts)) && (
-            <div className="odysee-context-menu__separator" />
+            <div className={CONTEXT_MENU_CLASSES.separator} />
           )}
           {!isExternalEmbedPlayback && onToggleAutoplayMedia && (
-            <button type="button" className="odysee-context-menu__item" onClick={ctxToggleAutoplay}>
+            <button type="button" className={CONTEXT_MENU_CLASSES.item} onClick={ctxToggleAutoplay}>
               <svg
-                className="odysee-context-menu__icon"
+                className={CONTEXT_MENU_CLASSES.icon}
                 width={14}
                 height={14}
                 viewBox="0 0 24 24"
@@ -2510,29 +2618,29 @@ export default function OdyseeSkin(props) {
                 <circle cx="12" cy="12" r="10" />
                 <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
               </svg>
-              <span className="odysee-context-menu__label">{__('Autoplay')}</span>
-              {ctxAutoplayMedia && <span className="odysee-context-menu__check">✓</span>}
+              <span className={CONTEXT_MENU_CLASSES.label}>{__('Autoplay')}</span>
+              {ctxAutoplayMedia && <span className={CONTEXT_MENU_CLASSES.check}>✓</span>}
             </button>
           )}
           {!isExternalEmbedPlayback && !isMarkdownOrComment && onToggleAutoplayNext && !isShorts && (
-            <button type="button" className="odysee-context-menu__item" onClick={ctxToggleAutoplayNext}>
-              <OdyseeAutoplayNext className="odysee-context-menu__icon" size={14} />
-              <span className="odysee-context-menu__label">{__('Autoplay Next')}</span>
-              {ctxAutoplayNext && <span className="odysee-context-menu__check">✓</span>}
+            <button type="button" className={CONTEXT_MENU_CLASSES.item} onClick={ctxToggleAutoplayNext}>
+              <OdyseeAutoplayNext className={CONTEXT_MENU_CLASSES.icon} size={14} />
+              <span className={CONTEXT_MENU_CLASSES.label}>{__('Autoplay Next')}</span>
+              {ctxAutoplayNext && <span className={CONTEXT_MENU_CLASSES.check}>✓</span>}
             </button>
           )}
-          <div className="odysee-context-menu__separator" />
-          <button type="button" className="odysee-context-menu__item" onClick={ctxCopyUrl} disabled={!uri}>
-            <OdyseeCopyLink className="odysee-context-menu__icon" size={14} color="currentColor" />
-            <span className="odysee-context-menu__label">{__('Copy video URL')}</span>
+          <div className={CONTEXT_MENU_CLASSES.separator} />
+          <button type="button" className={CONTEXT_MENU_CLASSES.item} onClick={ctxCopyUrl} disabled={!uri}>
+            <OdyseeCopyLink className={CONTEXT_MENU_CLASSES.icon} size={14} color="currentColor" />
+            <span className={CONTEXT_MENU_CLASSES.label}>{__('Copy video URL')}</span>
           </button>
-          <button type="button" className="odysee-context-menu__item" onClick={ctxCopyUrlAtTime} disabled={!uri}>
-            <OdyseeTime className="odysee-context-menu__icon" size={14} />
-            <span className="odysee-context-menu__label">{__('Copy video URL at current time')}</span>
+          <button type="button" className={CONTEXT_MENU_CLASSES.item} onClick={ctxCopyUrlAtTime} disabled={!uri}>
+            <OdyseeTime className={CONTEXT_MENU_CLASSES.icon} size={14} />
+            <span className={CONTEXT_MENU_CLASSES.label}>{__('Copy video URL at current time')}</span>
           </button>
-          <button type="button" className="odysee-context-menu__item" onClick={ctxCopyEmbed} disabled={!uri}>
-            <OdyseeEmbed className="odysee-context-menu__icon" size={14} color="currentColor" />
-            <span className="odysee-context-menu__label">{__('Copy embed code')}</span>
+          <button type="button" className={CONTEXT_MENU_CLASSES.item} onClick={ctxCopyEmbed} disabled={!uri}>
+            <OdyseeEmbed className={CONTEXT_MENU_CLASSES.icon} size={14} color="currentColor" />
+            <span className={CONTEXT_MENU_CLASSES.label}>{__('Copy embed code')}</span>
           </button>
         </div>
       )}

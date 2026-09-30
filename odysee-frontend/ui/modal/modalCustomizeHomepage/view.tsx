@@ -1,5 +1,4 @@
 import React from 'react';
-import './style.scss';
 import Button from 'component/button';
 import Card from 'component/common/card';
 import { FormField } from 'component/common/form';
@@ -12,6 +11,7 @@ import { selectClientSetting } from 'redux/selectors/settings';
 import { doSetClientSetting } from 'redux/actions/settings';
 import { doToast } from 'redux/actions/notifications';
 import { doOpenModal, doHideModal } from 'redux/actions/app';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type HomepageOrder = {
   active: Array<string> | null | undefined;
   hidden: Array<string> | null | undefined;
@@ -94,13 +94,13 @@ export default function ModalCustomizeHomepage() {
   }
 
   return (
-    <Modal className="modal-customize-homepage" isOpen type="custom" width="wide-fixed" onAborted={undefined}>
+    <Modal className="tw:upto-small:p-0" isOpen type="custom" width="wide-fixed" onAborted={undefined}>
       <Card
         title={__('Customize Homepage')}
         body={
           <>
             <HomepageSort onUpdate={handleNewOrder} />
-            <Button button="link" label={__('Reset')} onClick={handleReset} />
+            <Button className="tw:float-right" button="link" label={__('Reset')} onClick={handleReset} />
             <FormField
               type="checkbox"
               name="apply_to_sidebar"
@@ -111,7 +111,7 @@ export default function ModalCustomizeHomepage() {
           </>
         }
         actions={
-          <div className="modal-customize-homepage__actions section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="primary" label={__('Save')} onClick={handleSave} />
             <Button button="link" label={__('Cancel')} onClick={() => dispatch(doHideModal())} />
           </div>

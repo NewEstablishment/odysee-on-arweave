@@ -3,6 +3,7 @@ import { Modal } from 'modal/modal';
 import LastReleaseChanges from 'component/lastReleaseChanges';
 import { useAppDispatch } from 'redux/hooks';
 import { doDownloadUpgrade, doSkipUpgrade, doHideModal } from 'redux/actions/app';
+import { MODAL_UPGRADE_SCROLLBAR_CLASS } from './classes';
 
 const IS_MAC = navigator.userAgent.indexOf('Mac OS X') !== -1;
 
@@ -20,7 +21,7 @@ export default function ModalUpgrade() {
 
   return (
     <Modal
-      className={IS_MAC ? '' : 'main-wrapper--scrollbar'}
+      className={IS_MAC ? '' : MODAL_UPGRADE_SCROLLBAR_CLASS}
       isOpen
       contentLabel={__('Upgrade available')}
       title={__('LBRY leveled up')}

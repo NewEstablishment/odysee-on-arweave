@@ -10,6 +10,8 @@ import SUPPORTED_LANGUAGES from 'constants/supported_languages';
 import { makeSelectMetadataItemForUri, makeSelectClaimForUri } from 'redux/selectors/claims';
 import { selectUser } from 'redux/selectors/user';
 import { useAppSelector } from 'redux/hooks';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { MEDIA_INFO_TEXT_CLASS, MEDIA_INFO_TEXT_CONSTRAINED_CLASS } from 'component/common/media-classes';
 
 type Props = {
   uri: string;
@@ -46,12 +48,12 @@ function ChannelAbout(props: Props) {
   const canView = user && user.global_mod;
   return (
     <div className="card">
-      <section className="section card--section">
+      <section className={`section ${CARD_CLASSES.section}`}>
         <Fragment>
           {description && (
             <>
               <label>{__('Description')}</label>
-              <div className="media__info-text media__info-text--constrained">
+              <div className={`${MEDIA_INFO_TEXT_CLASS} ${MEDIA_INFO_TEXT_CONSTRAINED_CLASS}`}>
                 <DeferredMarkdown content={description} />
               </div>
             </>
@@ -59,7 +61,7 @@ function ChannelAbout(props: Props) {
           {email && (
             <Fragment>
               <label>{__('Contact')}</label>
-              <div className="media__info-text">
+              <div className={MEDIA_INFO_TEXT_CLASS}>
                 <a href={formatEmail(email) || undefined}>{email}</a>
               </div>
             </Fragment>
@@ -67,7 +69,7 @@ function ChannelAbout(props: Props) {
           {website && (
             <Fragment>
               <label>{__('Site')}</label>
-              <div className="media__info-text">
+              <div className={MEDIA_INFO_TEXT_CLASS}>
                 <a href={formatWebsite(website) || undefined} target="_blank" rel="noopener noreferrer">
                   {website}
                 </a>
@@ -76,14 +78,14 @@ function ChannelAbout(props: Props) {
           )}
 
           <label>{__('Tags')}</label>
-          <div className="media__info-text">
+          <div className={MEDIA_INFO_TEXT_CLASS}>
             <ClaimTags uri={uri} type="large" />
           </div>
 
           {languages && languages.length && (
             <>
               <label>{__('Languages')}</label>
-              <div className="media__info-text">
+              <div className={MEDIA_INFO_TEXT_CLASS}>
                 {languages.reduce((acc, lang, i) => {
                   return acc + `${SUPPORTED_LANGUAGES[lang] || lang} `;
                 }, '')}
@@ -94,27 +96,27 @@ function ChannelAbout(props: Props) {
           {claim.meta?.claims_in_channel && (
             <>
               <label>{__('Total Uploads')}</label>
-              <div className="media__info-text">{claim.meta?.claims_in_channel}</div>
+              <div className={MEDIA_INFO_TEXT_CLASS}>{claim.meta?.claims_in_channel}</div>
             </>
           )}
 
           <label>{__('Last Updated')}</label>
-          <div className="media__info-text">
+          <div className={MEDIA_INFO_TEXT_CLASS}>
             <DateTime timeAgo uri={uri} />
           </div>
 
           <label>{__('URL')}</label>
-          <div className="media__info-text">
-            <div className="media__info-text media__info-text--constrained">{claim.canonical_url}</div>
+          <div className={MEDIA_INFO_TEXT_CLASS}>
+            <div className={`${MEDIA_INFO_TEXT_CLASS} ${MEDIA_INFO_TEXT_CONSTRAINED_CLASS}`}>{claim.canonical_url}</div>
           </div>
 
           <label>{__('Claim ID')}</label>
-          <div className="media__info-text">
-            <div className="media__info-text media__info-text--constrained">{claim.claim_id}</div>
+          <div className={MEDIA_INFO_TEXT_CLASS}>
+            <div className={`${MEDIA_INFO_TEXT_CLASS} ${MEDIA_INFO_TEXT_CONSTRAINED_CLASS}`}>{claim.claim_id}</div>
           </div>
 
           <label>{__('Staked Credits')}</label>
-          <div className="media__info-text">
+          <div className={MEDIA_INFO_TEXT_CLASS}>
             <CreditAmount amount={parseFloat(claim.amount) + parseFloat(claim.meta.support_amount)} precision={8} />{' '}
             <Button
               button="link"

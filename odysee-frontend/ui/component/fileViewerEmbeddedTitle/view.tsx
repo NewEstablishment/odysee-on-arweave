@@ -12,6 +12,7 @@ import {
   selectIsStreamPlaceholderForUri,
 } from 'redux/selectors/claims';
 import { selectContentPositionForUri, selectContentStates } from 'redux/selectors/content';
+import { FILE_VIEWER_CLASSES } from 'component/viewers/classes';
 type Props = {
   uri: string;
   uriAccessKey?: UriAccessKey | null | undefined;
@@ -47,10 +48,10 @@ function FileViewerEmbeddedTitle(props: Props) {
   const contentLink =
     (isEmbed ? URL : '') + formatLbryUrlForWeb(uri) + (urlParams.toString() ? `?${urlParams.toString()}` : '');
   return (
-    <div className="file-viewer__embedded-header">
-      <div className="file-viewer__embedded-gradient" />
+    <div className={FILE_VIEWER_CLASSES.embeddedHeader} data-file-viewer-embedded-header>
+      <div className={FILE_VIEWER_CLASSES.embeddedGradient} data-file-viewer-embedded-gradient />
       {preferEmbed ? (
-        <div className="file-viewer__embedded-title ">
+        <div className={FILE_VIEWER_CLASSES.embeddedTitle} data-file-viewer-embedded-title>
           <span dir="auto">{title}</span>
         </div>
       ) : (
@@ -58,15 +59,17 @@ function FileViewerEmbeddedTitle(props: Props) {
           label={title}
           aria-label={title}
           button="link"
-          className="file-viewer__embedded-title"
+          className={FILE_VIEWER_CLASSES.embeddedTitle}
+          data-file-viewer-embedded-title
           navigate={contentLink}
           navigateTarget={isEmbed && '_blank'}
         />
       )}
 
-      <div className="file-viewer__embedded-info">
+      <div className={FILE_VIEWER_CLASSES.embeddedInfo} data-file-viewer-embedded-info>
         <Button
-          className="file-viewer__overlay-logo"
+          className={FILE_VIEWER_CLASSES.overlayLogo}
+          data-file-viewer-overlay-logo
           disabled={preferEmbed}
           aria-label={__('Home')}
           navigate={isEmbed ? URL : '/'}

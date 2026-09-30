@@ -1,0 +1,1 @@
+export const REWARDS_CARD_LIST_CLASS = String.raw`tw:block tw:[column-count:2] tw:[column-gap:var(--spacing-l)] tw:[&_.card]:mb-app-l tw:[&_.card]:inline-block tw:[&_.card]:w-full tw:upto-small:[column-count:1] tw:upto-small:[&_.card]:block`;

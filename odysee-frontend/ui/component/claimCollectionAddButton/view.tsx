@@ -9,6 +9,7 @@ import { doOpenModal as doOpenModalAction } from 'redux/actions/app';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectClaimSavedForUrl } from 'redux/selectors/collections';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { SHORTS_ACTION_CLASSES } from 'component/shortsActions/classes';
 type Props = {
   uri: string;
   isShortsPage?: boolean;
@@ -33,7 +34,7 @@ function ClaimCollectionAddButton(props: Props) {
     return (
       <>
         <Button
-          className="shorts-page__actions-button"
+          className={SHORTS_ACTION_CLASSES.button}
           title={__('Add this video to a playlist')}
           icon={!isSaved ? ICONS.PLAYLIST_ADD : ICONS.PLAYLIST_FILLED}
           iconSize={16}

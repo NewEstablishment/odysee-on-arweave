@@ -13,6 +13,9 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import FileReactions from 'component/fileReactions';
 import { Menu, MenuButton, MenuList, MenuItem } from 'component/common/menu';
 import Icon from 'component/common/icon';
+import { BUTTON_ALT_CLASS, BUTTON_CLASS } from 'component/button/classes';
+import { FILE_ACTION_MENU_BUTTON_CLASS } from 'component/common/file-action-button-classes';
+import { MEDIA_ACTIONS_CLASS } from 'component/common/media-classes';
 import { webDownloadClaim } from 'util/downloadClaim';
 import ClaimShareButton from 'component/claimShareButton';
 import ClaimRepostButton from 'component/claimRepostButton';
@@ -161,7 +164,7 @@ export default function FileActions(props: Props) {
   }
 
   return (
-    <div className="media__actions">
+    <div className={MEDIA_ACTIONS_CLASS}>
       {ENABLE_FILE_REACTIONS && !disableFileReactions && canReactToFile && <FileReactions uri={uri} />}
 
       {!isAPreorder && !isFiatRequired && <ClaimSupportButton uri={uri} fileAction />}
@@ -182,7 +185,7 @@ export default function FileActions(props: Props) {
       {((isMobile && (showRepost || claimIsMine)) || showDownload || !claimIsMine) && (
         <Menu>
           <MenuButton
-            className="button--file-action--menu"
+            className={`${BUTTON_CLASS} ${BUTTON_ALT_CLASS} ${FILE_ACTION_MENU_BUTTON_CLASS}`}
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();

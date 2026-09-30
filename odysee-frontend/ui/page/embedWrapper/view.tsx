@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as PAGES from 'constants/pages';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import React from 'react';
@@ -17,6 +18,7 @@ import { makeSelectFileRenderModeForUri } from 'redux/selectors/content';
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
 import { selectFirstItemUrlForCollection } from 'redux/selectors/collections';
 import { doFetchItemsInCollection as doFetchItemsInCollectionAction } from 'redux/actions/collections';
+import { EMBED_WRAPPER_CLASSES, EMBED_WRAPPER_PAGE_CLASS } from './classes';
 
 const ClaimPage = lazyImport(
   () =>
@@ -134,7 +136,7 @@ const EmbedWrapperPage = () => {
   // Show loading while waiting for collection first item
   if (isPlaylistPath && collectionId && !collectionFirstItemUri) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner text={__('Loading playlist...')} />
       </div>
     );
@@ -159,14 +161,17 @@ const EmbedWrapperPage = () => {
       }}
     >
       <div
-        className={classnames('embed__wrapper', {
-          'embed__wrapper--light-background': embedLightBackground,
-          'embed__wrapper--page': isPageLike,
-        })}
+        className={classnames(
+          EMBED_WRAPPER_CLASSES.root,
+          embedLightBackground && EMBED_WRAPPER_CLASSES.lightBackground,
+          isPageLike && EMBED_WRAPPER_PAGE_CLASS
+        )}
+        data-embed-wrapper
+        data-embed-light-background={embedLightBackground || undefined}
       >
         <React.Suspense
           fallback={
-            <div className="main--empty">
+            <div className={PAGE_MAIN_EMPTY_CLASS}>
               <Spinner text={__('Loading...')} />
             </div>
           }

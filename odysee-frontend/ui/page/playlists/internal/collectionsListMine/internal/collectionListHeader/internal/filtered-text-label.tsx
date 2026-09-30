@@ -5,11 +5,11 @@ const FilteredTextLabel = () => {
   const { totalLength, searchText, filteredCollectionsLength, isFetchingCollections } =
     React.useContext(CollectionsListContext);
   if (isFetchingCollections) {
-    return <div className="collection-grid__results-summary">{__('Loading playlists...')}</div>;
+    return <div className="tw:p-0 tw:pb-app-m tw:text-app-text">{__('Loading playlists...')}</div>;
   }
   if (!searchText) return null;
   return (
-    <div className="collection-grid__results-summary">
+    <div className="tw:p-0 tw:pb-app-m tw:text-app-text">
       {__(
         filteredCollectionsLength > 1
           ? 'Showing %filtered% results of %total%'

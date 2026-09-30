@@ -3,6 +3,7 @@ import LbcMessage from 'component/common/lbc-message';
 import I18nMessage from 'component/i18nMessage';
 import UriIndicator from 'component/uriIndicator';
 import { RULE, CHANNEL_NAME_AT_SENTENCE_START_REGEX } from 'constants/notifications';
+import { NOTIFICATION_CLASSES as C } from '../classes';
 
 function getChannelNameLink(channelUrl: string, channelName: string | null | undefined) {
   return (
@@ -34,7 +35,7 @@ export function generateNotificationTitle(
             tokens={{
               commenter: getChannelNameLink(channelUrl, channelName),
               amount: <LbcMessage>{amountStr}</LbcMessage>,
-              title: <span className="notification__claim-title">{notificationParams.dynamic?.claim_title}</span>,
+              title: <span className={C.claimTitle}>{notificationParams.dynamic?.claim_title}</span>,
             }}
           >
             %commenter% sent a %amount% hyperchat on %title%
@@ -47,7 +48,7 @@ export function generateNotificationTitle(
           <I18nMessage
             tokens={{
               commenter: getChannelNameLink(channelUrl, channelName),
-              title: <span className="notification__claim-title">{notificationParams.dynamic?.claim_title}</span>,
+              title: <span className={C.claimTitle}>{notificationParams.dynamic?.claim_title}</span>,
             }}
           >
             %commenter% commented on %title%
@@ -64,7 +65,7 @@ export function generateNotificationTitle(
         <I18nMessage
           tokens={{
             commenter: getChannelNameLink(channelUrl, channelName),
-            title: <span className="notification__claim-title">{notificationParams.dynamic?.claim_title}</span>,
+            title: <span className={C.claimTitle}>{notificationParams.dynamic?.claim_title}</span>,
           }}
         >
           %commenter% commented on %title%
@@ -80,7 +81,7 @@ export function generateNotificationTitle(
         <I18nMessage
           tokens={{
             commenter: getChannelNameLink(channelUrl, channelName),
-            title: <span className="notification__claim-title">{notificationParams.dynamic?.claim_title}</span>,
+            title: <span className={C.claimTitle}>{notificationParams.dynamic?.claim_title}</span>,
           }}
         >
           %commenter% replied to you on %title%

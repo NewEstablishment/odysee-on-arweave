@@ -1,13 +1,25 @@
 import React from 'react';
+import classnames from 'classnames';
 import { lazyImport } from 'util/lazyImport';
 import FileTitleSection from 'component/fileTitleSection';
+import { FILE_PAGE_MEDIA_ACTIONS_CLASS } from 'component/filePrice/classes';
 import Empty from 'component/common/empty';
 import Button from 'component/button';
+import { ButtonFireEffect, ButtonSlimeEffect } from 'component/buttonReactionEffects/view';
+import {
+  BUTTON_FIRE_GLOW_CLASS,
+  BUTTON_REACTION_DISLIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_DISLIKE_CLASS,
+  BUTTON_REACTION_LIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_LIKE_CLASS,
+  BUTTON_SLIME_GLOW_CLASS,
+} from 'component/button/classes';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
 import * as TAGS from 'constants/tags';
 import ShortsActions from 'component/shortsActions';
+import { SHORTS_SIDE_PANEL_CLASSES } from 'component/shortsSidePanel/classes';
 import MobileTabView from 'component/mobileTabView';
 import RecommendedContent from 'component/recommendedContent';
 import ChaptersCard from 'component/chaptersCard';
@@ -30,6 +42,31 @@ import { selectPlayingCollectionId } from 'redux/selectors/content';
 import { selectMyReactionForUri } from 'redux/selectors/reactions';
 import { doOpenModal } from 'redux/actions/app';
 import { doReactionLike, doReactionDislike } from 'redux/actions/reactions';
+import {
+  VIDEO_FULLSCREEN_ACTION_BUTTON_ACTIVE_CLASS,
+  VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+  VIDEO_FULLSCREEN_ACTION_BUTTON_REACTION_CLASS,
+  VIDEO_FULLSCREEN_ACTIONS_LANDSCAPE_CLASS,
+  VIDEO_FULLSCREEN_ACTIONS_CLASS,
+  VIDEO_FULLSCREEN_ACTIONS_GROUP_CLASS,
+  VIDEO_FULLSCREEN_ACTIONS_WRAPPER_CLASS,
+  VIDEO_FULLSCREEN_CHAT_CLOSE_BUTTON_CLASS,
+  VIDEO_FULLSCREEN_CLOSE_BUTTON_CLASS,
+  VIDEO_FULLSCREEN_CLOSE_BUTTON_CONTAINER_CLASS,
+  VIDEO_FULLSCREEN_PULLER_CLASS,
+  VIDEO_FULLSCREEN_PULLER_VERTICAL_CLASS,
+  VIDEO_FULLSCREEN_SHEET_HEADER_CLASS,
+  VIDEO_FULLSCREEN_SHORTS_ACTIONS_CLASS,
+  VIDEO_FULLSCREEN_SIDE_HANDLE_CLASS,
+  VIDEO_FULLSCREEN_SIDE_PANEL_CHAPTERS_CLASS,
+  VIDEO_FULLSCREEN_SIDE_PANEL_CHAT_CLASS,
+  VIDEO_FULLSCREEN_SIDE_PANEL_CLASS,
+  VIDEO_FULLSCREEN_SIDE_PANEL_CONTENT_CLASS,
+  VIDEO_FULLSCREEN_SIDE_PANEL_INNER_CLASS,
+  VIDEO_FULLSCREEN_SIDE_PANEL_MOBILE_CLASS,
+  VIDEO_FULLSCREEN_SIDE_PANEL_OPEN_CLASS,
+  VIDEO_FULLSCREEN_SIDE_PANEL_PLAYLIST_CLASS,
+} from './classes';
 
 const CommentsList = lazyImport(() => import('component/commentsList'));
 const ChatLayout = lazyImport(() => import('component/chat'));
@@ -69,7 +106,7 @@ export default function VideoFullscreenActions(props: Props) {
     Boolean(isShort) ||
     urlParams.get('view') === 'shorts' ||
     !!document.querySelector('.shorts-page__container') ||
-    !!document.querySelector('.content__viewer--shorts-floating');
+    !!document.querySelector('[data-floating-shorts-player]');
 
   const claim = useAppSelector((state) => (uri ? selectClaimForUri(state, uri) : undefined));
   const claimId = claim?.claim_id;
@@ -173,7 +210,7 @@ export default function VideoFullscreenActions(props: Props) {
   const adjustVideoForSwipe = React.useCallback((deltaX) => {
     const fsTarget = document.querySelector<HTMLElement>('.player-fullscreen-target');
     if (!fsTarget) return;
-    const contentWrapper = fsTarget.querySelector<HTMLElement>('.content__wrapper');
+    const contentWrapper = fsTarget.querySelector<HTMLElement>('[data-content-wrapper]');
     const actions = fsTarget.querySelector<HTMLElement>('.video-fullscreen__actions');
     if (deltaX === null) {
       if (contentWrapper) {
@@ -421,7 +458,7 @@ export default function VideoFullscreenActions(props: Props) {
     const infoContent = (
       <div className="file-page">
         <div className="card-stack">
-          <section className="file-page__media-actions">
+          <section className={FILE_PAGE_MEDIA_ACTIONS_CLASS} data-file-page-media-actions>
             <FileTitleSection uri={uri} accessStatus={accessStatus} expandOverride />
           </section>
         </div>
@@ -466,24 +503,27 @@ export default function VideoFullscreenActions(props: Props) {
 
     return (
       <div
-        className={`video-fullscreen__actions-wrapper ${
-          useSidePanel ? 'video-fullscreen__actions-wrapper--landscape' : ''
-        }`}
+        className={classnames(
+          VIDEO_FULLSCREEN_ACTIONS_WRAPPER_CLASS,
+          useSidePanel && VIDEO_FULLSCREEN_ACTIONS_LANDSCAPE_CLASS
+        )}
       >
         {useSidePanel ? (
           <div
             ref={sidePanelRef}
-            className={`video-fullscreen__side-panel ${panelMode ? 'video-fullscreen__side-panel--open' : ''}`}
+            className={classnames(VIDEO_FULLSCREEN_SIDE_PANEL_CLASS, {
+              [VIDEO_FULLSCREEN_SIDE_PANEL_OPEN_CLASS]: panelMode,
+            })}
           >
             <div
-              className="video-fullscreen__side-handle"
+              className={VIDEO_FULLSCREEN_SIDE_HANDLE_CLASS}
               onTouchStart={handleSideTouchStart}
               onTouchMove={handleSideTouchMove}
               onTouchEnd={handleSideTouchEnd}
             >
-              <span className="video-fullscreen__puller video-fullscreen__puller--vertical" />
+              <span className={`${VIDEO_FULLSCREEN_PULLER_CLASS} ${VIDEO_FULLSCREEN_PULLER_VERTICAL_CLASS}`} />
             </div>
-            <div className="video-fullscreen__side-panel-inner">
+            <div className={VIDEO_FULLSCREEN_SIDE_PANEL_INNER_CLASS}>
               <ForceMobileProvider value={true}>
                 {panelMode && (
                   <MobileTabView
@@ -524,9 +564,14 @@ export default function VideoFullscreenActions(props: Props) {
 
   return (
     <div
-      className={`video-fullscreen__actions-wrapper ${isShortContext ? 'video-fullscreen__actions-wrapper--shorts' : ''}`}
+      className={classnames(
+        VIDEO_FULLSCREEN_ACTIONS_WRAPPER_CLASS,
+        isShortContext && 'video-fullscreen__actions-wrapper--shorts'
+      )}
     >
-      <div className={`video-fullscreen__actions ${isShortContext ? 'video-fullscreen__actions--shorts' : ''}`}>
+      <div
+        className={classnames(VIDEO_FULLSCREEN_ACTIONS_CLASS, isShortContext && VIDEO_FULLSCREEN_SHORTS_ACTIONS_CLASS)}
+      >
         {isShortContext ? (
           isFs && (
             <ShortsActions
@@ -545,11 +590,17 @@ export default function VideoFullscreenActions(props: Props) {
           )
         ) : (
           <>
-            <div className="video-fullscreen__actions-group">
+            <div className={VIDEO_FULLSCREEN_ACTIONS_GROUP_CLASS}>
               <Button
-                className={`video-fullscreen__action-btn video-fullscreen__action-btn--reaction ${
-                  myReaction === REACTION_TYPES.LIKE ? 'button--fire' : ''
-                } ${fireGlow ? 'button--fire-glow-pulse' : ''}`}
+                className={classnames(
+                  VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+                  VIDEO_FULLSCREEN_ACTION_BUTTON_REACTION_CLASS,
+                  BUTTON_REACTION_LIKE_CLASS,
+                  {
+                    [BUTTON_REACTION_LIKE_ACTIVE_CLASS]: myReaction === REACTION_TYPES.LIKE,
+                    [BUTTON_FIRE_GLOW_CLASS]: fireGlow,
+                  }
+                )}
                 onClick={() => {
                   if (myReaction !== REACTION_TYPES.LIKE) triggerFireGlow();
                   handleReactionLike(uri);
@@ -557,24 +608,18 @@ export default function VideoFullscreenActions(props: Props) {
                 icon={myReaction === REACTION_TYPES.LIKE ? ICONS.FIRE_ACTIVE : ICONS.FIRE}
                 iconSize={18}
                 title={__('Like')}
-                label={
-                  myReaction === REACTION_TYPES.LIKE ? (
-                    <>
-                      <div className="button__fire-glow" />
-                      <div className="button__fire-particle1" />
-                      <div className="button__fire-particle2" />
-                      <div className="button__fire-particle3" />
-                      <div className="button__fire-particle4" />
-                      <div className="button__fire-particle5" />
-                      <div className="button__fire-particle6" />
-                    </>
-                  ) : undefined
-                }
+                label={myReaction === REACTION_TYPES.LIKE ? <ButtonFireEffect /> : undefined}
               />
               <Button
-                className={`video-fullscreen__action-btn video-fullscreen__action-btn--reaction ${
-                  myReaction === REACTION_TYPES.DISLIKE ? 'button--slime' : ''
-                } ${slimeGlow ? 'button--slime-glow-pulse' : ''}`}
+                className={classnames(
+                  VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+                  VIDEO_FULLSCREEN_ACTION_BUTTON_REACTION_CLASS,
+                  BUTTON_REACTION_DISLIKE_CLASS,
+                  {
+                    [BUTTON_REACTION_DISLIKE_ACTIVE_CLASS]: myReaction === REACTION_TYPES.DISLIKE,
+                    [BUTTON_SLIME_GLOW_CLASS]: slimeGlow,
+                  }
+                )}
                 onClick={() => {
                   if (myReaction !== REACTION_TYPES.DISLIKE) triggerSlimeGlow();
                   handleReactionDislike(uri);
@@ -582,23 +627,16 @@ export default function VideoFullscreenActions(props: Props) {
                 icon={myReaction === REACTION_TYPES.DISLIKE ? ICONS.SLIME_ACTIVE : ICONS.SLIME}
                 iconSize={18}
                 title={__('Dislike')}
-                label={
-                  myReaction === REACTION_TYPES.DISLIKE ? (
-                    <>
-                      <div className="button__slime-stain" />
-                      <div className="button__slime-drop1" />
-                      <div className="button__slime-drop2" />
-                    </>
-                  ) : undefined
-                }
+                label={myReaction === REACTION_TYPES.DISLIKE ? <ButtonSlimeEffect /> : undefined}
               />
             </div>
 
-            <div className="video-fullscreen__actions-group">
+            <div className={VIDEO_FULLSCREEN_ACTIONS_GROUP_CLASS}>
               <Button
-                className={`video-fullscreen__action-btn ${
-                  panelMode === 'info' ? 'video-fullscreen__action-btn--active' : ''
-                }`}
+                className={classnames(
+                  VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+                  panelMode === 'info' && VIDEO_FULLSCREEN_ACTION_BUTTON_ACTIVE_CLASS
+                )}
                 onClick={() => handleTogglePanel('info')}
                 icon={ICONS.INFO}
                 iconSize={18}
@@ -607,9 +645,10 @@ export default function VideoFullscreenActions(props: Props) {
 
               {hasChapters && (
                 <Button
-                  className={`video-fullscreen__action-btn ${
-                    panelMode === 'chapters' ? 'video-fullscreen__action-btn--active' : ''
-                  }`}
+                  className={classnames(
+                    VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+                    panelMode === 'chapters' && VIDEO_FULLSCREEN_ACTION_BUTTON_ACTIVE_CLASS
+                  )}
                   onClick={() => handleTogglePanel('chapters')}
                   icon={ICONS.VIEW_LIST}
                   iconSize={18}
@@ -619,9 +658,10 @@ export default function VideoFullscreenActions(props: Props) {
 
               {hasPlaylist && (
                 <Button
-                  className={`video-fullscreen__action-btn ${
-                    panelMode === 'playlist' ? 'video-fullscreen__action-btn--active' : ''
-                  }`}
+                  className={classnames(
+                    VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+                    panelMode === 'playlist' && VIDEO_FULLSCREEN_ACTION_BUTTON_ACTIVE_CLASS
+                  )}
                   onClick={() => handleTogglePanel('playlist')}
                   icon={ICONS.PLAYLIST}
                   iconSize={18}
@@ -631,9 +671,10 @@ export default function VideoFullscreenActions(props: Props) {
 
               {isLivestreamClaim ? (
                 <Button
-                  className={`video-fullscreen__action-btn ${
-                    panelMode === 'chat' ? 'video-fullscreen__action-btn--active' : ''
-                  }`}
+                  className={classnames(
+                    VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+                    panelMode === 'chat' && VIDEO_FULLSCREEN_ACTION_BUTTON_ACTIVE_CLASS
+                  )}
                   onClick={() => handleTogglePanel('chat')}
                   icon={ICONS.CHAT}
                   iconSize={18}
@@ -642,18 +683,20 @@ export default function VideoFullscreenActions(props: Props) {
               ) : (
                 <>
                   <Button
-                    className={`video-fullscreen__action-btn ${
-                      panelMode === 'comments' ? 'video-fullscreen__action-btn--active' : ''
-                    }`}
+                    className={classnames(
+                      VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+                      panelMode === 'comments' && VIDEO_FULLSCREEN_ACTION_BUTTON_ACTIVE_CLASS
+                    )}
                     onClick={() => handleTogglePanel('comments')}
                     icon={ICONS.COMMENTS_LIST}
                     iconSize={18}
                     title={__('Comments')}
                   />
                   <Button
-                    className={`video-fullscreen__action-btn ${
-                      panelMode === 'related' ? 'video-fullscreen__action-btn--active' : ''
-                    }`}
+                    className={classnames(
+                      VIDEO_FULLSCREEN_ACTION_BUTTON_CLASS,
+                      panelMode === 'related' && VIDEO_FULLSCREEN_ACTION_BUTTON_ACTIVE_CLASS
+                    )}
                     onClick={() => handleTogglePanel('related')}
                     icon={ICONS.DISCOVER}
                     iconSize={18}
@@ -668,24 +711,24 @@ export default function VideoFullscreenActions(props: Props) {
 
       <div
         ref={sidePanelRef}
-        className={`video-fullscreen__side-panel ${
-          panelMode ? 'video-fullscreen__side-panel--open' : ''
-        } ${panelMode === 'chat' ? 'video-fullscreen__side-panel--chat' : ''} ${
-          panelMode === 'playlist' ? 'video-fullscreen__side-panel--playlist' : ''
-        } ${
-          panelMode === 'chapters' ? 'video-fullscreen__side-panel--chapters' : ''
-        } ${isMobile ? 'video-fullscreen__side-panel--mobile' : ''}`}
+        className={classnames(VIDEO_FULLSCREEN_SIDE_PANEL_CLASS, {
+          [VIDEO_FULLSCREEN_SIDE_PANEL_OPEN_CLASS]: panelMode,
+          [VIDEO_FULLSCREEN_SIDE_PANEL_CHAT_CLASS]: panelMode === 'chat',
+          [VIDEO_FULLSCREEN_SIDE_PANEL_PLAYLIST_CLASS]: panelMode === 'playlist',
+          [VIDEO_FULLSCREEN_SIDE_PANEL_CHAPTERS_CLASS]: panelMode === 'chapters',
+          [VIDEO_FULLSCREEN_SIDE_PANEL_MOBILE_CLASS]: isMobile,
+        })}
       >
         {isMobile && (
           <div
-            className="video-fullscreen__sheet-header"
+            className={VIDEO_FULLSCREEN_SHEET_HEADER_CLASS}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
-            <span className="video-fullscreen__puller" />
+            <span className={VIDEO_FULLSCREEN_PULLER_CLASS} />
             <Button
-              className="video-fullscreen__close-button"
+              className={VIDEO_FULLSCREEN_CLOSE_BUTTON_CLASS}
               onClick={handleClosePanel}
               icon={ICONS.REMOVE}
               iconSize={20}
@@ -694,9 +737,9 @@ export default function VideoFullscreenActions(props: Props) {
           </div>
         )}
         {!isMobile && (
-          <div className="video-fullscreen__close-button-container">
+          <div className={VIDEO_FULLSCREEN_CLOSE_BUTTON_CONTAINER_CLASS}>
             <Button
-              className="video-fullscreen__close-button"
+              className={VIDEO_FULLSCREEN_CLOSE_BUTTON_CLASS}
               onClick={handleClosePanel}
               icon={ICONS.REMOVE}
               iconSize={20}
@@ -705,12 +748,12 @@ export default function VideoFullscreenActions(props: Props) {
           </div>
         )}
 
-        <div ref={panelContentRef} className="video-fullscreen__side-panel-content">
+        <div ref={panelContentRef} className={VIDEO_FULLSCREEN_SIDE_PANEL_CONTENT_CLASS}>
           {isShortDetailsPanel && (
             <>
               <FileTitleSection uri={uri} accessStatus={accessStatus} expandOverride />
-              <div ref={commentsSectionRef} className="shorts-page__side-panel-comments">
-                <h2 className="shorts-page__side-panel-comments-title">{__('Comments')}</h2>
+              <div ref={commentsSectionRef} className={SHORTS_SIDE_PANEL_CLASSES.comments}>
+                <h2 className={SHORTS_SIDE_PANEL_CLASSES.commentsTitle}>{__('Comments')}</h2>
                 {contentUnlocked &&
                   (commentsDisabled ? (
                     <Empty padded text={__('The creator of this content has disabled comments.')} />
@@ -732,7 +775,11 @@ export default function VideoFullscreenActions(props: Props) {
           )}
           {panelMode === 'chat' && (
             <>
-              <button className="video-fullscreen__chat-close-button" onClick={handleClosePanel} title={__('Close')}>
+              <button
+                className={VIDEO_FULLSCREEN_CHAT_CLOSE_BUTTON_CLASS}
+                onClick={handleClosePanel}
+                title={__('Close')}
+              >
                 <Icon size={18} icon={ICONS.REMOVE} />
               </button>
               <React.Suspense fallback={null}>

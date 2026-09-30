@@ -1,5 +1,12 @@
 import React from 'react';
 import classnames from 'classnames';
+import {
+  CLAIM_PREVIEW_TILE_CLASSES,
+  CLAIM_TILE_ABOUT_COUNTS_CLASS,
+  CLAIM_TILE_HEADER_CLASS,
+  CLAIM_TILE_PLACEHOLDER_SECONDARY_TITLE_CLASS,
+  CLAIM_TILE_REPOST_AUTHOR_CLASS,
+} from './classes';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ChannelPageContext } from 'contexts/channel';
 import * as COLLECTIONS from 'constants/collections';
@@ -12,19 +19,29 @@ import DateTimeClaim from 'component/dateTimeClaim';
 import LivestreamDateTime from 'component/livestreamDateTime';
 import ChannelThumbnail from 'component/channelThumbnail';
 import FileViewCountInline from 'component/fileViewCountInline';
+import { CLAIM_TILE_VIEW_COUNT_CONTAINER_CLASS } from 'component/fileViewCountInline/classes';
 // import SubscribeButton from 'component/subscribeButton';
 import useGetThumbnail from 'effects/use-get-thumbnail';
 import { isClaimAllowedForCollection } from 'util/collections';
 import { formatLbryUrlForWeb, generateListSearchUrlParams } from 'util/url';
 import { formatClaimPreviewTitle } from 'util/formatAriaLabel';
 import PreviewOverlayProperties from 'component/previewOverlayProperties';
+import { CLAIM_PREVIEW_FILE_PROPERTY_OVERLAY_CLASS } from 'component/previewOverlayProperties/classes';
 import FileHideRecommendation from 'component/fileHideRecommendation';
 import FileWatchLaterLink from 'component/fileWatchLaterLink';
 import ButtonAddToQueue from 'component/buttonAddToQueue';
 import ButtonFloatingPlayer from 'component/buttonFloatingPlayer';
+import { BUTTON_CONTENT_CLASS } from 'component/button/classes';
 import ClaimRepostAuthor from 'component/claimRepostAuthor';
 import ClaimMenuList from 'component/claimMenuList';
 import CollectionPreviewOverlay from 'component/collectionPreviewOverlay';
+import {
+  CLAIM_PREVIEW_PLACEHOLDER_CHANNEL_CLASS,
+  CLAIM_PREVIEW_PLACEHOLDER_CLASSES,
+} from 'component/common/claim-preview-loading-classes';
+import { CLAIM_TILE_ABOUT_CLASS } from 'component/common/claim-grid-classes';
+import { CLAIM_PREVIEW_HOVER_ACTIONS_GRID_CLASS } from 'component/claimPreview/hover-action-classes';
+import { CLAIM_PREVIEW_LIVE_WRAPPER_CLASS } from 'component/claimPreview/classes';
 import { FYP_ID } from 'constants/urlParams';
 import * as PAGES from 'constants/pages';
 import { EmbedContext } from 'contexts/embed';
@@ -262,28 +279,28 @@ function ClaimPreviewTile(props: Props) {
   if (isPlaceholder) {
     return (
       <li
-        className={classnames('placeholder claim-preview--tile', {
+        className={classnames(CLAIM_PREVIEW_PLACEHOLDER_CLASSES.tileRoot, {
           pulse: pulse,
           'placeholder--pagination': placeholder === 'pagination',
         })}
       >
         <div
-          className={classnames('media__thumb', {
-            media__thumb__short: useShortsThumb,
+          className={classnames(CLAIM_PREVIEW_PLACEHOLDER_CLASSES.thumbnail, {
+            [CLAIM_PREVIEW_TILE_CLASSES.shortThumbnail]: useShortsThumb,
           })}
         />
-        <div className="placeholder__wrapper">
-          <div className="claim-tile__title" />
-          <div className="claim-tile__title_b" />
+        <div className={CLAIM_PREVIEW_PLACEHOLDER_CLASSES.wrapper}>
+          <div className={CLAIM_PREVIEW_PLACEHOLDER_CLASSES.tileTitle} />
+          <div className={CLAIM_TILE_PLACEHOLDER_SECONDARY_TITLE_CLASS} data-claim-tile-placeholder-secondary-title />
           <div
             className={classnames('claim-tile__info', {
-              contains_view_count: shouldShowViewCount,
+              [CLAIM_TILE_VIEW_COUNT_CONTAINER_CLASS]: shouldShowViewCount,
             })}
           >
-            <div className="channel-thumbnail" />
-            <div className="claim-tile__about">
-              <div className="button__content" />
-              <div className="claim-tile__about--counts" />
+            <div className={CLAIM_PREVIEW_PLACEHOLDER_CHANNEL_CLASS} />
+            <div className={CLAIM_PREVIEW_PLACEHOLDER_CLASSES.about}>
+              <div className={`${BUTTON_CONTENT_CLASS} ${CLAIM_PREVIEW_PLACEHOLDER_CLASSES.buttonContent}`} />
+              <div className={CLAIM_TILE_ABOUT_COUNTS_CLASS} data-claim-tile-about-counts />
             </div>
           </div>
         </div>
@@ -299,11 +316,12 @@ function ClaimPreviewTile(props: Props) {
       onMouseLeave={() => setTileHover(false)}
       className={classnames('claim-preview__wrapper claim-preview--tile', {
         'claim-preview__wrapper--channel': isChannel,
-        'claim-preview__wrapper--live': isLivestreamActive,
-        'claim-preview__wrapper--short': isShort && sectionTitle === 'Shorts',
-        'claim-preview__wrapper--short-cover': isShort && isShortFromChannelPage,
-        'claim-preview--placeholder-reveal': revealFromPlaceholder,
+        [CLAIM_PREVIEW_LIVE_WRAPPER_CLASS]: isLivestreamActive,
+        [CLAIM_PREVIEW_TILE_CLASSES.shortSection]: isShort && sectionTitle === 'Shorts',
+        [CLAIM_PREVIEW_TILE_CLASSES.shortCover]: isShort && isShortFromChannelPage,
+        [CLAIM_PREVIEW_TILE_CLASSES.placeholderReveal]: revealFromPlaceholder,
       })}
+      data-claim-preview-wrapper-short={isShort && sectionTitle === 'Shorts' ? true : undefined}
     >
       {/* Use div instead of NavLink to avoid invalid <a> nesting with hover action buttons */}
       <div
@@ -352,7 +370,7 @@ function ClaimPreviewTile(props: Props) {
         >
           {!isChannel && (
             <React.Fragment>
-              <div className="claim-preview__hover-actions-grid">
+              <div className={CLAIM_PREVIEW_HOVER_ACTIONS_GRID_CLASS}>
                 {fypId && isStream && (
                   <div className="claim-preview__hover-actions">
                     <FileHideRecommendation focusable={false} uri={repostedContentUri} />
@@ -368,7 +386,7 @@ function ClaimPreviewTile(props: Props) {
                 {media && (!isLivestream || isLivestreamActive) && <ButtonFloatingPlayer uri={repostedContentUri} />}
               </div>
 
-              <div className="claim-preview__file-property-overlay">
+              <div className={CLAIM_PREVIEW_FILE_PROPERTY_OVERLAY_CLASS} data-claim-preview-file-property-overlay>
                 <PreviewOverlayProperties uri={uri} properties={properties} />
               </div>
               <ClaimPreviewProgress uri={uri} />
@@ -382,12 +400,12 @@ function ClaimPreviewTile(props: Props) {
       onlyThumb used for the preview tile functionality, without the bottom part (channel, menu, etc) */}
       {!onlyThumb && (
         <>
-          <div className="claim-tile__header">
+          <div className={CLAIM_TILE_HEADER_CLASS} data-claim-tile-header>
             <NavLink aria-label={ariaLabelData} {...navLinkProps} target={isEmbed && '_blank'}>
               <h2 className="claim-preview__title">
                 <TruncatedText text={title || (claim && claim.name)} lines={isChannel ? 1 : 2} />
                 {isChannel && (
-                  <div className="claim-tile__about">
+                  <div className={CLAIM_TILE_ABOUT_CLASS}>
                     <UriIndicator uri={uri} external={isEmbed} />
                   </div>
                 )}
@@ -404,12 +422,10 @@ function ClaimPreviewTile(props: Props) {
           <div>
             <div
               className={classnames('claim-tile__info', {
-                contains_view_count: shouldShowViewCount,
+                [CLAIM_TILE_VIEW_COUNT_CONTAINER_CLASS]: shouldShowViewCount,
               })}
             >
-              {isChannel ? ( //  <div className="claim-tile__about--channel">
-                //    <SubscribeButton uri={repostedChannelUri || uri} />
-                //  </div>
+              {isChannel ? (
                 <></>
               ) : (
                 <React.Fragment>
@@ -417,9 +433,9 @@ function ClaimPreviewTile(props: Props) {
                     <ChannelThumbnail uri={channelUri || ''} xsmall checkMembership={false} />
                   </UriIndicator>
 
-                  <div className="claim-tile__about">
+                  <div className={CLAIM_TILE_ABOUT_CLASS}>
                     <UriIndicator uri={uri} link external={isEmbed} />
-                    <div className="claim-tile__about--counts">
+                    <div className={CLAIM_TILE_ABOUT_COUNTS_CLASS} data-claim-tile-about-counts>
                       {isPreview ? (
                         <span>{__('142 views · 3 hours ago')}</span>
                       ) : (
@@ -435,7 +451,7 @@ function ClaimPreviewTile(props: Props) {
               )}
             </div>
             {isRepost && (
-              <div className="claim-tile__repost-author">
+              <div className={CLAIM_TILE_REPOST_AUTHOR_CLASS} data-claim-tile-repost-author>
                 <ClaimRepostAuthor uri={uri} short={false} />
               </div>
             )}

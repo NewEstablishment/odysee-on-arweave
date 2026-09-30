@@ -8,6 +8,7 @@ import useThrottle from 'effects/use-throttle';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doResolveUri } from 'redux/actions/claims';
 import { selectBalance } from 'redux/selectors/wallet';
+import { CARD_CLASSES } from 'component/common/card-classes';
 
 function RepostPage() {
   const dispatch = useAppDispatch();
@@ -49,7 +50,7 @@ function RepostPage() {
       }}
     >
       {balance === 0 && <YrblWalletEmpty />}
-      <div className={balance === 0 ? 'card--disabled' : undefined}>
+      <div className={balance === 0 ? CARD_CLASSES.disabled : undefined}>
         <RepostCreate
           uri={decodedFrom}
           name={repostTo}

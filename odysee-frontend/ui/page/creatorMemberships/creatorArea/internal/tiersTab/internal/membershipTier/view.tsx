@@ -1,4 +1,5 @@
 import React from 'react';
+import classnames from 'classnames';
 import Symbol from 'component/common/symbol';
 import { Menu, MenuButton, MenuList, MenuItem } from 'component/common/menu';
 import * as ICONS from 'constants/icons';
@@ -12,6 +13,8 @@ import {
 } from 'redux/actions/memberships';
 import { doToast as doToastAction } from 'redux/actions/notifications';
 import { selectArweaveExchangeRates } from 'redux/selectors/arwallet';
+import { JOIN_MEMBERSHIP_CLASSES, JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES } from 'component/joinMembershipCard/classes';
+import { MEMBERSHIP_TIER_CLASSES } from 'component/joinMembershipCard/internal/previewPage/internal/membershipTier/classes';
 type Props = {
   membership: CreatorMembership;
   index: number;
@@ -29,17 +32,20 @@ function MembershipTier(props: Props) {
   const doDeactivateMembershipForId = (membershipId: number | null | undefined) =>
     dispatch(doDeactivateMembershipForIdAction(membershipId));
   const doMembershipList = (params: MembershipListParams) => dispatch(doMembershipListAction(params));
+  const tierVariableClass = JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES[index];
   return (
     <>
-      <div className="membership-tier__header">
-        <span className="membership-tier__name">{`${membership.name} ${membership.enabled ? '' : __('(Disabled)')}`}</span>
+      <div className={MEMBERSHIP_TIER_CLASSES.header}>
+        <span className={MEMBERSHIP_TIER_CLASSES.headerName}>
+          {`${membership.name} ${membership.enabled ? '' : __('(Disabled)')}`}
+        </span>
         {membership.enabled === true && (
           <Menu>
-            <MenuButton className="menu__button">
+            <MenuButton className={classnames('menu__button', MEMBERSHIP_TIER_CLASSES.headerMenuButton)}>
               <Icon size={18} icon={ICONS.SETTINGS} />
             </MenuButton>
 
-            <MenuList className={'menu__list membership-tier' + String(index + 1)}>
+            <MenuList className={classnames('menu__list', JOIN_MEMBERSHIP_CLASSES.tierMenu, tierVariableClass)}>
               <MenuItem className="comment__menu-option" onSelect={addEditingId}>
                 <div className="menu__link">
                   <Icon size={16} icon={ICONS.EDIT} />
@@ -91,7 +97,9 @@ function MembershipTier(props: Props) {
       </div>
 
       <div className="membership-tier__infos">
-        {membership.description && <span className="membership-tier__infos-description">{membership.description}</span>}
+        {membership.description && (
+          <span className={JOIN_MEMBERSHIP_CLASSES.detailsDescription}>{membership.description}</span>
+        )}
         <label>{__('Pledge')}</label>
         <span>
           ${(Number(membership?.prices[0].amount) / 100).toFixed(2)} (
@@ -102,11 +110,23 @@ function MembershipTier(props: Props) {
           )
         </span>{' '}
         {/* the ui basically supports monthly right now */}
-        <div className="membership-tier__perks">
+        <div className={MEMBERSHIP_TIER_CLASSES.perks}>
           <div className="membership-tier__perks-content">
             <label>{__('Odysee Perks')}</label>
-            <ul>
-              {membership.perks && membership.perks.map((tierPerk, i) => <li key={i}>{__(tierPerk.description)}</li>)}
+            <ul className={MEMBERSHIP_TIER_CLASSES.perksList}>
+              {membership.perks &&
+                membership.perks.map((tierPerk, i) => (
+                  <li
+                    className={classnames(
+                      MEMBERSHIP_TIER_CLASSES.perksItem,
+                      MEMBERSHIP_TIER_CLASSES.perksItemTierColor,
+                      MEMBERSHIP_TIER_CLASSES.perksItemMuted
+                    )}
+                    key={i}
+                  >
+                    {__(tierPerk.description)}
+                  </li>
+                ))}
             </ul>
           </div>
         </div>

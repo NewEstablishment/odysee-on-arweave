@@ -1,6 +1,7 @@
 import * as ICONS from 'constants/icons';
 import React from 'react';
 import Button from 'component/button';
+import { ICON_HELP_CLASS } from './icon-classes';
 type Props = {
   href?: string;
   navigate?: string;
@@ -17,7 +18,7 @@ export default function HelpLink(props: Props) {
           e.stopPropagation();
         }
       }}
-      className="icon--help"
+      className={ICON_HELP_CLASS}
       icon={icon || ICONS.HELP}
       iconSize={iconSize || 14}
       title={description || __('Help')}

@@ -15,6 +15,8 @@ import {
 } from 'redux/selectors/claims';
 import { makeSelectPendingAmountByUri } from 'redux/selectors/wallet';
 import { doOpenModal } from 'redux/actions/app';
+import { FILE_VALUES_TABLE_CLASS } from './classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 
 type Props = {
   uri: string;
@@ -31,7 +33,7 @@ function FileValues(props: Props) {
   const claimIsMine = useAppSelector((state) => selectClaimIsMine(state, claim));
 
   if (!claim || !metadata) {
-    return <span className="empty">{__('Empty claim or metadata info.')}</span>;
+    return <span className={EMPTY_CLASS}>{__('Empty claim or metadata info.')}</span>;
   }
 
   const openModal = (id: string, modalProps: { uri: string }) => dispatch(doOpenModal(id, modalProps));
@@ -39,7 +41,7 @@ function FileValues(props: Props) {
   const supportsAmount = claim && claim.meta && claim.meta.support_amount && Number(claim.meta.support_amount);
   const purchaseReceipt = claim && claim.purchase_receipt;
   return (
-    <table className="table table--condensed table--fixed table--lbc-details">
+    <table className={FILE_VALUES_TABLE_CLASS}>
       <tbody>
         <tr>
           <td>{__('LBRY URL')}</td>

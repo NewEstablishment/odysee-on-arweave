@@ -4,6 +4,9 @@ import * as TAGS from 'constants/tags';
 import React from 'react';
 import classnames from 'classnames';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_DISABLED_PREFIX_CLASS } from 'component/common/form-components/fieldset-group-classes';
+import { FORM_FIELD_PRICE_AMOUNT_CLASS } from 'component/common/form-components/form-field-classes';
+import { PUBLISH_ROW_CLASS, PUBLISH_ROW_NO_MARGIN_CLASS } from 'component/publish/shared/publish-row-classes';
 import Button from 'component/button';
 import TagsSearch from 'component/tagsSearch';
 import { FF_MAX_CHARS_IN_DESCRIPTION } from 'constants/form-field';
@@ -14,7 +17,9 @@ import ClaimAbandonButton from 'component/claimAbandonButton';
 import { useNavigate } from 'react-router-dom';
 import { MINIMUM_PUBLISH_BID, INVALID_NAME_ERROR, ESTIMATED_FEE } from 'constants/claim';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'component/common/tabs';
+import { TAB_PANEL_CLASS } from 'component/common/tabs-classes';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import * as PAGES from 'constants/pages';
 import * as PUBLISH from 'constants/publish';
 import analytics from 'analytics';
@@ -45,6 +50,12 @@ import { doUpdateBlockListForPublishedChannel } from 'redux/actions/comments';
 import { doClaimInitialRewards } from 'redux/actions/rewards';
 import { selectIsClaimingInitialRewards, selectHasClaimedInitialRewards } from 'redux/selectors/rewards';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { CHANNEL_COVER_CLASSES } from 'component/channelCover/classes';
+import { CHANNEL_THUMBNAIL_CLASSES } from 'component/channelThumbnail/classes';
+import { CHANNEL_EDIT_THUMB_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
+import { CHANNEL_PAGE_CLASSES } from 'page/claim/internal/claimPageComponent/internal/channelPage/classes';
 
 const MAX_TAG_SELECT = 5;
 type Props = {
@@ -334,17 +345,17 @@ function ChannelForm(props: Props) {
     <>
       <div
         className={classnames({
-          'card--disabled': disabled,
+          [CARD_CLASSES.disabled]: disabled,
         })}
       >
         <header
-          className="channel-cover"
+          className={CHANNEL_COVER_CLASSES.root}
           style={{
             backgroundImage: 'url(' + coverSrc + ')',
           }}
         >
-          <div className="channel-header-content">
-            <div className="channel__quick-actions">
+          <div className={CHANNEL_COVER_CLASSES.headerContent}>
+            <div className={CHANNEL_COVER_CLASSES.quickActions}>
               <Button
                 button="alt"
                 title={__('Cover')}
@@ -363,12 +374,12 @@ function ChannelForm(props: Props) {
               />
             </div>
             {params.coverUrl && coverError && isUpload.cover && (
-              <div className="channel-cover__custom--waiting">
+              <div className={CHANNEL_COVER_CLASSES.waiting}>
                 <p>{__('Uploaded image will be visible in a few minutes after you submit this form.')}</p>
               </div>
             )}
-            <div className="channel__primary-info">
-              <h1 className="channel__title">
+            <div className={CHANNEL_COVER_CLASSES.primaryInfo}>
+              <h1 className={CHANNEL_COVER_CLASSES.title}>
                 {params.title || (channelName && '@' + channelName) || (params.name && '@' + params.name)}
               </h1>
             </div>
@@ -377,8 +388,8 @@ function ChannelForm(props: Props) {
 
         <Tabs index={tabIndex} onChange={onTabChange}>
           <div
-            className={classnames('tab__wrapper', {
-              'tab__wrapper--fixed': scrollPast,
+            className={classnames(CHANNEL_PAGE_CLASSES.tabWrapper, {
+              [CHANNEL_PAGE_CLASSES.tabWrapperFixed]: scrollPast,
             })}
           >
             <div
@@ -390,8 +401,8 @@ function ChannelForm(props: Props) {
               }
             >
               <ChannelThumbnail
-                className={classnames('channel__thumbnail--channel-page', {
-                  'channel__thumbnail--channel-page-fixed': scrollPast,
+                className={classnames(CHANNEL_THUMBNAIL_CLASSES.channelPage, {
+                  [CHANNEL_THUMBNAIL_CLASSES.channelPageFixed]: scrollPast,
                 })}
                 uri={uri}
                 thumbnailPreview={thumbnailPreview}
@@ -399,7 +410,7 @@ function ChannelForm(props: Props) {
                 setThumbUploadError={setThumbError}
                 ThumbUploadError={thumbError}
               />
-              <div className="channel__edit-thumb">
+              <div className={CHANNEL_EDIT_THUMB_CLASS}>
                 <Button
                   button="alt"
                   title={__('Edit')}
@@ -421,7 +432,7 @@ function ChannelForm(props: Props) {
               </div>
             </div>
 
-            <TabList className="tabs__list--channel-page">
+            <TabList className={CHANNEL_PAGE_CLASSES.tabList}>
               <Tab aria-selected={tabIndex === 0} onClick={() => onTabChange(0)}>
                 {__('About')}
               </Tab>
@@ -430,13 +441,13 @@ function ChannelForm(props: Props) {
               </Tab>
             </TabList>
           </div>
-          <TabPanels>
+          <TabPanels panelClassName={`${CHANNEL_PAGE_CLASSES.tabPanel} ${CHANNEL_PAGE_CLASSES.tabPanelEdit}`}>
             <TabPanel>
               <Card
                 background
                 title={__('General')}
                 body={
-                  <div className="publish-row publish-row--no-margin">
+                  <div className={`${PUBLISH_ROW_CLASS} ${PUBLISH_ROW_NO_MARGIN_CLASS}`}>
                     {isNewChannel && (
                       <Button
                         button="primary"
@@ -448,7 +459,7 @@ function ChannelForm(props: Props) {
 
                     {isNewChannel && (
                       <fieldset-group
-                        class="fieldset-group--smushed fieldset-group--disabled-prefix"
+                        class={FIELDSET_GROUP_DISABLED_PREFIX_CLASS}
                         style={{
                           marginTop: 'var(--spacing-m)',
                         }}
@@ -502,7 +513,7 @@ function ChannelForm(props: Props) {
                 background
                 title={__('Contact')}
                 body={
-                  <div className="publish-row publish-row--no-margin">
+                  <div className={`${PUBLISH_ROW_CLASS} ${PUBLISH_ROW_NO_MARGIN_CLASS}`}>
                     <FormField
                       type="text"
                       name="content_email2"
@@ -530,7 +541,7 @@ function ChannelForm(props: Props) {
                 title={__('Tags')}
                 className="card--tags"
                 body={
-                  <div className="publish-row">
+                  <div className={PUBLISH_ROW_CLASS}>
                     <TagsSearch
                       suggestMature={false}
                       disableAutoFocus
@@ -561,7 +572,7 @@ function ChannelForm(props: Props) {
                 background
                 title={__('Languages')}
                 body={
-                  <div className="publish-row">
+                  <div className={PUBLISH_ROW_CLASS}>
                     <fieldset-section
                       style={{
                         marginTop: 'calc(var(--spacing-m) * -1)',
@@ -613,9 +624,9 @@ function ChannelForm(props: Props) {
                   background
                   title={__('Credit Details')}
                   body={
-                    <div className="publish-row publish-row--no-margin">
+                    <div className={`${PUBLISH_ROW_CLASS} ${PUBLISH_ROW_NO_MARGIN_CLASS}`}>
                       <FormField
-                        className="form-field--price-amount"
+                        className={FORM_FIELD_PRICE_AMOUNT_CLASS}
                         type="number"
                         name="content_bid2"
                         step="any"
@@ -643,7 +654,7 @@ function ChannelForm(props: Props) {
                     background
                     title={__('Delete Channel')}
                     body={
-                      <div className="publish-row">
+                      <div className={PUBLISH_ROW_CLASS}>
                         <ClaimAbandonButton
                           uri={uri}
                           abandonActionCallback={() => navigate(`/$/${PAGES.CHANNELS}`, { replace: true })}
@@ -658,18 +669,18 @@ function ChannelForm(props: Props) {
           </TabPanels>
         </Tabs>
 
-        <div className="card-fixed-bottom">
+        <div className="card-fixed-bottom tw:[body:has(.nag)_&]:bottom-[3rem]">
           <Card
-            className="card--after-tabs tab__panel"
+            className={`card--after-tabs ${TAB_PANEL_CLASS} ${CHANNEL_PAGE_CLASSES.tabPanel} ${CHANNEL_PAGE_CLASSES.tabPanelEdit}`}
             actions={
               <>
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   <Button button="primary" disabled={submitDisabled} label={submitLabel} onClick={handleSubmit} />
                   <Button button="link" label={__('Cancel')} onClick={onDone} />
                   {errorMsg ? (
                     <ErrorText>{errorMsg}</ErrorText>
                   ) : (
-                    <p className="help">
+                    <p className={HELP_CLASS}>
                       <Icon icon={ICONS.INFO} />
                       {__('After submitting, it will take a few minutes for your changes to be live for everyone.')}
                     </p>

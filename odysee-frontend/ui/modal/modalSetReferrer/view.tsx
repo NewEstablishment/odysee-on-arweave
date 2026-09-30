@@ -3,6 +3,7 @@ import { FormField, Form } from 'component/common/form';
 import { Modal } from 'modal/modal';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectSetReferrerError, selectSetReferrerPending } from 'redux/selectors/user';
 import { doHideModal } from 'redux/actions/app';
@@ -66,7 +67,7 @@ function ModalSetReferrer(props: Props) {
                 error={!referrerSetPending && referrerSetError}
               />
             </Form>
-            <div className="card__actions">
+            <div className={CARD_CLASSES.actions}>
               <Button button="primary" label={__('Done')} onClick={handleClose} />
             </div>
           </React.Fragment>

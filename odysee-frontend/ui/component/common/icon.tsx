@@ -2,8 +2,9 @@ import * as ICONS from 'constants/icons';
 import React from 'react';
 import classnames from 'classnames';
 import { icons } from './icon-custom';
+import { ICON_NAME_CLASSES, ICON_WRAPPER_CLASS, ICON_WRAPPER_NAME_CLASSES } from './icon-classes';
 // It would be nice to standardize this somehow
-// These are copied from `scss/vars`, can they both come from the same source?
+// Keep these names aligned with the semantic icon tokens in ui/styles/tokens.css.
 const RED_COLOR = '#e2495e';
 const GREEN_COLOR = '#44b098';
 const BLUE_COLOR = '#49b2e2';
@@ -69,15 +70,19 @@ function IconComponent({
     <Icon
       title={tooltipText}
       size={size || (sectionIcon ? 20 : 16)}
-      className={classnames(`icon icon--${icon}`, className, {
-        'color-override': iconColor,
-      })}
+      className={classnames(`icon icon--${icon}`, ICON_NAME_CLASSES[icon], className)}
       color={color}
       aria-hidden
       {...rest}
     />
   );
-  return sectionIcon ? <span className={`icon__wrapper icon__wrapper--${icon}`}>{component}</span> : component;
+  return sectionIcon ? (
+    <span className={classnames(ICON_WRAPPER_CLASS, `icon__wrapper--${icon}`, ICON_WRAPPER_NAME_CLASSES[icon])}>
+      {component}
+    </span>
+  ) : (
+    component
+  );
 }
 
 export default IconComponent;

@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React, { useState } from 'react';
 import { Modal } from 'modal/modal';
 import { FormField } from 'component/common/form';
@@ -12,6 +13,8 @@ import { selectHasYoutubeChannels } from 'redux/selectors/user';
 import { doHideModal } from 'redux/actions/app';
 import { doAbandonTxo, doAbandonClaim, doResolveUri } from 'redux/actions/claims';
 import { doToast } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS, HELP_WARNING_CLASS } from 'component/common/help-classes';
 
 type Props = {
   tx: Txo;
@@ -89,7 +92,7 @@ export default function ModalRevokeClaim(props: Props) {
             {__('This will permanently remove your channel. Content published under this channel will be orphaned.')}
           </p>
           {hasYouTubeChannels && (
-            <div className="help--warning">
+            <div className={HELP_WARNING_CLASS}>
               <p>{__('YOUTUBE SYNCED CHANNELS!')}</p>
               <p>
                 {__(
@@ -121,7 +124,10 @@ export default function ModalRevokeClaim(props: Props) {
             your spendable balance.
           </I18nMessage>
         </p>
-        <p className="help error__text"> {__('FINAL WARNING: This action is permanent and cannot be undone.')}</p>
+        <p className={`${HELP_CLASS} ${ERROR_TEXT_CLASS}`}>
+          {' '}
+          {__('FINAL WARNING: This action is permanent and cannot be undone.')}
+        </p>
       </React.Fragment>
     );
   }
@@ -138,7 +144,7 @@ export default function ModalRevokeClaim(props: Props) {
         title={label}
         body={getMsgBody(type, isSupport, name)}
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               disabled={shouldConfirmChannel && name.normalize('NFC') !== channelName.normalize('NFC')}
               button="primary"

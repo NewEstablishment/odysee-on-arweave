@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React, { useEffect } from 'react';
 import { Navigate, NavigationType, Route, Routes, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import * as PAGES from 'constants/pages';
@@ -1025,7 +1026,7 @@ function AppRouter(props: Props) {
           <Route
             path={`/$/:maybeCategoryPage`}
             element={
-              <div className="main--empty">
+              <div className={PAGE_MAIN_EMPTY_CLASS}>
                 <Spinner text={__('Loading category...')} />
               </div>
             }

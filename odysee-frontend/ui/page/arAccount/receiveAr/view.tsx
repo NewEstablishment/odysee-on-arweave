@@ -1,10 +1,10 @@
 import React from 'react';
-import QRCode from 'component/common/qr-code';
-import CopyableText from 'component/copyableText';
 import I18nMessage from 'component/i18nMessage';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import ReceiveAddressLayout from 'component/receiveAddressLayout';
 import Symbol from 'component/common/symbol';
-import './style.scss';
+import { AR_ACCOUNT_CARD_CLASS, AR_ACCOUNT_CARD_TITLE_CLASS, AR_ACCOUNT_PAGE_CLASSES } from '../classes';
 type Props = {
   cardHeader: any;
   wallet: any;
@@ -15,19 +15,14 @@ function ReceiveAr(props: Props) {
   const { cardHeader, wallet, arWalletStatus } = props;
   return (
     <Card
-      className={!arWalletStatus ? `card--receiveAr card--disabled` : `card--receiveAr`}
+      className={`${AR_ACCOUNT_CARD_CLASS}${!arWalletStatus ? ` ${CARD_CLASSES.disabled}` : ''}`}
       title={cardHeader()}
+      titleClassName={AR_ACCOUNT_CARD_TITLE_CLASS}
       background
       actions={
-        <div className="section__flex">
-          <div className="qr__wrapper">
-            <QRCode value={wallet?.address} />
-            <div className="address__wrapper">
-              <CopyableText copyable={wallet?.address} />
-            </div>
-          </div>
-          <div className="section-content__wrapper">
-            <h2 className="section__title--small">
+        <ReceiveAddressLayout address={wallet?.address}>
+          <div className={AR_ACCOUNT_PAGE_CLASSES.sectionContent}>
+            <h2 className={AR_ACCOUNT_PAGE_CLASSES.sectionTitle}>
               <I18nMessage
                 tokens={{
                   ar: (
@@ -42,7 +37,7 @@ function ReceiveAr(props: Props) {
               </I18nMessage>
             </h2>
           </div>
-        </div>
+        </ReceiveAddressLayout>
       }
     />
   );

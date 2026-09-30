@@ -3,6 +3,7 @@
 // will use this component to properly position itself based on the ClaimCoverRender
 import React from 'react';
 import Button from 'component/button';
+import { BUTTON_LARGE_ICON_CLASS, BUTTON_PLAY_CLASS } from 'component/button/classes';
 import ClaimCoverRender from 'component/claimCoverRender';
 import withStreamClaimRender from 'hocs/withStreamClaimRender';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
@@ -37,7 +38,12 @@ const VideoClaimInitiator = (props: Props) => {
   );
   return (
     <ClaimCoverRender uri={uri} onClick={streamClaim} passedRef={playerRef}>
-      <Button className="button--icon button--play" onClick={streamClaim} iconSize={30} title={__('Play')} />
+      <Button
+        className={`${BUTTON_LARGE_ICON_CLASS} ${BUTTON_PLAY_CLASS}`}
+        onClick={streamClaim}
+        iconSize={30}
+        title={__('Play')}
+      />
       {children}
     </ClaimCoverRender>
   );

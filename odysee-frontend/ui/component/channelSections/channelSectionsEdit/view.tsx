@@ -9,6 +9,10 @@ import { parseURI } from 'util/lbryURI';
 import { useAppSelector } from 'redux/hooks';
 import { makeSelectCoverForUri, selectClaimForUri } from 'redux/selectors/claims';
 import { getClaimTitle, getThumbnailFromClaim } from 'util/claim';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { CHANNEL_COVER_CLASSES } from 'component/channelCover/classes';
+import { CHANNEL_THUMBNAIL_CLASSES } from 'component/channelThumbnail/classes';
+import { CHANNEL_PAGE_CLASSES } from 'page/claim/internal/claimPageComponent/internal/channelPage/classes';
 
 type Props = {
   uri: string;
@@ -41,36 +45,36 @@ export default function ChannelSectionsEdit(props: Props) {
   return (
     <div
       className={classnames({
-        'card--disabled': disabled,
+        [CARD_CLASSES.disabled]: disabled,
       })}
     >
-      <header className="channel-cover">
+      <header className={CHANNEL_COVER_CLASSES.root}>
         {coverUrl &&
           (coverError ? (
-            <div className="channel-cover__custom--waiting">
+            <div className={CHANNEL_COVER_CLASSES.waiting}>
               <p>{__('Uploaded image will be visible in a few minutes after you submit this form.')}</p>
             </div>
           ) : (
-            <img className="channel-cover__custom" src={coverSrc} onError={() => setCoverError(true)} />
+            <img className={CHANNEL_COVER_CLASSES.custom} src={coverSrc} onError={() => setCoverError(true)} />
           ))}
-        <div className="channel__primary-info">
+        <div className={CHANNEL_COVER_CLASSES.primaryInfo}>
           <ChannelThumbnail
-            className="channel__thumbnail--channel-page"
+            className={CHANNEL_THUMBNAIL_CLASSES.channelPage}
             uri={uri}
             thumbnailPreview={thumbnailPreview}
             allowGifs
             setThumbUploadError={setThumbError}
             thumbUploadError={thumbError}
           />
-          <h1 className="channel__title">{title || (channelName && '@' + channelName)}</h1>
+          <h1 className={CHANNEL_COVER_CLASSES.title}>{title || (channelName && '@' + channelName)}</h1>
         </div>
       </header>
 
       <Tabs className="channelPage-wrapper">
-        <TabList className="tabs__list--channel-page">
+        <TabList className={CHANNEL_PAGE_CLASSES.tabList}>
           <Tab>{''}</Tab>
         </TabList>
-        <TabPanels>
+        <TabPanels panelClassName={CHANNEL_PAGE_CLASSES.tabPanel}>
           <TabPanel>
             <SectionList uri={uri} editMode />
           </TabPanel>

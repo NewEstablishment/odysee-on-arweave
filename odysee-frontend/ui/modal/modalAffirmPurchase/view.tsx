@@ -13,7 +13,9 @@ import { selectInsufficientCreditsForUri, selectPlayingUri } from 'redux/selecto
 import { doHideModal, doAnaltyicsPurchaseEvent } from 'redux/actions/app';
 import { makeSelectMetadataForUri } from 'redux/selectors/claims';
 import { doPlayUri, doSetPlayingUri } from 'redux/actions/content';
-// This number is tied to transitions in scss/purchase.scss
+import { AFFIRM_PURCHASE_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+// This number is tied to the purchase transitions in ui/styles/components.css.
 const ANIMATION_LENGTH = 2500;
 type Props = {
   uri: string;
@@ -103,7 +105,7 @@ function ModalAffirmPurchase(props: Props) {
         subtitle={
           <>
             <div
-              className={classnames('purchase-stuff', {
+              className={classnames(AFFIRM_PURCHASE_CLASSES.root, {
                 'purchase-stuff--purchased': success,
               })}
             >
@@ -122,9 +124,9 @@ function ModalAffirmPurchase(props: Props) {
               </div>
             </div>
             {success && (
-              <div className="purchase-stuff__text--purchased">
+              <div className={AFFIRM_PURCHASE_CLASSES.purchased}>
                 {__('Purchased!')}
-                <div className="purchase_stuff__subtext--purchased">
+                <div className={AFFIRM_PURCHASE_CLASSES.purchasedSubtext}>
                   {__('This content will now be in your Library.')}
                 </div>
               </div>
@@ -133,7 +135,7 @@ function ModalAffirmPurchase(props: Props) {
         }
         actions={
           <div
-            className="section__actions"
+            className={SECTION_CLASSES.actions}
             style={
               success
                 ? {

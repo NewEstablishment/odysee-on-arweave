@@ -21,6 +21,7 @@ import {
 import { FF_MAX_CHARS_IN_COMMENT } from 'constants/form-field';
 import { ENABLE_COMMENT_REACTIONS } from 'config';
 import React, { useEffect, useState } from 'react';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { parseURI } from 'util/lbryURI';
 import DateTime from 'component/dateTime';
 import Button from 'component/button';
@@ -32,6 +33,9 @@ import { Menu, MenuButton } from 'component/common/menu';
 import Icon from 'component/common/icon';
 import { FormField, Form } from 'component/common/form';
 import classnames from 'classnames';
+import { COMMENT_CLASSES, COMMENT_STICKER_CLASS } from './classes';
+import { EMPTY_CENTERED_TIGHT_CLASS } from 'component/common/empty-classes';
+import { URI_INDICATOR_CLASS } from 'component/uriIndicator/classes';
 
 import CommentReactions from 'component/commentReactions';
 import CommentsReplies from 'component/commentsReplies';
@@ -365,41 +369,49 @@ function CommentView(props: Props) {
   return (
     <li
       className={classnames('comment', {
-        'comment--top-level': isTopLevel,
-        'comment--reply': !isTopLevel,
+        [COMMENT_CLASSES.topLevel]: isTopLevel,
+        [COMMENT_CLASSES.reply]: !isTopLevel,
       })}
       id={commentId}
     >
-      <div className="comment__thumbnail-wrapper">
+      <div className={COMMENT_CLASSES.thumbnailWrapper}>
         {authorUri ? (
-          <ChannelThumbnail uri={authorUri} xsmall className="comment__author-thumbnail" />
+          <ChannelThumbnail uri={authorUri} xsmall className={COMMENT_CLASSES.authorThumbnail} />
         ) : (
-          <ChannelThumbnail uri="" xsmall className="comment__author-thumbnail" />
+          <ChannelThumbnail uri="" xsmall className={COMMENT_CLASSES.authorThumbnail} />
         )}
 
         {numDirectReplies > 0 && showReplies && (
-          <Button className="comment__threadline" aria-label="Hide Replies" onClick={() => setShowReplies(false)} />
+          <Button
+            button="alt"
+            className={COMMENT_CLASSES.threadline}
+            aria-label="Hide Replies"
+            onClick={() => setShowReplies(false)}
+          />
         )}
       </div>
 
-      <div className="comment__content" ref={isLinkedComment || isThreadComment ? linkedCommentRef : commentElemRef}>
+      <div
+        className={COMMENT_CLASSES.content}
+        ref={isLinkedComment || isThreadComment ? linkedCommentRef : commentElemRef}
+      >
         <div
-          className={classnames('comment__body-container', {
+          className={classnames(COMMENT_CLASSES.bodyContainer, {
             [COMMENT_HIGHLIGHTED]: isLinkedComment || (isThreadComment && !linkedCommentId),
-            'comment--slimed': slimedToDeath && !displayDeadComment,
+            'tw:opacity-60': slimedToDeath && !displayDeadComment,
           })}
         >
-          <div className="comment__meta">
-            <div className="comment__meta-information">
+          <div className="tw:flex tw:justify-between">
+            <div className={COMMENT_CLASSES.metaInformation} data-comment-meta-information>
               {!author ? (
-                <span className="comment__author">{__('Anonymous')}</span>
+                <span className={COMMENT_CLASSES.author}>{__('Anonymous')}</span>
               ) : isNativeProfile ? (
-                <span className="comment__author">{claimName}</span>
+                <span className={COMMENT_CLASSES.author}>{claimName}</span>
               ) : (
                 <Menu>
                   <MenuButton
-                    className={classnames('button--uri-indicator comment__author', {
-                      'comment__author--creator': commentByOwnerOfContent,
+                    className={classnames(URI_INDICATOR_CLASS, COMMENT_CLASSES.author, {
+                      [COMMENT_CLASSES.authorCreator]: commentByOwnerOfContent,
                     })}
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -418,8 +430,8 @@ function CommentView(props: Props) {
                     channelIsMine={false}
                     handleEditComment={() => handleEditComment(true)}
                     setQuickReply={setQuickReply as (arg0: any) => void}
-                    className={classnames('comment__author', {
-                      'comment__author--creator': commentByOwnerOfContent,
+                    className={classnames(COMMENT_CLASSES.author, {
+                      [COMMENT_CLASSES.authorCreator]: commentByOwnerOfContent,
                     })}
                   />
                 </Menu>
@@ -430,13 +442,14 @@ function CommentView(props: Props) {
               {odyseeMembership && <MembershipBadge membershipName={odyseeMembership} linkPage />}
               {creatorMembership && <MembershipBadge membershipName={creatorMembership} linkPage uri={uri} />}
               <Button
-                className="comment__time"
+                className={COMMENT_CLASSES.time}
+                data-comment-time
                 onClick={handleTimeClick}
                 label={
                   (
                     <>
                       <DateTime date={timePosted} timeAgo />
-                      {commentIsEdited && <span className="comment__edited">{__('(edited)')}</span>}
+                      {commentIsEdited && <span className="tw:ml-app-xxxxs">{__('(edited)')}</span>}
                     </>
                   ) as any
                 }
@@ -456,7 +469,7 @@ function CommentView(props: Props) {
               )}
             </div>
             {!hideContextMenu && (
-              <div className="comment__menu">
+              <div className={COMMENT_CLASSES.menu}>
                 <Menu>
                   <MenuButton className="menu__button">
                     <Icon size={18} icon={ICONS.MORE_VERTICAL} />
@@ -487,7 +500,7 @@ function CommentView(props: Props) {
                   message={__('You are still editing this message, are you sure you want to leave?')}
                 />
                 <FormField
-                  className="comment__edit-input"
+                  className="tw:mt-app-xxs"
                   type={'textarea'}
                   name="editing_comment"
                   value={editedMessage}
@@ -496,7 +509,7 @@ function CommentView(props: Props) {
                   textAreaMaxLength={FF_MAX_CHARS_IN_COMMENT}
                   handleSubmit={handleSubmit}
                 />
-                <div className="section__actions section__actions--no-margin">
+                <div className={SECTION_CLASSES.actionsNoMargin}>
                   <Button
                     button="primary"
                     type="submit"
@@ -509,13 +522,13 @@ function CommentView(props: Props) {
               </Form>
             ) : (
               <>
-                <div className="comment__message">
+                <div className={COMMENT_CLASSES.message} data-comment-message>
                   {slimedToDeath && !displayDeadComment ? (
-                    <div onClick={() => setDisplayDeadComment(true)} className="comment__dead">
+                    <div onClick={() => setDisplayDeadComment(true)} className={COMMENT_CLASSES.dead}>
                       {__('This comment was slimed to death. (Click to view)')} <Icon icon={ICONS.SLIME_ACTIVE} />
                     </div>
                   ) : stickerFromMessage ? (
-                    <div className="sticker__comment">
+                    <div className={COMMENT_STICKER_CLASS}>
                       <OptimizedImage src={stickerFromMessage.url} waitLoad />
                     </div>
                   ) : (
@@ -533,7 +546,7 @@ function CommentView(props: Props) {
                 {!hideActions && (
                   <div
                     className={classnames('comment__actions', {
-                      'comment__actions--disabled': disabled,
+                      [COMMENT_CLASSES.actionsDisabled]: disabled,
                     })}
                   >
                     <Button
@@ -553,7 +566,7 @@ function CommentView(props: Props) {
                 {numDirectReplies > 0 && !hideActions && (
                   <div
                     className={classnames('comment__actions', {
-                      'comment__actions--disabled': disabled,
+                      [COMMENT_CLASSES.actionsDisabled]: disabled,
                     })}
                   >
                     {!showReplies ? (
@@ -624,7 +637,7 @@ function CommentView(props: Props) {
 
         {showReplies &&
           (repliesFetching && (!fetchedReplies || fetchedReplies.length === 0) ? (
-            <div className="empty empty--centered-tight">
+            <div className={EMPTY_CENTERED_TIGHT_CLASS}>
               <Spinner type="small" />
             </div>
           ) : (

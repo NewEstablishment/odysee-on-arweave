@@ -1,6 +1,7 @@
 import React, { useRef, useCallback } from 'react';
 import Button from 'component/button';
 import { FormField } from 'component/common/form';
+import { FORM_FIELD_COPYABLE_CLASS } from './form-components/form-field-classes';
 type Props = {
   type?: string;
   currentPath?: string | null;
@@ -45,7 +46,7 @@ function FileSelector({
       <FormField
         label={label}
         webkitdirectory="true"
-        className="form-field--copyable"
+        className={FORM_FIELD_COPYABLE_CLASS}
         error={error}
         disabled={disabled}
         type="text"

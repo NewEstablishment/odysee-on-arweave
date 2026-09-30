@@ -8,7 +8,7 @@ function LoadingBarOneOff(props: any) {
       loadingBarRef.current.continuousStart();
     }
   }, []);
-  return <LoadingBar className="loading-bar" ref={loadingBarRef} />;
+  return <LoadingBar className="tw:![background-image:var(--color-odysee-gradient)]" ref={loadingBarRef} />;
 }
 
 export default LoadingBarOneOff;

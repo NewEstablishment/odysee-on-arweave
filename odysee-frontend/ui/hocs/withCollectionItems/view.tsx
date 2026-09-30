@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import Spinner from 'component/spinner';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
@@ -64,7 +65,7 @@ const withCollectionItems = <P extends Props>(Component: React.ComponentType<P &
 
     if (shouldKeepLoading) {
       return (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       );

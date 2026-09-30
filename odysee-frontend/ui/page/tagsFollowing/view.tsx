@@ -4,6 +4,7 @@ import * as SETTINGS from 'constants/settings';
 import React from 'react';
 import ClaimListDiscover from 'component/claimListDiscover';
 import Page from 'component/page';
+import { PAGE_TITLE_CLASS } from 'component/page/classes';
 import Button from 'component/button';
 import Icon from 'component/common/icon';
 import * as CS from 'constants/claim_search';
@@ -17,7 +18,7 @@ function TagsFollowingPage() {
     <Page noFooter fullWidthPage>
       <ClaimListDiscover
         headerLabel={
-          <h1 className="page__title">
+          <h1 className={PAGE_TITLE_CLASS}>
             <Icon icon={ICONS.TAG} />
             <label>{__('Your Tags')}</label>
           </h1>

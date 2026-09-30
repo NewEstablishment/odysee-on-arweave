@@ -5,9 +5,11 @@ import classnames from 'classnames';
 import { Menu, MenuList, MenuButton, MenuItem } from 'component/common/menu';
 import Icon from 'component/common/icon';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import Button from 'component/button';
 import Symbol from 'component/common/symbol';
-import './style.scss';
+import { PAYMENT_ACCOUNT_CARD_CLASS, PAYMENT_ACCOUNT_CARD_TITLE_CLASS } from '../classes';
+import { CHANNEL_SELECTOR_CLASSES } from 'component/channelSelector/classes';
 
 function SendUsdc(props: any) {
   const { cardHeader, arWalletStatus, balance } = props;
@@ -50,13 +52,14 @@ function SendUsdc(props: any) {
 
   return (
     <Card
-      className={!arWalletStatus ? `card--sendusdc card--disabled` : `card--sendusdc`}
+      className={classnames(PAYMENT_ACCOUNT_CARD_CLASS, { [CARD_CLASSES.disabled]: !arWalletStatus })}
       title={cardHeader()}
+      titleClassName={PAYMENT_ACCOUNT_CARD_TITLE_CLASS}
       background
       actions={
         <>
-          <div className="sendusdc-row">
-            <div className="sendusdc-row__amount">
+          <div className="tw:flex tw:gap-app-s">
+            <div className="tw:flex tw:flex-col">
               {__('Amount')}
               <input
                 ref={inputAmountRef}
@@ -64,29 +67,32 @@ function SendUsdc(props: any) {
                 step="0.00000001"
                 placeholder={Number(0).toFixed(8)}
                 onChange={handleCheckForm}
+                className="tw:w-full"
               />
-              <span onClick={handleSetMaxAmount}>
+              <span className="tw:mt-app-xxxs tw:text-app-xsmall" onClick={handleSetMaxAmount}>
                 {__('Totally available: ')}
                 {balance.toFixed(8)}
               </span>
             </div>
-            <div className="sendusdc-row__network">
+            <div className="tw:flex tw:flex-col">
               {__('Network')}
               <div className="network-selector">
                 <Menu>
-                  <MenuButton className="menu__link">
+                  <MenuButton className="menu__link tw:min-w-[150px] tw:rounded-app tw:bg-app-background">
                     <Symbol token={targetNetwork.symbol} />
                     {targetNetwork.label}
-                    <Icon icon={ICONS.DOWN} />
+                    <Icon className="tw:mr-0 tw:ml-auto" icon={ICONS.DOWN} />
                   </MenuButton>
-                  <MenuList className="menu__list channel-selector">
+                  <MenuList className={CHANNEL_SELECTOR_CLASSES.list}>
                     {networks.map((network, index) => {
                       return (
                         <MenuItem key={index} onSelect={() => setTargetNetwork(network)}>
                           <div
-                            className={classnames('channel-selector__item', {
-                              'channel-selector__item--selected': targetNetwork.symbol === network.symbol,
+                            className={classnames(CHANNEL_SELECTOR_CLASSES.item, {
+                              [CHANNEL_SELECTOR_CLASSES.itemSelected]: targetNetwork.symbol === network.symbol,
                             })}
+                            data-channel-selector-item=""
+                            data-channel-selector-selected={targetNetwork.symbol === network.symbol ? '' : undefined}
                           >
                             <Symbol token={network.symbol} />
                             {network.label}
@@ -98,16 +104,17 @@ function SendUsdc(props: any) {
                 </Menu>
               </div>
             </div>
-            <div className="sendusdc-row__receiver">
+            <div className="tw:flex tw:flex-col">
               {__('Receiving address')}
               <input
                 ref={inputReceivingAddressRef}
                 type="text"
                 placeholder={`0x0000000000000000000000000000000000000000`}
                 onChange={handleCheckForm}
+                className="tw:min-w-[450px]"
               />
             </div>
-            <div className="sendusdc-row__send">
+            <div className="tw:mt-[24px]">
               <Button button="primary" title={__('Send')} label={__('Send')} disabled={!canSend} />
             </div>
           </div>

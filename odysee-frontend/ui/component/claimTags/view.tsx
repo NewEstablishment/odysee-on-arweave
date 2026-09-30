@@ -4,6 +4,7 @@ import Tag from 'component/tag';
 import { useAppSelector } from 'redux/hooks';
 import { selectTagsForUri } from 'redux/selectors/claims';
 import { selectFollowedTags } from 'redux/selectors/tags';
+import { CLAIM_TAGS_CLASS, CLAIM_TAGS_LARGE_CLASS } from './classes';
 const SLIM_TAGS = 1;
 const NORMAL_TAGS = 3;
 const LARGE_TAGS = 6;
@@ -55,9 +56,11 @@ export default function ClaimTags(props: Props) {
 
   return (
     <div
-      className={classnames('claim__tags', {
-        'claim__tags--large': type === 'large',
+      className={classnames(CLAIM_TAGS_CLASS, {
+        [CLAIM_TAGS_LARGE_CLASS]: type === 'large',
       })}
+      data-claim-tags
+      data-claim-tags-large={type === 'large' || undefined}
     >
       {tagsToDisplay.map((tag) => (
         <Tag key={tag} title={tag} name={tag} />

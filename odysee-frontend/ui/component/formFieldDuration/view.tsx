@@ -2,6 +2,7 @@ import React from 'react';
 import parseDuration from 'parse-duration';
 import { FormField } from 'component/common/form';
 import Icon from 'component/common/icon';
+import { ICON_HELP_CLASS } from 'component/common/icon-classes';
 import * as ICONS from 'constants/icons';
 // prettier-ignore
 const TOOLTIP = 'Units:\n • s:  seconds\n • m:  minutes \n • h:  hours\n • d:  days\n • month:  months\n • y:  years';
@@ -73,7 +74,7 @@ export default function FormFieldDuration(props: Props) {
       label={
         <>
           {label || __('Duration --[period e.g. ban duration]--')}
-          <Icon customTooltipText={__(TOOLTIP)} className="icon--help" icon={ICONS.HELP} tooltip size={16} />
+          <Icon customTooltipText={__(TOOLTIP)} className={ICON_HELP_CLASS} icon={ICONS.HELP} tooltip size={16} />
         </>
       }
       placeholder={placeholder || '30s, 10m, 1h, 2d, 3month, 1y'}

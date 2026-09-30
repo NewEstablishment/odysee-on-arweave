@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import * as MODALS from 'constants/modal_types';
 import { useNavigate } from 'react-router-dom';
@@ -16,7 +17,10 @@ import {
 import { selectMyCollectionClaimIds } from 'redux/selectors/claims';
 import { doFetchCollectionListMine } from 'redux/actions/collections';
 import { doOpenModal } from 'redux/actions/app';
-import './style.scss';
+import { PLAYLISTS_PAGE_CLASS } from './classes';
+import { CLAIM_GRID_WRAPPER_CLASS } from 'component/common/claim-grid-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 
 const PlaylistsPage = () => {
   const dispatch = useAppDispatch();
@@ -43,7 +47,7 @@ const PlaylistsPage = () => {
       // Fetch the signed native playlists owned by this HyperBEAM account.
       return (
         <Wrapper>
-          <div className="main--empty empty">
+          <div className={`${PAGE_MAIN_EMPTY_CLASS} ${EMPTY_CLASS}`}>
             <Spinner text={__('Loading your playlists...')} />
           </div>
         </Wrapper>
@@ -59,7 +63,7 @@ const PlaylistsPage = () => {
             title={__('You can add videos to your Playlists')}
             subtitle={__('Do you want to find some content to save for later, or create a brand new playlist?')}
             actions={
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button button="secondary" label={__('Explore!')} onClick={() => navigate('/')} />
                 <Button button="primary" label={__('New Playlist')} onClick={handleCreatePlaylist} />
               </div>
@@ -76,7 +80,7 @@ const PlaylistsPage = () => {
           type="sad"
           title={__('You have no Playlists yet. Better start hoarding!')}
           actions={
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="primary" label={__('Create a Playlist')} onClick={handleCreatePlaylist} />
             </div>
           }
@@ -93,8 +97,8 @@ const PlaylistsPage = () => {
 };
 
 const Wrapper = ({ children }: { children: any }) => (
-  <Page className="playlists-page__wrapper">
-    <div className="claim-grid__wrapper">
+  <Page className={PLAYLISTS_PAGE_CLASS}>
+    <div className={CLAIM_GRID_WRAPPER_CLASS} data-claim-grid-wrapper>
       <BuiltinPlaylists />
 
       {children}

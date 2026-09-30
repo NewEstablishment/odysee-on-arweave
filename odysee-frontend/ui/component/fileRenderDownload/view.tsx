@@ -4,6 +4,7 @@ import * as RENDER_MODES from 'constants/file_render_modes';
 import Card from 'component/common/card';
 import { useAppSelector } from 'redux/hooks';
 import { makeSelectFileRenderModeForUri } from 'redux/selectors/content';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   uri: string;
   isFree?: boolean;
@@ -18,7 +19,7 @@ export default function FileRenderDownload(props: Props) {
         title={__('Download')}
         subtitle={<p>{__("This file type can't be viewed on Odysee.")}</p>}
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <FileDownloadLink uri={uri} buttonType="primary" showLabel />
           </div>
         }

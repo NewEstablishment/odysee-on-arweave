@@ -1,10 +1,12 @@
 import React from 'react';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import Page from 'component/page';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
-import './style.scss';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { TABLE_HEADER_TEXT_CLASS } from 'component/common/table-classes';
 
 const StripeAccountConnection = () => {
   return (
@@ -19,12 +21,12 @@ const StripeAccountConnection = () => {
       }}
     >
       <Card
-        title={<div className="table__header-text">{__('Fiat payout accounts retired')}</div>}
+        title={<div className={TABLE_HEADER_TEXT_CLASS}>{__('Fiat payout accounts retired')}</div>}
         background
         isBodyList
         body={
-          <div className="card__body-actions connected-account-information">
-            <h3>{__('Stripe-based payout accounts are no longer supported.')}</h3>
+          <div className={CARD_CLASSES.bodyActions}>
+            <h3 className="tw:mb-app-xs">{__('Stripe-based payout accounts are no longer supported.')}</h3>
             <p>
               {__(
                 'If you still have legacy fiat payout data attached to your account, it is now read-only and no longer managed from this app.'
@@ -34,7 +36,7 @@ const StripeAccountConnection = () => {
           </div>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="secondary" label={__('Open Wallet')} icon={ICONS.WALLET} navigate={`/$/${PAGES.WALLET}`} />
             <Button
               button="primary"

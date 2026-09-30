@@ -14,6 +14,7 @@ import { selectPublishFormValue } from 'redux/selectors/publish';
 import { selectModal } from 'redux/selectors/app';
 import { doOpenModal } from 'redux/actions/app';
 import { v4 as uuid } from 'uuid';
+import { FILE_DROP_AREA_CLASS, FILE_DROP_CLASS, FILE_DROP_MAIN_ICON_CLASS, FILE_DROP_SHOW_CLASS } from './classes';
 
 const HIDE_TIME_OUT = 600;
 const TARGET_TIME_OUT = 300;
@@ -156,9 +157,9 @@ function FileDrop() {
   // Show drop area when files are dragged over or processing dropped file
   const show = files.length === 1 || (!target && drag && (!modal || modal.id !== MODALS.FILE_SELECTION));
   return (
-    <div aria-hidden={!show} className={classnames('file-drop', show && 'file-drop--show')}>
-      <div className={classnames('card', 'file-drop__area')}>
-        <Icon size={64} icon={icon} className={'main-icon'} />
+    <div aria-hidden={!show} className={classnames(FILE_DROP_CLASS, show && FILE_DROP_SHOW_CLASS)}>
+      <div className={classnames('card', FILE_DROP_AREA_CLASS)}>
+        <Icon size={64} icon={icon} className={FILE_DROP_MAIN_ICON_CLASS} />
         <p>{target ? target.name : __(`Drop here to publish!`)} </p>
       </div>
     </div>

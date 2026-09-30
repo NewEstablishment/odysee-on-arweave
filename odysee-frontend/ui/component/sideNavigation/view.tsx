@@ -15,6 +15,7 @@ import Icon from 'component/common/icon';
 import NotificationBubble from 'component/notificationBubble';
 import DebouncedInput from 'component/common/debounced-input';
 import I18nMessage from 'component/i18nMessage';
+import { EMPTY_CENTERED_CLASS } from 'component/common/empty-classes';
 import ChannelThumbnail from 'component/channelThumbnail';
 import { useIsMobile } from 'effects/use-screensize';
 import { platform } from 'util/platform';
@@ -41,6 +42,37 @@ import { GetLinksData } from 'util/buildHomepage';
 import { getSortedRowData } from 'util/homepageOrder';
 import { getModalUrlParam } from 'util/url';
 import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  NAVIGATION_AUTH_NUDGE_CLASS,
+  NAVIGATION_CLASS,
+  NAVIGATION_HIDDEN_CLASS,
+  NAVIGATION_INNER_CLASS,
+  NAVIGATION_ITEM_CLASS,
+  NAVIGATION_LINK_ACTIVE_CLASS,
+  NAVIGATION_LINK_CENTERED_CLASS,
+  NAVIGATION_LINK_CLASS,
+  NAVIGATION_LINK_HIGHLIGHTED_CLASS,
+  NAVIGATION_LINK_PULSE_CLASS,
+  NAVIGATION_LINK_WITH_THUMBNAIL_CLASS,
+  NAVIGATION_LINKS_ABSOLUTE_CLASS,
+  NAVIGATION_LINKS_CLASS,
+  NAVIGATION_LINKS_MICRO_CLASS,
+  NAVIGATION_LINKS_SMALL_CLASS,
+  NAVIGATION_MICRO_CLASS,
+  NAVIGATION_MOBILE_ONLY_CLASS,
+  NAVIGATION_OVERLAY_ACTIVE_CLASS,
+  NAVIGATION_OVERLAY_CLASS,
+  NAVIGATION_PUSH_CLASS,
+  NAVIGATION_SECONDARY_CLASS,
+  NAVIGATION_SECTION_HEADER_CLASS,
+  NAVIGATION_SUBSCRIPTION_CLASS,
+  NAVIGATION_SUBSCRIPTION_TITLE_CLASS,
+  NAVIGATION_TERTIARY_CLASS,
+  NAVIGATION_TOUCH_CLASS,
+  NAVIGATION_WRAPPER_ABSOLUTE_CLASS,
+  NAVIGATION_WRAPPER_CLASS,
+  NAVIGATION_WRAPPER_MICRO_CLASS,
+} from './classes';
 const touch = platform.isTouch() && /iPad|Android/i.test(navigator.userAgent);
 
 // ****************************************************************************
@@ -244,8 +276,8 @@ function getCategoryLink(props: SidebarCat) {
         navigate={route || link}
         label={__(title)}
         title={__(title)}
-        className="navigation-link"
-        activeClass="navigation-link--active"
+        className={NAVIGATION_LINK_CLASS}
+        activeClass={NAVIGATION_LINK_ACTIVE_CLASS}
       />
     </li>
   );
@@ -414,11 +446,11 @@ function SideNavigation(props: Props) {
           navigate={route || link}
           label={noI18n ? title : __(title)}
           title={noI18n ? title : __(title)}
-          className={classnames('navigation-link', {
-            'navigation-link--pulse': icon === ICONS.LIBRARY && pulseLibrary,
-            'navigation-link--highlighted': icon === ICONS.NOTIFICATION && unseenCount > 0,
+          className={classnames(NAVIGATION_LINK_CLASS, {
+            [NAVIGATION_LINK_PULSE_CLASS]: icon === ICONS.LIBRARY && pulseLibrary,
+            [NAVIGATION_LINK_HIGHLIGHTED_CLASS]: icon === ICONS.NOTIFICATION && unseenCount > 0,
           })}
-          activeClass="navigation-link--active"
+          activeClass={NAVIGATION_LINK_ACTIVE_CLASS}
         />
         {extra}
       </li>
@@ -432,7 +464,7 @@ function SideNavigation(props: Props) {
       }
 
       return (
-        <ul className="navigation__secondary navigation-links">
+        <ul className={classnames(NAVIGATION_LINKS_CLASS, NAVIGATION_SECONDARY_CLASS)}>
           {!showMicroMenu && (
             <SectionHeader
               title={__('Following')}
@@ -441,7 +473,7 @@ function SideNavigation(props: Props) {
             />
           )}
           {subscriptionUris.length > SIDEBAR_SUBS_DISPLAYED && (
-            <li className="navigation-item">
+            <li className={NAVIGATION_ITEM_CLASS}>
               <DebouncedInput icon={ICONS.SEARCH} placeholder={__('Filter')} onChange={setSubscriptionFilter} />
             </li>
           )}
@@ -449,20 +481,20 @@ function SideNavigation(props: Props) {
             <SubscriptionListItem key={sub.uri} subscription={sub} />
           ))}
           {subscriptionUris.length > SIDEBAR_SUBS_DISPLAYED && (
-            <li className="navigation-item">
+            <li className={NAVIGATION_ITEM_CLASS}>
               <Button
                 icon={ICONS.MORE}
                 title={__('Manage Following')}
                 navigate={`/$/${PAGES.CHANNELS_FOLLOWING_MANAGE}`}
-                className="navigation-link navigation-link--icon-centered"
-                activeClass="navigation-link--active"
+                className={classnames(NAVIGATION_LINK_CLASS, NAVIGATION_LINK_CENTERED_CLASS)}
+                activeClass={NAVIGATION_LINK_ACTIVE_CLASS}
               />
             </li>
           )}
           {!!subscriptionFilter && !displayedSubs.length && (
             <li>
-              <div className="navigation-item">
-                <div className="empty empty--centered">{__('No results')}</div>
+              <div className={NAVIGATION_ITEM_CLASS}>
+                <div className={EMPTY_CENTERED_CLASS}>{__('No results')}</div>
               </div>
             </li>
           )}
@@ -476,7 +508,7 @@ function SideNavigation(props: Props) {
   function getFollowedTagsSection() {
     if (showTagSection) {
       return (
-        <ul className="navigation__secondary navigation-links">
+        <ul className={classnames(NAVIGATION_LINKS_CLASS, NAVIGATION_SECONDARY_CLASS)}>
           {!showMicroMenu && (
             <SectionHeader
               title={__('Tags')}
@@ -485,18 +517,18 @@ function SideNavigation(props: Props) {
             />
           )}
           <li key="all" className="navigation-link__wrapper">
-            <Button navigate={`/$/tags`} label={__('View all')} className="navigation-link" />
+            <Button navigate={`/$/tags`} label={__('View all')} className={NAVIGATION_LINK_CLASS} />
           </li>
           {displayedFollowedTags.map(({ name }, key) => (
             <li key={name} className="navigation-link__wrapper">
-              <Button navigate={`/$/discover?t=${name}`} label={`#${name}`} className="navigation-link" />
+              <Button navigate={`/$/discover?t=${name}`} label={`#${name}`} className={NAVIGATION_LINK_CLASS} />
             </li>
           ))}
           {followedTags.length > SIDEBAR_SUBS_DISPLAYED && (
             <Button
               key="showMore"
               label={expandTags ? __('Show less') : __('Show more')}
-              className="navigation-link"
+              className={NAVIGATION_LINK_CLASS}
               onClick={() => setExpandTags(!expandTags)}
             />
           )}
@@ -610,7 +642,7 @@ function SideNavigation(props: Props) {
 
   const SectionHeader = ({ title, actionTooltip, onClick, navigate }: SectionHeaderProps) => {
     return (
-      <div className="navigation-section-header">
+      <div className={NAVIGATION_SECTION_HEADER_CLASS}>
         <span>{title}</span>
         {(onClick || navigate) && (
           <Button
@@ -627,7 +659,7 @@ function SideNavigation(props: Props) {
 
   const unAuthNudge =
     DOMAIN === 'lbry.tv' ? null : (
-      <div className="navigation__auth-nudge">
+      <div className={NAVIGATION_AUTH_NUDGE_CLASS}>
         <span>
           <I18nMessage
             tokens={{
@@ -646,23 +678,23 @@ function SideNavigation(props: Props) {
       </div>
     );
   const helpLinks = (
-    <ul className="navigation__tertiary navigation-links--small">
-      <li className="navigation-link">
+    <ul className={classnames(NAVIGATION_LINKS_CLASS, NAVIGATION_TERTIARY_CLASS, NAVIGATION_LINKS_SMALL_CLASS)}>
+      <li className={NAVIGATION_LINK_CLASS}>
         <Button label={__('FAQ and Support')} href="https://help.odysee.tv/" target="_blank" />
       </li>
-      <li className="navigation-link">
+      <li className={NAVIGATION_LINK_CLASS}>
         <Button label={__('Community Guidelines')} href="https://help.odysee.tv/communityguidelines/" target="_blank" />
       </li>
-      <li className="navigation-link">
+      <li className={NAVIGATION_LINK_CLASS}>
         <Button label={__('Contribute')} navigate={`/$/${PAGES.CONTRIBUTE}`} />
       </li>
-      <li className="navigation-link">
+      <li className={NAVIGATION_LINK_CLASS}>
         <Button label={__('Terms')} href="https://odysee.com/$/tos" />
       </li>
-      <li className="navigation-link">
+      <li className={NAVIGATION_LINK_CLASS}>
         <Button label={__('Privacy Policy')} href="https://odysee.com/$/privacypolicy" />
       </li>
-      <li className="navigation-link" id="gdprSidebarLink">
+      <li className={NAVIGATION_LINK_CLASS} id="gdprSidebarLink">
         <Button label={__('Cookie Settings')} onClick={() => window.Optanon && window.Optanon.ToggleInfoDisplay()} />
       </li>
     </ul>
@@ -671,32 +703,38 @@ function SideNavigation(props: Props) {
   // **************************************************************************
   return (
     <div
-      className={classnames('navigation__wrapper', {
-        'navigation__wrapper--micro': showMicroMenu,
-        'navigation__wrapper--absolute': isAbsolute,
+      className={classnames(NAVIGATION_WRAPPER_CLASS, {
+        [NAVIGATION_WRAPPER_MICRO_CLASS]: showMicroMenu,
+        [NAVIGATION_WRAPPER_ABSOLUTE_CLASS]: isAbsolute,
       })}
       ref={sideNavigationRef}
     >
       <nav
         aria-label={'Sidebar'}
-        className={classnames('navigation', {
-          'navigation--micro': showMicroMenu,
-          'navigation--push': showPushMenu,
-          'navigation-file-page-and-mobile': hideMenuFromView,
-          'navigation-touch': touch,
+        className={classnames(NAVIGATION_CLASS, {
+          [NAVIGATION_MICRO_CLASS]: showMicroMenu,
+          [NAVIGATION_PUSH_CLASS]: showPushMenu,
+          [NAVIGATION_HIDDEN_CLASS]: hideMenuFromView,
+          [NAVIGATION_TOUCH_CLASS]: touch,
         })}
       >
         {(!canDisposeMenu || sidebarOpen) && (
-          <div className="navigation-inner-container">
-            <ul className="navigation-links--absolute mobile-only">
+          <div className={NAVIGATION_INNER_CLASS}>
+            <ul
+              className={classnames(
+                NAVIGATION_LINKS_CLASS,
+                NAVIGATION_LINKS_ABSOLUTE_CLASS,
+                NAVIGATION_MOBILE_ONLY_CLASS
+              )}
+            >
               {notificationsEnabled && getLink(NOTIFICATIONS)}
               {getLink(WALLET)}
             </ul>
 
             <ul
-              className={classnames('navigation-links', {
-                'navigation-links--micro': showMicroMenu,
-                'navigation-links--absolute': shouldRenderLargeMenu,
+              className={classnames(NAVIGATION_LINKS_CLASS, {
+                [NAVIGATION_LINKS_MICRO_CLASS]: showMicroMenu,
+                [NAVIGATION_LINKS_ABSOLUTE_CLASS]: shouldRenderLargeMenu,
               })}
             >
               {getLink(getHomeButton(() => dispatch(doClearClaimSearch())))}
@@ -706,13 +744,19 @@ function SideNavigation(props: Props) {
               {showMicroMenu && getLink(UPLOADS)}
               {!hasMembership && getLink(PREMIUM)}
             </ul>
-            <ul className="navigation-links--absolute mobile-only">
+            <ul
+              className={classnames(
+                NAVIGATION_LINKS_CLASS,
+                NAVIGATION_LINKS_ABSOLUTE_CLASS,
+                NAVIGATION_MOBILE_ONLY_CLASS
+              )}
+            >
               {email && MOBILE_PUBLISH.map((linkProps) => getLink(linkProps))}
             </ul>
             <ul
-              className={classnames('navigation-links', {
-                'navigation-links--micro': showMicroMenu,
-                'navigation-links--absolute': shouldRenderLargeMenu,
+              className={classnames(NAVIGATION_LINKS_CLASS, {
+                [NAVIGATION_LINKS_MICRO_CLASS]: showMicroMenu,
+                [NAVIGATION_LINKS_ABSOLUTE_CLASS]: shouldRenderLargeMenu,
               })}
             >
               {!showMicroMenu && isAuthenticated && <SectionHeader title={__('Lists')} />}
@@ -723,9 +767,9 @@ function SideNavigation(props: Props) {
             </ul>
 
             <ul
-              className={classnames('navigation-links', {
-                'navigation-links--micro': showMicroMenu,
-                'navigation-links--absolute': shouldRenderLargeMenu,
+              className={classnames(NAVIGATION_LINKS_CLASS, {
+                [NAVIGATION_LINKS_MICRO_CLASS]: showMicroMenu,
+                [NAVIGATION_LINKS_ABSOLUTE_CLASS]: shouldRenderLargeMenu,
               })}
             >
               {!showMicroMenu && isAuthenticated && <SectionHeader title={__('You')} />}
@@ -733,9 +777,9 @@ function SideNavigation(props: Props) {
             </ul>
 
             <ul
-              className={classnames('navigation-links', {
-                'navigation-links--micro': showMicroMenu,
-                'navigation-links--absolute': shouldRenderLargeMenu,
+              className={classnames(NAVIGATION_LINKS_CLASS, {
+                [NAVIGATION_LINKS_MICRO_CLASS]: showMicroMenu,
+                [NAVIGATION_LINKS_ABSOLUTE_CLASS]: shouldRenderLargeMenu,
               })}
             >
               {categories && (
@@ -752,7 +796,13 @@ function SideNavigation(props: Props) {
               )}
             </ul>
 
-            <ul className="navigation-links--absolute mobile-only">
+            <ul
+              className={classnames(
+                NAVIGATION_LINKS_CLASS,
+                NAVIGATION_LINKS_ABSOLUTE_CLASS,
+                NAVIGATION_MOBILE_ONLY_CLASS
+              )}
+            >
               {email && MOBILE_LINKS.map((linkProps) => getLink(linkProps))}
               {!isAuthenticated && UNAUTH_LINKS.map((linkProps) => getLink(linkProps))}
             </ul>
@@ -765,8 +815,8 @@ function SideNavigation(props: Props) {
         {(!canDisposeMenu || sidebarOpen) && shouldRenderLargeMenu && helpLinks}
       </nav>
       <div
-        className={classnames('navigation__overlay', {
-          'navigation__overlay--active': showOverlay,
+        className={classnames(NAVIGATION_OVERLAY_CLASS, {
+          [NAVIGATION_OVERLAY_ACTIVE_CLASS]: showOverlay,
         })}
         onClick={() => setSidebarOpen(false)}
       />
@@ -785,14 +835,14 @@ function SubscriptionListItem(props: SubItemProps) {
   const { subscription } = props;
   const { uri, channelName } = subscription;
   return (
-    <li className="navigation-link__wrapper navigation__subscription">
+    <li className={classnames('navigation-link__wrapper', NAVIGATION_SUBSCRIPTION_CLASS)}>
       <Button
         navigate={uri}
-        className="navigation-link navigation-link--with-thumbnail"
-        activeClass="navigation-link--active"
+        className={classnames(NAVIGATION_LINK_CLASS, NAVIGATION_LINK_WITH_THUMBNAIL_CLASS)}
+        activeClass={NAVIGATION_LINK_ACTIVE_CLASS}
       >
         <ChannelThumbnail xsmall uri={uri} hideStakedIndicator />
-        <div className="navigation__subscription-title">
+        <div className={NAVIGATION_SUBSCRIPTION_TITLE_CLASS}>
           <ClaimPreviewTitle uri={uri} />
           <span dir="auto" className="channel-name">
             {channelName}

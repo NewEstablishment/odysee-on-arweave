@@ -7,6 +7,7 @@ import { SITE_HELP_EMAIL } from 'config';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doUserPhoneVerify, doUserPhoneReset } from 'redux/actions/user';
 import { selectPhoneToVerify, selectPhoneVerifyErrorMessage, selectUserCountryCode } from 'redux/selectors/user';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const UserPhoneVerify = React.memo(function UserPhoneVerify(props: { cancelButton?: React.ReactNode }) {
   const dispatch = useAppDispatch();
@@ -51,7 +52,7 @@ const UserPhoneVerify = React.memo(function UserPhoneVerify(props: { cancelButto
               inputButton={<Submit label={__('Verify')} />}
             />
           </Form>
-          <p className="help">
+          <p className={HELP_CLASS}>
             <I18nMessage
               tokens={{
                 help_link: <Button button="link" href={`mailto:${SITE_HELP_EMAIL}`} label={`${SITE_HELP_EMAIL}`} />,

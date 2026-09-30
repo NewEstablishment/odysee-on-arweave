@@ -1,4 +1,5 @@
 import React from 'react';
+import { WALLPAPER_CLASSES, WALLPAPER_PORTAL_STAR_CLASSES } from './classes';
 import { manifestAssetPath } from 'util/manifest-prefix';
 // import { resetColors } from 'util/theme';
 type Props = {
@@ -200,17 +201,17 @@ const Wallpaper = (props: Props) => {
   return (
     <>
       <div
-        className={'background-image'}
+        className={WALLPAPER_CLASSES.background}
         style={{
           backgroundImage: `url("${manifestAssetPath('/img/spaceman_pattern.png')}")`,
         }}
       />
-      <div className="theme" />
+      <div className={WALLPAPER_CLASSES.shade} />
 
       {/* <div className="backdrop"/> */}
-      <div className="stars">
-        <div id="stars" />
-        <div id="stars2" />
+      <div className={WALLPAPER_CLASSES.stars}>
+        <div id="stars" className={WALLPAPER_PORTAL_STAR_CLASSES.small} />
+        <div id="stars2" className={WALLPAPER_PORTAL_STAR_CLASSES.medium} />
       </div>
     </>
   ); // }

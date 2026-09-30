@@ -1,7 +1,6 @@
 import * as MODALS from 'constants/modal_types';
 import * as STRIPE from 'constants/stripe';
 import React from 'react';
-import './style.lazy.scss';
 import FileActionButton from 'component/common/file-action-button';
 import { useIsMobile } from 'effects/use-screensize';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -52,12 +51,17 @@ export default function ClaimSupportButton(props: Props) {
     [STRIPE.CURRENCIES.EUR]: 16,
     [STRIPE.CURRENCIES.USD]: fileAction ? 22 : undefined,
   };
+  const monetizedChildClass = canReceiveTips
+    ? 'tw:!stroke-[var(--color-support-button)] tw:text-[var(--color-support-button)] tw:[filter:brightness(0.85)] tw:group-hover:text-[var(--color-support-button)] tw:group-hover:[filter:brightness(1)]'
+    : undefined;
   return (
     <FileActionButton
-      className={canReceiveTips ? 'monetized-account__button' : undefined}
+      className={canReceiveTips ? 'tw:group' : undefined}
       title={__('Support this content')}
       label={label}
       icon={STRIPE.CURRENCY[preferredCurrency].icon}
+      iconClassName={monetizedChildClass}
+      labelClassName={monetizedChildClass}
       iconSize={iconSizes[preferredCurrency]}
       onClick={() =>
         dispatch(

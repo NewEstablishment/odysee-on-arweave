@@ -11,6 +11,10 @@ import {
   selectTierIndexForCreatorIdAndMembershipId,
 } from 'redux/selectors/memberships';
 import { doOpenCancelationModalForMembership } from 'redux/actions/memberships';
+import classnames from 'classnames';
+import { MEMBERSHIP_TIER_CLASSES } from './classes';
+import { JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES } from '../../../../classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 type Props = {
   membership: CreatorMembership;
@@ -89,18 +93,19 @@ const MembershipTier = (props: Props) => {
     Membership active, payments[2] status paid
    */
   const hasPayment = getHasPayment(thisMembership);
+  const tierVariableClass = typeof index === 'number' ? JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES[index] : undefined;
 
   const getMembershipAction = () => {
     if (isActive && !isCanceled) {
-      return <div className={'help'}>Currently Subscribed!</div>;
+      return <div className={HELP_CLASS}>Currently Subscribed!</div>;
     }
 
     if (isPending && hasPayment) {
-      return <div className={'help'}>Currently Subscribed! (Pending Confirmation)</div>;
+      return <div className={HELP_CLASS}>Currently Subscribed! (Pending Confirmation)</div>;
     }
 
     if (isCanceled && userHasCreatorMembership) {
-      return <div className={'help'}>Canceled Membership.</div>;
+      return <div className={HELP_CLASS}>Canceled Membership.</div>;
     }
 
     if (isCanceled && thisMembership) {
@@ -118,7 +123,7 @@ const MembershipTier = (props: Props) => {
 
     if (userHasCreatorMembership) {
       return (
-        <div className={'help'}>
+        <div className={HELP_CLASS}>
           {__('$%membership_price% per month', {
             membership_price: (Number(membership?.prices[0].amount) / 100).toFixed(
               Number(membership?.prices[0].amount) < 100 ? 2 : 0
@@ -150,11 +155,11 @@ const MembershipTier = (props: Props) => {
 
   return (
     <div
-      className={
-        Number.isInteger(index) && Number.isInteger(length)
-          ? `membership-tier__wrapper item${(index || 0) + 1}-${length || 0}`
-          : 'membership-tier__wrapper'
-      }
+      className={classnames(
+        MEMBERSHIP_TIER_CLASSES.root,
+        tierVariableClass,
+        index === 4 && length === 5 && MEMBERSHIP_TIER_CLASSES.lastOfFive
+      )}
     >
       <MembershipDetails isChannelTab={isChannelTab} membership={membership} headerAction={getMembershipAction()} />
     </div>

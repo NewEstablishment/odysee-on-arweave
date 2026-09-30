@@ -539,7 +539,12 @@ function ClaimMenuListInner(props: Props) {
       >
         <Icon size={20} icon={ICONS.MORE_VERTICAL} />
       </MenuButton>
-      <MenuList className={classnames('menu__list', { 'menu__list--preview': isPreview })}>
+      <MenuList
+        className={classnames(
+          'menu__list',
+          isPreview && 'tw:[&_[data-reach-menu-item]]:pointer-events-none tw:[&_[data-reach-menu-item]]:opacity-40'
+        )}
+      >
         {claim.value_type === 'deleted' && collectionId ? (
           <AddToCollectionContext />
         ) : (

@@ -1,7 +1,7 @@
 import React from 'react';
 import * as RENDER_MODES from 'constants/file_render_modes';
 import { v4 as uuid } from 'uuid';
-import { INLINE_PLAYER_WRAPPER_CLASS } from 'constants/player';
+import { INLINE_PLAYER_WRAPPER_STYLE_CLASS } from 'component/viewers/classes';
 import Button from 'component/button';
 import VideoRender from 'component/videoClaimRender';
 import FileViewerEmbeddedTitle from 'component/fileViewerEmbeddedTitle';
@@ -11,6 +11,7 @@ import withLiveStatus from 'hocs/withLiveStatus';
 import { useAppSelector } from 'redux/hooks';
 import { selectIsStreamPlaceholderForUri } from 'redux/selectors/claims';
 import { selectPlayingUri, selectFileRenderModeForUri } from 'redux/selectors/content';
+import { CLAIM_LINK_PREVIEW_URL_CLASS } from '../../classes';
 
 type Props = {
   uri: string;
@@ -50,7 +51,7 @@ const ClaimLinkPreview = (props: Props) => {
   );
   const PreviewLinkButton = React.useMemo(
     () => () => (
-      <div className="preview-link__url">
+      <div className={CLAIM_LINK_PREVIEW_URL_CLASS} data-claim-link-preview-url>
         <Button button="link" label={channel + ': ' + title} navigate={cleanUri} />
       </div>
     ), // eslint-disable-next-line react-hooks/exhaustive-deps -- @see TODO_NEED_VERIFICATION
@@ -62,7 +63,7 @@ const ClaimLinkPreview = (props: Props) => {
   if (RENDER_MODES.FLOATING_MODES.includes(renderMode)) {
     return (
       <>
-        <div className={INLINE_PLAYER_WRAPPER_CLASS} id={claimLinkId}>
+        <div className={INLINE_PLAYER_WRAPPER_STYLE_CLASS} id={claimLinkId}>
           {!currentUriPlaying && <FileViewerEmbeddedTitle uri={cleanUri} />}
           <Component uri={cleanUri} embedded claimLinkId={claimLinkId} parentCommentId={parentCommentId} />
         </div>

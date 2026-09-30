@@ -1,8 +1,10 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import * as MODALS from 'constants/modal_types';
 import React, { useState } from 'react';
 import { isNameValid } from 'util/lbryURI';
 import Button from 'component/button';
 import { Form, FormField } from 'component/common/form';
+import { FIELDSET_GROUP_DISABLED_PREFIX_CLASS } from 'component/common/form-components/fieldset-group-classes';
 import { INVALID_NAME_ERROR } from 'constants/claim';
 import Card from 'component/common/card';
 import I18nMessage from 'component/i18nMessage';
@@ -19,6 +21,13 @@ import { selectUser } from 'redux/selectors/user';
 import { selectCreatingChannel, selectCreateChannelError } from 'redux/selectors/claims';
 import { doCreateChannel } from 'redux/actions/claims';
 import { doOpenModal } from 'redux/actions/app';
+import {
+  USER_FIRST_CHANNEL_AVATAR_CLASS,
+  USER_FIRST_CHANNEL_AVATAR_UPLOAD_CLASS,
+  USER_FIRST_CHANNEL_ROOT_CLASS,
+} from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CARD_ACTIONS_CLASS } from 'component/common/help-classes';
 
 export const DEFAULT_BID_FOR_FIRST_CHANNEL = 0.01;
 type Props = {
@@ -131,7 +140,7 @@ function UserFirstChannel(props: Props) {
   }
 
   return (
-    <div className="main__channel-creation">
+    <div className={USER_FIRST_CHANNEL_ROOT_CLASS}>
       <Card
         title={__('Create a Channel')}
         subtitle={
@@ -144,8 +153,8 @@ function UserFirstChannel(props: Props) {
           <Form onSubmit={handleCreateChannel}>
             <fieldset-section>
               <label>{__('Channel profile picture')}</label>
-              <div className="form-field__avatar_upload">
-                <img className="form-field__avatar" src={thumbnailPreview} />
+              <div className={USER_FIRST_CHANNEL_AVATAR_UPLOAD_CLASS} data-user-first-channel-avatar-upload>
+                <img className={USER_FIRST_CHANNEL_AVATAR_CLASS} src={thumbnailPreview} />
                 <Button
                   button="alt"
                   title={__('Edit')}
@@ -176,11 +185,11 @@ function UserFirstChannel(props: Props) {
                 onChange={handleTitleChange}
               />
             </fieldset-section>
-            <fieldset-group class="fieldset-group--smushed fieldset-group--disabled-prefix">
+            <fieldset-group class={FIELDSET_GROUP_DISABLED_PREFIX_CLASS}>
               <fieldset-section>
                 <label htmlFor="auth_first_channel">
                   {createChannelError || nameError ? (
-                    <span className="error__text">{createChannelError || nameError}</span>
+                    <span className={ERROR_TEXT_CLASS}>{createChannelError || nameError}</span>
                   ) : (
                     __('Username (cannot be changed)')
                   )}
@@ -216,7 +225,7 @@ function UserFirstChannel(props: Props) {
                 ))}
               </FormField>
             </fieldset-section>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="primary"
                 type="submit"
@@ -224,7 +233,7 @@ function UserFirstChannel(props: Props) {
                 label={creatingChannel || claimingReward ? __('Creating') : __('Create')}
               />
             </div>
-            <div className="help--card-actions">
+            <div className={HELP_CARD_ACTIONS_CLASS}>
               <I18nMessage
                 tokens={{
                   sync_channel: (

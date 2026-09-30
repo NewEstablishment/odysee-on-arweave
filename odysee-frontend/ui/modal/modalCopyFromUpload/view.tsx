@@ -1,8 +1,10 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import classnames from 'classnames';
 import { Modal } from 'modal/modal';
 import Card from 'component/common/card';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import ClaimPreview from 'component/claimPreview';
 import Spinner from 'component/spinner';
 import { FormField } from 'component/common/form';
@@ -17,7 +19,7 @@ import { selectPublishFormValues } from 'redux/selectors/publish';
 import { doHideModal, doOpenModal } from 'redux/actions/app';
 import { doPopulatePublishFormFromClaim, doSearchMyUploads, doUpdatePublishForm } from 'redux/actions/publish';
 import { doToast } from 'redux/actions/notifications';
-import './style.scss';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 const COPYABLE_FIELDS = [
   {
     key: 'title',
@@ -591,7 +593,7 @@ export default function ModalCopyFromUpload() {
             count: overwriteFieldLabels.length,
           }),
           body: (
-            <ul className="copy-from-upload__overwrite-list">
+            <ul className="tw:m-0 tw:pl-app-m tw:text-[rgba(var(--color-text-base),0.88)] tw:[&_li+li]:mt-app-xxxs">
               {overwriteFieldLabels.map((fieldLabel) => (
                 <li key={fieldLabel}>{__(fieldLabel)}</li>
               ))}
@@ -611,26 +613,26 @@ export default function ModalCopyFromUpload() {
 
   // --- Step 1: Search & Select ---
   const renderSearchStep = () => (
-    <div className="copy-from-upload__search-step">
-      <div className="copy-from-upload__controls">
-        <div className="copy-from-upload__filters">
+    <div className="tw:flex tw:flex-col tw:gap-app-s">
+      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-app-s tw:upto-small:flex-col tw:upto-small:items-stretch tw:upto-small:gap-app-xxs">
+        <div className="tw:flex tw:shrink-0 tw:[&_.button-toggle-surface:first-child]:rounded-[var(--border-radius)_0_0_var(--border-radius)] tw:[&_.button-toggle-surface:last-child]:rounded-[0_var(--border-radius)_var(--border-radius)_0] tw:upto-small:overflow-x-auto tw:upto-small:pb-[2px] tw:upto-small:[-ms-overflow-style:none] tw:upto-small:[scrollbar-width:none] tw:upto-small:[&::-webkit-scrollbar]:hidden tw:upto-small:[&_.button-toggle-surface]:flex-[0_0_auto]">
           {FILTERS.map((f) => (
             <Button
               key={f.key}
               button="alt"
               label={__(f.label)}
               onClick={() => setActiveFilter(f.key)}
-              className={classnames('button-toggle', {
-                'button-toggle--active': activeFilter === f.key,
+              className={classnames(BUTTON_TOGGLE_CLASS, {
+                [BUTTON_TOGGLE_ACTIVE_CLASS]: activeFilter === f.key,
               })}
             />
           ))}
         </div>
-        <div className="copy-from-upload__search-field">
+        <div className="tw:flex tw:min-w-[14rem] tw:flex-[1_1_18rem] tw:items-stretch tw:[&_fieldset-section]:m-0 tw:[&_fieldset-section]:min-h-[2.35rem] tw:[&_fieldset-section]:w-full">
           <FormField
             type="text"
             name="copy_from_upload_search"
-            className="copy-from-upload__search-input"
+            className="tw:!h-[2.35rem] tw:!min-h-[2.35rem] tw:w-full tw:pt-0 tw:pb-0 tw:text-app-body tw:leading-[1.2]"
             placeholder={__('Search by title...')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -638,26 +640,26 @@ export default function ModalCopyFromUpload() {
           />
         </div>
       </div>
-      <p className="copy-from-upload__result-hint">
+      <p className="tw:text-app-small tw:text-[rgba(var(--color-text-base),0.6)]">
         {__('Recent uploads are shown first by release date (up to 100).')}
       </p>
       {showShortSearchHint && (
-        <p className="copy-from-upload__result-hint">
+        <p className="tw:text-app-small tw:text-[rgba(var(--color-text-base),0.6)]">
           {__('Type at least 3 characters for full search results. Short terms filter recent uploads.')}
         </p>
       )}
-      <div className="copy-from-upload__results">
+      <div className="tw:max-h-[330px] tw:overflow-x-hidden tw:overflow-y-auto tw:rounded-app tw:border tw:border-app-border tw:upto-small:max-h-[48vh]">
         {loading ? (
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Spinner />
           </div>
         ) : loadingFailed ? (
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <p>{__('Something went wrong. Please try again.')}</p>
             <Button button="link" label={__('Retry')} onClick={() => runSearch(trimmedTerm, activeFilter)} />
           </div>
         ) : filteredClaims.length === 0 ? (
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             {activeFilter === 'unlisted'
               ? __('No unlisted uploads found')
               : activeFilter === 'scheduled'
@@ -670,13 +672,13 @@ export default function ModalCopyFromUpload() {
             return (
               <div
                 key={claim.claim_id}
-                className="copy-from-upload__result-item"
+                className="copy-from-upload__result-item tw:grid tw:cursor-pointer tw:grid-cols-[minmax(0,1fr)_minmax(10.75rem,27%)] tw:items-stretch tw:overflow-hidden tw:[transition:background-color_0.15s] tw:[&:not(:last-child)]:[border-bottom:1px_solid_var(--color-border)] tw:hover:bg-[rgba(var(--color-primary-dynamic),0.1)] tw:focus-visible:[outline:2px_solid_rgba(var(--color-primary-dynamic),0.6)] tw:focus-visible:outline-offset-[-2px] tw:upto-small:grid-cols-[1fr]"
                 onClick={() => setSelectedClaim(claim)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => handleResultKeyDown(e, claim)}
               >
-                <div className="copy-from-upload__result-main">
+                <div className="tw:min-w-0">
                   <ClaimPreview
                     uri={claim.permanent_url || claim.canonical_url}
                     type="small"
@@ -686,24 +688,24 @@ export default function ModalCopyFromUpload() {
                     properties={false}
                   />
                 </div>
-                <div className="copy-from-upload__result-copy-meta">
-                  <div className="copy-from-upload__chip-row">
+                <div className="tw:flex tw:min-w-0 tw:flex-col tw:justify-start tw:gap-[0.15rem] tw:[border-left:1px_solid_rgba(var(--color-text-base),0.12)] tw:p-app-xxs tw:upto-small:[border-top:1px_solid_rgba(var(--color-text-base),0.12)] tw:upto-small:[border-left:none]">
+                  <div className="tw:flex tw:min-w-0 tw:flex-wrap tw:gap-[0.2rem]">
                     {copySummary.fieldChips.length > 0 ? (
                       copySummary.fieldChips.map((fieldLabel) => (
                         <span
                           key={`${claim.claim_id}:${fieldLabel}`}
-                          className="copy-from-upload__chip copy-from-upload__chip--field"
+                          className="tw:max-w-full tw:overflow-hidden tw:rounded-app tw:border tw:border-[rgba(var(--color-primary-dynamic),0.45)] tw:bg-[rgba(var(--color-primary-dynamic),0.16)] tw:px-[0.32rem] tw:py-[0.08rem] tw:text-[0.69rem] tw:leading-[1.25] tw:text-ellipsis tw:whitespace-nowrap"
                         >
                           {__(fieldLabel)}
                         </span>
                       ))
                     ) : (
-                      <span className="copy-from-upload__chip copy-from-upload__chip--muted">
+                      <span className="tw:max-w-full tw:overflow-hidden tw:rounded-app tw:border tw:border-[rgba(var(--color-text-base),0.2)] tw:bg-[rgba(var(--color-text-base),0.05)] tw:px-[0.32rem] tw:py-[0.08rem] tw:text-[0.69rem] tw:leading-[1.25] tw:text-[rgba(var(--color-text-base),0.64)] tw:text-ellipsis tw:whitespace-nowrap">
                         {__('No copyable fields found')}
                       </span>
                     )}
                     {copySummary.hiddenFieldCount > 0 && (
-                      <span className="copy-from-upload__chip copy-from-upload__chip--muted">
+                      <span className="tw:max-w-full tw:overflow-hidden tw:rounded-app tw:border tw:border-[rgba(var(--color-text-base),0.2)] tw:bg-[rgba(var(--color-text-base),0.05)] tw:px-[0.32rem] tw:py-[0.08rem] tw:text-[0.69rem] tw:leading-[1.25] tw:text-[rgba(var(--color-text-base),0.64)] tw:text-ellipsis tw:whitespace-nowrap">
                         {__('+%count% more', {
                           count: copySummary.hiddenFieldCount,
                         })}
@@ -711,17 +713,17 @@ export default function ModalCopyFromUpload() {
                     )}
                   </div>
                   {copySummary.detailChips.length > 0 && (
-                    <div className="copy-from-upload__chip-row copy-from-upload__chip-row--detail">
+                    <div className="tw:flex tw:min-w-0 tw:flex-wrap tw:gap-[0.2rem]">
                       {copySummary.detailChips.map((detailLabel, index) => (
                         <span
                           key={`${claim.claim_id}:detail:${index}`}
-                          className="copy-from-upload__chip copy-from-upload__chip--detail"
+                          className="tw:max-w-full tw:overflow-hidden tw:rounded-app tw:border tw:border-[rgba(var(--color-text-base),0.18)] tw:bg-[rgba(var(--color-text-base),0.05)] tw:px-[0.32rem] tw:py-[0.08rem] tw:text-[0.69rem] tw:leading-[1.25] tw:text-[rgba(var(--color-text-base),0.84)] tw:text-ellipsis tw:whitespace-nowrap"
                         >
                           {detailLabel}
                         </span>
                       ))}
                       {copySummary.hiddenDetailCount > 0 && (
-                        <span className="copy-from-upload__chip copy-from-upload__chip--muted">
+                        <span className="tw:max-w-full tw:overflow-hidden tw:rounded-app tw:border tw:border-[rgba(var(--color-text-base),0.2)] tw:bg-[rgba(var(--color-text-base),0.05)] tw:px-[0.32rem] tw:py-[0.08rem] tw:text-[0.69rem] tw:leading-[1.25] tw:text-[rgba(var(--color-text-base),0.64)] tw:text-ellipsis tw:whitespace-nowrap">
                           {__('+%count% more', {
                             count: copySummary.hiddenDetailCount,
                           })}
@@ -736,7 +738,7 @@ export default function ModalCopyFromUpload() {
         )}
       </div>
       {filteredClaims.length > MAX_VISIBLE_RESULTS && (
-        <p className="copy-from-upload__result-hint">
+        <p className="tw:text-app-small tw:text-[rgba(var(--color-text-base),0.6)]">
           {__('Showing %shown% of %total% results. Refine your search to see more.', {
             shown: MAX_VISIBLE_RESULTS,
             total: filteredClaims.length,
@@ -753,15 +755,15 @@ export default function ModalCopyFromUpload() {
     const availableFieldCount = COPYABLE_FIELDS.filter((field) => fieldAvailability[field.key]).length;
     const overwriteCount = fieldsThatWouldOverwrite.length;
     return (
-      <div className="copy-from-upload__field-step">
-        <div className="copy-from-upload__selected-claim">
+      <div className="tw:flex tw:flex-col tw:gap-app-m">
+        <div className="tw:flex tw:flex-col tw:gap-app-s">
           <Button
             button="link"
             icon={ICONS.ARROW_LEFT}
             label={__('Back to search')}
             onClick={() => setSelectedClaim(null)}
           />
-          <div className="copy-from-upload__selected-preview">
+          <div className="copy-from-upload__selected-preview tw:rounded-app tw:border tw:border-app-border tw:bg-[rgba(var(--color-primary-dynamic),0.05)] tw:p-app-xxs">
             <ClaimPreview
               uri={selectedClaim?.permanent_url || selectedClaim?.canonical_url}
               type="small"
@@ -772,24 +774,26 @@ export default function ModalCopyFromUpload() {
             />
           </div>
         </div>
-        <div className="copy-from-upload__field-list">
-          <label className="copy-from-upload__field-label">
+        <div className="tw:flex tw:flex-col tw:gap-app-xs tw:[&_fieldset-section]:m-0">
+          <label className="tw:mb-app-xxs tw:font-bold">
             {__('Select fields to copy from "%title%":', {
               title: claimTitle,
             })}
           </label>
-          <p className="copy-from-upload__field-hint">
+          <p className="tw:m-0 tw:text-app-small tw:text-[rgba(var(--color-text-base),0.62)]">
             {__('Unavailable fields are grayed out because they are not set on the selected upload.')}
           </p>
           {overwriteCount > 0 && (
-            <p className="copy-from-upload__field-hint">
+            <p className="tw:m-0 tw:text-app-small tw:text-[rgba(var(--color-text-base),0.62)]">
               {__('%count% selected field(s) will replace existing values.', {
                 count: overwriteCount,
               })}
             </p>
           )}
           {availableFieldCount === 0 && (
-            <p className="copy-from-upload__field-hint">{__('No copyable metadata found on this upload.')}</p>
+            <p className="tw:m-0 tw:text-app-small tw:text-[rgba(var(--color-text-base),0.62)]">
+              {__('No copyable metadata found on this upload.')}
+            </p>
           )}
           {COPYABLE_FIELDS.map((field) => (
             // Disable no-op options so users only pick fields that actually exist on the source claim.
@@ -813,7 +817,7 @@ export default function ModalCopyFromUpload() {
       isOpen
       type="custom"
       width="wide"
-      className="copy-from-upload-modal"
+      className="tw:!w-[min(94vw,800px)] tw:!min-w-[min(94vw,560px)] tw:!max-w-[800px] tw:[--file-list-thumbnail-width:6.4rem] tw:[&_.card]:max-w-none tw:upto-small:!w-[96vw] tw:upto-small:!min-w-[96vw] tw:upto-small:!max-w-[96vw] tw:upto-small:[--file-list-thumbnail-width:5.8rem] tw:upto-xxsmall:[--file-list-thumbnail-width:5.5rem]"
       onAborted={() => dispatch(doHideModal())}
     >
       <Card
@@ -825,7 +829,7 @@ export default function ModalCopyFromUpload() {
         }
         body={selectedClaim ? renderFieldStep() : renderSearchStep()}
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             {selectedClaim ? (
               <>
                 <Button

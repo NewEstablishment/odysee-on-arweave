@@ -1,4 +1,5 @@
 import { VIDEO_ALMOST_FINISHED_THRESHOLD } from 'constants/player';
+import { PRIMARY_PLAYER_WRAPPER_STYLE_CLASS } from 'component/viewers/classes';
 import * as React from 'react';
 import { lazyImport } from 'util/lazyImport';
 import parseChapters from 'util/parse-chapters';
@@ -7,6 +8,7 @@ import * as COLLECTIONS_CONSTS from 'constants/collections';
 import * as SETTINGS from 'constants/settings';
 import * as TAGS from 'constants/tags';
 import FileTitleSection from 'component/fileTitleSection';
+import { FILE_PAGE_MEDIA_ACTIONS_CLASS } from 'component/filePrice/classes';
 import VideoClaimInitiator from 'component/videoClaimInitiator';
 import ClaimCoverRender from 'component/claimCoverRender';
 import RecommendedContent from 'component/recommendedContent';
@@ -34,6 +36,7 @@ import {
 import { selectCommentsListTitleForUri, selectCommentsDisabledSettingForChannelId } from 'redux/selectors/comments';
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
 import { clearPosition as clearPositionAction } from 'redux/actions/content';
+import { CARD_STACK_SPACING_M_CLASS } from '../../classes';
 const CommentsList = lazyImport(
   () =>
     import(
@@ -48,8 +51,6 @@ const PlaylistCard = lazyImport(
       /* webpackChunkName: "playlistCard" */
     )
 );
-export const PRIMARY_PLAYER_WRAPPER_CLASS = 'file-page__video-container';
-export const PRIMARY_IMAGE_WRAPPER_CLASS = 'file-render__img-container';
 type Props = {
   uri: string;
   accessStatus: string | null | undefined;
@@ -127,7 +128,7 @@ export default function VideoPlayersPage(props: Props) {
       <>
         <div className="section card-stack file-page__video">
           {isAutoplayCountdownForUri && (
-            <div className={PRIMARY_PLAYER_WRAPPER_CLASS}>
+            <div className={PRIMARY_PLAYER_WRAPPER_STYLE_CLASS}>
               <ClaimCoverRender uri={uri} />
             </div>
           )}
@@ -147,7 +148,7 @@ export default function VideoPlayersPage(props: Props) {
 
   if (isMobilePortrait) {
     const infoContent = (
-      <section className="file-page__media-actions">
+      <section className={FILE_PAGE_MEDIA_ACTIONS_CLASS} data-file-page-media-actions>
         <FileTitleSection uri={uri} accessStatus={accessStatus} expandOverride />
       </section>
     );
@@ -178,7 +179,7 @@ export default function VideoPlayersPage(props: Props) {
     return (
       <>
         <div className="section card-stack file-page__video">
-          <div className={PRIMARY_PLAYER_WRAPPER_CLASS}>
+          <div className={PRIMARY_PLAYER_WRAPPER_STYLE_CLASS}>
             <VideoClaimInitiator uri={uri} />
           </div>
 
@@ -200,14 +201,14 @@ export default function VideoPlayersPage(props: Props) {
   return (
     <>
       <div className="section card-stack file-page__video">
-        <div className={PRIMARY_PLAYER_WRAPPER_CLASS}>
+        <div className={PRIMARY_PLAYER_WRAPPER_STYLE_CLASS}>
           <VideoClaimInitiator uri={uri} />
         </div>
 
         <HyperbeamPlaybackDebug uri={uri} claim={claim} accessStatus={accessStatus} />
 
         <div className="file-page__secondary-content">
-          <section className="file-page__media-actions">
+          <section className={FILE_PAGE_MEDIA_ACTIONS_CLASS} data-file-page-media-actions>
             {isSmallScreen && <PlaylistCard id={collectionId} uri={uri} />}
             {isSmallScreen && <ChaptersCard uri={uri} />}
 
@@ -241,7 +242,7 @@ const RightSideContent = (rightSideProps: RightSideProps) => {
   const { collectionId, uri, isSmallScreen } = rightSideProps;
   const isMobile = useIsMobile();
   return (
-    <div className="card-stack--spacing-m">
+    <div className={CARD_STACK_SPACING_M_CLASS}>
       {!isSmallScreen && !isMobile && <PlaylistCard id={collectionId} uri={uri} />}
       {!isMobile && <ChaptersCard uri={uri} />}
       <RecommendedContent uri={uri} />

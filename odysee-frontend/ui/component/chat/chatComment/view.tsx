@@ -1,4 +1,3 @@
-import 'scss/component/_livestream-comment.scss';
 import { getStickerUrl } from 'util/comments';
 import { Menu, MenuButton } from 'component/common/menu';
 import { parseURI } from 'util/lbryURI';
@@ -28,6 +27,8 @@ import {
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { selectMembershipForCreatorOnlyIdAndChannelId, selectUserOdyseeMembership } from 'redux/selectors/memberships';
 import { getChannelIdFromClaim } from 'util/claim';
+import { CHAT_COMMENT_CLASSES } from '../classes';
+import { COMMENT_STICKER_CLASS } from 'component/comment/classes';
 
 type ChatCommentData = {
   comment_id: string;
@@ -109,6 +110,18 @@ export default function ChatComment(props: Props) {
   const timePosted = timestamp * 1000;
   const commentIsMine = comment.channel_id && isMyComment(comment.channel_id);
   const [showTimestamps] = usePersistedState('live-timestamps', false);
+  const levelClass =
+    basedAmount >= 500
+      ? CHAT_COMMENT_CLASSES.level5
+      : basedAmount >= 100
+        ? CHAT_COMMENT_CLASSES.level4
+        : basedAmount >= 50
+          ? CHAT_COMMENT_CLASSES.level3
+          : basedAmount >= 10
+            ? CHAT_COMMENT_CLASSES.level2
+            : basedAmount >= 5
+              ? CHAT_COMMENT_CLASSES.level1
+              : undefined;
 
   // todo: implement comment_list --mine in SDK so redux can grab with selectCommentIsMine
   function isMyComment(channelId: string) {
@@ -128,38 +141,37 @@ export default function ChatComment(props: Props) {
   }, [activeChannelClaim]);
   return (
     <li
-      className={classnames('livestream__comment', {
-        'livestream__comment--hyperchat': basedAmount,
-        'hyperchat-level1': basedAmount >= 5,
-        'hyperchat-level2': basedAmount >= 10,
-        'hyperchat-level3': basedAmount >= 50,
-        'hyperchat-level4': basedAmount >= 100,
-        'hyperchat-level5': basedAmount >= 500,
-        'livestream__comment--sticker': isSticker,
-        'livestream__comment--mentioned': hasUserMention,
-        'livestream__comment--mobile': isMobile,
-        'livestream__comment--minimal': isCompact,
-      })}
+      className={classnames(
+        CHAT_COMMENT_CLASSES.root,
+        !basedAmount && CHAT_COMMENT_CLASSES.standard,
+        basedAmount && CHAT_COMMENT_CLASSES.hyperchat,
+        levelClass,
+        isSticker && 'livestream__comment--sticker',
+        hasUserMention && CHAT_COMMENT_CLASSES.mentioned,
+        isMobile && CHAT_COMMENT_CLASSES.mobile,
+        isMobile && isCompact && CHAT_COMMENT_CLASSES.mobileMinimal,
+        isCompact && CHAT_COMMENT_CLASSES.minimalRoot,
+        isCompact && basedAmount && CHAT_COMMENT_CLASSES.minimalHyperchat,
+        isCompact && isMobile && CHAT_COMMENT_CLASSES.minimalMobile
+      )}
     >
       {supportAmount > 0 && (
-        <div className="livestream-comment__hyperchat-banner">
+        <div className={CHAT_COMMENT_CLASSES.banner}>
           <CreditAmount isFiat={isFiat} amount={supportAmount} hyperChat />
         </div>
       )}
 
-      <div className="livestream-comment__body">
+      <div className={CHAT_COMMENT_CLASSES.body}>
         {/* supportAmount thumbnail disabled */}
         {!isCompact || isPinned ? (
           <>
             <ChannelThumbnail uri={authorUri} xsmall />
 
-            <div className="livestream-comment__info">
-              <div className="livestream-comment__meta-information">
+            <div className={CHAT_COMMENT_CLASSES.info}>
+              <div className={CHAT_COMMENT_CLASSES.meta}>
                 <Menu>
                   <MenuButton
-                    className={classnames('button--uri-indicator comment__author', {
-                      'comment__author--creator': isStreamer,
-                    })}
+                    className={isStreamer ? CHAT_COMMENT_CLASSES.authorCreator : CHAT_COMMENT_CLASSES.author}
                     onClick={(e) => e.stopPropagation()}
                   >
                     {claimName}
@@ -204,11 +216,11 @@ export default function ChatComment(props: Props) {
               </div>
 
               {isSticker ? (
-                <div className="sticker__comment">
+                <div className={COMMENT_STICKER_CLASS}>
                   <OptimizedImage src={stickerUrlFromMessage} waitLoad loading="lazy" />
                 </div>
               ) : (
-                <div className="livestream-comment__text">
+                <div className={CHAT_COMMENT_CLASSES.text}>
                   {removed ? (
                     <Empty text={__('[Removed]')} />
                   ) : (
@@ -233,7 +245,7 @@ export default function ChatComment(props: Props) {
             </div>
           </>
         ) : (
-          <div className="livestream-comment--minimal">
+          <div className={CHAT_COMMENT_CLASSES.minimal}>
             {showTimestamps && <DateTime date={timePosted} key={forceUpdate} />}
             {(isStreamer || isModerator || isGlobalMod || odyseeMembership) && (
               <ChannelThumbnail uri={authorUri} xxxsmall />
@@ -248,9 +260,7 @@ export default function ChatComment(props: Props) {
             {creatorMembership && <MembershipBadge membershipName={creatorMembership} linkPage uri={uri} />}
             <Menu>
               <MenuButton
-                className={classnames('button--uri-indicator comment__author', {
-                  'comment__author--creator': isStreamer,
-                })}
+                className={isStreamer ? CHAT_COMMENT_CLASSES.authorCreator : CHAT_COMMENT_CLASSES.author}
                 onClick={(e) => e.stopPropagation()}
               >
                 {claimName}
@@ -275,11 +285,11 @@ export default function ChatComment(props: Props) {
             </Menu>
             <p className="colon">:</p>
             {isSticker ? (
-              <div className="sticker__comment">
+              <div className={COMMENT_STICKER_CLASS}>
                 <OptimizedImage src={stickerUrlFromMessage} waitLoad loading="lazy" />
               </div>
             ) : (
-              <div className="livestream-comment__text">
+              <div className={CHAT_COMMENT_CLASSES.text}>
                 {removed ? (
                   <Empty text={__('[Removed]')} />
                 ) : (
@@ -300,7 +310,7 @@ export default function ChatComment(props: Props) {
         )}
       </div>
 
-      <div className="livestream-comment__menu">
+      <div className={CHAT_COMMENT_CLASSES.menu}>
         <Menu>
           <MenuButton className="menu__button" onClick={(e) => e.stopPropagation()}>
             <Icon size={18} icon={ICONS.MORE_VERTICAL} />

@@ -3,6 +3,7 @@ import classnames from 'classnames';
 import * as PAGES from 'constants/pages';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'component/common/tabs';
+import { TAB_LIST_COLLECTION_EDIT_CLASS } from 'component/common/tabs-classes';
 import { Form, Submit, FormErrors } from 'component/common/form';
 import { COLLECTION_PAGE } from 'constants/urlParams';
 import Button from 'component/button';
@@ -25,7 +26,10 @@ import {
 import { doCollectionEdit, doRemoveFromUnsavedChangesCollectionsForCollectionId } from 'redux/actions/collections';
 import { doOpenModal } from 'redux/actions/app';
 import * as MODALS from 'constants/modal_types';
-import './style.scss';
+import { COLLECTION_PUBLISH_FORM_CLASS } from './classes';
+import { COLLECTION_ACTIONS_CLASS } from '../collectionHeader/classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 export const PAGE_TAB_QUERY = `tab`;
 const TAB = {
   GENERAL: 0,
@@ -201,7 +205,8 @@ const CollectionEditForm = (props: Props) => {
 
   return (
     <Form
-      className="main--contained collection-edit-form__wrapper"
+      className={COLLECTION_PUBLISH_FORM_CLASS}
+      data-collection-edit-form
       onSubmit={handleSubmitForm}
       errors={{
         ...(itemError
@@ -218,7 +223,7 @@ const CollectionEditForm = (props: Props) => {
       disableSubmitOnEnter
     >
       <Tabs onChange={onTabChange} index={tabIndex}>
-        <TabList className="tabs__list--collection-edit-page">
+        <TabList className={TAB_LIST_COLLECTION_EDIT_CLASS}>
           <Tab>{__('General')}</Tab>
           <Tab>
             {__('Items')}
@@ -242,7 +247,7 @@ const CollectionEditForm = (props: Props) => {
           <TabPanel>
             {tabIndex === TAB.ITEMS && (
               <>
-                <div className={classnames('collection-actions')}>
+                <div className={classnames(COLLECTION_ACTIONS_CLASS)}>
                   <SortButton collectionId={collectionId} />
                 </div>
                 <CollectionItemsList
@@ -257,7 +262,7 @@ const CollectionEditForm = (props: Props) => {
 
       {hasUnavailableClaims && <ErrorBubble>{__('Remove unavailable items before saving this playlist.')}</ErrorBubble>}
 
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <Submit
           {...({
             button: 'primary',
@@ -271,7 +276,7 @@ const CollectionEditForm = (props: Props) => {
 
       <FormErrors />
 
-      <p className="help">
+      <p className={HELP_CLASS}>
         {__('Saving commits a new immutable snapshot while keeping this playlist link unchanged.')}
       </p>
     </Form>

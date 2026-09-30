@@ -3,8 +3,10 @@ import * as ICONS from 'constants/icons';
 import * as React from 'react';
 import ReactModal from 'react-modal';
 import Button from 'component/button';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import classnames from 'classnames';
 import { useIsMobile } from 'effects/use-screensize';
+import { MODAL_CLASSES, MODAL_WIDTH_CLASSES } from './classes';
 type ModalProps = {
   isOpen?: boolean;
   type?: 'alert' | 'card' | 'custom' | 'confirm';
@@ -48,14 +50,16 @@ export function Modal(props: ModalProps) {
       {...modalProps}
       parentSelector={() => document.fullscreenElement || document.body}
       onRequestClose={!disableOutsideClick ? onAborted || onConfirmed : undefined}
-      className={classnames('modal', className, {
-        'modal--card-internal': type === 'card',
-        'modal--wide': width === 'wide',
-        'modal--wide-fixed': width === 'wide-fixed',
-      })}
-      overlayClassName="modal-overlay"
+      className={classnames(
+        MODAL_CLASSES.root,
+        className,
+        type === 'card' && MODAL_CLASSES.cardInternal,
+        width === 'wide' && MODAL_WIDTH_CLASSES.wide,
+        width === 'wide-fixed' && MODAL_WIDTH_CLASSES.wideFixed
+      )}
+      overlayClassName={MODAL_CLASSES.overlay}
     >
-      {title && <h1 className="card__title card__title--deprecated">{title}</h1>}
+      {title && <h1 className={`card__title ${CARD_CLASSES.titleDeprecated}`}>{title}</h1>}
       {type === 'card' && (
         <Button
           iconSize={isMobile ? 24 : undefined}
@@ -67,7 +71,7 @@ export function Modal(props: ModalProps) {
       )}
       {children}
       {type === 'custom' || type === 'card' ? null : ( // custom modals define their own buttons
-        <div className="card__actions">
+        <div className={CARD_CLASSES.actions}>
           <Button button="primary" label={confirmButtonLabel} disabled={confirmButtonDisabled} onClick={onConfirmed} />
           {type === 'confirm' ? (
             <Button button="link" label={abortButtonLabel} disabled={abortButtonDisabled} onClick={onAborted} />
@@ -93,7 +97,7 @@ export function ExpandableModal(props: ModalProps) {
     <Modal type="custom" {...rest} onConfirmed={onConfirmed}>
       {children}
       {expanded ? <div>{extraContent}</div> : null}
-      <div className="card__actions">
+      <div className={CARD_CLASSES.actions}>
         <Button button="primary" label={confirmButtonLabel} onClick={onConfirmed} />
         <Button
           button="link"

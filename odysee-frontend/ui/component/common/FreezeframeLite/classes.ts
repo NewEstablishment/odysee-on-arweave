@@ -1,6 +1,6 @@
 // Refined from
 // https://github.com/ctrl-freaks/freezeframe.js/tree/master/packages/freezeframe/src
-// Names match with constants in styles.scss
+// Names match the generated-DOM selectors in ui/styles/compatibility.css.
 export const classes = {
   SELECTOR: '.freezeframe',
   CONTAINER: 'ff-container',

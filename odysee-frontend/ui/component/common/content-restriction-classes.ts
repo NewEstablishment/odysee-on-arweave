@@ -1,0 +1,1 @@
+export const DMCA_INFO_CLASS = String.raw`dmca-info tw:mb-app-l tw:rounded-app tw:border-2 tw:border-[rgba(255,0,0,0.6)] tw:bg-[rgba(255,0,0,0.06)] tw:p-app-s tw:[.claim-preview-info_&]:mb-0 tw:[.claim-preview-info_&]:text-app-text tw:[.claim-preview-info_&:hover]:bg-[rgba(255,0,0,0.4)]`;

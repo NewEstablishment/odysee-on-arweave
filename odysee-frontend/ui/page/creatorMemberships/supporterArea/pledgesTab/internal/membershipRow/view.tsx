@@ -12,9 +12,11 @@ import { selectClaimForId } from 'redux/selectors/claims';
 import { selectIndexForCreatorMembership } from 'redux/selectors/memberships';
 import { doMembershipList } from 'redux/actions/memberships';
 import Button from 'component/button';
+import { BUTTON_LABEL_CLASS } from 'component/button/classes';
 import * as ICONS from 'constants/icons';
 import dayjs from 'util/dayjs';
 import { getFormattedRenewBy } from 'util/memberships';
+import { MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS } from '../../../../tableClasses';
 type Props = {
   membershipSub: MembershipSub;
 };
@@ -120,7 +122,7 @@ export default function MembershipRow(props: Props) {
 
   return (
     <tr key={`${membershipSub.membership.channel_claim_id}${membershipSub.membership.name}`}>
-      <td className="channelThumbnail">
+      <td className={MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS}>
         <ChannelThumbnail xsmall uri={creatorChannelUri} />
         <ChannelThumbnail
           xxsmall
@@ -158,7 +160,7 @@ export default function MembershipRow(props: Props) {
         )}
       </td>
       <td>
-        <span dir="auto" className="button__label">
+        <span dir="auto" className={BUTTON_LABEL_CLASS}>
           <Button button="alt" icon={ICONS.MEMBERSHIP} navigate={creatorChannelPath + '?view=membership'} />
         </span>
       </td>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { ERROR_BUBBLE_CLASS } from './error-classes';
 type Props = {
   title?: string;
   subtitle?: string;
@@ -9,15 +10,18 @@ type Props = {
 
 const ErrorBubble = (props: Props) => {
   const { children, title, subtitle, action } = props;
+  const actionWithHook = React.isValidElement(action)
+    ? React.cloneElement(action as React.ReactElement<any>, { 'data-error-bubble-action': true })
+    : action;
 
   if (title && subtitle && action) {
     return (
-      <div className="error-bubble">
+      <div className={ERROR_BUBBLE_CLASS}>
         <div>
           <label>{title}</label>
           <span>{subtitle}</span>
         </div>
-        {action}
+        {actionWithHook}
       </div>
     );
   }
@@ -26,7 +30,7 @@ const ErrorBubble = (props: Props) => {
     return null;
   }
 
-  return <span className="error-bubble">{children}</span>;
+  return <span className={ERROR_BUBBLE_CLASS}>{children}</span>;
 };
 
 export default ErrorBubble;

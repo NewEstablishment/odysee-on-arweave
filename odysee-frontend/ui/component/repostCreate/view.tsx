@@ -1,3 +1,5 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import { MINIMUM_PUBLISH_BID, INVALID_NAME_ERROR } from 'constants/claim';
@@ -6,6 +8,8 @@ import Card from 'component/common/card';
 import Button from 'component/button';
 import ChannelSelector from 'component/channelSelector';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_DISABLED_PREFIX_CLASS } from 'component/common/form-components/fieldset-group-classes';
+import { FORM_FIELD_PRICE_AMOUNT_CLASS } from 'component/common/form-components/form-field-classes';
 import { parseURI, isNameValid, isURIValid, normalizeURI } from 'util/lbryURI';
 import { creditsToString } from 'util/format-credits';
 import analytics from 'analytics';
@@ -17,7 +21,6 @@ import HelpLink from 'component/common/help-link';
 import WalletSpendableBalanceHelp from 'component/walletSpendableBalanceHelp';
 import BidHelpText from 'component/publish/shared/publishBid/bid-help-text';
 import Spinner from 'component/spinner';
-import './style.scss';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   makeSelectClaimForUri,
@@ -30,6 +33,7 @@ import {
   selectFetchingMyChannels,
 } from 'redux/selectors/claims';
 import { selectBalance } from 'redux/selectors/wallet';
+import { REPOST_ACTIONS_CLASS, REPOST_PREVIEW_CLASS } from './classes';
 import {
   doRepost,
   doClearRepostError,
@@ -39,6 +43,7 @@ import {
 import { doToast } from 'redux/actions/notifications';
 import { selectActiveChannelClaim, selectIncognito } from 'redux/selectors/app';
 import { doHideModal } from 'redux/actions/app';
+import { FORM_FIELD_HELP_CLASS } from 'component/common/help-classes';
 
 type Props = {
   uri: string;
@@ -305,7 +310,7 @@ function RepostCreate(props: Props) {
 
   if (fetchingMyChannels) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     );
@@ -315,7 +320,7 @@ function RepostCreate(props: Props) {
     <>
       <Card
         title={__('Repost')}
-        className="repost-wrapper"
+        className={REPOST_PREVIEW_CLASS}
         subtitle={
           isRepostPage ? undefined : (
             <Button
@@ -332,11 +337,11 @@ function RepostCreate(props: Props) {
         actions={
           <div>
             <fieldset-section>
-              <fieldset-group class="fieldset-group--smushed fieldset-group--disabled-prefix">
+              <fieldset-group class={FIELDSET_GROUP_DISABLED_PREFIX_CLASS}>
                 <fieldset-section>
                   <label htmlFor="auth_first_channel">
                     {repostNameError ? (
-                      <span className="error__text">{repostNameError}</span>
+                      <span className={ERROR_TEXT_CLASS}>{repostNameError}</span>
                     ) : (
                       <span>
                         {__('Repost URL')}
@@ -407,7 +412,7 @@ function RepostCreate(props: Props) {
                   min={0}
                   step="any"
                   placeholder="0.123"
-                  className="form-field--price-amount"
+                  className={FORM_FIELD_PRICE_AMOUNT_CLASS}
                   label={<LbcSymbol postfix={__('Support --[button to support a claim]--')} size={14} />}
                   value={repostBid}
                   error={repostBidError}
@@ -418,7 +423,7 @@ function RepostCreate(props: Props) {
                 <WalletSpendableBalanceHelp inline />
               </div>
               <div
-                className="form-field__help"
+                className={FORM_FIELD_HELP_CLASS}
                 style={{
                   marginTop: 'var(--spacing-xs)',
                 }}
@@ -432,7 +437,7 @@ function RepostCreate(props: Props) {
             </div>
 
             <div
-              className="section__actions publish__actions"
+              className={REPOST_ACTIONS_CLASS}
               style={{
                 marginTop: 'var(--spacing-m)',
               }}

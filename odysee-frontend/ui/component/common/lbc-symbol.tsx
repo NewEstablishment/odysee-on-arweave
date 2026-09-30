@@ -2,6 +2,8 @@ import * as ICONS from 'constants/icons';
 import React from 'react';
 import classnames from 'classnames';
 import Icon from 'component/common/icon';
+import { LBC_SYMBOL_CLASS } from './lbc-symbol-classes';
+
 type Props = {
   withText?: boolean;
   isTitle?: boolean;
@@ -18,10 +20,10 @@ const LbcSymbol = (props: Props) => {
       <Icon
         icon={ICONS.LBC}
         size={isTitle ? 22 : size}
-        className={classnames('icon__lbc', {
-          'icon__lbc--before-text': prefix,
-          'icon__lbc--after-text': postfix,
-          'icon__lbc--title': isTitle,
+        className={classnames(LBC_SYMBOL_CLASS, {
+          'tw:ml-[4px]': prefix,
+          'tw:mr-app-xxxxs': postfix,
+          'tw:mb-[4px]': isTitle,
         })}
       />
       <span>{postfix}</span>

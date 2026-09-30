@@ -1,6 +1,6 @@
 import React from 'react';
 import VideoClaimInitiator from 'component/videoClaimInitiator';
-export const SHORTS_PLAYER_WRAPPER_CLASS = 'shorts-page__video-container';
+import { SHORTS_PLAYER_WRAPPER_CLASS, SHORTS_VIDEO_SECTION_CLASS, SHORTS_VIDEO_SECTION_INNER_CLASS } from './classes';
 type Props = {
   uri: string;
   upcomingUris?: Array<string>;
@@ -71,7 +71,7 @@ const ShortsVideoPlayer = React.memo<Props>(
     }, [uri]);
 
     return (
-      <div className="shorts-page__video-section">
+      <div className={`${SHORTS_VIDEO_SECTION_CLASS} ${SHORTS_VIDEO_SECTION_INNER_CLASS}`}>
         <div className={`${SHORTS_PLAYER_WRAPPER_CLASS} ${primaryPlayerWrapperClass}`}>
           <VideoClaimInitiator
             uri={uri}

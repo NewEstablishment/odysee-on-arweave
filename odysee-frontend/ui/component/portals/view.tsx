@@ -5,11 +5,21 @@ import * as ICONS from 'constants/icons';
 import * as SETTINGS from 'constants/settings';
 import classnames from 'classnames';
 import { NavLink } from 'react-router-dom';
-import './style.lazy.scss';
+import { DISABLED_CLASS } from 'component/common/state-classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { doSetClientSetting as doSetClientSettingAction } from 'redux/actions/settings';
 import { getThumbnailCdnUrl } from 'util/thumbnail';
+
+const PORTALS_WRAPPER_CLASS =
+  'tw:group/portals tw:relative tw:mb-app-xxl tw:w-full tw:overflow-hidden tw:rounded-app tw:bg-fixed tw:bg-cover tw:px-[12px] tw:py-app-l tw:select-none tw:[-webkit-touch-callout:none] tw:upto-small:pt-app-xl';
+const PORTAL_ITEM_CLASS = 'tw:mr-[12px] tw:inline-block';
+const PORTAL_THUMBNAIL_CLASS = 'tw:w-full tw:rounded-t-app tw:![border-bottom:none] tw:[transition:background_0.6s]';
+const PORTAL_BROWSE_CLASS =
+  'tw:absolute tw:top-[calc(50%_-_30px)] tw:size-[60px] tw:rounded-[50%] tw:bg-[rgba(var(--color-header-background-base),0.8)] tw:text-center tw:text-[38px] tw:opacity-0 tw:group-hover/portals:opacity-80 tw:hover:cursor-pointer tw:hover:!bg-[rgba(var(--color-header-background-base),1)] tw:hover:!opacity-100 tw:upto-small:top-[calc(50%_-_20px)] tw:upto-small:size-[40px] tw:upto-small:text-[26px] tw:upto-small:opacity-80';
+const PORTAL_DOT_CLASS =
+  'tw:mx-app-xxs tw:inline-block tw:size-[12px] tw:rounded-[50%] tw:border tw:border-white tw:bg-[rgba(150,150,150,0.6)] tw:[transition:all_1s] tw:hover:cursor-pointer tw:hover:!bg-white tw:upto-small:size-[6px]';
+
 type HomepageOrder = {
   active: Array<string> | null | undefined;
   hidden: Array<string> | null | undefined;
@@ -140,8 +150,8 @@ export default function Portals(props: Props) {
   return mainPortal ? (
     <div
       id="portals"
-      className={classnames('portals-wrapper', {
-        kill: kill,
+      className={classnames(PORTALS_WRAPPER_CLASS, {
+        'tw:hidden': kill,
       })}
       style={{
         backgroundImage: `url(${getThumbnailCdnUrl({
@@ -154,9 +164,11 @@ export default function Portals(props: Props) {
       onMouseEnter={() => setPause(true)}
       onMouseLeave={() => setPause(false)}
     >
-      <h1>{mainPortal.description}</h1>
+      <h1 className="tw:absolute tw:w-full tw:bg-[radial-gradient(rgba(101,15,124,0.7)_0%,transparent_60%)] tw:text-center tw:text-app-large tw:font-bold tw:text-[rgba(255,255,255,0.9)] tw:upto-small:w-[90%]">
+        {mainPortal.description}
+      </h1>
       <div
-        className="portal-rotator"
+        className="tw:relative tw:mt-[60px] tw:mb-app-m tw:ml-0 tw:flex tw:h-full tw:w-full tw:flex-nowrap tw:[transition:all_1s] tw:upto-small:mt-[80px]"
         style={{
           marginLeft: marginLeft,
         }}
@@ -165,8 +177,8 @@ export default function Portals(props: Props) {
         {mainPortals.map((portal, i) => {
           return (
             <div
-              className={classnames('portal-wrapper', {
-                disabled: portal.name === activePortal,
+              className={classnames(PORTAL_ITEM_CLASS, {
+                [DISABLED_CLASS]: portal.name === activePortal,
               })}
               style={{
                 width: tileWidth - 12,
@@ -187,13 +199,14 @@ export default function Portals(props: Props) {
                 state={portal}
               >
                 <div
-                  className="portal-thumbnail"
+                  className={PORTAL_THUMBNAIL_CLASS}
                   style={{
                     background: `rgba(` + portal.css.rgb + `,` + (hover === portal.name ? 1 : 0.8) + `)`,
                     border: `2px solid rgba(` + portal.css.rgb + `,1)`,
                   }}
                 >
                   <img
+                    className="tw:rounded-t-app"
                     style={{
                       width: tileWidth - 12,
                       height: tileWidth - 12,
@@ -204,12 +217,12 @@ export default function Portals(props: Props) {
                   />
                 </div>
                 <div
-                  className="portal-title"
+                  className="tw:rounded-b-app tw:bg-[rgba(0,0,0,0.6)] tw:text-center"
                   style={{
                     border: `2px solid rgba(` + portal.css.rgb + `,1)`,
                   }}
                 >
-                  <label>{portal.label}</label>
+                  <label className="tw:font-bold tw:text-white tw:hover:cursor-pointer">{portal.label}</label>
                 </div>
               </NavLink>
             </div>
@@ -219,24 +232,26 @@ export default function Portals(props: Props) {
       {mainPortals.length > tileNum && (
         <>
           <div
-            className="portal-browse left"
+            className={`${PORTAL_BROWSE_CLASS} tw:left-app-m`}
             onClick={() => setIndex(index > 1 ? index - 1 : mainPortals.length - (tileNum - 1))}
           >
             ‹
           </div>
           <div
-            className="portal-browse right"
+            className={`${PORTAL_BROWSE_CLASS} tw:right-app-m`}
             onClick={() => setIndex(index + (tileNum - 1) < mainPortals.length ? index + 1 : 1)}
           >
             ›
           </div>
-          <div className="portal-active-indicator">
+          <div className="tw:absolute tw:bottom-app-m tw:flex tw:w-full tw:items-center tw:justify-center tw:text-center">
             {mainPortals.map((item, i) => {
               return (
                 i < mainPortals.length - (tileNum - 1) && (
                   <div
                     key={i}
-                    className={i + 1 === index ? 'portal-active-indicator-active' : ''}
+                    className={classnames(PORTAL_DOT_CLASS, {
+                      'tw:!size-[12px] tw:!bg-white tw:upto-small:!size-[8px]': i + 1 === index,
+                    })}
                     onClick={() => setIndex(i + 1)}
                   />
                 )
@@ -246,15 +261,18 @@ export default function Portals(props: Props) {
         </>
       )}
       {authenticated && (
-        <div className="portals-remove" onClick={() => removePortals()}>
-          <Icon icon={ICONS.REMOVE} />
+        <div
+          className="tw:absolute tw:top-app-m tw:right-app-m tw:flex tw:rounded-app tw:bg-app-primary tw:p-[0.3rem] tw:opacity-0 tw:group-hover/portals:opacity-100 tw:hover:cursor-pointer tw:upto-small:top-app-s tw:upto-small:right-app-s"
+          onClick={() => removePortals()}
+        >
+          <Icon className="tw:size-[1rem] tw:stroke-white" icon={ICONS.REMOVE} />
         </div>
       )}
     </div>
   ) : (
-    <div className="portals-wrapper">
-      <div className="portal-wrapper">
-        <div className="portal-thumbnail" />
+    <div className={PORTALS_WRAPPER_CLASS}>
+      <div className={PORTAL_ITEM_CLASS}>
+        <div className={PORTAL_THUMBNAIL_CLASS} />
       </div>
     </div>
   );

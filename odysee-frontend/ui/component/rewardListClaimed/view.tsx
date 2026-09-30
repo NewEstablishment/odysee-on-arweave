@@ -5,6 +5,8 @@ import LbcSymbol from 'component/common/lbc-symbol';
 import Card from 'component/common/card';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimedRewards } from 'redux/selectors/rewards';
+import { REWARD_TABLE_CLASS } from './classes';
+import { TABLE_HEADER_TEXT_CLASS, TABLE_WRAPPER_CLASS } from 'component/common/table-classes';
 type Reward = {
   id: string;
   reward_title: string;
@@ -23,9 +25,9 @@ const RewardListClaimed = (props: Props) => {
 
   return (
     <Card
-      title={<div className="table__header-text">{__('Claimed Credits')}</div>}
+      title={<div className={TABLE_HEADER_TEXT_CLASS}>{__('Claimed Credits')}</div>}
       subtitle={
-        <div className="table__header-text">
+        <div className={TABLE_HEADER_TEXT_CLASS}>
           {__(
             'Claimed credit history is tied to your email. In case of lost or multiple wallets, your balance may differ from the amounts claimed'
           )}
@@ -33,8 +35,8 @@ const RewardListClaimed = (props: Props) => {
       }
       isBodyList
       body={
-        <div className="table__wrapper">
-          <table className="table table--rewards">
+        <div className={TABLE_WRAPPER_CLASS}>
+          <table className={REWARD_TABLE_CLASS}>
             <thead>
               <tr>
                 <th>{__('Title')}</th>

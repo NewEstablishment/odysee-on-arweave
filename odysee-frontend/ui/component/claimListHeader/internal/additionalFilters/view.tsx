@@ -1,6 +1,7 @@
 import React from 'react';
 import { FormField } from 'component/common/form';
 import * as CS from 'constants/claim_search';
+import { CLAIM_LIST_HEADER_CLASSES as C } from '../../classes';
 type Props = {
   filterCtx: any;
   contentType: string;
@@ -49,7 +50,7 @@ function AdditionalFilters(props: Props) {
           )}
         </div>
         {hasActiveFilter && (
-          <span className="additional-filters__notice">{__('These filters apply to all channel pages.')}</span>
+          <span className={C.additionalFiltersNotice}>{__('These filters apply to all channel pages.')}</span>
         )}
       </fieldset>
     </div>

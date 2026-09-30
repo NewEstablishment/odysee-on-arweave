@@ -7,6 +7,7 @@ import { useAppSelector } from 'redux/hooks';
 import { selectTagsRawForUri, selectTimestampsForUri } from 'redux/selectors/claims';
 import * as SETTINGS from 'constants/settings';
 import { selectClientSetting } from 'redux/selectors/settings';
+import { DATE_TIME_CLASS } from 'component/dateTime/classes';
 type Props = {
   uri: string | null | undefined;
   format?: 'date-only';
@@ -48,7 +49,7 @@ function DateTimeClaim(props: Props) {
   }
 
   return (
-    <span className="date_time" title={title}>
+    <span className={DATE_TIME_CLASS} title={title}>
       {getDateElem()}
     </span>
   );

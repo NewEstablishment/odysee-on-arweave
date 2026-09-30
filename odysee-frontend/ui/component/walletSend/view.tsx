@@ -1,9 +1,17 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import * as MODALS from 'constants/modal_types';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import { Form, FormField } from 'component/common/form';
+import { FIELDSET_GROUP_SMUSHED_CLASS } from 'component/common/form-components/fieldset-group-classes';
+import {
+  FORM_FIELD_ADDRESS_CLASS,
+  FORM_FIELD_PRICE_AMOUNT_CLASS,
+} from 'component/common/form-components/form-field-classes';
 import validateSendTx from 'util/form-validation';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import WalletSpendableBalanceHelp from 'component/walletSpendableBalanceHelp';
 import classnames from 'classnames';
 import ChannelSelector from 'component/channelSelector';
@@ -113,8 +121,8 @@ const WalletSend = React.memo(function WalletSend({
               label={__('Address')}
               button="alt"
               onClick={() => setIsAddress(true)}
-              className={classnames('button-toggle', {
-                'button-toggle--active': isAddress,
+              className={classnames(BUTTON_TOGGLE_CLASS, {
+                [BUTTON_TOGGLE_ACTIVE_CLASS]: isAddress,
               })}
             />
             <Button
@@ -122,8 +130,8 @@ const WalletSend = React.memo(function WalletSend({
               label={__('Search')}
               button="alt"
               onClick={() => setIsAddress(false)}
-              className={classnames('button-toggle', {
-                'button-toggle--active': !isAddress,
+              className={classnames(BUTTON_TOGGLE_CLASS, {
+                [BUTTON_TOGGLE_ACTIVE_CLASS]: !isAddress,
               })}
             />
           </div>
@@ -138,7 +146,7 @@ const WalletSend = React.memo(function WalletSend({
                   name="search"
                   error={contentError}
                   placeholder={__('Enter a name, @username or URL')}
-                  className="form-field--address"
+                  className={FORM_FIELD_ADDRESS_CLASS}
                   label={__('Recipient search')}
                   onChange={(event) => setEnteredContentUri(event.target.value)}
                   value={contentUri}
@@ -160,13 +168,13 @@ const WalletSend = React.memo(function WalletSend({
                 </fieldset-section>
               )}
 
-              <fieldset-group class="fieldset-group--smushed">
+              <fieldset-group class={FIELDSET_GROUP_SMUSHED_CLASS}>
                 <FormField
                   autoFocus
                   type="number"
                   name="amount"
                   label={__('Amount')}
-                  className="form-field--price-amount"
+                  className={FORM_FIELD_PRICE_AMOUNT_CLASS}
                   affixClass="form-field--fix-no-height"
                   min={0}
                   step="any"
@@ -185,7 +193,7 @@ const WalletSend = React.memo(function WalletSend({
                     type="text"
                     name="address"
                     placeholder={'bbFxRyXXXXXXXXXXXZD8nE7XTLUxYnddTs'}
-                    className="form-field--address"
+                    className={FORM_FIELD_ADDRESS_CLASS}
                     label={__('Recipient address')}
                     onChange={(event) =>
                       setDraftTransaction({
@@ -199,7 +207,7 @@ const WalletSend = React.memo(function WalletSend({
                 )}
               </fieldset-group>
 
-              <div className="card__actions">
+              <div className={CARD_CLASSES.actions}>
                 <Button
                   button="primary"
                   type="submit"
@@ -211,7 +219,7 @@ const WalletSend = React.memo(function WalletSend({
                     (isAddress ? !draftTransaction.address || validationErrors.address !== '' : !contentClaim)
                   }
                 />
-                {formError && <span className="error__text">{formError}</span>}
+                {formError && <span className={ERROR_TEXT_CLASS}>{formError}</span>}
               </div>
               <WalletSpendableBalanceHelp />
             </Form>

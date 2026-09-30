@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'component/common/tabs';
@@ -12,7 +13,8 @@ import Page from 'component/page';
 import ChannelSelector from 'component/channelSelector';
 import Spinner from 'component/spinner';
 import Button from 'component/button';
-import './style.scss';
+import { SUPPORTER_MEMBERSHIP_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 const PledgesTab = lazyImport(
   () =>
     import(
@@ -51,8 +53,8 @@ const SupporterArea = () => {
 
   if (activeChannelClaim === undefined) {
     return (
-      <Page className="premium-wrapper">
-        <div className="main--empty">
+      <Page>
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       </Page>
@@ -88,27 +90,40 @@ const SupporterArea = () => {
   }
 
   return (
-    <Page className="membershipPage-wrapper">
-      <div className="supporter-header-wrapper">
-        <div className="supporter-header">
-          <Button navigate={`/$/${PAGES.MEMBERSHIPS_LANDING}`} icon={ICONS.BACK} button="liquidass" />
-          <div>{__('Donor Portal')}</div>
+    <Page className={SUPPORTER_MEMBERSHIP_CLASSES.page}>
+      <div className={SUPPORTER_MEMBERSHIP_CLASSES.header}>
+        <div className={SUPPORTER_MEMBERSHIP_CLASSES.headerContent}>
+          <Button
+            className={SUPPORTER_MEMBERSHIP_CLASSES.headerBackButton}
+            navigate={`/$/${PAGES.MEMBERSHIPS_LANDING}`}
+            icon={ICONS.BACK}
+            button="liquidass"
+          />
+          <div className={SUPPORTER_MEMBERSHIP_CLASSES.headerTitle}>{__('Donor Portal')}</div>
         </div>
       </div>
-      <Tabs onChange={onTabChange} index={tabIndex}>
-        <div className="tab__wrapper">
-          <TabList>
-            <Tab aria-selected={tabIndex === 0} onClick={() => onTabChange(0)}>
+      <Tabs className={SUPPORTER_MEMBERSHIP_CLASSES.tabs} onChange={onTabChange} index={tabIndex}>
+        <div className={SUPPORTER_MEMBERSHIP_CLASSES.tabWrapper}>
+          <TabList className={SUPPORTER_MEMBERSHIP_CLASSES.tabList}>
+            <Tab
+              className={SUPPORTER_MEMBERSHIP_CLASSES.tab}
+              aria-selected={tabIndex === 0}
+              onClick={() => onTabChange(0)}
+            >
               {__('Overview')}
             </Tab>
-            <Tab aria-selected={tabIndex === 1} onClick={() => onTabChange(1)}>
+            <Tab
+              className={SUPPORTER_MEMBERSHIP_CLASSES.tab}
+              aria-selected={tabIndex === 1}
+              onClick={() => onTabChange(1)}
+            >
               {__('Payments')}
             </Tab>
           </TabList>
         </div>
 
         <TabPanels>
-          <TabPanel>
+          <TabPanel className={SUPPORTER_MEMBERSHIP_CLASSES.tabPanel}>
             <PledgesTab />
             <HelpHub
               href="https://help.odysee.tv/category-memberships/donorportal"
@@ -117,9 +132,9 @@ const SupporterArea = () => {
             />
           </TabPanel>
 
-          <TabPanel>
+          <TabPanel className={SUPPORTER_MEMBERSHIP_CLASSES.tabPanel}>
             <>
-              <span className="section__subtitle ">{__('Membership Payments for Channel')}</span>
+              <span className={SECTION_CLASSES.subtitle}>{__('Membership Payments for Channel')}</span>
               <ChannelSelector
                 channelIds={myChannelIds}
                 hideCreateNew

@@ -11,7 +11,6 @@ import SendUsdc from './sendUsdc';
 import ReceiveUsdt from './receiveUsdc';
 import ArWallets from './arWallets';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'component/common/tabs';
-import './style.scss';
 import Overview from './overview';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectArweaveConnected, selectArweaveBalance, selectArweaveFetching } from 'redux/selectors/arwallet';
@@ -20,6 +19,7 @@ import {
   doArDisconnect as doArDisconnectAction,
   doArUpdateBalance as doArUpdateBalanceAction,
 } from 'redux/actions/arwallet';
+import { PAYMENT_ACCOUNT_PAGE_CLASSES } from './classes';
 
 const TAB_QUERY = 'tab';
 const TABS = {
@@ -70,7 +70,9 @@ function PaymentAccountPage() {
         <Symbol token="usdc" amount={balance} precision={2} isTitle />
         <div
           onClick={() => dispatch(doArUpdateBalanceAction())}
-          className={!fetching ? `refresh-balance` : `refresh-balance refresh-balance--loading`}
+          className={`${PAYMENT_ACCOUNT_PAGE_CLASSES.refresh}${
+            fetching ? ` ${PAYMENT_ACCOUNT_PAGE_CLASSES.refreshLoading}` : ''
+          }`}
         >
           <Icon icon={ICONS.REFRESH} />
         </div>
@@ -100,22 +102,38 @@ function PaymentAccountPage() {
   }
 
   return (
-    <Page className="paymentAccountPage-wrapper main--full-width">
-      <header className="page-header" />
+    <Page className={PAYMENT_ACCOUNT_PAGE_CLASSES.page}>
+      <header className={PAYMENT_ACCOUNT_PAGE_CLASSES.header} />
       <Tabs onChange={onTabChange} index={tabIndex}>
-        <div className="tab__wrapper">
-          <TabList className="tabs__list">
-            <Tab aria-selected={tabIndex === 0} onClick={() => onTabChange(0)}>
+        <div className={PAYMENT_ACCOUNT_PAGE_CLASSES.tabWrapper}>
+          <TabList className={PAYMENT_ACCOUNT_PAGE_CLASSES.tabList}>
+            <Tab
+              className={PAYMENT_ACCOUNT_PAGE_CLASSES.tab}
+              aria-selected={tabIndex === 0}
+              onClick={() => onTabChange(0)}
+            >
               {__('Overview')}
             </Tab>
-            <Tab aria-selected={tabIndex === 1} onClick={() => onTabChange(1)}>
+            <Tab
+              className={PAYMENT_ACCOUNT_PAGE_CLASSES.tab}
+              aria-selected={tabIndex === 1}
+              onClick={() => onTabChange(1)}
+            >
               {__('Receive')}
             </Tab>
-            <Tab aria-selected={tabIndex === 2} onClick={() => onTabChange(2)}>
+            <Tab
+              className={PAYMENT_ACCOUNT_PAGE_CLASSES.tab}
+              aria-selected={tabIndex === 2}
+              onClick={() => onTabChange(2)}
+            >
               {__('Send')}
             </Tab>
             {arweaveWallets && arweaveWallets.length > 0 ? (
-              <Tab aria-selected={tabIndex === 3} onClick={() => onTabChange(3)}>
+              <Tab
+                className={PAYMENT_ACCOUNT_PAGE_CLASSES.tab}
+                aria-selected={tabIndex === 3}
+                onClick={() => onTabChange(3)}
+              >
                 {__('My Wallets')}
               </Tab>
             ) : (
@@ -124,41 +142,41 @@ function PaymentAccountPage() {
           </TabList>
         </div>
         <TabPanels>
-          <TabPanel>
+          <TabPanel className={PAYMENT_ACCOUNT_PAGE_CLASSES.tabPanel}>
             <>
               <Overview cardHeader={cardHeader} arWalletStatus={arWalletStatus} />
               {!arWalletStatus && (
-                <div className="wallet">
+                <div className={PAYMENT_ACCOUNT_PAGE_CLASSES.wallet}>
                   <WalletConnect />
                 </div>
               )}
             </>
           </TabPanel>
-          <TabPanel>
+          <TabPanel className={PAYMENT_ACCOUNT_PAGE_CLASSES.tabPanel}>
             <>
               <ReceiveUsdt cardHeader={cardHeader} arWalletStatus={arWalletStatus} />
               {!arWalletStatus && (
-                <div className="wallet">
+                <div className={PAYMENT_ACCOUNT_PAGE_CLASSES.wallet}>
                   <WalletConnect />
                 </div>
               )}
             </>
           </TabPanel>
-          <TabPanel>
+          <TabPanel className={PAYMENT_ACCOUNT_PAGE_CLASSES.tabPanel}>
             <>
               <SendUsdc cardHeader={cardHeader} arWalletStatus={arWalletStatus} balance={balance} />
               {!arWalletStatus && (
-                <div className="wallet">
+                <div className={PAYMENT_ACCOUNT_PAGE_CLASSES.wallet}>
                   <WalletConnect />
                 </div>
               )}
             </>
           </TabPanel>
-          <TabPanel>
+          <TabPanel className={PAYMENT_ACCOUNT_PAGE_CLASSES.tabPanel}>
             <>
               <ArWallets cardHeader={cardHeader} arWalletStatus={arWalletStatus} arweaveWallets={arweaveWallets} />
               {!arWalletStatus && (
-                <div className="wallet">
+                <div className={PAYMENT_ACCOUNT_PAGE_CLASSES.wallet}>
                   <WalletConnect />
                 </div>
               )}

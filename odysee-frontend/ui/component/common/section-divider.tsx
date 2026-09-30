@@ -1,7 +1,8 @@
 import React from 'react';
+import { SECTION_CLASSES } from './section-classes';
 
 const SectionDivider = () => (
-  <div className="section__divider">
+  <div className={SECTION_CLASSES.divider}>
     <hr />
   </div>
 );

@@ -9,6 +9,20 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectUser, selectUserAuthenticated } from 'redux/selectors/user';
 import { selectHasChannels } from 'redux/selectors/claims';
 import { doHideModal } from 'redux/actions/app';
+import {
+  BUTTON_CLASS,
+  BUTTON_CONTENT_CLASS,
+  BUTTON_CONTENT_LEADING_CLASS,
+  BUTTON_CONTENT_TRAILING_CLASS,
+  BUTTON_DISABLED_CLASS,
+  BUTTON_ICON_LEADING_CLASS,
+  BUTTON_ICON_TRAILING_CLASS,
+  BUTTON_LABEL_CLASS,
+  BUTTON_LABEL_CURRENT_CLASS,
+  BUTTON_LABEL_RESERVED_CLASS,
+  BUTTON_LABEL_RESERVE_CLASS,
+  getButtonVariantClass,
+} from './classes';
 
 type Props = {
   id?: string | null | undefined;
@@ -29,6 +43,9 @@ type Props = {
   // primary, secondary, alt, link
   iconSize?: number;
   iconColor?: string;
+  iconClassName?: string;
+  labelClassName?: string;
+  contentClassName?: string;
   activeClass?: string;
   innerRef?: any | null | undefined;
   authSrc?: string;
@@ -79,6 +96,9 @@ const Button = forwardRef<any, Props>((props: Props, ref: any) => {
     button,
     iconSize,
     iconColor,
+    iconClassName,
+    labelClassName,
+    contentClassName,
     activeClass,
     requiresAuth,
     requiresChannel,
@@ -102,83 +122,63 @@ const Button = forwardRef<any, Props>((props: Props, ref: any) => {
   const disable = disabled || (user === null && requiresAuth);
   const onClick = disabled ? undefined : onClickProp;
   const combinedClassName = classnames(
-    'button',
-    button
-      ? {
-          'button--primary': button === 'primary',
-          'button--secondary': button === 'secondary',
-          'button--alt': button === 'alt',
-          'button--inverse': button === 'inverse',
-          'button--close': button === 'close',
-          'button--disabled': disable,
-          'button--link': button === 'link',
-          'button--liquidass': button === 'liquidass',
-        }
-      : 'button--no-style',
+    BUTTON_CLASS,
+    getButtonVariantClass(button),
+    button && disable && BUTTON_DISABLED_CLASS,
     className
   );
   const innerRef = useRef(null);
   const combinedRef = useCombinedRefs(ref, innerRef, myref);
   const size = iconSize || (!label && !children) ? 18 : undefined; // Fall back to default
+  const hasCopy = Boolean(label || largestLabel || children);
 
   // Label can be a string or object ( use title instead )
   const ariaLabel = description || (typeof label === 'string' ? label : title);
   const content = (
-    <span className="button__content">
-      {icon && <Icon icon={icon} iconColor={iconColor} size={iconSize} />}
+    <span
+      className={classnames(
+        BUTTON_CONTENT_CLASS,
+        {
+          [BUTTON_CONTENT_LEADING_CLASS]: icon && hasCopy,
+          [BUTTON_CONTENT_TRAILING_CLASS]: iconRight && hasCopy,
+        },
+        contentClassName
+      )}
+    >
+      {icon && (
+        <Icon
+          className={classnames(BUTTON_ICON_LEADING_CLASS, iconClassName)}
+          icon={icon}
+          iconColor={iconColor}
+          size={iconSize}
+        />
+      )}
 
       {!largestLabel && label && (
-        <span dir="auto" className="button__label">
+        <span dir="auto" className={classnames(BUTTON_LABEL_CLASS, labelClassName)}>
           {label}
         </span>
       )}
 
       {/* largestLabel is used when a single button has two different labels based on hover state */}
       {largestLabel && (
-        <div
-          dir="auto"
-          className="button__label"
-          style={{
-            position: 'relative',
-          }}
-        >
-          <div
-            style={{
-              position: 'relative',
-              left: '50%',
-              top: '50%',
-              transform: `translate(-50%, 0%)`,
-            }}
-          >
-            <span
-              style={{
-                visibility: 'hidden',
-              }}
-            >
-              {largestLabel || label}
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: '50%',
-                  transform: `translate(-50%, -50%)`,
-                }}
-              >
-                <span
-                  style={{
-                    visibility: 'visible',
-                  }}
-                >
-                  {label}
-                </span>
-              </div>
-            </span>
-          </div>
-        </div>
+        <span dir="auto" className={classnames(BUTTON_LABEL_CLASS, BUTTON_LABEL_RESERVED_CLASS, labelClassName)}>
+          <span aria-hidden className={BUTTON_LABEL_RESERVE_CLASS}>
+            {largestLabel}
+          </span>
+          <span className={BUTTON_LABEL_CURRENT_CLASS}>{label}</span>
+        </span>
       )}
 
       {children}
-      {iconRight && <Icon icon={iconRight} iconColor={iconColor} size={iconSize || size} />}
+      {iconRight && (
+        <Icon
+          className={classnames(BUTTON_ICON_TRAILING_CLASS, iconClassName)}
+          icon={iconRight}
+          iconColor={iconColor}
+          size={iconSize || size}
+        />
+      )}
     </span>
   );
 

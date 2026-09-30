@@ -1,9 +1,11 @@
 import React from 'react';
+import classnames from 'classnames';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import ButtonToggle from 'component/buttonToggle';
 import { useAppSelector } from 'redux/hooks';
 import { selectArweaveAddress } from 'redux/selectors/arwallet';
-import './style.scss';
+import { PAYMENT_ACCOUNT_CARD_CLASS, PAYMENT_ACCOUNT_CARD_TITLE_CLASS } from '../classes';
 type Props = {
   cardHeader: () => React.ReactNode;
   arweaveWallets: any;
@@ -15,36 +17,43 @@ function ArWallets(props: Props) {
   const activeAddress = useAppSelector(selectArweaveAddress);
   return (
     <Card
-      className={!arWalletStatus ? `card--arwalllets card--disabled` : `card--arwalllets`}
+      className={`${PAYMENT_ACCOUNT_CARD_CLASS}${!arWalletStatus ? ` ${CARD_CLASSES.disabled}` : ''}`}
       title={cardHeader()}
+      titleClassName={PAYMENT_ACCOUNT_CARD_TITLE_CLASS}
       background
       actions={
         <>
-          <div className="wallet-table">
-            <div className="wallet-table-row wallet-table-row--header">
-              <div className="wallet-table-row__id">#</div>
-              <div className="wallet-table-row__address">{__('Arweave Address')}</div>
-              <div className="wallet-table-row__deposit">{__('Deposit Address')}</div>
-              <div className="wallet-table-row__status">{__('Status')}</div>
-              <div className="wallet-table-row__default">{__('Connected')}</div>
+          <div className="tw:w-full tw:rounded-app tw:bg-app-background tw:p-app-s">
+            <div className="tw:mb-app-xs tw:flex tw:w-full tw:rounded-app tw:border-b tw:border-b-[var(--color-header-button)] tw:px-app-xxs tw:py-app-xxxs tw:font-bold">
+              <div className="tw:min-w-[30px]">#</div>
+              <div className="tw:w-[440px] tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap">
+                {__('Arweave Address')}
+              </div>
+              <div className="tw:w-[440px] tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap">
+                {__('Deposit Address')}
+              </div>
+              <div className="tw:ml-auto tw:min-w-[86px]">{__('Status')}</div>
+              <div className="tw:min-w-[86px]">{__('Connected')}</div>
             </div>
             {arweaveWallets.map((wallet, index) => {
               return (
                 <div
                   key={index}
-                  className={
-                    wallet.address === activeAddress
-                      ? `wallet-table-row`
-                      : `wallet-table-row wallet-table-row--disconnected`
-                  }
+                  className={classnames('tw:flex tw:w-full tw:rounded-app tw:px-app-xxs tw:py-app-xxxs', {
+                    'tw:pointer-events-none tw:opacity-60': wallet.address !== activeAddress,
+                  })}
                 >
-                  <div className="wallet-table-row__id">{index + 1}</div>
-                  <div className="wallet-table-row__address">{wallet.address}</div>
-                  <div className="wallet-table-row__deposit">{wallet.deposit_address}</div>
-                  <div className="wallet-table-row__status">
+                  <div className="tw:min-w-[30px]">{index + 1}</div>
+                  <div className="tw:w-[440px] tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap">
+                    {wallet.address}
+                  </div>
+                  <div className="tw:w-[440px] tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap">
+                    {wallet.deposit_address}
+                  </div>
+                  <div className="tw:ml-auto tw:min-w-[86px]">
                     <ButtonToggle status={wallet.status === 'active'} />
                   </div>
-                  <div className="wallet-table-row__default">{wallet.default.toString()}</div>
+                  <div className="tw:min-w-[86px]">{wallet.default.toString()}</div>
                 </div>
               );
             })}

@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import { SITE_NAME } from 'config';
 import * as MODALS from 'constants/modal_types';
 import * as ICONS from 'constants/icons';
@@ -13,6 +14,8 @@ import { doUserIdentityVerify, doUserFetch } from 'redux/actions/user';
 import { makeSelectRewardByType } from 'redux/selectors/rewards';
 import rewards from 'rewards';
 import { selectUser, selectIdentityVerifyIsPending, selectIdentityVerifyErrorMessage } from 'redux/selectors/user';
+import { USER_VERIFY_CLASSES, USER_VERIFY_HEADER_CLASS } from './classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 type Props = {
   skipLink?: string;
@@ -43,9 +46,9 @@ const UserVerify = React.memo(function UserVerify({ onSkip }: Props) {
   }
 
   return (
-    <div className="main__auth-content">
-      <section className="section__header">
-        <h1 className="section__title--large">
+    <div className={USER_VERIFY_CLASSES.root}>
+      <section className={USER_VERIFY_HEADER_CLASS}>
+        <h1 className={USER_VERIFY_CLASSES.title}>
           {''}
           <I18nMessage
             tokens={{
@@ -67,7 +70,7 @@ const UserVerify = React.memo(function UserVerify({ onSkip }: Props) {
             %SITE_NAME% community safe! %Skip%.
           </I18nMessage>
         </p>
-        <p className="help">
+        <p className={HELP_CLASS}>
           {__('This step is not mandatory and not required in order for you to use %SITE_NAME%.', {
             SITE_NAME,
           })}
@@ -82,7 +85,7 @@ const UserVerify = React.memo(function UserVerify({ onSkip }: Props) {
            subtitle={__('Your card information will not be stored or charged, now or in the future.')}
            actions={
              <Fragment>
-               {errorMessage && <p className="error__text">{errorMessage}</p>}
+               {errorMessage && <p className={ERROR_TEXT_CLASS}>{errorMessage}</p>}
                <CardVerify
                  label={__('Verify Card')}
                  disabled={isPending}

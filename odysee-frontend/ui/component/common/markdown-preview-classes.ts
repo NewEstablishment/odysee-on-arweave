@@ -1,0 +1,1 @@
+export const EMBED_INLINE_BUTTON_CLASS = String.raw`tw:relative tw:flex tw:h-auto tw:w-full tw:items-center tw:justify-center tw:rounded-t-app tw:bg-[var(--color-black)] tw:bg-[length:100%] tw:bg-center tw:bg-no-repeat tw:before:float-left tw:before:pt-[var(--aspect-ratio-standard)] tw:before:content-[''] tw:after:block tw:after:clear-both tw:after:content-['']`;

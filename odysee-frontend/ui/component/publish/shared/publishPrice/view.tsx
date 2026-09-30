@@ -1,17 +1,15 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
+import { PUBLISH_DETAILS_TITLE_CLASS } from 'component/publish/shared/publish-details-classes';
 import classnames from 'classnames';
 import FeeBreakdown from './internal/feeBreakdown';
 import Button from 'component/button';
 import { FormField, FormFieldPrice } from 'component/common/form';
-import Card from 'component/common/card';
-import LbcSymbol from 'component/common/lbc-symbol';
 import FormFieldDurationCombo from 'component/formFieldDurationCombo';
 import I18nMessage from 'component/i18nMessage';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
 import { PAYWALL } from 'constants/publish';
-import { ENABLE_ARCONNECT } from 'config';
-import './style.lazy.scss';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectPublishFormValue } from 'redux/selectors/publish';
 import { doUpdatePublishForm } from 'redux/actions/publish';
@@ -25,6 +23,14 @@ const FEE = {
   MAX: 999.99,
 };
 const CURRENCY_OPTIONS = ['USD']; // ['USD', 'EUR']; // disable EUR until currency approach is determined.
+const PRICE_ROW_CLASS_NAME = 'tw:mb-app-m tw:flex tw:flex-col tw:last:mb-0';
+const PRICE_OPTION_BASE_CLASS_NAME =
+  'tw:flex tw:flex-col tw:gap-app-xs tw:rounded-app tw:border tw:bg-app-card tw:p-app-s tw:text-left tw:[transition:border-color_0.15s_ease]';
+const PRICE_OPTION_HEADER_CLASS_NAME =
+  'tw:flex tw:items-center tw:gap-app-xs tw:text-app-small tw:font-bold tw:text-app-text tw:[&_label::before]:!bg-[rgba(var(--color-text-base),0.06)]';
+const PRICE_OPTION_CONTENT_CLASS_NAME =
+  'tw:mt-app-xs tw:[border-top:1px_solid_var(--color-border)] tw:pt-app-xs tw:[&_input]:![background:rgba(var(--color-text-base),0.06)] tw:[&_select]:![background:rgba(var(--color-text-base),0.06)] tw:[&_label::before]:!bg-[rgba(var(--color-text-base),0.06)]';
+const PRICE_FEES_CLASS_NAME = 'tw:text-app-xxsmall tw:text-app-text-subtitle tw:italic';
 
 type Props = {
   disabled: boolean;
@@ -36,8 +42,8 @@ function clamp(value, min, max) {
 
 function getTncRow() {
   return (
-    <div className="publish-price__row">
-      <div className="publish-price__grp-1 publish-price__tnc">
+    <div className={PRICE_ROW_CLASS_NAME}>
+      <div className="tw:mb-app-s tw:text-app-xsmall tw:text-app-text-subtitle tw:only:mb-0">
         <I18nMessage
           tokens={{
             paid_content_terms_and_conditions: (
@@ -65,19 +71,14 @@ function PublishPrice(props: Props) {
   const fiatRentalEnabled = useAppSelector((state) => selectPublishFormValue(state, 'fiatRentalEnabled'));
   const fiatRentalFee = useAppSelector((state) => selectPublishFormValue(state, 'fiatRentalFee'));
   const fiatRentalExpiration = useAppSelector((state) => selectPublishFormValue(state, 'fiatRentalExpiration'));
-  const fee = useAppSelector((state) => selectPublishFormValue(state, 'fee'));
   const chargesEnabled = useAppSelector((state) => selectAccountChargesEnabled(state));
   const memberRestrictionOn = useAppSelector((state) => selectPublishFormValue(state, 'memberRestrictionOn'));
   const visibility = useAppSelector((state) => selectPublishFormValue(state, 'visibility'));
   const monetizationStatus = useAppSelector((state) => selectArweaveDefaultAccountMonetizationEnabled(state));
   const updatePublishForm = (value: UpdatePublishState) => dispatch(doUpdatePublishForm(value));
-  const doTipAccountStatus = () => dispatch(doTipAccountStatusAction());
   const doCustomerPurchaseCost = (cost: number) => dispatch(doCustomerPurchaseCostAction(cost));
-  const expanded = true;
-  const [hadSDKPaywallSelected] = React.useState(paywall === PAYWALL.SDK);
   const paymentDisallowed = visibility !== 'public';
   const bankAccountNotFetched = chargesEnabled === undefined;
-  const noBankAccount = !chargesEnabled && !bankAccountNotFetched;
   // If it's only restricted, the price can be added externally, and they won't be able to change it
   const restrictedWithoutPrice = paywall === PAYWALL.FREE && memberRestrictionOn;
 
@@ -108,186 +109,9 @@ function PublishPrice(props: Props) {
 
   function getRestrictionWarningRow() {
     return (
-      <div className={classnames('publish-price__row', {})}>
-        <div className="error__text">
+      <div className={PRICE_ROW_CLASS_NAME}>
+        <div className={ERROR_TEXT_CLASS}>
           {__('You already have content restrictions enabled, disable them first in order to set a price.')}
-        </div>
-      </div>
-    );
-  }
-
-  function getPaywallOptionsRow() {
-    return (
-      <div className="publish-price__row">
-        <div className="publish-price__grp-1">
-          <fieldset-section>
-            <FormField
-              type="checkbox"
-              name="content_paid"
-              label={__('Enable paid content (Purchase / Rent)')}
-              checked={paywall === PAYWALL.FIAT}
-              disabled={disabled || !monetizationStatus || restrictedWithoutPrice}
-              onChange={() => updatePublishForm({ paywall: paywall === PAYWALL.FIAT ? PAYWALL.FREE : PAYWALL.FIAT })}
-              helper={
-                !monetizationStatus &&
-                'In order to use this feature, you must set up a wallet and enable monetization first.'
-              }
-            />
-            {hadSDKPaywallSelected && (
-              <>
-                <FormField
-                  type="radio"
-                  name="content_sdk"
-                  label={<LbcSymbol prefix={__('Purchase with Credits')} />}
-                  checked={paywall === PAYWALL.SDK}
-                  disabled={disabled}
-                  onChange={() => updatePublishForm({ paywall: PAYWALL.SDK })}
-                />
-                {paywall === PAYWALL.SDK && (
-                  <p className="help--warning" style={{ marginTop: '10px' }}>
-                    LBC will be sunset in the future, we recommend using other content pricing methods
-                  </p>
-                )}
-              </>
-            )}
-          </fieldset-section>
-        </div>
-      </div>
-    );
-  }
-
-  function getPurchaseRow() {
-    return (
-      <div
-        className={classnames('publish-price__row', {
-          'publish-price__row--disabled': (noBankAccount || restrictedWithoutPrice) && !ENABLE_ARCONNECT,
-        })}
-      >
-        <div className="publish-price__grp-1">
-          <FormField
-            label={__('Purchase')}
-            name="purchase"
-            type="checkbox"
-            checked={fiatPurchaseEnabled}
-            onChange={() =>
-              updatePublishForm({
-                fiatPurchaseEnabled: !fiatPurchaseEnabled,
-              })
-            }
-          />
-        </div>
-        <div
-          className={classnames('publish-price__grp-2', {
-            'publish-price__grp-2--disabled': !fiatPurchaseEnabled,
-          })}
-        >
-          <FormFieldPrice
-            name="fiat_purchase_fee"
-            min={0.01}
-            price={fiatPurchaseFee}
-            onChange={(fee) =>
-              updatePublishForm({
-                fiatPurchaseFee: fee,
-              })
-            }
-            onBlur={() => sanitizeFee('fiatPurchaseFee')}
-            currencies={CURRENCY_OPTIONS}
-          />
-          <div className="publish-price__fees">
-            <FeeBreakdown
-              amount={fiatPurchaseFee.amount}
-              currency={fiatPurchaseFee.currency}
-              doCustomerPurchaseCost={doCustomerPurchaseCost}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function getRentalRow() {
-    return (
-      <div
-        className={classnames('publish-price__row', {
-          'publish-price__row--disabled': (noBankAccount || restrictedWithoutPrice) && !ENABLE_ARCONNECT,
-        })}
-      >
-        <div className="publish-price__grp-1">
-          <FormField
-            label={__('Rent')}
-            name="rent"
-            type="checkbox"
-            checked={fiatRentalEnabled}
-            onChange={() =>
-              updatePublishForm({
-                fiatRentalEnabled: !fiatRentalEnabled,
-              })
-            }
-          />
-        </div>
-        <div
-          className={classnames('publish-price__grp-2', {
-            'publish-price__grp-2--disabled': !fiatRentalEnabled,
-          })}
-        >
-          <FormFieldPrice
-            name="fiat_rental_fee"
-            min={0.01}
-            price={fiatRentalFee}
-            onChange={(fee) =>
-              updatePublishForm({
-                fiatRentalFee: fee,
-              })
-            }
-            onBlur={() => sanitizeFee('fiatRentalFee')}
-            currencies={CURRENCY_OPTIONS}
-          />
-          <FormFieldDurationCombo
-            label={__('Duration')}
-            name="fiat_rental_expiration"
-            min={1}
-            duration={fiatRentalExpiration}
-            onChange={(duration) =>
-              updatePublishForm({
-                fiatRentalExpiration: duration,
-              })
-            }
-            onBlur={() => sanitizeDuration()}
-            units={['months', 'weeks', 'days', 'hours']}
-          />
-          <div className="publish-price__fees">
-            <FeeBreakdown
-              amount={fiatRentalFee.amount}
-              currency={fiatRentalFee.currency}
-              doCustomerPurchaseCost={doCustomerPurchaseCost}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function getLbcPurchaseRow() {
-    return (
-      <div
-        className={classnames('publish-price__row', {
-          'publish-price__row--disabled': restrictedWithoutPrice,
-        })}
-      >
-        <div className="publish-price__grp-1">
-          <FormFieldPrice
-            name="lbc_purchase_fee"
-            min={1}
-            price={fee}
-            onChange={(newFee) =>
-              updatePublishForm({
-                fee: newFee,
-              })
-            }
-          />
-          {fee && fee.currency !== 'LBC' && (
-            <p className="publish-price__subtitle">{__('All content fees are charged in Credits.')}</p>
-          )}
         </div>
       </div>
     );
@@ -303,9 +127,9 @@ function PublishPrice(props: Props) {
 
   if (paymentDisallowed) {
     return (
-      <div className="publish-price">
-        <h3 className="publish-details__title">{__('Price')}</h3>
-        <p className="publish-price__reason">
+      <div>
+        <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Price')}</h3>
+        <p className="tw:text-app-small tw:text-[var(--color-text-warning)]">
           {__('Payment options are not available for Unlisted or Scheduled content.')}
         </p>
       </div>
@@ -313,8 +137,8 @@ function PublishPrice(props: Props) {
   }
 
   return (
-    <div className="publish-price">
-      <h3 className="publish-details__title">{__('Price')}</h3>
+    <div>
+      <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Price')}</h3>
 
       {restrictedWithoutPrice && getRestrictionWarningRow()}
 
@@ -333,28 +157,31 @@ function PublishPrice(props: Props) {
         }}
       />
 
-      <div className="publish-price__options">
+      <div className="tw:mt-app-s tw:grid tw:grid-cols-[repeat(3,1fr)] tw:gap-app-s tw:upto-tablet:grid-cols-[repeat(2,1fr)] tw:upto-tablet:gap-app-xs tw:upto-xxsmall:grid-cols-[1fr]">
         <button
           type="button"
-          className={
-            'publish-price__option' +
-            (!fiatPurchaseEnabled && !fiatRentalEnabled ? ' publish-price__option--selected' : '')
-          }
+          className={classnames(
+            PRICE_OPTION_BASE_CLASS_NAME,
+            !fiatPurchaseEnabled && !fiatRentalEnabled ? 'tw:border-app-primary' : 'tw:border-app-border',
+            'tw:cursor-pointer tw:hover:border-app-primary'
+          )}
           onClick={() => updatePublishForm({ paywall: PAYWALL.FREE })}
         >
-          <div className="publish-price__option-header">
+          <div className={PRICE_OPTION_HEADER_CLASS_NAME}>
             <Icon icon={ICONS.UNLOCK} size={18} />
             <span>{__('Free')}</span>
           </div>
-          <p className="publish-price__option-desc">{__('Anyone can view this content.')}</p>
+          <p className="tw:m-0 tw:text-app-xsmall tw:leading-[1.4] tw:text-app-text-subtitle">
+            {__('Anyone can view this content.')}
+          </p>
         </button>
 
         <div
-          className={
-            'publish-price__option' +
-            (isPaid && fiatPurchaseEnabled ? ' publish-price__option--selected' : '') +
-            (!isPaid ? ' publish-price__option--disabled' : '')
-          }
+          className={classnames(
+            PRICE_OPTION_BASE_CLASS_NAME,
+            isPaid && fiatPurchaseEnabled ? 'tw:border-app-primary' : 'tw:border-app-border',
+            isPaid ? 'tw:cursor-pointer tw:hover:border-app-primary' : 'tw:cursor-default tw:opacity-40'
+          )}
           onClick={() => {
             if (!isPaid) return;
             const next = !fiatPurchaseEnabled;
@@ -363,7 +190,7 @@ function PublishPrice(props: Props) {
             updatePublishForm(updates);
           }}
         >
-          <div className="publish-price__option-header">
+          <div className={PRICE_OPTION_HEADER_CLASS_NAME}>
             <FormField
               type="checkbox"
               name="purchase_toggle"
@@ -375,9 +202,11 @@ function PublishPrice(props: Props) {
               label={__('Purchase')}
             />
           </div>
-          <p className="publish-price__option-desc">{__('One-time purchase with USD.')}</p>
+          <p className="tw:m-0 tw:text-app-xsmall tw:leading-[1.4] tw:text-app-text-subtitle">
+            {__('One-time purchase with USD.')}
+          </p>
           {paywall === PAYWALL.FIAT && fiatPurchaseEnabled && (
-            <div className="publish-price__option-content" onClick={(e) => e.stopPropagation()}>
+            <div className={PRICE_OPTION_CONTENT_CLASS_NAME} onClick={(e) => e.stopPropagation()}>
               <FormFieldPrice
                 name="fiat_purchase_fee"
                 min={0.01}
@@ -386,7 +215,7 @@ function PublishPrice(props: Props) {
                 onBlur={() => sanitizeFee('fiatPurchaseFee')}
                 currencies={CURRENCY_OPTIONS}
               />
-              <div className="publish-price__fees">
+              <div className={PRICE_FEES_CLASS_NAME}>
                 <FeeBreakdown
                   amount={fiatPurchaseFee.amount}
                   currency={fiatPurchaseFee.currency}
@@ -398,11 +227,11 @@ function PublishPrice(props: Props) {
         </div>
 
         <div
-          className={
-            'publish-price__option' +
-            (isPaid && fiatRentalEnabled ? ' publish-price__option--selected' : '') +
-            (!isPaid ? ' publish-price__option--disabled' : '')
-          }
+          className={classnames(
+            PRICE_OPTION_BASE_CLASS_NAME,
+            isPaid && fiatRentalEnabled ? 'tw:border-app-primary' : 'tw:border-app-border',
+            isPaid ? 'tw:cursor-pointer tw:hover:border-app-primary' : 'tw:cursor-default tw:opacity-40'
+          )}
           onClick={() => {
             if (!isPaid) return;
             const next = !fiatRentalEnabled;
@@ -411,7 +240,7 @@ function PublishPrice(props: Props) {
             updatePublishForm(updates);
           }}
         >
-          <div className="publish-price__option-header">
+          <div className={PRICE_OPTION_HEADER_CLASS_NAME}>
             <FormField
               type="checkbox"
               name="rental_toggle"
@@ -423,9 +252,11 @@ function PublishPrice(props: Props) {
               label={__('Rent')}
             />
           </div>
-          <p className="publish-price__option-desc">{__('Rent for a limited time with USD.')}</p>
+          <p className="tw:m-0 tw:text-app-xsmall tw:leading-[1.4] tw:text-app-text-subtitle">
+            {__('Rent for a limited time with USD.')}
+          </p>
           {paywall === PAYWALL.FIAT && fiatRentalEnabled && (
-            <div className="publish-price__option-content" onClick={(e) => e.stopPropagation()}>
+            <div className={PRICE_OPTION_CONTENT_CLASS_NAME} onClick={(e) => e.stopPropagation()}>
               <FormFieldPrice
                 name="fiat_rental_fee"
                 min={0.01}
@@ -443,7 +274,7 @@ function PublishPrice(props: Props) {
                 onBlur={() => sanitizeDuration()}
                 units={['months', 'weeks', 'days', 'hours']}
               />
-              <div className="publish-price__fees">
+              <div className={PRICE_FEES_CLASS_NAME}>
                 <FeeBreakdown
                   amount={fiatRentalFee.amount}
                   currency={fiatRentalFee.currency}

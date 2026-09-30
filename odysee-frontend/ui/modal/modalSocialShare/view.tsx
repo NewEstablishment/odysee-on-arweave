@@ -5,6 +5,7 @@ import SocialShare from 'component/socialShare';
 import Card from 'component/common/card';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
+import { SOCIAL_SHARE_CARD_CLASS } from './classes';
 
 type Props = {
   uri: string;
@@ -21,7 +22,7 @@ function ModalSocialShare(props: Props) {
   return (
     <Modal isOpen onAborted={closeModal} type="card">
       <Card
-        className="card--share"
+        className={SOCIAL_SHARE_CARD_CLASS}
         title={
           <>
             {__('Share')}

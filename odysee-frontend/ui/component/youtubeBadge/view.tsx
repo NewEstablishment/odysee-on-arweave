@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { getTimeAgoStr } from 'util/time';
 import { Lbryio } from 'lbryinc';
+import { MEDIA_INFO_TEXT_CLASS, MEDIA_INFO_TEXT_CONSTRAINED_CLASS } from 'component/common/media-classes';
 type Props = {
   channelClaimId: string;
 };
@@ -31,8 +32,8 @@ export default function YoutubeBadge(props: Props) {
     return (
       <>
         <label>{__('Official YouTube Creator')}</label>
-        <div className="media__info-text">
-          <div className="media__info-text media__info-text--constrained">
+        <div className={MEDIA_INFO_TEXT_CLASS}>
+          <div className={`${MEDIA_INFO_TEXT_CLASS} ${MEDIA_INFO_TEXT_CONSTRAINED_CLASS}`}>
             {lastYtSyncDate &&
               __('Last checked %time_ago%', {
                 time_ago: getTimeAgoStr(lastYtSyncDate),

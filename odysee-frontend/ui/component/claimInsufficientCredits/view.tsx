@@ -5,6 +5,7 @@ import LbcSymbol from 'component/common/lbc-symbol';
 import { useAppSelector } from 'redux/hooks';
 import { selectInsufficientCreditsForUri } from 'redux/selectors/content';
 import { selectClaimWasPurchasedForUri } from 'redux/selectors/claims';
+import { HELP_WARNING_CLASS } from 'component/common/help-classes';
 
 type Props = {
   uri: string;
@@ -21,7 +22,7 @@ function ClaimInsufficientCredits(props: Props) {
   }
 
   return (
-    <div className="media__insufficient-credits help--warning">
+    <div className={`media__insufficient-credits ${HELP_WARNING_CLASS}`}>
       <I18nMessage
         tokens={{
           reward_link: <Button button="link" navigate="/$/rewards" label={__('Receive Credits')} />,

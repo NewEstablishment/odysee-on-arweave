@@ -10,6 +10,7 @@ import { CsOptHelper } from 'util/claim-search';
 import Button from 'component/button';
 import dayjs from 'util/dayjs';
 import ClaimList from 'component/claimList';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import ClaimPreview from 'component/claimPreview';
 import I18nMessage from 'component/i18nMessage';
 import LangFilterIndicator from 'component/langFilterIndicator';
@@ -1032,8 +1033,8 @@ function ClaimListDiscover(props: Props) {
       {tileLayout ? (
         <div>
           {!repostedClaimId && showHeader && (
-            <div className="section__header--actions">
-              <div className="section__actions section__actions-span">
+            <div className={SECTION_CLASSES.headerActions}>
+              <div className={`${SECTION_CLASSES.actions} tw:w-full`}>
                 {headerToUse}
                 {searchInSelectedLang && <LangFilterIndicator />}
               </div>
@@ -1068,8 +1069,8 @@ function ClaimListDiscover(props: Props) {
       ) : (
         <div>
           {showHeader && (
-            <div className="section__header--actions">
-              <div className="section__actions">
+            <div className={SECTION_CLASSES.headerActions}>
+              <div className={SECTION_CLASSES.actions}>
                 {headerToUse}
                 {searchInSelectedLang && <LangFilterIndicator />}
               </div>

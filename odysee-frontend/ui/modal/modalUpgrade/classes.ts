@@ -1,0 +1,1 @@
+export const MODAL_UPGRADE_SCROLLBAR_CLASS = String.raw`tw:[scrollbar-color:var(--color-scrollbar-thumb-bg)_var(--color-scrollbar-track-bg)] tw:[&_*::-webkit-scrollbar]:size-[6px] tw:[&_*::-webkit-scrollbar-track]:bg-[var(--color-scrollbar-track-bg)] tw:[&_*::-webkit-scrollbar-thumb]:bg-[var(--color-scrollbar-thumb-bg)]`;

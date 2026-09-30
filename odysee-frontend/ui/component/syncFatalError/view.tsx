@@ -1,9 +1,11 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as ICONS from 'constants/icons';
 import React from 'react';
 import Button from 'component/button';
 import Yrbl from 'component/yrbl';
 import { SITE_HELP_EMAIL } from 'config';
 import { STATUS_DEGRADED, STATUS_FAILING, STATUS_DOWN } from 'web/effects/use-degraded-performance';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   lbryTvApiStatus: string;
 };
@@ -14,7 +16,7 @@ export default function SyncFatalError(props: Props) {
     IS_WEB &&
     (lbryTvApiStatus === STATUS_DEGRADED || lbryTvApiStatus === STATUS_FAILING || lbryTvApiStatus === STATUS_DOWN);
   return (
-    <div className="main--empty">
+    <div className={PAGE_MAIN_EMPTY_CLASS}>
       <Yrbl
         title={downTime ? __('Under maintenance...') : __('There is a bug... somewhere')}
         subtitle={
@@ -27,7 +29,7 @@ export default function SyncFatalError(props: Props) {
           </p>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="primary"
               icon={ICONS.REFRESH}

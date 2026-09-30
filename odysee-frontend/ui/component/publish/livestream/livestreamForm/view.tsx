@@ -11,6 +11,7 @@ import { buildURI, isURIValid, isNameValid } from 'util/lbryURI';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { BITRATE } from 'constants/publish';
 import Button from 'component/button';
+import { DISABLED_CLASS } from 'component/common/state-classes';
 import ChannelSelector from 'component/channelSelector';
 import PublishLivestream from 'component/publish/livestream/publishLivestream';
 import PublishTitleUrl from 'component/publish/shared/publishTitleUrl';
@@ -18,16 +19,25 @@ import PublishDescription from 'component/publish/shared/publishDescription';
 import PublishAdditionalOptions from 'component/publish/shared/publishAdditionalOptions';
 import PublishFormErrors from 'component/publish/shared/publishFormErrors';
 import PublishReleaseDate from 'component/publish/shared/publishReleaseDate';
-import PublishVisibility from 'component/publish/shared/publishVisibility';
+import PublishVisibility, {
+  publishVisibilityOptionClassName,
+  publishVisibilityOptionDescriptionClassName,
+  publishVisibilityOptionHeaderClassName,
+  publishVisibilityOptionsClassName,
+  publishVisibilityScheduledClassName,
+} from 'component/publish/shared/publishVisibility';
 import PublishProtectedContent from 'component/publishProtectedContent';
 import PublishControlTags from 'component/publish/shared/publishControlTags/view';
 import PublishTagsPicker from 'component/publish/shared/publishTagsPicker/view';
 import PublishSummary from 'component/publish/shared/publishSummary/view';
+import { PUBLISH_DETAILS_CLASS, PUBLISH_DETAILS_TITLE_CLASS } from 'component/publish/shared/publish-details-classes';
 import PublishWizard from 'component/publish/shared/publishWizard';
+import { PUBLISH_LIVESTREAM_HEADER_CLASS } from 'page/livestreamSetup/classes';
 import Card from 'component/common/card';
 import I18nMessage from 'component/i18nMessage';
 import Spinner from 'component/spinner';
 import Tooltip from 'component/common/tooltip';
+import { PAGE_TITLE_CLASS } from 'component/page/classes';
 import { toHex } from 'util/hex';
 import { lazyImport } from 'util/lazyImport';
 import { NEW_LIVESTREAM_REPLAY_API } from 'constants/livestream';
@@ -48,6 +58,7 @@ import { selectModal, selectActiveChannelClaim, selectIncognito } from 'redux/se
 import { selectClientSetting } from 'redux/selectors/settings';
 import { selectBalance } from 'redux/selectors/wallet';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const SelectThumbnail = lazyImport(() => import('component/selectThumbnail' /* webpackChunkName: "selectThumbnail" */));
 const PublishPrice = lazyImport(
@@ -352,9 +363,9 @@ function LivestreamForm(props: Props) {
         : __('Create livestream');
 
   return (
-    <div className={classnames('card-stack', { disabled: balance < 0.01 })}>
-      <div className="livestream-form__header">
-        <h1 className="page__title">
+    <div className={classnames('card-stack', { [DISABLED_CLASS]: balance < 0.01 })}>
+      <div className="tw:mb-app-m tw:flex tw:items-center tw:gap-app-m">
+        <h1 className={`${PAGE_TITLE_CLASS} tw:m-0 tw:min-w-0 tw:flex-[1_1_0]`}>
           <Icon icon={ICONS.LIVESTREAM_MONOCHROME} />
           <label>{headerTitle}</label>
         </h1>
@@ -364,7 +375,7 @@ function LivestreamForm(props: Props) {
             icon={ICONS.REFRESH}
             button="primary"
             label={__('Clear')}
-            className="livestream-form__clear"
+            className="tw:shrink-0"
           />
         )}
       </div>
@@ -385,8 +396,8 @@ function LivestreamForm(props: Props) {
             <Card
               background
               body={
-                <div className="publish-details">
-                  <div className="publish-livestream-header">
+                <div className={PUBLISH_DETAILS_CLASS}>
+                  <div className={PUBLISH_LIVESTREAM_HEADER_CLASS}>
                     <Tooltip title={__('Check for Replays')}>
                       <Button
                         button="secondary"
@@ -416,23 +427,23 @@ function LivestreamForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <PublishTitleUrl disabled={publishing || propDisabled} />
 
                 <div>
-                  <h3 className="publish-details__title">{__('Description')}</h3>
+                  <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Description')}</h3>
                   <PublishDescription disabled={publishing || propDisabled} />
                 </div>
 
                 <div>
-                  <h3 className="publish-details__title">{__('Thumbnail')}</h3>
+                  <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Thumbnail')}</h3>
                   <React.Suspense fallback={null}>
                     <SelectThumbnail />
                   </React.Suspense>
                 </div>
 
                 <div>
-                  <h3 className="publish-details__title">{__('Tags')}</h3>
+                  <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Tags')}</h3>
                   <PublishTagsPicker
                     tags={tags}
                     limitSelect={TAGS_LIMIT}
@@ -449,29 +460,25 @@ function LivestreamForm(props: Props) {
 
                 {showDatePicker && (
                   <div>
-                    <h3 className="publish-details__title">{__('When do you want to go live?')}</h3>
-                    <div className="publish-visibility__options publish-visibility__options--two">
+                    <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('When do you want to go live?')}</h3>
+                    <div className={publishVisibilityOptionsClassName(true)}>
                       <button
                         type="button"
-                        className={classnames('publish-visibility__option', {
-                          'publish-visibility__option--selected': !isScheduled,
-                        })}
+                        className={publishVisibilityOptionClassName(!isScheduled)}
                         onClick={() => updatePublishForm({ releaseTime: undefined })}
                       >
-                        <div className="publish-visibility__option-header">
+                        <div className={publishVisibilityOptionHeaderClassName}>
                           <Icon icon={ICONS.GLOBE} size={18} />
                           <span>{__('Anytime')}</span>
                         </div>
-                        <p className="publish-visibility__option-desc">
+                        <p className={publishVisibilityOptionDescriptionClassName}>
                           {__('Go live whenever you want without a scheduled time.')}
                         </p>
                       </button>
 
                       <button
                         type="button"
-                        className={classnames('publish-visibility__option', {
-                          'publish-visibility__option--selected': isScheduled,
-                        })}
+                        className={publishVisibilityOptionClassName(isScheduled)}
                         onClick={() => {
                           if (!isScheduled) {
                             const d = new Date();
@@ -482,15 +489,15 @@ function LivestreamForm(props: Props) {
                           }
                         }}
                       >
-                        <div className="publish-visibility__option-header">
+                        <div className={publishVisibilityOptionHeaderClassName}>
                           <Icon icon={ICONS.TIMERCHECK} size={18} />
                           <span>{__('Scheduled')}</span>
                         </div>
-                        <p className="publish-visibility__option-desc">
+                        <p className={publishVisibilityOptionDescriptionClassName}>
                           {__('Set a specific time when you will go live.')}
                         </p>
                         {isScheduled && (
-                          <div className="publish-visibility__scheduled" onClick={(e) => e.stopPropagation()}>
+                          <div className={publishVisibilityScheduledClassName} onClick={(e) => e.stopPropagation()}>
                             <PublishReleaseDate />
                           </div>
                         )}
@@ -515,7 +522,7 @@ function LivestreamForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <PublishVisibility />
                 {/* @ts-ignore -- isStillEditing is resolved internally */}
                 <PublishProtectedContent claim={myClaimForUri} />
@@ -545,12 +552,12 @@ function LivestreamForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <PublishSummary />
                 {!formDisabled && !formValid ? (
                   <PublishFormErrors title={title} waitForFile={waitingForFile} />
                 ) : (
-                  <div className="help">
+                  <div className={HELP_CLASS}>
                     <I18nMessage
                       tokens={{
                         odysee_terms_of_service: (

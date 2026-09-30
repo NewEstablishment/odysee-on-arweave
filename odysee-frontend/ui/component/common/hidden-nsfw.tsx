@@ -4,14 +4,15 @@ import React from 'react';
 import Button from 'component/button';
 import Icon from 'component/common/icon';
 import I18nMessage from 'component/i18nMessage';
+import { SECTION_CLASSES } from './section-classes';
 type Props = {
   type?: string;
 };
 export default function HiddenNsfw(props: Props) {
   const { type = 'page' } = props;
   return (
-    <div className="section--padded section__subtitle">
-      <Icon className="icon--hidden" icon={ICONS.EYE_OFF} />
+    <div className={`${SECTION_CLASSES.padded} ${SECTION_CLASSES.subtitle}`}>
+      <Icon className="tw:mr-app-s" icon={ICONS.EYE_OFF} />
       <I18nMessage
         tokens={{
           type,

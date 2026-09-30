@@ -3,13 +3,17 @@ import { isNameValid, parseURI } from 'util/lbryURI';
 import Button from 'component/button';
 import ClaimPreview from 'component/claimPreview';
 import { FormField } from 'component/common/form-components/form-field';
+import { FORM_FIELD_ADDRESS_CLASS } from 'component/common/form-components/form-field-classes';
 import Icon from 'component/common/icon';
+import { ICON_HELP_CLASS } from 'component/common/icon-classes';
 import TagsSearch from 'component/tagsSearch';
 import * as ICONS from 'constants/icons';
 import { getUriForSearchTerm } from 'util/search';
 import { useAppDispatch } from 'redux/hooks';
 import { doToast } from 'redux/actions/notifications';
 import { doResolveUris } from 'redux/actions/claims';
+import { SEARCH_CHANNEL_FIELD_CLASSES } from './classes';
+import { CLAIM_PREVIEW_LARGE_CLASS } from 'component/claimPreview/classes';
 
 type Props = {
   label: string;
@@ -136,21 +140,21 @@ export default function SearchChannelField(props: Props) {
     } // eslint-disable-next-line react-hooks/exhaustive-deps -- @see TODO_NEED_VERIFICATION
 
   }, [searchTerm, setSearchTermError]);
-  return <div className="search__channel tag--blocked-words">
+  return <div className={`${SEARCH_CHANNEL_FIELD_CLASSES.root} tag--blocked-words`}>
       <TagsSearch label={label} labelAddNew={labelAddNew} tagsPassedIn={values.map(x => ({
       name: x
     }))} onSelect={addTag} onRemove={removeTag} disableAutoFocus hideInputField hideSuggestions disableControlTags />
 
-      <div className="search__channel--popup">
-        <FormField type="text" name="moderator_search" className="form-field--address" label={<>
+      <div className={SEARCH_CHANNEL_FIELD_CLASSES.popup}>
+        <FormField type="text" name="moderator_search" className={FORM_FIELD_ADDRESS_CLASS} label={<>
               {labelAddNew}
-              <Icon customTooltipText={__(HELP.CHANNEL_SEARCH)} className="icon--help" icon={ICONS.HELP} tooltip size={16} />
+              <Icon customTooltipText={__(HELP.CHANNEL_SEARCH)} className={ICON_HELP_CLASS} icon={ICONS.HELP} tooltip size={16} />
             </>} placeholder={__('Enter full channel name or URL')} value={searchTerm} error={searchTermError} onKeyPress={(e) => handleKeyPress(e)} onChange={(e) => setSearchTerm(e.target.value)} />
 
-        {searchUri && <div className="search__channel--popup-results">
-            <ClaimPreview uri={searchUri} hideMenu hideJoin hideRepostLabel disableNavigation showNullPlaceholder properties={''} renderActions={getFoundChannelRenderActionsFn()} empty={<div className="claim-preview claim-preview--inactive claim-preview--large claim-preview__empty">
+        {searchUri && <div className={SEARCH_CHANNEL_FIELD_CLASSES.results}>
+            <ClaimPreview uri={searchUri} hideMenu hideJoin hideRepostLabel disableNavigation showNullPlaceholder properties={''} renderActions={getFoundChannelRenderActionsFn()} empty={<div className={`claim-preview ${CLAIM_PREVIEW_LARGE_CLASS} tw:flex tw:items-center tw:justify-center`} data-claim-preview-inactive>
                   {__('Channel not found')}
-                  <Icon customTooltipText={__(HELP.CHANNEL_SEARCH)} className="icon--help" icon={ICONS.HELP} tooltip size={22} />
+                  <Icon customTooltipText={__(HELP.CHANNEL_SEARCH)} className={ICON_HELP_CLASS} icon={ICONS.HELP} tooltip size={22} />
                 </div>} />
           </div>}
       </div>

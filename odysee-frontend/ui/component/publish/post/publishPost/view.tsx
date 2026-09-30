@@ -1,7 +1,9 @@
 import React from 'react';
 import PostEditor from 'component/postEditor';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_CLASS } from 'component/common/form-components/fieldset-group-classes';
 import PublishName from 'component/publish/shared/publishName';
 import useThrottle from 'effects/use-throttle';
 import classnames from 'classnames';
@@ -51,7 +53,7 @@ function PublishPost(props: Props) {
   return (
     <Card
       className={classnames({
-        'card--disabled': disabled || balance === 0,
+        [CARD_CLASSES.disabled]: disabled || balance === 0,
       })}
       actions={
         <React.Fragment>
@@ -64,7 +66,7 @@ function PublishPost(props: Props) {
             value={titleValue}
             onChange={handleTitleChange}
             onBlur={flushTitle}
-            className="fieldset-group"
+            className={FIELDSET_GROUP_CLASS}
             max={200}
             autoFocus
             autoComplete="off"

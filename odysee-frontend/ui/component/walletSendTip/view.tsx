@@ -1,4 +1,5 @@
 import React from 'react';
+import { WALLET_SEND_TIP_CLASS, WALLET_SEND_TIP_MONETIZATION_DISABLED_CLASS } from './classes';
 import { ENABLE_ARCONNECT } from 'config';
 import { Lbryio } from 'lbryinc';
 import { parseURI } from 'util/lbryURI';
@@ -8,7 +9,12 @@ import { TAB_USD, TAB_BOOST } from 'constants/tip_tabs';
 import { Form } from 'component/common/form';
 import LbcMessage from 'component/common/lbc-message';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { CONFIRM_VALUE_CLASS, CONFIRM_WRAPPER_CLASS } from 'component/common/confirm-classes';
+import { ERROR_PANEL_CLASS } from 'component/common/error-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import ChannelSelector from 'component/channelSelector';
 import I18nMessage from 'component/i18nMessage';
 import LbcSymbol from 'component/common/lbc-symbol';
@@ -37,6 +43,7 @@ import { doArTip } from 'redux/actions/arwallet';
 import { doToast } from 'redux/actions/notifications';
 import { selectArweaveTippingErrorForId, selectArweaveTippingStartedForId } from 'redux/selectors/arwallet';
 import { doTipAccountCheckForUri } from 'redux/actions/payments';
+import { HELP_CLASS } from 'component/common/help-classes';
 const stripeEnvironment = getStripeEnvironment();
 type SupportParams = {
   amount: number;
@@ -321,7 +328,7 @@ export default function WalletSendTip(props: Props) {
       {/* if there is lbc, the main tip/boost gui with the 3 tabs at the top */}
       <Card
         title={titleText}
-        className="modal--send-tip"
+        className={WALLET_SEND_TIP_CLASS}
         subtitle={
           <>
             {!claimIsMine && (
@@ -338,7 +345,7 @@ export default function WalletSendTip(props: Props) {
             )}
 
             {/* short explainer under the button */}
-            <div className="section__subtitle">
+            <div className={SECTION_CLASSES.subtitle}>
               {explainerText}{' '}
               <Button label={__('Learn more')} button="link" href="https://help.odysee.tv/category-monetization/" />
             </div>
@@ -348,14 +355,14 @@ export default function WalletSendTip(props: Props) {
           // confirmation modal, allow  user to confirm or cancel transaction
           isOnConfirmationPage ? (
             <>
-              <div className="section card--inline confirm__wrapper">
+              <div className={`section ${CARD_CLASSES.inline} ${CONFIRM_WRAPPER_CLASS}`}>
                 <div className="section">
                   <div className="confirm__label">{__('To --[the tip recipient]--')}</div>
-                  <div className="confirm__value">{channelName || title}</div>
+                  <div className={CONFIRM_VALUE_CLASS}>{channelName || title}</div>
                   <div className="confirm__label">{__('From --[the tip sender]--')}</div>
-                  <div className="confirm__value">{(!incognito && activeChannelName) || __('Anonymous')}</div>
+                  <div className={CONFIRM_VALUE_CLASS}>{(!incognito && activeChannelName) || __('Anonymous')}</div>
                   <div className="confirm__label">{__('Amount')}</div>
-                  <div className="confirm__value">
+                  <div className={CONFIRM_VALUE_CLASS}>
                     {activeTab === TAB_USD ? (
                       <p>{`${ICONS.USD} $ ${(Math.round(tipAmount * 100) / 100).toFixed(2)}`}</p>
                     ) : (
@@ -364,7 +371,7 @@ export default function WalletSendTip(props: Props) {
                   </div>
                 </div>
               </div>
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 {activeTab === TAB_USD ? (
                   <>
                     <Button button="primary" label={__('Confirm')} onClick={handleSubmit} />
@@ -380,12 +387,12 @@ export default function WalletSendTip(props: Props) {
                 )}
                 <Button button="link" label={__('Cancel')} onClick={() => setConfirmationPage(false)} />
               </div>
-              {arweaveTippingError && <div className={'error'}>{arweaveTippingError}</div>}
+              {arweaveTippingError && <div className={ERROR_PANEL_CLASS}>{arweaveTippingError}</div>}
             </>
           ) : !(activeTab === TAB_BOOST && balance === 0) ? (
             <>
               {activeTab === TAB_USD && !canReceiveTips ? (
-                <div className="monetization-disabled">
+                <div className={WALLET_SEND_TIP_MONETIZATION_DISABLED_CLASS}>
                   USD Monetization isn't available. It may not be set up yet or has been disabled by the creator.
                 </div>
               ) : activeTab === TAB_USD && activeArStatus !== 'connected' ? (
@@ -404,7 +411,7 @@ export default function WalletSendTip(props: Props) {
                     modalProps={modalProps}
                     exchangeRateOverride={undefined}
                   />
-                  <div className="section__actions">
+                  <div className={SECTION_CLASSES.actions}>
                     <Button
                       autoFocus
                       icon={isSupport ? ICONS.TRENDING : ICONS.SUPPORT}
@@ -421,7 +428,7 @@ export default function WalletSendTip(props: Props) {
                       }
                       label={<LbcMessage>{customText || buildButtonText()}</LbcMessage>}
                     />
-                    {fetchingChannels && <span className="help">{__('Loading your channels...')}</span>}
+                    {fetchingChannels && <span className={HELP_CLASS}>{__('Loading your channels...')}</span>}
                   </div>
                 </>
               )}
@@ -448,7 +455,7 @@ export default function WalletSendTip(props: Props) {
                 </I18nMessage>
               }
               actions={
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   <Button
                     icon={ICONS.REWARDS}
                     button="primary"
@@ -486,8 +493,8 @@ const TabSwitchButton = (tabButtonProps: TabButtonProps) => {
         if (tipInputElement) tipInputElement.focus();
         if (!isOnConfirmationPage) setActiveTab(name);
       }}
-      className={classnames('button-toggle', {
-        'button-toggle--active': activeTab === name,
+      className={classnames(BUTTON_TOGGLE_CLASS, {
+        [BUTTON_TOGGLE_ACTIVE_CLASS]: activeTab === name,
       })}
     />
   );

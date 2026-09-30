@@ -14,7 +14,6 @@ import { selectArweaveWanderAuth, selectArweaveAddress, selectArweaveConnecting 
 import { selectArAccountRegisteringError } from 'redux/selectors/payments';
 import { selectTheme } from 'redux/selectors/settings';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
-import './style.scss';
 type Props = {};
 export default function Wander(props: Props) {
   const dispatch = useAppDispatch();
@@ -245,5 +244,5 @@ export default function Wander(props: Props) {
       clearInterval(loginTimerRef.current);
     }; // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instance, dispatch]);
-  return <div className="wanderConnectWrapper" ref={wrapperRef} />;
+  return <div className="tw:relative tw:mr-app-s tw:hidden tw:size-[40px]" ref={wrapperRef} />;
 }

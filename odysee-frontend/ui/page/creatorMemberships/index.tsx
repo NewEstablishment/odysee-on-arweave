@@ -1,12 +1,15 @@
 import React from 'react';
+import '../../styles/chunks/memberships.css';
+import withRouteStyleBoundary from 'component/common/route-style-boundary';
 import * as PAGES from 'constants/pages';
 import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
 import Button from 'component/button';
 import Page from 'component/page';
 import HelpHub from 'component/common/help-hub';
-import './style.scss';
 import { useNavigate } from 'react-router-dom';
+import classnames from 'classnames';
+import { MEMBERSHIPS_LANDING_CLASSES } from './classes';
 
 const MembershipsLandingPage = () => {
   const navigate = useNavigate();
@@ -16,26 +19,31 @@ const MembershipsLandingPage = () => {
   }
 
   return (
-    <Page className="memberships-wrapper">
-      <div className="memberships-header-wrapper">
-        <div className="memberships-header">
-          <h1>
+    <Page className={MEMBERSHIPS_LANDING_CLASSES.page}>
+      <div className={MEMBERSHIPS_LANDING_CLASSES.header}>
+        <div className={MEMBERSHIPS_LANDING_CLASSES.headerContent}>
+          <h1 className={MEMBERSHIPS_LANDING_CLASSES.headerTitle}>
             <Icon icon={ICONS.MEMBERSHIP} size={10} />
             {__('Memberships')}
           </h1>
         </div>
       </div>
 
-      <div className="memberships-content">
-        <div className="memberships">
+      <div className={MEMBERSHIPS_LANDING_CLASSES.content}>
+        <div className={MEMBERSHIPS_LANDING_CLASSES.panels}>
           <div
-            className="membership-wrapper supporter"
+            className={classnames(MEMBERSHIPS_LANDING_CLASSES.panel, MEMBERSHIPS_LANDING_CLASSES.supporterPanel)}
             onClick={() => handleNavigateToPage(PAGES.MEMBERSHIPS_SUPPORTER)}
           >
-            <div className="membership-content">
-              <div>
-                <h2>{__('Donor Portal')}</h2>
-                <p className="portal-tagline">{__('Find creators you like and support them.')}</p>
+            <div
+              className={classnames(
+                MEMBERSHIPS_LANDING_CLASSES.panelContent,
+                MEMBERSHIPS_LANDING_CLASSES.supporterContent
+              )}
+            >
+              <div className={MEMBERSHIPS_LANDING_CLASSES.panelCard}>
+                <h2 className={MEMBERSHIPS_LANDING_CLASSES.panelTitle}>{__('Donor Portal')}</h2>
+                <p className={MEMBERSHIPS_LANDING_CLASSES.tagline}>{__('Find creators you like and support them.')}</p>
                 <Button
                   button="primary"
                   navigate={`/$/${PAGES.MEMBERSHIPS_SUPPORTER}`}
@@ -46,13 +54,18 @@ const MembershipsLandingPage = () => {
           </div>
 
           <div
-            className="membership-wrapper memberships"
+            className={classnames(MEMBERSHIPS_LANDING_CLASSES.panel, MEMBERSHIPS_LANDING_CLASSES.creatorPanel)}
             onClick={() => handleNavigateToPage(PAGES.CREATOR_MEMBERSHIPS)}
           >
-            <div className="membership-content">
-              <div>
-                <h2>{__('Creator Portal')}</h2>
-                <p className="portal-tagline">
+            <div
+              className={classnames(
+                MEMBERSHIPS_LANDING_CLASSES.panelContent,
+                MEMBERSHIPS_LANDING_CLASSES.creatorContent
+              )}
+            >
+              <div className={MEMBERSHIPS_LANDING_CLASSES.panelCard}>
+                <h2 className={MEMBERSHIPS_LANDING_CLASSES.panelTitle}>{__('Creator Portal')}</h2>
+                <p className={MEMBERSHIPS_LANDING_CLASSES.tagline}>
                   {__('Create memberships and have users subscribe to them to support you.')}
                 </p>
                 <Button
@@ -74,4 +87,4 @@ const MembershipsLandingPage = () => {
   );
 };
 
-export default MembershipsLandingPage;
+export default withRouteStyleBoundary(MembershipsLandingPage, 'memberships');

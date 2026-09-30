@@ -1,12 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import './style.scss';
 import FileThumbnail from 'component/fileThumbnail';
 import ClaimMenuList from 'component/claimMenuList';
 import ChannelThumbnail from 'component/channelThumbnail';
 import ClaimPreviewSubtitle from 'component/claimPreviewSubtitle';
 import FileWatchLaterLink from 'component/fileWatchLaterLink';
 import ButtonAddToQueue from 'component/buttonAddToQueue';
+import { CLAIM_PREVIEW_HOVER_ACTIONS_GRID_CLASS } from 'component/claimPreview/hover-action-classes';
 import { isClaimAllowedForCollection } from 'util/collections';
 import { formatLbryUrlForWeb } from 'util/url';
 import PreviewOverlayProperties from 'component/previewOverlayProperties';
@@ -15,6 +15,7 @@ import { getClaimMetadata } from 'util/claim';
 import { selectClaimForUri, selectGeoRestrictionForUri } from 'redux/selectors/claims';
 import { doResolveClaimId as doResolveClaimIdAction } from 'redux/actions/claims';
 import { doFetchViewCount as doFetchViewCountAction } from 'lbryinc';
+import { FEATURED_SECTION_CLASSES } from './classes';
 type Props = {
   uri: string;
   claimId: string;
@@ -49,10 +50,14 @@ function FeaturedSection(props: Props) {
     navigate(navigateUrl);
   };
   return claim ? (
-    <div className="claim-preview claim-preview-featured" onClick={handleClick} style={{ cursor: 'pointer' }}>
+    <div
+      className={`claim-preview ${FEATURED_SECTION_CLASSES.root}`}
+      onClick={handleClick}
+      style={{ cursor: 'pointer' }}
+    >
       <FileThumbnail uri={uri} thumbnail={claim.value.thumbnail?.url} forceReload>
         {showCollectionContext && (
-          <div className="claim-preview__hover-actions-grid">
+          <div className={CLAIM_PREVIEW_HOVER_ACTIONS_GRID_CLASS}>
             <FileWatchLaterLink focusable={false} uri={uri} />
             <ButtonAddToQueue focusable={false} uri={uri} />
           </div>
@@ -76,7 +81,7 @@ function FeaturedSection(props: Props) {
       </div>
     </div>
   ) : (
-    <div className="claim-preview claim-preview-featured claim-preview-featured-placeholder">
+    <div className={`claim-preview ${FEATURED_SECTION_CLASSES.root} ${FEATURED_SECTION_CLASSES.placeholder}`}>
       <div className="media__thumb" />
       <div className="claim-preview__text">
         <div className="claim-preview-info">

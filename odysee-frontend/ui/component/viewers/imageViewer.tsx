@@ -3,6 +3,7 @@ import Card from 'component/common/card';
 import ErrorText from 'component/common/error-text';
 import ZoomableImage from 'component/zoomableImage';
 import Tooltip from 'component/common/tooltip';
+import { FILE_VIEWER_CLASSES } from './classes';
 type Props = {
   source: string;
   title: string | null | undefined;
@@ -22,7 +23,10 @@ function ImageViewer(props: Props) {
         />
       )}
       {!loadingError && (
-        <div className={`file-viewer${onClick ? ' file-viewer--download' : ''}`}>
+        <div
+          className={onClick ? `${FILE_VIEWER_CLASSES.base} ${FILE_VIEWER_CLASSES.download}` : FILE_VIEWER_CLASSES.base}
+          data-file-viewer
+        >
           {!onClick ? (
             <ZoomableImage
               src={source}

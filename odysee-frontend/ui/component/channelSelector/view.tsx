@@ -3,8 +3,9 @@ import * as PAGES from 'constants/pages';
 import classnames from 'classnames';
 import React from 'react';
 import ChannelThumbnail from 'component/channelThumbnail';
-import { Menu, MenuList, MenuButton, MenuItem } from 'component/common/menu';
+import { Menu, MenuList, MenuButton, MenuItem, MenuLink } from 'component/common/menu';
 import Icon from 'component/common/icon';
+import { DISABLED_CLASS } from 'component/common/state-classes';
 import { useLocation, useNavigate } from 'react-router-dom';
 import IncognitoSelector from './internal/incognito-selector';
 import LoadingSelector from './internal/loading-selector';
@@ -19,6 +20,7 @@ import { doFetchOdyseeMembershipForChannelIds } from 'redux/actions/memberships'
 import { doSetDefaultChannel } from 'redux/actions/settings';
 import { selectDefaultChannelClaim } from 'redux/selectors/settings';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { CHANNEL_SELECTOR_CLASSES as C } from './classes';
 
 type Props = {
   selectedChannelUrl?: string;
@@ -89,11 +91,13 @@ function ChannelSelector(props: Props) {
   return (
     <>
       <div
-        className={classnames('channel-selector', {
-          'channel-selector--publish': isPublishMenu,
-          'channel-selector--tabHeader': isTabHeader,
-          disabled: disabled,
+        className={classnames(C.root, {
+          [C.header]: isHeaderMenu,
+          [C.publish]: isPublishMenu,
+          [C.tabHeader]: isTabHeader,
+          [DISABLED_CLASS]: disabled,
         })}
+        data-channel-selector=""
       >
         <Menu>
           {isHeaderMenu && channelIds && channelIds.length > 1 ? (
@@ -118,7 +122,7 @@ function ChannelSelector(props: Props) {
             </MenuButton>
           )}
 
-          <MenuList className="menu__list channel-selector">
+          <MenuList className={C.list}>
             {showAllOption && (
               <MenuItem onSelect={allOptionProps?.onSelectAll}>
                 <AllSelector />
@@ -161,9 +165,11 @@ function ChannelSelector(props: Props) {
             )}
             {!hideCreateNew && (
               <MenuItem onSelect={() => navigate(`/$/${PAGES.CHANNEL_NEW}?redirect=${pathname}`)}>
-                <div className="channel-selector__item">
+                <div className={C.item} data-channel-selector-item="">
                   <Icon sectionIcon icon={ICONS.CHANNEL} />
-                  <div className="channel-selector__text">{__('Create a new channel')}</div>
+                  <div className={C.text} data-channel-selector-text="">
+                    {__('Create a new channel')}
+                  </div>
                 </div>
               </MenuItem>
             )}
@@ -171,12 +177,10 @@ function ChannelSelector(props: Props) {
         </Menu>
       </div>
       {isHeaderMenu && activeChannelUrl && (
-        <NavLink to={formatLbryUrlForWeb(activeChannelUrl)}>
-          <div className="header__navigationItem--channel">
-            <span>↳</span>
-            {__('My Channel Page')}
-          </div>
-        </NavLink>
+        <MenuLink as={NavLink} className={C.headerChannelLink} to={formatLbryUrlForWeb(activeChannelUrl)}>
+          <span>↳</span>
+          {__('My Channel Page')}
+        </MenuLink>
       )}
     </>
   );

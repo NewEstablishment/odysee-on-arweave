@@ -3,8 +3,9 @@
  * For the text-based version, see 'component/formFieldDuration'.
  */
 import React from 'react';
-import './style.scss';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_SMUSHED_CLASS } from 'component/common/form-components/fieldset-group-classes';
+import { FORM_FIELD_PRICE_AMOUNT_CLASS } from 'component/common/form-components/form-field-classes';
 
 type DurationCombo = {
   value: number;
@@ -57,12 +58,12 @@ export default function FormFieldDurationCombo(props: Props) {
   }
 
   return (
-    <fieldset-group class="ff-duration-combo fieldset-group--smushed">
+    <fieldset-group class={FIELDSET_GROUP_SMUSHED_CLASS}>
       <FormField
         label={label || __('Duration')}
         name="duration_value"
         type="number"
-        className="form-field--price-amount"
+        className={FORM_FIELD_PRICE_AMOUNT_CLASS}
         min={min}
         value={duration.value || value}
         onWheel={(e) => e.preventDefault()}

@@ -7,9 +7,19 @@ import React, { useRef, useState, useEffect } from 'react';
 import { InputSimple, BlockWrapWrapper } from './input-simple';
 import { InputSelect } from './input-select';
 import { CountInfo, QuickAction, Label } from './common';
+import {
+  FORM_FIELD_CHARACTER_COUNTER_CLASS,
+  FORM_FIELD_CHARACTER_COUNTER_ERROR_CLASS,
+  FORM_CHECKBOX_CLASS,
+  FORM_FIELD_MARKDOWN_CLASS,
+  FORM_FIELD_SLIM_SELECT_CLASS,
+  FORM_FIELD_TWO_COLUMN_CLASS,
+  INPUT_SUBMIT_CLASS,
+} from './form-field-classes';
 
 const MarkdownEditor = lazyImport(() => import('./markdown-editor'));
 import { TextareaWrapper } from './slim-input-field';
+import { FORM_FIELD_HELP_CLASS } from 'component/common/help-classes';
 // prettier-ignore
 const TextareaWithSuggestions = lazyImport(() => import('component/textareaWithSuggestions'
 /* webpackChunkName: "suggestions" */
@@ -169,7 +179,7 @@ export function FormField(props: Props) {
     case 'checkbox':
       return (
         <FormFieldWrapper {...wrapperProps}>
-          <div className="checkbox">
+          <div className={FORM_CHECKBOX_CLASS}>
             <InputSimple {...inputSimpleProps} type="checkbox" />
           </div>
         </FormFieldWrapper>
@@ -194,16 +204,16 @@ export function FormField(props: Props) {
     case 'select-tiny':
       return (
         <FormFieldWrapper {...wrapperProps}>
-          <InputSelect {...inputSelectProps} className="select--slim" />
+          <InputSelect {...inputSelectProps} className={FORM_FIELD_SLIM_SELECT_CLASS} />
         </FormFieldWrapper>
       );
 
     case 'markdown':
       return (
         <FormFieldWrapper {...wrapperProps}>
-          <div className="form-field--SimpleMDE">
+          <div className={FORM_FIELD_MARKDOWN_CLASS}>
             <fieldset-section>
-              <div className="form-field__two-column">
+              <div className={FORM_FIELD_TWO_COLUMN_CLASS}>
                 <div>
                   <Label {...labelProps} />
                 </div>
@@ -254,13 +264,15 @@ export function FormField(props: Props) {
               tipModalOpen={tipModalOpen}
             >
               {(!slimInput || drawerOpen) && label && (
-                <div className="form-field__two-column">
+                <div className={FORM_FIELD_TWO_COLUMN_CLASS}>
                   <Label {...labelProps} />
 
                   {max && typeof textAreaValue === 'string' && (
                     <label
                       className={
-                        Number(max) - String(textAreaValue).length > 0 ? 'input-max-counter' : 'input-max-counter-error'
+                        Number(max) - String(textAreaValue).length > 0
+                          ? FORM_FIELD_CHARACTER_COUNTER_CLASS
+                          : FORM_FIELD_CHARACTER_COUNTER_ERROR_CLASS
                       }
                     >
                       {Number(max) - String(textAreaValue).length}
@@ -347,8 +359,8 @@ export function FormField(props: Props) {
                   <label
                     className={
                       Number(inputElementProps.maxLength) - String(inputElementProps.value).length > 0
-                        ? 'input-max-counter'
-                        : 'input-max-counter-error'
+                        ? FORM_FIELD_CHARACTER_COUNTER_CLASS
+                        : FORM_FIELD_CHARACTER_COUNTER_ERROR_CLASS
                     }
                   >
                     {Number(inputElementProps.maxLength) - String(inputElementProps.value).length}
@@ -358,7 +370,7 @@ export function FormField(props: Props) {
             )}
 
             {inputButton ? (
-              <input-submit>
+              <input-submit className={INPUT_SUBMIT_CLASS}>
                 {!hideValue && <input {...inputElementProps} />}
                 {inputButton}
               </input-submit>
@@ -388,7 +400,7 @@ const FormFieldWrapper = (wrapperProps: WrapperProps) => {
   return (
     <>
       {type && children}
-      {helper && <div className="form-field__help">{helper}</div>}
+      {helper && <div className={FORM_FIELD_HELP_CLASS}>{helper}</div>}
     </>
   );
 };

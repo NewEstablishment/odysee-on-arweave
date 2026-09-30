@@ -6,8 +6,9 @@ import { lazyImport } from 'util/lazyImport';
 import { useAppSelector } from 'redux/hooks';
 import { selectHomepageData } from 'redux/selectors/settings';
 import { selectUser } from 'redux/selectors/user';
+import { PORTAL_PAGE_CLASSES, PORTAL_THEME_CLASS } from './classes';
+import { WALLPAPER_PORTAL_ACTIVE_CLASS } from 'component/wallpaper/classes';
 import { getThumbnailCdnUrl } from 'util/thumbnail';
-import './style.scss';
 
 const Portals = lazyImport(
   () =>
@@ -39,34 +40,42 @@ function PortalPage() {
     }
   }, [portals, portalName]);
   React.useEffect(() => {
-    if (portal) {
-      const theme = document.getElementsByClassName('theme');
-      const stars = document.getElementsByClassName('stars');
-      (theme[0] as HTMLElement).style.backgroundImage =
+    if (!portal) return;
+
+    const theme = document.querySelector<HTMLElement>('.theme');
+    const stars = document.querySelector<HTMLElement>('.stars');
+    const previousBackgroundImage = theme?.style.backgroundImage || '';
+
+    document.documentElement.classList.add(PORTAL_THEME_CLASS);
+    if (theme) {
+      theme.style.backgroundImage =
         'radial-gradient(circle at 80% 20%, rgba(0,0,0,0.6), #000 50%, rgba(101,15,124,0.9) 25%, #000 75%)';
-      stars[0].classList.add('stars-active');
-      setTimeout(() => {
-        const footer = document.getElementsByClassName('footer');
-        footer && footer[0] && footer[0].classList.add('footer-background');
-      }, 1000);
     }
+    stars?.classList.add(WALLPAPER_PORTAL_ACTIVE_CLASS);
+
+    return () => {
+      document.documentElement.classList.remove(PORTAL_THEME_CLASS);
+      if (theme) theme.style.backgroundImage = previousBackgroundImage;
+      stars?.classList.remove(WALLPAPER_PORTAL_ACTIVE_CLASS);
+    };
   }, [portal]);
   return portal ? (
     <>
-      <Page className="portal-wrapper" fullWidthPage>
-        <div className="portal-header">
+      <Page fullWidthPage>
+        <div className={PORTAL_PAGE_CLASSES.header}>
           <img
+            className={PORTAL_PAGE_CLASSES.image}
             src={getThumbnailCdnUrl({ thumbnail: portal.image, width: 237, height: 0, quality: 95 }) || undefined}
             style={{
               background: `rgba(` + portal.css.rgb + `,1)`,
             }}
           />
-          <div className="portal-meta">
-            <h1>{portal.label}</h1>
-            <p>{portal.description}</p>
+          <div className={PORTAL_PAGE_CLASSES.meta}>
+            <h1 className={PORTAL_PAGE_CLASSES.title}>{portal.label}</h1>
+            <p className={PORTAL_PAGE_CLASSES.description}>{portal.description}</p>
           </div>
         </div>
-        <div className="portal-content">
+        <div className={PORTAL_PAGE_CLASSES.content}>
           <ClaimListDiscover
             claimIds={(portal.claimIds && portal.claimIds.videos) || []}
             infiniteScroll

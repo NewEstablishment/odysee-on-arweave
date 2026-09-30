@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as MODALS from 'constants/modal_types';
 import React from 'react';
 import Spinner from 'component/spinner';
@@ -7,6 +8,9 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClaimedRewardsByTransactionId } from 'redux/selectors/rewards';
 import { doOpenModal } from 'redux/actions/app';
 import { selectIsFetchingTxos } from 'redux/selectors/wallet';
+import { WALLET_TRANSACTION_TABLE_CLASSES } from 'page/wallet/classes';
+import { TABLE_WRAPPER_CLASS } from 'component/common/table-classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 type Props = {
   emptyMessage?: string | null | undefined;
   txos: Array<Txo>;
@@ -30,22 +34,24 @@ function TransactionListTable(props: Props) {
 
   return (
     <React.Fragment>
-      {!loading && !txos.length && <h2 className="main--empty empty">{emptyMessage || __('No transactions.')}</h2>}
+      {!loading && !txos.length && (
+        <h2 className={`${PAGE_MAIN_EMPTY_CLASS} ${EMPTY_CLASS}`}>{emptyMessage || __('No transactions.')}</h2>
+      )}
       {loading && (
-        <h2 className="main--empty empty">
+        <h2 className={`${PAGE_MAIN_EMPTY_CLASS} ${EMPTY_CLASS}`}>
           <Spinner delayed />
         </h2>
       )}
       {!loading && !!txos.length && (
-        <div className="table__wrapper">
-          <table className="table table--transactions">
+        <div className={TABLE_WRAPPER_CLASS}>
+          <table className={WALLET_TRANSACTION_TABLE_CLASSES.root}>
             <thead>
               <tr>
-                <th className="table-column-lbc-date">{__('Date')}</th>
-                <th className="table-column-lbc-type">{<>{__('Type')}</>}</th>
+                <th className={WALLET_TRANSACTION_TABLE_CLASSES.date}>{__('Date')}</th>
+                <th className={WALLET_TRANSACTION_TABLE_CLASSES.type}>{<>{__('Type')}</>}</th>
                 <th>{__('Details')} </th>
-                <th className="table-column-lbc-transaction">{__('Transaction')}</th>
-                <th className="table__item--align-right">
+                <th className={WALLET_TRANSACTION_TABLE_CLASSES.transaction}>{__('Transaction')}</th>
+                <th className={WALLET_TRANSACTION_TABLE_CLASSES.alignRight}>
                   <LbcSymbol size={18} />
                 </th>
               </tr>

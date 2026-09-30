@@ -7,6 +7,9 @@ import {
   selectMembershipTxOutgoingFetching,
   selectMembershipTxOutgoingError,
 } from 'redux/selectors/memberships';
+import { SUPPORTER_MEMBERSHIP_PAYMENTS_TABLE_CLASS } from '../../tableClasses';
+import { WALLET_FIAT_TRANSACTIONS_CLASS } from 'page/wallet/classes';
+import { TABLE_CLASS } from 'component/common/table-classes';
 interface IProps {
   channelsToList?: Array<Claim>;
 }
@@ -26,8 +29,8 @@ function PaymentsTab(props: IProps) {
   ).sort((a, b) => new Date(b.initiated_at).getTime() - new Date(a.initiated_at).getTime());
   return (
     <>
-      <div className="membership-payments-table__wrapper">
-        <table className="table">
+      <div className={SUPPORTER_MEMBERSHIP_PAYMENTS_TABLE_CLASS} data-membership-payments-table>
+        <table className={TABLE_CLASS}>
           <thead>
             <tr>
               <th className="date-header">{__('Date')}</th> {/* completed_at */}
@@ -46,7 +49,7 @@ function PaymentsTab(props: IProps) {
               })}
           </tbody>
         </table>
-        {transactions.length === 0 && <p className="wallet__fiat-transactions">{__('No Membership Payments')}</p>}
+        {transactions.length === 0 && <p className={WALLET_FIAT_TRANSACTIONS_CLASS}>{__('No Membership Payments')}</p>}
       </div>
     </>
   );

@@ -7,6 +7,8 @@ import { selectClaimForUri } from 'redux/selectors/claims';
 import { formatLbryChannelName } from 'util/url';
 import { getClaimTitle, getChannelIdFromClaim } from 'util/claim';
 import { selectUserOdyseeMembership } from 'redux/selectors/memberships';
+import { EMOTE_CLASS } from 'component/common/emote-classes';
+import { TEXTAREA_SUGGESTION_CLASSES } from './classes';
 type Props = {
   emote?: any;
   uri?: string;
@@ -35,15 +37,17 @@ export default function TextareaSuggestionsItem(props: Props) {
     return (
       <div {...autocompleteProps}>
         {unicode ? (
-          <div className="emote">
+          <div className={EMOTE_CLASS}>
             <Twemoji emoji={unicode} />
           </div>
         ) : (
-          <img className="emote" src={url} />
+          <img className={EMOTE_CLASS} src={url} />
         )}
 
-        <div className="textarea-suggestion__label">
-          <span className="textarea-suggestion__title textarea-suggestion__value textarea-suggestion__value--emote">
+        <div className={TEXTAREA_SUGGESTION_CLASSES.label}>
+          <span
+            className={`${TEXTAREA_SUGGESTION_CLASSES.title} ${TEXTAREA_SUGGESTION_CLASSES.value} textarea-suggestion__value--emote`}
+          >
             {value}
           </span>
         </div>
@@ -55,11 +59,11 @@ export default function TextareaSuggestionsItem(props: Props) {
     const value = claimLabel;
     return (
       <div {...autocompleteProps}>
-        <ChannelThumbnail xsmall uri={uri} />
+        <ChannelThumbnail className={TEXTAREA_SUGGESTION_CLASSES.thumbnail} xsmall uri={uri} />
 
-        <div className="textarea-suggestion__label">
-          <span className="textarea-suggestion__title">{claimTitle || value}</span>
-          <span className="textarea-suggestion__value">
+        <div className={TEXTAREA_SUGGESTION_CLASSES.label}>
+          <span className={TEXTAREA_SUGGESTION_CLASSES.title}>{claimTitle || value}</span>
+          <span className={TEXTAREA_SUGGESTION_CLASSES.value}>
             {value}
             {odyseeMembership && <MembershipBadge membershipName={odyseeMembership} />}
           </span>

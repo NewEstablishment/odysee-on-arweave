@@ -1,5 +1,7 @@
 import React from 'react';
 import classnames from 'classnames';
+import { EMPTY_CLASSES } from './empty-classes';
+
 type Props = {
   text: string;
   padded?: boolean;
@@ -8,14 +10,14 @@ export default function Empty(props: Props) {
   const { text = '', padded = false } = props;
   return (
     <div
-      className={classnames('empty__wrap', {
-        'empty__wrap--padded': padded,
+      className={classnames(EMPTY_CLASSES.wrap, {
+        [EMPTY_CLASSES.padded]: padded,
       })}
     >
       <div>
         {text && (
-          <div className="empty__content">
-            <p className="empty__text">{text}</p>
+          <div className={EMPTY_CLASSES.content}>
+            <p className="tw:text-[var(--color-text-empty)] tw:italic">{text}</p>
           </div>
         )}
       </div>

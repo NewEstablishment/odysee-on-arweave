@@ -16,6 +16,7 @@ import UriIndicator from 'component/uriIndicator';
 import { getNotificationLink, getNotificationTarget } from './helpers/target';
 import { generateNotificationTitle } from './helpers/title';
 import { generateNotificationText } from './helpers/text';
+import { NOTIFICATION_CLASSES as C } from './classes';
 import { useAppDispatch } from 'redux/hooks';
 import { doReadNotifications, doDeleteNotification as doDeleteNotificationAction } from 'redux/actions/notifications';
 import { doGetMembershipSupportersList as doGetMembershipSupportersListAction } from 'redux/actions/memberships';
@@ -55,7 +56,12 @@ const creatorIcon = (channelUrl, channelThumbnail) => (
       title: '',
     }}
   >
-    <ChannelThumbnail small thumbnailPreview={channelThumbnail} uri={channelThumbnail ? undefined : channelUrl} />
+    <ChannelThumbnail
+      className={C.channelThumbnail}
+      small
+      thumbnailPreview={channelThumbnail}
+      uri={channelThumbnail ? undefined : channelUrl}
+    />
   </UriIndicator>
 );
 
@@ -146,16 +152,16 @@ function Notification(props: Props) {
 
   const Wrapper = menuButton
     ? (props: { children: any }) => (
-        <MenuItem className="menu__link--notification" onSelect={handleNotificationClick}>
+        <MenuItem className={C.menuLink} onSelect={handleNotificationClick}>
           {props.children}
         </MenuItem>
       )
     : notificationLink
       ? (props: { children: any }) => (
-          <div className="menu__link--notification menu__link--notification--with-overlay">
+          <div className={`${C.menuLink} ${C.menuLinkWithOverlay}`}>
             <Link
               aria-label={notification_parameters?.device?.title || __('Open notification')}
-              className="notification__link-overlay"
+              className={C.linkOverlay}
               onAuxClick={handleNotificationLinkClick}
               onClick={handleNotificationLinkClick}
               to={notificationLink}
@@ -164,26 +170,23 @@ function Notification(props: Props) {
           </div>
         )
       : (props: { children: any }) => (
-          <span
-            className={is_read ? 'menu__link--notification-nolink' : 'menu__link--notification'}
-            onClick={handleNotificationClick}
-          >
+          <span className={is_read ? C.menuLinkNoLink : C.menuLink} onClick={handleNotificationClick}>
             {props.children}
           </span>
         );
   return (
     <div
-      className={classnames('notification__wrapper', {
-        'notification__wrapper--unread': !is_read,
+      className={classnames(C.wrapper, C.pageWrapper, {
+        [C.unread]: !is_read,
       })}
     >
       <Wrapper>
-        <div className="notification__icon">{icon}</div>
+        <div className={C.icon}>{icon}</div>
 
-        <div className="notificationContent__wrapper">
-          <div className="notification__content">
-            <div className="notificationText__wrapper">
-              <div className="notification__title">
+        <div className={C.contentWrapper}>
+          <div className={C.content}>
+            <div className={C.textWrapper}>
+              <div className={C.title}>
                 {generateNotificationTitle(notification_rule, notification_parameters, channelName)}
               </div>
               {generateNotificationText(notification_rule, notification_parameters)}
@@ -193,34 +196,31 @@ function Notification(props: Props) {
               <FileThumbnail
                 uri={notification_parameters.device.target}
                 thumbnail={notification_parameters?.dynamic?.claim_thumbnail}
-                className="notificationContent__thumbnail"
+                className={C.thumbnail}
               />
             )}
             {notification_rule === RULE.NEW_LIVESTREAM && (
-              <FileThumbnail
-                thumbnail={(notification_parameters.device as any).image_url}
-                className="notificationContent__thumbnail"
-              />
+              <FileThumbnail thumbnail={(notification_parameters.device as any).image_url} className={C.thumbnail} />
             )}
           </div>
 
-          <div className="notification__extra">
+          <div className={C.extra}>
             {!is_read && (
               <Button
-                className="notification__markSeen"
+                className={C.markSeen}
                 onClick={(e) => {
                   e.stopPropagation();
                   doReadNotificationsAction([notification.id]);
                 }}
               />
             )}
-            <div className="notification__time">
+            <div className={C.time}>
               <DateTime timeAgo date={notification.active_at} />
             </div>
           </div>
         </div>
 
-        <div className="notification__menu">
+        <div className={C.menu}>
           <Menu>
             <MenuButton
               className="menu__button notification__menuButton"
@@ -246,7 +246,7 @@ function Notification(props: Props) {
 
       {isCommentNotification && (
         <div>
-          <div className="notification__reactions">
+          <div className={C.reactions}>
             <Button
               label={__('Reply')}
               className="comment__action"

@@ -20,6 +20,9 @@ import remarkFrontMatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import remarkStrip from 'strip-markdown';
 import ZoomableImage from 'component/zoomableImage';
+import { FILE_VIEWER_CLASSES } from 'component/viewers/classes';
+import { EMOTE_CLASS } from './emote-classes';
+import { EMBED_INLINE_BUTTON_CLASS } from './markdown-preview-classes';
 const RE_EMOTE = /:\+1:|:-1:|:[\w-]+:/;
 const RE_STANDALONE_HTML_BREAK = /^\s*<br\s*\/?>\s*$/i;
 const RE_FENCED_CODE = /^\s*(```|~~~)/;
@@ -170,7 +173,10 @@ const SimpleLink = (props: SimpleLinkProps) => {
     // Decode this since users might just copy it from the url bar
     const decodedUri = decodeURI(uri);
     return (
-      <div className="embed__inline-button embed__inline-button--preview">
+      <div
+        className={`${EMBED_INLINE_BUTTON_CLASS} tw:!w-1/2 tw:!bg-[var(--color-editor-inline-code-bg)]`}
+        data-embed-inline-button
+      >
         <pre>{decodedUri}</pre>
       </div>
     );
@@ -190,7 +196,7 @@ const SimpleImageLink = (props: ImageLinkProps) => {
   }
 
   if (isEmote(title, src)) {
-    return <OptimizedImage src={src} title={title} className="emote" loading="lazy" />;
+    return <OptimizedImage src={src} title={title} className={EMOTE_CLASS} loading="lazy" />;
   }
 
   return (
@@ -352,7 +358,11 @@ export default React.memo<MarkdownProps>(function MarkdownPreview(props: Markdow
 
             if (noDataStore) {
               return (
-                <div className="file-viewer file-viewer--document">
+                <div
+                  className={`${FILE_VIEWER_CLASSES.base} ${FILE_VIEWER_CLASSES.document}`}
+                  data-file-viewer
+                  data-file-viewer-document
+                >
                   <img alt={alt} title={title} src={imageCdnUrl} />
                 </div>
               );

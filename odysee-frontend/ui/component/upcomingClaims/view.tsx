@@ -1,4 +1,5 @@
 import React from 'react';
+import { UPCOMING_CLAIMS_CLASSES } from './classes';
 import dayjs from 'util/dayjs';
 import classnames from 'classnames';
 import ClaimList from 'component/claimList';
@@ -7,6 +8,15 @@ import ClaimPreviewTile from 'component/claimPreviewTile';
 import * as ICONS from 'constants/icons';
 import { useIsMobile, useIsSmallScreen, useIsLargeScreen } from 'effects/use-screensize';
 import Button from 'component/button';
+import { BUTTON_CONTENT_CLASS } from 'component/button/classes';
+import { ICON_WRAPPER_CLASS } from 'component/common/icon-classes';
+import {
+  CLAIM_GRID_CLASS,
+  CLAIM_GRID_HEADER_CLASS,
+  CLAIM_GRID_SECONDARY_TITLE_CLASS,
+  CLAIM_GRID_TITLE_CLASS,
+  CLAIM_GRID_VIEW_MORE_CLASS,
+} from 'component/common/claim-grid-classes';
 import * as SETTINGS from 'constants/settings';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectMutedAndBlockedChannelIds } from 'redux/selectors/blocked';
@@ -134,22 +144,25 @@ const UpcomingClaims = (props: Props) => {
     if (list.total === 0) return null;
     return (
       <div
-        className="claim-grid__header"
+        className={CLAIM_GRID_HEADER_CLASS}
+        data-claim-grid-header
         onClick={() => {
           showHideSetting && hideScheduled(!hideUpcoming);
         }}
       >
-        <div className="button__content">
-          <span className="icon__wrapper">
+        <div className={BUTTON_CONTENT_CLASS}>
+          <span className={ICON_WRAPPER_CLASS}>
             <Icon icon={ICONS.TIME} />
           </span>
-          <span className="claim-grid__title">{__('Upcoming')}</span>
+          <span className={CLAIM_GRID_TITLE_CLASS} data-claim-grid-title>
+            {__('Upcoming')}
+          </span>
 
           {showHideSetting && (
-            <div className="upcoming-grid__visibility" onClick={() => hideScheduled(!hideUpcoming)}>
+            <div className={UPCOMING_CLAIMS_CLASSES.visibility} onClick={() => hideScheduled(!hideUpcoming)}>
               <Icon icon={hideUpcoming ? ICONS.EYE : ICONS.EYE_OFF} />
               <span>{hideUpcoming ? __('Show') : __('Hide')}</span>
-              <div className="upcoming-grid__counter">
+              <div className={UPCOMING_CLAIMS_CLASSES.counter}>
                 {Math.min(list.total, showAllUpcoming ? upcomingMax : upcomingMax * 2)}
               </div>
             </div>
@@ -170,21 +183,28 @@ const UpcomingClaims = (props: Props) => {
     }
   }, [doClaimSearch, scheduledOptions]);
   if (isChannelPage && list.total === 0) return null;
+  const isGridLayout = showHideSetting && tileLayout;
+  const isListLayout = !isGridLayout;
+  const isClosed =
+    (hideUpcoming && showHideSetting) ||
+    (showHideSetting && list.total === 0 && !loading) ||
+    (!showHideSetting && list.total === 0 && !loading);
   return (
     <div
-      className={classnames('md:mb-xl', {
-        'upcoming-grid': showHideSetting && tileLayout,
-        'upcoming-list': !showHideSetting || !tileLayout,
-        'upcoming-grid--extended': showAllUpcoming,
-        'upcoming-grid--closed':
-          (hideUpcoming && showHideSetting) ||
-          (showHideSetting && list.total === 0 && !loading) ||
-          (!showHideSetting && list.total === 0 && !loading),
+      className={classnames(UPCOMING_CLAIMS_CLASSES.root, {
+        [UPCOMING_CLAIMS_CLASSES.grid]: isGridLayout,
+        [UPCOMING_CLAIMS_CLASSES.list]: isListLayout,
+        [UPCOMING_CLAIMS_CLASSES.extended]: showAllUpcoming,
+        [UPCOMING_CLAIMS_CLASSES.closed]: isClosed,
       })}
+      data-upcoming-grid={isGridLayout ? '' : undefined}
+      data-upcoming-list={isListLayout ? '' : undefined}
+      data-upcoming-extended={showAllUpcoming ? '' : undefined}
+      data-upcoming-closed={isClosed ? '' : undefined}
     >
       <Header />
       {loading && (
-        <section className="claim-grid">
+        <section className={CLAIM_GRID_CLASS}>
           {Array.from({ length: upcomingMax }, (_, i) => (
             <ClaimPreviewTile key={i} placeholder="loading" pulse />
           ))}
@@ -193,24 +213,24 @@ const UpcomingClaims = (props: Props) => {
 
       {!loading && list.total > 0 && <ClaimList uris={list.uris} tileLayout={tileLayout} showNoSourceClaims />}
       {list.total > upcomingMax && !showAllUpcoming && !isChannelPage && !hideUpcoming && (
-        <div className="upcoming-list__view-more">
+        <div className={CLAIM_GRID_VIEW_MORE_CLASS}>
           <Button
             label={__('Show more upcoming content')}
             button="link"
             iconRight={ICONS.ARROW_RIGHT}
-            className="claim-grid__title--secondary"
+            className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
             onClick={() => setShowAllUpcoming(true)}
           />
         </div>
       )}
 
       {showAllUpcoming && !hideUpcoming && (
-        <div className="upcoming-list__view-more">
+        <div className={CLAIM_GRID_VIEW_MORE_CLASS}>
           <Button
             label={__('Show less upcoming content')}
             button="link"
             iconRight={ICONS.ARROW_RIGHT}
-            className="claim-grid__title--secondary"
+            className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
             onClick={() => {
               if (isMobileScreen)
                 window.scrollTo({

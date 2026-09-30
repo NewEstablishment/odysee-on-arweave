@@ -15,17 +15,20 @@ import DateTime from 'component/dateTime';
 import Button from 'component/button';
 import LbcSymbol from 'component/common/lbc-symbol';
 import classnames from 'classnames';
-import './style.lazy.scss';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClaimForUri, selectClaimIsMineForUri } from 'redux/selectors/claims';
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
 import { doOpenModal } from 'redux/actions/app';
+import { POST_CONTAINER_CLASS, POST_INFO_DIM_CLASS, POST_VIEWER_CLASS } from './classes';
 
 const EXPAND = {
   NONE: 'none',
   CREDIT_DETAILS: 'credit_details',
   FILE_DETAILS: 'file_details',
 };
+const POST_INFO_CLASS_NAME = String.raw`tw:flex tw:items-center tw:justify-between tw:text-app-small tw:[&_.credit-amount]:mr-app-s`;
+const POST_DATE_CLASS_NAME = String.raw`tw:flex tw:text-app-small tw:text-[var(--color-help)] tw:[&_.date\_time]:mr-app-m tw:[&_.date\_time]:text-app-small tw:[&_.date\_time]:text-app-text-subtitle`;
+const POST_INFO_GROUP_CLASS_NAME = String.raw`tw:flex tw:[&_.button-surface--link]:mr-app-s tw:[&_.button-surface--link:last-of-type]:mr-0 tw:[&_.button-surface\_\_content]:text-app-primary tw:[&_.button-surface\_\_content_.icon]:text-app-text-subtitle tw:[&_.button-surface\_\_content:hover]:text-app-secondary`;
 type Props = {
   uri: string;
 };
@@ -58,27 +61,26 @@ function PostViewer(props: Props) {
   }
 
   return (
-    <div className="post">
-      <FileTitle uri={uri} className="post__title" />
+    <div className={POST_VIEWER_CLASS}>
+      <FileTitle
+        uri={uri}
+        className="tw:mt-0 tw:mb-app-s tw:text-[2rem] tw:leading-[1.2] tw:font-bold tw:[font-family:Georgia,serif] tw:[word-break:break-word] tw:[&_:first-child]:mr-app-s tw:[&_:first-child]:inline-block tw:small:mt-app-xl tw:small:text-[3rem] tw:small:leading-none"
+      />
       <GeoRestictionInfo uri={uri} />
-      <div
-        className={classnames('post__info', {
-          'post__info--expanded': expand !== EXPAND.NONE,
-        })}
-      >
-        <span className="post__date">
+      <div className={classnames(POST_INFO_CLASS_NAME, expand !== EXPAND.NONE ? 'tw:mb-app-s' : 'tw:mb-app-l')}>
+        <span className={POST_DATE_CLASS_NAME}>
           <DateTime uri={uri} type="date" />
           {contentUnlocked && <FileViewCount uri={uri} />}
         </span>
-        <div className="post__info--grouped">
+        <div className={POST_INFO_GROUP_CLASS_NAME}>
           <Button
             button="link"
-            className="dim"
+            className={POST_INFO_DIM_CLASS}
             icon={ICONS.INFO}
             aria-label={__('View claim details')}
             onClick={() => handleExpand(EXPAND.FILE_DETAILS)}
           />
-          <Button button="link" className="dim" onClick={() => handleExpand(EXPAND.CREDIT_DETAILS)}>
+          <Button button="link" className={POST_INFO_DIM_CLASS} onClick={() => handleExpand(EXPAND.CREDIT_DETAILS)}>
             <LbcSymbol postfix={expand === EXPAND.CREDIT_DETAILS ? __('Hide') : formattedAmount} />
           </Button>
           {claimIsMine && hasSupport && (
@@ -100,13 +102,13 @@ function PostViewer(props: Props) {
       </div>
 
       {expand === EXPAND.CREDIT_DETAILS && (
-        <div className="section post__info--credit-details">
+        <div className="section tw:mt-app-l tw:mb-app-l tw:[&_.tag]:mt-0">
           <FileValues uri={uri} />
         </div>
       )}
 
       {expand === EXPAND.FILE_DETAILS && (
-        <div className="section post__info--credit-details">
+        <div className="section tw:mt-app-l tw:mb-app-l tw:[&_.tag]:mt-0">
           <ClaimTags uri={uri} type="large" />
           <FileDetails uri={uri} />
         </div>
@@ -114,7 +116,7 @@ function PostViewer(props: Props) {
 
       <ClaimAuthor uri={uri} />
 
-      <div className="file-render--post-container">
+      <div className={POST_CONTAINER_CLASS}>
         <StreamClaimRenderInline uri={uri} />
       </div>
       <FileActions uri={uri} />

@@ -16,6 +16,20 @@ import { selectClaimForUri, selectClaimIsNsfwForUri } from 'redux/selectors/clai
 import { selectClientSetting } from 'redux/selectors/settings';
 import { selectFileRenderModeForUri, selectPlayingUri } from 'redux/selectors/content';
 import { selectLiveThumbnailForUri } from 'redux/selectors/livestream';
+import {
+  SHORTS_COVER_SLIME_STATE_CLASS,
+  SHORTS_DOCUMENT_TRANSITION_COVER_CLASS,
+  SHORTS_EFFECT_FIRE_STATE_CLASS,
+} from 'component/shortsActions/classes';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import {
+  CLAIM_COVER_BLACK_BACKGROUND_CLASS,
+  CLAIM_COVER_CLASSES,
+  CLAIM_COVER_DISABLED_CLASS,
+  CLAIM_COVER_LINK_CLASS,
+  CLAIM_COVER_LIVE_IMAGE_CLASS,
+  CLAIM_COVER_LIVE_REFRESHING_CLASS,
+} from './classes';
 type Props = {
   uri: string;
   children?: any;
@@ -132,38 +146,45 @@ const ClaimCoverRender = (props: Props) => {
             }
           : {}
       }
-      className={classnames('content__cover', {
-        'content__cover--shorts': shouldUseShortsCoverLayout,
-        'content__cover--embed': isEmbed,
-        'content__cover--black-background': !transparent,
-        'content__cover--disabled': !onClick && !href,
-        'content__cover--theater-mode': theaterMode && !isMobile,
-        'content__cover--link': isNavigateLink,
-        'card__media--nsfw': obscurePreview,
-        'content__cover--side-panel-open': sidePanelOpen && !isMobile,
-        'content__cover--live-refreshing': isLiveRefreshing,
+      className={classnames(CLAIM_COVER_CLASSES.base, SHORTS_DOCUMENT_TRANSITION_COVER_CLASS, {
+        [CLAIM_COVER_CLASSES.nonEmbed]: !isEmbed,
+        [CLAIM_COVER_CLASSES.shorts]: shouldUseShortsCoverLayout,
+        [SHORTS_EFFECT_FIRE_STATE_CLASS]: shouldUseShortsCoverLayout,
+        [SHORTS_COVER_SLIME_STATE_CLASS]: shouldUseShortsCoverLayout,
+        [CLAIM_COVER_CLASSES.embed]: isEmbed,
+        [CLAIM_COVER_BLACK_BACKGROUND_CLASS]: !transparent,
+        [CLAIM_COVER_DISABLED_CLASS]: !onClick && !href,
+        [CLAIM_COVER_CLASSES.theater]: theaterMode && !isMobile,
+        [CLAIM_COVER_LINK_CLASS]: isNavigateLink,
+        [CARD_CLASSES.mediaNsfw]: obscurePreview,
+        [CLAIM_COVER_CLASSES.sidePanel]: sidePanelOpen && !isMobile,
+        [CLAIM_COVER_LIVE_REFRESHING_CLASS]: isLiveRefreshing,
       })}
+      data-claim-cover
+      data-claim-cover-shorts={shouldUseShortsCoverLayout ? '' : undefined}
     >
       {enableLiveCrossfade && coverBufferA && (
         <img
           src={coverBufferA}
-          className={classnames('content__cover-live-img', {
-            'content__cover-live-img--active': activeCoverBuffer === 'a',
+          className={classnames(CLAIM_COVER_LIVE_IMAGE_CLASS, {
+            'tw:opacity-100': activeCoverBuffer === 'a',
           })}
           onLoad={() => setActiveCoverBuffer('a')}
           alt=""
           draggable={false}
+          data-claim-cover-live-image
         />
       )}
       {enableLiveCrossfade && coverBufferB && (
         <img
           src={coverBufferB}
-          className={classnames('content__cover-live-img', {
-            'content__cover-live-img--active': activeCoverBuffer === 'b',
+          className={classnames(CLAIM_COVER_LIVE_IMAGE_CLASS, {
+            'tw:opacity-100': activeCoverBuffer === 'b',
           })}
           onLoad={() => setActiveCoverBuffer('b')}
           alt=""
           draggable={false}
+          data-claim-cover-live-image
         />
       )}
       {children}

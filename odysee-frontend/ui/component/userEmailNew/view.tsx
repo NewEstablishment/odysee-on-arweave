@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import * as PAGES from 'constants/pages';
 import { DOMAIN } from 'config';
 import React, { useState } from 'react';
@@ -8,6 +9,7 @@ import { EMAIL_REGEX } from 'constants/email';
 import I18nMessage from 'component/i18nMessage';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import ErrorText from 'component/common/error-text';
 import Nag from 'component/nag';
 import classnames from 'classnames';
@@ -17,6 +19,9 @@ import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { doClearEmailEntry, doUserSignUp } from 'redux/actions/user';
 import { selectEmailNewIsPending, selectEmailNewErrorMessage, selectEmailAlreadyExists } from 'redux/selectors/user';
 import { selectDaemonSettings } from 'redux/selectors/settings';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PAGE_MAIN_SIGN_UP_CLASS, PAGE_MAIN_SIGN_UP_GRAPHIC_CLASS } from 'component/page/classes';
+import { HELP_CARD_ACTIONS_CLASS } from 'component/common/help-classes';
 
 type Props = {
   interestedInYoutubSync?: boolean;
@@ -81,8 +86,8 @@ function UserEmailNew(props: Props) {
   }, [emailExists]);
   return (
     <div
-      className={classnames('main__sign-up', {
-        'main__sign-up--graphic': true,
+      className={classnames(PAGE_MAIN_SIGN_UP_CLASS, {
+        [PAGE_MAIN_SIGN_UP_GRAPHIC_CLASS]: true,
       })}
     >
       <Card
@@ -90,7 +95,7 @@ function UserEmailNew(props: Props) {
         actions={
           <div
             className={classnames({
-              'card--disabled': DOMAIN === 'lbry.tv' && IS_WEB,
+              [CARD_CLASSES.disabled]: DOMAIN === 'lbry.tv' && IS_WEB,
             })}
           >
             <Form onSubmit={handleSubmit} className="section">
@@ -133,12 +138,12 @@ function UserEmailNew(props: Props) {
                     <React.Fragment>
                       {__('Share usage data with LBRY inc.')}{' '}
                       <Button button="link" href="https://odysee.com/$/privacypolicy" label={__('Learn More')} />
-                      {!localShareUsageData && <span className="error__text"> ({__('Required')})</span>}
+                      {!localShareUsageData && <span className={ERROR_TEXT_CLASS}> ({__('Required')})</span>}
                     </React.Fragment>
                   }
                 />
               )}
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button
                   button="primary"
                   type="submit"
@@ -149,7 +154,7 @@ function UserEmailNew(props: Props) {
                 />
                 <Button button="link" onClick={handleChangeToSignIn} label={__('Log In')} />
               </div>
-              <p className="help--card-actions">
+              <p className={HELP_CARD_ACTIONS_CLASS}>
                 <I18nMessage
                   tokens={{
                     terms: <Button button="link" href="https://odysee.com/$/tos" label={__('terms')} />,

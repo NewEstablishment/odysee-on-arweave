@@ -1,5 +1,5 @@
 import React from 'react';
-import './style.scss';
+import classnames from 'classnames';
 type Props = {
   label: string;
   sortKey: string | null;
@@ -35,11 +35,13 @@ export default function (props: Props) {
   const downActive = order === 'desc' && sortKey === ownKey;
   return (
     <th>
-      <span className="th-label-with-arrows">
+      <span className="tw:flex tw:items-center tw:gap-[4px]">
         {__(label)}
-        <span className="arrows">
+        <span className="tw:flex tw:flex-row tw:leading-none">
           <span
-            className={`arrow-up ${upActive ? 'arrow-up--active' : ''}`}
+            className={classnames('tw:text-center tw:text-[16px] tw:opacity-50', {
+              'tw:text-app-primary tw:opacity-100': upActive,
+            })}
             onClick={() => onUpClick()}
             role="button"
             tabIndex={0}
@@ -50,7 +52,9 @@ export default function (props: Props) {
             &#9650;
           </span>
           <span
-            className={`arrow-down ${downActive ? 'arrow-down--active' : ''}`}
+            className={classnames('tw:text-center tw:text-[16px] tw:opacity-50', {
+              'tw:text-app-primary tw:opacity-100': downActive,
+            })}
             onClick={() => onDownClick()}
             role="button"
             tabIndex={0}

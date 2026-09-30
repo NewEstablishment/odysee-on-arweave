@@ -2,6 +2,7 @@ import React from 'react';
 import * as MODALS from 'constants/modal_types';
 import { useAppDispatch } from 'redux/hooks';
 import { doOpenModal } from 'redux/actions/app';
+import { ZOOMABLE_IMAGE_CLASS } from './classes';
 
 type Props = {
   src?: string;
@@ -23,7 +24,7 @@ function ZoomableImage(props: Props) {
     );
   };
 
-  return <img className="img__zoomable" {...imgProps} onClick={onClick} />;
+  return <img className={ZOOMABLE_IMAGE_CLASS} {...imgProps} onClick={onClick} />;
 }
 
 export default ZoomableImage;

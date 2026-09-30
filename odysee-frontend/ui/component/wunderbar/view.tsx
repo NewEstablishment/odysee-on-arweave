@@ -1,6 +1,12 @@
 import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
 import React from 'react';
+import {
+  WUNDERBAR_CLASS,
+  WUNDERBAR_INPUT_CLASS,
+  WUNDERBAR_MOBILE_SEARCH_CLASS,
+  WUNDERBAR_WRAPPER_CLASS,
+} from './classes';
 import { lazyImport } from 'util/lazyImport';
 import { getModalUrlParam } from 'util/url';
 import { useIsMobile } from 'effects/use-screensize';
@@ -66,8 +72,9 @@ export default function WunderBar(props: Props) {
   return isMobile ? (
     <React.Suspense fallback={null}>
       <Button
+        button="alt"
         icon={ICONS.SEARCH}
-        className="wunderbar__mobile-search"
+        className={WUNDERBAR_MOBILE_SEARCH_CLASS}
         aria-label={__('Search')}
         title={__('Search')}
         onClick={() => doOpenMobileSearch({ ...props })}
@@ -76,7 +83,7 @@ export default function WunderBar(props: Props) {
   ) : (
     <React.Suspense
       fallback={
-        <div className="wunderbar__wrapper wunderbar wunderbar__input" aria-disabled>
+        <div className={`${WUNDERBAR_WRAPPER_CLASS} ${WUNDERBAR_CLASS} ${WUNDERBAR_INPUT_CLASS}`} aria-disabled>
           <Icon icon={ICONS.SEARCH} aria-disabled />
         </div>
       }

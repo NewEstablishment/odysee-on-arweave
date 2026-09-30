@@ -1,6 +1,7 @@
 import React from 'react';
 import Page from 'component/page';
 import ClaimListDiscover from 'component/claimListDiscover';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import * as CS from 'constants/claim_search';
 import { CUSTOM_HOMEPAGE } from 'config';
 import { useAppSelector } from 'redux/hooks';
@@ -39,7 +40,7 @@ function ChannelsFollowingDiscover() {
         scrollAnchor={MORE_CHANNELS_ANCHOR}
         maxPages={3}
         hideFilters
-        header={<h1 className="section__title">{__('Moon cheese is an acquired taste')}</h1>}
+        header={<h1 className={SECTION_CLASSES.title}>{__('Moon cheese is an acquired taste')}</h1>}
       />
     </Page>
   );

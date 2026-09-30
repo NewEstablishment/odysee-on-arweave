@@ -10,6 +10,7 @@ import {
   selectMyPurchasedMembershipsForChannelClaimId,
 } from 'redux/selectors/memberships';
 import { selectChannelClaimIdForUri } from 'redux/selectors/claims';
+import { JOIN_MEMBERSHIP_CLASSES } from 'component/joinMembershipCard/classes';
 
 type Props = {
   uri: string;
@@ -39,10 +40,10 @@ const MembershipTab = (props: Props) => {
   return (
     <>
       {activeMemberships.length > 0 && (
-        <div className={'membership-tab-item__wrapper'}>
-          <div className={'card__header--between membership-tab-header__wrapper'}>
+        <div className={JOIN_MEMBERSHIP_CLASSES.tabItem}>
+          <div className={`card__header--between ${JOIN_MEMBERSHIP_CLASSES.tabHeader}`}>
             <h2 className={'card__title'}>Active Memberships</h2>
-            <div className="button--view-memberships">
+            <div className="tw:text-center">
               <Button
                 icon={ICONS.MEMBERSHIP}
                 button="primary"

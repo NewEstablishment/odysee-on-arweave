@@ -1,6 +1,7 @@
 import React from 'react';
 import classnames from 'classnames';
 import useLazyLoading from 'effects/use-lazy-loading';
+import { FILE_THUMBNAIL_CLASSES as C } from '../classes';
 type Props = {
   thumb: string | null | undefined;
   fallback: string | null | undefined;
@@ -53,7 +54,7 @@ const Thumb = (props: Props) => {
         ref={thumbnailRef}
         style={stableLiveBackground ? { backgroundImage: `url(${stableLiveBackground})` } : undefined}
         className={classnames('media__thumb', className, {
-          'media__thumb--small': small,
+          [C.small]: small,
           'media__thumb--loaded': true,
         })}
         {...hoverHandlers}
@@ -61,7 +62,7 @@ const Thumb = (props: Props) => {
         {bufferA && (
           <img
             src={bufferA}
-            className={classnames('media__thumb-live-img', { 'media__thumb-live-img--active': activeBuffer === 'a' })}
+            className={classnames(C.liveImage, { [C.liveImageActive]: activeBuffer === 'a' })}
             onLoad={() => handleImgLoad('a')}
             alt=""
             draggable={false}
@@ -70,7 +71,7 @@ const Thumb = (props: Props) => {
         {bufferB && (
           <img
             src={bufferB}
-            className={classnames('media__thumb-live-img', { 'media__thumb-live-img--active': activeBuffer === 'b' })}
+            className={classnames(C.liveImage, { [C.liveImageActive]: activeBuffer === 'b' })}
             onLoad={() => handleImgLoad('b')}
             alt=""
             draggable={false}
@@ -87,7 +88,7 @@ const Thumb = (props: Props) => {
       data-background-image={thumb}
       style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}
       className={classnames('media__thumb', className, {
-        'media__thumb--small': small,
+        [C.small]: small,
         'media__thumb--loaded': srcLoaded,
       })}
       {...hoverHandlers}

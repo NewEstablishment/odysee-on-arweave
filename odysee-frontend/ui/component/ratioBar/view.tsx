@@ -1,4 +1,5 @@
 import React from 'react';
+import { RATIO_BAR_CLASSES } from './classes';
 type Props = {
   likeCount: number;
   dislikeCount: number;
@@ -10,15 +11,15 @@ const RatioBar = (props: Props) => {
 
   if (like || dislikeCount) {
     return (
-      <div className={'ratio-bar'}>
+      <div className={RATIO_BAR_CLASSES.root}>
         <div
-          className={'ratio-bar-like'}
+          className={RATIO_BAR_CLASSES.like}
           style={{
             flex: like,
           }}
         />
         <div
-          className={'ratio-bar-dislike'}
+          className={RATIO_BAR_CLASSES.dislike}
           style={{
             flex: 1 - like,
           }}
@@ -26,7 +27,7 @@ const RatioBar = (props: Props) => {
       </div>
     );
   } else {
-    return <div className={'ratio-bar'} />;
+    return <div className={RATIO_BAR_CLASSES.root} />;
   }
 };
 

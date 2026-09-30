@@ -1,0 +1,10 @@
+const PREVIEW_PROTECTED_BADGE_CLASS = String.raw`tw:absolute tw:bottom-app-xxs tw:left-app-xxs tw:rounded-app tw:[background:var(--color-black)] tw:opacity-85 tw:[&_.icon]:size-[14px] tw:[&_.icon]:p-0 tw:[&_.icon]:mt-[0.3rem] tw:[&_.icon]:mr-[0.3rem] tw:[&_.icon]:mb-0 tw:[&_.icon]:ml-[0.3rem]`;
+
+export const PREVIEW_PROTECTED_CONTENT_CLASSES = {
+  wrapper: String.raw`tw:absolute tw:flex tw:size-full tw:flex-col tw:items-center tw:justify-center tw:bg-[rgba(0,0,0,0.6)] tw:[-webkit-backdrop-filter:blur(2px)] tw:[backdrop-filter:blur(2px)] tw:[transition:all_0.2s] tw:[:is(.claim-preview\_\_wrapper,.playlist-preview\_\_wrapper):hover_&]:bg-transparent tw:[:is(.claim-preview\_\_wrapper,.playlist-preview\_\_wrapper):hover_&]:[-webkit-backdrop-filter:blur(0)] tw:[:is(.claim-preview\_\_wrapper,.playlist-preview\_\_wrapper):hover_&]:[backdrop-filter:blur(0)]`,
+  labelWrapper: String.raw`tw:max-w-[80%] tw:rounded-app tw:[background:var(--color-odysee-gradient)] tw:px-app-xxs tw:text-center tw:text-app-body tw:text-app-text tw:opacity-100 tw:[transition:all_0.4s] tw:[:is(.claim-preview\_\_wrapper,.playlist-preview\_\_wrapper):hover_&]:opacity-0`,
+  labelContainer: 'tw:[background:rgba(0,0,0,0.95)]',
+  label: String.raw`tw:bg-[image:var(--color-odysee-gradient)] tw:[background-clip:text] tw:[-webkit-background-clip:text] tw:px-app-xxxs tw:font-[var(--font-weight-bold)] tw:text-transparent tw:[&_span]:mt-[-6px] tw:[&_span]:block tw:[&_span]:text-app-xxsmall tw:[&_span]:text-transparent tw:[&_span]:[background-clip:text] tw:[&_span]:[-webkit-background-clip:text] tw:[@media(max-width:900px)]:text-app-large`,
+  lock: String.raw`${PREVIEW_PROTECTED_BADGE_CLASS} tw:[transition:all_0.2s] tw:[&_.icon]:[stroke:var(--color-fire)] tw:[:is(.claim-preview\_\_wrapper,.playlist-preview\_\_wrapper):hover_&]:opacity-100 tw:[:is(.claim-preview\_\_wrapper,.playlist-preview\_\_wrapper):hover_&_.icon]:[stroke-width:3]`,
+  unlocked: `${PREVIEW_PROTECTED_BADGE_CLASS} tw:[&_.icon]:stroke-[#91f92d]`,
+} as const;

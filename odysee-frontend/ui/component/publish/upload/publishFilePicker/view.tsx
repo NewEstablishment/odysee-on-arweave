@@ -12,12 +12,18 @@ import PublishStatusCard from 'component/publish/shared/publishStatusCard';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectIsStillEditing, selectPublishFormValue, selectPrevFileSizeTooBig } from 'redux/selectors/publish';
 import { doUpdateFile } from 'redux/actions/publish';
-import './style.scss';
-import '../publishFile/style.scss';
 
 type Props = {
   disabled?: boolean;
 };
+
+const DROPZONE_CLASS =
+  'tw:flex tw:min-h-[300px] tw:flex-col tw:items-center tw:justify-center tw:gap-app-s tw:rounded-app tw:border-2 tw:border-dashed tw:px-app-l tw:py-app-xl tw:text-center tw:[transition:border-color_0.2s_ease,background_0.2s_ease] tw:[&_.icon]:mb-app-s tw:upto-small:min-h-[220px] tw:upto-small:px-app-s tw:upto-small:py-app-l';
+const DROPZONE_IDLE_CLASS =
+  'tw:border-app-border tw:[&_.icon]:text-app-text-subtitle tw:hover:border-app-text-subtitle tw:hover:bg-[rgba(var(--color-header-button-base),0.04)]';
+const DROPZONE_DRAGGING_CLASS =
+  'tw:border-app-primary tw:bg-[rgba(var(--color-primary-dynamic),0.06)] tw:[&_.icon]:text-app-primary';
+const DROPZONE_DISABLED_CLASS = 'tw:pointer-events-none tw:cursor-default tw:opacity-50';
 
 export default function PublishFilePicker(props: Props) {
   const { disabled } = props;
@@ -101,7 +107,7 @@ export default function PublishFilePicker(props: Props) {
   }
 
   return (
-    <div className="publish-file-picker">
+    <div>
       <input
         ref={fileInputRef}
         type="file"
@@ -112,9 +118,11 @@ export default function PublishFilePicker(props: Props) {
 
       {!hasFile ? (
         <div
-          className={classnames('publish-file-picker__dropzone', {
-            'publish-file-picker__dropzone--dragging': isDragging,
-            'publish-file-picker__dropzone--disabled': disabled,
+          className={classnames(DROPZONE_CLASS, {
+            [DROPZONE_IDLE_CLASS]: !isDragging,
+            [DROPZONE_DRAGGING_CLASS]: isDragging,
+            [DROPZONE_DISABLED_CLASS]: disabled,
+            'tw:cursor-pointer': !disabled,
           })}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
@@ -122,8 +130,10 @@ export default function PublishFilePicker(props: Props) {
           onClick={() => !disabled && fileInputRef.current?.click()}
         >
           <Icon icon={ICONS.PUBLISH} size={48} />
-          <p className="publish-file-picker__dropzone-title">{__('Drag and drop a file to upload')}</p>
-          <p className="publish-file-picker__dropzone-subtitle">
+          <p className="tw:m-0 tw:text-app-large tw:font-bold tw:text-app-text">
+            {__('Drag and drop a file to upload')}
+          </p>
+          <p className="tw:m-0 tw:text-app-body tw:text-app-text-subtitle">
             {__('Or click to browse. Videos, audio, and images accepted.')}
           </p>
           <Button
@@ -134,16 +144,20 @@ export default function PublishFilePicker(props: Props) {
               fileInputRef.current?.click();
             }}
           />
-          <p className="publish-file-picker__dropzone-limit">
+          <p className="tw:mt-app-xs tw:mr-0 tw:mb-0 tw:ml-0 tw:text-app-xsmall tw:text-app-text-subtitle">
             {__('Max file size: %limit% GB', { limit: TV_PUBLISH_SIZE_LIMIT_GB_STR })}
           </p>
         </div>
       ) : (
-        <div className="publish-file-picker__selected">
-          <h3 className="publish-file-picker__title">{__('Selected File')}</h3>
-          <div className="publish-file-picker__selected-info">
-            <div className="publish-file-picker__selected-details">
-              <span className="publish-file-picker__selected-name">{currentPath}</span>
+        <div className="tw:flex tw:flex-col tw:gap-app-s">
+          <h3 className="tw:mt-0 tw:mr-0 tw:mb-app-s tw:ml-0 tw:text-app-body tw:font-bold tw:text-app-text tw:upto-small:m-0">
+            {__('Selected File')}
+          </h3>
+          <div className="tw:flex tw:items-center tw:gap-app-s tw:rounded-app tw:bg-app-card tw:p-app-m">
+            <div className="tw:flex tw:min-w-0 tw:flex-1 tw:flex-col tw:gap-app-xxs">
+              <span className="tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:font-bold">
+                {currentPath}
+              </span>
             </div>
             <Button
               button="primary"

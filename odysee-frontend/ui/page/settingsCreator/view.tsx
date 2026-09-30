@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as React from 'react';
 import humanizeDuration from 'humanize-duration';
 import * as ICONS from 'constants/icons';
@@ -11,6 +12,7 @@ import SearchChannelField from 'component/searchChannelField';
 import SettingsRow from 'component/settingsRow';
 import Spinner from 'component/spinner';
 import { FormField } from 'component/common/form-components/form-field';
+import { FORM_FIELD_COPYABLE_CLASS } from 'component/common/form-components/form-field-classes';
 import { parseURI } from 'util/lbryURI';
 import debounce from 'util/debounce';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -35,6 +37,7 @@ import {
 import { selectChannelHasMembershipTiersForId } from 'redux/selectors/memberships';
 import { doListAllMyMembershipTiers } from 'redux/actions/memberships';
 import { selectMyChannelClaims } from 'redux/selectors/claims';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 const DEBOUNCE_REFRESH_MS = 1000;
 // ****************************************************************************
@@ -236,7 +239,7 @@ export default function SettingsCreatorPage() {
       <div className="card-stack">
         <ChannelSelector hideAnon />
 
-        {isBusy && <div className="main--empty">
+        {isBusy && <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Spinner />
           </div>}
 
@@ -272,8 +275,8 @@ export default function SettingsCreatorPage() {
                   </SettingsRow>
 
                   <SettingsRow title={__('Minimum channel age for comments')} subtitle={__(HELP.CHANNEL_AGE)}>
-                    <div className="section__actions">
-                      <FormField name="time_since_first_comment" className="form-field--copyable" disabled={minChannelAgeMinutes <= 0} type="text" readOnly value={minChannelAgeMinutes > 0 ? humanizeDuration(minChannelAgeMinutes * 60 * 1000, {
+                    <div className={SECTION_CLASSES.actions}>
+                      <FormField name="time_since_first_comment" className={FORM_FIELD_COPYABLE_CLASS} disabled={minChannelAgeMinutes <= 0} type="text" readOnly value={minChannelAgeMinutes > 0 ? humanizeDuration(minChannelAgeMinutes * 60 * 1000, {
                 round: true
               }) : __('No limit')} inputButton={<Button button="secondary" icon={ICONS.EDIT} title={__('Change')} onClick={() => {
                 dispatch(doOpenModal(MODALS.MIN_CHANNEL_AGE, {

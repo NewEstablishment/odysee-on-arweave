@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import Button from 'component/button';
 import ChannelThumbnail from 'component/channelThumbnail';
@@ -15,7 +16,15 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doResolveUris } from 'redux/actions/claims';
 import { doFetchLastActiveSubs } from 'redux/actions/subscriptions';
 import { selectLastActiveSubscriptions, selectSubscriptionUris } from 'redux/selectors/subscriptions';
-import './style.scss';
+import {
+  NAVIGATION_LINK_ACTIVE_CLASS,
+  NAVIGATION_LINK_CLASS,
+  NAVIGATION_LINK_WITH_THUMBNAIL_CLASS,
+  NAVIGATION_SUBSCRIPTION_CLASS,
+  NAVIGATION_SUBSCRIPTION_TITLE_CLASS,
+} from 'component/sideNavigation/classes';
+import { FOLLOWING_RECENT_CLASS } from './classes';
+import { CARD_CLASSES } from 'component/common/card-classes';
 
 function getFilteredUris(uris: Array<string>, filterQuery: string) {
   if (filterQuery) {
@@ -73,7 +82,7 @@ export default function ChannelsFollowingManage() {
       </div>
 
       {page < 0 ? (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner delayed />
         </div>
       ) : uris && uris.length === 0 ? (
@@ -87,19 +96,19 @@ export default function ChannelsFollowingManage() {
           {!filteredUris && lastActiveSubs && lastActiveSubs.length === SIDEBAR_SUBS_DISPLAYED && (
             <>
               <div className="card__title-section">
-                <div className="card__subtitle"> {__('Recently Active')}</div>
+                <div className={CARD_CLASSES.subtitle}> {__('Recently Active')}</div>
               </div>
-              <div className="following__recently-active">
+              <div className={FOLLOWING_RECENT_CLASS}>
                 {lastActiveSubs.map((sub) => {
                   return (
-                    <div key={sub.uri} className="navigation-link__wrapper navigation__subscription">
+                    <div key={sub.uri} className={`navigation-link__wrapper ${NAVIGATION_SUBSCRIPTION_CLASS}`}>
                       <Button
                         navigate={sub.uri}
-                        className="navigation-link navigation-link--with-thumbnail"
-                        activeClass="navigation-link--active"
+                        className={`${NAVIGATION_LINK_CLASS} ${NAVIGATION_LINK_WITH_THUMBNAIL_CLASS}`}
+                        activeClass={NAVIGATION_LINK_ACTIVE_CLASS}
                       >
                         <ChannelThumbnail xsmall uri={sub.uri} hideStakedIndicator />
-                        <div className="navigation__subscription-title">
+                        <div className={NAVIGATION_SUBSCRIPTION_TITLE_CLASS}>
                           <ClaimPreviewTitle uri={sub.uri} />
                           <span dir="auto" className="channel-name">
                             {sub.channelName}
@@ -116,7 +125,7 @@ export default function ChannelsFollowingManage() {
           {!filteredUris && uris.length > 0 && (
             <>
               <div className="card__title-section">
-                <div className="card__subtitle"> {__('All Channels')}</div>
+                <div className={CARD_CLASSES.subtitle}> {__('All Channels')}</div>
               </div>
               <ClaimList
                 uris={uris.slice(0, (page + 1) * FOLLOW_PAGE_SIZE)}

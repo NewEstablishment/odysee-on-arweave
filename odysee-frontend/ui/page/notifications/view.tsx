@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS, PAGE_TITLE_CLASS } from 'component/page/classes';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
@@ -25,6 +26,7 @@ import {
   selectNotificationsLoaded,
 } from 'redux/selectors/notifications';
 import { doCommentReactList } from 'redux/actions/comments';
+import { NOTIFICATIONS_PAGE_CLASSES as C } from './classes';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { selectUserIsNative } from 'redux/selectors/user';
 import {
@@ -33,6 +35,7 @@ import {
   doSeeAllNotifications,
   doNotificationCategories,
 } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 export default function NotificationsPage() {
@@ -127,7 +130,7 @@ export default function NotificationsPage() {
   // eslint-disable-line react-hooks/exhaustive-deps
   if (native && !signedIn) {
     return (
-      <Page className="notification-page">
+      <Page className={C.page}>
         <Yrbl
           title={__('Sign in to view notifications')}
           subtitle={__('See replies to your comments and new uploads from channels you follow.')}
@@ -137,7 +140,7 @@ export default function NotificationsPage() {
     );
   }
   return (
-    <Page className="notification-page">
+    <Page className={C.page}>
       {!native && <BrowserNotificationBanner />}
       {error && (
         <div role="alert">
@@ -147,12 +150,12 @@ export default function NotificationsPage() {
       )}
 
       {ready && (
-        <div className="claim-list__header">
-          <h1 className="page__title">
+        <div className={C.header} data-claim-list-header>
+          <h1 className={PAGE_TITLE_CLASS}>
             <Icon icon={ICONS.NOTIFICATION} />
             <label>{__('Notifications')}</label>
           </h1>
-          <div className="claim-list__alt-controls--wrap">
+          <div className={C.controls}>
             {fetching && <Spinner type="small" delayed />}
 
             {unreadCount > 0 && (
@@ -180,19 +183,19 @@ export default function NotificationsPage() {
       )}
 
       {!ready ? (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       ) : list && list.length > 0 && !(isFiltered && fetching) ? (
         <div className="card">
-          <div className="notification_list">
+          <div className={C.list}>
             {list.map((notification) => {
               return <Notification key={notification.id} notification={notification} />;
             })}
           </div>
         </div>
       ) : (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           {!fetching && !error && (
             <Yrbl
               title={__('No notifications')}
@@ -202,7 +205,7 @@ export default function NotificationsPage() {
                   : __("You don't have any notifications yet, but they will be here when you do!")
               }
               actions={
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   <Button button="primary" icon={ICONS.HOME} label={__('Go Home')} navigate="/" />
                 </div>
               }

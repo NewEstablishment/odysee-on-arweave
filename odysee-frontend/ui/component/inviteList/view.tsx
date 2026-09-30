@@ -3,10 +3,12 @@ import RewardLink from 'component/rewardLink';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import LbcMessage from 'component/common/lbc-message';
 import { useAppSelector } from 'redux/hooks';
 import { selectReferralReward } from 'redux/selectors/rewards';
 import { selectUserInvitees } from 'redux/selectors/user';
+import { TABLE_CLASS, TABLE_HEADER_TEXT_CLASS, TABLE_WRAPPER_CLASS } from 'component/common/table-classes';
 
 function InviteList() {
   const invitees = useAppSelector(selectUserInvitees);
@@ -33,16 +35,16 @@ function InviteList() {
   const showClaimable = invitees.some((invite) => invite.invite_reward_claimable && !invite.invite_reward_claimed);
   return (
     <Card
-      title={<div className="table__header-text">{__('Invite History')}</div>}
+      title={<div className={TABLE_HEADER_TEXT_CLASS}>{__('Invite History')}</div>}
       subtitle={
-        <div className="table__header-text">
+        <div className={TABLE_HEADER_TEXT_CLASS}>
           <LbcMessage>{rewardHelp}</LbcMessage>
         </div>
       }
       titleActions={
         referralReward &&
         showClaimable && (
-          <div className="card__actions--inline">
+          <div className={CARD_CLASSES.actionsInline}>
             <RewardLink
               button
               label={__(`Receive Your %reward_amount% Invite Credit`, {
@@ -55,8 +57,8 @@ function InviteList() {
       }
       isBodyList
       body={
-        <div className="table__wrapper">
-          <table className="table section">
+        <div className={TABLE_WRAPPER_CLASS}>
+          <table className={`${TABLE_CLASS} section`}>
             <thead>
               <tr>
                 <th>{__('Invitee Email')}</th>

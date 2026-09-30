@@ -1,0 +1,5 @@
+export const RATIO_BAR_CLASSES = {
+  dislike: 'tw:h-full tw:bg-[var(--color-slime)] tw:[transition:flex_0.6s]',
+  like: 'tw:h-full tw:bg-[var(--color-fire)] tw:[transition:flex_0.6s]',
+  root: String.raw`ratio-bar tw:[.embed-reactions-overlay_.ratio-wrapper_&]:hidden tw:[.media\_\_actions_.ratio-wrapper_&]:absolute tw:[.media\_\_actions_.ratio-wrapper_&]:bottom-[-2px] tw:[.media\_\_actions_.ratio-wrapper_&]:left-0 tw:[.media\_\_actions_.ratio-wrapper_&]:z-[2] tw:[.media\_\_actions_.ratio-wrapper_&]:flex tw:[.media\_\_actions_.ratio-wrapper_&]:h-[3px] tw:[.media\_\_actions_.ratio-wrapper_&]:w-full tw:[.media\_\_actions_.ratio-wrapper_&]:overflow-hidden tw:[.media\_\_actions_.ratio-wrapper_&]:rounded-[2px] tw:[.media\_\_actions_.ratio-wrapper_&]:bg-[var(--color-text)] tw:upto-small:[.media\_\_actions_.ratio-wrapper_&]:bottom-[-1px] tw:upto-small:[.media\_\_actions_.ratio-wrapper_&]:h-px tw:active-fullscreen-side-panel:[.media\_\_actions_.ratio-wrapper_&]:bottom-[-1px] tw:active-fullscreen-side-panel:[.media\_\_actions_.ratio-wrapper_&]:h-px`,
+} as const;

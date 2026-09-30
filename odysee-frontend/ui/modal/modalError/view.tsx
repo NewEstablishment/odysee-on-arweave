@@ -5,6 +5,7 @@ import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectAssignedLbrynetServer } from 'redux/selectors/app';
 import { doDismissError } from 'redux/actions/notifications';
 import { doHideModal } from 'redux/actions/app';
+import { ERROR_MODAL_LIST_CLASS, ERROR_MODAL_ROOT_CLASS } from 'modal/error-classes';
 
 // Note: It accepts an object for 'error', but never pass Error itself as Error
 // cannot be stringified (unless the code below is updated to handle that).
@@ -90,13 +91,19 @@ function ModalError(props: Props) {
   }
 
   return (
-    <Modal isOpen contentLabel={__('Error')} title={__('Error')} className="error-modal" onConfirmed={closeModal}>
+    <Modal
+      isOpen
+      contentLabel={__('Error')}
+      title={__('Error')}
+      className={ERROR_MODAL_ROOT_CLASS}
+      onConfirmed={closeModal}
+    >
       <p>
         {__(
           "We're sorry that Odysee has encountered an error. Please try again or reach out to hello@odysee.com with detailed information."
         )}
       </p>
-      <ul className="error-modal__error-list ul--no-style">{errorInfoList}</ul>
+      <ul className={`${ERROR_MODAL_LIST_CLASS} ul--no-style`}>{errorInfoList}</ul>
     </Modal>
   );
 }

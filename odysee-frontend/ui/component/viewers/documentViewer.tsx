@@ -2,6 +2,7 @@ import React from 'react';
 import LoadingScreen from 'component/common/loading-screen';
 import { lazyImport } from 'util/lazyImport';
 import * as RENDER_MODES from 'constants/file_render_modes';
+import { FILE_VIEWER_CLASSES } from './classes';
 
 const MarkdownPreview = lazyImport(
   () =>
@@ -58,7 +59,11 @@ const DocumentViewer = (props: Props) => {
   }
 
   return (
-    <div className="file-viewer file-viewer--document">
+    <div
+      className={`${FILE_VIEWER_CLASSES.base} ${FILE_VIEWER_CLASSES.document}`}
+      data-file-viewer
+      data-file-viewer-document
+    >
       {content === null && <LoadingScreen transparent status={__("Sorry, looks like we can't load the document.")} />}
       {content && (
         <React.Suspense fallback={<LoadingScreen transparent />}>

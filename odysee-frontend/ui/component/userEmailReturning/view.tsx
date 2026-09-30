@@ -20,6 +20,8 @@ import {
   selectEmailNewIsPending,
 } from 'redux/selectors/user';
 import { doUserCheckIfEmailExists, doClearEmailEntry } from 'redux/actions/user';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PAGE_MAIN_SIGN_IN_CLASS, PAGE_MAIN_SIGN_UP_GRAPHIC_CLASS } from 'component/page/classes';
 
 function UserEmailReturning() {
   const dispatch = useAppDispatch();
@@ -59,8 +61,8 @@ function UserEmailReturning() {
 
   return (
     <div
-      className={classnames('main__sign-in', {
-        'main__sign-up--graphic': !showEmailVerification,
+      className={classnames(PAGE_MAIN_SIGN_IN_CLASS, {
+        [PAGE_MAIN_SIGN_UP_GRAPHIC_CLASS]: !showEmailVerification,
       })}
     >
       {showEmailVerification ? (
@@ -85,7 +87,7 @@ function UserEmailReturning() {
                   onChange={(e) => setEmail(e.target.value)}
                 />
 
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   <Button
                     autoFocus={emailExistsFromUrl}
                     button="primary"

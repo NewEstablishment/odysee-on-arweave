@@ -9,6 +9,9 @@ import {
   selectMembershipTxIncomingFetching,
   selectMembershipTxIncomingError,
 } from 'redux/selectors/memberships';
+import { CREATOR_MEMBERSHIP_PAYMENTS_TABLE_CLASS } from '../../../tableClasses';
+import { WALLET_FIAT_TRANSACTIONS_CLASS } from 'page/wallet/classes';
+import { TABLE_CLASS } from 'component/common/table-classes';
 interface IProps {
   channelsToList?: Array<any>;
 }
@@ -36,8 +39,8 @@ function PaymentsTab(props: IProps) {
   ).sort((a, b) => new Date(b.initiated_at).getTime() - new Date(a.initiated_at).getTime());
   return (
     <>
-      <div className="membership-payments-table__wrapper">
-        <table className="table">
+      <div className={CREATOR_MEMBERSHIP_PAYMENTS_TABLE_CLASS} data-membership-payments-table>
+        <table className={TABLE_CLASS}>
           <thead>
             <tr>
               <th className="date-header">{__('Date')}</th>
@@ -64,10 +67,10 @@ function PaymentsTab(props: IProps) {
         </table>
         <Paginate totalPages={Math.ceil(transactionsToList.length / PAGE_SIZE)} />
         {!txsFetching && transactions.length === 0 && (
-          <p className="wallet__fiat-transactions">{__('No Membership Payments')}</p>
+          <p className={WALLET_FIAT_TRANSACTIONS_CLASS}>{__('No Membership Payments')}</p>
         )}
         {txsFetching && transactions.length === 0 && (
-          <p className="wallet__fiat-transactions">{__('Fetching Membership Payments')}</p>
+          <p className={WALLET_FIAT_TRANSACTIONS_CLASS}>{__('Fetching Membership Payments')}</p>
         )}
       </div>
     </>

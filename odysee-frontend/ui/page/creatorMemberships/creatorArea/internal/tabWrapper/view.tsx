@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import * as PAGES from 'constants/pages';
 import Spinner from 'component/spinner';
@@ -33,7 +34,7 @@ const TabWrapper = (props: Props) => {
     (supportersList === undefined && !isOnTiersTab)
   ) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     );

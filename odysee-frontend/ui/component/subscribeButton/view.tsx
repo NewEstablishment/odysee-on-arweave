@@ -24,6 +24,15 @@ import { selectUser } from 'redux/selectors/user';
 import { doToast } from 'redux/actions/notifications';
 import { PREFERENCE_EMBED } from 'constants/tags';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { BUTTON_GROUP_CLASS, BUTTON_GROUP_HOOK } from 'component/button/classes';
+import {
+  SUBSCRIBE_BELL_CLASS,
+  SUBSCRIBE_BELL_RINGING_CLASS,
+  SUBSCRIBE_BUTTON_ACTIVE_CLASS,
+  SUBSCRIBE_BUTTON_CLASS,
+  SUBSCRIBE_HEART_PARTICLE_CLASS,
+  SUBSCRIBE_HEART_PARTICLE_HOOK,
+} from './classes';
 type Props = {
   uri: string;
   shrinkOnMobile?: boolean;
@@ -102,7 +111,7 @@ export default function SubscribeButton(props: Props) {
 
   if (!preferEmbed && isSubscribed && !permanentUrl && rawChannelName) {
     return (
-      <div className="button-group button-group-subscribed">
+      <div className={`${BUTTON_GROUP_CLASS} button-group-subscribed`}>
         <Button
           ref={buttonRef}
           iconColor="red"
@@ -147,11 +156,13 @@ export default function SubscribeButton(props: Props) {
   }
 
   return !preferEmbed && permanentUrl && claimName ? (
-    <div className="button-group">
+    <div className={BUTTON_GROUP_CLASS}>
       <Button
         ref={buttonRef}
+        data-subscribe-button
+        data-subscribe-active={isSubscribed || undefined}
         iconColor="red"
-        className={`button-following${isSubscribed ? ' button-following--active' : ''}`}
+        className={`${SUBSCRIBE_BUTTON_CLASS}${isSubscribed ? ` ${SUBSCRIBE_BUTTON_ACTIVE_CLASS}` : ''}`}
         icon={
           isSubscribed && isHovering && !isBellHovering
             ? ICONS.UNSUBSCRIBE
@@ -237,11 +248,11 @@ export default function SubscribeButton(props: Props) {
                     }
                   );
                   const btn = buttonRef.current;
-                  const group = btn ? btn.closest<HTMLElement>('.button-group') : null;
+                  const group = btn ? btn.closest<HTMLElement>(`.${BUTTON_GROUP_HOOK}`) : null;
 
                   if (btn && group) {
                     group.style.position = 'relative';
-                    group.querySelectorAll('.button-following__heart-particle').forEach((el) => el.remove());
+                    group.querySelectorAll(`.${SUBSCRIBE_HEART_PARTICLE_HOOK}`).forEach((el) => el.remove());
                     const icon = btn.querySelector<HTMLElement>('.icon');
 
                     if (icon) {
@@ -253,7 +264,7 @@ export default function SubscribeButton(props: Props) {
                       for (let i = 0; i < 5; i++) {
                         const heart = document.createElement('span');
                         heart.textContent = '\u2764';
-                        heart.className = 'button-following__heart-particle';
+                        heart.className = SUBSCRIBE_HEART_PARTICLE_CLASS;
                         heart.style.left = cx + (Math.random() * 20 - 10) + 'px';
                         heart.style.top = cy + 'px';
                         heart.style.animationDelay = Math.random() * 0.3 + 's';
@@ -270,15 +281,16 @@ export default function SubscribeButton(props: Props) {
         {isSubscribed && uiNotificationsEnabled && (
           <span
             ref={bellRef}
-            className="button-following__bell"
+            className={SUBSCRIBE_BELL_CLASS}
+            data-subscribe-bell
             role="button"
             tabIndex={0}
             aria-label={notificationsDisabled ? __('Turn on notifications') : __('Turn off notifications')}
             onClick={(e) => {
               e.stopPropagation();
               const bell = e.currentTarget;
-              bell.classList.add('button-following__bell--ringing');
-              bell.addEventListener('animationend', () => bell.classList.remove('button-following__bell--ringing'), {
+              bell.classList.add(SUBSCRIBE_BELL_RINGING_CLASS);
+              bell.addEventListener('animationend', () => bell.classList.remove(SUBSCRIBE_BELL_RINGING_CLASS), {
                 once: true,
               });
               const newNotificationsDisabled = !notificationsDisabled;

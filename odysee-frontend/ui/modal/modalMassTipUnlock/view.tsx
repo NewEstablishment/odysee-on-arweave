@@ -10,6 +10,8 @@ import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectIsMassClaimingTips, selectUtxoCounts, selectTipsBalance } from 'redux/selectors/wallet';
 import { doHideModal } from 'redux/actions/app';
 import { doTipClaimMass } from 'redux/actions/wallet';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 export default function ModalSupportsLiquidate() {
   const dispatch = useAppDispatch();
@@ -64,7 +66,7 @@ export default function ModalSupportsLiquidate() {
         }
         actions={
           <>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="primary"
                 onClick={() => dispatch(doTipClaimMass())}
@@ -73,7 +75,7 @@ export default function ModalSupportsLiquidate() {
               />
             </div>
             {supportCount > WALLET_CONSOLIDATE_UTXOS && (
-              <span className="help">{__('You have a lot of tips. This could take some time.')}</span>
+              <span className={HELP_CLASS}>{__('You have a lot of tips. This could take some time.')}</span>
             )}
           </>
         }

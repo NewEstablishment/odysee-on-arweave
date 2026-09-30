@@ -11,7 +11,7 @@ import * as SETTINGS from 'constants/settings';
 import { selectClientSetting, selectLanguage } from 'redux/selectors/settings';
 import classnames from 'classnames';
 import describeUnknown from 'util/describeUnknown';
-import './style.scss';
+import { LIVESTREAM_QUICK_CREATE_CLASSES as C } from './classes';
 
 const DEFAULT_THUMBNAIL = `${window.location.origin}/public/img/livestream-default-thumb.svg`;
 
@@ -173,16 +173,16 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
 
   if (confirming) {
     return (
-      <div className="quick-create">
-        <div className="quick-create__card quick-create__card--confirming">
-          <div className="quick-create__confirming">
-            <span className="quick-create__spinner" />
-            <h3 className="quick-create__confirming-title">{__('Confirming your stream claim...')}</h3>
-            <p className="quick-create__confirming-text">
+      <div className={C.root}>
+        <div className={`${C.card} ${C.confirmingCard}`}>
+          <div className={C.confirming}>
+            <span className={C.spinner} />
+            <h3 className={C.confirmingTitle}>{__('Confirming your stream claim...')}</h3>
+            <p className={C.confirmingText}>
               {__('This usually takes 1-2 minutes. The stream page will load automatically once confirmed.')}
             </p>
-            <div className="quick-create__confirming-progress">
-              <div className="quick-create__confirming-bar" />
+            <div className={C.confirmingProgress}>
+              <div className={C.confirmingBar} />
             </div>
           </div>
         </div>
@@ -191,11 +191,11 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
   }
 
   return (
-    <div className="quick-create">
-      <div className="quick-create__card">
+    <div className={C.root}>
+      <div className={C.card}>
         {/* Header */}
-        <div className="quick-create__header">
-          <div className="quick-create__icon">
+        <div className={C.header}>
+          <div className={C.icon}>
             <svg
               width="24"
               height="24"
@@ -211,18 +211,16 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
             </svg>
           </div>
           <div>
-            <h2 className="quick-create__title">{__('Quick Stream Setup')}</h2>
-            <p className="quick-create__subtitle">
-              {__('Create a stream claim to go live. Only a title is required.')}
-            </p>
+            <h2 className={C.title}>{__('Quick Stream Setup')}</h2>
+            <p className={C.subtitle}>{__('Create a stream claim to go live. Only a title is required.')}</p>
           </div>
         </div>
 
         {/* Title */}
-        <div className="quick-create__section">
-          <label className="quick-create__label">{__('Stream Title')}</label>
+        <div className={C.section}>
+          <label className={C.label}>{__('Stream Title')}</label>
           <input
-            className="quick-create__input"
+            className={C.input}
             type="text"
             placeholder={__('Enter a title for your stream...')}
             value={title}
@@ -231,19 +229,19 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
             autoFocus
           />
           {title && (
-            <span className="quick-create__uri">
+            <span className={C.uri}>
               {channelName}/{generatedName}
             </span>
           )}
         </div>
 
         {/* When to go live */}
-        <div className="quick-create__section">
-          <label className="quick-create__label">{__('When do you want to go live?')}</label>
-          <div className="quick-create__schedule">
+        <div className={C.section}>
+          <label className={C.label}>{__('When do you want to go live?')}</label>
+          <div className={C.schedule}>
             <button
-              className={classnames('quick-create__schedule-btn', {
-                'quick-create__schedule-btn--active': !scheduled,
+              className={classnames(C.scheduleButton, {
+                [C.scheduleButtonActive]: !scheduled,
               })}
               onClick={() => setScheduled(false)}
               type="button"
@@ -251,8 +249,8 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
               {__('Anytime')}
             </button>
             <button
-              className={classnames('quick-create__schedule-btn', {
-                'quick-create__schedule-btn--active': scheduled,
+              className={classnames(C.scheduleButton, {
+                [C.scheduleButtonActive]: scheduled,
               })}
               onClick={() => setScheduled(true)}
               type="button"
@@ -261,19 +259,19 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
             </button>
           </div>
           {scheduled && (
-            <div className="quick-create__date-row">
+            <div className={C.dateRow}>
               <DatePicker
                 selected={scheduleDate}
                 onChange={(d: Date | null) => d && setScheduleDate(d)}
                 showTimeSelect
                 dateFormat={clock24h ? 'yyyy-MM-dd HH:mm' : 'yyyy-MM-dd h:mm aa'}
                 timeFormat={clock24h ? 'HH:mm' : 'h:mm aa'}
-                className="quick-create__input quick-create__input--date"
+                className={`${C.input} ${C.dateInput}`}
                 minDate={todayStart}
               />
             </div>
           )}
-          <p className="quick-create__hint">
+          <p className={C.hint}>
             {!scheduled
               ? __('Your stream will be ready anytime you start broadcasting.')
               : __('Scheduled streams appear on your channel page and for followers.')}
@@ -281,8 +279,8 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
         </div>
 
         {/* Tags */}
-        <div className="quick-create__section">
-          <label className="quick-create__label">{__('Tags')}</label>
+        <div className={C.section}>
+          <label className={C.label}>{__('Tags')}</label>
           <TagsSearch
             onSelect={(newTags) => setTags(newTags)}
             onRemove={(tag) =>
@@ -299,11 +297,11 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
         </div>
 
         {/* Thumbnail toggle */}
-        <div className="quick-create__section">
-          <button className="quick-create__expand-btn" onClick={() => setShowThumb(!showThumb)} type="button">
+        <div className={C.section}>
+          <button className={C.expandButton} onClick={() => setShowThumb(!showThumb)} type="button">
             <svg
-              className={classnames('quick-create__chevron', {
-                'quick-create__chevron--open': showThumb,
+              className={classnames(C.chevron, {
+                [C.chevronOpen]: showThumb,
               })}
               width="14"
               height="14"
@@ -317,19 +315,19 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
               <polyline points="6 9 12 15 18 9" />
             </svg>
             {__('Custom Thumbnail')}
-            <span className="quick-create__optional">{__('optional')}</span>
+            <span className={C.optional}>{__('optional')}</span>
           </button>
 
           {showThumb && (
-            <div className="quick-create__thumb-section">
+            <div className={C.thumbnailSection}>
               <input
-                className="quick-create__input"
+                className={C.input}
                 type="text"
                 placeholder={__('Paste image URL...')}
                 value={thumbnail}
                 onChange={(e) => setThumbnail(e.target.value)}
               />
-              <div className="quick-create__thumb-preview">
+              <div className={C.thumbnailPreview}>
                 <img
                   src={thumbnail || DEFAULT_THUMBNAIL}
                   alt=""
@@ -344,8 +342,8 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
 
         {/* Submit */}
         <button
-          className={classnames('quick-create__submit', {
-            'quick-create__submit--publishing': publishing,
+          className={classnames(C.submit, {
+            [C.submitPublishing]: publishing,
           })}
           onClick={handleCreate}
           disabled={!canPublish}
@@ -353,7 +351,7 @@ export default function LivestreamQuickCreate({ onCreated }: Props) {
         >
           {publishing ? (
             <>
-              <span className="quick-create__spinner" />
+              <span className={C.spinner} />
               {__('Creating...')}
             </>
           ) : (

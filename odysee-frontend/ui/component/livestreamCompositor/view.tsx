@@ -7,7 +7,9 @@ import {
   type ChatPlaceholderMessage,
 } from 'util/livestreamChatPlaceholders';
 import { applyChromaKey, releaseChromaKey } from 'util/chromaKey';
-import './style.scss';
+
+const LAYER_BUTTON_CLASS =
+  'tw:flex tw:size-[24px] tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[4px] tw:[border:none] tw:bg-[rgba(255,255,255,0.15)] tw:p-0 tw:text-white tw:[&_svg]:size-[13px]';
 
 export type CropRegion = {
   sx: number;
@@ -169,9 +171,12 @@ export function ChatWidgetEditPreview({ layer, scale }: { layer: CompositorLayer
   };
   return (
     <div
-      className={classnames('livestream-compositor__chat-edit-preview', {
-        'livestream-compositor__chat-edit-preview--new-on-top': newOnTop,
-      })}
+      className={classnames(
+        'tw:pointer-events-none tw:absolute tw:inset-0 tw:flex tw:flex-col tw:gap-[4px] tw:overflow-hidden tw:p-[8px]',
+        newOnTop
+          ? 'tw:justify-start tw:[-webkit-mask-image:linear-gradient(to_top,transparent_0,#000_5%)] tw:[mask-image:linear-gradient(to_top,transparent_0,#000_5%)]'
+          : 'tw:justify-end tw:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,#000_5%)] tw:[mask-image:linear-gradient(to_bottom,transparent_0,#000_5%)]'
+      )}
       style={{
         background: bgColor,
         fontSize: `${fontSize}px`,
@@ -186,16 +191,16 @@ export function ChatWidgetEditPreview({ layer, scale }: { layer: CompositorLayer
           return (
             <div
               key={i}
-              className="livestream-compositor__chat-edit-hyperchat"
+              className="tw:flex tw:flex-[0_0_auto] tw:flex-col tw:overflow-hidden tw:rounded-[4px]"
               style={{ background: `rgba(${r}, ${g}, ${b}, 0.08)`, border: `1px solid ${c}` }}
             >
               <div
-                className="livestream-compositor__chat-edit-hyperchat-banner"
+                className="tw:flex-[0_0_auto] tw:px-[8px] tw:py-[2px] tw:text-[0.7em] tw:font-bold tw:text-white"
                 style={{ backgroundImage: `linear-gradient(to right, ${c}, transparent)` }}
               >
                 <span>${m.amount}</span>
               </div>
-              <div className="livestream-compositor__chat-edit-hyperchat-body">
+              <div className="tw:flex tw:flex-wrap tw:gap-[4px] tw:px-[8px] tw:py-[2px] tw:[word-break:break-word]">
                 <span style={{ color: userColor }}>{m.user}:</span>
                 <span style={{ color: textColor }}>{m.msg}</span>
               </div>
@@ -203,7 +208,7 @@ export function ChatWidgetEditPreview({ layer, scale }: { layer: CompositorLayer
           );
         }
         return (
-          <div key={i} className="livestream-compositor__chat-edit-msg">
+          <div key={i} className="tw:flex tw:flex-[0_0_auto] tw:flex-wrap tw:gap-[4px] tw:[word-break:break-word]">
             <span style={{ color: userColor }}>{m.user}:</span>
             <span style={{ color: textColor }}>{m.msg}</span>
           </div>
@@ -701,14 +706,14 @@ export default function LivestreamCompositor(props: Props) {
   return (
     <div
       ref={containerRef}
-      className="livestream-compositor"
+      className="livestream-compositor tw:relative tw:w-full tw:cursor-default tw:touch-none tw:select-none tw:overflow-hidden tw:bg-black tw:[-webkit-touch-callout:none]"
       style={{ aspectRatio: `${outputWidth} / ${outputHeight}` }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      <canvas ref={canvasRef} className="livestream-compositor__canvas" />
+      <canvas ref={canvasRef} className="tw:pointer-events-none tw:block tw:size-full" />
 
       {[...layers]
         .filter((l) => l.visible)
@@ -723,9 +728,12 @@ export default function LivestreamCompositor(props: Props) {
           return (
             <div
               key={layer.id}
-              className={classnames('livestream-compositor__layer-outline', {
-                'livestream-compositor__layer-outline--selected': isSelected,
-              })}
+              className={classnames(
+                'tw:group/outline tw:pointer-events-none tw:absolute tw:border tw:border-[rgba(255,255,255,0.3)]',
+                {
+                  'tw:border-2 tw:border-app-primary': isSelected,
+                }
+              )}
               style={{
                 left: layer.x * scaleX,
                 top: layer.y * scaleY,
@@ -734,13 +742,19 @@ export default function LivestreamCompositor(props: Props) {
               }}
             >
               {layer.id === '__widget_chat__' && <ChatWidgetEditPreview layer={layer} scale={scaleX} />}
-              <div className="livestream-compositor__layer-toolbar">
-                <span className="livestream-compositor__layer-label">{layer.label}</span>
-                <div className="livestream-compositor__layer-actions">
+              <div
+                className={classnames(
+                  'tw:absolute tw:inset-x-0 tw:top-0 tw:flex tw:items-center tw:justify-between tw:bg-[rgba(0,0,0,0.6)] tw:px-[4px] tw:py-[3px] tw:opacity-0 tw:[pointer-events:all] tw:[transition:opacity_0.15s_ease] tw:group-hover/outline:opacity-100',
+                  { 'tw:opacity-100': isSelected }
+                )}
+              >
+                <span className="tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[10px] tw:text-white">
+                  {layer.label}
+                </span>
+                <div className="tw:flex tw:shrink-0 tw:gap-[2px]">
                   <button
-                    className={classnames('livestream-compositor__layer-btn', {
-                      'livestream-compositor__layer-btn--active':
-                        layer.displayMode === 'max' || layer.displayMode === 'pip',
+                    className={classnames(LAYER_BUTTON_CLASS, 'tw:hover:bg-[rgba(255,255,255,0.3)]', {
+                      'tw:bg-app-primary tw:text-white': layer.displayMode === 'max' || layer.displayMode === 'pip',
                     })}
                     title={layer.displayMode === 'max' ? __('Picture in picture') : __('Fill canvas')}
                     onPointerDown={(e) => {
@@ -829,7 +843,7 @@ export default function LivestreamCompositor(props: Props) {
                     )}
                   </button>
                   <button
-                    className="livestream-compositor__layer-btn"
+                    className={`${LAYER_BUTTON_CLASS} tw:hover:bg-[rgba(255,255,255,0.3)]`}
                     title={__('Minimize to taskbar')}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -844,8 +858,8 @@ export default function LivestreamCompositor(props: Props) {
                     </svg>
                   </button>
                   <button
-                    className={classnames('livestream-compositor__layer-btn', {
-                      'livestream-compositor__layer-btn--locked': layer.locked,
+                    className={classnames(LAYER_BUTTON_CLASS, 'tw:hover:bg-[rgba(255,255,255,0.3)]', {
+                      'tw:bg-[rgba(255,180,0,0.3)] tw:text-[#f5a623]': layer.locked,
                     })}
                     title={layer.locked ? __('Unlock') : __('Lock')}
                     onPointerDown={(e) => {
@@ -880,7 +894,7 @@ export default function LivestreamCompositor(props: Props) {
                     )}
                   </button>
                   <button
-                    className="livestream-compositor__layer-btn livestream-compositor__layer-btn--close"
+                    className={`${LAYER_BUTTON_CLASS} tw:hover:bg-[rgba(244,67,54,0.8)]`}
                     title={__('Remove')}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -902,7 +916,13 @@ export default function LivestreamCompositor(props: Props) {
                   if (handle.includes('s')) style.bottom = -HANDLE_SIZE / 2;
                   if (handle.includes('w')) style.left = -HANDLE_SIZE / 2;
                   if (handle.includes('e')) style.right = -HANDLE_SIZE / 2;
-                  return <div key={handle} className="livestream-compositor__handle" style={style} />;
+                  return (
+                    <div
+                      key={handle}
+                      className="tw:absolute tw:size-[8px] tw:rounded-[2px] tw:border tw:border-white tw:bg-app-primary tw:[pointer-events:all]"
+                      style={style}
+                    />
+                  );
                 })}
               {isSelected &&
                 !layer.locked &&
@@ -930,13 +950,17 @@ export default function LivestreamCompositor(props: Props) {
                     style.bottom = HANDLE_SIZE;
                     style.width = EDGE_HIT_SIZE;
                   }
-                  return <div key={handle} className="livestream-compositor__edge-handle" style={style} />;
+                  return <div key={handle} className="tw:bg-transparent tw:[pointer-events:all]" style={style} />;
                 })}
             </div>
           );
         })}
 
-      {layers.length === 0 && <div className="livestream-compositor__empty">{__('Select sources from the panel')}</div>}
+      {layers.length === 0 && (
+        <div className="tw:pointer-events-none tw:absolute tw:right-0 tw:bottom-app-l tw:left-0 tw:flex tw:items-center tw:justify-center tw:px-app-m tw:text-center tw:text-app-small tw:text-[rgba(255,255,255,0.4)]">
+          {__('Select sources from the panel')}
+        </div>
+      )}
     </div>
   );
 }

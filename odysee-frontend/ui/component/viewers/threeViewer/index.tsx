@@ -1,6 +1,5 @@
 import * as React from 'react';
 import * as dat from 'dat.gui';
-import './style.lazy.scss';
 import LoadingScreen from 'component/common/loading-screen';
 // ThreeJS
 import { LoadingManager } from 'three-full/sources/loaders/LoadingManager';
@@ -18,6 +17,7 @@ import detectWebGL from './internal/detector';
 import ThreeGrid from './internal/grid';
 import ThreeScene from './internal/scene';
 import ThreeRenderer from './internal/renderer';
+import { THREE_VIEWER_CLASSES } from './classes';
 
 const Manager = ({ onLoad, onStart, onError }) => {
   const manager = new LoadingManager();
@@ -478,12 +478,15 @@ class ThreeViewer extends React.PureComponent<Props, State> {
     const loadingMessage = __('Loading 3D model.');
 
     const showLoading = isLoading && !error && !isReady;
-    const containerClass = 'gui-container';
     return (
       <>
-        <div className="file-render__viewer file-render__viewer--three">
-          <div ref={(element) => (this.guiContainer = element)} className={containerClass} />
-          <div className="three-viewer" ref={(viewer) => (this.viewer = viewer)}>
+        <div className={THREE_VIEWER_CLASSES.root}>
+          <div
+            ref={(element) => (this.guiContainer = element)}
+            className="tw:absolute tw:top-0 tw:right-0"
+            data-three-viewer-gui
+          />
+          <div className={THREE_VIEWER_CLASSES.viewport} ref={(viewer) => (this.viewer = viewer)}>
             {error && <LoadingScreen status={error} spinner={false} />}
             {showLoading && <LoadingScreen status={loadingMessage} spinner />}
           </div>

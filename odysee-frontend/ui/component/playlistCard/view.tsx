@@ -4,9 +4,11 @@ import classnames from 'classnames';
 import CollectionItemsList from 'component/collectionItemsList';
 import Card from 'component/common/card';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import * as PAGES from 'constants/pages';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import Icon from 'component/common/icon';
+import { ICON_MARGIN_RIGHT_CLASS } from 'component/common/icon-classes';
 import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
 import { NavLink } from 'react-router-dom';
@@ -16,6 +18,7 @@ import ShuffleButton from './internal/shuffleButton';
 import LoopButton from './internal/loopButton';
 import usePersistedState from 'effects/use-persisted-state';
 import { HEADER_HEIGHT_MOBILE } from 'constants/player';
+import { PLAYLIST_CARD_ELLIPSIS_CLASS } from './classes';
 import { getMaxLandscapeHeight } from 'util/window';
 import { useIsMobile, useIsSmallScreen } from 'effects/use-screensize';
 import { getLocalizedNameForCollectionId } from 'util/collections';
@@ -41,7 +44,6 @@ import {
 } from 'redux/actions/collections';
 import { doClearPlayingCollection as doClearPlayingCollectionAction } from 'redux/actions/content';
 import { doOpenModal as doOpenModalAction } from 'redux/actions/app';
-import './style.lazy.scss';
 type Props = {
   id: string;
   uri?: string;
@@ -258,9 +260,9 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
 
           if (isFloating || isMobile) {
             if (isFloating) {
-              const playerInfo = document.querySelector<HTMLElement>('.content__info');
+              const playerInfo = document.querySelector<HTMLElement>('[data-floating-player-info]');
               if (playerInfo) playerInfoTop = playerInfo.offsetTop;
-              const playerElem = document.querySelector<HTMLElement>('.content__viewer');
+              const playerElem = document.querySelector<HTMLElement>('[data-content-viewer]');
               const playerTransform = playerElem && playerElem.style.transform;
 
               if (playerTransform) {
@@ -335,7 +337,7 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
     <>
       <Global
         styles={{
-          '.claim-list__scroll-to-recent': {
+          '[data-claim-list-scroll-to-recent]': {
             opacity: !scrolledPastActive || !hasActive ? '0' : '0.9 !important',
             // visibility also needed because it prevents clicking on the button
             // opacity makes it invisible but still clickable
@@ -345,7 +347,7 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
             },
           },
           '.playlist__wrapper': {
-            '.claim-list': {
+            '[data-claim-list]': {
               'li:last-child': {
                 marginBottom:
                   scrolledPastActive && hasActive && playingItemIndex !== collectionLength
@@ -376,7 +378,7 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
                   <Button
                     requiresAuth
                     title={__('Copy')}
-                    className="button-toggle"
+                    className={BUTTON_TOGGLE_CLASS}
                     icon={ICONS.COPY}
                     onClick={() =>
                       doOpenModal(MODALS.COLLECTION_CREATE, {
@@ -389,8 +391,8 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
                     ? !collectionEmpty && (
                         <Button
                           title={__('Arrange')}
-                          className={classnames('button-toggle', {
-                            'button-toggle--active': showEdit,
+                          className={classnames(BUTTON_TOGGLE_CLASS, {
+                            [BUTTON_TOGGLE_ACTIVE_CLASS]: showEdit,
                           })}
                           icon={ICONS.ARRANGE}
                           onClick={() => setShowEdit(!showEdit)}
@@ -400,7 +402,7 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
                         <Button
                           requiresAuth
                           title={collectionSavedForId ? __('Unsave') : __('Save')}
-                          className="button-toggle"
+                          className={BUTTON_TOGGLE_CLASS}
                           icon={collectionSavedForId ? ICONS.PLAYLIST_FILLED : ICONS.PLAYLIST_ADD}
                           onClick={() => doToggleCollectionSavedForId(id)}
                         />
@@ -414,14 +416,14 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
               <NavLink
                 to={`/$/${PAGES.PLAYLIST}/${id || ''}`}
                 className={classnames('playlist__title', {
-                  'align-end': isFloating,
+                  'tw:inline-flex tw:max-w-full tw:items-end': isFloating,
                 })}
               >
                 {isFloating ? (
                   <>
                     <Icon icon={ICONS.PLAYLIST_PLAYBACK} size={40} />
                     <div className="playlist__title-text">
-                      <span className="text-ellipsis">
+                      <span className={PLAYLIST_CARD_ELLIPSIS_CLASS}>
                         {__('Now playing: --[Which Playlist is currently playing]--') + ' ' + usedCollectionName}
                       </span>
                     </div>
@@ -430,11 +432,11 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
                   <>
                     <Icon
                       icon={COLLECTIONS_CONSTS.PLAYLIST_ICONS[id] || ICONS.PLAYLIST}
-                      className="icon--margin-right"
+                      className={ICON_MARGIN_RIGHT_CLASS}
                     />
                     <div className="playlist__title-text">
                       <div className="playlist__title-text-list">
-                        <span className="text-ellipsis">{usedCollectionName}</span>
+                        <span className={PLAYLIST_CARD_ELLIPSIS_CLASS}>{usedCollectionName}</span>
                       </div>
                       {bodyOnly ? undefined : (
                         <>
@@ -484,8 +486,8 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
               <>
                 {!bodyOnly && (
                   <Button
-                    className={classnames('button-toggle', {
-                      'button-toggle--active': !bodyOpen,
+                    className={classnames(BUTTON_TOGGLE_CLASS, {
+                      [BUTTON_TOGGLE_ACTIVE_CLASS]: !bodyOpen,
                     })}
                     icon={bodyOpen ? ICONS.UP : ICONS.DOWN}
                     onClick={() => {
@@ -497,7 +499,7 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
 
                 <Button
                   title={onClose ? __('Close') : __('Close Playlist')}
-                  className="button-toggle"
+                  className={BUTTON_TOGGLE_CLASS}
                   icon={ICONS.REMOVE}
                   onClick={onClose || closePlaylist}
                 />

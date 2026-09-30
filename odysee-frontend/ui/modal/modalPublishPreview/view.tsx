@@ -1,7 +1,6 @@
 import React from 'react';
 import dayjs from 'util/dayjs';
 import type { DoPublishDesktop } from 'redux/actions/publish';
-import './style.scss';
 import Button from 'component/button';
 import { Form, FormField } from 'component/common/form';
 import { Modal } from 'modal/modal';
@@ -35,6 +34,10 @@ import { selectFfmpegStatus, selectClientSetting } from 'redux/selectors/setting
 import { doHideModal } from 'redux/actions/app';
 import { doPublishDesktop } from 'redux/actions/publish';
 import { doSetClientSetting } from 'redux/actions/settings';
+import { PUBLISH_PREVIEW_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
+import { TABLE_CLASS, TABLE_CONDENSED_CLASS, TABLE_PUBLISH_PREVIEW_CLASS } from 'component/common/table-classes';
 
 type Props = {
   publishPayload: PublishParams;
@@ -179,7 +182,7 @@ const ModalPublishPreview = (props: Props) => {
 
   function getDescription() {
     return description ? (
-      <div className="media__info-text-preview">
+      <div className={PUBLISH_PREVIEW_CLASSES.description}>
         <MarkdownPreview content={description} simpleLinks />
       </div>
     ) : null;
@@ -228,9 +231,9 @@ const ModalPublishPreview = (props: Props) => {
         return (
           <>
             {fiatPurchaseEnabled && fiatPurchaseFee && (
-              <div className="publish-preview__fiat-price">
-                <Icon icon={ICONS.BUY} />
-                <p>
+              <div className="tw:flex tw:items-end tw:not-first:mt-app-xs">
+                <Icon className="tw:text-app-text-subtitle" icon={ICONS.BUY} />
+                <p className="tw:pl-app-xxs tw:text-app-small tw:before:text-app-text-subtitle tw:before:content-['_|_']">
                   {__('Purchase for %currency%%amount%', {
                     currency: STRIPE.CURRENCY[fiatPurchaseFee.currency].symbol,
                     amount: fiatPurchaseFee.amount,
@@ -239,9 +242,9 @@ const ModalPublishPreview = (props: Props) => {
               </div>
             )}
             {fiatRentalEnabled && fiatRentalFee && fiatRentalExpiration && (
-              <div className="publish-preview__fiat-price">
-                <Icon icon={ICONS.TIME} />
-                <p>
+              <div className="tw:flex tw:items-end tw:not-first:mt-app-xs">
+                <Icon className="tw:text-app-text-subtitle" icon={ICONS.TIME} />
+                <p className="tw:pl-app-xxs tw:text-app-small tw:before:text-app-text-subtitle tw:before:content-['_|_']">
                   {__('Rent %duration% for %currency%%amount%', {
                     duration: secondsToDhms(rentalSeconds),
                     currency: STRIPE.CURRENCY[fiatRentalFee.currency].symbol,
@@ -276,12 +279,12 @@ const ModalPublishPreview = (props: Props) => {
   function getChannelValue(channel: string) {
     const channelClaim: any = myChannels && myChannels.find((x: any) => x.name === channel);
     return channel ? (
-      <div className="channel-value">
+      <div className={PUBLISH_PREVIEW_CLASSES.channelValue}>
         {channelClaim && <ChannelThumbnail xsmall noLazyLoad uri={channelClaim.permanent_url} />}
         {channel}
       </div>
     ) : (
-      <div className="channel-value">
+      <div className={PUBLISH_PREVIEW_CLASSES.channelValue}>
         <Icon sectionIcon icon={ICONS.ANONYMOUS} />
         <i>{__('Anonymous')}</i>
       </div>
@@ -306,14 +309,14 @@ const ModalPublishPreview = (props: Props) => {
     }
 
     return (
-      <div className="publish-preview__tier-restrictions">
+      <div className={PUBLISH_PREVIEW_CLASSES.tierRestrictions}>
         {myMembershipTiers.map((tier: CreatorMembership) => {
           const tierId = tier?.membership_id || '0';
           const tierSelected = memberRestrictionTierIds.includes(tierId);
           return tierSelected ? (
             <FormField key={tierId} name={tierId} type="checkbox" defaultChecked label={tier?.name || tierId} />
           ) : (
-            <div key={tierId} className="dummy-tier" />
+            <div key={tierId} className="tw:inline-block" />
           );
         })}
       </div>
@@ -380,7 +383,7 @@ const ModalPublishPreview = (props: Props) => {
           body={
             <>
               <div className="section">
-                <table className="table table--condensed table--publish-preview">
+                <table className={`${TABLE_CLASS} ${TABLE_CONDENSED_CLASS} ${TABLE_PUBLISH_PREVIEW_CLASS}`}>
                   <tbody>
                     {!livestream && type !== PUBLISH_TYPES.POST && createRow(__('File'), getFilePathName(filePath))}
                     {createRow(__('Replay'), getReplayValue(), hideReplayRow())}
@@ -401,10 +404,10 @@ const ModalPublishPreview = (props: Props) => {
                 </table>
               </div>
               {paywall === PAYWALL.FIAT && (
-                <div className="publish-preview__fee-footnote">{`* ${__('processing and platform fees apply')}`}</div>
+                <div className="tw:mt-app-m tw:text-app-xsmall tw:italic">{`* ${__('processing and platform fees apply')}`}</div>
               )}
               {txFee && (
-                <div className="publish-preview__blockchain-fee" aria-label={__('Estimated transaction fee:')}>
+                <div className="tw:mt-app-m tw:text-app-small" aria-label={__('Estimated transaction fee:')}>
                   <b>{__('Est. transaction fee:')}</b>&nbsp;&nbsp;
                   <em>
                     <LbcSymbol postfix={txFee} />
@@ -415,11 +418,11 @@ const ModalPublishPreview = (props: Props) => {
           }
           actions={
             <>
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button autoFocus button="primary" disabled={publishing} label={confirmBtnText} onClick={onConfirmed} />
                 <Button button="link" label={__('Cancel')} onClick={closeModal} />
               </div>
-              <p className="help">{__('Once the transaction is sent, it cannot be reversed.')}</p>
+              <p className={HELP_CLASS}>{__('Once the transaction is sent, it cannot be reversed.')}</p>
               <FormField
                 type="checkbox"
                 name="sync_toggle"

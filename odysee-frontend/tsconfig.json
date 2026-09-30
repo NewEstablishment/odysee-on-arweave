@@ -57,7 +57,6 @@
       "homepage/*": ["./ui/util/homepage/*"],
       "homepages": ["./custom/homepages/v2"],
       "homepages/*": ["./custom/homepages/v2/*"],
-      "scss/*": ["./ui/scss/*"],
       "lbryinc": ["./extras/lbryinc"],
       "lbryinc/*": ["./extras/lbryinc/*"],
       "store": ["./ui/store"],

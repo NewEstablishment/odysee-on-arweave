@@ -1,4 +1,4 @@
-import { FLOATING_PLAYER_CLASS } from 'constants/player';
+import { FLOATING_PLAYER_SELECTOR } from 'constants/player';
 export function getRootEl() {
   return document && document.documentElement;
 }
@@ -11,7 +11,7 @@ export function getScreenHeight() {
   return rootEl ? rootEl.clientHeight : window.innerHeight;
 }
 export function getFloatingPlayerRect() {
-  const elem = document.querySelector(`.${FLOATING_PLAYER_CLASS}`);
+  const elem = document.querySelector(FLOATING_PLAYER_SELECTOR);
   return elem ? elem.getBoundingClientRect() : null;
 }
 export function clampFloatingPlayerToScreen(params: { x: number; y: number }) {

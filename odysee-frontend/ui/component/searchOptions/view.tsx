@@ -5,7 +5,10 @@ import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Form, FormField } from 'component/common/form';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
+import { SEARCH_OPTIONS_CLASSES } from './classes';
 import Icon from 'component/common/icon';
+import { ICON_HELP_CLASS } from 'component/common/icon-classes';
 import classnames from 'classnames';
 import LangFilterIndicator from 'component/langFilterIndicator';
 import usePersistedState from 'effects/use-persisted-state';
@@ -16,6 +19,7 @@ import { selectSearchOptions } from 'redux/selectors/search';
 import { doToggleSearchExpanded } from 'redux/actions/app';
 import { selectSearchOptionsExpanded } from 'redux/selectors/app';
 import { selectClientSetting } from 'redux/selectors/settings';
+import { TABLE_CLASS, TABLE_CONDENSED_CLASS } from 'component/common/table-classes';
 const CLAIM_TYPES = {
   [SEARCH_OPTIONS.INCLUDE_FILES]: 'Files',
   [SEARCH_OPTIONS.INCLUDE_CHANNELS]: 'Channels',
@@ -58,7 +62,7 @@ function addRow(label: string, value: any) {
   return (
     <tr>
       <td>
-        <legend className="search__legend">{label}</legend>
+        <legend className={SEARCH_OPTIONS_CLASSES.legend}>{label}</legend>
       </td>
       <td>{value}</td>
     </tr>
@@ -170,7 +174,7 @@ const SearchOptions = (props: Props) => {
 
   const typeElem = (
     <>
-      <div className="filter-values">
+      <div className={SEARCH_OPTIONS_CLASSES.filterValues}>
         <div>
           {Object.entries(CLAIM_TYPES).map((t) => {
             const option = t[0];
@@ -184,8 +188,8 @@ const SearchOptions = (props: Props) => {
                 key={option}
                 button="alt"
                 label={__(t[1])}
-                className={classnames(`button-toggle`, {
-                  'button-toggle--active': options[SEARCH_OPTIONS.CLAIM_TYPE] === option,
+                className={classnames(BUTTON_TOGGLE_CLASS, {
+                  [BUTTON_TOGGLE_ACTIVE_CLASS]: options[SEARCH_OPTIONS.CLAIM_TYPE] === option,
                 })}
                 onClick={() => setSearchOption(SEARCH_OPTIONS.CLAIM_TYPE, option)}
               />
@@ -194,15 +198,16 @@ const SearchOptions = (props: Props) => {
         </div>
         <Button
           button="close"
-          className={classnames('close-button', {
-            'close-button--visible': options[SEARCH_OPTIONS.CLAIM_TYPE] !== SEARCH_OPTIONS.INCLUDE_FILES_AND_CHANNELS,
+          className={classnames(SEARCH_OPTIONS_CLASSES.closeButton, {
+            [SEARCH_OPTIONS_CLASSES.closeButtonVisible]:
+              options[SEARCH_OPTIONS.CLAIM_TYPE] !== SEARCH_OPTIONS.INCLUDE_FILES_AND_CHANNELS,
           })}
           icon={ICONS.REMOVE}
           onClick={() => updateSearchOptions(SEARCH_OPTIONS.CLAIM_TYPE, SEARCH_OPTIONS.INCLUDE_FILES_AND_CHANNELS)}
         />
       </div>
       {options[SEARCH_OPTIONS.CLAIM_TYPE] === SEARCH_OPTIONS.INCLUDE_FILES && (
-        <div className="media-types">
+        <div className={SEARCH_OPTIONS_CLASSES.mediaTypes}>
           {Object.entries(typeOptions).map((t) => {
             const option = t[0];
             return (
@@ -224,7 +229,7 @@ const SearchOptions = (props: Props) => {
   );
   const otherOptionsElem = (
     <>
-      <div className="filter-values">
+      <div className={SEARCH_OPTIONS_CLASSES.filterValues}>
         <FormField
           type="checkbox"
           name="exact-match"
@@ -233,7 +238,7 @@ const SearchOptions = (props: Props) => {
           label={__('Exact match')}
         />
         <Icon
-          className="icon--help"
+          className={classnames(ICON_HELP_CLASS, SEARCH_OPTIONS_CLASSES.helpIcon)}
           icon={ICONS.HELP}
           tooltip
           size={16}
@@ -245,7 +250,7 @@ const SearchOptions = (props: Props) => {
     </>
   );
   const uploadDateElem = (
-    <div className="filter-values">
+    <div className={SEARCH_OPTIONS_CLASSES.filterValues}>
       <FormField
         type="select"
         name="upload-date"
@@ -257,8 +262,8 @@ const SearchOptions = (props: Props) => {
       </FormField>
       <Button
         button="close"
-        className={classnames('close-button', {
-          'close-button--visible': options[SEARCH_OPTIONS.TIME_FILTER],
+        className={classnames(SEARCH_OPTIONS_CLASSES.closeButton, {
+          [SEARCH_OPTIONS_CLASSES.closeButtonVisible]: options[SEARCH_OPTIONS.TIME_FILTER],
         })}
         icon={ICONS.REMOVE}
         onClick={() => updateSearchOptions(SEARCH_OPTIONS.TIME_FILTER, '')}
@@ -266,7 +271,7 @@ const SearchOptions = (props: Props) => {
     </div>
   );
   const sortByElem = (
-    <div className="filter-values">
+    <div className={SEARCH_OPTIONS_CLASSES.filterValues}>
       <FormField
         type="select"
         name="sort-by"
@@ -279,7 +284,7 @@ const SearchOptions = (props: Props) => {
     </div>
   );
   const durationElem = (
-    <div className="filter-values">
+    <div className={SEARCH_OPTIONS_CLASSES.filterValues}>
       <div className="claim-search__duration-inputs-container">
         <FormField
           label={__('Min Minutes')}
@@ -305,8 +310,8 @@ const SearchOptions = (props: Props) => {
         />
         <Button
           button="close"
-          className={classnames('close-button', {
-            'close-button--visible': minDurationMinutes || maxDurationMinutes,
+          className={classnames(SEARCH_OPTIONS_CLASSES.closeButton, {
+            [SEARCH_OPTIONS_CLASSES.closeButtonVisible]: minDurationMinutes || maxDurationMinutes,
           })}
           icon={ICONS.REMOVE}
           onClick={() => {
@@ -323,37 +328,38 @@ const SearchOptions = (props: Props) => {
     options[SEARCH_OPTIONS.CLAIM_TYPE] === SEARCH_OPTIONS.INCLUDE_CHANNELS ? __('Creation Date') : __('Upload Date');
   return (
     <div>
-      <div className="search__filters-toolbar">
+      <div className={SEARCH_OPTIONS_CLASSES.toolbar}>
         <Button
           button="alt"
           label={activeFilterCount > 0 ? `${__('Filter')} (${activeFilterCount})` : __('Filter')}
           icon={ICONS.FILTER}
           iconRight={expanded ? ICONS.UP : ICONS.DOWN}
-          className={classnames('search__filters-toggle button-toggle', {
-            'button-toggle--active': activeFilterCount > 0,
+          className={classnames(SEARCH_OPTIONS_CLASSES.toggle, BUTTON_TOGGLE_CLASS, {
+            [BUTTON_TOGGLE_ACTIVE_CLASS]: activeFilterCount > 0,
           })}
           onClick={toggleSearchExpanded}
         />
         {searchInLanguage && <LangFilterIndicator />}
       </div>
       {activeFilterCount > 0 && (
-        <div className="search__filters-summary">
-          <span className="search__filters-summary-label">
+        <div className={SEARCH_OPTIONS_CLASSES.summary}>
+          <span className={SEARCH_OPTIONS_CLASSES.summaryLabel}>
             {__('Active filters')}: {activeFilterCount}
           </span>
           {activeFilterLabels.map((label) => (
-            <span key={label} className="search__filters-chip">
+            <span key={label} className={SEARCH_OPTIONS_CLASSES.chip}>
               {label}
             </span>
           ))}
         </div>
       )}
       <Form
-        className={classnames('search__options', {
-          'search__options--expanded': expanded,
-        })}
+        className={classnames(
+          SEARCH_OPTIONS_CLASSES.options,
+          expanded ? SEARCH_OPTIONS_CLASSES.optionsExpanded : SEARCH_OPTIONS_CLASSES.optionsCollapsed
+        )}
       >
-        <table className="table table--condensed">
+        <table className={`${TABLE_CLASS} ${TABLE_CONDENSED_CLASS}`}>
           <tbody>
             {addRow(__('Type'), typeElem)}
             {addRow(uploadDateLabel, uploadDateElem)}

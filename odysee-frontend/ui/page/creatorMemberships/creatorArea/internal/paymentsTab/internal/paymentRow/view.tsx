@@ -10,6 +10,7 @@ import Button from 'component/button';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { selectMembershipForId } from 'redux/selectors/memberships';
+import { MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS } from '../../../../../tableClasses';
 interface IProps {
   transaction: MembershipPayment;
   longList: boolean;
@@ -47,7 +48,7 @@ function View(props: IProps) {
           <div>{dayjs(new Date(transaction.initiated_at)).format('LL')}</div>
         </Tooltip>
       </td>
-      <td className="channelThumbnail">
+      <td className={MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS}>
         {recipientUri ? (
           longList ? (
             <Button button={'link'} label={recipientName} navigate={recipientUri} />
@@ -61,7 +62,7 @@ function View(props: IProps) {
           <div>Anon</div>
         )}
       </td>
-      <td className="channelThumbnail">
+      <td className={MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS}>
         {senderUri ? (
           longList ? (
             <Button button={'link'} label={senderName} navigate={senderUri} />

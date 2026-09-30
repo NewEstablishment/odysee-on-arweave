@@ -1,4 +1,5 @@
 import { Menu, MenuButton, MenuList, MenuItem } from 'component/common/menu';
+import { BUTTON_ALT_CLASS, BUTTON_CLASS } from 'component/button/classes';
 import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
 import React from 'react';
@@ -63,7 +64,7 @@ const CommentListMenu = (props: Props) => {
   if (channelHasMembershipTiers && claimIsMine) {
     return (
       <Menu>
-        <MenuButton className="button button--alt menu__button">
+        <MenuButton className={`${BUTTON_CLASS} ${BUTTON_ALT_CLASS} menu__button`}>
           <Icon size={18} icon={ICONS.SETTINGS} />
         </MenuButton>
 

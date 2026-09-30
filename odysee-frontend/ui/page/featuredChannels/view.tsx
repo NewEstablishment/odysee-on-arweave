@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import Section from 'component/channelSections/Section';
 import Page from 'component/page';
@@ -36,7 +37,7 @@ function FeaturedChannelsPage() {
   if (!fc) {
     return (
       <Page>
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Yrbl title={__('List Not Found')} />
         </div>
       </Page>
@@ -46,7 +47,7 @@ function FeaturedChannelsPage() {
   if (fetchingCreatorSettings) {
     return (
       <Page>
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       </Page>

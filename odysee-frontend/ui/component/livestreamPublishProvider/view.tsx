@@ -9,6 +9,7 @@ import {
 } from 'contexts/livestreamPublish';
 import type { AudioMixer } from 'util/audioMixer';
 import type { VideoSource, AudioSource } from 'component/livestreamSourceSelector/view';
+import { LIVESTREAM_STUDIO_CLASSES } from 'component/livestreamStudio/classes';
 
 const LivestreamStudio = React.lazy(() => import('component/livestreamStudio'));
 
@@ -42,7 +43,7 @@ export default function LivestreamPublishProvider({ children }: Props) {
   const studioHostRef = React.useRef<HTMLDivElement | null>(null);
   if (!studioHostRef.current && typeof document !== 'undefined') {
     studioHostRef.current = document.createElement('div');
-    studioHostRef.current.className = 'livestream-studio-portal-host';
+    studioHostRef.current.className = LIVESTREAM_STUDIO_CLASSES.portalHost;
   }
 
   React.useEffect(() => {

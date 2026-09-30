@@ -1,6 +1,5 @@
 import * as ICONS from 'constants/icons';
 import * as React from 'react';
-import classnames from 'classnames';
 import Icon from 'component/common/icon';
 import FilePrice from 'component/filePrice';
 import VideoDuration from 'component/videoDuration';
@@ -20,6 +19,7 @@ import { selectIsActiveLivestreamForUri, selectViewersForId } from 'redux/select
 import { makeSelectFilePartlyDownloaded } from 'redux/selectors/file_info';
 import { selectCollectionHasEditsForId } from 'redux/selectors/collections';
 import { claimContainsTag } from 'util/claim';
+import { CLAIM_PREVIEW_OVERLAY_PROPERTIES_CLASS, PREVIEW_OVERLAY_VIEWER_COUNT_CLASS } from './classes';
 type Props = {
   uri: string;
   pending?: boolean;
@@ -53,27 +53,19 @@ function PreviewOverlayProperties(props: Props) {
 
   if (pending && isUnlisted) {
     return (
-      <div
-        className={classnames('claim-preview__overlay-properties', {
-          '.claim-preview__overlay-properties--small': small,
-        })}
-      >
+      <div className={CLAIM_PREVIEW_OVERLAY_PROPERTIES_CLASS} data-claim-preview-overlay-properties>
         {isUnlisted && <Icon icon={ICONS.COPY_LINK} size={13} />}
       </div>
     );
   }
 
   return (
-    <div
-      className={classnames('claim-preview__overlay-properties', {
-        '.claim-preview__overlay-properties--small': small,
-      })}
-    >
+    <div className={CLAIM_PREVIEW_OVERLAY_PROPERTIES_CLASS} data-claim-preview-overlay-properties>
       {isLivestreamActive ? (
         Number.isInteger(livestreamViewerCount) ? (
           <>
             <Icon icon={ICONS.LIVESTREAM_MONOCHROME} />
-            <span className="livestream__viewer-count">
+            <span className={PREVIEW_OVERLAY_VIEWER_COUNT_CLASS}>
               {livestreamViewerCount} <Icon icon={ICONS.EYE} />
             </span>
           </>
@@ -107,7 +99,7 @@ function PreviewOverlayProperties(props: Props) {
             <>
               <Icon icon={ICONS.LIVESTREAM_MONOCHROME} />
               {isLivestreamScheduled && (
-                <span className="livestream__viewer-count">
+                <span className={PREVIEW_OVERLAY_VIEWER_COUNT_CLASS}>
                   <LivestreamDateTime uri={uri} />
                 </span>
               )}

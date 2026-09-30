@@ -7,9 +7,13 @@ import { selectClaimForUri, selectIsStreamPlaceholderForUri, selectIsUriUnlisted
 import { selectMyReactionForUri, selectLikeCountForUri, selectDislikeCountForUri } from 'redux/selectors/reactions';
 import { doFetchReactions, doReactionLike, doReactionDislike } from 'redux/actions/reactions';
 import { doOpenModal } from 'redux/actions/app';
-import './style.scss';
 import MobileActions from '../shortsMobileActions';
 import { fullscreenElement as getFullscreenElement } from 'util/full-screen';
+import {
+  SWIPE_NAVIGATION_OVERLAY_CLASS,
+  SWIPE_NAVIGATION_OVERLAY_ENABLED_CLASS,
+  SWIPE_NAVIGATION_PANEL_OPEN_CLASS,
+} from '../classes';
 
 const LIVE_REACTION_FETCH_MS = 1000 * 45;
 type Props = {
@@ -186,7 +190,7 @@ const SwipeNavigationPortal = React.memo<Props>(
             if (
               link &&
               link.closest(
-                '.shorts-viewer__content-info, .shorts-page__view-toggle--overlay, .button--play, .shorts-page__navigation, .odysee-mobile-controls__top'
+                '.shorts-viewer__content-info, .shorts-page__view-toggle--overlay, .button-surface--play, .shorts-page__navigation, .odysee-mobile-controls__top'
               )
             ) {
               if (link instanceof HTMLElement) link.click();
@@ -208,9 +212,9 @@ const SwipeNavigationPortal = React.memo<Props>(
           handlePlayPause();
         }}
         ref={overlayRef}
-        className={classnames('swipe-navigation-overlay', className, {
-          'swipe-navigation-overlay--enabled': isEnabled,
-          'shorts__viewer--panel-open': sidePanelOpen,
+        className={classnames(SWIPE_NAVIGATION_OVERLAY_CLASS, className, {
+          [SWIPE_NAVIGATION_OVERLAY_ENABLED_CLASS]: isEnabled,
+          [SWIPE_NAVIGATION_PANEL_OPEN_CLASS]: sidePanelOpen,
         })}
       >
         <MobileActions

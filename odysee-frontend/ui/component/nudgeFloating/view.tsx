@@ -4,6 +4,7 @@ import usePersistedState from 'effects/use-persisted-state';
 import Button from 'component/button';
 import { useAppSelector } from 'redux/hooks';
 import { selectUser } from 'redux/selectors/user';
+import { NUDGE_CLASSES as C } from './classes';
 type Props = {
   name: string;
   text: string;
@@ -21,9 +22,9 @@ export default function NudgeFloating(props: Props) {
   }, [emailVerified, nudgeAcknowledged]);
   return (
     showNudge && (
-      <div className="nudge">
-        <div className="nudge__wrapper">
-          <span className="nudge__text">{text}</span>
+      <div className={C.root}>
+        <div className={C.wrapper}>
+          <span className={C.text}>{text}</span>
           <Button
             className="nudge__close"
             button="close"

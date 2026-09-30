@@ -14,13 +14,14 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doOpenModal } from 'redux/actions/app';
 import { doDeleteChannelSection } from 'redux/actions/comments';
 import { selectClaimIsMineForId } from 'redux/selectors/claims';
-import './style.scss';
+import { CHANNEL_SECTION_ITEM_CLASS } from './classes';
 
 type Props = {
   id?: string;
   title?: string;
   uris: Array<string>;
   channelId: ClaimId;
+  sectionListMenu?: boolean;
 };
 
 const ContextMenuItem = (props: { label: string; icon: string; onSelect: any }) => (
@@ -31,7 +32,7 @@ const ContextMenuItem = (props: { label: string; icon: string; onSelect: any }) 
 );
 
 export default function Section(props: Props) {
-  const { id, title, uris, channelId } = props;
+  const { id, title, uris, channelId, sectionListMenu } = props;
   const dispatch = useAppDispatch();
   const isChannelMine = useAppSelector((state) => selectClaimIsMineForId(state, channelId));
   const navigate = useNavigate();
@@ -42,8 +43,18 @@ export default function Section(props: Props) {
 
   const ContextMenu = (props: {}) => (
     <Menu>
-      <MenuButton className="menu__button">
-        <Icon size={18} icon={ICONS.MORE_VERTICAL} />
+      <MenuButton
+        className={classnames('menu__button', {
+          'tw:group-hover/section:opacity-100': !sectionListMenu,
+          'tw:group tw:[transform:rotate(0deg)] tw:[transition:transform_0.4s] tw:aria-expanded:rounded-[50%] tw:aria-expanded:bg-[var(--color-header-button)] tw:aria-expanded:opacity-100 tw:aria-expanded:[transform:rotate(90deg)]':
+            sectionListMenu,
+        })}
+      >
+        <Icon
+          className={classnames({ 'tw:group-aria-expanded:stroke-app-primary': sectionListMenu })}
+          size={18}
+          icon={ICONS.MORE_VERTICAL}
+        />
       </MenuButton>
 
       <MenuList className="menu__list">
@@ -98,18 +109,20 @@ export default function Section(props: Props) {
   // **************************************************************************
   // **************************************************************************
   return (
-    <div className="channel-section-card">
-      <div className="channel-section-card__header">
-        <div className="channel-section-card__title">{title}</div>
-        <div className="channel-section-card__menu">{isChannelMine && <ContextMenu />}</div>
+    <div className="tw:group/section tw:mt-app-l tw:w-full tw:rounded-app">
+      <div className="tw:mb-app-s tw:flex tw:items-center tw:justify-between tw:border-b tw:border-b-app-border tw:pb-app-xs tw:text-app-large">
+        <div className="tw:mr-app-l tw:flex tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap">{title}</div>
+        <div className={classnames('tw:px-app-s tw:leading-none', { 'tw:p-[unset]': sectionListMenu })}>
+          {isChannelMine && <ContextMenu />}
+        </div>
       </div>
-      <div className="channel-section-card__content">
-        <div className="channel-section-card__item-row">
-          <div className={classnames('channel-section-card__item-list')}>
+      <div>
+        <div className="tw:flex tw:justify-between">
+          <div className="tw:mb-app-l tw:grid tw:w-full tw:grid-cols-[repeat(auto-fill,minmax(calc(100%/9),1fr))] tw:gap-app-s tw:upto-medium:grid-cols-[repeat(auto-fill,minmax(calc(100%/7),1fr))] tw:upto-small:grid-cols-[repeat(auto-fill,minmax(calc(100%/4),1fr))]">
             {uris.map((uri) => (
               <div
                 key={uri}
-                className="channel-section-card__item"
+                className={CHANNEL_SECTION_ITEM_CLASS}
                 onClick={() => navigate(formatLbryUrlForWeb(uri) + '?view=home')}
               >
                 <ChannelThumbnail uri={uri} />

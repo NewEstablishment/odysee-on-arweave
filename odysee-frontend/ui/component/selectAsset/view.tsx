@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import { THUMBNAIL_CDN_SIZE_LIMIT_BYTES } from 'config';
 import FileSelector from 'component/common/file-selector';
@@ -10,8 +11,7 @@ import Icon from 'component/common/icon';
 import ReactCrop, { centerCrop, makeAspectCrop, Crop, PixelCrop } from 'react-image-crop';
 import * as ICONS from 'constants/icons';
 import uploadThumbnail from 'services/thumbnailUpload';
-import 'react-image-crop/src/ReactCrop.scss';
-import './style.scss';
+import { SELECT_ASSET_CLASSES } from './classes';
 const accept = '.png, .jpg, .jpeg, .gif, .webp';
 const STATUS = {
   READY: 'READY',
@@ -256,9 +256,9 @@ function SelectAsset(props: Props) {
 
   const ChannelPreview = () => {
     return (
-      <div className="channel-preview__wrapper">
+      <div className="tw:relative tw:mt-app-s tw:h-[160px] tw:w-full tw:select-none tw:overflow-hidden tw:rounded-app tw:border-2 tw:border-app-border tw:bg-app-background">
         <div
-          className="channel-preview__header"
+          className="tw:aspect-[32/5] tw:w-full tw:bg-[length:100%] tw:bg-no-repeat"
           style={{
             backgroundImage:
               'url(' +
@@ -266,40 +266,40 @@ function SelectAsset(props: Props) {
               ')',
           }}
         >
-          {assetName === 'Cover Image' && fileSelected && !isAnimated && <canvas ref={previewCanvasRef} />}
-        </div>
-        <div className="channel-preview__tabs">
-          <div>
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-        </div>
-        <div className="channel-preview__thumbnail">
-          {otherValue && assetName === 'Cover Image' ? (
-            <img src={String(otherValue)} />
-          ) : !isAnimated ? (
-            <canvas ref={previewCanvasRef} />
-          ) : (
-            <img src={String(currentPlaceholder)} />
+          {assetName === 'Cover Image' && fileSelected && !isAnimated && (
+            <canvas className="tw:max-w-full" ref={previewCanvasRef} />
           )}
         </div>
-        <div className="channel-preview__grid">
+        <div className="tw:relative tw:h-[16px] tw:w-full tw:[border-bottom:1px_solid_var(--color-header-button)] tw:bg-[var(--color-header-background)]">
+          <div className="tw:absolute tw:top-[5px] tw:left-[calc(20%+50px)] tw:flex tw:gap-app-xxxs tw:upto-small:top-[6px]">
+            {Array.from({ length: 8 }, (_, index) => (
+              <span
+                className="tw:inline-block tw:h-[6px] tw:w-[24px] tw:rounded-app tw:bg-white tw:opacity-60 tw:upto-small:h-[4px] tw:upto-small:w-[12px]"
+                key={index}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="tw:absolute tw:top-[46px] tw:left-[20%] tw:size-[42px] tw:rounded-[50%] tw:bg-[var(--color-header-button)] tw:[box-shadow:0_1px_2px_0_black,0_2px_5px_0_rgb(0_0_0/60%)] tw:upto-small:top-[20px]">
+          {otherValue && assetName === 'Cover Image' ? (
+            <img className="tw:size-full tw:rounded-[50%]" src={String(otherValue)} />
+          ) : !isAnimated ? (
+            <canvas className="tw:size-full tw:rounded-[50%]" ref={previewCanvasRef} />
+          ) : (
+            <img className="tw:size-full tw:rounded-[50%]" src={String(currentPlaceholder)} />
+          )}
+        </div>
+        <div className="tw:mx-[20%] tw:mt-[10px] tw:grid tw:h-full tw:w-[60%] tw:grid-cols-[repeat(6,1fr)] tw:gap-[10px]">
           {Array.from(Array(6), (e, i) => {
             return (
-              <div className="channel-preview__grid-tile" key={i}>
-                <div />
-                <div />
-                <div />
-                <div />
-                <div>
-                  <div />
-                  <div />
+              <div key={i}>
+                <div className="tw:h-[22px] tw:w-full tw:rounded-[3px] tw:bg-[var(--color-header-button)]" />
+                <div className="tw:mt-[2px] tw:h-[2px] tw:w-full tw:rounded-[3px] tw:bg-app-text tw:opacity-40" />
+                <div className="tw:mt-[2px] tw:h-[2px] tw:w-[90%] tw:rounded-[3px] tw:bg-app-text tw:opacity-40" />
+                <div className="tw:mb-[5px] tw:inline-block tw:size-[10px] tw:rounded-[50%] tw:bg-[var(--color-header-button)]" />
+                <div className="tw:ml-[2px] tw:inline-block tw:w-[calc(100%-12px)]">
+                  <div className="tw:h-[2px] tw:w-full tw:rounded-[3px] tw:!bg-app-text tw:opacity-20" />
+                  <div className="tw:mt-[2px] tw:mb-[7px] tw:h-[2px] tw:w-[90%] tw:rounded-[3px] tw:bg-app-text tw:opacity-20" />
                 </div>
               </div>
             );
@@ -311,9 +311,9 @@ function SelectAsset(props: Props) {
 
   const formBody = (
     <>
-      <div className="modal_header">
+      <div className="tw:mt-[calc(var(--spacing-l)*-1)] tw:mr-[calc(var(--spacing-l)*-1)] tw:mb-app-m tw:ml-[calc(var(--spacing-l)*-1)] tw:flex tw:w-[calc(var(--modal-width)-4px)] tw:items-center tw:rounded-[var(--border-radius)_var(--border-radius)_0_0] tw:bg-app-text-inverse tw:p-app-s tw:[&_svg]:mr-app-s tw:upto-small:mt-[calc(var(--spacing-s)*-1)] tw:upto-small:mr-[calc(var(--spacing-s)*-1)] tw:upto-small:ml-[calc(var(--spacing-s)*-1)] tw:upto-small:p-[22px]">
         <Icon icon={ICONS.IMAGE} />
-        <h2 className="modal_title">
+        <h2 className="modal_title tw:font-black tw:leading-[1rem]">
           {title ||
             __('Choose %asset%', {
               asset: __(assetName),
@@ -321,7 +321,7 @@ function SelectAsset(props: Props) {
         </h2>
       </div>
       <fieldset-section>
-        {uploadErrorMsg && <div className="error__text">{uploadErrorMsg}</div>}
+        {uploadErrorMsg && <div className={ERROR_TEXT_CLASS}>{uploadErrorMsg}</div>}
         {useUrl ? (
           <>
             <FormField
@@ -337,7 +337,7 @@ function SelectAsset(props: Props) {
               }}
             />
             {assetName === 'Image' && (
-              <div className="image-upload-wrapper">
+              <div>
                 <FormField
                   type={'text'}
                   name={'thumbnail'}
@@ -348,10 +348,8 @@ function SelectAsset(props: Props) {
                     setImageTitle(e.target.value);
                   }}
                 />
-                <div className="preview-image__wrapper">
-                  <div className="preview-image__container">
-                    {url ? <img className="preview-image" src={String(url)} /> : <Icon icon={ICONS.IMAGE} />}
-                  </div>
+                <div>
+                  <div>{url ? <img src={String(url)} /> : <Icon icon={ICONS.IMAGE} />}</div>
                 </div>
               </div>
             )}
@@ -387,7 +385,7 @@ function SelectAsset(props: Props) {
             />
 
             {assetName === 'Image' && (
-              <div className="image-upload__wrapper">
+              <div className="tw:mt-app-s">
                 <FormField
                   type={'text'}
                   name={'thumbnail'}
@@ -398,10 +396,13 @@ function SelectAsset(props: Props) {
                     setImageTitle(e.target.value);
                   }}
                 />
-                <div className="preview-image__wrapper">
-                  <div className="preview-image__container">
+                <div className="tw:mt-app-s tw:min-h-[40px] tw:w-full tw:rounded-app tw:bg-[var(--color-header-button)] tw:p-app-s tw:text-center">
+                  <div className={SELECT_ASSET_CLASSES.preview}>
                     {currentPlaceholder ? (
-                      <img className="preview-image" src={String(currentPlaceholder)} />
+                      <img
+                        className="tw:mb-app-xs tw:max-w-[50%] tw:rounded-app tw:border-2 tw:border-app-border"
+                        src={String(currentPlaceholder)}
+                      />
                     ) : (
                       <Icon icon={ICONS.IMAGE} />
                     )}
@@ -412,7 +413,7 @@ function SelectAsset(props: Props) {
             {(assetName === 'Cover Image' || assetName === 'Thumbnail') && (
               <>
                 {fileSelected && !isAnimated && (
-                  <div className="cropCanvas">
+                  <div className="tw:mt-app-s tw:flex tw:max-h-[350px] tw:items-center tw:justify-center tw:rounded-app tw:bg-app-text-inverse tw:p-app-xs tw:[line-height:0] tw:[outline:2px_solid_var(--color-border)]">
                     <ReactCrop
                       crop={crop}
                       onChange={(c: Crop) => setCrop(c)}
@@ -422,6 +423,7 @@ function SelectAsset(props: Props) {
                       minWidth={assetName === 'Cover Image' ? (null as any) : 160}
                     >
                       <img
+                        className="tw:max-h-[350px] tw:max-w-full tw:p-0"
                         ref={imgRef}
                         src={URL.createObjectURL(
                           new Blob([fileSelected], {
@@ -440,7 +442,7 @@ function SelectAsset(props: Props) {
         )}
       </fieldset-section>
 
-      <div className="section__actions upload-actions">
+      <div className={SELECT_ASSET_CLASSES.actions}>
         <FormField
           className="toggle-upload-checkbox"
           name="toggle-upload"

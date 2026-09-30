@@ -5,6 +5,7 @@ import FileTitleSection from 'component/fileTitleSection';
 import Empty from 'component/common/empty';
 import Button from 'component/button';
 import * as ICONS from 'constants/icons';
+import { SHORTS_SIDE_PANEL_CLASSES } from './classes';
 
 const CommentsList = lazyImport(() => import('component/commentsList'));
 
@@ -61,10 +62,14 @@ const ShortsSidePanel = React.memo<Props>(
     }, [isOpen, isComments, uri, linkedCommentId, threadCommentId]);
 
     const panel = (
-      <div className={`shorts-page__side-panel ${isOpen ? 'shorts-page__side-panel--open' : ''}`}>
-        <div className="shorts-page__close-button-container">
+      <div
+        className={`${SHORTS_SIDE_PANEL_CLASSES.root} ${isOpen ? SHORTS_SIDE_PANEL_CLASSES.open : ''}`}
+        data-shorts-side-panel
+        data-shorts-side-panel-open={isOpen ? '' : undefined}
+      >
+        <div className={SHORTS_SIDE_PANEL_CLASSES.closeButtonContainer}>
           <Button
-            className="shorts-page__close-button"
+            className={SHORTS_SIDE_PANEL_CLASSES.closeButton}
             onClick={onClose}
             icon={ICONS.REMOVE}
             iconSize={20}
@@ -72,11 +77,11 @@ const ShortsSidePanel = React.memo<Props>(
           />
         </div>
 
-        <div ref={contentRef} className="shorts-page__side-panel-content">
+        <div ref={contentRef} className={SHORTS_SIDE_PANEL_CLASSES.content}>
           <FileTitleSection uri={uri} accessStatus={accessStatus} />
 
-          <div ref={commentsRef} className="shorts-page__side-panel-comments">
-            <h2 className="shorts-page__side-panel-comments-title">{__('Comments')}</h2>
+          <div ref={commentsRef} className={SHORTS_SIDE_PANEL_CLASSES.comments}>
+            <h2 className={SHORTS_SIDE_PANEL_CLASSES.commentsTitle}>{__('Comments')}</h2>
             {isOpen &&
               contentUnlocked &&
               (commentsDisabled ? (

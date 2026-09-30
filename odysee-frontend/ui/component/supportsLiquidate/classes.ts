@@ -1,0 +1,1 @@
+export const SUPPORTS_RANGE_LABEL_CLASS = String.raw`range__label tw:mb-app-m tw:flex tw:w-full tw:justify-between tw:[&>*]:w-[33%] tw:[&>*]:text-center tw:[&>*:first-of-type]:text-left tw:[&>*:last-of-type]:text-right`;

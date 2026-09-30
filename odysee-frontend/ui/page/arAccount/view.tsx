@@ -21,7 +21,7 @@ import { doArDisconnect, doArUpdateBalance } from 'redux/actions/arwallet';
 import BuyAr from './buyAr';
 import Overview from './overview';
 import ArWallets from './arWallets';
-import './style.scss';
+import { AR_ACCOUNT_PAGE_CLASSES } from './classes';
 
 const TAB_QUERY = 'tab';
 const TABS = {
@@ -76,7 +76,7 @@ function ArAccountPage() {
         <Symbol token="usd" amount={balance.ar * exchangeRate.ar} precision={2} />
         <div
           onClick={() => updateArBalance(() => dispatch(doArUpdateBalance()))}
-          className={!fetching ? `refresh-balance` : `refresh-balance refresh-balance--loading`}
+          className={`${AR_ACCOUNT_PAGE_CLASSES.refresh}${fetching ? ` ${AR_ACCOUNT_PAGE_CLASSES.refreshLoading}` : ''}`}
         >
           <Icon icon={ICONS.REFRESH} />
         </div>
@@ -109,19 +109,23 @@ function ArAccountPage() {
   }
 
   return (
-    <Page className="paymentAccountPage-wrapper main--full-width">
-      <header className="page-header" />
-      <Tabs onChange={onTabChange} index={tabIndex}>
-        <div className="tab__wrapper">
-          <TabList className="tabs__list">
-            <Tab aria-selected={tabIndex === 0} onClick={() => onTabChange(0)}>
+    <Page className={AR_ACCOUNT_PAGE_CLASSES.page}>
+      <header className={AR_ACCOUNT_PAGE_CLASSES.header} />
+      <Tabs className={AR_ACCOUNT_PAGE_CLASSES.tabs} onChange={onTabChange} index={tabIndex}>
+        <div className={AR_ACCOUNT_PAGE_CLASSES.tabWrapper}>
+          <TabList className={AR_ACCOUNT_PAGE_CLASSES.tabList}>
+            <Tab className={AR_ACCOUNT_PAGE_CLASSES.tab} aria-selected={tabIndex === 0} onClick={() => onTabChange(0)}>
               {__('Overview')}
             </Tab>
-            <Tab aria-selected={tabIndex === 1} onClick={() => onTabChange(1)}>
+            <Tab className={AR_ACCOUNT_PAGE_CLASSES.tab} aria-selected={tabIndex === 1} onClick={() => onTabChange(1)}>
               {__('Buy')}
             </Tab>
             {arweaveWallets && arweaveWallets.length > 1 ? (
-              <Tab aria-selected={tabIndex === 2} onClick={() => onTabChange(2)}>
+              <Tab
+                className={AR_ACCOUNT_PAGE_CLASSES.tab}
+                aria-selected={tabIndex === 2}
+                onClick={() => onTabChange(2)}
+              >
                 {__('My Wallets')}
               </Tab>
             ) : (
@@ -130,7 +134,7 @@ function ArAccountPage() {
           </TabList>
         </div>
         <TabPanels>
-          <TabPanel>
+          <TabPanel className={AR_ACCOUNT_PAGE_CLASSES.tabPanel}>
             <>
               <Overview
                 cardHeader={cardHeader}
@@ -139,27 +143,27 @@ function ArAccountPage() {
                 activeArStatus={activeArStatus}
               />
               {activeArStatus !== 'connected' && (
-                <div className="wallet">
+                <div className={AR_ACCOUNT_PAGE_CLASSES.wallet}>
                   <WalletStatus />
                 </div>
               )}
             </>
           </TabPanel>
-          <TabPanel>
+          <TabPanel className={AR_ACCOUNT_PAGE_CLASSES.tabPanel}>
             <>
               <BuyAr cardHeader={cardHeader} wallet={activeWallet} activeArStatus={activeArStatus} />
               {activeArStatus !== 'connected' && (
-                <div className="wallet">
+                <div className={AR_ACCOUNT_PAGE_CLASSES.wallet}>
                   <WalletStatus />
                 </div>
               )}
             </>
           </TabPanel>
-          <TabPanel>
+          <TabPanel className={AR_ACCOUNT_PAGE_CLASSES.tabPanel}>
             <>
               <ArWallets cardHeader={cardHeader} activeArStatus={activeArStatus} arweaveWallets={arweaveWallets} />
               {activeArStatus !== 'connected' && (
-                <div className="wallet">
+                <div className={AR_ACCOUNT_PAGE_CLASSES.wallet}>
                   <WalletStatus />
                 </div>
               )}

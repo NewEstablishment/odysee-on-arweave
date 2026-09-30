@@ -6,6 +6,15 @@ import classnames from 'classnames';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doCollectionEdit } from 'redux/actions/collections';
 import { selectIndexForUrlInCollectionForId, selectUrlsForCollectionId } from 'redux/selectors/collections';
+import {
+  COLLECTION_EDIT_BUTTONS_CLASS,
+  COLLECTION_EDIT_GROUP_CLASS,
+  COLLECTION_MANAGE_BUTTON_CLASS,
+  COLLECTION_MANAGE_DELETE_CANCEL_CLASS,
+  COLLECTION_MANAGE_DELETE_CLASS,
+  COLLECTION_MANAGE_DELETE_CONFIRM_CLASS,
+  COLLECTION_MANAGE_DRAG_CLASS,
+} from './classes';
 
 type Props = {
   uri?: string;
@@ -62,15 +71,15 @@ export default function CollectionButtons(props: Props) {
 
   return (
     <div
-      className="collection-preview__edit-buttons"
+      className={COLLECTION_EDIT_BUTTONS_CLASS}
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
       }}
     >
-      <div className="collection-preview__edit-group" {...dragHandleProps}>
+      <div className={COLLECTION_EDIT_GROUP_CLASS} {...dragHandleProps}>
         <div
-          className="button-collection-manage button-collection-drag top-left bottom-left"
+          className={COLLECTION_MANAGE_DRAG_CLASS}
           onMouseEnter={doDisablePlayerDrag ? () => doDisablePlayerDrag(true) : undefined}
           onMouseLeave={doDisablePlayerDrag ? () => doDisablePlayerDrag(false) : undefined}
         >
@@ -78,7 +87,7 @@ export default function CollectionButtons(props: Props) {
         </div>
       </div>
 
-      <div className="collection-preview__edit-group">
+      <div className={COLLECTION_EDIT_GROUP_CLASS}>
         <OrderButton
           title={__('Move Top')}
           icon={ICONS.UP_TOP}
@@ -108,7 +117,7 @@ export default function CollectionButtons(props: Props) {
         />
       </div>
 
-      <div className="collection-preview__edit-group">
+      <div className={COLLECTION_EDIT_GROUP_CLASS}>
         <OrderButton
           title={__('Move Up')}
           icon={ICONS.UP}
@@ -139,25 +148,25 @@ export default function CollectionButtons(props: Props) {
       </div>
 
       {!confirmDelete ? (
-        <div className="collection-preview__edit-group collection-preview__delete ">
+        <div className={COLLECTION_EDIT_GROUP_CLASS}>
           <Button
-            className="button-collection-manage button-collection-delete top-right bottom-right"
+            className={COLLECTION_MANAGE_DELETE_CLASS}
             icon={ICONS.DELETE}
             title={__('Remove')}
             onClick={() => setConfirmDelete(true)}
           />
         </div>
       ) : (
-        <div className="collection-preview__edit-group collection-preview__delete">
+        <div className={COLLECTION_EDIT_GROUP_CLASS}>
           <Button
-            className="button-collection-manage button-collection-delete-cancel top-right"
+            className={COLLECTION_MANAGE_DELETE_CANCEL_CLASS}
             icon={ICONS.REMOVE}
             title={__('Cancel')}
             onClick={() => setConfirmDelete(false)}
           />
 
           <OrderButton
-            className="button-collection-delete-confirm bottom-right"
+            className={COLLECTION_MANAGE_DELETE_CONFIRM_CLASS}
             title={__('Remove')}
             icon={ICONS.DELETE}
             onClick={() => {
@@ -192,5 +201,5 @@ type ButtonProps = {
 
 const OrderButton = (props: ButtonProps) => {
   const { className, ...buttonProps } = props;
-  return <Button className={classnames('button-collection-manage', className)} {...buttonProps} />;
+  return <Button className={classnames(COLLECTION_MANAGE_BUTTON_CLASS, className)} {...buttonProps} />;
 };

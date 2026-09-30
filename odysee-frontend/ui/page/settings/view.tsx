@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as PAGES from 'constants/pages';
 import * as ICONS from 'constants/icons';
 import * as React from 'react';
@@ -17,6 +18,8 @@ import { doEnterSettingsPage, doExitSettingsPage } from 'redux/actions/settings'
 import { selectDaemonSettings, selectLanguage } from 'redux/selectors/settings';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { selectUserAuthenticated } from 'redux/selectors/user';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 export default function SettingsPage() {
   const dispatch = useAppDispatch();
@@ -46,7 +49,7 @@ export default function SettingsPage() {
         }}
         className="card-stack"
       >
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner text={__('Please wait a bit, we are still getting your account ready.')} />
         </div>
       </Page>
@@ -68,13 +71,13 @@ export default function SettingsPage() {
       {!isAuthenticated && IS_WEB && (
         <>
           <SettingUnauthenticated />
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Yrbl
               type="happy"
               title={__('Sign up for full control')}
               subtitle={__('Unlock new buttons that change things.')}
               actions={
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   <Button button="primary" icon={ICONS.SIGN_UP} label={__('Sign Up')} navigate={`/$/${PAGES.AUTH}`} />
                 </div>
               }
@@ -84,13 +87,13 @@ export default function SettingsPage() {
       )}
 
       {!IS_WEB && noDaemonSettings ? (
-        <section className="card card--section">
-          <div className="card__title card__title--deprecated">{__('Failed to load settings.')}</div>
+        <section className={`card ${CARD_CLASSES.section}`}>
+          <div className={`card__title ${CARD_CLASSES.titleDeprecated}`}>{__('Failed to load settings.')}</div>
         </section>
       ) : (
         <div
           className={classnames('card-stack', {
-            'card--disabled': IS_WEB && !isAuthenticated,
+            [CARD_CLASSES.disabled]: IS_WEB && !isAuthenticated,
           })}
         >
           <SettingAppearance />

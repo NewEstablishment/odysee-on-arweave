@@ -19,5 +19,12 @@ const skipNavigation = (e) => {
 };
 
 export default function SkipNavigationButton() {
-  return <Button className={'skip-button'} onClick={skipNavigation} label={__('Skip Navigation')} button={'link'} />;
+  return (
+    <Button
+      className="tw:absolute tw:top-0 tw:left-0 tw:mr-app-l tw:h-0 tw:w-0 tw:overflow-hidden tw:opacity-0 tw:focus:relative tw:focus:h-auto tw:focus:w-auto tw:focus:overflow-visible tw:focus:opacity-100"
+      onClick={skipNavigation}
+      label={__('Skip Navigation')}
+      button="link"
+    />
+  );
 }

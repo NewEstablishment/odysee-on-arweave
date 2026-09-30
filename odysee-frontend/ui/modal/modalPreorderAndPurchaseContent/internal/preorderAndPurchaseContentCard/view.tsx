@@ -15,6 +15,7 @@ import I18nMessage from 'component/i18nMessage';
 import { ModalContext } from 'contexts/modal';
 import { useArStatus } from 'effects/use-ar-status';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { PREORDER_PURCHASE_CLASSES } from './classes';
 import {
   selectClaimForUri,
   selectPreorderTagForUri,
@@ -36,7 +37,7 @@ import { doCheckIfPurchasedClaimId } from 'redux/actions/payments';
 import { doPurchaseClaimForUri } from 'redux/actions/wallet';
 import { selectPreferredCurrency } from 'redux/selectors/settings';
 import { selectArweaveBalance, selectArweaveExchangeRates } from 'redux/selectors/arwallet';
-import './style.scss';
+import { HELP_CLASS } from 'component/common/help-classes';
 type RentalTagParams = {
   price: number;
   expirationTimeInSeconds: number;
@@ -186,15 +187,14 @@ export default function PreorderAndPurchaseContentCard(props: Props) {
     <Form onSubmit={handleSubmit}>
       <Card
         title={__(STRINGS[transactionType].title)}
-        className="fiat-order"
         actions={
-          <div className="fiat-order__actions">
-            <div className="fiat-order__claim-preview">
+          <div className={PREORDER_PURCHASE_CLASSES.actions}>
+            <div className={PREORDER_PURCHASE_CLASSES.claimPreview}>
               <ClaimPreview uri={uri} hideMenu hideActions nonClickable type="small" />
             </div>
             {/* confirm purchase - needs to check balance and disable */}
             {!canReceiveTips ? (
-              <div className="monetization-disabled">
+              <div className="tw:rounded-app tw:border tw:border-app-text-error tw:bg-[rgba(218,4,4,0.1)] tw:p-app-s tw:text-center">
                 USD Monetization isn't available. It may not be set up yet or has been disabled by the creator.
               </div>
             ) : activeArStatus !== 'connected' ? (
@@ -221,7 +221,7 @@ export default function PreorderAndPurchaseContentCard(props: Props) {
                 onSdkPurchaseClick={handleSdkPurchase}
               />
             )}
-            <p className="help">
+            <p className={HELP_CLASS}>
               <I18nMessage
                 tokens={{
                   paid_content_terms_and_conditions: (
@@ -245,8 +245,10 @@ export default function PreorderAndPurchaseContentCard(props: Props) {
 }
 
 const SubmitArea = (props: any) => (
-  <div className="handle-submit-area">
+  <div className="tw:flex tw:gap-app-s">
     <Button
+      className="tw:mt-app-s tw:!mr-[unset] tw:flex-1"
+      contentClassName="tw:justify-center"
       button="primary"
       onClick={() => props.handleSubmit()}
       label={__(props.label, {
@@ -260,6 +262,8 @@ const SubmitArea = (props: any) => (
 
     {props.tags.purchaseTag && props.tags.rentalTag && (
       <Button
+        className="tw:mt-app-s tw:!mr-[unset] tw:flex-1"
+        contentClassName="tw:justify-center"
         button="primary"
         onClick={() => props.handleSubmit('rent')}
         label={__(props.rentLabel, {
@@ -274,6 +278,8 @@ const SubmitArea = (props: any) => (
 
     {props.pendingSdkPayment && (
       <Button
+        className="tw:mt-app-s tw:!mr-[unset] tw:flex-1"
+        contentClassName="tw:justify-center"
         button="primary"
         requiresAuth
         onClick={props.onSdkPurchaseClick}

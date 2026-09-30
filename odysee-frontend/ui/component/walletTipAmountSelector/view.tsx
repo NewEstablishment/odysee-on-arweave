@@ -1,9 +1,14 @@
 import React from 'react';
-import 'scss/component/_wallet-tip-selector.scss';
+import { WALLET_TIP_AMOUNT_CLASSES } from './classes';
 import { FormField } from 'component/common/form';
 import { MINIMUM_PUBLISH_BID } from 'constants/claim';
 import { useIsMobile } from 'effects/use-screensize';
 import Button from 'component/button';
+import {
+  BUTTON_TOGGLE_ACTIVE_CLASS,
+  BUTTON_TOGGLE_CLASS,
+  BUTTON_TOGGLE_EXPAND_MOBILE_CLASS,
+} from 'component/button/classes';
 import classnames from 'classnames';
 import usePersistedState from 'effects/use-persisted-state';
 import WalletSpendableBalanceHelp from 'component/walletSpendableBalanceHelp';
@@ -14,6 +19,7 @@ import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectArweaveTipDataForId, selectCanReceiveFiatTipsForUri } from 'redux/selectors/payments';
 import { doTipAccountCheckForUri } from 'redux/actions/payments';
 import { getChannelIdFromClaim } from 'util/claim';
+import { HELP_CLASS } from 'component/common/help-classes';
 const DEFAULT_TIP_AMOUNTS = [1, 5, 25, 100];
 type Props = {
   uri: string;
@@ -151,7 +157,7 @@ function WalletTipAmountSelector(props: Props) {
   if (!claim) return null;
 
   const getHelpMessage = (helpMessage: any, customClassName?: string) => (
-    <div className={classnames('help', customClassName)}>{helpMessage}</div>
+    <div className={classnames(HELP_CLASS, customClassName)}>{helpMessage}</div>
   );
 
   return (
@@ -163,8 +169,8 @@ function WalletTipAmountSelector(props: Props) {
               key={defaultAmount}
               disabled={shouldDisableAmountSelector(defaultAmount)}
               button="alt"
-              className={classnames('button-toggle button-toggle--expandformobile', {
-                'button-toggle--active':
+              className={classnames(BUTTON_TOGGLE_CLASS, BUTTON_TOGGLE_EXPAND_MOBILE_CLASS, {
+                [BUTTON_TOGGLE_ACTIVE_CLASS]:
                   convertToTwoDecimalsOrMore(defaultAmount) === convertToTwoDecimalsOrMore(amount) && !useCustomTip,
                 'button-toggle--disabled': activeTab === 'TabUSDC' && (amount > USDCBalance || USDCBalance === 0),
               })}
@@ -180,8 +186,8 @@ function WalletTipAmountSelector(props: Props) {
         <Button
           button="alt"
           disabled={shouldDisableAmountSelector(0)}
-          className={classnames('button-toggle button-toggle--expandformobile', {
-            'button-toggle--active': useCustomTip,
+          className={classnames(BUTTON_TOGGLE_CLASS, BUTTON_TOGGLE_EXPAND_MOBILE_CLASS, {
+            [BUTTON_TOGGLE_ACTIVE_CLASS]: useCustomTip,
           })}
           icon={TAB_USD}
           label={__('Custom')}
@@ -202,7 +208,7 @@ function WalletTipAmountSelector(props: Props) {
 
       {/* custom number input form */}
       {useCustomTip && (
-        <div className="walletTipSelector__input">
+        <div className={WALLET_TIP_AMOUNT_CLASSES.root}>
           <FormField
             autoFocus={!isMobile}
             name="tip-input"
@@ -212,14 +218,14 @@ function WalletTipAmountSelector(props: Props) {
             min={0}
             step="any"
             type="number"
-            className={activeTab === 'TabUSD' ? 'usd-tip' : ''}
+            className={activeTab === 'TabUSD' ? WALLET_TIP_AMOUNT_CLASSES.usdInput : ''}
             prefix={activeTab === 'TabUSD' ? '$' : null}
             placeholder={'1.23'}
             value={amount}
             onChange={(event) => handleCustomPriceChange(event.target.value)}
           />{' '}
           {activeTab === TAB_USD ? (
-            <span className={'walletTipSelector__input-conversion help'}>({amountInArEstimated} AR)</span>
+            <span className={`${HELP_CLASS} tw:!m-0 tw:h-full`}>({amountInArEstimated} AR)</span>
           ) : (
             ''
           )}

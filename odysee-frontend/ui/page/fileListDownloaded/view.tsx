@@ -1,7 +1,9 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as ICONS from 'constants/icons';
 import React, { useState } from 'react';
 import usePersistedState from 'effects/use-persisted-state';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import ClaimList from 'component/claimList';
 import Paginate from 'component/common/paginate';
 import { PAGE_SIZE } from 'constants/claim';
@@ -12,6 +14,7 @@ import classnames from 'classnames';
 import Yrbl from 'component/yrbl';
 import { PURCHASES_PAGE_SIZE } from 'page/library/view';
 import Spinner from 'component/spinner';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppSelector } from 'redux/hooks';
 import {
@@ -24,6 +27,7 @@ import {
   selectIsFetchingMyPurchases,
   selectMyPurchasesCount,
 } from 'redux/selectors/claims';
+import { WUNDERBAR_INLINE_CLASS, WUNDERBAR_INPUT_INLINE_CLASS } from 'component/wunderbar/classes';
 
 const VIEW_DOWNLOADS = 'view_download';
 const VIEW_PURCHASES = 'view_purchases';
@@ -56,15 +60,15 @@ function FileListDownloaded() {
 
   return (
     <>
-      <div className="section__header--actions">
+      <div className={SECTION_CLASSES.headerActions}>
         {ENABLE_DOWNLOADS_TAB && (
-          <div className="section__actions--inline">
+          <div className={SECTION_CLASSES.actionsInline}>
             <Button
               icon={ICONS.LIBRARY}
               button="alt"
               label={__('Downloads')}
-              className={classnames(`button-toggle`, {
-                'button-toggle--active': viewMode === VIEW_DOWNLOADS,
+              className={classnames(BUTTON_TOGGLE_CLASS, {
+                [BUTTON_TOGGLE_ACTIVE_CLASS]: viewMode === VIEW_DOWNLOADS,
               })}
               onClick={() => setViewMode(VIEW_DOWNLOADS)}
             />
@@ -72,8 +76,8 @@ function FileListDownloaded() {
               icon={ICONS.PURCHASED}
               button="alt"
               label={__('Purchases')}
-              className={classnames(`button-toggle`, {
-                'button-toggle--active': viewMode === VIEW_PURCHASES,
+              className={classnames(BUTTON_TOGGLE_CLASS, {
+                [BUTTON_TOGGLE_ACTIVE_CLASS]: viewMode === VIEW_PURCHASES,
               })}
               onClick={() => setViewMode(VIEW_PURCHASES)}
             />
@@ -82,14 +86,16 @@ function FileListDownloaded() {
         )}
       </div>
       {IS_WEB && viewMode === VIEW_DOWNLOADS ? (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Yrbl
             title={__('Try out the app!')}
             subtitle={
-              <p className="section__subtitle">{__("Download the app to track files you've viewed and downloaded.")}</p>
+              <p className={SECTION_CLASSES.subtitle}>
+                {__("Download the app to track files you've viewed and downloaded.")}
+              </p>
             }
             actions={
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button button="primary" label={__('Get The App')} href="https://lbry.com/get" />
               </div>
             }
@@ -98,12 +104,12 @@ function FileListDownloaded() {
       ) : (
         <div>
           <ClaimList
-            header={<h1 className="section__title">{__('Purchases')}</h1>}
+            header={<h1 className={SECTION_CLASSES.title}>{__('Purchases')}</h1>}
             headerAltControls={
-              <Form onSubmit={() => {}} className="wunderbar--inline">
+              <Form onSubmit={() => {}} className={WUNDERBAR_INLINE_CLASS}>
                 <Icon icon={ICONS.SEARCH} />
                 <FormField
-                  className="wunderbar__input--inline"
+                  className={WUNDERBAR_INPUT_INLINE_CLASS}
                   onChange={handleInputChange}
                   value={query}
                   type="text"

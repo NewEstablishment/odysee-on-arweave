@@ -1,0 +1,10 @@
+@import 'tailwindcss/theme.css' reference prefix(tw);
+@reference '../tailwind-context.css';
+
+@layer utilities {
+  :where(.odysee-route-styles--publish) {
+    @tailwind utilities source(none);
+  }
+}
+
+/* Vite injects the owned utility candidate boundary for publishing routes. */

@@ -1,5 +1,8 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import * as React from 'react';
 import Button from 'component/button';
+import { FORM_FIELD_COMMENT_COUNT_CLASS } from './form-field-classes';
+
 type CountInfoProps = {
   charCount?: number;
   textAreaMaxLength?: number;
@@ -12,7 +15,7 @@ export const CountInfo = (countInfoProps: CountInfoProps) => {
   return (
     hasCharCount &&
     textAreaMaxLength !== undefined && (
-      <span className="comment__char-count-mde">{`${charCount || '0'}/${textAreaMaxLength}`}</span>
+      <span className={FORM_FIELD_COMMENT_COUNT_CLASS}>{`${charCount || '0'}/${textAreaMaxLength}`}</span>
     )
   );
 };
@@ -23,7 +26,7 @@ type QuickActionProps = {
 export const QuickAction = (quickActionProps: QuickActionProps) => {
   const { label, quickActionHandler } = quickActionProps;
   return label && quickActionHandler ? (
-    <div className="form-field__quick-action">
+    <div className="form-field__quick-action tw:text-app-xsmall">
       <Button button="link" onClick={quickActionHandler} label={label} />
     </div>
   ) : null;
@@ -35,5 +38,7 @@ type LabelProps = {
 };
 export const Label = (labelProps: LabelProps) => {
   const { name, label, errorMessage } = labelProps;
-  return <label htmlFor={name}>{errorMessage ? <span className="error__text">{errorMessage}</span> : label}</label>;
+  return (
+    <label htmlFor={name}>{errorMessage ? <span className={ERROR_TEXT_CLASS}>{errorMessage}</span> : label}</label>
+  );
 };

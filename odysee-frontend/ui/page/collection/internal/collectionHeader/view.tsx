@@ -17,7 +17,7 @@ import { useAppSelector } from 'redux/hooks';
 import { selectClaimForId } from 'redux/selectors/claims';
 import { selectCountForCollectionId } from 'redux/selectors/collections';
 import { getThumbnailCdnUrl } from 'util/thumbnail';
-import './style.scss';
+import { COLLECTION_HEADER_CLASSES } from './classes';
 type Props = {
   collection?: Collection;
   showEdit?: boolean;
@@ -55,11 +55,11 @@ const CollectionHeader = (props: Props) => {
 
   return (
     <>
-      <div className="collection-header__wrapper">
-        <div className="background__wrapper">
+      <div className={COLLECTION_HEADER_CLASSES.wrapper}>
+        <div className={COLLECTION_HEADER_CLASSES.backgroundWrapper}>
           {collection?.thumbnail?.url && (
             <div
-              className="background"
+              className={COLLECTION_HEADER_CLASSES.background}
               style={
                 backgroundImage && {
                   backgroundImage: 'url(' + backgroundImage + ')',
@@ -69,13 +69,15 @@ const CollectionHeader = (props: Props) => {
           )}
         </div>
 
-        <div className="collection-header__content">
-          <div className="collection-header__content-top">
-            <div className="collection-header__title">
+        <div className={COLLECTION_HEADER_CLASSES.content}>
+          <div className={COLLECTION_HEADER_CLASSES.contentTop}>
+            <div className={COLLECTION_HEADER_CLASSES.title}>
               <h1>{collection.title || collection.name}</h1>
-              {collection.profileName && <span className="collection__subtitle">{collection.profileName}</span>}
+              {collection.profileName && (
+                <span className={COLLECTION_HEADER_CLASSES.subtitle}>{collection.profileName}</span>
+              )}
             </div>
-            <div className="collection-header__actions">
+            <div className={COLLECTION_HEADER_CLASSES.actions}>
               <CollectionHeaderActions
                 uri={uri}
                 collectionId={collectionId}
@@ -87,11 +89,11 @@ const CollectionHeader = (props: Props) => {
             </div>
           </div>
           <div className="collection-header__text">
-            <div className="collection-header__description">
+            <div className={COLLECTION_HEADER_CLASSES.description}>
               <MarkdownPreview content={collection.description} />
-              <div className="collection-header__meta">
+              <div className={COLLECTION_HEADER_CLASSES.meta}>
                 <div
-                  className="collection-header__meta-entry"
+                  className={COLLECTION_HEADER_CLASSES.metaEntry}
                   style={
                     backgroundImage && {
                       backgroundImage: 'url(' + backgroundImage + ')',
@@ -102,7 +104,7 @@ const CollectionHeader = (props: Props) => {
                 </div>
                 {isPublic ? (
                   <div
-                    className="collection-header__meta-entry"
+                    className={COLLECTION_HEADER_CLASSES.metaEntry}
                     style={
                       backgroundImage && {
                         backgroundImage: 'url(' + backgroundImage + ')',
@@ -113,7 +115,7 @@ const CollectionHeader = (props: Props) => {
                   </div>
                 ) : (
                   <div
-                    className="collection-header__meta-entry"
+                    className={COLLECTION_HEADER_CLASSES.metaEntry}
                     style={
                       backgroundImage && {
                         backgroundImage: 'url(' + backgroundImage + ')',
@@ -125,7 +127,7 @@ const CollectionHeader = (props: Props) => {
                 )}
                 {isNotADefaultList && (
                   <div
-                    className="collection-header__meta-entry"
+                    className={COLLECTION_HEADER_CLASSES.metaEntry}
                     style={
                       backgroundImage && {
                         backgroundImage: 'url(' + backgroundImage + ')',
@@ -143,7 +145,7 @@ const CollectionHeader = (props: Props) => {
                   </div>
                 )}
                 <div
-                  className="collection-header__meta-entry"
+                  className={COLLECTION_HEADER_CLASSES.metaEntry}
                   style={
                     backgroundImage && {
                       backgroundImage: 'url(' + backgroundImage + ')',

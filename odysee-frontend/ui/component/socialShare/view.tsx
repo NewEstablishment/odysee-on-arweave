@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import type { ShareUrlProps, ShareUrl } from './thunk';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
@@ -9,6 +10,7 @@ import Spinner from 'component/spinner';
 import { generateDownloadUrl, generateNewestUrl } from 'util/web';
 import { useIsMobile } from 'effects/use-screensize';
 import { FormField } from 'component/common/form';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { getClaimScheduledState, isClaimUnlisted } from 'util/claim';
 import { hmsToSeconds, secondsToHms } from 'util/time';
 import { generateLbryContentUrl, generateRssUrl } from 'util/url';
@@ -69,7 +71,7 @@ function withSpinner(Component: (props: any) => React.ReactElement<React.Compone
       return null;
     } else if (!inviteStatusFetched || accessKey === FETCHING_ACCESS_KEY) {
       return (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       );
@@ -231,7 +233,7 @@ function SocialShare(props: SocialShareProps) {
 
   if (!shareUrl) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     );
@@ -241,7 +243,7 @@ function SocialShare(props: SocialShareProps) {
     <React.Fragment>
       <CopyableText copyable={shareUrl.url} />
       {showStartAt && (
-        <div className="section__checkbox">
+        <div className={SECTION_CLASSES.checkbox}>
           <FormField
             type="checkbox"
             name="share_start_at_checkbox"
@@ -259,7 +261,7 @@ function SocialShare(props: SocialShareProps) {
         </div>
       )}
       {Boolean(collectionId) && (
-        <div className="section__checkbox">
+        <div className={SECTION_CLASSES.checkbox}>
           <FormField
             type="checkbox"
             name="share_collection_id_checkbox"
@@ -271,7 +273,7 @@ function SocialShare(props: SocialShareProps) {
       )}
       {showAdditionalShareOptions && (
         <>
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button className="share" iconSize={24} icon={ICONS.TWITTER} title={__('Share on X')} href={tweetIntent} />
             <Button
               className="share"
@@ -351,7 +353,7 @@ function SocialShare(props: SocialShareProps) {
             )}
           </div>
           {SUPPORTS_SHARE_API && isMobile && (
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button icon={ICONS.SHARE} button="primary" label={__('Share via...')} onClick={handleWebShareClick} />
             </div>
           )}

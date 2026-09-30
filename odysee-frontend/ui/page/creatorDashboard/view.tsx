@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as PAGES from 'constants/pages';
 import React from 'react';
 import Page from 'component/page';
@@ -9,6 +10,7 @@ import Yrbl from 'component/yrbl';
 import { useAppSelector } from 'redux/hooks';
 import { selectHasChannels, selectFetchingMyChannels } from 'redux/selectors/claims';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 export default function CreatorDashboardPage() {
   const hasChannels = useAppSelector(selectHasChannels);
@@ -17,7 +19,7 @@ export default function CreatorDashboardPage() {
   return (
     <Page>
       {fetchingChannels && (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner delayed />
         </div>
       )}
@@ -27,7 +29,7 @@ export default function CreatorDashboardPage() {
           type="happy"
           title={__("You haven't created a channel yet, let's fix that!")}
           actions={
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="primary" navigate={`/$/${PAGES.CHANNEL_NEW}`} label={__('Create A Channel')} />
             </div>
           }

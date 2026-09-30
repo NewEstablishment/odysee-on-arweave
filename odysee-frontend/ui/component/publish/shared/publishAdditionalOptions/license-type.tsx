@@ -1,6 +1,8 @@
 import React, { useCallback } from 'react';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_CLASS } from 'component/common/form-components/fieldset-group-classes';
 import { CC_LICENSES, LEGACY_CC_LICENSES, COPYRIGHT, OTHER, PUBLIC_DOMAIN, NONE } from 'constants/licenses';
+import { FORM_FIELD_HELP_CLASS } from 'component/common/help-classes';
 type Props = {
   licenseType: string | null | undefined;
   licenseUrl: string | null | undefined;
@@ -68,8 +70,8 @@ function LicenseType({
 
       {licenseType === OTHER && (
         <fieldset>
-          <div className="form-field__help">{__('Provide a description and link to your license')}</div>
-          <fieldset-group>
+          <div className={FORM_FIELD_HELP_CLASS}>{__('Provide a description and link to your license')}</div>
+          <fieldset-group class={FIELDSET_GROUP_CLASS}>
             <FormField
               label={__('License description')}
               placeholder={__("The 'cool' license - TM")}

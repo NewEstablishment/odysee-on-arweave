@@ -17,6 +17,7 @@ import { selectStreamingUrlForUri } from 'redux/selectors/file_info';
 import { selectClientSetting } from 'redux/selectors/settings';
 import * as SETTINGS from 'constants/settings';
 import { sendAnalyticsEvent } from 'analytics/hyperbeam';
+import { FILE_THUMBNAIL_CLASSES as C } from './classes';
 
 const previewImpressionSubjectIds = new Set<string>();
 
@@ -277,7 +278,7 @@ function FileThumbnail(props: Props) {
           src={url}
           className={classnames('media__thumb', className, {
             'media__thumb--resolving': !hasResolvedClaim,
-            'media__thumb--small': small,
+            [C.small]: small,
           })}
         >
           <PreviewOverlayProtectedContent uri={uri} />
@@ -373,10 +374,10 @@ function FileThumbnail(props: Props) {
         thumb={thumbnailUrl || FALLBACK}
         fallback={FALLBACK}
         className={classnames(className, {
-          'media__thumb--live': Boolean(liveThumbnail),
-          'media__thumb--has-preview': canPreviewOnHover,
-          'media__thumb--preview-active': isPreviewActive,
-          'media__thumb--live-refreshing': isLiveRefreshing,
+          [C.live]: Boolean(liveThumbnail),
+          [C.hasPreview]: canPreviewOnHover,
+          [C.previewActive]: isPreviewActive,
+          [C.liveRefreshing]: isLiveRefreshing,
         })}
         forceReload={forceReload}
         enableLiveCrossfade={enableLiveCrossfade}
@@ -385,16 +386,15 @@ function FileThumbnail(props: Props) {
       >
         {isHovering && canPreviewOnHover && (
           <div
-            className={classnames('media__thumb-video-wrap', {
-              'media__thumb-video-wrap--active': hlsPreviewActive,
+            className={classnames(C.videoWrap, {
+              [C.videoWrapActive]: hlsPreviewActive,
             })}
-            style={{ pointerEvents: 'none' }}
           >
             <video
               ref={hlsVideoRef}
               disablePictureInPicture
-              className={classnames('media__thumb-video-preview', {
-                'media__thumb-video-preview--portrait': isShort,
+              className={classnames(C.videoPreview, {
+                [C.videoPreviewPortrait]: isShort,
               })}
               muted={isMuted}
               playsInline
@@ -403,7 +403,7 @@ function FileThumbnail(props: Props) {
         )}
         {hlsPreviewActive && (
           <button
-            className="media__thumb-mute-btn"
+            className={C.muteButton}
             type="button"
             onClick={(e) => {
               e.preventDefault();
@@ -434,21 +434,16 @@ function FileThumbnail(props: Props) {
         )}
         {hasFrames && (
           <div
-            className={classnames('media__thumb-frame-crossfade', {
-              'media__thumb-frame-crossfade--active': framesFadedIn && isHovering,
-              'media__thumb-frame-crossfade--portrait': isShort,
+            className={classnames(C.frameCrossfade, {
+              [C.frameCrossfadeActive]: framesFadedIn && isHovering,
+              [C.frameCrossfadePortrait]: isShort,
             })}
           >
-            <img
-              src={vodPreview.previous || vodPreview.current}
-              className="media__thumb-frame-preview"
-              alt=""
-              draggable={false}
-            />
+            <img src={vodPreview.previous || vodPreview.current} className={C.framePreview} alt="" draggable={false} />
             <img
               key={vodPreview.frameIndex}
               src={vodPreview.current}
-              className="media__thumb-frame-preview media__thumb-frame-preview--front"
+              className={`${C.framePreview} ${C.framePreviewFront}`}
               alt=""
               draggable={false}
             />
@@ -460,7 +455,7 @@ function FileThumbnail(props: Props) {
             return (
               <div
                 ref={thumbMeasureRef}
-                className="media__thumb-progress-wrap"
+                className={C.progressWrap}
                 onMouseMove={handleMouseMove}
                 onMouseLeave={() => setHoverFrac(0)}
                 onClick={(e) => {
@@ -476,7 +471,7 @@ function FileThumbnail(props: Props) {
               >
                 {hoverFrac > 0 && (
                   <div
-                    className="media__thumb-progress-tooltip"
+                    className={C.progressTooltip}
                     style={{
                       left: (() => {
                         const vttZoom = activeCue
@@ -498,11 +493,11 @@ function FileThumbnail(props: Props) {
                         const scale = isPortrait ? portraitScale : vttScale;
                         return (
                           <div
-                            className="media__thumb-progress-tooltip-sprite"
+                            className={C.progressTooltipSprite}
                             style={isPortrait ? { aspectRatio: 'auto', minWidth: 0, minHeight: 0 } : undefined}
                           >
                             <div
-                              className="media__thumb-progress-tooltip-sprite-inner"
+                              className={C.progressTooltipSpriteInner}
                               style={{
                                 width: activeCue.w,
                                 height: activeCue.h,
@@ -514,19 +509,19 @@ function FileThumbnail(props: Props) {
                           </div>
                         );
                       })()}
-                    <span className="media__thumb-progress-tooltip-time">{formatTime(hoverTime)}</span>
+                    <span className={C.progressTooltipTime}>{formatTime(hoverTime)}</span>
                   </div>
                 )}
-                <div className="media__thumb-progress">
-                  <div className="media__thumb-progress-hover" style={{ width: `${hoverFrac * 100}%` }} />
-                  <div className="media__thumb-progress-bar" style={{ width: `${pct}%` }} />
-                  <div className="media__thumb-progress-dot" style={{ left: `${pct}%` }} />
+                <div className={C.progress}>
+                  <div className={C.progressHover} style={{ width: `${hoverFrac * 100}%` }} />
+                  <div className={C.progressBar} style={{ width: `${pct}%` }} />
+                  <div className={C.progressDot} style={{ left: `${pct}%` }} />
                 </div>
               </div>
             );
           })()}
         {framePreviewActive && framesFadedIn && (
-          <div className="media__thumb-frame-counter">
+          <div className={C.frameCounter}>
             {vodPreview.frameIndex + 1}/{10}
           </div>
         )}
@@ -540,7 +535,7 @@ function FileThumbnail(props: Props) {
     <div
       className={classnames('media__thumb', className, {
         'media__thumb--resolving': !hasResolvedClaim,
-        'media__thumb--small': small,
+        [C.small]: small,
       })}
     >
       {children}

@@ -2,6 +2,7 @@ import React from 'react';
 import Button from 'component/button';
 import { getSavedPassword } from 'util/saved-passwords';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import Spinner from 'component/spinner';
 import Lbry from 'lbry';
 import ErrorText from 'component/common/error-text';
@@ -211,7 +212,7 @@ function SyncEnableFlow(props: Props) {
       actions={
         <>
           {step === CONFIRM && (
-            <div className={'card__actions'}>
+            <div className={CARD_CLASSES.actions}>
               <Button
                 button="primary"
                 name={'syncbutton'}
@@ -222,7 +223,7 @@ function SyncEnableFlow(props: Props) {
             </div>
           )}
           {(step === FETCH_FOR_ENABLE || step === FETCH_FOR_DISABLE) && (
-            <div className={'card__actions'}>
+            <div className={CARD_CLASSES.actions}>
               <Button
                 button="primary"
                 name={'syncbutton'}
@@ -234,7 +235,7 @@ function SyncEnableFlow(props: Props) {
             </div>
           )}
           {(error || getSyncError) && (
-            <div className={'card__actions'}>
+            <div className={CARD_CLASSES.actions}>
               <Button button="primary" name={'cancel'} label={__('Close')} onClick={() => closeModal()} />
               <ErrorText>{error || (getSyncError && String(getSyncError)) || __('Unknown error')}</ErrorText>
             </div>

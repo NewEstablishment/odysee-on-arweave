@@ -1,6 +1,8 @@
 import * as React from 'react';
 import classnames from 'classnames';
 import { YRBL_HAPPY_IMG_URL, YRBL_SAD_IMG_URL } from 'config';
+import { YRBL_CLASSES as C } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { getThumbnailCdnUrl } from 'util/thumbnail';
 type Props = {
   title?: string;
@@ -23,19 +25,19 @@ export default class extends React.PureComponent<Props> {
     const { title, subtitle, type, className, actions, alwaysShow = false } = this.props;
     const image = yrblTypes[type];
     return (
-      <div className="yrbl__wrap">
+      <div className={C.root}>
         <img
           alt="Friendly gerbil"
-          className={classnames('yrbl', className, {
-            'yrbl--always-show': alwaysShow,
+          className={classnames(C.image, className, {
+            [C.alwaysShow]: alwaysShow,
           })}
           src={`${image}`}
         />
         <div>
           {(title || subtitle) && (
-            <div className="yrbl__content">
-              <h2 className="section__title">{title}</h2>
-              <div className="section__subtitle">{subtitle}</div>
+            <div className={C.content}>
+              <h2 className={SECTION_CLASSES.title}>{title}</h2>
+              <div className={SECTION_CLASSES.subtitle}>{subtitle}</div>
             </div>
           )}
           {actions}

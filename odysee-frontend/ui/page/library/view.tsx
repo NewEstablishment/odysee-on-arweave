@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import Button from 'component/button';
 import Page from 'component/page';
@@ -9,6 +10,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectDownloadUrlsCount, selectIsFetchingFileList } from 'redux/selectors/file_info';
 import { selectMyPurchases, selectIsFetchingMyPurchases } from 'redux/selectors/claims';
 import { doPurchaseList } from 'redux/actions/claims';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 // https://github.com/lbryio/lbry-sdk/issues/2964
 export const PURCHASES_PAGE_SIZE = 10;
 
@@ -37,19 +39,19 @@ function LibraryPage() {
       }}
     >
       {loading && !hasDownloads && (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner delayed />
         </div>
       )}
 
       {!loading && !hasDownloads && (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Yrbl
             title={
               IS_WEB ? __("You haven't purchased anything yet") : __("You haven't downloaded anything from LBRY yet")
             }
             actions={
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button button="primary" navigate="/" label={__('Explore New Content')} />
               </div>
             }

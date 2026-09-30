@@ -5,6 +5,8 @@ import React, { useRef } from 'react';
 import { generateEmbedUrlEncoded, generateEmbedIframeData } from 'util/web';
 import { useAppDispatch } from 'redux/hooks';
 import { doToast } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { FORM_FIELD_COPYABLE_CLASS } from 'component/common/form-components/form-field-classes';
 
 type Props = {
   copyable?: string;
@@ -85,7 +87,7 @@ export default function EmbedTextArea(props: Props) {
       <FormField
         name="embed-textarea"
         type="textarea"
-        className="form-field--copyable"
+        className={FORM_FIELD_COPYABLE_CLASS}
         label={label}
         value={embedText || ''}
         ref={input}
@@ -94,7 +96,7 @@ export default function EmbedTextArea(props: Props) {
       />
 
       {showAutoplayToggle && (
-        <div className="margin-vertical-medium">
+        <div className="tw:my-app-m">
           <FormField
             name={'embed-autoplay' + (newestType ? ' ' + newestType : '')}
             type="checkbox"
@@ -105,7 +107,7 @@ export default function EmbedTextArea(props: Props) {
         </div>
       )}
 
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <Button
           icon={ICONS.COPY}
           button="primary"

@@ -1,5 +1,5 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React, { useEffect } from 'react';
-import './style.scss';
 import { FormField } from 'component/common/form';
 import Card from 'component/common/card';
 import I18nMessage from 'component/i18nMessage';
@@ -12,6 +12,7 @@ import { selectActiveChannelClaim, selectIncognito } from 'redux/selectors/app';
 import { selectMembershipTiersForCreatorId } from 'redux/selectors/memberships';
 import { selectPublishFormValue, selectValidTierIdsForCurrentForm } from 'redux/selectors/publish';
 import { doMembershipContentforStreamClaimId, doMembershipList } from 'redux/actions/memberships';
+import { PUBLISH_PROTECTED_CONTENT_CLASSES } from './classes';
 
 type Props = {
   claim: Claim;
@@ -103,7 +104,7 @@ function PublishProtectedContent(props: Props) {
           isBodyList
           title={__('Restrict Content')}
           body={
-            <div className="settings-row publish-row--locked">
+            <div className={`settings-row ${PUBLISH_PROTECTED_CONTENT_CLASSES.lockedRow}`}>
               <I18nMessage
                 tokens={{
                   activate_your_memberships: (
@@ -131,8 +132,8 @@ function PublishProtectedContent(props: Props) {
         isBodyList
         title={__('Restrict Content')}
         body={
-          <div className="publish-row publish-row-tiers">
-            <div className="publish-row__reason">
+          <div className={PUBLISH_PROTECTED_CONTENT_CLASSES.tiersRow}>
+            <div className="tw:px-app-xs tw:py-app-xxs tw:text-app-small tw:text-[var(--color-text-warning)]">
               {__('The selected channel has no membership tiers with exclusive-content perks for the current setup.')}
             </div>
           </div>
@@ -149,8 +150,8 @@ function PublishProtectedContent(props: Props) {
           isBodyList
           title={__('Restrict Content')}
           body={
-            <div className="publish-row publish-row-tiers">
-              <div className="publish-row__reason">
+            <div className={PUBLISH_PROTECTED_CONTENT_CLASSES.tiersRow}>
+              <div className="tw:px-app-xs tw:py-app-xxs tw:text-app-small tw:text-[var(--color-text-warning)]">
                 {__('Membership restrictions are not available for Unlisted content.')}
               </div>
             </div>
@@ -166,9 +167,9 @@ function PublishProtectedContent(props: Props) {
           isBodyList
           title={__('Restrict Content')}
           body={
-            <div className="publish-row publish-row-tiers">
+            <div className={PUBLISH_PROTECTED_CONTENT_CLASSES.tiersRow}>
               {paywall !== PAYWALL.FREE && (
-                <div className="error__text" style={{ marginBottom: 'var(--spacing-m)' }}>
+                <div className={ERROR_TEXT_CLASS} style={{ marginBottom: 'var(--spacing-m)' }}>
                   {__('This file has an attached price, disable it in order to add content restrictions.')}
                 </div>
               )}
@@ -184,7 +185,7 @@ function PublishProtectedContent(props: Props) {
               />
 
               <div
-                className="tier-list"
+                className={PUBLISH_PROTECTED_CONTENT_CLASSES.tierList}
                 style={!memberRestrictionOn ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
               >
                 {myMembershipTiers.map((tier: CreatorMembership) => {
@@ -200,7 +201,7 @@ function PublishProtectedContent(props: Props) {
                       onChange={() => toggleMemberRestrictionTierId(tier.membership_id)}
                     />
                   ) : (
-                    <div key={tier.membership_id} className="dummy-tier" />
+                    <div key={tier.membership_id} className={PUBLISH_PROTECTED_CONTENT_CLASSES.dummyTier} />
                   );
                 })}
               </div>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Form, FormField } from 'component/common/form';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { setSavedPassword } from 'util/saved-passwords';
 import usePersistedState from 'effects/use-persisted-state';
 import I18nMessage from 'component/i18nMessage';
@@ -12,6 +13,7 @@ import { selectGetSyncIsPending, selectSyncApplyPasswordError } from 'redux/sele
 import { doGetSyncDesktop } from 'redux/actions/sync';
 import { selectUserEmail } from 'redux/selectors/user';
 import { doSignOut, doHandleSyncComplete } from 'redux/actions/app';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 function SyncPassword() {
   const dispatch = useAppDispatch();
@@ -69,7 +71,7 @@ function SyncPassword() {
               checked={rememberPassword}
               onChange={() => setRememberPassword(!rememberPassword)}
             />
-            <div className="card__actions">
+            <div className={CARD_CLASSES.actions}>
               <Button
                 type="submit"
                 button="primary"
@@ -78,7 +80,7 @@ function SyncPassword() {
               />
               <Button button="link" label={__('Cancel')} onClick={() => dispatch(doSignOut())} />
             </div>
-            <p className="help">
+            <p className={HELP_CLASS}>
               <I18nMessage
                 tokens={{
                   help: (

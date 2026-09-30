@@ -6,6 +6,8 @@ import Button from 'component/button';
 import Card from 'component/common/card';
 import Page from 'component/page';
 import React, { useState, useCallback } from 'react';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { DISABLED_CLASS } from 'component/common/state-classes';
 
 function ReportPage() {
   const [submitting, setSubmitting] = useState(false);
@@ -55,12 +57,12 @@ function ReportPage() {
                 placeholder={__('Description of your issue or feature request')}
               />
 
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button
                   button="primary"
                   label={submitting ? __('Submitting...') : __('Submit Report')}
                   onClick={submitMessage}
-                  className={`button-block button-primary ${submitting ? 'disabled' : ''}`}
+                  className={`button-block button-primary ${submitting ? DISABLED_CLASS : ''}`}
                 />
               </div>
             </>

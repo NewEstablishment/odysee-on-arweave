@@ -1,0 +1,1 @@
+export const TRUNCATED_TEXT_CLASS = String.raw`truncated-text tw:[display:-webkit-box] tw:overflow-hidden tw:[-webkit-box-orient:vertical] tw:[word-break:break-word] tw:[&_img.emoji]:h-[var(--font-small)]`;

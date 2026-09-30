@@ -20,11 +20,11 @@ import { StickerReviewBox, StickerActionButton } from './internal/sticker-conten
 import { TipReviewBox, TipActionButton } from './internal/tip-contents';
 import { FormChannelSelector, HelpText } from './internal/extra-contents';
 import ErrorBubble from 'component/common/error-bubble';
+import { ERROR_PANEL_CLASS } from 'component/common/error-classes';
 import { AppContext } from 'contexts/app';
 import { getStripeEnvironment } from 'util/stripe';
 import { TAB_USD } from 'constants/tip_tabs';
 import { useArStatus } from 'effects/use-ar-status';
-import './style.lazy.scss';
 import { BeforeUnload } from 'util/beforeUnload';
 import { hasLegacyOdyseePremium } from 'redux/selectors/user';
 import {
@@ -63,6 +63,8 @@ import { doArTip as doArTipAction } from 'redux/actions/arwallet';
 import { selectArweaveTippingErrorForId } from 'redux/selectors/arwallet';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { COMMENT_CREATE_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 const stripeEnvironment = getStripeEnvironment();
 
@@ -926,7 +928,7 @@ export function CommentCreate(props: Props) {
     return (
       <div
         role="button"
-        className="comment-create__auth"
+        className={COMMENT_CREATE_CLASSES.auth}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -962,7 +964,7 @@ export function CommentCreate(props: Props) {
         />
 
         {!isMobile && (
-          <div className="section__actions--no-margin">
+          <div className={SECTION_CLASSES.actionsNoMargin}>
             <Button disabled button="primary" label={__('Send --[button to submit something]--')} requiresAuth />
           </div>
         )}
@@ -992,11 +994,12 @@ export function CommentCreate(props: Props) {
 
       <Form
         onSubmit={() => {}}
-        className={classnames('comment-create', {
-          'comment-create--reply': isReply,
-          'comment-create--nestedReply': isNested,
-          'comment-create--bottom': bottom,
-        })}
+        className={classnames(
+          COMMENT_CREATE_CLASSES.form,
+          isReply && COMMENT_CREATE_CLASSES.reply,
+          isNested && COMMENT_CREATE_CLASSES.nestedReply,
+          bottom && COMMENT_CREATE_CLASSES.bottom
+        )}
       >
         {isReviewingSupportComment ? (
           activeChannelUrl &&
@@ -1010,7 +1013,7 @@ export function CommentCreate(props: Props) {
                 isReviewingStickerComment={isReviewingStickerComment}
                 stickerPreviewComponent={selectedSticker && <StickerReviewBox {...stickerReviewProps} />}
               />
-              {arweaveTippingError && <div className={'error'}>{arweaveTippingError}</div>}
+              {arweaveTippingError && <div className={ERROR_PANEL_CLASS}>{arweaveTippingError}</div>}
             </>
           )
         ) : selectedSticker ? (
@@ -1020,11 +1023,10 @@ export function CommentCreate(props: Props) {
             <FormField
               autoFocus={isReply}
               charCount={charCount}
-              className={classnames('', {
-                create__reply: isReply,
-                create__comment: !isReply,
-                disabled_chat_comments: notAuthedToLiveChat,
-              })}
+              className={classnames(
+                isReply ? COMMENT_CREATE_CLASSES.replyInput : COMMENT_CREATE_CLASSES.commentInput,
+                notAuthedToLiveChat && COMMENT_CREATE_CLASSES.disabledChatComments
+              )}
               disabled={(!hyperbeamEnabled && isFetchingChannels) || disableInput}
               isLivestream={isLivestream}
               label={<FormChannelSelector isReply={Boolean(isReply)} isLivestream={Boolean(isLivestream)} />}
@@ -1083,7 +1085,7 @@ export function CommentCreate(props: Props) {
           )}
 
         {(!isMobile || isReviewingStickerComment || isReviewingSupportComment) && (
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             {/* Submit Button */}
             {isReviewingSupportComment && (
               <>
@@ -1204,7 +1206,7 @@ export function CommentCreate(props: Props) {
             )}
           </div>
         )}
-        <div className="chat-resize">
+        <div className={COMMENT_CREATE_CLASSES.resizeHandle}>
           <div />
           <div />
           <div />

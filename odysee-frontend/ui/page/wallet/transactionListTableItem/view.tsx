@@ -8,11 +8,14 @@ import Button from 'component/button';
 import Spinner from 'component/spinner';
 import { toCapitalCase } from 'util/string';
 import { buildURI, parseURI } from 'util/lbryURI';
+import { WALLET_TRANSACTION_TABLE_CLASSES } from 'page/wallet/classes';
 import * as TXO from 'constants/txo_list';
 import * as ABANDON_STATES from 'constants/abandon_states';
 import UriIndicator from 'component/uriIndicator';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimForClaimId } from 'redux/selectors/claims';
+import { TABLE_ITEM_LABEL_CLASS } from 'component/common/table-classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 type Props = {
   txo: Txo;
   revokeClaim: (arg0: Txo, arg1: (arg0: string) => void) => void;
@@ -121,19 +124,19 @@ function TransactionListTableItem(props: Props) {
   const forClaim = name && claimId;
   return (
     <tr>
-      <td className="table__date">
+      <td className={WALLET_TRANSACTION_TABLE_CLASSES.dateCell}>
         {timestamp ? (
           <div>
             <DateTime date={date} type="date" formatOptions={dateFormat} />
-            <div className="table__item-label">
+            <div className={TABLE_ITEM_LABEL_CLASS}>
               <DateTime date={date} type="time" />
             </div>
           </div>
         ) : (
-          <span className="empty">{__('Pending')}</span>
+          <span className={EMPTY_CLASS}>{__('Pending')}</span>
         )}
       </td>
-      <td className="table__item--actionable">
+      <td className={WALLET_TRANSACTION_TABLE_CLASSES.actionable}>
         <span>
           {(isTip && __('Tip')) ||
             (type === 'support' && !isTip && __('Support --[noun; transaction type]--')) ||
@@ -146,24 +149,24 @@ function TransactionListTableItem(props: Props) {
         {forClaim && <Button button="link" navigate={uri} label={claimName} disabled={!date} />}
         {!forClaim && reward && <span>{reward.reward_title}</span>}
         {isLbryViewReward && (
-          <div className="table__item-label">
+          <div className={TABLE_ITEM_LABEL_CLASS}>
             {__('%SITE_NAME% view Credit', {
               SITE_NAME,
             })}
           </div>
         )}
         {isTip && signingChannel && !isLbryViewReward && (
-          <div className="table__item-label">
+          <div className={TABLE_ITEM_LABEL_CLASS}>
             <UriIndicator uri={signingChannel && signingChannel.permanent_url} link showAtSign />
           </div>
         )}
-        {isTip && !signingChannel && !isLbryViewReward && <div className="table__item-label">Anonymous</div>}
+        {isTip && !signingChannel && !isLbryViewReward && <div className={TABLE_ITEM_LABEL_CLASS}>Anonymous</div>}
       </td>
 
       <td>
         <ButtonTransaction id={txid} />
       </td>
-      <td className="table__item--align-right">
+      <td className={WALLET_TRANSACTION_TABLE_CLASSES.alignRight}>
         <CreditAmount
           showPlus={isMinus}
           amount={isMinus ? Number(0 - Number(amount)) : Number(amount)}

@@ -1,6 +1,7 @@
 import * as ICONS from 'constants/icons';
 import React from 'react';
 import Button from 'component/button';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import { MenuItem } from 'component/common/menu';
 import Icon from 'component/common/icon';
@@ -85,11 +86,12 @@ function ButtonAddToQueue(props: any) {
   }
 
   return (
-    <div className="claim-preview__hover-actions third-item">
+    <div className="claim-preview__hover-actions tw:col-start-2 tw:row-start-2">
       <Button
+        button="alt"
         title={__('Queue Mode')}
         label={label}
-        className="button--file-action"
+        className={FILE_ACTION_BUTTON_CLASS}
         icon={hasClaimInQueue ? ICONS.PLAYLIST_FILLED : ICONS.PLAYLIST_ADD}
         onClick={(e) => handleQueue(e)}
         tabIndex={focusable ? 0 : -1}

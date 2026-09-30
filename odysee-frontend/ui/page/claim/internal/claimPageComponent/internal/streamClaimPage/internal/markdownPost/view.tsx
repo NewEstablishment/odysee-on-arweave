@@ -13,6 +13,8 @@ import {
 } from 'redux/selectors/claims';
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
 import { getChannelIdFromClaim } from 'util/claim';
+import { MARKDOWN_POST_COMMENTS_CLASS } from './classes';
+import { STREAM_CLAIM_PAGE_CLASSES } from '../../classes';
 const CommentsList = lazyImport(
   () =>
     import(
@@ -68,7 +70,7 @@ export default function MarkdownPostPage(props: Props) {
         </React.Suspense>
       </PostWrapper>
 
-      <div className="file-page__post-comments">
+      <div className={MARKDOWN_POST_COMMENTS_CLASS}>
         {commentsDisabled ? (
           <Empty text={__('The creator of this content has disabled comments.')} />
         ) : contentUnlocked ? (
@@ -88,5 +90,5 @@ export default function MarkdownPostPage(props: Props) {
 }
 
 const PostWrapper = ({ children }: { children: any }) => (
-  <div className="section card-stack file-page__md">{children}</div>
+  <div className={`section card-stack ${STREAM_CLAIM_PAGE_CLASSES.markdown}`}>{children}</div>
 );

@@ -12,6 +12,8 @@ import {
   selectCountForCollectionId,
   selectSourceIdForCollectionId,
 } from 'redux/selectors/collections';
+import { COLLECTION_HEADER_CLASSES } from '../../classes';
+import { HEADER_BALANCE_LOADING_CLASS } from 'component/header/classes';
 
 type Props = {
   collectionId: string;
@@ -27,7 +29,7 @@ const CollectionSubtitle = (props: Props) => {
   return (
     <div>
       {sourceId && (
-        <span className="collection__subtitle">
+        <span className={COLLECTION_HEADER_CLASSES.subtitle}>
           <Button
             iconRight={ICONS.EXTERNAL}
             label={__('View copied playlist source')}
@@ -38,7 +40,7 @@ const CollectionSubtitle = (props: Props) => {
       )}
 
       {collectionCount || collectionCount === 0 ? (
-        <span className="collection__subtitle">
+        <span className={COLLECTION_HEADER_CLASSES.subtitle}>
           {collectionCount === 1
             ? __('1 item')
             : __('%collectionCount% items', {
@@ -46,13 +48,13 @@ const CollectionSubtitle = (props: Props) => {
               })}
         </span>
       ) : (
-        <Skeleton variant="text" animation="wave" className="header__navigationItem--balanceLoading" />
+        <Skeleton variant="text" animation="wave" className={HEADER_BALANCE_LOADING_CLASS} />
       )}
 
       <MarkdownPreview content={collectionDescription} />
 
       {collection?.profileName ? (
-        <span className="collection__subtitle">{collection.profileName}</span>
+        <span className={COLLECTION_HEADER_CLASSES.subtitle}>{collection.profileName}</span>
       ) : (
         <CollectionPrivateIcon />
       )}

@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import UserEmailReturning from 'component/userEmailReturning';
 import UserSignInPassword from 'component/userSignInPassword';
@@ -10,6 +11,9 @@ import Button from 'component/button';
 import Card from 'component/common/card';
 import { recoverHyperbeamAccount } from 'util/hyperbeamAccount';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { USER_SIGN_IN_CENTERED_ACTIONS_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PAGE_MAIN_CONTAINED_CLASS, PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 
 function HyperbeamSignIn() {
   const location = useLocation();
@@ -37,13 +41,13 @@ function HyperbeamSignIn() {
   }
 
   return (
-    <div className="main--contained">
+    <div className={PAGE_MAIN_CONTAINED_CLASS}>
       <Card
         title={__('Log In')}
         actions={
           <div>
-            {error && <p className="error__text">{error}</p>}
-            <div className="section__actions">
+            {error && <p className={ERROR_TEXT_CLASS}>{error}</p>}
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="primary"
                 label={isPending ? __('Logging In...') : __('Log In')}
@@ -93,7 +97,7 @@ function LegacySignIn() {
         </div>
       )}
       {!showEmail && !showPassword && showLoading && (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner delayed />
         </div>
       )}
@@ -109,7 +113,7 @@ function UserSignIn() {
   return (
     <>
       {useBrowserSession ? <HyperbeamSignIn /> : <LegacySignIn />}
-      <div className="section__actions section__actions--centered">
+      <div className={`${SECTION_CLASSES.actions} ${USER_SIGN_IN_CENTERED_ACTIONS_CLASS}`}>
         <Button
           button="link"
           label={useBrowserSession ? __('Use email and password') : __('Use HyperBEAM browser session')}

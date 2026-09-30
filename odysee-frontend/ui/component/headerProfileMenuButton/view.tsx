@@ -1,4 +1,3 @@
-import 'scss/component/_header.scss';
 import { Global } from '@emotion/react';
 import { Menu as MuiMenu, MenuItem as MuiMenuItem } from '@mui/material';
 import * as ICONS from 'constants/icons';
@@ -23,6 +22,13 @@ import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { selectUser, selectUserAuthenticated, selectUserEmail, selectUserIsNative } from 'redux/selectors/user';
 import { selectClientSetting, selectTheme } from 'redux/selectors/settings';
 import { doSetClientSetting } from 'redux/actions/settings';
+import { HEADER_NAVIGATION_ICON_CLASS } from 'component/header/classes';
+import {
+  HEADER_PROFILE_BUTTON_CLASS,
+  HEADER_PROFILE_BUTTON_WITH_THUMBNAIL_CLASS,
+  HEADER_PROFILE_THUMBNAIL_CLASS,
+} from './classes';
+import { MENU_CLASSES } from 'component/common/menu-classes';
 
 export default function HeaderProfileMenuButton() {
   const dispatch = useAppDispatch();
@@ -83,12 +89,12 @@ export default function HeaderProfileMenuButton() {
         padding: 'var(--spacing-xs)',
       },
     },
-    className: 'menu__list--header',
+    className: MENU_CLASSES.header,
     sx: {
       'z-index': 2,
     },
     PaperProps: {
-      className: 'MuiMenu-list--paper',
+      className: MENU_CLASSES.paper,
     },
     disableScrollLock: true,
   };
@@ -105,10 +111,10 @@ export default function HeaderProfileMenuButton() {
         />
       )}
 
-      <div className="header__buttons">
+      <div className="tw:flex">
         {!isMobile && (
           <Tooltip title={currentTheme === 'light' ? __('Dark') : __('Light')}>
-            <Button className="header__navigationItem--icon" onClick={handleThemeToggle}>
+            <Button className={HEADER_NAVIGATION_ICON_CLASS} onClick={handleThemeToggle}>
               <Icon icon={currentTheme === 'light' ? ICONS.DARK : ICONS.LIGHT} />
             </Button>
           </Tooltip>
@@ -122,13 +128,21 @@ export default function HeaderProfileMenuButton() {
             aria-haspopup="true"
             aria-expanded={open ? 'true' : undefined}
             onClick={handleClick}
-            className={classnames('header__navigationItem', {
-              'header__navigationItem--icon': !activeChannelUrl,
-              'header__navigationItem--profilePic': activeChannelUrl,
+            className={classnames(HEADER_PROFILE_BUTTON_CLASS, {
+              [HEADER_NAVIGATION_ICON_CLASS]: !activeChannelUrl,
+              [HEADER_PROFILE_BUTTON_WITH_THUMBNAIL_CLASS]: activeChannelUrl,
             })}
           >
             {activeChannelUrl ? (
-              <ChannelThumbnail uri={activeChannelUrl} hideTooltip small noLazyLoad showMemberBadge allowGifs />
+              <ChannelThumbnail
+                uri={activeChannelUrl}
+                className={HEADER_PROFILE_THUMBNAIL_CLASS}
+                hideTooltip
+                small
+                noLazyLoad
+                showMemberBadge
+                allowGifs
+              />
             ) : (
               <Icon size={18} icon={ICONS.ACCOUNT} aria-hidden />
             )}
@@ -184,7 +198,10 @@ export default function HeaderProfileMenuButton() {
               <HeaderMenuLink useMui page={PAGES.HELP} icon={ICONS.HELP} name={__('Help')} />
 
               <hr className="menu__separator" />
-              <MuiMenuItem className="menu__link menu__link--sign-out" onClick={signOut}>
+              <MuiMenuItem
+                className={`${MENU_CLASSES.item} ${MENU_CLASSES.link} menu__link--sign-out`}
+                onClick={signOut}
+              >
                 <Icon aria-hidden icon={ICONS.SIGN_OUT} />
                 <span>
                   {__('Sign Out')}

@@ -32,6 +32,9 @@ The current implementation follows these decisions:
 - [`decisions/native-user-preferences.md`](decisions/native-user-preferences.md):
   private settings use encrypted immutable snapshots and a generic stable
   reference head.
+- [`decisions/frontend-tailwind.md`](decisions/frontend-tailwind.md): the
+  browser uses a Tailwind-first, Sass-free cascade with scoped lazy utility
+  chunks and production chunk checks.
 - [`decisions/private-playlists.md`](decisions/private-playlists.md): private
   playlists use owner-bound encrypted snapshots and can advance the same
   stable reference to a public snapshot exactly once.

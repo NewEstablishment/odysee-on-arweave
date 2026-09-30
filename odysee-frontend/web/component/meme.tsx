@@ -1,5 +1,6 @@
 import React from 'react';
 import Button from 'component/button';
+import { HOME_MEME_CLASS } from 'component/memeClasses';
 type Props = {
   meme:
     | {
@@ -17,7 +18,7 @@ export default function Meme(props: Props) {
   }
 
   return (
-    <h1 className="home__meme">
+    <h1 className={HOME_MEME_CLASS}>
       <Button button="link" navigate={meme.url}>
         {meme.text}
       </Button>

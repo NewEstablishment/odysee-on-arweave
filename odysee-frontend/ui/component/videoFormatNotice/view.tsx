@@ -3,15 +3,24 @@ import { useAppDispatch } from 'redux/hooks';
 import { doUpdateFile, doUpdatePublishForm } from 'redux/actions/publish';
 import { doToast } from 'redux/actions/notifications';
 import { cacheOptimizedFile } from 'util/uploadCache';
-import classnames from 'classnames';
-import './style.scss';
+import {
+  publishStatusActionClassName,
+  publishStatusCardClassName,
+  publishStatusCheckboxClassName,
+  publishStatusDescriptionClassName,
+  publishStatusHeaderClassName,
+  publishStatusIconClassName,
+  publishStatusTextClassName,
+  publishStatusTitleClassName,
+  type PublishStatusVariant,
+} from 'component/publish/shared/publishStatusCard/classes';
 
 type Props = {
   file: File;
   format: string;
   videoCodec: string;
   audioCodec: string;
-  variant: 'error' | 'mandatory' | 'recommended';
+  variant: PublishStatusVariant;
 };
 
 type TransmuxState = 'idle' | 'transmuxing' | 'done' | 'error';
@@ -119,11 +128,18 @@ export default function VideoFormatNotice({ file, format, videoCodec, audioCodec
   if (state === 'done') return null;
 
   const progressPercent = Math.round(progress * 100);
+  const labelVariantClassName = {
+    error: 'tw:bg-[rgba(244,67,54,0.15)] tw:text-[#f44336]',
+    mandatory: 'tw:bg-[rgba(255,180,0,0.15)] tw:text-[#f5a623]',
+    recommended: 'tw:bg-[rgba(76,175,80,0.15)] tw:text-[#4caf50]',
+  }[variant];
 
   return (
-    <div className={`format-notice publish-status-card publish-status-card--${variant}`}>
-      <div className="publish-status-card__header">
-        <div className="publish-status-card__icon">
+    <div
+      className={`${publishStatusCardClassName} tw:upto-small:gap-app-xs tw:upto-small:px-app-s tw:upto-small:py-app-xs`}
+    >
+      <div className={publishStatusHeaderClassName}>
+        <div className={publishStatusIconClassName(variant)}>
           <svg
             width="18"
             height="18"
@@ -139,14 +155,16 @@ export default function VideoFormatNotice({ file, format, videoCodec, audioCodec
           </svg>
         </div>
 
-        <div className="publish-status-card__text">
-          <h3 className="publish-status-card__title">
+        <div className={publishStatusTextClassName}>
+          <h3 className={publishStatusTitleClassName}>
             {__('Format Conversion')}
-            <span className="format-notice__label">
+            <span
+              className={`tw:ml-app-xs tw:rounded-[4px] tw:px-[8px] tw:py-[4px] tw:align-middle tw:text-app-xsmall tw:font-semibold ${labelVariantClassName}`}
+            >
               {variant === 'mandatory' ? __('Mandatory') : variant === 'error' ? __('Required') : __('Recommended')}
             </span>
           </h3>
-          <p className="publish-status-card__description">
+          <p className={publishStatusDescriptionClassName}>
             {variant === 'mandatory'
               ? canTransmux
                 ? __('Your %format% file must be converted to MP4 for playback compatibility.', {
@@ -163,20 +181,21 @@ export default function VideoFormatNotice({ file, format, videoCodec, audioCodec
                     format: format.toUpperCase(),
                   })}
           </p>
-          <span className="format-notice__hint">
+          <span className="tw:text-app-xsmall tw:text-app-text-subtitle">
             {canTransmux ? __('Fast, no quality loss') : __('May take a few minutes, slight quality change')}
           </span>
         </div>
 
         {state === 'idle' &&
           (variant === 'mandatory' ? (
-            <label className="publish-status-card__action" style={{ pointerEvents: 'none', opacity: 0.7 }}>
-              <input type="checkbox" checked readOnly />
+            <label className={publishStatusActionClassName(variant)} style={{ pointerEvents: 'none', opacity: 0.7 }}>
+              <input className={publishStatusCheckboxClassName(variant)} type="checkbox" checked readOnly />
               <span>{__('Convert')}</span>
             </label>
           ) : (
-            <label className="publish-status-card__action">
+            <label className={publishStatusActionClassName(variant)}>
               <input
+                className={publishStatusCheckboxClassName(variant)}
                 type="checkbox"
                 checked={convertEnabled}
                 onChange={(e) => {
@@ -189,28 +208,32 @@ export default function VideoFormatNotice({ file, format, videoCodec, audioCodec
           ))}
       </div>
 
-      <div className="format-notice__body">
+      <div className="tw:min-w-0">
         {state === 'idle' && null}
 
         {state === 'transmuxing' && (
           <>
-            <div className="format-notice__progress">
-              <div className="format-notice__progress-bar">
-                <div className="format-notice__progress-fill" style={{ width: `${progressPercent}%` }} />
+            <div className="tw:mb-app-xs tw:flex tw:items-center tw:gap-app-xs">
+              <div className="tw:h-[4px] tw:flex-1 tw:overflow-hidden tw:rounded-[2px] tw:bg-[rgba(var(--color-header-button-base),0.12)]">
+                <div
+                  className="tw:h-full tw:rounded-[2px] tw:bg-[#f5a623] tw:[transition:width_0.3s_ease]"
+                  style={{ width: `${progressPercent}%` }}
+                />
               </div>
-              <span className="format-notice__progress-text">{progressPercent}%</span>
+              <span className="tw:min-w-[32px] tw:text-right tw:text-app-xsmall tw:font-semibold tw:text-[#f5a623] tw:[font-variant-numeric:tabular-nums]">
+                {progressPercent}%
+              </span>
             </div>
-            <button className="format-notice__btn format-notice__btn--cancel" onClick={handleCancel}>
+            <button
+              className="tw:inline-flex tw:cursor-pointer tw:items-center tw:justify-center tw:gap-[6px] tw:rounded-[8px] tw:border tw:border-[rgba(var(--color-header-button-base),0.15)] tw:[background:none] tw:px-[12px] tw:py-[4px] tw:text-app-xsmall tw:font-semibold tw:text-app-text-subtitle tw:hover:text-app-text"
+              onClick={handleCancel}
+            >
               {__('Cancel')}
             </button>
           </>
         )}
 
-        {state === 'error' && (
-          <p className="format-notice__text format-notice__text--error">
-            {__('Conversion failed. You can still publish the original file.')}
-          </p>
-        )}
+        {state === 'error' && <p>{__('Conversion failed. You can still publish the original file.')}</p>}
       </div>
     </div>
   );

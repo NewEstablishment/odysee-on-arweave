@@ -6,6 +6,7 @@ import { MenuLink, MenuItem } from 'component/common/menu';
 import MuiMenuItem from '@mui/material/MenuItem';
 import MuiLink from '@mui/material/Link';
 import Icon from 'component/common/icon';
+import { MENU_CLASSES } from 'component/common/menu-classes';
 type Props = {
   icon: string;
   name: string;
@@ -20,7 +21,7 @@ export default function HeaderMenuLink(props: Props) {
   if (useMui) {
     return (
       <MuiMenuItem
-        className="menu__link"
+        className={`${MENU_CLASSES.item} ${MENU_CLASSES.link}`}
         component={MuiLink}
         href={`/$/${page}`}
         onClick={(e) => {

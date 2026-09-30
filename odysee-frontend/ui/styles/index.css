@@ -1,0 +1,19 @@
+/* Tailwind is prefixed and reset-free so the application owns its complete cascade. */
+@layer theme, base, compatibility, primitives, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme) prefix(tw);
+@reference './tailwind-context.css';
+@import './tokens.css' layer(theme);
+@import './base.css' layer(base);
+@import './compatibility.css' layer(compatibility);
+@import './primitives.css' layer(primitives);
+@import './animations.css' layer(components);
+@import './portal-stars.css' layer(components);
+@import './semantic-components.css' layer(components);
+@import 'tailwindcss/utilities.css' layer(utilities) source(none) prefix(tw);
+@import './runtime-overrides.css';
+
+@source '../**/*.{js,jsx,ts,tsx}';
+@source '../../web/**/*.{js,jsx,ts,tsx}';
+@source '../../extras/**/*.{js,jsx,ts,tsx}';
+@source '../../custom/**/*.{js,jsx,ts,tsx}';

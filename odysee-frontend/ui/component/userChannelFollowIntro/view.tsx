@@ -12,6 +12,7 @@ import { doChannelSubscribe } from 'redux/actions/subscriptions';
 import { selectHomepageData, selectLanguage, selectHomepageDiscover } from 'redux/selectors/settings';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { selectSubscriptions } from 'redux/selectors/subscriptions';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 type Props = {
   onContinue: () => void;
@@ -71,7 +72,7 @@ function UserChannelFollowIntro(props: Props) {
   }, [prefsReady]);
   return (
     <Card
-      className="channelsToFollow-wrapper"
+      className="tw:mt-app-l"
       title={__('Find channels to follow')}
       subtitle={__(
         '%SITE_NAME% works better if you find and follow a couple creators you like. You can also block channels you never want to see.',
@@ -80,7 +81,7 @@ function UserChannelFollowIntro(props: Props) {
         }
       )}
       actions={
-        <div className="section__body">
+        <div className={SECTION_CLASSES.body}>
           <ClaimListDiscover
             hideFilters
             hideAdvancedFilter

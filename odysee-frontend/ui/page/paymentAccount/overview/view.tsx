@@ -2,8 +2,9 @@ import React from 'react';
 import CopyableText from 'component/copyableText';
 import ButtonToggle from 'component/buttonToggle';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import Symbol from 'component/common/symbol';
-import './style.scss';
+import { PAYMENT_ACCOUNT_CARD_CLASS, PAYMENT_ACCOUNT_CARD_TITLE_CLASS, PAYMENT_ACCOUNT_PAGE_CLASSES } from '../classes';
 type Props = {
   cardHeader: () => React.ReactElement<React.ComponentProps<any>, any>;
   arWalletStatus: any;
@@ -115,28 +116,31 @@ function Overview(props: Props) {
   const address = '';
   return (
     <Card
-      className={!arWalletStatus ? `card--overview card--disabled` : `card--overview`}
+      className={`${PAYMENT_ACCOUNT_CARD_CLASS} payment-account-overview-surface${
+        !arWalletStatus ? ` ${CARD_CLASSES.disabled}` : ''
+      }`}
       title={cardHeader()}
+      titleClassName={PAYMENT_ACCOUNT_CARD_TITLE_CLASS}
       background
       actions={
         <>
-          <h2 className="section__title--small">{__('Connected wallet')}</h2>
-          <div className="payment-options">
-            <div className="payment-option">
+          <h2 className={PAYMENT_ACCOUNT_PAGE_CLASSES.sectionTitle}>{__('Connected wallet')}</h2>
+          <div className="tw:mt-[calc(var(--spacing-s)*-1)] tw:flex tw:w-full tw:gap-app-m tw:rounded-app tw:bg-app-background tw:p-app-s">
+            <div className="tw:flex tw:flex-1 tw:items-center">
               <CopyableText copyable={address} />
             </div>
-            <div className="payment-option">
-              <div className="payment-option__monetization">
+            <div className="tw:flex tw:flex-1 tw:items-center">
+              <div className="tw:ml-auto tw:mr-app-xxs tw:flex tw:gap-app-l">
                 {__('Allow monetization')} <ButtonToggle status />
               </div>
             </div>
           </div>
-          <h2 className="section__title--small">{__('Transaction history')}</h2>
-          <div className="transaction-history">
+          <h2 className={PAYMENT_ACCOUNT_PAGE_CLASSES.sectionTitle}>{__('Transaction history')}</h2>
+          <div className="tw:mt-[calc(var(--spacing-s)*-1)] tw:rounded-app tw:bg-app-background tw:p-app-s">
             {transactions.map((transaction, index) => {
               return (
-                <div className="transaction-history__row" key={index}>
-                  <div className="transaction-history__date">
+                <div className="tw:flex tw:gap-app-s" key={index}>
+                  <div>
                     {new Date(transaction.date * 1000)
                       .toLocaleString('en-US', {
                         month: '2-digit',
@@ -148,18 +152,16 @@ function Overview(props: Props) {
                       })
                       .replace(',', '')}
                   </div>
-                  <div className="transaction-history__action">
+                  <div className="tw:min-w-[90px]">
                     {transaction.action === 'sendTip' ? __('Send Tip') : __('Receive Tip')}
                   </div>
-                  <div className="transaction-history__amount">{transaction.amount.toFixed(2)}</div>
-                  <div className="transaction-history__token">
+                  <div>{transaction.amount.toFixed(2)}</div>
+                  <div>
                     <Symbol token="usdc" />
                     USDC
                   </div>
-                  <div className="transaction-history__direction">
-                    {transaction.action === 'sendTip' ? __('to') : __('from')}
-                  </div>
-                  <div className="transaction-history__target">{transaction.target}</div>
+                  <div className="tw:min-w-[50px]">{transaction.action === 'sendTip' ? __('to') : __('from')}</div>
+                  <div>{transaction.target}</div>
                 </div>
               );
             })}

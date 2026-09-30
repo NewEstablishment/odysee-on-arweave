@@ -6,6 +6,7 @@ import Button from 'component/button';
 import MembershipBadge from 'component/membershipBadge';
 import { useAppDispatch } from 'redux/hooks';
 import { doOpenCancelationModalForMembership } from 'redux/actions/memberships';
+import { ODYSEE_PREMIUM_CLASSES } from '../../classes';
 type Props = {
   membershipView?: MembershipSub;
 };
@@ -38,18 +39,18 @@ const PremiumOption = (props: Props) => {
     const membershipStillValid = isCancelled && Subscription.current_period_end * 1000 > Date.now();
     return (
       <Wrapper name={MembershipDetails.name}>
-        <h4 className="membership_info">
+        <h4 className={ODYSEE_PREMIUM_CLASSES.info}>
           <b>{__('Registered On')}:</b> {formatDateToMonthDayAndYear(Membership.created_at)}
         </h4>
 
-        <h4 className="membership_info">
+        <h4 className={ODYSEE_PREMIUM_CLASSES.info}>
           <b>{__(isCancelled ? 'Canceled On' : 'Auto-Renews On')}:</b>{' '}
           {formatDateToMonthDayAndYear(
             (isCancelled ? Subscription.canceled_at : Subscription.current_period_end) * 1000
           )}
         </h4>
 
-        <h4 className="membership_info">
+        <h4 className={ODYSEE_PREMIUM_CLASSES.info}>
           <b>{__(membershipStillValid ? 'Still Valid Until' : 'Ended on')}:</b>{' '}
           {formatDateToMonthDayAndYear(Subscription.current_period_end * 1000)}
         </h4>
@@ -59,7 +60,7 @@ const PremiumOption = (props: Props) => {
             button="alt"
             membership-id={Membership.membership_id}
             onClick={() => dispatch(doOpenCancelationModalForMembership(membership))}
-            className="cancel-membership-button"
+            className="tw:mt-app-s tw:bg-app-background tw:hover:bg-app-primary"
             label={__('Cancel membership')}
             icon={ICONS.FINANCE}
           />
@@ -79,13 +80,13 @@ type WrapperProps = {
 const Wrapper = (props: WrapperProps) => {
   const { name, children } = props;
   return (
-    <div className="premium-option" key={name}>
-      <h4 className="membership_title">
+    <div className={ODYSEE_PREMIUM_CLASSES.option} key={name}>
+      <h4 className={ODYSEE_PREMIUM_CLASSES.title}>
         {name}
         <MembershipBadge membershipName={name} />
       </h4>
 
-      <h4 className="membership_subtitle">{__(MEMBERSHIP_CONSTS.DESCRIPTIONS[name])}</h4>
+      <h4 className={ODYSEE_PREMIUM_CLASSES.subtitle}>{__(MEMBERSHIP_CONSTS.DESCRIPTIONS[name])}</h4>
 
       {children}
     </div>

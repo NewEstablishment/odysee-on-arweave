@@ -1,5 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { FormField } from './form-field';
+import { FIELDSET_GROUP_SMUSHED_CLASS } from './fieldset-group-classes';
+import { FORM_FIELD_PRICE_AMOUNT_CLASS } from './form-field-classes';
 type FormPrice = {
   amount: number;
   currency: string;
@@ -43,12 +45,12 @@ export function FormFieldPrice({ price, onChange, onBlur, placeholder, min, disa
   );
 
   return (
-    <fieldset-group class="fieldset-group--smushed">
+    <fieldset-group class={FIELDSET_GROUP_SMUSHED_CLASS}>
       <FormField
         name={`${name}_amount`}
         label={__('Price')}
         type="number"
-        className="form-field--price-amount"
+        className={FORM_FIELD_PRICE_AMOUNT_CLASS}
         min={min}
         value={price.amount || amount}
         onWheel={(e: any) => e.preventDefault()}
@@ -63,7 +65,7 @@ export function FormFieldPrice({ price, onChange, onBlur, placeholder, min, disa
         name={`${name}_currency`}
         type="select"
         id={`${name}_currency`}
-        className="input--currency-select currency-fix"
+        className="input--currency-select tw:[justify-content:end]"
         disabled={disabled}
         onChange={handleCurrencyChange}
         value={price.currency}

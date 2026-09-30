@@ -5,6 +5,7 @@ import React from 'react';
 import Button from 'component/button';
 import { useAppDispatch } from 'redux/hooks';
 import { doUpdateVisibleNagIds } from 'redux/actions/notifications';
+import { NAG_CLASSES } from './classes';
 
 type Props = {
   message: string | React.ReactNode;
@@ -50,22 +51,22 @@ export default function Nag(props: Props) {
   }, []);
   return (
     <div
-      className={classnames('nag', {
-        'nag--helpful': type === 'helpful',
-        'nag--error': type === 'error',
-        'nag--inline': inline,
-        'nag--relative': relative,
+      className={classnames(NAG_CLASSES.root, {
+        [NAG_CLASSES.helpful]: type === 'helpful',
+        [NAG_CLASSES.error]: type === 'error',
+        [NAG_CLASSES.inline]: inline,
+        [NAG_CLASSES.relative]: relative,
       })}
     >
-      <div className="nag__message">{message}</div>
+      <div className={NAG_CLASSES.message}>{message}</div>
 
       {customAction}
 
       {buttonProps && (
         <Button
-          className={classnames('nag__button', {
-            'nag__button--helpful': type === 'helpful',
-            'nag__button--error': type === 'error',
+          className={classnames(NAG_CLASSES.button, {
+            [NAG_CLASSES.buttonHelpful]: type === 'helpful',
+            [NAG_CLASSES.buttonError]: type === 'error',
           })}
           {...buttonProps}
         >
@@ -75,9 +76,9 @@ export default function Nag(props: Props) {
 
       {onClose && (
         <Button
-          className={classnames('nag__button nag__close', {
-            'nag__button--helpful': type === 'helpful',
-            'nag__button--error': type === 'error',
+          className={classnames(NAG_CLASSES.button, NAG_CLASSES.close, {
+            [NAG_CLASSES.buttonHelpful]: type === 'helpful',
+            [NAG_CLASSES.buttonError]: type === 'error',
           })}
           title={closeTitle}
           icon={ICONS.REMOVE}

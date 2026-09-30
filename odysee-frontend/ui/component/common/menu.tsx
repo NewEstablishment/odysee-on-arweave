@@ -1,6 +1,8 @@
 import MUIRawMenu from '@mui/material/Menu';
 import classnames from 'classnames';
 import React from 'react';
+import { MENU_CLASSES } from './menu-classes';
+import { DISABLED_CLASS } from './state-classes';
 
 type MenuContextValue = {
   anchorEl: HTMLElement | null;
@@ -30,7 +32,7 @@ function Menu(props: MenuProps) {
 
   return (
     <MenuContext.Provider value={value}>
-      <div className="menu__wrapper">{children}</div>
+      <div className={MENU_CLASSES.wrapper}>{children}</div>
     </MenuContext.Provider>
   );
 }
@@ -118,7 +120,7 @@ function MenuList(props: MenuListProps) {
           onClick: handleClose as any,
         },
         paper: {
-          className: 'menu__paper',
+          className: MENU_CLASSES.paper,
           'data-reach-menu-popover': '',
           onClick: (event: any) => event.stopPropagation(),
         } as any,
@@ -167,8 +169,8 @@ function MenuItem(props: MenuItemProps) {
       role="menuitem"
       tabIndex={disabled ? -1 : 0}
       aria-disabled={disabled || undefined}
-      className={classnames(className, {
-        disabled,
+      className={classnames(MENU_CLASSES.item, className, {
+        [DISABLED_CLASS]: disabled,
       })}
       data-reach-menu-item=""
       {...(highlighted ? { 'data-selected': '' } : {})}
@@ -211,7 +213,7 @@ function MenuLink(props: MenuLinkProps) {
     <Component
       {...rest}
       role="menuitem"
-      className={className}
+      className={classnames(MENU_CLASSES.item, MENU_CLASSES.link, className)}
       onClick={(event) => {
         onClick?.(event);
 

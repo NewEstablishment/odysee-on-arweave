@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import React from 'react';
@@ -36,7 +37,6 @@ import AboutTab from './tabs/aboutTab';
 import CreatorSettingsTab from './tabs/creatorSettingsTab';
 import * as CS from 'constants/claim_search';
 import * as SETTINGS from 'constants/settings';
-import './style.scss';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   selectClaimIsMine,
@@ -61,6 +61,10 @@ import { getThumbnailFromClaim, isClaimNsfw } from 'util/claim';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 import { doMembershipMine as doMembershipMineAction } from 'redux/actions/memberships';
 import { PREFERENCE_EMBED } from 'constants/tags';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { CHANNEL_COVER_CLASSES } from 'component/channelCover/classes';
+import { CHANNEL_THUMBNAIL_CLASSES } from 'component/channelThumbnail/classes';
+import { CHANNEL_PAGE_CLASSES } from './classes';
 const HiddenNsfwClaims = lazyImport(
   () =>
     import(
@@ -247,7 +251,7 @@ function ChannelPage(props: Props) {
 
   if (channelIsMine) {
     collectionEmpty = hasUnpublishedCollections ? (
-      <section className="main--empty">
+      <section className={PAGE_MAIN_EMPTY_CLASS}>
         {
           <p>
             <I18nMessage
@@ -261,10 +265,12 @@ function ChannelPage(props: Props) {
         }
       </section>
     ) : (
-      <section className="main--empty">{__('You have no playlists! Create one from any playable content.')}</section>
+      <section className={PAGE_MAIN_EMPTY_CLASS}>
+        {__('You have no playlists! Create one from any playable content.')}
+      </section>
     );
   } else {
-    collectionEmpty = <section className="main--empty">{__('No Playlists found')}</section>;
+    collectionEmpty = <section className={PAGE_MAIN_EMPTY_CLASS}>{__('No Playlists found')}</section>;
   }
 
   // If a user changes tabs, update the url so it stays on the same page if they refresh.
@@ -492,8 +498,8 @@ function ChannelPage(props: Props) {
   return (
     <ChannelPageContext.Provider value>
       <header
-        className={classnames('channel-cover', {
-          'channel-cover-legacy': legacyHeader,
+        className={classnames(CHANNEL_COVER_CLASSES.root, {
+          [CHANNEL_PAGE_CLASSES.coverLegacy]: legacyHeader,
         })}
         style={
           coverUrl && {
@@ -501,8 +507,8 @@ function ChannelPage(props: Props) {
           }
         }
       >
-        <div className="channel-header-content">
-          <div className="channel__quick-actions">
+        <div className={CHANNEL_COVER_CLASSES.headerContent}>
+          <div className={CHANNEL_COVER_CLASSES.quickActions}>
             {isMyYouTubeChannel && (
               <Button
                 button="alt"
@@ -521,12 +527,12 @@ function ChannelPage(props: Props) {
             )}
             <ClaimMenuList uri={claim.permanent_url} inline collectionId="" />
           </div>
-          <div className="channel__primary-info">
-            <h1 className="channel__title">
+          <div className={CHANNEL_COVER_CLASSES.primaryInfo}>
+            <h1 className={CHANNEL_COVER_CLASSES.title}>
               <TruncatedText text={title || (channelName && '@' + channelName)} lines={2} showTooltip />
               {odyseeMembership && <MembershipBadge membershipName={odyseeMembership} />}
             </h1>
-            <div className="channel__meta">
+            <div className="tw:flex tw:items-end tw:justify-between">
               <Tooltip title={formattedSubCount} followCursor placement="top">
                 <span>
                   {getChannelSubCountStr(subCount, compactSubCount)}
@@ -538,7 +544,7 @@ function ChannelPage(props: Props) {
                 </span>
               </Tooltip>
             </div>
-            <div className="channel__edit">
+            <div className={CHANNEL_PAGE_CLASSES.edit}>
               {canEditProfile && (
                 <>
                   {pending ? (
@@ -565,7 +571,7 @@ function ChannelPage(props: Props) {
           <HiddenNsfwClaims uri={uri} mature />
         </React.Suspense>
       ) : (isBlocked || isMuted) && !viewBlockedChannel ? (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Yrbl
             title={isBlocked ? __('This channel is blocked') : __('This channel is hidden')}
             subtitle={
@@ -578,7 +584,7 @@ function ChannelPage(props: Props) {
                   })
             }
             actions={
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button button="primary" label={__('View Content')} onClick={() => setViewBlockedChannel(true)} />
               </div>
             }
@@ -587,8 +593,8 @@ function ChannelPage(props: Props) {
       ) : (
         <Tabs onChange={onTabChange as (arg0: number) => void} index={tabIndex}>
           <div
-            className={classnames('tab__wrapper', {
-              'tab__wrapper--fixed': scrollPast,
+            className={classnames(CHANNEL_PAGE_CLASSES.tabWrapper, {
+              [CHANNEL_PAGE_CLASSES.tabWrapperFixed]: scrollPast,
             })}
           >
             <div
@@ -600,8 +606,8 @@ function ChannelPage(props: Props) {
               }
             >
               <ChannelThumbnail
-                className={classnames('channel__thumbnail--channel-page', {
-                  'channel__thumbnail--channel-page-fixed': scrollPast,
+                className={classnames(CHANNEL_THUMBNAIL_CLASSES.channelPage, {
+                  [CHANNEL_THUMBNAIL_CLASSES.channelPageFixed]: scrollPast,
                 })}
                 uri={uri}
                 allowGifs
@@ -609,7 +615,7 @@ function ChannelPage(props: Props) {
                 hideStakedIndicator
               />
             </div>
-            <TabList>
+            <TabList className={CHANNEL_PAGE_CLASSES.tabList}>
               <Tab aria-selected={tabIndex === 0} disabled={editing || !showClaims} onClick={() => onTabChange(0)}>
                 {__('Home')}
               </Tab>
@@ -619,7 +625,7 @@ function ChannelPage(props: Props) {
               <Tab
                 disabled={editing || !showClaims || !hasShorts}
                 className={classnames({
-                  'tab--hidden': !hasShorts || hideShorts,
+                  [CHANNEL_PAGE_CLASSES.tabHidden]: !hasShorts || hideShorts,
                 })}
                 aria-selected={tabIndex === 2}
                 onClick={() => onTabChange(2)}
@@ -645,7 +651,7 @@ function ChannelPage(props: Props) {
               </Tab>
               <Tab
                 className={classnames({
-                  'tab--hidden': hideAboutTab,
+                  [CHANNEL_PAGE_CLASSES.tabHidden]: hideAboutTab,
                 })}
                 aria-selected={tabIndex === 7}
                 onClick={() => onTabChange(7)}
@@ -660,7 +666,7 @@ function ChannelPage(props: Props) {
             </TabList>
           </div>
 
-          <TabPanels>
+          <TabPanels panelClassName={CHANNEL_PAGE_CLASSES.tabPanel}>
             <TabPanel>
               {activeView === CHANNEL_PAGE.VIEWS.HOME && (
                 <HomeTab uri={uri} editMode={!!channelIsMine} handleViewMore={(e) => handleViewMore(e)} />
@@ -673,7 +679,7 @@ function ChannelPage(props: Props) {
                   channelIsBlackListed={!!channelIsBlackListed}
                   viewHiddenChannels
                   claimType={['stream', 'repost'] as any}
-                  empty={(<section className="main--empty">{__('No Content Found')}</section>) as any}
+                  empty={(<section className={PAGE_MAIN_EMPTY_CLASS}>{__('No Content Found')}</section>) as any}
                   filters={filters}
                   excludeShorts
                 />
@@ -690,7 +696,7 @@ function ChannelPage(props: Props) {
                   channelIsBlackListed={!!channelIsBlackListed}
                   viewHiddenChannels
                   claimType={['stream', 'repost'] as any}
-                  empty={(<section className="main--empty">{__('No Shorts Found')}</section>) as any}
+                  empty={(<section className={PAGE_MAIN_EMPTY_CLASS}>{__('No Shorts Found')}</section>) as any}
                   filters={filters}
                   loadedCallback={handleShortsLoaded}
                   shortsOnly

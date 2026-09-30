@@ -5,7 +5,6 @@ import imagesLoaded from 'imagesloaded';
 import { isTouch, wrapNode, htmlToNode } from './utils';
 import * as templates from './templates';
 import { classes } from './classes';
-import './styles.scss';
 const frozenFrameCache = new Map();
 const defaultOptions = {
   responsive: true,

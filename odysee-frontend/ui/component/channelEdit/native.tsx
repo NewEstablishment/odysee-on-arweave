@@ -9,6 +9,12 @@ import { uploadProfileImage } from 'services/profileImageUpload';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { doResolveUri } from 'redux/actions/claims';
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+
+const PROFILE_IMAGE_FIELD_CLASS = 'tw:mt-app-m';
+const PROFILE_IMAGE_LABEL_CLASS = 'tw:mb-app-xs tw:block';
+const PROFILE_IMAGE_CLASS = 'tw:max-h-[180px] tw:max-w-full tw:rounded-app tw:object-contain';
 
 export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDone?: () => void }) {
   const dispatch = useAppDispatch();
@@ -86,7 +92,7 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
             )}
           </p>
           {error && (
-            <p role="alert" className="error__text">
+            <p role="alert" className={ERROR_TEXT_CLASS}>
               {error}
             </p>
           )}
@@ -113,13 +119,15 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
                 onChange={(event) => setMetadata({ ...metadata, description: event.target.value })}
               />
               {(['avatar_id', 'banner_id'] as const).map((key) => (
-                <div key={key} className="section">
-                  <label htmlFor={`profile_${key}`}>{key === 'avatar_id' ? __('Avatar') : __('Banner')}</label>
+                <div key={key} className={PROFILE_IMAGE_FIELD_CLASS}>
+                  <label className={PROFILE_IMAGE_LABEL_CLASS} htmlFor={`profile_${key}`}>
+                    {key === 'avatar_id' ? __('Avatar') : __('Banner')}
+                  </label>
                   {metadata[key] && (
                     <img
                       alt={key === 'avatar_id' ? __('Avatar preview') : __('Banner preview')}
+                      className={PROFILE_IMAGE_CLASS}
                       src={`${hyperbeamNodeBase()}/${metadata[key]}`}
-                      style={{ maxWidth: '100%', maxHeight: 180 }}
                     />
                   )}
                   <input
@@ -152,7 +160,7 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
         </>
       }
       actions={
-        <div className="section__actions">
+        <div className={SECTION_CLASSES.actions}>
           <Button
             button="primary"
             label={busy ? __('Saving...') : __('Save profile')}

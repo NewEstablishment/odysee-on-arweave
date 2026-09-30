@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { OVERLAY_CLASSES } from './overlay-classes';
 
 const OVERLAY_DURATION_MS = 800;
 
@@ -30,8 +31,8 @@ export default function Overlays({ overlay }) {
   if (!overlay) return null;
 
   return (
-    <div className="odysee-overlay odysee-overlay--center" key={overlay.id}>
-      <div className="odysee-overlay__content">{overlay.content}</div>
+    <div className={OVERLAY_CLASSES.root} key={overlay.id}>
+      <div className={OVERLAY_CLASSES.content}>{overlay.content}</div>
     </div>
   );
 }

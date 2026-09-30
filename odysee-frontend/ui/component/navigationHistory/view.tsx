@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as React from 'react';
 import Button from 'component/button';
 import NavigationHistoryItem from 'component/navigationHistoryItem';
@@ -6,6 +7,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectHistoryPageCount, makeSelectHistoryForPage } from 'redux/selectors/content';
 import { doClearContentHistoryUri } from 'redux/actions/content';
 import { useLocation } from 'react-router-dom';
+import { CARD_CLASSES } from 'component/common/card-classes';
 type HistoryItem = {
   uri: string;
   lastViewed: number;
@@ -53,7 +55,7 @@ function UserHistoryPage() {
 
   return historyItems.length ? (
     <React.Fragment>
-      <div className="card__actions">
+      <div className={CARD_CLASSES.actions}>
         {Object.keys(itemsSelected).length ? (
           <Button button="link" label={__('Delete')} onClick={removeSelected} />
         ) : (
@@ -79,11 +81,13 @@ function UserHistoryPage() {
       <Paginate totalPages={pageCount} />
     </React.Fragment>
   ) : (
-    <div className="main--empty">
-      <section className="card card--section">
-        <h2 className="card__title card__title--deprecated">{__('Your history is empty, what are you doing here?')}</h2>
+    <div className={PAGE_MAIN_EMPTY_CLASS}>
+      <section className={`card ${CARD_CLASSES.section}`}>
+        <h2 className={`card__title ${CARD_CLASSES.titleDeprecated}`}>
+          {__('Your history is empty, what are you doing here?')}
+        </h2>
 
-        <div className="card__actions card__actions--center">
+        <div className={`${CARD_CLASSES.actions} ${CARD_CLASSES.actionsCentered}`}>
           <Button button="primary" navigate="/" label={__('Explore new content')} />
         </div>
       </section>

@@ -1,0 +1,131 @@
+/* Shared Tailwind design context. Referencing this file emits no CSS. */
+@custom-variant fullscreen-side-panel (.video-fullscreen__side-panel-inner &);
+@custom-variant active-player-fullscreen
+  (:is(.player-fullscreen-target:fullscreen &, html.ios-fullscreen .player-fullscreen-target &));
+@custom-variant active-player-fullscreen-actions-coarse-revealed
+  (:is(
+      .player-fullscreen-target:fullscreen:has(.media-controls:not([data-mobile-hidden]))
+        &:not([data-mobile-hidden]),
+      .player-fullscreen-target:fullscreen:has([data-paused]) &:not([data-mobile-hidden]),
+      .player-fullscreen-target:fullscreen:has(.media-button--settings-open) &:not([data-mobile-hidden]),
+      html.ios-fullscreen
+        .player-fullscreen-target:has(.media-controls:not([data-mobile-hidden]))
+        &:not([data-mobile-hidden]),
+      html.ios-fullscreen .player-fullscreen-target:has([data-paused]) &:not([data-mobile-hidden]),
+      html.ios-fullscreen
+        .player-fullscreen-target:has(.media-button--settings-open)
+        &:not([data-mobile-hidden])
+    ));
+@custom-variant active-player-fullscreen-actions-fine-revealed
+  (:is(
+      .player-fullscreen-target:fullscreen:has(.media-controls[data-visible]) &:not([data-mobile-hidden]),
+      .player-fullscreen-target:fullscreen:has([data-paused]) &:not([data-mobile-hidden]),
+      .player-fullscreen-target:fullscreen:has(.media-button--settings-open) &:not([data-mobile-hidden]),
+      html.ios-fullscreen
+        .player-fullscreen-target:has(.media-controls[data-visible])
+        &:not([data-mobile-hidden]),
+      html.ios-fullscreen .player-fullscreen-target:has([data-paused]) &:not([data-mobile-hidden]),
+      html.ios-fullscreen
+        .player-fullscreen-target:has(.media-button--settings-open)
+        &:not([data-mobile-hidden])
+    ));
+@custom-variant active-shorts-fullscreen
+  (:is(
+      .shorts-page__container:fullscreen &,
+      .player-fullscreen-target:fullscreen &,
+      html.ios-fullscreen .shorts-page__container &,
+      html.ios-fullscreen .player-fullscreen-target &
+    ));
+@custom-variant active-shorts-fullscreen-revealed
+  (:is(
+      .shorts-page__container:fullscreen:has(.media-controls[data-visible]) &,
+      .shorts-page__container:fullscreen:has([data-paused]) &,
+      .player-fullscreen-target:fullscreen:has(.media-controls[data-visible]) &,
+      .player-fullscreen-target:fullscreen:has([data-paused]) &,
+      html.ios-fullscreen .shorts-page__container:has(.media-controls[data-visible]) &,
+      html.ios-fullscreen .shorts-page__container:has([data-paused]) &,
+      html.ios-fullscreen .player-fullscreen-target:has(.media-controls[data-visible]) &,
+      html.ios-fullscreen .player-fullscreen-target:has([data-paused]) &
+    ));
+@custom-variant active-fullscreen-side-panel
+  (:is(.player-fullscreen-target:fullscreen .video-fullscreen__actions-wrapper--landscape .video-fullscreen__side-panel-inner &, html.ios-fullscreen .player-fullscreen-target .video-fullscreen__actions-wrapper--landscape .video-fullscreen__side-panel-inner &));
+@custom-variant active-fullscreen-landscape
+  (:is(.player-fullscreen-target:fullscreen .video-fullscreen__actions-wrapper--landscape &, html.ios-fullscreen .player-fullscreen-target .video-fullscreen__actions-wrapper--landscape &));
+@custom-variant mobile-tab-panel (.mobile-tab-view__panel &);
+
+@theme inline {
+  --breakpoint-xxsmall: 450px;
+  --breakpoint-mobile-narrow: 520px;
+  --breakpoint-xsmall: 600px;
+  --breakpoint-mobile-wide: 720px;
+  --breakpoint-debug-panel: 760px;
+  --breakpoint-tablet: 768px;
+  --breakpoint-small: 900px;
+  --breakpoint-small-plus: 1000px;
+  --breakpoint-shorts: 1020px;
+  --breakpoint-shorts-medium: 1050px;
+  --breakpoint-medium: 1150px;
+  --breakpoint-shorts-large: 1180px;
+  --breakpoint-shorts-wide: 1380px;
+  --breakpoint-shorts-xwide: 1400px;
+  --breakpoint-desktop-compact: 1450px;
+  --breakpoint-large: 1600px;
+  --breakpoint-desktop-wide: 1750px;
+  --breakpoint-desktop-xwide: 1900px;
+  --breakpoint-xlarge: 2500px;
+  --breakpoint-xxlarge: 3600px;
+
+  --color-app-background: var(--color-background);
+  --color-app-border: var(--color-border);
+  --color-app-card: var(--color-card-background);
+  --color-app-card-highlighted: var(--color-card-background-highlighted);
+  --color-app-danger: var(--color-danger);
+  --color-app-error: var(--color-error);
+  --color-app-header: var(--color-header-background);
+  --color-app-link: var(--color-link);
+  --color-app-link-hover: var(--color-link-hover);
+  --color-app-primary: var(--color-primary);
+  --color-app-primary-contrast: var(--color-primary-contrast);
+  --color-app-secondary: var(--color-secondary);
+  --color-app-text: var(--color-text);
+  --color-app-text-error: var(--color-text-error);
+  --color-app-text-inverse: var(--color-text-inverse);
+  --color-app-text-subtitle: var(--color-text-subtitle);
+  --color-app-warning: var(--color-warning);
+
+  --font-app-mono: var(--font-mono), 'Courier New', monospace;
+  --font-app-sans: var(--font-sans), Inter, Arial, sans-serif;
+  --font-app-serif: var(--font-serif), Georgia, serif;
+
+  --radius-app: var(--border-radius);
+  --radius-app-thumbnail: var(--border-radius-thumbnail);
+
+  --spacing-app-xxxxs: var(--spacing-xxxxs);
+  --spacing-app-xxxs: var(--spacing-xxxs);
+  --spacing-app-xxs: var(--spacing-xxs);
+  --spacing-app-xs: var(--spacing-xs);
+  --spacing-app-s: var(--spacing-s);
+  --spacing-app-m: var(--spacing-m);
+  --spacing-app-l: var(--spacing-l);
+  --spacing-app-xl: var(--spacing-xl);
+  --spacing-app-xxl: var(--spacing-xxl);
+
+  --text-app-xxxsmall: var(--font-xxxsmall);
+  --text-app-xxsmall: var(--font-xxsmall);
+  --text-app-xsmall: var(--font-xsmall);
+  --text-app-small: var(--font-small);
+  --text-app-body: var(--font-body);
+  --text-app-large: var(--font-large);
+  --text-app-title: var(--font-title);
+  --text-app-heading: var(--font-heading);
+}
+
+/* Sass max-width mixins included the boundary pixel; Tailwind's max-* variants do not. */
+@custom-variant upto-shorts-xwide (@media (width <= 1400px));
+@custom-variant upto-shorts (@media (width <= 1020px));
+@custom-variant upto-medium (@media (width <= 1150px));
+@custom-variant upto-small-plus (@media (width <= 1000px));
+@custom-variant upto-small (@media (width <= 900px));
+@custom-variant upto-tablet (@media (width <= 768px));
+@custom-variant upto-xsmall (@media (width <= 600px));
+@custom-variant upto-xxsmall (@media (width <= 450px));

@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import Page from 'component/page';
 import Invited from './internal/invited';
@@ -20,7 +21,7 @@ export default function ReferredPage() {
   return (
     <Page authPage>
       {referrerUri === undefined ? (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       ) : (

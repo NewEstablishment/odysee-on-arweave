@@ -1,4 +1,6 @@
 import React from 'react';
+import { PUBLISH_DETAILS_TITLE_CLASS } from 'component/publish/shared/publish-details-classes';
+import { PUBLISH_CONTROL_TAG_ITEMS_CLASS } from './classes';
 import { FormField } from 'component/common/form';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
@@ -13,7 +15,6 @@ import {
   DISABLE_SLIMES_COMMENTS_TAG,
   DISABLE_COMMENTS_TAG,
 } from 'constants/tags';
-import './style.scss';
 
 type Props = {
   tags: Array<Tag>;
@@ -57,12 +58,12 @@ export default function PublishControlTags({ tags, onSelect, onRemove }: Props) 
   function renderGroup(icon: string, title: string, groupTags: string[]) {
     if (groupTags.length === 0) return null;
     return (
-      <div className="publish-control-tags__group">
-        <div className="publish-control-tags__group-header">
+      <div className="tw:rounded-app tw:border tw:border-app-border tw:bg-app-card tw:p-app-s tw:upto-tablet:p-app-xs">
+        <div className="tw:mb-app-s tw:flex tw:items-center tw:gap-app-xs tw:text-app-small tw:font-bold tw:text-app-text">
           <Icon icon={icon} size={16} />
           <span>{title}</span>
         </div>
-        <div className="publish-control-tags__group-items">
+        <div className={PUBLISH_CONTROL_TAG_ITEMS_CLASS}>
           {groupTags.map((t) => (
             <FormField
               key={t}
@@ -80,9 +81,9 @@ export default function PublishControlTags({ tags, onSelect, onRemove }: Props) 
   }
 
   return (
-    <div className="publish-control-tags">
-      <h3 className="publish-details__title">{__('User Interactions')}</h3>
-      <div className="publish-control-tags__groups">
+    <div>
+      <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('User Interactions')}</h3>
+      <div className="tw:grid tw:grid-cols-3 tw:gap-app-s tw:upto-tablet:grid-cols-2 tw:upto-tablet:gap-app-xs tw:upto-xxsmall:grid-cols-1">
         {renderGroup(ICONS.PLAY, __('Content'), CONTENT_TAGS)}
         {renderGroup(ICONS.COMMENTS_LIST, __('Comments'), COMMENT_TAGS)}
         {renderGroup(ICONS.FINANCE, __('Other'), OTHER_TAGS)}

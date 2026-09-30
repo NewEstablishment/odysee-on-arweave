@@ -6,7 +6,7 @@ import { SEARCH_IN_LANGUAGE } from 'constants/hashes';
 export default function LangFilterIndicator() {
   return (
     <Button
-      className="icon--langFilter"
+      className="icon--langFilter tw:ml-app-xs tw:text-[var(--color-live)] tw:opacity-90"
       icon={ICONS.FILTERED_BY_LANG}
       iconSize={20}
       description={__('Search results are being filtered by language. Click here to change the setting.')}

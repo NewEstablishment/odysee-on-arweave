@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import classnames from 'classnames';
 import { ChannelPageContext } from 'contexts/channel';
@@ -5,13 +6,14 @@ import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import * as MODALS from 'constants/modal_types';
 import Button from 'component/button';
+import { ERROR_BUBBLE_CLASS } from 'component/common/error-classes';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import ButtonNavigateChannelId from 'component/buttonNavigateChannelId';
 import ChannelThumbnail from 'component/channelThumbnail';
 import WalletStatus from 'component/walletStatus';
 import MembershipTier from './internal/membershipTier';
 import MembershipDetails from './internal/membershipDetails';
 import { useArStatus } from 'effects/use-ar-status';
-import './style.scss';
 import Spinner from 'component/spinner';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
@@ -29,6 +31,7 @@ import { doTipAccountCheckForUri } from 'redux/actions/payments';
 import { selectIsChannelMineForClaimId, selectClaimForUri } from 'redux/selectors/claims';
 import { doOpenModal } from 'redux/actions/app';
 import { getChannelFromClaim, getChannelTitleFromClaim, getChannelIdFromClaim } from 'util/claim';
+import { JOIN_MEMBERSHIP_CLASSES, JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES } from '../../classes';
 
 type Props = {
   uri: string;
@@ -83,7 +86,7 @@ const PreviewPage = (props: Props) => {
 
   if (isFetchingMemberships) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     );
@@ -95,8 +98,8 @@ const PreviewPage = (props: Props) => {
     // hack to test monetization disabled - memberships come back address = ''
     if (cheapestPlan && !joinEnabled) {
       return (
-        <div className="join-membership__empty">
-          <h2 className="header--no-memberships">{__('Closed to New Members')}</h2>
+        <div className={JOIN_MEMBERSHIP_CLASSES.empty}>
+          <h2>{__('Closed to New Members')}</h2>
           <p>{__('Unfortunately, this membership is not accepting new members at this time.')}</p>
           <div>
             <Button
@@ -113,8 +116,8 @@ const PreviewPage = (props: Props) => {
 
     if (channelIsMine) {
       return (
-        <div className="join-membership__empty">
-          <h2 className="header--no-memberships">{__('Cannot join own memberships')}</h2>
+        <div className={JOIN_MEMBERSHIP_CLASSES.empty}>
+          <h2>{__('Cannot join own memberships')}</h2>
           <p>
             {__(
               "Unfortunately you haven't activated your memberships functionality for this channel yet, but you can do so now at the link below."
@@ -138,8 +141,8 @@ const PreviewPage = (props: Props) => {
 
     if (!paymentsEnabled) {
       return (
-        <div className="join-membership__empty">
-          <h2 className="header--no-memberships">{__('This channel is not accepting payments at this time')}</h2>
+        <div className={JOIN_MEMBERSHIP_CLASSES.empty}>
+          <h2>{__('This channel is not accepting payments at this time')}</h2>
           <p>
             {__(
               "Unfortunately, this creator hasn't migrated to the new payment system yet, but you can create your own tiers with the link below!"
@@ -159,8 +162,8 @@ const PreviewPage = (props: Props) => {
     }
 
     return (
-      <div className="join-membership__empty">
-        <h2 className="header--no-memberships">{__('Channel Has No Memberships')}</h2>
+      <div className={JOIN_MEMBERSHIP_CLASSES.empty}>
+        <h2>{__('Channel Has No Memberships')}</h2>
         <p>
           {__(
             "Unfortunately, this creator hasn't activated their membership functionality yet, but you can create your own tiers with the link below!"
@@ -184,7 +187,7 @@ const PreviewPage = (props: Props) => {
       <>
         <WalletStatus />
         {channelIsMine && (
-          <div className="button--manage-memberships">
+          <div className="tw:mb-app-s tw:text-right">
             <ButtonNavigateChannelId
               icon={ICONS.MEMBERSHIP}
               button="primary"
@@ -196,7 +199,7 @@ const PreviewPage = (props: Props) => {
           </div>
         )}
 
-        <div className="join-membership__tab">
+        <div className={JOIN_MEMBERSHIP_CLASSES.tab}>
           {creatorMemberships
             .filter((m) => m.enabled === true)
             .map((membership, index) => (
@@ -242,7 +245,7 @@ const PreviewPage = (props: Props) => {
 
   return (
     <>
-      <div className="join-membership__modal-header">
+      <div className={JOIN_MEMBERSHIP_CLASSES.modalHeader}>
         <ChannelThumbnail uri={channelUri} />
         <h2>{channelTitle}</h2>
         <h3>{__('Join Membership')}</h3>
@@ -255,12 +258,12 @@ const PreviewPage = (props: Props) => {
           )}
         </p>
       </div>
-      <div className={'membership-tab-item__wrapper'}>
-        <div className={'card__header--between membership-tab-header__wrapper'}>
+      <div className={JOIN_MEMBERSHIP_CLASSES.tabItem}>
+        <div className={`card__header--between ${JOIN_MEMBERSHIP_CLASSES.tabHeader}`}>
           <h2 className={'card__title'}>Available Memberships</h2>
         </div>
       </div>
-      <div className="join-membership__modal-tabs">
+      <div className={JOIN_MEMBERSHIP_CLASSES.modalTabs}>
         {creatorMemberships.map((m, index) => (
           <Button
             key={m.membership_id}
@@ -268,16 +271,24 @@ const PreviewPage = (props: Props) => {
             button="alt"
             icon={pickIconToUse(m.membership_id)}
             onClick={() => setMembershipIndex(index)}
-            className={classnames('button-toggle', {
-              'button-toggle--active': index === selectedMembershipIndex,
-              'no-access-button': unlockableTierIds && !unlockableTierIds.includes(m.membership_id),
-              'access-button': unlockableTierIds && unlockableTierIds.includes(m.membership_id),
-            })}
+            className={classnames(
+              BUTTON_TOGGLE_CLASS,
+              JOIN_MEMBERSHIP_CLASSES.tierButton,
+              JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES[index],
+              {
+                [BUTTON_TOGGLE_ACTIVE_CLASS]: index === selectedMembershipIndex,
+                [JOIN_MEMBERSHIP_CLASSES.tierButtonActive]: index === selectedMembershipIndex,
+                [JOIN_MEMBERSHIP_CLASSES.tierButtonNoAccess]:
+                  unlockableTierIds && !unlockableTierIds.includes(m.membership_id),
+                [JOIN_MEMBERSHIP_CLASSES.tierButtonAccess]:
+                  unlockableTierIds && unlockableTierIds.includes(m.membership_id),
+              }
+            )}
           />
         ))}
       </div>
 
-      <div className="join-membership__modal-content">
+      <div className={JOIN_MEMBERSHIP_CLASSES.modalContent}>
         {selectedCreatorMembership && (
           <MembershipDetails
             membership={selectedCreatorMembership}
@@ -289,7 +300,7 @@ const PreviewPage = (props: Props) => {
         )}
       </div>
 
-      <div className="join-membership__modal-action">
+      <div className={JOIN_MEMBERSHIP_CLASSES.modalAction}>
         <Button
           icon={ICONS.MEMBERSHIP}
           button="primary"
@@ -303,7 +314,7 @@ const PreviewPage = (props: Props) => {
         />
 
         {creatorPurchaseDisabled && (
-          <span className="error-bubble">
+          <span className={ERROR_BUBBLE_CLASS}>
             {channelIsMine ? __("You're not able to signup for your own memberships") : __("You're already a member.")}
           </span>
         )}

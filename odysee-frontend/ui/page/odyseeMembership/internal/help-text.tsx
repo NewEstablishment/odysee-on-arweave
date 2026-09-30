@@ -1,7 +1,8 @@
 import React from 'react';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 const HelpText = () => (
-  <div className="section__subtitle">
+  <div className={SECTION_CLASSES.subtitle}>
     <p className="balance-text">
       {__(
         'First of all, thank you for considering or purchasing a membership, it means a ton to us! A few important details to know:'

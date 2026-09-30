@@ -1,4 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { HTML_VIEWER_PLACEHOLDER_CLASS } from './html-viewer-classes';
+import { FILE_VIEWER_CLASSES } from './classes';
 type Props = {
   source: string;
 };
@@ -29,8 +31,8 @@ function HtmlViewer({ source }: Props) {
   }, []);
 
   return (
-    <div className="file-viewer file-viewer--html file-viewer--iframe">
-      {loading && <div className="placeholder--text-document" />}
+    <div className={`${FILE_VIEWER_CLASSES.base} file-viewer--html ${FILE_VIEWER_CLASSES.iframe}`} data-file-viewer>
+      {loading && <div className={HTML_VIEWER_PLACEHOLDER_CLASS} />}
       <iframe ref={iframe} hidden={loading} sandbox="" title={__('File preview')} src={source} />
     </div>
   );

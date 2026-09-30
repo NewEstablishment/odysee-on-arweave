@@ -1,4 +1,3 @@
-import 'scss/component/_file-price.scss';
 import * as ICONS from 'constants/icons';
 import classnames from 'classnames';
 import CreditAmount from 'component/common/credit-amount';
@@ -15,6 +14,7 @@ import {
   selectCostInfoForUri,
 } from 'redux/selectors/claims';
 import { doTipAccountCheckForUri } from 'redux/actions/payments';
+import { FILE_PRICE_CLASSES } from './classes';
 
 type Props = {
   uri?: string;
@@ -76,12 +76,12 @@ const FilePrice = React.memo(function FilePrice({
     return null;
   }
 
-  const className = classnames('filePrice', {
-    'filePrice--key': sdkPaid,
-    'filePrice--filepage': type === 'filepage',
-    'filePrice--thumbnail': type === 'thumbnail',
-    'filePrice--modal': type === 'modal',
-    'filePrice--fiat': fiatRequired,
+  const className = classnames(FILE_PRICE_CLASSES.root, {
+    [FILE_PRICE_CLASSES.key]: sdkPaid,
+    [FILE_PRICE_CLASSES.filePage]: type === 'filepage',
+    [FILE_PRICE_CLASSES.thumbnail]: type === 'thumbnail',
+    [FILE_PRICE_CLASSES.modal]: type === 'modal',
+    [FILE_PRICE_CLASSES.fiat]: fiatRequired,
   });
 
   if (fiatRequired) {
@@ -93,8 +93,8 @@ const FilePrice = React.memo(function FilePrice({
     const showIconsOnly = hasMultiOptions && type === 'thumbnail';
     return (
       <div
-        className={classnames('filePriceFiatDuo', {
-          'filePriceFiatDuo--filePage': type === 'filepage',
+        className={classnames(FILE_PRICE_CLASSES.duo, {
+          [FILE_PRICE_CLASSES.duoFilePage]: type === 'filepage',
         })}
       >
         {fiatPaid ? (

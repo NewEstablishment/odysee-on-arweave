@@ -9,6 +9,7 @@ import { selectUserAuthenticated } from 'redux/selectors/user';
 import { makeSelectTagInClaimOrChannelForUri } from 'redux/selectors/claims';
 import { selectContentStates } from 'redux/selectors/content';
 import { PREFERENCE_EMBED } from 'constants/tags';
+import { FILE_VIEWER_CLASSES } from '../../../classes';
 const DEFAULT_PROMPTS = {
   bigtech: 'Together, we can take back control from big tech',
   discuss: `Continue the discussion on ${SITE_NAME}`,
@@ -49,17 +50,25 @@ function FileViewerEmbeddedEnded(props: Props) {
   })();
 
   return (
-    <div className="file-viewer__overlay">
-      <div className="file-viewer__overlay-secondary">
-        <Button className="file-viewer__overlay-logo" href="/" disabled={preferEmbed}>
+    <div className={FILE_VIEWER_CLASSES.overlay} data-file-viewer-overlay>
+      <div className={FILE_VIEWER_CLASSES.overlaySecondary} data-file-viewer-overlay-secondary>
+        <Button
+          className={FILE_VIEWER_CLASSES.overlayLogo}
+          href="/"
+          disabled={preferEmbed}
+          data-file-viewer-overlay-logo
+        >
           <Logo type={'embed'} />
         </Button>
       </div>
 
-      <div className="file-viewer__overlay-title file-viewer_embed-ended-title">
+      <div
+        className={`${FILE_VIEWER_CLASSES.overlayTitle} ${FILE_VIEWER_CLASSES.embeddedEndedTitle}`}
+        data-file-viewer-overlay-title
+      >
         <p>{prompt}</p>
       </div>
-      <div className="file-viewer__overlay-actions">
+      <div className={FILE_VIEWER_CLASSES.overlayActions}>
         <>
           {doReplay && (
             <Button

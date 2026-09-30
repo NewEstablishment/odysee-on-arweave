@@ -14,10 +14,13 @@
 //   boot     -> same check on a signed-in account; a final 401/403 forgets it.
 
 import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { isServedFromManifest } from 'util/manifest-prefix';
 
 const ACCOUNT_KEY = 'hyperbeam-account';
 const SAVED_KEY = 'hyperbeam-account-saved';
 const COOKIE_PREFIX = 'secret-';
+const NATIVE_WRITE_PATH = 'id?0.%21=true&committers=all';
+const NATIVE_WRITE_PROXY_PATH = '/$/api/hyperbeam-native-message/v1/write';
 
 export type HyperbeamAccount = { name: string; id: string };
 
@@ -59,10 +62,15 @@ export async function signUpHyperbeam(name: string): Promise<HyperbeamAccount> {
 
   clearNodeCookies();
 
-  const response = await fetch(`${base}/id?0.%21=true&committers=all`, {
+  const direct = typeof window === 'undefined' || isServedFromManifest();
+  const response = await fetch(direct ? `${base}/${NATIVE_WRITE_PATH}` : NATIVE_WRITE_PROXY_PATH, {
     method: 'POST',
     credentials: 'include',
-    headers: { accept: 'application/json', type: 'channel', name: trimmed },
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ type: 'channel', name: trimmed }),
   });
   const id =
     response.headers.get('message-id') ||

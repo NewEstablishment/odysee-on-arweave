@@ -13,6 +13,7 @@ import PaidContentOverlay from './internal/paidContentOverlay';
 import LoadingScreen from 'component/common/loading-screen';
 import ScheduledInfo from 'component/scheduledInfo';
 import Button from 'component/button';
+import { BUTTON_LARGE_ICON_CLASS, BUTTON_PLAY_CLASS } from 'component/button/classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   selectClaimForUri,
@@ -451,7 +452,12 @@ const withStreamClaimRender = (StreamClaimComponent: FunctionalComponentParam) =
             isFloatingContext={isFloatingContext}
           >
             {embedded && <FileViewerEmbeddedTitle uri={uri} uriAccessKey={uriAccessKey} />}
-            <Button onClick={handleClick} iconSize={30} title={__('Play')} className="button--icon button--play" />
+            <Button
+              onClick={handleClick}
+              iconSize={30}
+              title={__('Play')}
+              className={`${BUTTON_LARGE_ICON_CLASS} ${BUTTON_PLAY_CLASS}`}
+            />
           </ClaimCoverRender>
         );
       } else if (renderMode === 'md') {

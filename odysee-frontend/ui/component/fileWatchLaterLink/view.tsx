@@ -2,7 +2,8 @@ import * as ICONS from 'constants/icons';
 import React, { useRef } from 'react';
 import * as PAGES from 'constants/pages';
 import Icon from 'component/common/icon';
-import classnames from 'classnames';
+import { BUTTON_ALT_CLASS, BUTTON_CLASS, BUTTON_CONTENT_CLASS, BUTTON_LABEL_CLASS } from 'component/button/classes';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
 import useHover from 'effects/use-hover';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import { getLocalizedNameForCollectionId } from 'util/collections';
@@ -55,19 +56,19 @@ function FileWatchLaterLink(props: Props) {
   // label that is shown after hover
   const label = !hasClaimInWatchLater ? __('Watch Later') : __('Remove');
   return (
-    <div className="claim-preview__hover-actions second-item">
+    <div className="claim-preview__hover-actions tw:col-start-2 tw:row-start-1">
       <button
         ref={buttonRef}
         title={title}
         aria-label={title}
-        className={classnames('button button--no-style button--file-action')}
+        className={`${BUTTON_CLASS} ${BUTTON_ALT_CLASS} ${FILE_ACTION_BUTTON_CLASS}`}
         onClick={handleWatchLater}
         tabIndex={focusable ? 0 : -1}
         type="button"
       >
-        <span className="button__content">
+        <span className={BUTTON_CONTENT_CLASS}>
           <Icon icon={(hasClaimInWatchLater && (isHovering ? ICONS.REMOVE : ICONS.COMPLETED)) || ICONS.TIME} />
-          <span dir="auto" className="button__label">
+          <span dir="auto" className={BUTTON_LABEL_CLASS}>
             {label}
           </span>
         </span>

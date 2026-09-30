@@ -15,7 +15,8 @@ import {
 import { doFetchInviteStatus } from 'redux/actions/user';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { doSetClientSetting } from 'redux/actions/settings';
-import './style.scss';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
+import { INVITE_PAGE_CLASS } from './classes';
 
 function InvitePage() {
   const dispatch = useAppDispatch();
@@ -34,7 +35,7 @@ function InvitePage() {
   }, []);
 
   return (
-    <Page className="invite-page__wrapper">
+    <Page className={INVITE_PAGE_CLASS}>
       {!authenticated ? (
         <RewardAuthIntro
           title={__('Log in to %SITE_NAME% to Invite Your Friends', {
@@ -44,7 +45,7 @@ function InvitePage() {
       ) : (
         <React.Fragment>
           {isPending && <BusyIndicator message={__('Checking your invite status')} />}
-          {!isPending && isFailed && <span className="empty">{__('Failed to retrieve invite status.')}</span>}
+          {!isPending && isFailed && <span className={EMPTY_CLASS}>{__('Failed to retrieve invite status.')}</span>}
           {!isPending && !isFailed && (
             <React.Fragment>
               <InviteNew />

@@ -1,3 +1,5 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import { SITE_NAME } from 'config';
 import * as PAGES from 'constants/pages';
 import React from 'react';
@@ -19,6 +21,7 @@ import { doUserSetReferrerForUri } from 'redux/actions/user';
 import { selectIsSubscribedForUri } from 'redux/selectors/subscriptions';
 import { selectChannelTitleForUri } from 'redux/selectors/claims';
 import { doChannelSubscribe } from 'redux/actions/subscriptions';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   referrerUri: string | null | undefined;
 };
@@ -114,7 +117,7 @@ function Invited(props: Props) {
   // Case 1: Loading
   if (referrerSet === undefined && referrerUri) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     );
@@ -147,9 +150,9 @@ function Invited(props: Props) {
         subtitle={__('Something went wrong with your invite link.')}
         actions={
           <>
-            <p className="error__text">{__('Not a valid invite')}</p>
+            <p className={ERROR_TEXT_CLASS}>{__('Not a valid invite')}</p>
 
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="primary"
                 label={userHasVerifiedEmail ? __('Verify') : __('Sign up')}
@@ -213,7 +216,7 @@ function Invited(props: Props) {
         )
       }
       actions={
-        <div className="section__actions">
+        <div className={SECTION_CLASSES.actions}>
           <SignUpButton button="primary" />
           <Button button="link" label={__('Skip')} onClick={handleDone} />
         </div>

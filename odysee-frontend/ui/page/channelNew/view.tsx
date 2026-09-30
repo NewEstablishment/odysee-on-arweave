@@ -10,6 +10,9 @@ import { selectBalance } from 'redux/selectors/wallet';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { selectIsMyChannelCountOverLimit } from 'redux/selectors/claims';
 import { doClaimRewardType } from 'redux/actions/rewards';
+import { CHANNEL_NEW_PAGE_CLASS } from './classes';
+import { EMPTY_CENTERED_CLASS } from 'component/common/empty-classes';
+import { CHANNEL_PAGE_CLASSES } from 'page/claim/internal/claimPageComponent/internal/channelPage/classes';
 
 function ChannelNew() {
   const dispatch = useAppDispatch();
@@ -29,7 +32,7 @@ function ChannelNew() {
   }, [isAuthenticated, emptyBalance, dispatch]);
   return (
     <Page
-      className="channelPage-wrapper channelPage-edit-wrapper channelPage-new-wrapper"
+      className={`channelPage-wrapper ${CHANNEL_PAGE_CLASSES.editWrapper} ${CHANNEL_NEW_PAGE_CLASS}`}
       noSideNavigation
       fullWidthPage
       noFooter
@@ -41,7 +44,7 @@ function ChannelNew() {
       {emptyBalance && <YrblWalletEmpty />}
 
       {channelCountOverLimit && (
-        <div className="empty empty--centered">{__('Sorry, you have exceeded the channel creation limit.')}</div>
+        <div className={EMPTY_CENTERED_CLASS}>{__('Sorry, you have exceeded the channel creation limit.')}</div>
       )}
 
       <ChannelEdit

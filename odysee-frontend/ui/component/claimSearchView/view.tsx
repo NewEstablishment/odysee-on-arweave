@@ -21,7 +21,6 @@
  *  [CsOptHelper] can be used to generate common options.
  */
 import React from 'react';
-import './style.scss';
 import ClaimList from 'component/claimList';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
@@ -103,7 +102,10 @@ function ClaimSearchView(props: Props) {
     }
 
     return (
-      <div className="cs-view__no-results" onClick={advanceToNextPage}>
+      <div
+        className="tw:my-app-l tw:flex tw:flex-col tw:items-center tw:px-app-m tw:text-[var(--color-text-empty)] tw:italic"
+        onClick={advanceToNextPage}
+      >
         {csResults === null && <p>{__('Sorry, your request timed out. Try refreshing in a bit.')}</p>}
         {csResults && csResults.length === 0 && <p>{__('No results.')}</p>}
       </div>
@@ -113,9 +115,12 @@ function ClaimSearchView(props: Props) {
   const MoreIndicator = () => {
     if (pagination === 'infinite') {
       return (
-        <div className="cs-view__has-more" onClick={advanceToNextPage}>
+        <div
+          className="tw:block tw:rounded-app tw:text-center tw:hover:cursor-pointer tw:hover:bg-[var(--color-navigation-hover)]"
+          onClick={advanceToNextPage}
+        >
           {isFetching && <Spinner type="small" />}
-          {!isFetching && hasMorePages && <Icon icon={ICONS.DOWN} />}
+          {!isFetching && hasMorePages && <Icon icon={ICONS.DOWN} className="tw:inline-block" />}
         </div>
       );
     }

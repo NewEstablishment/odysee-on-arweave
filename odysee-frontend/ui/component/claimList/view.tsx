@@ -1,8 +1,10 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import { MAIN_CLASS } from 'constants/classnames';
 import React, { useEffect } from 'react';
 import classnames from 'classnames';
 import ClaimPreview from 'component/claimPreview';
 import Spinner from 'component/spinner';
+import { SPINNER_AREA_CENTERED_CLASS } from 'component/spinner/classes';
 import { FormField } from 'component/common/form';
 import usePersistedState from 'effects/use-persisted-state';
 import useGetLastVisibleSlot from 'effects/use-get-last-visible-slot';
@@ -15,6 +17,17 @@ import type { HomepageTitles } from 'util/buildHomepage';
 import { useAppSelector } from 'redux/hooks';
 import { selectClientSetting } from 'redux/selectors/settings';
 import * as SETTINGS from 'constants/settings';
+import {
+  CLAIM_LIST_ALT_CONTROLS_CLASS,
+  CLAIM_LIST_CLASS,
+  CLAIM_LIST_DROPDOWN_CLASS,
+  CLAIM_LIST_HEADER_CLASS,
+  CLAIM_LIST_NO_MARGIN_CLASS,
+  CLAIM_LIST_SCROLL_TO_RECENT_CLASS,
+} from './classes';
+import { CLAIM_GRID_CLASS, CLAIM_SHORTS_GRID_CLASS } from 'component/common/claim-grid-classes';
+import { EMPTY_CENTERED_CLASS, EMPTY_CLASS } from 'component/common/empty-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 const Draggable = React.lazy(() =>
   import(
     '@hello-pangea/dnd'
@@ -373,9 +386,9 @@ export default function ClaimList(props: Props) {
     <>
       <section
         ref={listRef}
-        className={classnames('claim-grid', {
-          'claim-shorts-grid': isShorts,
-          'claim-grid--stable-pagination': stablePaginationSlots,
+        className={classnames(CLAIM_GRID_CLASS, {
+          [CLAIM_SHORTS_GRID_CLASS]: isShorts,
+          'tw:[overflow-anchor:none]': stablePaginationSlots,
         })}
       >
         {urisLength > 0 &&
@@ -425,38 +438,42 @@ export default function ClaimList(props: Props) {
           );
         })}
         {!timedOut && urisLength === 0 && !loading && !noEmpty && (
-          <div className="empty main--empty">{empty || noResultMsg}</div>
+          <div className={`${EMPTY_CLASS} ${PAGE_MAIN_EMPTY_CLASS}`}>{empty || noResultMsg}</div>
         )}
-        {timedOut && timedOutMessage && <div className="empty main--empty">{timedOutMessage}</div>}
+        {timedOut && timedOutMessage && (
+          <div className={`${EMPTY_CLASS} ${PAGE_MAIN_EMPTY_CLASS}`}>{timedOutMessage}</div>
+        )}
       </section>
       {loading && useLoadingSpinner && (
-        <div className="spinnerArea--centered">
+        <div className={SPINNER_AREA_CENTERED_CLASS}>
           <Spinner type="small" />
         </div>
       )}
     </>
   ) : (
     <section
-      className={classnames('claim-list', {
-        'claim-list--no-margin': showIndexes,
+      className={classnames(CLAIM_LIST_CLASS, {
+        [CLAIM_LIST_NO_MARGIN_CLASS]: showIndexes,
       })}
+      data-claim-list
     >
       {header !== false && (
         <React.Fragment>
           {header && (
             <div
-              className={classnames('claim-list__header', {
-                'section__title--small': type === 'small',
+              className={classnames(CLAIM_LIST_HEADER_CLASS, {
+                [SECTION_CLASSES.titleSmall]: type === 'small',
               })}
+              data-claim-list-header
             >
               {header}
               {loading && <Spinner type="small" />}
               {(headerAltControls || defaultSort) && (
-                <div className="claim-list__alt-controls">
+                <div className={CLAIM_LIST_ALT_CONTROLS_CLASS}>
                   {headerAltControls}
                   {defaultSort && (
                     <FormField
-                      className="claim-list__dropdown"
+                      className={CLAIM_LIST_DROPDOWN_CLASS}
                       type="select"
                       name="file_sort"
                       value={currentSort}
@@ -504,9 +521,10 @@ export default function ClaimList(props: Props) {
                         document.documentElement?.style?.getPropertyValue('--content-height') || 0
                       );
                       const playerInfo =
-                        isDraggingFromFloatingPlayer && document.querySelector<HTMLElement>('.content__info');
+                        isDraggingFromFloatingPlayer &&
+                        document.querySelector<HTMLElement>('[data-floating-player-info]');
                       const playerElem =
-                        isDraggingFromFloatingPlayer && document.querySelector<HTMLElement>('.content__viewer');
+                        isDraggingFromFloatingPlayer && document.querySelector<HTMLElement>('[data-content-viewer]');
                       const playerTransform = playerElem && playerElem.style.transform;
                       const playerTop =
                         playerTransform &&
@@ -556,7 +574,7 @@ export default function ClaimList(props: Props) {
               ))}
               {droppableProvided.placeholder}
               {isLargeList && visibleCount < sortedUris.length && (
-                <li className="claim-list__loading-more">
+                <li className="tw:flex tw:justify-center tw:p-app-s">
                   <Spinner type="small" />
                 </li>
               )}
@@ -570,7 +588,7 @@ export default function ClaimList(props: Props) {
                 </React.Fragment>
               ))}
               {isLargeList && visibleCount < sortedUris.length && (
-                <li className="claim-list__loading-more">
+                <li className="tw:flex tw:justify-center tw:p-app-s">
                   <Spinner type="small" />
                 </li>
               )}
@@ -580,17 +598,17 @@ export default function ClaimList(props: Props) {
       )}
 
       {restoreScrollPos && (
-        <div className="claim-list__scroll-to-recent">
+        <div className={CLAIM_LIST_SCROLL_TO_RECENT_CLASS} data-claim-list-scroll-to-recent>
           <Button button="secondary" label={__('Scroll to Playing')} onClick={restoreScrollPos} />
         </div>
       )}
 
       {!timedOut && urisLength === 0 && !loading && !noEmpty && (
-        <div className="empty empty--centered">{empty || noResultMsg}</div>
+        <div className={EMPTY_CENTERED_CLASS}>{empty || noResultMsg}</div>
       )}
-      {!loading && timedOut && timedOutMessage && <div className="empty empty--centered">{timedOutMessage}</div>}
+      {!loading && timedOut && timedOutMessage && <div className={EMPTY_CENTERED_CLASS}>{timedOutMessage}</div>}
       {loading && useLoadingSpinner && (
-        <div className="spinnerArea--centered">
+        <div className={SPINNER_AREA_CENTERED_CLASS}>
           <Spinner type="small" />
         </div>
       )}

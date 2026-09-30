@@ -1,6 +1,7 @@
 import classnames from 'classnames';
 import React from 'react';
 import Empty from 'component/common/empty';
+import { CLAIM_PREVIEW_LARGE_CLASS } from '../classes';
 type Props = {
   isChannel: boolean;
   type: string;
@@ -16,10 +17,10 @@ function ClaimPreviewNoContent(props: Props) {
       })}
     >
       <div
-        className={classnames('claim-preview claim-preview--inactive', {
-          'claim-preview--large': type === 'large',
-          'claim-preview__empty': true,
+        className={classnames('claim-preview tw:flex tw:items-center tw:justify-center', {
+          [CLAIM_PREVIEW_LARGE_CLASS]: type === 'large',
         })}
+        data-claim-preview-inactive
       >
         <Empty text={__('Nothing found here. Like big tech ethics.')} />
       </div>

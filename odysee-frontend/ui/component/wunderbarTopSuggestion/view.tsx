@@ -11,6 +11,8 @@ import { doResolveUris } from 'redux/actions/claims';
 import { parseURI } from 'util/lbryURI';
 import { makeSelectWinningUriForQuery } from 'redux/selectors/search';
 import { PREFERENCE_EMBED } from 'constants/tags';
+import { WUNDERBAR_SUGGESTION_CLASSES } from 'component/wunderbarSuggestion/classes';
+import { WUNDERBAR_TOP_SUGGESTION_CLASSES } from './classes';
 
 type Props = {
   query: string;
@@ -53,13 +55,15 @@ export default function WunderbarTopSuggestion(props: Props) {
   if (resolvingUris) {
     return (
       <div className="wunderbar__winning-claim">
-        <div className="wunderbar__label wunderbar__placeholder-label" />
+        <div
+          className={`${WUNDERBAR_TOP_SUGGESTION_CLASSES.label} ${WUNDERBAR_TOP_SUGGESTION_CLASSES.placeholderLabel}`}
+        />
 
-        <div className="wunderbar__suggestion wunderbar__placeholder-suggestion">
-          <div className="wunderbar__placeholder-thumbnail" />
-          <div className="wunderbar__placeholder-info" />
+        <div className={`${WUNDERBAR_SUGGESTION_CLASSES.root} ${WUNDERBAR_TOP_SUGGESTION_CLASSES.suggestion}`}>
+          <div className={WUNDERBAR_TOP_SUGGESTION_CLASSES.thumbnail} />
+          <div className={WUNDERBAR_TOP_SUGGESTION_CLASSES.info} />
         </div>
-        <hr className="wunderbar__top-separator" />
+        <hr className={WUNDERBAR_TOP_SUGGESTION_CLASSES.separator} />
       </div>
     );
   }
@@ -70,12 +74,12 @@ export default function WunderbarTopSuggestion(props: Props) {
 
   return (
     <>
-      <div className="wunderbar__label">
+      <div className={WUNDERBAR_TOP_SUGGESTION_CLASSES.label}>
         <LbcSymbol prefix={__('Most Supported')} />
       </div>
 
       <WunderbarSuggestion uri={winningUri} />
-      <hr className="wunderbar__top-separator" />
+      <hr className={WUNDERBAR_TOP_SUGGESTION_CLASSES.separator} />
     </>
   );
 }

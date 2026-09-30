@@ -5,8 +5,12 @@ import * as PAGES from 'constants/pages';
 import { useNavigate } from 'react-router-dom';
 import { COLLECTION_PAGE } from 'constants/urlParams';
 import Icon from 'component/common/icon';
+import { ICON_MARGIN_RIGHT_CLASS } from 'component/common/icon-classes';
 import Skeleton from '@mui/material/Skeleton';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_CLASS } from 'component/button/classes';
+import { COLLECTION_HEADER_CLASSES } from '../../classes';
+import { HEADER_BALANCE_LOADING_CLASS } from 'component/header/classes';
 import { useAppSelector } from 'redux/hooks';
 import {
   selectCollectionTitleForId,
@@ -28,12 +32,12 @@ const CollectionTitle = (props: Props) => {
   const showEditButton =
     isMyCollection && !isBuiltin && collectionType !== COLLECTIONS_CONSTS.COL_TYPES.FEATURED_CHANNELS;
   return (
-    <div className="card__title card__title--with-actions">
-      <h2 className="card-title__text">
+    <div className="card__title card__title--with-actions tw:flex tw:justify-between tw:gap-app-m">
+      <h2 className={COLLECTION_HEADER_CLASSES.titleText}>
         {!noIcon && (
           <Icon
             icon={COLLECTIONS_CONSTS.PLAYLIST_ICONS[collectionId] || ICONS.PLAYLIST}
-            className="icon--margin-right"
+            className={ICON_MARGIN_RIGHT_CLASS}
           />
         )}
 
@@ -43,7 +47,7 @@ const CollectionTitle = (props: Props) => {
           <Skeleton
             variant="text"
             animation="wave"
-            className="header__navigationItem--balanceLoading"
+            className={HEADER_BALANCE_LOADING_CLASS}
             style={{
               display: 'inline-block',
             }}
@@ -52,10 +56,10 @@ const CollectionTitle = (props: Props) => {
       </h2>
 
       {showEditButton && (
-        <div className="card-title__action-buttons">
+        <div className="card-title__action-buttons tw:flex">
           <Button
             title={__('Edit')}
-            className="button-toggle"
+            className={BUTTON_TOGGLE_CLASS}
             icon={ICONS.EDIT}
             onClick={() =>
               navigate(

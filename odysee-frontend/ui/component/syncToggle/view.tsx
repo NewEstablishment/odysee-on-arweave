@@ -8,6 +8,7 @@ import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { doOpenModal } from 'redux/actions/app';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 type Props = {
   disabled: boolean;
@@ -44,7 +45,7 @@ function SyncToggle(props: Props) {
       />
       {!verifiedEmail && (
         <div>
-          <p className="help">{__('An email address is required to sync your account.')}</p>
+          <p className={HELP_CLASS}>{__('An email address is required to sync your account.')}</p>
           <Button requiresAuth button="primary" label={__('Add Email')} />
         </div>
       )}

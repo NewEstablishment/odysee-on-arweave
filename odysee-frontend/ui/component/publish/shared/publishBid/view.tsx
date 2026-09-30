@@ -14,7 +14,9 @@ import {
   selectTakeOverAmount,
 } from 'redux/selectors/publish';
 import { doUpdatePublishForm } from 'redux/actions/publish';
-import './style.scss';
+import { FORM_FIELD_PRICE_AMOUNT_CLASS } from 'component/common/form-components/form-field-classes';
+import { DISABLED_CLASS } from 'component/common/state-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 type Props = {};
 
 function PublishBid(props: Props) {
@@ -61,17 +63,17 @@ function PublishBid(props: Props) {
   }, [bid, previousBidAmount, balance, dispatch]);
   return showDepositField ? (
     <Card
-      className={!name ? 'disabled' : ''}
+      className={!name ? DISABLED_CLASS : ''}
       actions={
-        <div className="publish-bid__row">
-          <div className="publish-bid__input">
+        <div className="tw:flex tw:items-center tw:gap-app-m tw:upto-small:flex-col">
+          <div className="tw:min-w-[12rem] tw:flex-none">
             <FormField
               type="number"
               name="content_bid"
               min={0}
               step="any"
               placeholder="0.123"
-              className="form-field--price-amount"
+              className={FORM_FIELD_PRICE_AMOUNT_CLASS}
               label={<LbcSymbol postfix={__('Deposit')} />}
               value={bid}
               error={bidError}
@@ -84,8 +86,8 @@ function PublishBid(props: Props) {
             />
             <WalletSpendableBalanceHelp inline />
           </div>
-          <div className="publish-bid__helper">
-            <span className="help">
+          <div className="tw:flex tw:min-w-0 tw:flex-auto tw:flex-col tw:gap-app-xs">
+            <span className={HELP_CLASS}>
               <BidHelpText
                 uri={'lbry://' + name}
                 amountNeededForTakeover={amountNeededForTakeover}

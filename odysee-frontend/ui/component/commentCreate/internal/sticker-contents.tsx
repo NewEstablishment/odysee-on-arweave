@@ -4,6 +4,7 @@ import FilePrice from 'component/filePrice';
 import OptimizedImage from 'component/optimizedImage';
 import ChannelThumbnail from 'component/channelThumbnail';
 import UriIndicator from 'component/uriIndicator';
+import { COMMENT_CREATE_CLASSES } from '../classes';
 type Props = {
   activeChannelUrl: string;
   src: string;
@@ -13,13 +14,13 @@ type Props = {
 export const StickerReviewBox = (props: Props) => {
   const { activeChannelUrl, src, price, exchangeRate } = props;
   return (
-    <div className="comment-create__sticker-preview">
-      <div className="comment-create__sticker-preview__info">
+    <div className={COMMENT_CREATE_CLASSES.stickerPreview}>
+      <div className={COMMENT_CREATE_CLASSES.stickerPreviewInfo}>
         <ChannelThumbnail xsmall uri={activeChannelUrl} />
         <UriIndicator uri={activeChannelUrl} link showAtSign />
       </div>
 
-      <div className="comment-create__sticker-preview__image">
+      <div className={COMMENT_CREATE_CLASSES.stickerPreviewImage}>
         <OptimizedImage src={src} waitLoad loading="lazy" />
       </div>
 

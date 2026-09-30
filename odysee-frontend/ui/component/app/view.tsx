@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as PAGES from 'constants/pages';
 import * as MODALS from 'constants/modal_types';
 import * as SETTINGS from 'constants/settings';
@@ -176,7 +177,7 @@ const YoutubeWelcome = lazyImport(
     )
 );
 // ****************************************************************************
-export const MAIN_WRAPPER_CLASS = 'main-wrapper';
+export const MAIN_WRAPPER_CLASS = 'tw:relative tw:mx-auto';
 export const IS_MAC = navigator.userAgent.indexOf('Mac OS X') !== -1;
 import { useLivestreamPublish } from 'contexts/livestreamPublish';
 
@@ -761,7 +762,7 @@ function App() {
   // It's not needed on desktop since there is no un-authed state
   if (user === undefined) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner delayed />
       </div>
     );
@@ -781,7 +782,7 @@ function App() {
       <div className={MAIN_WRAPPER_CLASS} ref={appRef} key={langRenderKey}>
         {lbryTvApiStatus === STATUS_DOWN ? (
           <Yrbl
-            className="main--empty"
+            className={PAGE_MAIN_EMPTY_CLASS}
             title={__('odysee.com is currently down')}
             subtitle={__('My wheel broke, but the good news is that someone from LBRY is working on it.')}
           />
@@ -793,7 +794,7 @@ function App() {
           >
             <React.Suspense
               fallback={
-                <div className="main--empty">
+                <div className={PAGE_MAIN_EMPTY_CLASS}>
                   <Spinner delayed />
                 </div>
               }

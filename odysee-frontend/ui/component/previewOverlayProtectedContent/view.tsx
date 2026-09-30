@@ -10,6 +10,7 @@ import {
   selectProtectedContentMembershipsForContentClaimId,
 } from 'redux/selectors/memberships';
 import { doMembershipList } from 'redux/actions/memberships';
+import { PREVIEW_PROTECTED_CONTENT_CLASSES } from './classes';
 type Props = {
   uri: string;
 };
@@ -39,7 +40,7 @@ const PreviewOverlayProtectedContent = (props: Props) => {
 
   if (userIsAMember || (protectedMembershipIds && claimIsMine)) {
     return (
-      <div className="protected-content__wrapper--unlocked">
+      <div className={PREVIEW_PROTECTED_CONTENT_CLASSES.unlocked} data-preview-protected-content-unlocked>
         <Icon icon={ICONS.UNLOCK} size={64} />
       </div>
     );
@@ -47,14 +48,17 @@ const PreviewOverlayProtectedContent = (props: Props) => {
 
   if (hasProtectedContentTag) {
     return (
-      <div className="protected-content__wrapper">
-        <div className="protected-content__lock">
+      <div className={PREVIEW_PROTECTED_CONTENT_CLASSES.wrapper} data-preview-protected-content>
+        <div className={PREVIEW_PROTECTED_CONTENT_CLASSES.lock} data-preview-protected-content-lock>
           <Icon icon={ICONS.LOCK} />
         </div>
         {userIsAMember !== undefined && protectedMembershipIds && cheapestPlanPrice && (
-          <div className="protected-content__label-wrapper">
-            <div className="protected-content__label-container">
-              <div className="protected-content__label">
+          <div className={PREVIEW_PROTECTED_CONTENT_CLASSES.labelWrapper} data-preview-protected-content-label-wrapper>
+            <div
+              className={PREVIEW_PROTECTED_CONTENT_CLASSES.labelContainer}
+              data-preview-protected-content-label-container
+            >
+              <div className={PREVIEW_PROTECTED_CONTENT_CLASSES.label} data-preview-protected-content-label>
                 {__('Members Only')}
                 <span>
                   {__('Join for $%membership_price% per month', {

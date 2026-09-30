@@ -3,6 +3,7 @@ import UriIndicator from 'component/uriIndicator';
 import DateTimeClaim from 'component/dateTimeClaim';
 import LivestreamDateTime from 'component/livestreamDateTime';
 import Button from 'component/button';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import FileViewCountInline from 'component/fileViewCountInline';
 import { getChannelSubCountStr, getChannelViewCountStr } from 'util/formatMediaDuration';
 import { toCompactNotation } from 'util/string';
@@ -14,6 +15,7 @@ import { selectLanguage } from 'redux/selectors/settings';
 import { doBeginPublish } from 'redux/actions/publish';
 import { doFetchSubCount, selectSubCountForUri } from 'lbryinc';
 import { isStreamPlaceholderClaim } from 'util/claim';
+import { CLAIM_PREVIEW_EXTRA_INFO_CLASS, CLAIM_PREVIEW_SUB_UPLOAD_METADATA_CLASS } from './classes';
 const SPACED_BULLET = '\u00A0\u2022\u00A0';
 type Props = {
   uri: string;
@@ -58,7 +60,7 @@ function ClaimPreviewSubtitle(props: Props) {
             <>
               {isChannel && type !== 'inline' && (
                 <>
-                  <span className="claim-preview-metadata-sub-upload">
+                  <span className={CLAIM_PREVIEW_SUB_UPLOAD_METADATA_CLASS} data-claim-preview-sub-upload-metadata>
                     {getChannelViewCountStr(claimsInChannel)}
                     {Number.isInteger(subCount) ? SPACED_BULLET : ''}
                     {getChannelSubCountStr(subCount, formattedSubCount)}
@@ -70,7 +72,7 @@ function ClaimPreviewSubtitle(props: Props) {
                 (isLivestream ? (
                   <LivestreamDateTime uri={uri} />
                 ) : (
-                  <span className="claim-extra-info">
+                  <span className={CLAIM_PREVIEW_EXTRA_INFO_CLASS} data-claim-preview-extra-info>
                     <FileViewCountInline uri={uri} />
                     <DateTimeClaim uri={uri} />
                   </span>
@@ -81,7 +83,7 @@ function ClaimPreviewSubtitle(props: Props) {
       ) : (
         <React.Fragment>
           <div>{__('Upload something and claim this spot!')}</div>
-          <div className="card__actions">
+          <div className={CARD_CLASSES.actions}>
             <Button
               onClick={() => dispatch(doBeginPublish('file', name))}
               button="primary"

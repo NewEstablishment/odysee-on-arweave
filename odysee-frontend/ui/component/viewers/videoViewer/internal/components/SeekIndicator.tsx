@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useReducer } from 'react';
+import { SEEK_INDICATOR_CLASSES } from './interaction-overlay-classes';
 
 const FADE_DELAY_MS = 800;
 
@@ -75,20 +76,20 @@ export default function SeekIndicator() {
   if (!state.left.visible && !state.right.visible) return null;
 
   return (
-    <div className="odysee-seek-indicator">
-      <div className="odysee-seek-indicator__side">
+    <div className={SEEK_INDICATOR_CLASSES.root}>
+      <div className={SEEK_INDICATOR_CLASSES.side}>
         {state.left.visible && (
-          <div className="odysee-seek-indicator__bubble" key={state.left.key}>
+          <div className={SEEK_INDICATOR_CLASSES.bubble} key={state.left.key}>
             <RewindIcon />
-            <span className="odysee-seek-indicator__label">-{state.left.total}s</span>
+            <span className={SEEK_INDICATOR_CLASSES.label}>-{state.left.total}s</span>
           </div>
         )}
       </div>
-      <div className="odysee-seek-indicator__side">
+      <div className={SEEK_INDICATOR_CLASSES.side}>
         {state.right.visible && (
-          <div className="odysee-seek-indicator__bubble" key={state.right.key}>
+          <div className={SEEK_INDICATOR_CLASSES.bubble} key={state.right.key}>
             <FastForwardIcon />
-            <span className="odysee-seek-indicator__label">{state.right.total}s</span>
+            <span className={SEEK_INDICATOR_CLASSES.label}>{state.right.total}s</span>
           </div>
         )}
       </div>

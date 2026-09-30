@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Player from '../player';
 import * as QUALITY_OPTIONS from 'constants/player';
+import classnames from 'classnames';
+import { QUALITY_SELECTOR_CLASSES } from './quality-selector-classes';
 
 export default function QualitySelector({ defaultQuality, originalVideoHeight, isLivestream, onQualityChanged }) {
   const media = Player.useMedia();
@@ -65,17 +67,17 @@ export default function QualitySelector({ defaultQuality, originalVideoHeight, i
         : QUALITY_OPTIONS.AUTO;
 
   return (
-    <div className="media-quality-selector">
+    <div className={QUALITY_SELECTOR_CLASSES.root}>
       <button
         type="button"
         className="media-button media-button--icon media-button--quality"
         onClick={() => setIsOpen(!isOpen)}
       >
-        <span className="media-quality-label">{currentLabel}</span>
+        <span className={QUALITY_SELECTOR_CLASSES.label}>{currentLabel}</span>
       </button>
 
       {isOpen && (
-        <div className="media-quality-menu media-surface">
+        <div className={QUALITY_SELECTOR_CLASSES.menu}>
           {levels
             .slice()
             .sort((a, b) => a.height - b.height)
@@ -83,7 +85,12 @@ export default function QualitySelector({ defaultQuality, originalVideoHeight, i
               <button
                 key={level.index}
                 type="button"
-                className={`media-quality-item ${currentLevel === level.index ? 'media-quality-item--selected' : ''}`}
+                className={classnames(
+                  QUALITY_SELECTOR_CLASSES.item,
+                  currentLevel === level.index
+                    ? QUALITY_SELECTOR_CLASSES.itemSelected
+                    : QUALITY_SELECTOR_CLASSES.itemHover
+                )}
                 onClick={() => selectQuality(level.index)}
               >
                 {level.height}p
@@ -92,7 +99,10 @@ export default function QualitySelector({ defaultQuality, originalVideoHeight, i
           {!isLivestream && (
             <button
               type="button"
-              className={`media-quality-item ${currentLevel === -2 ? 'media-quality-item--selected' : ''}`}
+              className={classnames(
+                QUALITY_SELECTOR_CLASSES.item,
+                currentLevel === -2 ? QUALITY_SELECTOR_CLASSES.itemSelected : QUALITY_SELECTOR_CLASSES.itemHover
+              )}
               onClick={() => {
                 selectQuality(-2);
               }}
@@ -102,7 +112,10 @@ export default function QualitySelector({ defaultQuality, originalVideoHeight, i
           )}
           <button
             type="button"
-            className={`media-quality-item ${currentLevel === -1 ? 'media-quality-item--selected' : ''}`}
+            className={classnames(
+              QUALITY_SELECTOR_CLASSES.item,
+              currentLevel === -1 ? QUALITY_SELECTOR_CLASSES.itemSelected : QUALITY_SELECTOR_CLASSES.itemHover
+            )}
             onClick={() => selectQuality(-1)}
           >
             {QUALITY_OPTIONS.AUTO}

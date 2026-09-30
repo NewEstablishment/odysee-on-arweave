@@ -6,8 +6,11 @@ import { FormField } from 'component/common/form';
 import { FormContext } from 'component/common/form-components/form';
 import TagsSelect from 'component/tagsSelect';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { COLLECTION_GENERAL_TAB_CLASS, COLLECTION_TITLE_SURFACE_CLASS } from './classes';
 import { lazyImport } from 'util/lazyImport';
-import './style.scss';
+import { PUBLISH_ROW_CLASS } from 'component/publish/shared/publish-row-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 const SelectThumbnail = lazyImport(
   () =>
     import(
@@ -16,6 +19,7 @@ const SelectThumbnail = lazyImport(
     )
 );
 const TAGS_LIMIT = 5;
+const collectionSectionTitleClassName = 'tw:mt-app-l tw:text-app-large tw:font-bold';
 function normalizeTag(tag: any) {
   if (typeof tag === 'string') return { name: tag };
   return tag;
@@ -70,9 +74,9 @@ function CollectionGeneralTab(props: Props) {
     updateFormErrors('thumbnail', thumbnailError); // eslint-disable-next-line react-hooks/exhaustive-deps -- ignore updateFormErrors
   }, [setThumbnailError, thumbError, thumbStatus]);
   return (
-    <div className="card card--background collection-edit__wrapper">
-      <div className="collection__title">
-        <h2>{__('Title')}</h2>
+    <div className={`card ${CARD_CLASSES.background} ${COLLECTION_GENERAL_TAB_CLASS}`}>
+      <div className={COLLECTION_TITLE_SURFACE_CLASS} data-collection-title-surface>
+        <h2 className={collectionSectionTitleClassName}>{__('Title')}</h2>
         <FormField
           type="text"
           name="collection_title"
@@ -98,7 +102,7 @@ function CollectionGeneralTab(props: Props) {
         />
       </fieldset-section>
 
-      <h2>{__('Description')}</h2>
+      <h2 className={collectionSectionTitleClassName}>{__('Description')}</h2>
       <FormField
         type="markdown"
         name="collection_description"
@@ -111,18 +115,11 @@ function CollectionGeneralTab(props: Props) {
         textAreaMaxLength={FF_MAX_CHARS_IN_DESCRIPTION}
       />
 
-      <h2
-        className="card__title"
-        style={{
-          marginTop: 'var(--spacing-l)',
-        }}
-      >
-        {__('Tags')}
-      </h2>
+      <h2 className={`card__title ${collectionSectionTitleClassName}`}>{__('Tags')}</h2>
       <Card
         background
         body={
-          <div className="publish-row">
+          <div className={PUBLISH_ROW_CLASS}>
             <TagsSelect
               suggestMature={false}
               disableAutoFocus
@@ -165,14 +162,7 @@ function CollectionGeneralTab(props: Props) {
         }
       />
 
-      <h2
-        className="card__title"
-        style={{
-          marginTop: 'var(--spacing-l)',
-        }}
-      >
-        {__('Visibility')}
-      </h2>
+      <h2 className={`card__title ${collectionSectionTitleClassName}`}>{__('Visibility')}</h2>
       <Card
         background
         body={
@@ -189,7 +179,7 @@ function CollectionGeneralTab(props: Props) {
                 })
               }
             />
-            <p className="help">
+            <p className={HELP_CLASS}>
               {initialVisibility === 'public'
                 ? __('This playlist is public. Its published history cannot be made private.')
                 : visibility === 'public'

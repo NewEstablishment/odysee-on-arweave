@@ -1,5 +1,6 @@
 /* eslint-disable react/prop-types */
 import React, { useCallback, useEffect } from 'react';
+import { KEYBOARD_SHORTCUT_CLASSES } from './keyboard-shortcuts-classes';
 
 const PRIMARY_SHORTCUTS = [
   { keys: ['Space', 'K'], label: __('Play/Pause (hold to speed up)') },
@@ -27,16 +28,16 @@ function ShortcutItem({ keys, separator, label }: { keys: any; separator?: any; 
   const joiner = separator || ' / ';
 
   return (
-    <li className="odysee-shortcuts__item">
-      <span className="odysee-shortcuts__keys">
+    <li className={KEYBOARD_SHORTCUT_CLASSES.item}>
+      <span className={KEYBOARD_SHORTCUT_CLASSES.keys}>
         {parts.map((key, i) => (
           <React.Fragment key={key}>
-            {i > 0 && <span className="odysee-shortcuts__separator">{joiner}</span>}
-            <kbd className="odysee-shortcuts__kbd">{key}</kbd>
+            {i > 0 && <span className={KEYBOARD_SHORTCUT_CLASSES.separator}>{joiner}</span>}
+            <kbd className={KEYBOARD_SHORTCUT_CLASSES.kbd}>{key}</kbd>
           </React.Fragment>
         ))}
       </span>
-      <span className="odysee-shortcuts__action">{label}</span>
+      <span className={KEYBOARD_SHORTCUT_CLASSES.action}>{label}</span>
     </li>
   );
 }
@@ -55,21 +56,26 @@ export default function KeyboardShortcutsOverlay({ onClose }) {
   }, [handleKeyDown]);
 
   return (
-    <div className="odysee-shortcuts-overlay" role="dialog" aria-label={__('Keyboard shortcuts')} onClick={onClose}>
-      <div className="odysee-shortcuts-overlay__card" onClick={(e) => e.stopPropagation()}>
-        <div className="odysee-shortcuts-overlay__header">
-          <span className="odysee-shortcuts-overlay__title">{__('Keyboard shortcuts')}</span>
-          <button type="button" className="odysee-shortcuts-overlay__close" onClick={onClose}>
+    <div
+      className={KEYBOARD_SHORTCUT_CLASSES.overlay}
+      role="dialog"
+      aria-label={__('Keyboard shortcuts')}
+      onClick={onClose}
+    >
+      <div className={KEYBOARD_SHORTCUT_CLASSES.card} onClick={(e) => e.stopPropagation()}>
+        <div className={KEYBOARD_SHORTCUT_CLASSES.header}>
+          <span className={KEYBOARD_SHORTCUT_CLASSES.title}>{__('Keyboard shortcuts')}</span>
+          <button type="button" className={KEYBOARD_SHORTCUT_CLASSES.close} onClick={onClose}>
             {__('Close')}
           </button>
         </div>
-        <div className="odysee-shortcuts-overlay__body">
-          <ul className="odysee-shortcuts__list">
+        <div className={KEYBOARD_SHORTCUT_CLASSES.body}>
+          <ul className={KEYBOARD_SHORTCUT_CLASSES.list}>
             {PRIMARY_SHORTCUTS.map((s) => (
               <ShortcutItem key={s.label} {...s} />
             ))}
           </ul>
-          <ul className="odysee-shortcuts__list">
+          <ul className={KEYBOARD_SHORTCUT_CLASSES.list}>
             {SECONDARY_SHORTCUTS.map((s) => (
               <ShortcutItem key={s.label} {...s} />
             ))}

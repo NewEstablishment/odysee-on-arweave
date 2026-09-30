@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FormField } from 'component/common/form';
 import Button from 'component/button';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import I18nMessage from 'component/i18nMessage';
 import * as ICONS from 'constants/icons';
 import ServerInputRow from './internal/inputRow';
@@ -15,6 +16,9 @@ import {
   doSaveCustomWalletServers,
 } from 'redux/actions/settings';
 import { selectSavedWalletServers, selectDaemonStatus, selectHasWalletServerPrefs } from 'redux/selectors/settings';
+import { WALLET_SERVER_INTERNAL_OPTION_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 type StatusOfServer = {
   host: string;
@@ -124,7 +128,7 @@ function SettingWalletServer() {
           }}
           label={__('Use custom wallet servers')}
         />
-        <p className="help">
+        <p className={HELP_CLASS}>
           <I18nMessage
             tokens={{
               learn_more: <Button button="link" href="http://lbry.com/faq/wallet-servers" label={__('Learn More')} />,
@@ -146,12 +150,12 @@ function SettingWalletServer() {
                 return (
                   <div
                     key={`${host}:${port}`}
-                    className="section section--padded card--inline form-field__internal-option"
+                    className={`section ${SECTION_CLASSES.padded} ${CARD_CLASSES.inline} ${WALLET_SERVER_INTERNAL_OPTION_CLASS}`}
                   >
                     <h3>
                       {host}:{port}
                     </h3>
-                    <span className="help">
+                    <span className={HELP_CLASS}>
                       {available ? __('Connected') : walletReconnecting ? __('Connecting...') : __('Not connected')}
                     </span>
                     <Button
@@ -163,7 +167,7 @@ function SettingWalletServer() {
                   </div>
                 );
               })}
-            <div className="form-field__internal-option">
+            <div className={WALLET_SERVER_INTERNAL_OPTION_CLASS}>
               <ServerInputRow update={onAdd} />
             </div>
           </div>

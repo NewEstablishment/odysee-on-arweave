@@ -16,6 +16,7 @@ import PublishProtectedContent from 'component/publishProtectedContent';
 import PublishControlTags from 'component/publish/shared/publishControlTags/view';
 import PublishTagsPicker from 'component/publish/shared/publishTagsPicker/view';
 import PublishSummary from 'component/publish/shared/publishSummary/view';
+import { PUBLISH_DETAILS_CLASS, PUBLISH_DETAILS_TITLE_CLASS } from 'component/publish/shared/publish-details-classes';
 import PublishWizard from 'component/publish/shared/publishWizard';
 import Card from 'component/common/card';
 import I18nMessage from 'component/i18nMessage';
@@ -38,6 +39,8 @@ import { doClaimInitialRewards } from 'redux/actions/rewards';
 import { selectIsClaimingInitialRewards, selectHasClaimedInitialRewards } from 'redux/selectors/rewards';
 import { selectModal, selectActiveChannelClaim, selectIncognito } from 'redux/selectors/app';
 import { selectClientSetting } from 'redux/selectors/settings';
+import { PAGE_TITLE_MARGIN_CLASS } from 'component/page/classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const SelectThumbnail = lazyImport(() => import('component/selectThumbnail'));
 const PublishPrice = lazyImport(() => import('component/publish/shared/publishPrice'));
@@ -242,10 +245,10 @@ function PostForm(props: Props) {
 
   return (
     <div className="card-stack">
-      <h1 className="page__title page__title--margin">
+      <h1 className={PAGE_TITLE_MARGIN_CLASS}>
         <Icon icon={ICONS.POST} />
         <label>{formTitle}</label>
-        <span className="publish-wizard__title-actions">
+        <span className="tw:ml-auto tw:inline-flex tw:items-center tw:gap-app-s tw:[&_*]:!mt-0">
           {!isClear && (
             <Button
               onClick={() => dispatch(doClearPublish())}
@@ -272,7 +275,7 @@ function PostForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <PublishPost
                   inEditMode={inEditMode}
                   uri={permanentUrl}
@@ -292,13 +295,13 @@ function PostForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <div>
-                  <h3 className="publish-details__title">{__('Thumbnail')}</h3>
+                  <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Thumbnail')}</h3>
                   <SelectThumbnail />
                 </div>
                 <div>
-                  <h3 className="publish-details__title">{__('Tags')}</h3>
+                  <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Tags')}</h3>
                   <PublishTagsPicker
                     tags={tags}
                     limitSelect={TAGS_LIMIT}
@@ -327,7 +330,7 @@ function PostForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <PublishVisibility />
                 <PublishProtectedContent claim={myClaimForUri} />
                 <PublishPrice disabled={formDisabled} />
@@ -352,13 +355,13 @@ function PostForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <PublishSummary />
                 {showSchedulingOptions && <PublishStreamReleaseDate />}
                 {!formDisabled && !formValid ? (
                   <PublishFormErrors title={title} mode={mode} />
                 ) : (
-                  <div className="help">
+                  <div className={HELP_CLASS}>
                     <I18nMessage
                       tokens={{
                         odysee_terms_of_service: (

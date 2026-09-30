@@ -1,7 +1,7 @@
 import React from 'react';
 import classnames from 'classnames';
-import './style.scss';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import ClaimSearchView from 'component/claimSearchView';
 import Page from 'component/page';
 import Yrbl from 'component/yrbl';
@@ -9,6 +9,7 @@ import { MS } from 'constants/date-time';
 import { SCHEDULED_TAGS, VISIBILITY_TAGS } from 'constants/tags';
 import { useAppSelector } from 'redux/hooks';
 import { selectUser } from 'redux/selectors/user';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 // ****************************************************************************
 // ****************************************************************************
 const FILTER = {
@@ -42,7 +43,7 @@ const NoAccess = () => {
       type="sad"
       title={__('Sorry, no soup for you!')}
       actions={
-        <div className="section__actions">
+        <div className={SECTION_CLASSES.actions}>
           <Button button="primary" navigate="/" label={__('Go Home')} />
         </div>
       }
@@ -58,15 +59,15 @@ function HiddenContentPage() {
   // --------------------------------------------------------------------------
   const Header = () => {
     return (
-      <div className="hidden-content__header">
+      <div className="tw:mb-app-m tw:flex">
         <div className="hidden-content__filter">
           <Button
             button="alt"
             key="unlisted"
             label={__('Unlisted')}
             onClick={() => setFilter(FILTER.UNLISTED)}
-            className={classnames(`button-toggle`, {
-              'button-toggle--active': filter === FILTER.UNLISTED,
+            className={classnames(BUTTON_TOGGLE_CLASS, {
+              [BUTTON_TOGGLE_ACTIVE_CLASS]: filter === FILTER.UNLISTED,
             })}
           />
           <Button
@@ -74,8 +75,8 @@ function HiddenContentPage() {
             key="scheduled"
             label={__('Scheduled')}
             onClick={() => setFilter(FILTER.SCHEDULED)}
-            className={classnames(`button-toggle`, {
-              'button-toggle--active': filter === FILTER.SCHEDULED,
+            className={classnames(BUTTON_TOGGLE_CLASS, {
+              [BUTTON_TOGGLE_ACTIVE_CLASS]: filter === FILTER.SCHEDULED,
             })}
           />
         </div>

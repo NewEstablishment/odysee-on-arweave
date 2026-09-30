@@ -3,6 +3,7 @@ import { FormField, Form } from 'component/common/form';
 import { Modal } from 'modal/modal';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import I18nMessage from 'component/i18nMessage';
 import LbcSymbol from 'component/common/lbc-symbol';
 import REWARDS from 'rewards';
@@ -67,7 +68,7 @@ function ModalRewardCode() {
                 onChange={(e) => setRewardCode(e.target.value)}
               />
             </Form>
-            <div className="card__actions">
+            <div className={CARD_CLASSES.actions}>
               <Button button="link" label={__('Cancel')} onClick={closeModal} />
             </div>
           </>

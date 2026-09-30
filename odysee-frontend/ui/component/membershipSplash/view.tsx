@@ -1,4 +1,5 @@
 import React from 'react';
+import classnames from 'classnames';
 import * as ICONS from 'constants/icons';
 import * as MEMBERSHIP_CONSTS from 'constants/memberships';
 import Icon from 'component/common/icon';
@@ -10,6 +11,7 @@ import OdyseePremium from './internal/assets/odysee_premium.png';
 import JoinButton from './internal/joinPlanButton';
 import { useAppSelector } from 'redux/hooks';
 import { selectPreferredCurrency } from 'redux/selectors/settings';
+import { MEMBERSHIP_SPLASH_CLASSES } from './classes';
 type Props = {
   pageLocation?: string;
   uri?: string;
@@ -21,20 +23,20 @@ const MembershipSplash = (props: Props) => {
   const { pageLocation } = props;
   const preferredCurrency = useAppSelector(selectPreferredCurrency);
   return (
-    <div className="membership-splash">
-      <div className="membership-splash__banner">
-        <img width="1000" height="740" src={AstronautAndFriends} />
+    <div className={MEMBERSHIP_SPLASH_CLASSES.root}>
+      <div className={MEMBERSHIP_SPLASH_CLASSES.banner}>
+        <img className={MEMBERSHIP_SPLASH_CLASSES.bannerImage} width="1000" height="740" src={AstronautAndFriends} />
 
-        <section className="membership-splash__title">
-          <section>
-            <img width="1000" height="174" src={OdyseePremium} />
+        <section className={MEMBERSHIP_SPLASH_CLASSES.title}>
+          <section className={MEMBERSHIP_SPLASH_CLASSES.logoSection}>
+            <img className={MEMBERSHIP_SPLASH_CLASSES.logo} width="1000" height="174" src={OdyseePremium} />
           </section>
 
           <section>
             <I18nMessage
               tokens={{
-                early_access: <b>{__('early access')}</b>,
-                site_wide_badge: <b>{__('site-wide badge')}</b>,
+                early_access: <b className={MEMBERSHIP_SPLASH_CLASSES.titleStrong}>{__('early access')}</b>,
+                site_wide_badge: <b className={MEMBERSHIP_SPLASH_CLASSES.titleStrong}>{__('site-wide badge')}</b>,
               }}
             >
               Get %early_access% features and a %site_wide_badge%
@@ -43,9 +45,9 @@ const MembershipSplash = (props: Props) => {
         </section>
       </div>
 
-      <div className="membership-splash__info-wrapper">
-        <div className="membership-splash__info">
-          <h1 className="balance-text">
+      <div className={MEMBERSHIP_SPLASH_CLASSES.infoWrapper}>
+        <div className={classnames(MEMBERSHIP_SPLASH_CLASSES.info, MEMBERSHIP_SPLASH_CLASSES.introInfo)}>
+          <h1 className={MEMBERSHIP_SPLASH_CLASSES.introTitle}>
             <I18nMessage>
               "Creating a revolutionary video platform for everyone is something we're proud to be doing, but it isn't
               something that can happen without support. If you believe in Odysee's mission, please consider becoming a
@@ -55,15 +57,17 @@ const MembershipSplash = (props: Props) => {
           </h1>
         </div>
 
-        <div className="membership-splash__info">
-          <section className="membership-splash__info-header">
-            <div className="membership-splash__info-price">
-              <img width="500" height="500" src={BadgePremium} />
+        <div className={classnames(MEMBERSHIP_SPLASH_CLASSES.info, MEMBERSHIP_SPLASH_CLASSES.premiumInfo)}>
+          <section
+            className={classnames(MEMBERSHIP_SPLASH_CLASSES.infoHeader, MEMBERSHIP_SPLASH_CLASSES.premiumHeader)}
+          >
+            <div className={MEMBERSHIP_SPLASH_CLASSES.infoPrice}>
+              <img className={MEMBERSHIP_SPLASH_CLASSES.infoPriceImage} width="500" height="500" src={BadgePremium} />
 
-              <section>
+              <section className={MEMBERSHIP_SPLASH_CLASSES.infoPriceValue}>
                 <I18nMessage
                   tokens={{
-                    premium_recurrence: <div className="membership-splash__info-range">{__('A MONTH')}</div>,
+                    premium_recurrence: <div className={MEMBERSHIP_SPLASH_CLASSES.infoRange}>{__('A MONTH')}</div>,
                     premium_price:
                       MEMBERSHIP_CONSTS.PRICES[MEMBERSHIP_CONSTS.ODYSEE_TIER_NAMES.PREMIUM][preferredCurrency],
                   }}
@@ -78,20 +82,27 @@ const MembershipSplash = (props: Props) => {
 
           <EarlyAcessInfo />
 
-          <div className="membership-splash__info-button">
+          <div className={MEMBERSHIP_SPLASH_CLASSES.infoButton}>
             <JoinButton pageLocation={pageLocation} interval="year" plan="Premium" doOpenModal />
           </div>
         </div>
 
-        <div className="membership-splash__info">
-          <section className="membership-splash__info-header">
-            <div className="membership-splash__info-price">
-              <img width="500" height="500" src={BadgePremiumPlus} />
+        <div className={classnames(MEMBERSHIP_SPLASH_CLASSES.info, MEMBERSHIP_SPLASH_CLASSES.premiumPlusInfo)}>
+          <section
+            className={classnames(MEMBERSHIP_SPLASH_CLASSES.infoHeader, MEMBERSHIP_SPLASH_CLASSES.premiumPlusHeader)}
+          >
+            <div className={MEMBERSHIP_SPLASH_CLASSES.infoPrice}>
+              <img
+                className={MEMBERSHIP_SPLASH_CLASSES.infoPriceImage}
+                width="500"
+                height="500"
+                src={BadgePremiumPlus}
+              />
 
-              <section>
+              <section className={MEMBERSHIP_SPLASH_CLASSES.infoPriceValue}>
                 <I18nMessage
                   tokens={{
-                    premium_recurrence: <div className="membership-splash__info-range">{__('A MONTH')}</div>,
+                    premium_recurrence: <div className={MEMBERSHIP_SPLASH_CLASSES.infoRange}>{__('A MONTH')}</div>,
                     premium_price:
                       MEMBERSHIP_CONSTS.PRICES[MEMBERSHIP_CONSTS.ODYSEE_TIER_NAMES.PREMIUM_PLUS][preferredCurrency],
                   }}
@@ -105,7 +116,7 @@ const MembershipSplash = (props: Props) => {
           <BadgeInfo />
           <EarlyAcessInfo />
 
-          <div className="membership-splash__info-button">
+          <div className={MEMBERSHIP_SPLASH_CLASSES.infoButton}>
             <JoinButton pageLocation={pageLocation} interval="year" plan="Premium%2b" doOpenModal />
           </div>
         </div>
@@ -115,16 +126,16 @@ const MembershipSplash = (props: Props) => {
 };
 
 const EarlyAcessInfo = () => (
-  <div className="membership-splash__info-content">
-    <Icon icon={ICONS.EARLY_ACCESS} />
-    <h1 className="balance-text">{__('Exclusive and early access to features')}</h1>
+  <div className={MEMBERSHIP_SPLASH_CLASSES.infoContent}>
+    <Icon className={MEMBERSHIP_SPLASH_CLASSES.infoContentIcon} icon={ICONS.EARLY_ACCESS} />
+    <h1 className={MEMBERSHIP_SPLASH_CLASSES.infoContentTitle}>{__('Exclusive and early access to features')}</h1>
   </div>
 );
 
 const BadgeInfo = () => (
-  <div className="membership-splash__info-content">
-    <Icon icon={ICONS.MEMBER_BADGE} />
-    <h1 className="balance-text">{__('Badge on profile')}</h1>
+  <div className={MEMBERSHIP_SPLASH_CLASSES.infoContent}>
+    <Icon className={MEMBERSHIP_SPLASH_CLASSES.infoContentIcon} icon={ICONS.MEMBER_BADGE} />
+    <h1 className={MEMBERSHIP_SPLASH_CLASSES.infoContentTitle}>{__('Badge on profile')}</h1>
   </div>
 );
 

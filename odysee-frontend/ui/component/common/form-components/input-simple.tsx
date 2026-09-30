@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Label } from './common';
+import { FORM_RADIO_CLASS } from './form-field-classes';
 type InputSimpleProps = {
   name: string;
   type: string;
@@ -21,8 +22,8 @@ type BlockWrapProps = {
 export const BlockWrapWrapper = (blockWrapProps: BlockWrapProps) => {
   const { blockWrap, children } = blockWrapProps;
   return blockWrap ? (
-    <fieldset-section class="radio">{children}</fieldset-section>
+    <fieldset-section class={FORM_RADIO_CLASS}>{children}</fieldset-section>
   ) : (
-    <span className="radio">{children}</span>
+    <span className={FORM_RADIO_CLASS}>{children}</span>
   );
 };

@@ -7,6 +7,7 @@ import { FormField } from 'component/common/form';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
 import { doSetClientSetting } from 'redux/actions/settings';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 function ModalConfirmAge() {
   const dispatch = useAppDispatch();
@@ -35,7 +36,7 @@ function ModalConfirmAge() {
                 onChange={() => setConfirmed(!confirmed)}
               />
             </div>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="primary" label={'Confirm'} onClick={handleConfirmAge} disabled={!confirmed} />
               <Button button="link" label={__('Cancel')} onClick={() => dispatch(doHideModal())} />
             </div>

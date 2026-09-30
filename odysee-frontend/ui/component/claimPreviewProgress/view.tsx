@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectContentPositionForUri } from 'redux/selectors/content';
+import { CLAIM_PREVIEW_PROGRESS_CLASS } from './classes';
 type Props = {
   uri: string;
 };
@@ -16,9 +17,9 @@ function ClaimPreviewProgress(props: Props) {
   }
 
   return (
-    <div className="claim-preview__progress-section">
+    <div className={CLAIM_PREVIEW_PROGRESS_CLASS}>
       <div
-        className="claim-preview__progress-bar"
+        className="tw:h-[5px] tw:[background-image:var(--color-odysee-gradient)]"
         style={{
           width: `${(position / duration) * 100}%`,
         }}

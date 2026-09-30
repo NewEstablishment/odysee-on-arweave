@@ -1,7 +1,9 @@
 import * as React from 'react';
 import * as ICONS from 'constants/icons';
+import classnames from 'classnames';
 import Icon from 'component/common/icon';
 import { fullscreenElement as getFullscreenElement, onFullscreenChange } from 'util/full-screen';
+import { MOBILE_TAB_VIEW_CLASSES } from './classes';
 
 const DRAWER_TRANSITION = 'transform 0.2s ease';
 const SWIPE_THRESHOLD = 50;
@@ -288,7 +290,7 @@ export default function MobileTabView(props: Props) {
       const sheet = sheetRef.current;
       if (sheet) {
         sheet.style.transition = 'none';
-        sheet.classList.add('mobile-tab-view__sheet--open');
+        sheet.classList.add(...MOBILE_TAB_VIEW_CLASSES.sheetOpen.split(' '));
         void sheet.offsetHeight;
       }
       setDrawerOpen(true);
@@ -331,7 +333,7 @@ export default function MobileTabView(props: Props) {
 
   const getContentWrapper = React.useCallback((): HTMLElement | null => {
     const fs = document.querySelector('.player-fullscreen-target');
-    return fs ? fs.querySelector('.content__wrapper') : null;
+    return fs ? fs.querySelector('[data-content-wrapper]') : null;
   }, []);
 
   const handleDrawerTouchMove = React.useCallback(
@@ -469,10 +471,10 @@ export default function MobileTabView(props: Props) {
   const containerStyle = !useDrawer && panelHeight > 0 ? { height: panelHeight } : undefined;
 
   const scrollContainer = (
-    <div className="mobile-tab-view__scroll-container" style={containerStyle}>
-      <div className="mobile-tab-view__track" ref={trackRef}>
+    <div className={MOBILE_TAB_VIEW_CLASSES.scrollContainer} style={containerStyle}>
+      <div className={MOBILE_TAB_VIEW_CLASSES.track} ref={trackRef}>
         {panels.map((content, i) => (
-          <div className="mobile-tab-view__panel" key={i}>
+          <div className={MOBILE_TAB_VIEW_CLASSES.panel} key={i}>
             {content}
           </div>
         ))}
@@ -481,16 +483,18 @@ export default function MobileTabView(props: Props) {
   );
 
   const tabBar = (
-    <nav className="mobile-tab-view__bar">
+    <nav className={MOBILE_TAB_VIEW_CLASSES.bar}>
       {tabDefs.map((tab, i) => (
         <button
           key={tab.label}
-          className={`mobile-tab-view__tab ${i === activeTab ? 'mobile-tab-view__tab--active' : ''}`}
+          className={classnames(MOBILE_TAB_VIEW_CLASSES.tab, {
+            [MOBILE_TAB_VIEW_CLASSES.tabActive]: i === activeTab,
+          })}
           onClick={() => handleTabClick(i)}
           type="button"
         >
           <Icon icon={tab.icon} size={20} />
-          <span className="mobile-tab-view__tab-label">{__(tab.label)}</span>
+          <span className={MOBILE_TAB_VIEW_CLASSES.tabLabel}>{__(tab.label)}</span>
         </button>
       ))}
     </nav>
@@ -498,15 +502,20 @@ export default function MobileTabView(props: Props) {
 
   if (useDrawer) {
     return (
-      <div className="mobile-tab-view mobile-tab-view--drawer">
-        <div ref={sheetRef} className={`mobile-tab-view__sheet ${drawerOpen ? 'mobile-tab-view__sheet--open' : ''}`}>
+      <div className={classnames(MOBILE_TAB_VIEW_CLASSES.root, MOBILE_TAB_VIEW_CLASSES.drawer)}>
+        <div
+          ref={sheetRef}
+          className={classnames(MOBILE_TAB_VIEW_CLASSES.sheet, {
+            [MOBILE_TAB_VIEW_CLASSES.sheetOpen]: drawerOpen,
+          })}
+        >
           <div
-            className="mobile-tab-view__sheet-header"
+            className={MOBILE_TAB_VIEW_CLASSES.sheetHeader}
             onTouchStart={handleDrawerTouchStart}
             onTouchMove={handleDrawerTouchMove}
             onTouchEnd={handleDrawerTouchEnd}
           >
-            <span className="mobile-tab-view__puller" />
+            <span className={MOBILE_TAB_VIEW_CLASSES.puller} />
           </div>
 
           {scrollContainer}
@@ -517,7 +526,7 @@ export default function MobileTabView(props: Props) {
   }
 
   return (
-    <div className="mobile-tab-view" ref={containerRef}>
+    <div className={MOBILE_TAB_VIEW_CLASSES.root} ref={containerRef}>
       {scrollContainer}
       {tabBar}
     </div>

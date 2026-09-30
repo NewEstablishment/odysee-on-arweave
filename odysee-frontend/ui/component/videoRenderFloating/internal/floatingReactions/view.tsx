@@ -1,6 +1,18 @@
 import React from 'react';
 import classnames from 'classnames';
 import Button from 'component/button';
+import { ButtonFireEffect, ButtonSlimeEffect } from 'component/buttonReactionEffects/view';
+import {
+  BUTTON_FIRE_GLOW_CLASS,
+  BUTTON_REACTION_DISLIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_DISLIKE_CLASS,
+  BUTTON_REACTION_LIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_LIKE_CLASS,
+  BUTTON_SLIME_GLOW_CLASS,
+} from 'component/button/classes';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
+import { COMPACT_REACTION_BUTTON_CLASS } from 'component/fileReactions/compact-classes';
+import { FLOATING_REACTIONS_CLASS } from './classes';
 import * as ICONS from 'constants/icons';
 import * as REACTION_TYPES from 'constants/reactions';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -53,9 +65,10 @@ const FloatingReactions = ({ uri, claimId }: Props) => {
   const isSlimeActive = effectiveReaction === REACTION_TYPES.DISLIKE;
   if (disableReactions) return null;
   return (
-    <div className="floating-player__reactions">
-      <div className="floating-player__reaction">
+    <div className={FLOATING_REACTIONS_CLASS}>
+      <div>
         <Button
+          button="alt"
           onClick={() => {
             setOptimisticReaction(isFireActive ? null : REACTION_TYPES.LIKE);
 
@@ -74,29 +87,18 @@ const FloatingReactions = ({ uri, claimId }: Props) => {
           iconSize={14}
           requiresAuth
           authSrc="filereaction_like"
-          className={classnames('floating-player__reaction-btn button--file-action button-like', {
-            'button--fire': isFireActive,
-            'button--fire-glow-pulse': fireButtonGlow,
+          className={classnames(COMPACT_REACTION_BUTTON_CLASS, FILE_ACTION_BUTTON_CLASS, BUTTON_REACTION_LIKE_CLASS, {
+            [BUTTON_REACTION_LIKE_ACTIVE_CLASS]: isFireActive,
+            [BUTTON_FIRE_GLOW_CLASS]: fireButtonGlow,
           })}
-          label={
-            isFireActive ? (
-              <>
-                <div className="button__fire-glow" />
-                <div className="button__fire-particle1" />
-                <div className="button__fire-particle2" />
-                <div className="button__fire-particle3" />
-                <div className="button__fire-particle4" />
-                <div className="button__fire-particle5" />
-                <div className="button__fire-particle6" />
-              </>
-            ) : null
-          }
+          label={isFireActive ? <ButtonFireEffect /> : null}
         />
       </div>
 
       {!disableSlimes && (
-        <div className="floating-player__reaction">
+        <div>
           <Button
+            button="alt"
             onClick={() => {
               setOptimisticReaction(isSlimeActive ? null : REACTION_TYPES.DISLIKE);
 
@@ -115,19 +117,16 @@ const FloatingReactions = ({ uri, claimId }: Props) => {
             iconSize={14}
             requiresAuth
             authSrc="filereaction_dislike"
-            className={classnames('floating-player__reaction-btn button--file-action button-dislike', {
-              'button--slime': isSlimeActive,
-              'button--slime-glow-pulse': slimeButtonGlow,
-            })}
-            label={
-              isSlimeActive ? (
-                <>
-                  <div className="button__slime-stain" />
-                  <div className="button__slime-drop1" />
-                  <div className="button__slime-drop2" />
-                </>
-              ) : null
-            }
+            className={classnames(
+              COMPACT_REACTION_BUTTON_CLASS,
+              FILE_ACTION_BUTTON_CLASS,
+              BUTTON_REACTION_DISLIKE_CLASS,
+              {
+                [BUTTON_REACTION_DISLIKE_ACTIVE_CLASS]: isSlimeActive,
+                [BUTTON_SLIME_GLOW_CLASS]: slimeButtonGlow,
+              }
+            )}
+            label={isSlimeActive ? <ButtonSlimeEffect /> : null}
           />
         </div>
       )}

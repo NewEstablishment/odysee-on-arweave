@@ -10,6 +10,10 @@ import SUPPORTED_LANGUAGES from 'constants/supported_languages';
 import { useAppSelector } from 'redux/hooks';
 import { makeSelectMetadataItemForUri, makeSelectClaimForUri, selectClaimIsMine } from 'redux/selectors/claims';
 import { selectUser } from 'redux/selectors/user';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { MEDIA_INFO_TEXT_CLASS, MEDIA_INFO_TEXT_CONSTRAINED_CLASS } from 'component/common/media-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { DMCA_INFO_CLASS } from 'component/common/content-restriction-classes';
 type Props = {
   uri: string;
   channelIsBlackListed: boolean;
@@ -51,7 +55,7 @@ function AboutTab(props: Props) {
   if (channelIsBlackListed) {
     return (
       <div className="card">
-        <section className="card--section dmca-info">
+        <section className={`${CARD_CLASSES.section} ${DMCA_INFO_CLASS}`}>
           <p>
             {__(
               'In response to a complaint we received under the US Digital Millennium Copyright Act, we have blocked access to this channel from our applications. Content may also be blocked due to DMCA Red Flag rules which are obvious copyright violations we come across, are discussed in public channels, or reported to us.'
@@ -64,7 +68,7 @@ function AboutTab(props: Props) {
               })}
             </p>
           )}
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="link"
               href="https://help.odysee.tv/category-uploading/dmca-content/#receiving-a-dmca-notice"
@@ -78,12 +82,12 @@ function AboutTab(props: Props) {
 
   return (
     <div className="card">
-      <section className="section card--section">
+      <section className={`section ${CARD_CLASSES.section}`}>
         <Fragment>
           {description && (
             <>
               <label>{__('Description')}</label>
-              <div className="media__info-text media__info-text--constrained">
+              <div className={`${MEDIA_INFO_TEXT_CLASS} ${MEDIA_INFO_TEXT_CONSTRAINED_CLASS}`}>
                 <MarkdownPreview content={description} />
               </div>
             </>
@@ -91,7 +95,7 @@ function AboutTab(props: Props) {
           {email && (
             <Fragment>
               <label>{__('Contact')}</label>
-              <div className="media__info-text">
+              <div className={MEDIA_INFO_TEXT_CLASS}>
                 <MarkdownPreview content={formatEmail(email)} simpleLinks />
               </div>
             </Fragment>
@@ -99,21 +103,21 @@ function AboutTab(props: Props) {
           {website && (
             <Fragment>
               <label>{__('Site')}</label>
-              <div className="media__info-text">
+              <div className={MEDIA_INFO_TEXT_CLASS}>
                 <MarkdownPreview content={formatWebsite(website)} simpleLinks />
               </div>
             </Fragment>
           )}
 
           <label>{__('Tags')}</label>
-          <div className="media__info-text">
+          <div className={MEDIA_INFO_TEXT_CLASS}>
             <ClaimTags uri={uri} type="large" />
           </div>
 
           {languages && languages.length && (
             <>
               <label>{__('Languages')}</label>
-              <div className="media__info-text">
+              <div className={MEDIA_INFO_TEXT_CLASS}>
                 {languages.reduce((acc, lang, i) => {
                   return acc + `${SUPPORTED_LANGUAGES[lang] || lang} `;
                 }, '')}
@@ -122,25 +126,25 @@ function AboutTab(props: Props) {
           )}
 
           <label>{__('Total Uploads')}</label>
-          <div className="media__info-text">{claim.meta?.claims_in_channel}</div>
+          <div className={MEDIA_INFO_TEXT_CLASS}>{claim.meta?.claims_in_channel}</div>
 
           <label>{__('Created At')}</label>
-          <div className="media__info-text">
+          <div className={MEDIA_INFO_TEXT_CLASS}>
             <DateTime timeAgo uri={uri} />
           </div>
 
           <label>{__('URL')}</label>
-          <div className="media__info-text">
-            <div className="media__info-text media__info-text--constrained">{claim.canonical_url}</div>
+          <div className={MEDIA_INFO_TEXT_CLASS}>
+            <div className={`${MEDIA_INFO_TEXT_CLASS} ${MEDIA_INFO_TEXT_CONSTRAINED_CLASS}`}>{claim.canonical_url}</div>
           </div>
 
           <label>{__('Claim ID')}</label>
-          <div className="media__info-text">
-            <div className="media__info-text media__info-text--constrained">{claim.claim_id}</div>
+          <div className={MEDIA_INFO_TEXT_CLASS}>
+            <div className={`${MEDIA_INFO_TEXT_CLASS} ${MEDIA_INFO_TEXT_CONSTRAINED_CLASS}`}>{claim.claim_id}</div>
           </div>
 
           <label>{__('Staked Credits')}</label>
-          <div className="media__info-text">
+          <div className={MEDIA_INFO_TEXT_CLASS}>
             <CreditAmount amount={parseFloat(claim.amount) + parseFloat(claim.meta.support_amount)} precision={8} />{' '}
             <Button
               button="link"

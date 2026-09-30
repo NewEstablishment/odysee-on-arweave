@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import { DOMAIN } from 'config';
 import { LINKED_COMMENT_QUERY_PARAM, THREAD_COMMENT_QUERY_PARAM } from 'constants/comment';
 import React, { useEffect } from 'react';
@@ -236,7 +237,7 @@ const ClaimPageComponent = (props: Props) => {
   // Wait for latest claim fetch
   if (isNewestPath && latestClaimUrl === undefined) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner delayed />
       </div>
     );
@@ -265,7 +266,7 @@ const ClaimPageComponent = (props: Props) => {
           const newUrl = formatLbryUrlForWeb(`${collectionFirstItemUri}?${urlParams.toString()}`);
           if (shouldPromptPlaylistResume) {
             return (
-              <div className="main--empty">
+              <div className={PAGE_MAIN_EMPTY_CLASS}>
                 <Spinner delayed />
               </div>
             );

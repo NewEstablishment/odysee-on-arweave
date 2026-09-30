@@ -1,9 +1,11 @@
 import React from 'react';
 import classnames from 'classnames';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import ChannelThumbnail from 'component/channelThumbnail';
 import ClaimPreview from 'component/claimPreview';
 import Card from 'component/common/card';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { FormField } from 'component/common/form';
 import FormFieldDuration from 'component/formFieldDuration';
 import usePersistedState from 'effects/use-persisted-state';
@@ -15,6 +17,8 @@ import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { selectModerationDelegatorsById } from 'redux/selectors/comments';
 import { doHideModal } from 'redux/actions/app';
 import { doCommentModBlock, doCommentModBlockAsAdmin, doCommentModBlockAsModerator } from 'redux/actions/comments';
+import { BLOCK_MODAL_CLASSES } from './classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 const TAB = {
   PERSONAL: 'personal',
   MODERATOR: 'moderator',
@@ -82,8 +86,8 @@ export default function ModalBlockChannel(props: Props) {
         label={__(label)}
         button="alt"
         onClick={() => setTab(value)}
-        className={classnames('button-toggle', {
-          'button-toggle--active': tab === value,
+        className={classnames(BUTTON_TOGGLE_CLASS, {
+          [BUTTON_TOGGLE_ACTIVE_CLASS]: tab === value,
         })}
       />
     );
@@ -96,7 +100,7 @@ export default function ModalBlockChannel(props: Props) {
 
       case TAB.MODERATOR:
         return (
-          <p className="help">
+          <p className={HELP_CLASS}>
             {contentChannelClaim
               ? __('Block this channel on behalf of %creator%.', {
                   creator: contentChannelClaim.name,
@@ -137,9 +141,9 @@ export default function ModalBlockChannel(props: Props) {
 
   function getActiveChannelElem() {
     return activeChannelClaim ? (
-      <div className="block-modal--active-channel">
+      <div className={BLOCK_MODAL_CLASSES.activeChannel}>
         <ChannelThumbnail xsmall noLazyLoad uri={activeChannelClaim.permanent_url} />
-        <div className="block-modal--active-channel-label">
+        <div className={BLOCK_MODAL_CLASSES.activeChannelLabel}>
           {__('Interacting as')}
           <span>{activeChannelClaim.name}</span>
         </div>
@@ -201,10 +205,10 @@ export default function ModalBlockChannel(props: Props) {
         actions={
           <>
             {!isPersonalTheOnlyTab && (
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <div className="section">
                   <label>{__('Block list')}</label>
-                  <div className="block-modal--values">
+                  <div className={BLOCK_MODAL_CLASSES.values}>
                     {getTabElem(TAB.PERSONAL, 'Personal')}
                     {activeChannelIsModerator && getTabElem(TAB.MODERATOR, 'Moderator')}
                     {activeChannelIsAdmin && getTabElem(TAB.ADMIN, 'Global Admin')}
@@ -214,9 +218,9 @@ export default function ModalBlockChannel(props: Props) {
               </div>
             )}
 
-            <div className="section section--vertical-compact">
+            <div className={`section ${SECTION_CLASSES.verticalCompact}`}>
               <label>{__('Duration --[period e.g. ban duration]--')}</label>
-              <div className="block-modal--values">
+              <div className={BLOCK_MODAL_CLASSES.values}>
                 <fieldset>
                   {getBlockTypeElem(BLOCK.PERMANENT, 'Permanent')}
                   {getBlockTypeElem(
@@ -230,8 +234,8 @@ export default function ModalBlockChannel(props: Props) {
               </div>
             </div>
 
-            <div className="block-modal--finalize">
-              <div className="section__actions">
+            <div className="tw:mt-app-l">
+              <div className={SECTION_CLASSES.actions}>
                 <Button button="primary" label={__('Block')} onClick={handleBlock} disabled={blockButtonDisabled} />
                 <Button button="link" label={__('Cancel')} onClick={() => dispatch(doHideModal())} />
                 {getActiveChannelElem()}

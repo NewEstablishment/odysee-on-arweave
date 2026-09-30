@@ -4,6 +4,7 @@ import UriIndicator from 'component/uriIndicator';
 import Icon from 'component/common/icon';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimForUri } from 'redux/selectors/claims';
+import { CLAIM_REPOST_AUTHOR_CLASS, CLAIM_REPOST_RIBBON_CLASS } from './classes';
 type Props = {
   uri: string;
   short: boolean;
@@ -17,8 +18,8 @@ function ClaimRepostAuthor(props: Props) {
 
   if (short && repostUrl) {
     return (
-      <span className="claim-preview__repost-author">
-        <div className="claim-preview__repost-ribbon">
+      <span className={CLAIM_REPOST_AUTHOR_CLASS}>
+        <div className={CLAIM_REPOST_RIBBON_CLASS}>
           <Icon icon={ICONS.REPOST} size={12} />
           <br />
           <span>{repostUrl}</span>
@@ -29,9 +30,9 @@ function ClaimRepostAuthor(props: Props) {
 
   if (repostUrl && !repostChannelUrl) {
     return (
-      <div className="claim-preview__repost-author">
-        <div className="claim-preview__repost-ribbon">
-          <Icon icon={ICONS.REPOST} size={10} className="claim-preview__repost-icon" />
+      <div className={CLAIM_REPOST_AUTHOR_CLASS}>
+        <div className={CLAIM_REPOST_RIBBON_CLASS}>
+          <Icon icon={ICONS.REPOST} size={10} className="tw:mb-[-1px]" />
           <br />
           {__('Anonymous')}
         </div>
@@ -44,9 +45,9 @@ function ClaimRepostAuthor(props: Props) {
   }
 
   return (
-    <div className="claim-preview__repost-author">
-      <div className="claim-preview__repost-ribbon">
-        <Icon icon={ICONS.REPOST} size={10} className="claim-preview__repost-icon" />
+    <div className={CLAIM_REPOST_AUTHOR_CLASS}>
+      <div className={CLAIM_REPOST_RIBBON_CLASS}>
+        <Icon icon={ICONS.REPOST} size={10} className="tw:mb-[-1px]" />
         <br />
         <UriIndicator link uri={repostChannelUrl} showAtSign />
       </div>

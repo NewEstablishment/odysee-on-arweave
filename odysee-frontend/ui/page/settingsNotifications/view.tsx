@@ -13,6 +13,8 @@ import Button from 'component/button';
 import BrowserNotificationSettings from '$web/component/browserNotificationSettings';
 import { useAppSelector } from 'redux/hooks';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 export default function NotificationSettingsPage() {
   const isAuthenticated = Boolean(useAppSelector(selectUserVerifiedEmail));
@@ -120,7 +122,7 @@ export default function NotificationSettingsPage() {
           title={__('Uh oh')}
           subtitle={__('There was an error displaying this page.')}
           actions={
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="secondary"
                 label={__('Refresh')}
@@ -135,7 +137,9 @@ export default function NotificationSettingsPage() {
         <div className="card-stack">
           <div>
             <h2 className="card__title">{__('Notification Delivery')}</h2>
-            <div className="card__subtitle">{__("Choose how you'd like to receive your Odysee notifications.")}</div>
+            <div className={CARD_CLASSES.subtitle}>
+              {__("Choose how you'd like to receive your Odysee notifications.")}
+            </div>
           </div>
           <Card
             background
@@ -173,7 +177,7 @@ export default function NotificationSettingsPage() {
             <>
               <div>
                 <h2 className="card__title">{__('Email Notification Topics')}</h2>
-                <div className="card__subtitle">{__('Choose which topics you’d like to be emailed about.')}</div>
+                <div className={CARD_CLASSES.subtitle}>{__('Choose which topics you’d like to be emailed about.')}</div>
               </div>
               <Card
                 background

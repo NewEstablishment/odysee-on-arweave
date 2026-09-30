@@ -25,6 +25,8 @@ import { ENABLE_NO_SOURCE_CLAIMS } from 'config';
 import { createNormalizedClaimSearchKey } from 'util/claim';
 import { CsOptHelper } from 'util/claim-search';
 import * as CS from 'constants/claim_search';
+import { CLAIM_GRID_CLASS, CLAIM_SHORTS_GRID_CLASS } from 'component/common/claim-grid-classes';
+import { EMPTY_CENTERED_CLASS } from 'component/common/empty-classes';
 const SHOW_TIMEOUT_MSG = false;
 const HOMEPAGE_HYDRATION_CONCURRENCY = 2;
 const HOMEPAGE_VISIBLE_PRIORITY = 100000;
@@ -497,7 +499,7 @@ function ClaimTilesDiscover(props: Props) {
   // --------------------------------------------------------------------------
   if (timedOut && SHOW_TIMEOUT_MSG) {
     return (
-      <div className="empty empty--centered">
+      <div className={EMPTY_CENTERED_CLASS}>
         <p>{__('Sorry, your request timed out. Try refreshing in a bit.')}</p>
         <p>
           <I18nMessage
@@ -519,14 +521,14 @@ function ClaimTilesDiscover(props: Props) {
     !loading &&
     (usesExplicitUris || claimSearchLastPageReached)
   ) {
-    return <div className="empty empty--centered">{__('No results')}</div>;
+    return <div className={EMPTY_CENTERED_CLASS}>{__('No results')}</div>;
   }
 
   return (
     <ul
       ref={listRef}
-      className={classNames('claim-grid', {
-        'claim-shorts-grid': props.isShorts || sectionTitle === 'Shorts',
+      className={classNames(CLAIM_GRID_CLASS, {
+        [CLAIM_SHORTS_GRID_CLASS]: props.isShorts || sectionTitle === 'Shorts',
       })}
     >
       {!loading && finalUris && finalUris.length

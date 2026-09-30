@@ -3,7 +3,15 @@ import { BITRATE } from 'constants/publish';
 import * as ICONS from 'constants/icons';
 import React, { useState, useEffect } from 'react';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { EMPTY_CENTERED_TIGHT_CLASS, EMPTY_CLASS } from 'component/common/empty-classes';
+import { DISABLED_CLASS } from 'component/common/state-classes';
+import { PUBLISH_ROW_NO_MARGIN_CLASS } from 'component/publish/shared/publish-row-classes';
 import { FormField } from 'component/common/form';
+import {
+  FIELDSET_GROUP_CLASS,
+  FIELDSET_GROUP_PAGINATE_CLASS,
+} from 'component/common/form-components/fieldset-group-classes';
 import Spinner from 'component/spinner';
 import PublishName from '../../shared/publishName';
 import useThrottle from 'effects/use-throttle';
@@ -12,8 +20,6 @@ import dayjs from 'util/dayjs';
 import classnames from 'classnames';
 import ReactPaginateImport from 'react-paginate';
 const ReactPaginate = (ReactPaginateImport as any).default || ReactPaginateImport;
-import 'component/common/paginate.scss';
-import './style.scss';
 import FileSelector from 'component/common/file-selector';
 import Button from 'component/button';
 import Icon from 'component/common/icon';
@@ -25,6 +31,9 @@ import {
   doUpdatePublishForm as doUpdatePublishFormAction,
   doUpdateTitle as doUpdateTitleAction,
 } from 'redux/actions/publish';
+import { PUBLISH_UPLOAD_ERROR_CLASS } from './classes';
+import { TABLE_CLASS, TABLE_ITEM_LABEL_CLASS, TABLE_WRAPPER_CLASS } from 'component/common/table-classes';
+import { HELP_CLASS, HELP_WARNING_CLASS } from 'component/common/help-classes';
 type Props = {
   uri: string | null | undefined;
   disabled: boolean;
@@ -34,6 +43,11 @@ type Props = {
   hideTitleUrl?: boolean;
 };
 const INPUT_THROTTLE_MS = 750;
+const REPLAY_TABLE_CLASS = `${TABLE_CLASS} tw:border-separate tw:[border-spacing:0] tw:[&_td:nth-of-type(1)]:max-w-[4rem] tw:[&_td:nth-of-type(2)]:min-w-[8.5rem] tw:[&_td:nth-of-type(3)]:w-[4rem] tw:[&_td:nth-of-type(3)]:min-w-[9rem] tw:[&_td:nth-of-type(4)]:hidden tw:small:[&_td:nth-of-type(2)]:w-[40%] tw:small:[&_td:nth-of-type(3)]:w-[5rem] tw:small:[&_td:nth-of-type(4)]:table-cell tw:small:[&_td:nth-of-type(4)]:w-full`;
+const REPLAY_ROW_CLASS =
+  'tw:cursor-pointer tw:rounded-app tw:[&_.radio]:cursor-pointer tw:[&_fieldset-section.radio]:pt-0 tw:[&_td]:bg-[rgba(var(--color-header-button-base),0.3)] tw:[&_td]:pr-app-m tw:[&_td]:![border-bottom:unset] tw:[&_td:first-child]:pl-app-s tw:[&_td:first-child]:pr-0 tw:[&_td:first-child]:[border-radius:var(--border-radius)_0_0_var(--border-radius)] tw:[&_td:last-child]:[border-radius:0_var(--border-radius)_var(--border-radius)_0] tw:hover:bg-[rgba(var(--color-header-button-base),0.6)] tw:hover:[&_td_label]:cursor-pointer tw:hover:[&_input]:cursor-pointer tw:hover:[&_fieldset-section.radio_label::before]:[box-shadow:0_0_0_2px_var(--color-primary)_inset] tw:upto-small:[&_td]:p-app-xs';
+const REPLAY_ROW_SELECTED_CLASS =
+  'tw:!bg-[rgba(var(--color-background-base),1)] tw:[&_td]:!rounded-none tw:[&_td:first-child]:![border-radius:var(--border-radius)_0_0_var(--border-radius)] tw:[&_td:last-child]:![border-radius:0_var(--border-radius)_var(--border-radius)_0]';
 
 const normalizeUrlForProtocol = (url) => {
   if (url && url.startsWith('https://')) {
@@ -118,7 +132,7 @@ function PublishLivestream(props: Props) {
   function getUploadMessage() {
     if (fileSizeTooBig) {
       return (
-        <p className="help--error">
+        <p className={PUBLISH_UPLOAD_ERROR_CLASS}>
           <Icon icon={ICONS.INFO} />
           {UPLOAD_SIZE_MESSAGE}{' '}
           <Button button="link" label={__('Upload Guide')} href="https://help.odysee.tv/category-uploading/" />
@@ -128,7 +142,7 @@ function PublishLivestream(props: Props) {
 
     if (fileBitrate > BITRATE.RECOMMENDED) {
       return (
-        <p className="help--warning">
+        <p className={HELP_WARNING_CLASS}>
           <Icon icon={ICONS.INFO} />
           {fileBitrate > BITRATE.MAX
             ? __(
@@ -144,7 +158,7 @@ function PublishLivestream(props: Props) {
 
     if (isVid && !duration) {
       return (
-        <p className="help--warning">
+        <p className={HELP_WARNING_CLASS}>
           <Icon icon={ICONS.INFO} />
           {__(
             "Couldn't detect the video encoding. This video will not be playable in most browsers. We recommend to use H264/AAC encoding with MP4 container."
@@ -156,7 +170,7 @@ function PublishLivestream(props: Props) {
 
     if (!isStillEditing) {
       return (
-        <p className="help">
+        <p className={HELP_CLASS}>
           <Icon icon={ICONS.INFO} />
           {__(
             'For video content, use MP4s in H264/AAC format and a friendly bitrate (under 8 Mbps) for more reliable streaming. %SITE_NAME% uploads are restricted to %limit% GB.',
@@ -187,10 +201,10 @@ function PublishLivestream(props: Props) {
   return (
     <Card
       className={classnames({
-        'card--disabled': disabled || balance === 0,
+        [CARD_CLASSES.disabled]: disabled || balance === 0,
       })}
       actions={
-        <div className="publish-row--no-margin">
+        <div className={PUBLISH_ROW_NO_MARGIN_CLASS}>
           <React.Fragment>
             {!hideTitleUrl && (
               <>
@@ -203,7 +217,7 @@ function PublishLivestream(props: Props) {
                   value={titleValue}
                   onChange={handleTitleChange}
                   onBlur={flushTitle}
-                  className="fieldset-group"
+                  className={FIELDSET_GROUP_CLASS}
                   max={200}
                   autoFocus
                   autoComplete="off"
@@ -213,7 +227,7 @@ function PublishLivestream(props: Props) {
             )}
             <>
               {inEditMode && (
-                <fieldset-group>
+                <fieldset-group class={FIELDSET_GROUP_CLASS}>
                   <fieldset-section>
                     <label
                       style={{
@@ -254,13 +268,13 @@ function PublishLivestream(props: Props) {
                     </label>
                   )}
                   <div
-                    className={classnames('replay-picker__container', {
-                      disabled: inEditMode && liveEditType !== 'use_replay',
+                    className={classnames('tw:overflow-hidden tw:rounded-app tw:bg-app-background', {
+                      [DISABLED_CLASS]: inEditMode && liveEditType !== 'use_replay',
                     })}
                   >
                     <fieldset-section>
-                      <div className="table__wrapper">
-                        <table className="table table--livestream-data">
+                      <div className={`${TABLE_WRAPPER_CLASS} tw:p-app-xxs tw:pt-0`}>
+                        <table className={REPLAY_TABLE_CLASS}>
                           <tbody>
                             {livestreamData
                               .slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
@@ -278,12 +292,14 @@ function PublishLivestream(props: Props) {
                                       });
                                 return (
                                   <React.Fragment key={item.data.fileLocation}>
-                                    <tr className="livestream-data__row-spacer" />
+                                    <tr className="tw:h-app-xxs" />
                                     <tr
                                       onClick={() => setSelectedFileIndex((currentPage - 1) * PAGE_SIZE + i)}
-                                      className={classnames('livestream-data__row', {
-                                        'livestream-data__row--selected':
+                                      className={classnames(REPLAY_ROW_CLASS, {
+                                        [REPLAY_ROW_SELECTED_CLASS]:
                                           selectedFileIndex === (currentPage - 1) * PAGE_SIZE + i,
+                                        'tw:bg-[rgba(var(--color-header-button-base),0.4)]':
+                                          selectedFileIndex !== (currentPage - 1) * PAGE_SIZE + i,
                                       })}
                                     >
                                       <td>
@@ -294,19 +310,22 @@ function PublishLivestream(props: Props) {
                                           label={null}
                                           onChange={() => {}}
                                           onClick={() => setSelectedFileIndex((currentPage - 1) * PAGE_SIZE + i)}
-                                          className="livestream-data__row-radio"
                                         />
                                       </td>
                                       <td>
-                                        <div className="livestream-data__thumb-container">
+                                        <div className="tw:flex tw:h-[4rem] tw:w-full tw:flex-row tw:overflow-hidden">
                                           {item.data.thumbnails.slice(0, 3).map((thumb) => (
-                                            <img key={thumb} className="livestream___thumb" src={thumb} />
+                                            <img
+                                              key={thumb}
+                                              className="tw:mx-app-xxxs tw:my-0 tw:rounded-app tw:object-cover"
+                                              src={thumb}
+                                            />
                                           ))}
                                         </div>
                                       </td>
                                       <td>
                                         {durationElem}
-                                        <div className="table__item-label">
+                                        <div className={TABLE_ITEM_LABEL_CLASS}>
                                           {dayjs(item.data.uploadedAt).from(dayjs())}
                                         </div>
                                       </td>
@@ -326,7 +345,7 @@ function PublishLivestream(props: Props) {
                       </div>
                     </fieldset-section>
                     {totalPages > 1 && (
-                      <fieldset-group class="fieldset-group--smushed fieldgroup--paginate">
+                      <fieldset-group class={`${FIELDSET_GROUP_PAGINATE_CLASS} tw:!mt-app-xxs tw:!p-app-xxs`}>
                         <fieldset-section>
                           <ReactPaginate
                             pageCount={totalPages}
@@ -353,7 +372,7 @@ function PublishLivestream(props: Props) {
               {showReplaySelector && !hasLivestreamData && !isCheckingLivestreams && (
                 <>
                   {inEditMode && (
-                    <label className="disabled" style={{ marginTop: 0 }}>
+                    <label className={DISABLED_CLASS} style={{ marginTop: 0 }}>
                       <FormField
                         name="show-replays"
                         label={replayTitleLabel}
@@ -369,7 +388,7 @@ function PublishLivestream(props: Props) {
                     </label>
                   )}
                   <div
-                    className="empty disabled"
+                    className={`${EMPTY_CLASS} ${DISABLED_CLASS}`}
                     style={{
                       marginLeft: 'var(--spacing-m)',
                     }}
@@ -381,7 +400,7 @@ function PublishLivestream(props: Props) {
               {showReplaySelector && isCheckingLivestreams && (
                 <>
                   {inEditMode && (
-                    <label className="disabled" style={{ marginTop: 0 }}>
+                    <label className={DISABLED_CLASS} style={{ marginTop: 0 }}>
                       <FormField
                         name="replay-source"
                         label={replayTitleLabel}
@@ -397,14 +416,14 @@ function PublishLivestream(props: Props) {
                       />
                     </label>
                   )}
-                  <div className="main empty--centered-tight">
+                  <div className={`main ${EMPTY_CENTERED_TIGHT_CLASS}`}>
                     <Spinner type="small" />
                   </div>
                 </>
               )}
 
               {inEditMode && (
-                <div className="file-upload">
+                <div className="tw:mt-app-m tw:[&_.help]:mb-0">
                   <label
                     style={{
                       marginTop: 0,

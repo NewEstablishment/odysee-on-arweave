@@ -1,5 +1,6 @@
 import React from 'react';
-import './style.scss';
+import { COUNTER_ROOT_CLASS } from './classes';
+
 type Props = {
   value: number | string;
   precision?: number;
@@ -26,31 +27,26 @@ export default function Counter(props: Props) {
     setChars(str.split(''));
   }, [displayValue, precision]);
   return (
-    <div className="counter-inline">
-      <div
-        className="counter-wrapper"
-        style={{
-          lineHeight: 1,
-        }}
-      >
+    <div className={COUNTER_ROOT_CLASS}>
+      <div className="counter-wrapper tw:flex tw:leading-none">
         {chars.map((c, i) =>
           /\d/.test(c) ? (
-            <div className="number-wrapper" key={i}>
+            <div className="tw:inline-block tw:h-[1em] tw:w-[1ch] tw:overflow-hidden" key={i}>
               <div
-                className="digit-stack"
+                className="tw:h-[1000%] tw:transition-[transform] tw:duration-[600ms] tw:ease-[ease-in-out] tw:will-change-transform"
                 style={{
                   transform: `translateY(-${+c * 10}%)`,
                 }}
               >
                 {DIGITS.map((d) => (
-                  <div className="digit" key={d}>
+                  <div className="tw:h-[10%] tw:text-[inherit] tw:leading-none" key={d}>
                     {d}
                   </div>
                 ))}
               </div>
             </div>
           ) : (
-            <span key={i} className="number-placeholder">
+            <span key={i} className="tw:inline-block tw:w-[0.5ch] tw:text-[inherit] tw:leading-none">
               {c}
             </span>
           )

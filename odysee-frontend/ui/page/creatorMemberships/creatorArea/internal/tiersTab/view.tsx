@@ -1,5 +1,4 @@
 import React from 'react';
-import classnames from 'classnames';
 import { v4 as uuid } from 'uuid';
 import * as ICONS from 'constants/icons';
 import Button from 'component/button';
@@ -8,18 +7,19 @@ import EditingTier from './internal/editingTier';
 import HelpHub from 'component/common/help-hub';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doOpenModal } from 'redux/actions/app';
-import { selectAccountChargesEnabled } from 'redux/selectors/payments';
 import { selectMembershipTiersForCreatorId, selectMembershipOdyseePermanentPerks } from 'redux/selectors/memberships';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { doGetMembershipPerks, doDeactivateMembershipForId } from 'redux/actions/memberships';
 import { doToast } from 'redux/actions/notifications';
 import { selectArweaveExchangeRates } from 'redux/selectors/arwallet';
+import { CREATOR_TIER_EDITOR_CLASSES } from './classes';
+import { MEMBERSHIP_TIER_CLASSES } from 'component/joinMembershipCard/internal/previewPage/internal/membershipTier/classes';
+import { JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES } from 'component/joinMembershipCard/classes';
 type Props = {};
 
 function TiersTab(props: Props) {
   const dispatch = useAppDispatch();
   const activeChannelClaim = useAppSelector(selectActiveChannelClaim);
-  const bankAccountConfirmed = useAppSelector(selectAccountChargesEnabled);
   const fetchedMemberships = useAppSelector((state) =>
     activeChannelClaim ? selectMembershipTiersForCreatorId(state, activeChannelClaim.claim_id) : null
   );
@@ -89,26 +89,8 @@ function TiersTab(props: Props) {
       return Array.from(newFetchedMemberships);
     }); // eslint-disable-next-line react-hooks/exhaustive-deps -- no need to listen for editing ids
   }, [fetchedMembershipsStr]);
-  // if (!bankAccountConfirmed) {
-  //   return (
-  //     <>
-  //       <div className="bank-account-status">
-  //         <div>
-  //           <label>{__('Bank Account Status')}</label>
-  //           <span>{__('You have to connect a bank account before you can create tiers.')}</span>
-  //         </div>
-  //         <Button
-  //           button="primary"
-  //           label={__('Connect a bank account')}
-  //           icon={ICONS.FINANCE}
-  //           navigate={`$/${PAGES.SETTINGS_STRIPE_ACCOUNT}`}
-  //         />
-  //       </div>
-  //     </>
-  //   );
-  // }
   return (
-    <div className={classnames('tier-edit-functionality')}>
+    <div>
       {channelMemberships &&
         channelMemberships
           .filter((m) => m.enabled === true || m.saved === false)
@@ -117,7 +99,12 @@ function TiersTab(props: Props) {
             const isEditing = new Set(editingIds).has(membershipId);
             const hasSubscribers = membershipTier.has_subscribers;
             return (
-              <div className="membership-tier__wrapper" key={membershipIndex}>
+              <div
+                className={`${MEMBERSHIP_TIER_CLASSES.root} ${MEMBERSHIP_TIER_CLASSES.editor} ${
+                  JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES[membershipIndex] || ''
+                }`}
+                key={membershipIndex}
+              >
                 {isEditing ? (
                   <EditingTier
                     membership={membershipTier}
@@ -174,7 +161,7 @@ function TiersTab(props: Props) {
             addEditingForMembershipId(newestId);
             addChannelMembership(newestMembership);
           }}
-          className="add-membership__button"
+          className="tw:mt-[13px] tw:text-[18px]"
           label={__('Add Tier for %channel_name%', {
             channel_name: activeChannelClaim?.name || '',
           })}

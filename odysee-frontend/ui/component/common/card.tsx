@@ -5,9 +5,13 @@ import Button from 'component/button';
 import * as ICONS from 'constants/icons';
 // import twemoji from 'twemoji';
 import Tooltip from 'component/common/tooltip';
+import { CARD_CLASSES } from './card-classes';
+import { CONTENT_ACCESS_INDICATOR_CLASSES } from './content-access-indicator-classes';
 import { getThumbnailCdnUrl } from 'util/thumbnail';
+
 type Props = {
   title?: string | React.ReactNode;
+  titleClassName?: string;
   subtitle?: string | React.ReactNode;
   titleActions?: string | React.ReactNode;
   id?: string;
@@ -38,6 +42,7 @@ type Props = {
 function Card(props: Props) {
   const {
     title,
+    titleClassName,
     subtitle,
     titleActions,
     id,
@@ -68,8 +73,8 @@ function Card(props: Props) {
     <section
       role={onClick ? 'button' : undefined}
       className={classnames(className, 'card', {
-        'card__multi-pane': Boolean(secondPane),
-        'card--background': background,
+        [CARD_CLASSES.multiPane]: Boolean(secondPane),
+        [CARD_CLASSES.background]: background,
       })}
       id={id}
       onClick={(e) => {
@@ -96,47 +101,55 @@ function Card(props: Props) {
         {(title || subtitle) && (
           <div
             className={classnames('card__header--between', {
-              'card__header--slim': slimHeader,
-              'card__header--grid': gridHeader,
+              [CARD_CLASSES.headerSlim]: slimHeader,
+              [CARD_CLASSES.headerGrid]: gridHeader,
             })}
           >
             <div
               className={classnames('card__title-section', {
-                'card__title-section--body-list': isBodyList,
+                [CARD_CLASSES.titleSectionBodyList]: isBodyList,
               })}
             >
               {icon && <Icon sectionIcon icon={icon} />}
 
-              <div className="card__title-text">
-                <TitleWrapper isPageTitle={isPageTitle} smallTitle={smallTitle} accessStatus={accessStatus}>
+              <div className={CARD_CLASSES.titleText}>
+                <TitleWrapper
+                  isPageTitle={isPageTitle}
+                  smallTitle={smallTitle}
+                  accessStatus={accessStatus}
+                  className={titleClassName}
+                >
                   {title}
                 </TitleWrapper>
 
                 {subtitle && (
-                  <div
-                    className={classnames('card__subtitle', {
-                      'card__subtitle--small': smallTitle,
-                    })}
-                  >
-                    {subtitle}
-                  </div>
+                  <div className={smallTitle ? CARD_CLASSES.subtitleSmall : CARD_CLASSES.subtitle}>{subtitle}</div>
                 )}
               </div>
             </div>
 
             {(titleActions || expandable) && (
-              <div className="card__title-actions-container">
+              <div
+                className={classnames(CARD_CLASSES.titleActionsContainer, {
+                  [CARD_CLASSES.titleActionsContainerGrid]: gridHeader,
+                })}
+              >
                 {titleActions && (
                   <div
-                    className={classnames('card__title-actions', {
-                      'card__title-actions--small': smallTitle,
+                    className={classnames(CARD_CLASSES.titleActions, {
+                      [CARD_CLASSES.titleActionsGrid]: gridHeader,
+                      [CARD_CLASSES.titleActionsSmall]: smallTitle,
                     })}
                   >
                     {titleActions}
                   </div>
                 )}
                 {expandable && (
-                  <div className="card__title-actions">
+                  <div
+                    className={classnames(CARD_CLASSES.titleActions, {
+                      [CARD_CLASSES.titleActionsGrid]: gridHeader,
+                    })}
+                  >
                     <Button
                       button="alt"
                       aria-expanded={expanded}
@@ -158,8 +171,9 @@ function Card(props: Props) {
             {body && (
               <div
                 className={classnames('card__body', {
-                  'card__body--no-title': !title && !subtitle,
-                  'card__body--list': isBodyList,
+                  [CARD_CLASSES.bodyNoTitle]: !title && !subtitle,
+                  [CARD_CLASSES.bodyWithTitle]: title || subtitle,
+                  [CARD_CLASSES.bodyList]: isBodyList,
                 })}
               >
                 {body}
@@ -173,7 +187,7 @@ function Card(props: Props) {
         {nag}
       </FirstPaneWrapper>
 
-      {secondPane && <div className="card__second-pane">{secondPane}</div>}
+      {secondPane && <div className={CARD_CLASSES.secondPane}>{secondPane}</div>}
     </section>
   );
 }
@@ -185,12 +199,13 @@ type FirstPaneProps = {
 
 const FirstPaneWrapper = (props: FirstPaneProps) => {
   const { singlePane, children } = props;
-  return singlePane ? children : <div className="card__first-pane">{children}</div>;
+  return singlePane ? children : <div className={CARD_CLASSES.firstPane}>{children}</div>;
 };
 
 type TitleProps = {
   isPageTitle?: boolean;
   smallTitle?: boolean;
+  className?: string;
   children?: any;
   emoji?: any;
   accessStatus?: string;
@@ -207,7 +222,7 @@ function transformer(children) {
 }
 
 const TitleWrapper = (props: TitleProps) => {
-  const { isPageTitle, smallTitle, children, accessStatus } = props;
+  const { isPageTitle, smallTitle, className, children, accessStatus } = props;
 
   /*
   const Twemoji = ({ emoji }) => (
@@ -225,10 +240,10 @@ const TitleWrapper = (props: TitleProps) => {
     return (
       <Tooltip title={__('This is a members-only content')}>
         <div
-          className={classnames('content-access-indicator', {
-            locked: par.status === 'locked',
-            unlocked: par.status === 'unlocked',
-            purchased: par.status === 'purchased',
+          className={classnames(CONTENT_ACCESS_INDICATOR_CLASSES.root, {
+            [CONTENT_ACCESS_INDICATOR_CLASSES.locked]: par.status === 'locked',
+            [CONTENT_ACCESS_INDICATOR_CLASSES.unlocked]: par.status === 'unlocked',
+            [CONTENT_ACCESS_INDICATOR_CLASSES.purchased]: par.status === 'purchased',
           })}
         >
           <Icon icon={par.status === 'locked' ? ICONS.LOCK : ICONS.UNLOCK} />
@@ -249,7 +264,7 @@ const TitleWrapper = (props: TitleProps) => {
   */
 
   return isPageTitle ? (
-    <h1 className="card__title">
+    <h1 className={classnames('card__title', className)}>
       {accessStatus && <AccessIndicator status={accessStatus} />}
       <span
         dangerouslySetInnerHTML={{
@@ -259,9 +274,13 @@ const TitleWrapper = (props: TitleProps) => {
     </h1>
   ) : (
     <h2
-      className={classnames('card__title', {
-        'card__title--small': smallTitle,
-      })}
+      className={classnames(
+        'card__title',
+        {
+          'tw:text-app-body': smallTitle,
+        },
+        className
+      )}
     >
       {children}
     </h2>

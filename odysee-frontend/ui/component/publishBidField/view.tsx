@@ -10,6 +10,7 @@ import { selectBalance } from 'redux/selectors/wallet';
 import { selectIsResolvingPublishUris } from 'redux/selectors/publish';
 import { selectTakeOverAmountForName } from 'redux/selectors/claims';
 import { doResolveUri } from 'redux/actions/claims';
+import { FORM_FIELD_PRICE_AMOUNT_CLASS } from 'component/common/form-components/form-field-classes';
 
 type Props = {
   params: any;
@@ -44,7 +45,7 @@ function PublishName(props: Props) {
     <Card
       actions={
         <FormField
-          className="form-field--price-amount"
+          className={FORM_FIELD_PRICE_AMOUNT_CLASS}
           type="number"
           name="content_bid"
           step="any"

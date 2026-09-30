@@ -1,7 +1,6 @@
 import React from 'react';
 import type { CropRegion } from 'component/livestreamCompositor/view';
 import { applyChromaKey } from 'util/chromaKey';
-import './style.scss';
 
 type Props = {
   stream: MediaStream;
@@ -202,7 +201,7 @@ export default function LivestreamCropSelector(props: Props) {
   return (
     <div
       ref={containerRef}
-      className="livestream-crop"
+      className="tw:relative tw:size-full tw:cursor-crosshair tw:select-none tw:overflow-hidden"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -210,19 +209,24 @@ export default function LivestreamCropSelector(props: Props) {
     >
       <video
         ref={videoRef}
-        className="livestream-crop__video"
+        className="tw:size-full tw:pointer-events-none tw:object-contain"
         style={chromaKey ? { ...videoStyle, visibility: 'hidden', position: 'absolute' } : videoStyle}
         muted
         playsInline
         autoPlay
         disablePictureInPicture
       />
-      {chromaKey && <canvas ref={canvasRef} className="livestream-crop__video" style={videoStyle} />}
+      {chromaKey && (
+        <canvas ref={canvasRef} className="tw:size-full tw:pointer-events-none tw:object-contain" style={videoStyle} />
+      )}
 
       {crop && cropOverlayStyle && (
-        <div className="livestream-crop__region" style={cropOverlayStyle}>
+        <div
+          className="tw:absolute tw:cursor-move tw:border-2 tw:border-app-primary tw:bg-transparent tw:[box-shadow:0_0_0_9999px_rgba(0,0,0,0.5)]"
+          style={cropOverlayStyle}
+        >
           <button
-            className="livestream-crop__reset"
+            className="tw:absolute tw:top-[-12px] tw:right-[-12px] tw:flex tw:size-[20px] tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[50%] tw:[border:none] tw:bg-app-primary tw:text-[10px] tw:text-white tw:hover:bg-[#e53935]"
             onMouseDown={(e) => {
               e.stopPropagation();
               handleReset();
@@ -233,7 +237,11 @@ export default function LivestreamCropSelector(props: Props) {
         </div>
       )}
 
-      {!crop && <div className="livestream-crop__hint">{__('Draw to crop')}</div>}
+      {!crop && (
+        <div className="tw:absolute tw:bottom-app-s tw:left-1/2 tw:pointer-events-none tw:rounded-[4px] tw:bg-[rgba(0,0,0,0.6)] tw:px-app-s tw:py-app-xxs tw:text-app-xsmall tw:text-white tw:[transform:translateX(-50%)]">
+          {__('Draw to crop')}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import React from 'react';
 import dayjs from 'util/dayjs';
-import './style.scss';
 import Icon from 'component/common/icon';
 import I18nMessage from 'component/i18nMessage';
 import * as ICONS from 'constants/icons';
@@ -48,11 +47,11 @@ function ScheduledInfo(props: Props) {
   }
 
   return (
-    <div className="scheduled-info">
+    <div className="tw:absolute tw:bottom-app-m tw:left-app-m tw:flex tw:items-center tw:rounded-app tw:bg-[rgba(0,0,0,0.8)] tw:p-app-m tw:text-[var(--color-white)]">
       <Icon icon={icon} size={32} />
-      {inPast && <div className="scheduled-info__text">{__('Starting Soon')}</div>}
+      {inPast && <div className="tw:pl-app-m tw:leading-none">{__('Starting Soon')}</div>}
       {!inPast && (
-        <div className="scheduled-info__text">
+        <div className="tw:pl-app-m tw:leading-none">
           <I18nMessage
             tokens={{
               time_date: startDateFromNow,
@@ -60,7 +59,7 @@ function ScheduledInfo(props: Props) {
           >
             {text}
           </I18nMessage>
-          <div className="scheduled-info__date">{startDate}</div>
+          <div className="tw:mt-app-xxs tw:text-app-xsmall tw:text-app-text-subtitle">{startDate}</div>
         </div>
       )}
     </div>
