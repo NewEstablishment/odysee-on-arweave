@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import mammoth from 'mammoth';
 import LoadingScreen from 'component/common/loading-screen';
+import { FILE_VIEWER_CLASSES } from './classes';
 type Props = {
   source: string;
 };
@@ -39,12 +40,16 @@ function DocxViewer({ source }: Props) {
   const errorMessage = __("Sorry, looks like we can't load the document.");
 
   return (
-    <div className="file-viewer file-viewer--document">
+    <div
+      className={`${FILE_VIEWER_CLASSES.base} ${FILE_VIEWER_CLASSES.document}`}
+      data-file-viewer
+      data-file-viewer-document
+    >
       {loading && <LoadingScreen status={loadingMessage} spinner />}
       {error && <LoadingScreen status={errorMessage} spinner={false} />}
       {content && (
         <div
-          className="file-render__content"
+          className={FILE_VIEWER_CLASSES.content}
           dangerouslySetInnerHTML={{
             __html: content,
           }}

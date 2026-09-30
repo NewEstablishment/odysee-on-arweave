@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import { SITE_NAME, DOMAIN } from 'config';
 import * as PAGES from 'constants/pages';
 import SUPPORTED_LANGUAGES from 'constants/supported_languages';
@@ -7,6 +8,7 @@ import Button from 'component/button';
 import Card from 'component/common/card';
 import I18nMessage from 'component/i18nMessage';
 import { Form, FormField } from 'component/common/form';
+import { FIELDSET_GROUP_DISABLED_PREFIX_CLASS } from 'component/common/form-components/fieldset-group-classes';
 import { INVALID_NAME_ERROR } from 'constants/claim';
 import { isNameValid } from 'util/lbryURI';
 import { Lbryio } from 'lbryinc';
@@ -17,6 +19,9 @@ import { getDefaultLanguage, sortLanguageMap } from 'util/default-languages';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectYoutubeChannels } from 'redux/selectors/user';
 import { doUserFetch } from 'redux/actions/user';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { USER_FIRST_CHANNEL_ROOT_CLASS } from 'component/userFirstChannel/classes';
+import { HELP_CARD_ACTIONS_CLASS } from 'component/common/help-classes';
 
 const YoutubeTransferStatus = lazyImport(
   () =>
@@ -140,7 +145,7 @@ export default function YoutubeSync(props: Props) {
 
   return (
     <YoutubeSyncWrapper inSignUpFlow={inSignUpFlow}>
-      <div className="main__channel-creation">
+      <div className={USER_FIRST_CHANNEL_ROOT_CLASS}>
         {showYoutubeTransferStatus ? (
           <React.Suspense fallback={null}>
             <>
@@ -165,11 +170,11 @@ export default function YoutubeSync(props: Props) {
             )}
             actions={
               <Form onSubmit={handleCreateChannel}>
-                <fieldset-group class="fieldset-group--smushed fieldset-group--disabled-prefix">
+                <fieldset-group class={FIELDSET_GROUP_DISABLED_PREFIX_CLASS}>
                   <fieldset-section>
                     <label htmlFor="auth_first_channel">
                       {nameError ? (
-                        <span className="error__text">{nameError}</span>
+                        <span className={ERROR_TEXT_CLASS}>{nameError}</span>
                       ) : (
                         __('Your desired %site_name% channel name', {
                           site_name: IS_WEB ? SITE_NAME : 'Odysee',
@@ -184,7 +189,7 @@ export default function YoutubeSync(props: Props) {
                     placeholder={__('channel')}
                     type="text"
                     name="yt_sync_channel"
-                    className="form-field--short"
+                    className="tw:w-full tw:small:w-[25em]"
                     value={channel}
                     onChange={handleChannelChange}
                   />
@@ -228,7 +233,7 @@ export default function YoutubeSync(props: Props) {
                   }
                 />
 
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   <Button
                     button="primary"
                     type="submit"
@@ -248,7 +253,7 @@ export default function YoutubeSync(props: Props) {
                     />
                   )}
                 </div>
-                <div className="help--card-actions">
+                <div className={HELP_CARD_ACTIONS_CLASS}>
                   <p>
                     {__(
                       'Automated syncing by Odysee is available for channels with 50,000+ monthly views on YouTube. All other channels can use the Odysee Self Sync Tool to transfer their content.'

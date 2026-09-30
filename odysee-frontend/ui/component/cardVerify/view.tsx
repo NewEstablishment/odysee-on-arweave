@@ -2,6 +2,7 @@
 
 /* eslint-disable react/prop-types */
 const StripeCheckout = (window as any).StripeCheckout;
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Button from 'component/button';
 import { useAppSelector } from 'redux/hooks';
@@ -155,7 +156,7 @@ function CardVerify(props: Props) {
   return (
     <div>
       {scriptFailedToLoad && (
-        <div className="error__text">There was an error connecting to Stripe. Please try again later.</div>
+        <div className={ERROR_TEXT_CLASS}>There was an error connecting to Stripe. Please try again later.</div>
       )}
 
       <Button

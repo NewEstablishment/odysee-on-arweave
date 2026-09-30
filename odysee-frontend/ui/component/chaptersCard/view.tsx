@@ -2,6 +2,7 @@ import React from 'react';
 import classnames from 'classnames';
 import Card from 'component/common/card';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import * as ICONS from 'constants/icons';
 import * as SETTINGS from 'constants/settings';
 import parseChapters from 'util/parse-chapters';
@@ -10,7 +11,7 @@ import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { doSetClientSetting } from 'redux/actions/settings';
 import { getClaimMetadata } from 'util/claim';
-import './style.lazy.scss';
+import { CHAPTERS_CARD_CLASSES } from './classes';
 
 type Props = {
   uri?: string;
@@ -109,7 +110,7 @@ export default function ChaptersCard(props: Props) {
       window.player.currentTime(time);
     } else {
       window.pendingSeekTime = time;
-      const playButton = document.querySelector('.button--play');
+      const playButton = document.querySelector('.button-surface--play');
       if (playButton) (playButton as HTMLElement).click();
     }
     window.scrollTo(0, 0);
@@ -117,34 +118,34 @@ export default function ChaptersCard(props: Props) {
 
   return (
     <Card
-      className="chapters-card"
+      className={CHAPTERS_CARD_CLASSES.root}
       smallTitle
       slimHeader
       singlePane
       title={
-        <span className="chapters-card__title">
+        <span className={CHAPTERS_CARD_CLASSES.title}>
           {__('Chapters')}
-          <span className="chapters-card__count">
+          <span className={CHAPTERS_CARD_CLASSES.count}>
             {activeIndex >= 0 ? activeIndex + 1 : 0}/{chapters.length}
           </span>
         </span>
       }
-      titleActions={<Button className="button-toggle" icon={ICONS.REMOVE} onClick={() => setVisible(false)} />}
+      titleActions={<Button className={BUTTON_TOGGLE_CLASS} icon={ICONS.REMOVE} onClick={() => setVisible(false)} />}
       body={
-        <ul className="chapters-card__list" ref={listRef}>
+        <ul className={CHAPTERS_CARD_CLASSES.list} ref={listRef}>
           {chapters.map((chapter, i) => (
             <li
               key={i}
               ref={i === activeIndex ? activeItemRef : undefined}
-              className={classnames('chapters-card__item', {
-                'chapters-card__item--active': i === activeIndex,
+              className={classnames(CHAPTERS_CARD_CLASSES.item, {
+                [CHAPTERS_CARD_CLASSES.itemActive]: i === activeIndex,
               })}
             >
-              <button className="chapters-card__button" onClick={() => handleChapterClick(chapter.time, i)}>
-                <span className="chapters-card__timestamp">
+              <button className={CHAPTERS_CARD_CLASSES.button} onClick={() => handleChapterClick(chapter.time, i)}>
+                <span className={CHAPTERS_CARD_CLASSES.timestamp}>
                   <span>{chapter.timestamp}</span>
                 </span>
-                <span className="chapters-card__label">{chapter.label}</span>
+                <span className={CHAPTERS_CARD_CLASSES.label}>{chapter.label}</span>
               </button>
             </li>
           ))}

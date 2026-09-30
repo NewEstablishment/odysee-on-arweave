@@ -1,4 +1,3 @@
-import 'scss/component/_comment-badge.scss';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import * as MODALS from 'constants/modal_types';

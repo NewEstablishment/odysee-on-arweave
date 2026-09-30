@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Icon from 'component/common/icon';
@@ -12,7 +13,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectTotalBalance } from 'redux/selectors/wallet';
 import { doTipAccountStatus } from 'redux/actions/payments';
 import TxoList from './txoList';
-import './style.scss';
+import { WALLET_ANNOUNCEMENT_CLASSES, WALLET_PAGE_CLASS, WALLET_TAB_LIST_CLASS } from './classes';
 
 const TAB_QUERY = 'tab';
 const CURRENCY_QUERY_PARAM = 'currency';
@@ -84,9 +85,9 @@ const WalletPage = () => {
   const showIntro = totalBalance === 0;
   const loading = totalBalance === undefined;
   return (
-    <Page className="transactionsPage-wrapper">
+    <Page className={WALLET_PAGE_CLASS}>
       <Tabs onChange={onTabChange} index={tabIndex}>
-        <TabList className="tabs__list--collection-edit-page">
+        <TabList className={WALLET_TAB_LIST_CLASS}>
           <Tab>{__('Balance')}</Tab>
           <Tab>{__('Credits')}</Tab>
           <Tab>{__('Tips')}</Tab>
@@ -95,13 +96,18 @@ const WalletPage = () => {
         <TabPanels>
           {/* balances for lbc and fiat */}
           <TabPanel>
-            <div className="tmp-lbc-announcement">
-              <img src="https://thumbnails.odycdn.com/optimize/s:140:0/quality:95/plain/https://thumbs.odycdn.com/dcee45614b2798d1a09d2c43dda5fade.webp" />
-              <h3>
-                <Icon icon={ICONS.LBC} />
+            <div className={WALLET_ANNOUNCEMENT_CLASSES.root}>
+              <img
+                className={WALLET_ANNOUNCEMENT_CLASSES.image}
+                src="https://thumbnails.odycdn.com/optimize/s:140:0/quality:95/plain/https://thumbs.odycdn.com/dcee45614b2798d1a09d2c43dda5fade.webp"
+              />
+              <h3 className={WALLET_ANNOUNCEMENT_CLASSES.title}>
+                <Icon className={WALLET_ANNOUNCEMENT_CLASSES.titleIcon} icon={ICONS.LBC} />
                 LBC will be going away soon
               </h3>
-              <p>Odysee will be using AR cryptocurrency for Payments and Monetization.</p>
+              <p className={WALLET_ANNOUNCEMENT_CLASSES.copy}>
+                Odysee will be using AR cryptocurrency for Payments and Monetization.
+              </p>
             </div>
             <WalletBalance />
           </TabPanel>
@@ -110,7 +116,7 @@ const WalletPage = () => {
             <div className="section card-stack">
               <div className="lbc-transactions">
                 {loading && (
-                  <div className="main--empty">
+                  <div className={PAGE_MAIN_EMPTY_CLASS}>
                     <Spinner delayed />
                   </div>
                 )}
@@ -128,7 +134,7 @@ const WalletPage = () => {
             <div className="section card-stack">
               <div className="lbc-transactions">
                 {loading && (
-                  <div className="main--empty">
+                  <div className={PAGE_MAIN_EMPTY_CLASS}>
                     <Spinner delayed />
                   </div>
                 )}
@@ -145,7 +151,7 @@ const WalletPage = () => {
             <div className="section card-stack">
               <div className="lbc-transactions">
                 {loading && (
-                  <div className="main--empty">
+                  <div className={PAGE_MAIN_EMPTY_CLASS}>
                     <Spinner delayed />
                   </div>
                 )}

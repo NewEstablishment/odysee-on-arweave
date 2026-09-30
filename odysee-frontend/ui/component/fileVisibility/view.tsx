@@ -1,5 +1,4 @@
 import React from 'react';
-import './style.scss';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
 import { useAppSelector } from 'redux/hooks';
@@ -14,8 +13,8 @@ function FileVisibility(props: Props) {
 
   if (isUnlisted) {
     return (
-      <div className="file-visibility">
-        <Icon icon={ICONS.COPY_LINK} size={9} />
+      <div className="tw:ml-app-s tw:max-h-[1.3rem] tw:whitespace-nowrap tw:rounded-[3px] tw:border tw:border-[var(--color-border)] tw:bg-[var(--color-visibility-label)] tw:px-app-xs tw:text-app-xsmall tw:text-[var(--color-text-subtitle)]">
+        <Icon icon={ICONS.COPY_LINK} size={9} className="tw:mr-app-xxs" />
         {__('unlisted')}
       </div>
     );

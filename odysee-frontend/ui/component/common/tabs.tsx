@@ -1,6 +1,14 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import classnames from 'classnames';
 import { useOnResize } from 'effects/use-on-resize';
+import {
+  TAB_CLASS,
+  TAB_DIVIDER_CLASS,
+  TAB_LIST_CLASS,
+  TAB_PANEL_CLASS,
+  TAB_SELECTED_CLASS,
+  TABS_CLASS,
+} from './tabs-classes';
 
 type TabsContextValue = {
   selectedIndex: number;
@@ -78,11 +86,11 @@ function Tabs(props: TabsProps) {
 
   return (
     <TabsContext.Provider value={contextValue}>
-      <div className={classnames('tabs', className)} data-reach-tabs="" ref={tabsRef}>
+      <div className={classnames(TABS_CLASS, className)} data-reach-tabs="" ref={tabsRef}>
         {prePanel}
 
         <div
-          className="tab__divider"
+          className={TAB_DIVIDER_CLASS}
           style={{
             left: selectedRect && tabsRect ? selectedRect.left - tabsRect.left : undefined,
             width: selectedRect ? selectedRect.width : undefined,
@@ -118,7 +126,7 @@ function TabList(props: TabListProps) {
   });
 
   return (
-    <div className={classnames('tabs__list', className)} data-reach-tab-list="" role="tablist">
+    <div className={classnames(TAB_LIST_CLASS, className)} data-reach-tab-list="" role="tablist">
       {tabs}
     </div>
   );
@@ -144,9 +152,9 @@ function Tab(props: TabProps) {
       data-reach-tab=""
       data-tab-index={index}
       className={classnames(
-        'tab',
+        TAB_CLASS,
         {
-          'tab--selected': isSelected,
+          [TAB_SELECTED_CLASS]: isSelected,
         },
         className
       )}
@@ -160,17 +168,19 @@ function Tab(props: TabProps) {
 type TabPanelsProps = {
   children?: React.ReactNode;
   header?: React.ReactNode;
+  panelClassName?: string;
 };
 
 function TabPanels(props: TabPanelsProps) {
-  const { children, header } = props;
+  const { children, header, panelClassName } = props;
   const { selectedIndex } = React.useContext(TabsContext);
   const panels = React.Children.map(children, (child, index) => {
-    if (!React.isValidElement(child)) {
+    if (!React.isValidElement<{ className?: string; isSelected?: boolean }>(child)) {
       return child;
     }
 
     return React.cloneElement(child, {
+      className: classnames(child.props.className, panelClassName),
       isSelected: selectedIndex === index,
     });
   });
@@ -193,7 +203,12 @@ function TabPanel(props: TabPanelProps) {
   const { children, className, isSelected } = props;
 
   return (
-    <div data-reach-tab-panel="" role="tabpanel" className={classnames('tab__panel', className)} hidden={!isSelected}>
+    <div
+      data-reach-tab-panel=""
+      role="tabpanel"
+      className={classnames(TAB_PANEL_CLASS, className)}
+      hidden={!isSelected}
+    >
       {isSelected ? children : null}
     </div>
   );

@@ -1,4 +1,4 @@
-// Widths are taken from "ui/scss/init/vars.scss"
+// Widths mirror the breakpoint tokens in "ui/styles/tokens.css".
 import React, { useRef } from 'react';
 import { getWindowAngle, isWindowLandscapeForAngle } from 'util/window';
 const DEFAULT_SCREEN_SIZE = 1080;

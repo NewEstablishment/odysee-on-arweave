@@ -1,12 +1,15 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React, { useState, useEffect } from 'react';
 import { Form, FormField, Submit } from 'component/common/form';
 import { Modal } from 'modal/modal';
 import Button from 'component/button';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { setSavedPassword } from 'util/saved-passwords';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectWalletEncryptSucceeded } from 'redux/selectors/wallet';
 import { doHideModal } from 'redux/actions/app';
 import { doWalletEncrypt, doWalletStatus } from 'redux/actions/wallet';
+import { HELP_WARNING_CLASS } from 'component/common/help-classes';
 
 const acknowledgementText = __('I Understand');
 
@@ -128,7 +131,7 @@ function ModalWalletEncrypt() {
           />
         </fieldset-section>
 
-        <div className="help--warning">
+        <div className={HELP_WARNING_CLASS}>
           {__(
             'If your password is lost, it cannot be recovered. You will not be able to access your wallet without a password.'
           )}
@@ -152,9 +155,9 @@ function ModalWalletEncrypt() {
           name="wallet-understand"
           onChange={(event) => onChangeUnderstandConfirm(event)}
         />
-        {failMessage && <div className="error__text">{__(failMessage)}</div>}
+        {failMessage && <div className={ERROR_TEXT_CLASS}>{__(failMessage)}</div>}
       </Form>
-      <div className="card__actions">
+      <div className={CARD_CLASSES.actions}>
         <Button button="link" label={__('Cancel')} onClick={closeModal} />
       </div>
     </Modal>

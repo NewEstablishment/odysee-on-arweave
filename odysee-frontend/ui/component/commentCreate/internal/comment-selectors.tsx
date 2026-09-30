@@ -2,11 +2,14 @@ import { EMOTES_48px as ODYSEE_EMOTES, TWEMOTES } from 'constants/emotes';
 import * as ICONS from 'constants/icons';
 // import Icon from 'component/common/icon';
 import Button from 'component/button';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
 import CreditAmount from 'component/common/credit-amount';
 import React from 'react';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'component/common/tabs';
 import { FREE_GLOBAL_STICKERS, PAID_GLOBAL_STICKERS } from 'constants/stickers';
 import { useIsMobile } from 'effects/use-screensize';
+import classnames from 'classnames';
+import { COMMENT_CREATE_CLASSES } from '../classes';
 let gMountedOnce = false;
 export const SELECTOR_TABS = {
   EMOJI: 0,
@@ -38,10 +41,18 @@ export default function CommentSelectors(props: Props) {
     }
   }, [mount, isOpen]);
   return (
-    <Tabs index={openTab} className={isOpen ? 'tabs tabs--comment tabs--open' : 'tabs'} onChange={() => {}}>
-      <TabList className="tabs__list--comment-selector">
-        <Tab>{__('Emojis')}</Tab>
-        <Tab>{__('Stickers')}</Tab>
+    <Tabs
+      index={openTab}
+      className={classnames(
+        COMMENT_CREATE_CLASSES.tabs,
+        COMMENT_CREATE_CLASSES.tabsComment,
+        isOpen && COMMENT_CREATE_CLASSES.tabsOpen
+      )}
+      onChange={() => {}}
+    >
+      <TabList className={COMMENT_CREATE_CLASSES.tabList}>
+        <Tab className={COMMENT_CREATE_CLASSES.tab}>{__('Emojis')}</Tab>
+        <Tab className={COMMENT_CREATE_CLASSES.tab}>{__('Stickers')}</Tab>
       </TabList>
 
       <TabPanels>
@@ -137,10 +148,10 @@ const EmojisPanel = (emojisProps: EmojisProps) => {
     images: TWEMOTES.FLAGS
   }];
   return (
-    <div className="selector-menu" ref={emojiSelectorRef}>
+    <div className={COMMENT_CREATE_CLASSES.selectorMenu} ref={emojiSelectorRef}>
       <Button button="close" icon={ICONS.REMOVE} onClick={closeSelector} />
-      <div id="emoji-code-preview" />
-      <div className="emoji-categories">
+      <div id="emoji-code-preview" className={COMMENT_CREATE_CLASSES.emojiPreview} />
+      <div className={COMMENT_CREATE_CLASSES.emojiCategories}>
         {/* <Icon icon={ICONS.TIME} /> */}
         {CATEGORY_INFOS.map((x) => (
           <img
@@ -176,10 +187,10 @@ const StickersPanel = (stickersProps: StickersProps) => {
   const stickerSelectorRef = React.useRef();
   const isMobile = useIsMobile();
   return (
-    <div className="selector-menu" ref={stickerSelectorRef}>
+    <div className={COMMENT_CREATE_CLASSES.selectorMenu} ref={stickerSelectorRef}>
       <Button button="close" icon={ICONS.REMOVE} onClick={closeSelector} />
-      <div id="emoji-code-preview" />
-      <div className="emoji-categories">
+      <div id="emoji-code-preview" className={COMMENT_CREATE_CLASSES.emojiPreview} />
+      <div className={COMMENT_CREATE_CLASSES.emojiCategories}>
         <img
           onClick={() => scrollToCategory('free', stickerSelectorRef, isMobile)}
           onMouseEnter={() => handleHover(__('Free'))}
@@ -227,12 +238,12 @@ const EmoteCategory = (rowProps: RowProps) => {
   return (
     <>
       <a id={title.replace(/\s|&/g, '').toLowerCase()}>
-        <label id={title} className="chatImage-category-title">
+        <label id={title} className={COMMENT_CREATE_CLASSES.categoryTitle}>
           {title}
         </label>
       </a>
 
-      <div className="emote-selector__items">
+      <div className={classnames(COMMENT_CREATE_CLASSES.selectorItems, COMMENT_CREATE_CLASSES.emoteItems)}>
         {images &&
           images.map((emote) => {
             const { name, url } = emote;
@@ -241,7 +252,7 @@ const EmoteCategory = (rowProps: RowProps) => {
                 key={name}
                 title={name}
                 button="alt"
-                className="button--file-action"
+                className={FILE_ACTION_BUTTON_CLASS}
                 onClick={() => handleSelect(name)}
                 onMouseEnter={() => handleHover(name)}
                 onMouseLeave={() => handleHover('')}
@@ -260,11 +271,11 @@ const StickerCategory = (rowProps: RowProps) => {
   return (
     <>
       <a id={title.replace(/\s|&/g, '').toLowerCase()}>
-        <label id={title} className="chatImage-category-title">
+        <label id={title} className={COMMENT_CREATE_CLASSES.categoryTitle}>
           {title}
         </label>
       </a>
-      <div className="sticker-selector__items">
+      <div className={classnames(COMMENT_CREATE_CLASSES.selectorItems, COMMENT_CREATE_CLASSES.stickerItems)}>
         {images &&
           images.map((sticker) => {
             const { price, url, name } = sticker;
@@ -273,7 +284,7 @@ const StickerCategory = (rowProps: RowProps) => {
                 key={name}
                 title={name}
                 button="alt"
-                className="button--file-action"
+                className={FILE_ACTION_BUTTON_CLASS}
                 onClick={() => handleSelect(sticker)}
                 onMouseEnter={() => handleHover(sticker)}
                 onMouseLeave={() => handleHover('')}
@@ -297,5 +308,5 @@ type StickerProps = {
 
 const StickerWrapper = (stickerProps: StickerProps) => {
   const { price, children } = stickerProps;
-  return price ? <div className="sticker-item--priced">{children}</div> : children;
+  return price ? <div className={COMMENT_CREATE_CLASSES.pricedSticker}>{children}</div> : children;
 };

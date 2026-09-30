@@ -1,10 +1,10 @@
 import React from 'react';
 import * as ICONS from 'constants/icons';
 import useBrowserNotifications from '$web/component/browserNotificationSettings/use-browser-notifications';
-import 'scss/component/notifications-banner.scss';
 import Icon from 'component/common/icon';
 import Button from 'component/button';
 import usePersistedState from 'effects/use-persisted-state';
+import { BROWSER_NOTIFICATION_NOTICE_CLASS } from 'component/browserNotificationBanner/classes';
 export const BrowserNotificationBanner = () => {
   const { pushInitialized, pushSupported, pushEnabled, pushPermission, pushToggle, pushErrorModal } =
     useBrowserNotifications();
@@ -18,18 +18,20 @@ export const BrowserNotificationBanner = () => {
 
   return (
     <>
-      <div className="browser-notifications__banner notice-message">
-        <div className="browser-notifications__overview">
-          <Icon className="browser-notifications__icon" icon={ICONS.NOTIFICATION} size={32} />
+      <div className={BROWSER_NOTIFICATION_NOTICE_CLASS}>
+        <div className="tw:flex tw:items-center">
+          <Icon className="tw:mr-app-m tw:shrink-0" icon={ICONS.NOTIFICATION} size={32} />
           <p>
             <strong>{__('Realtime push notifications straight to your browser.')}</strong>
             <br />
-            <span className="notifications-blocked__subText">{__("Don't miss another notification again.")}</span>
+            <span className="tw:inline-block tw:text-app-small tw:text-app-text-subtitle">
+              {__("Don't miss another notification again.")}
+            </span>
           </p>
         </div>
-        <div className="browser-notifications__actions">
+        <div className="tw:flex tw:items-center tw:upto-small:mt-app-l">
           <Button
-            className="browser-notifications__button"
+            className="tw:mr-app-m"
             button="primary"
             title={__('Enable Push Notifications')}
             label={__('Enable Push Notifications')}

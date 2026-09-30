@@ -9,6 +9,7 @@ import { useAppSelector } from 'redux/hooks';
 import { selectClaimForUri, selectGeoRestrictionForUri, selectIsUriResolving } from 'redux/selectors/claims';
 import { selectUserOdyseeMembership } from 'redux/selectors/memberships';
 import { getChannelIdFromClaim } from 'util/claim';
+import { WUNDERBAR_CLAIM_PROPERTY_OVERLAY_CLASS, WUNDERBAR_SUGGESTION_CLASSES } from './classes';
 
 type Props = {
   uri: string;
@@ -24,7 +25,7 @@ export default function WunderbarSuggestion(props: Props) {
   if (isResolvingUri) {
     return (
       <ComboboxOption value={uri}>
-        <div className="wunderbar__suggestion">
+        <div className={WUNDERBAR_SUGGESTION_CLASSES.root}>
           <div className="media__thumb media__thumb--resolving" />
         </div>
       </ComboboxOption>
@@ -45,23 +46,23 @@ export default function WunderbarSuggestion(props: Props) {
   return (
     <ComboboxOption value={uri}>
       <div
-        className={classnames('wunderbar__suggestion', {
-          'wunderbar__suggestion--channel': isChannel,
+        className={classnames(WUNDERBAR_SUGGESTION_CLASSES.root, {
+          [WUNDERBAR_SUGGESTION_CLASSES.channel]: isChannel,
         })}
       >
         {isChannel && <ChannelThumbnail small uri={uri} />}
         {!isChannel && (
           <FileThumbnail uri={uri}>
             {isCollection && (
-              <div className="claim-preview__claim-property-overlay">
+              <div className={WUNDERBAR_CLAIM_PROPERTY_OVERLAY_CLASS} data-wunderbar-claim-property-overlay>
                 <ClaimProperties uri={uri} small iconOnly />
               </div>
             )}
           </FileThumbnail>
         )}
-        <span className="wunderbar__suggestion-label">
-          <div className="wunderbar__suggestion-title">{claim.value.title}</div>
-          <div className="wunderbar__suggestion-name">
+        <span className={WUNDERBAR_SUGGESTION_CLASSES.label}>
+          <div className={WUNDERBAR_SUGGESTION_CLASSES.title}>{claim.value.title}</div>
+          <div className={WUNDERBAR_SUGGESTION_CLASSES.name}>
             {isChannel ? claim.name : (claim.signing_channel && claim.signing_channel.name) || __('Anonymous')}
             {odyseeMembership && <MembershipBadge membershipName={odyseeMembership} />}
           </div>

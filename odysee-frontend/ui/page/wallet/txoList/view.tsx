@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import * as ICONS from 'constants/icons';
 import React, { useEffect } from 'react';
 import * as TXO from 'constants/txo_list';
@@ -5,7 +6,9 @@ import TransactionListTable from '../transactionListTable';
 import Paginate from 'component/common/paginate';
 import { FormField } from 'component/common/form-components/form-field';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { toCapitalCase } from 'util/string';
 import classnames from 'classnames';
 import HelpLink from 'component/common/help-link';
@@ -17,6 +20,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doOpenModal } from 'redux/actions/app';
 import { doFetchTxoPage, doFetchTransactions, doUpdateTxoPageParams } from 'redux/actions/wallet';
 import { doCustomerListPaymentHistory, doListAccountTransactions } from 'redux/actions/payments';
+import { WALLET_TXO_EXPORT_CLASS, WALLET_TXO_RADIOS_CLASS } from 'page/wallet/classes';
 import {
   selectIsFetchingTxos,
   selectIsFetchingTransactions,
@@ -265,9 +269,9 @@ function TxoList() {
         currency === 'credits' ? (
           <div>
             {/* LBC transactions section */}
-            <div className="card__body-actions">
-              <div className="card__actions card__actions--between">
-                <div className="card__actions--inline">
+            <div className={CARD_CLASSES.bodyActions}>
+              <div className={classnames(CARD_CLASSES.actions, CARD_CLASSES.actionsBetween)}>
+                <div className={CARD_CLASSES.actionsInline}>
                   <div>
                     {/* LBC transaction type dropdown */}
                     <FormField
@@ -328,7 +332,7 @@ function TxoList() {
                     <div>
                       <fieldset-section>
                         <label>{__('Status')}</label>
-                        <div className={'txo__radios'}>
+                        <div className={WALLET_TXO_RADIOS_CLASS}>
                           {/* active transactions button */}
                           <Button
                             button="alt"
@@ -338,8 +342,8 @@ function TxoList() {
                                 value: 'active',
                               })
                             }
-                            className={classnames(`button-toggle`, {
-                              'button-toggle--active': active === TXO.ACTIVE,
+                            className={classnames(BUTTON_TOGGLE_CLASS, {
+                              [BUTTON_TOGGLE_ACTIVE_CLASS]: active === TXO.ACTIVE,
                             })}
                             label={__('Active')}
                           />
@@ -352,8 +356,8 @@ function TxoList() {
                                 value: 'spent',
                               })
                             }
-                            className={classnames(`button-toggle`, {
-                              'button-toggle--active': active === 'spent',
+                            className={classnames(BUTTON_TOGGLE_CLASS, {
+                              [BUTTON_TOGGLE_ACTIVE_CLASS]: active === 'spent',
                             })}
                             label={__('Historical')}
                           />
@@ -366,8 +370,8 @@ function TxoList() {
                                 value: 'all',
                               })
                             }
-                            className={classnames(`button-toggle`, {
-                              'button-toggle--active': active === 'all',
+                            className={classnames(BUTTON_TOGGLE_CLASS, {
+                              [BUTTON_TOGGLE_ACTIVE_CLASS]: active === 'all',
                             })}
                             label={__('All')}
                           />
@@ -377,11 +381,11 @@ function TxoList() {
                   )}
                 </div>
                 {/* export and refresh buttons */}
-                <div className="card__actions--inline">
+                <div className={CARD_CLASSES.actionsInline}>
                   {!isFetchingTransactions && transactionsFile === null && (
-                    <label>{<span className="error__text">{__('Failed to process fetched data.')}</span>}</label>
+                    <label>{<span className={ERROR_TEXT_CLASS}>{__('Failed to process fetched data.')}</span>}</label>
                   )}
-                  <div className="txo__export">
+                  <div className={WALLET_TXO_EXPORT_CLASS}>
                     <FileExporter
                       data={transactionsFile}
                       label={__('Export')}
@@ -403,12 +407,12 @@ function TxoList() {
           <div>
             {/* FIAT SECTION ( toggle buttons and transactions) */}
             <div className="section card-stack">
-              <div className="card__body-actions">
-                <div className="card__actions">
+              <div className={CARD_CLASSES.bodyActions}>
+                <div className={CARD_CLASSES.actions}>
                   <div>
                     <fieldset-section>
                       <label>{__('Type')}</label>
-                      <div className={'txo__radios'}>
+                      <div className={WALLET_TXO_RADIOS_CLASS}>
                         {/* incoming transactions button */}
                         <Button
                           button="alt"
@@ -418,8 +422,8 @@ function TxoList() {
                               value: 'incoming',
                             })
                           }
-                          className={classnames(`button-toggle`, {
-                            'button-toggle--active': fiatType === 'incoming',
+                          className={classnames(BUTTON_TOGGLE_CLASS, {
+                            [BUTTON_TOGGLE_ACTIVE_CLASS]: fiatType === 'incoming',
                           })}
                           label={__('Incoming')}
                         />
@@ -432,8 +436,8 @@ function TxoList() {
                               value: 'outgoing',
                             })
                           }
-                          className={classnames(`button-toggle`, {
-                            'button-toggle--active': fiatType === 'outgoing',
+                          className={classnames(BUTTON_TOGGLE_CLASS, {
+                            [BUTTON_TOGGLE_ACTIVE_CLASS]: fiatType === 'outgoing',
                           })}
                           label={__('Outgoing')}
                         />

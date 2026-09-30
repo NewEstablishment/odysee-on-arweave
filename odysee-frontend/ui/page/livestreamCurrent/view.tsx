@@ -5,6 +5,7 @@ import Page from 'component/page';
 import Yrbl from 'component/yrbl';
 import { useAppSelector } from 'redux/hooks';
 import { selectUser } from 'redux/selectors/user';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 export default function LivestreamCurrentPage() {
   const user = useAppSelector(selectUser);
@@ -19,7 +20,7 @@ export default function LivestreamCurrentPage() {
           title={__("This page isn't quite ready")}
           subtitle={__('Check back later.')}
           actions={
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="primary" navigate="/" label={__('Go Home')} />
             </div>
           }

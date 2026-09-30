@@ -11,6 +11,7 @@ import { useAppSelector } from 'redux/hooks';
 import { selectClaimForUri, selectIsStreamPlaceholderForUri } from 'redux/selectors/claims';
 import { selectShouldShowLivestreamForUri } from 'redux/selectors/livestream';
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
+import { FILE_SUBTITLE_BETWEEN_CLASS, FILE_VIEW_DATE_CLASS } from './classes';
 type Props = {
   uri: string;
 };
@@ -25,8 +26,8 @@ function FileSubtitle(props: Props) {
   const isLive = useAppSelector((state) => selectShouldShowLivestreamForUri(state, uri)) || false;
   return (
     <>
-      <div className="media__subtitle--between">
-        <div className="file__viewdate">
+      <div className={FILE_SUBTITLE_BETWEEN_CLASS}>
+        <div className={FILE_VIEW_DATE_CLASS} data-file-viewdate>
           <Icon icon={ICONS.TIME} />
           {isLivestreamClaim && <LivestreamDateTime uri={uri} />}
           {!isLivestreamClaim && <DateTimeClaim uri={uri} format="date-only" disableFromNowFormat />}

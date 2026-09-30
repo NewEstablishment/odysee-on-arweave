@@ -8,6 +8,7 @@ import Icon from 'component/common/icon';
 import React from 'react';
 import Slide from '@mui/material/Slide';
 import { Lbryio } from 'lbryinc';
+import { CHAT_CLASSES } from './classes';
 
 type ChatCommentData = {
   comment_id: string;
@@ -64,16 +65,17 @@ export default function LivestreamHyperchats(props: Props) {
     <Slider isMobile={isMobile} hyperchatsHidden={hyperchatsHidden}>
       <div
         ref={elRef}
-        className={classnames('livestream-hyperchats__wrapper', {
-          'livestream-hyperchats__wrapper--mobile': isMobile,
-        })}
+        className={classnames(CHAT_CLASSES.hyperchatsWrapper, isMobile && CHAT_CLASSES.hyperchatsWrapperMobile)}
       >
-        <div className="livestream-hyperchats">
+        <div className={CHAT_CLASSES.hyperchats}>
           {pinnedComment && onPinClick && (
             <div
-              className={classnames('livestream-hyperchat livestream-hyperchat--pin', {
-                active: pinActive,
-              })}
+              className={classnames(
+                CHAT_CLASSES.hyperchat,
+                CHAT_CLASSES.hyperchatPin,
+                pinActive && CHAT_CLASSES.hyperchatActive,
+                pinActive && CHAT_CLASSES.hyperchatPinActive
+              )}
               onClick={onPinClick}
             >
               <Icon icon={ICONS.PIN} size={16} />
@@ -83,32 +85,42 @@ export default function LivestreamHyperchats(props: Props) {
             const { comment_id, channel_url, support_amount, is_fiat } = hyperChat;
             const isSticker = stickerSuperChats && stickerSuperChats.includes(hyperChat);
             const basedAmount = is_fiat && exchangeRate ? support_amount : support_amount * 10 * exchangeRate;
+            const levelClass =
+              basedAmount >= 500
+                ? CHAT_CLASSES.hyperchatLevel5
+                : basedAmount >= 100
+                  ? CHAT_CLASSES.hyperchatLevel4
+                  : basedAmount >= 50
+                    ? CHAT_CLASSES.hyperchatLevel3
+                    : basedAmount >= 10
+                      ? CHAT_CLASSES.hyperchatLevel2
+                      : basedAmount >= 5
+                        ? CHAT_CLASSES.hyperchatLevel1
+                        : undefined;
             return (
               <div
                 key={comment_id}
-                className={classnames('livestream-hyperchat', {
-                  'livestream-hyperchat--mobile': isMobile,
-                  'hyperchat-preview-level1': basedAmount >= 5,
-                  'hyperchat-preview-level2': basedAmount >= 10,
-                  'hyperchat-preview-level3': basedAmount >= 50,
-                  'hyperchat-preview-level4': basedAmount >= 100,
-                  'hyperchat-preview-level5': basedAmount >= 500,
-                  active: selectedHyperchat && selectedHyperchat.comment_id === comment_id,
-                })}
+                className={classnames(
+                  CHAT_CLASSES.hyperchat,
+                  isMobile && CHAT_CLASSES.hyperchatMobile,
+                  levelClass,
+                  selectedHyperchat && selectedHyperchat.comment_id === comment_id && CHAT_CLASSES.hyperchatActive
+                )}
                 onClick={() => handleHyperchatClick(hyperChat)}
               >
                 <ChannelThumbnail uri={channel_url} xxsmall showMemberBadge />
 
                 <div
-                  className={classnames('livestreamHyperchat__info', {
-                    'livestreamHyperchat__info--notSticker': stickerSuperChats && !isSticker,
-                  })}
+                  className={classnames(
+                    CHAT_CLASSES.hyperchatInfo,
+                    stickerSuperChats && !isSticker && CHAT_CLASSES.hyperchatInfoNotSticker
+                  )}
                 >
-                  <div className="livestreamHyperchat__info--user">
+                  <div className={CHAT_CLASSES.hyperchatInfoUser}>
                     <CreditAmount
                       hideTitle
                       size={10}
-                      className="livestreamHyperchat__amount--large"
+                      className={CHAT_CLASSES.hyperchatAmount}
                       amount={support_amount}
                       isFiat={is_fiat}
                     />
@@ -119,7 +131,7 @@ export default function LivestreamHyperchats(props: Props) {
           })}
 
           {showMore && (
-            <div className="chat__show-hyperchats">
+            <div className={CHAT_CLASSES.showHyperchats}>
               <Button
                 title={__('Show More...')}
                 button="inverse"

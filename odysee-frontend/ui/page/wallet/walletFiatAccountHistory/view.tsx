@@ -9,6 +9,8 @@ import { toCapitalCase } from 'util/string';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doListAccountTransactions as doListAccountTransactionsAction } from 'redux/actions/payments';
 import { selectAccountTransactions } from 'redux/selectors/payments';
+import { WALLET_FIAT_TRANSACTIONS_CLASS, WALLET_TRANSACTION_TABLE_CLASSES } from 'page/wallet/classes';
+import { TABLE_WRAPPER_CLASS } from 'component/common/table-classes';
 type Props = {
   page: number;
   pageSize: number;
@@ -163,16 +165,16 @@ const WalletFiatAccountHistory = (props: Props) => {
   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
-      <div className="table__wrapper">
-        <table className="table table--transactions">
+      <div className={TABLE_WRAPPER_CLASS}>
+        <table className={WALLET_TRANSACTION_TABLE_CLASSES.root}>
           <thead>
             <tr>
-              <th className="date-header">{__('Date')}</th>
-              <th className="channelName-header">{<>{__('Receiving Channel')}</>}</th>
-              <th className="channelName-header">{<>{__('Sending Channel')}</>}</th>
-              <th className="transactionType-header">{<>{__('Type')}</>}</th>
+              <th className={WALLET_TRANSACTION_TABLE_CLASSES.dateHeader}>{__('Date')}</th>
+              <th className={WALLET_TRANSACTION_TABLE_CLASSES.channelNameHeader}>{<>{__('Receiving Channel')}</>}</th>
+              <th className={WALLET_TRANSACTION_TABLE_CLASSES.channelNameHeader}>{<>{__('Sending Channel')}</>}</th>
+              <th className={WALLET_TRANSACTION_TABLE_CLASSES.transactionTypeHeader}>{<>{__('Type')}</>}</th>
               <th className="location-header">{__('Location')}</th>
-              <th className="amount-header">{__('Amount')} </th>
+              <th className={WALLET_TRANSACTION_TABLE_CLASSES.amountHeader}>{__('Amount')} </th>
               <th className="processingFee-header">{__('Fee')}</th>
               <th className="receivedAmount-header">{__('Received')}</th>
               <th className="transactionId-header">{__('Transaction')}</th>
@@ -198,7 +200,7 @@ const WalletFiatAccountHistory = (props: Props) => {
               })}
           </tbody>
         </table>
-        {transactions.length === 0 && <p className="wallet__fiat-transactions">{__('No Tips')}</p>}
+        {transactions.length === 0 && <p className={WALLET_FIAT_TRANSACTIONS_CLASS}>{__('No Tips')}</p>}
       </div>
       <Paginate totalPages={totalPages} />
     </>

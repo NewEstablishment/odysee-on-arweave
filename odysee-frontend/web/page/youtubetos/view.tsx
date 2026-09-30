@@ -1,10 +1,11 @@
 import React from 'react';
 import Page from 'component/page';
 import Card from 'component/common/card';
+import { STATIC_PAGE_CLASS } from 'component/page/classes';
 
 const YouTubeTOSPage = () => {
   return (
-    <Page className="static-page">
+    <Page className={STATIC_PAGE_CLASS}>
       <Card
         title="YouTube Sync Terms of Service"
         body={

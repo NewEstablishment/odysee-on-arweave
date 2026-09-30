@@ -5,6 +5,7 @@ import Spinner from 'component/spinner';
 import { Modal } from 'modal/modal';
 import BusyIndicator from 'component/common/busy-indicator';
 import { FormField } from 'component/common/form';
+import { CONFIRM_WRAPPER_CLASS } from 'component/common/confirm-classes';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import {
   selectMyChannelClaimUrls,
@@ -25,6 +26,8 @@ import { doHideModal } from 'redux/actions/app';
 import { doFetchAccountList } from 'redux/actions/wallet';
 import { doFetchChannelListMine, doFetchClaimListMine } from 'redux/actions/claims';
 import { doRemoveAccountSequence } from './thunk';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS, HELP_WARNING_CLASS } from 'component/common/help-classes';
 
 export default function ModalRemoveAccount() {
   const dispatch = useAppDispatch();
@@ -103,7 +106,7 @@ export default function ModalRemoveAccount() {
                             'Account has been queued for deletion, and content has been removed. You will receive an email confirmation once the deletion is completed. It may take few minutes for content to completely disappear.'
                           )}
             {showButton && (
-              <div className="help">
+              <div className={HELP_CLASS}>
                 <p>
                   {__('Credits: %credits%', {
                     credits: totalBalance,
@@ -130,7 +133,7 @@ export default function ModalRemoveAccount() {
             )}
           </>
         }
-        className="confirm__wrapper"
+        className={CONFIRM_WRAPPER_CLASS}
         actions={
           <>
             {showButton && (
@@ -144,7 +147,7 @@ export default function ModalRemoveAccount() {
               />
             )}
             {showButton && isWalletMerged && (
-              <div className="help--warning">
+              <div className={HELP_WARNING_CLASS}>
                 <p>
                   {__(
                     "We detected multiple wallets on this account. Please make sure this account doesn't have any credits, publications or channels that you don't want to lose. If you aren't sure, please reach out to help@odysee.com for support."
@@ -153,7 +156,7 @@ export default function ModalRemoveAccount() {
               </div>
             )}
             {showButton && hasYouTubeChannels && (
-              <div className="help--warning">
+              <div className={HELP_WARNING_CLASS}>
                 <p>{__('YOUTUBE SYNCED CHANNELS!')}</p>
                 <p>
                   {__(
@@ -162,7 +165,7 @@ export default function ModalRemoveAccount() {
                 </p>
               </div>
             )}
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               {isBusy || isLoadingAccountInfo ? (
                 <BusyIndicator message={isBusy ? __('Removing content...') : __('Loading account info...')} />
               ) : (

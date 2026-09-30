@@ -1,12 +1,27 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
+import classnames from 'classnames';
 import { lazyImport } from 'util/lazyImport';
 import * as ICONS from 'constants/icons';
 import FileTitleSection from 'component/fileTitleSection';
 import Empty from 'component/common/empty';
 import Button from 'component/button';
 import { lockBodyScroll, unlockBodyScroll } from 'util/body-scroll-lock';
-import './style.scss';
+import {
+  SHORTS_MOBILE_PANEL_BACKDROP_CLASS,
+  SHORTS_MOBILE_PANEL_BACKDROP_CLOSING_CLASS,
+  SHORTS_MOBILE_PANEL_CLASS,
+  SHORTS_MOBILE_PANEL_CLOSE_BUTTON_CLASS,
+  SHORTS_MOBILE_PANEL_COMMENTS_CLASS,
+  SHORTS_MOBILE_PANEL_CONTENT_CLASS,
+  SHORTS_MOBILE_PANEL_DRAG_HANDLE_CLASS,
+  SHORTS_MOBILE_PANEL_FILE_SECTION_CLASS,
+  SHORTS_MOBILE_PANEL_HEADER_CLASS,
+  SHORTS_MOBILE_PANEL_MODAL_CLASS,
+  SHORTS_MOBILE_PANEL_MODAL_CLOSING_CLASS,
+  SHORTS_MOBILE_PANEL_OPEN_CLASS,
+  SHORTS_MOBILE_PANEL_TITLE_CLASS,
+} from './classes';
 
 const CommentsList = lazyImport(
   () =>
@@ -109,20 +124,30 @@ export default function MobilePanel(props: Props) {
 
   if (!document.body) return null;
   return createPortal(
-    <div className={`shorts-mobile-panel ${isOpen ? 'shorts-mobile-panel--modal-open' : ''}`}>
+    <div
+      className={classnames(SHORTS_MOBILE_PANEL_CLASS, {
+        [SHORTS_MOBILE_PANEL_OPEN_CLASS]: isOpen,
+      })}
+    >
       {(isOpen || isClosing) && (
         <div
-          className={`shorts-mobile-panel__backdrop ${isClosing ? 'shorts-mobile-panel__backdrop--closing' : ''}`}
+          className={classnames(SHORTS_MOBILE_PANEL_BACKDROP_CLASS, {
+            [SHORTS_MOBILE_PANEL_BACKDROP_CLOSING_CLASS]: isClosing,
+          })}
           ref={modalRef}
           onClick={handleBackdropClick}
         >
-          <div className={`shorts-mobile-panel__modal ${isClosing ? 'shorts-mobile-panel__modal--closing' : ''}`}>
-            <div className="shorts-mobile-panel__header">
-              <div className="shorts-mobile-panel__drag-handle" />
-              <div className="shorts-mobile-panel__title-section">
+          <div
+            className={classnames(SHORTS_MOBILE_PANEL_MODAL_CLASS, {
+              [SHORTS_MOBILE_PANEL_MODAL_CLOSING_CLASS]: isClosing,
+            })}
+          >
+            <div className={SHORTS_MOBILE_PANEL_HEADER_CLASS}>
+              <div className={SHORTS_MOBILE_PANEL_DRAG_HANDLE_CLASS} />
+              <div className={SHORTS_MOBILE_PANEL_TITLE_CLASS}>
                 <div>{isComments ? __('Comments') : __('Video Details')}</div>
                 <Button
-                  className="shorts-mobile-panel__close-button"
+                  className={SHORTS_MOBILE_PANEL_CLOSE_BUTTON_CLASS}
                   onClick={handleClose}
                   icon={ICONS.REMOVE}
                   iconSize={20}
@@ -131,12 +156,12 @@ export default function MobilePanel(props: Props) {
               </div>
             </div>
 
-            <div ref={contentRef} className="shorts-mobile-panel__content">
-              <div className="shorts-mobile-panel__file-section">
+            <div ref={contentRef} className={SHORTS_MOBILE_PANEL_CONTENT_CLASS}>
+              <div className={SHORTS_MOBILE_PANEL_FILE_SECTION_CLASS}>
                 <FileTitleSection uri={uri} accessStatus={accessStatus} />
               </div>
 
-              <div ref={commentsRef} className="shorts-mobile-panel__comments-section">
+              <div ref={commentsRef} className={SHORTS_MOBILE_PANEL_COMMENTS_CLASS}>
                 <h4>{__('Comments')}</h4>
                 {contentUnlocked &&
                   (commentsDisabled ? (

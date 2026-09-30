@@ -1,5 +1,6 @@
 import React from 'react';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_CLASS } from 'component/common/form-components/fieldset-group-classes';
 import PublishName from 'component/publish/shared/publishName';
 import useThrottle from 'effects/use-throttle';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -50,7 +51,7 @@ export default function PublishTitleUrl(props: Props) {
         value={titleValue}
         onChange={handleTitleChange}
         onBlur={flushTitle}
-        className="fieldset-group"
+        className={FIELDSET_GROUP_CLASS}
         max={200}
       />
       <PublishName uri={uri} onChange={() => setUrlChangedManually(true)} />

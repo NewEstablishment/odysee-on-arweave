@@ -21,6 +21,7 @@ import PublishFile from 'component/publish/upload/publishFile';
 import PublishFilePicker from 'component/publish/upload/publishFilePicker';
 import PublishTitleUrl from 'component/publish/shared/publishTitleUrl';
 import PublishProtectedContent from 'component/publishProtectedContent';
+import { PUBLISH_ROW_CLASS } from 'component/publish/shared/publish-row-classes';
 import Card from 'component/common/card';
 import I18nMessage from 'component/i18nMessage';
 import * as PUBLISH_MODES from 'constants/publish_types';
@@ -34,6 +35,14 @@ import PublishWizard from 'component/publish/shared/publishWizard';
 import { Menu, MenuButton, MenuList, MenuItem } from 'component/common/menu';
 import PublishControlTags from 'component/publish/shared/publishControlTags/view';
 import PublishSummary from 'component/publish/shared/publishSummary/view';
+import {
+  PUBLISH_DETAILS_CLASS,
+  PUBLISH_DETAILS_FINAL_CLASS,
+  PUBLISH_DETAILS_THUMBNAIL_ATTENTION_CLASS,
+  PUBLISH_DETAILS_THUMBNAIL_CLASS,
+  PUBLISH_DETAILS_THUMBNAIL_FEEDBACK_CLASS,
+  PUBLISH_DETAILS_TITLE_CLASS,
+} from 'component/publish/shared/publish-details-classes';
 import PublishTagsPicker from 'component/publish/shared/publishTagsPicker/view';
 import * as ACTIONS from 'constants/action_types';
 import { doAddPipelineItem, doRemovePipelineItem, doUpdatePipelineItem } from 'redux/actions/publishPipeline';
@@ -76,6 +85,8 @@ import { selectClientSetting } from 'redux/selectors/settings';
 import { makeSelectFileRenderModeForUri } from 'redux/selectors/content';
 import { doFetchCreatorSettings } from 'redux/actions/comments';
 import { selectUploadTemplatesForChannelId } from 'redux/selectors/comments';
+import { PAGE_TITLE_MARGIN_CLASS, PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const loadSelectThumbnail = () => import('component/selectThumbnail' /* webpackChunkName: "selectThumbnail" */);
 const SelectThumbnail: React.LazyExoticComponent<React.ComponentType<any>> = lazyImport(loadSelectThumbnail);
@@ -836,7 +847,7 @@ function UploadForm(props: Props) {
 
   if (publishing || publishFormValues.type !== 'file') {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner delayed />
       </div>
     );
@@ -844,7 +855,7 @@ function UploadForm(props: Props) {
 
   return (
     <div className="card-stack">
-      <h1 className="page__title page__title--margin">
+      <h1 className={PAGE_TITLE_MARGIN_CLASS}>
         <Icon icon={ICONS.PUBLISH} />
         {(() => {
           const currentFilename =
@@ -859,24 +870,27 @@ function UploadForm(props: Props) {
           const displayName = currentFilename || __('New file');
           if (unpublishedItems.length === 0 || (unpublishedItems.length <= 1 && currentFilename)) {
             return (
-              <label className="publish-wizard__title-label">
-                {__('Upload')} <span className="publish-wizard__title-filename">{displayName}</span>
+              <label className="tw:inline-flex tw:min-w-0 tw:max-w-full tw:items-center tw:gap-app-xs">
+                {__('Upload')}{' '}
+                <span className="tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap">
+                  {displayName}
+                </span>
               </label>
             );
           }
           return (
-            <label className="publish-wizard__title-label">
+            <label className="tw:inline-flex tw:min-w-0 tw:max-w-full tw:items-center tw:gap-app-xs">
               {__('Upload')}
               <Menu>
-                <MenuButton className="publish-wizard__title-select">
+                <MenuButton className="tw:inline-flex tw:max-w-[400px] tw:cursor-pointer tw:items-center tw:gap-app-xxs tw:overflow-hidden tw:text-ellipsis tw:!rounded-app tw:![border:none] tw:!bg-[var(--color-header-button)] tw:px-app-s tw:py-app-xxs tw:text-app-body tw:font-bold tw:!text-app-text tw:![box-shadow:none] tw:hover:!bg-[var(--color-button-toggle-bg-hover)] tw:hover:!text-app-text tw:hover:![box-shadow:none] tw:hover:!outline-none tw:focus:!bg-[var(--color-button-toggle-bg-hover)] tw:focus:!text-app-text tw:focus:![box-shadow:none] tw:focus:!outline-none tw:upto-xsmall:max-w-[200px]">
                   {displayName}
                   <Icon icon={ICONS.DOWN} size={10} />
                 </MenuButton>
-                <MenuList className="menu__list publish-wizard__title-menu">
+                <MenuList className="menu__list">
                   {unpublishedItems.map((item) => (
                     <MenuItem
                       key={item.id}
-                      className="menu__link"
+                      className="menu__link tw:text-app-body"
                       onSelect={() => {
                         dispatch({ type: 'PUBLISH_SET_ACTIVE_FORM', data: { id: item.formId || item.id } });
                       }}
@@ -884,9 +898,9 @@ function UploadForm(props: Props) {
                       {item.filename}
                     </MenuItem>
                   ))}
-                  <hr className="publish-wizard__title-menu-separator" />
+                  <hr className="tw:my-app-xxs tw:mx-0 tw:[border-top:1px_solid_var(--color-border)] tw:[border-right:0] tw:[border-bottom:0] tw:[border-left:0]" />
                   <MenuItem
-                    className="menu__link"
+                    className="menu__link tw:text-app-body"
                     onSelect={() => {
                       dispatch({ type: 'PUBLISH_SET_ACTIVE_FORM', data: { id: `__new_${uuid()}` } });
                     }}
@@ -899,7 +913,7 @@ function UploadForm(props: Props) {
             </label>
           );
         })()}
-        <span className="publish-wizard__title-actions">
+        <span className="tw:ml-auto tw:inline-flex tw:items-center tw:gap-app-s tw:[&_*]:!mt-0">
           {!isClear && !inEditMode && (
             <Button onClick={() => clearPublish()} icon={ICONS.REFRESH} button="primary" label={__('Clear')} />
           )}
@@ -922,7 +936,7 @@ function UploadForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-row">
+              <div className={PUBLISH_ROW_CLASS}>
                 <PublishFilePicker disabled={disabled || publishing} />
               </div>
             }
@@ -934,22 +948,22 @@ function UploadForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <PublishTitleUrl disabled={disabled || publishing} />
                 <div>
-                  <h3 className="publish-details__title">{__('Description')}</h3>
+                  <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Description')}</h3>
                   <PublishDescription disabled={disabled || publishing} />
                 </div>
                 <div
                   ref={thumbnailSectionRef}
                   className={classnames({
-                    'publish-details__thumbnail': showThumbnailFeedback,
-                    'publish-details__thumbnail--needs-attention': showThumbnailFeedback,
+                    [PUBLISH_DETAILS_THUMBNAIL_CLASS]: showThumbnailFeedback,
+                    [PUBLISH_DETAILS_THUMBNAIL_ATTENTION_CLASS]: showThumbnailFeedback,
                   })}
                 >
-                  <h3 className="publish-details__title">{__('Thumbnail')}</h3>
+                  <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Thumbnail')}</h3>
                   {showThumbnailFeedback && (
-                    <div className="publish-details__thumbnail-feedback" role="alert">
+                    <div className={PUBLISH_DETAILS_THUMBNAIL_FEEDBACK_CLASS} role="alert">
                       <Icon icon={ICONS.ALERT} size={18} />
                       <span>{thumbnailFeedbackMessage}</span>
                     </div>
@@ -957,7 +971,7 @@ function UploadForm(props: Props) {
                   <SelectThumbnail />
                 </div>
                 <div>
-                  <h3 className="publish-details__title">{__('Tags')}</h3>
+                  <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Tags')}</h3>
                   <PublishTagsPicker
                     tags={tags}
                     limitSelect={TAGS_LIMIT}
@@ -991,7 +1005,7 @@ function UploadForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details">
+              <div className={PUBLISH_DETAILS_CLASS}>
                 <PublishVisibility />
                 <PublishProtectedContent claim={myClaimForUri} />
                 <PublishPrice disabled={formDisabled} />
@@ -1021,7 +1035,7 @@ function UploadForm(props: Props) {
           <Card
             background
             body={
-              <div className="publish-details publish-details--publish">
+              <div className={classnames(PUBLISH_DETAILS_CLASS, PUBLISH_DETAILS_FINAL_CLASS)}>
                 <PublishSummary />
 
                 {showSchedulingOptions && <PublishStreamReleaseDate />}
@@ -1035,7 +1049,7 @@ function UploadForm(props: Props) {
                       missingRequiredFile={missingRequiredFile}
                     />
                   )}
-                  <div className="help">
+                  <div className={HELP_CLASS}>
                     <I18nMessage
                       tokens={{
                         odysee_terms_of_service: (

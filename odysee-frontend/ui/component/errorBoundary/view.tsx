@@ -1,8 +1,10 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import Yrbl from 'component/yrbl';
 import Button from 'component/button';
 import analytics from 'analytics';
 import I18nMessage from 'component/i18nMessage';
+import { PAGE_MAIN_FULL_WIDTH_CLASS, PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 // import Native from 'native';
 // import Lbry from 'lbry';
 type Props = {
@@ -106,7 +108,7 @@ class ErrorBoundary extends React.Component<Props, State> {
 
     if (hasError) {
       return (
-        <div className="main main--full-width main--empty">
+        <div className={`main ${PAGE_MAIN_FULL_WIDTH_CLASS} ${PAGE_MAIN_EMPTY_CLASS}`}>
           <Yrbl
             type="sad"
             title={__('Aw shucks!')}
@@ -129,16 +131,16 @@ class ErrorBoundary extends React.Component<Props, State> {
             }
           />
           {!errorWasReported && (
-            <div className="error__wrapper">
-              <span className="error__text">
+            <div className="tw:rounded-app tw:bg-app-error tw:p-app-s">
+              <span className={ERROR_TEXT_CLASS}>
                 {__('You are not currently sharing diagnostic data so this error was not reported.')}
               </span>
             </div>
           )}
 
           {errorWasReported && (
-            <div className="error__wrapper">
-              <span className="error__text">
+            <div className="tw:rounded-app tw:bg-app-error tw:p-app-s">
+              <span className={ERROR_TEXT_CLASS}>
                 {__('Error ID: %sentryEventId%', {
                   sentryEventId,
                 })}

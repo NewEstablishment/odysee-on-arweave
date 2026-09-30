@@ -2,11 +2,20 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import Button from 'component/button';
+import { ButtonFireEffect, ButtonSlimeEffect } from 'component/buttonReactionEffects/view';
+import {
+  BUTTON_REACTION_DISLIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_DISLIKE_CLASS,
+  BUTTON_REACTION_LIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_LIKE_CLASS,
+} from 'component/button/classes';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
 import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
 import classnames from 'classnames';
 import * as REACTION_TYPES from 'constants/reactions';
 import Counter from 'component/counter';
+import { COUNTER_INLINE_CLASS } from 'component/counter/classes';
 import ClaimCollectionAddButton from 'component/claimCollectionAddButton';
 import ChannelThumbnail from 'component/channelThumbnail';
 import Icon from 'component/common/icon';
@@ -36,6 +45,14 @@ import {
 } from 'constants/tags';
 import { doOpenModal } from 'redux/actions/app';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { CLAIM_COVER_SHORTS_SELECTOR } from 'component/claimCoverRender/classes';
+import {
+  SHORTS_ACTION_CLASSES,
+  SHORTS_EFFECT_CLASSES,
+  SHORTS_FLOATING_ACTION_CLASSES,
+  SHORTS_MOBILE_SLIME_FILTER,
+  SHORTS_PAGE_NAVIGATION_CLASS,
+} from './classes';
 
 type Props = {
   hasPlaylist: boolean;
@@ -55,6 +72,16 @@ type Props = {
   totalVideos?: number;
 };
 const LIVE_REACTION_FETCH_MS = 1000 * 45;
+
+function updateRestartableEffect(element: Element | null, attribute: string, active: boolean) {
+  if (!element) return;
+  element.removeAttribute(attribute);
+  if (active) {
+    void (element as HTMLElement).offsetWidth;
+    element.setAttribute(attribute, '');
+  }
+}
+
 const ShortsActions = React.memo<Props>(
   ({
     uri,
@@ -109,30 +136,12 @@ const ShortsActions = React.memo<Props>(
     const [slimeEffect, setSlimeEffect] = React.useState(false);
     const slimeEffectTimeout = React.useRef(null);
     React.useEffect(() => {
-      const el = document.querySelector('.shorts__viewer') || document.querySelector('.content__cover--shorts');
-      if (!el) return;
-      const cls = el.classList.contains('shorts__viewer') ? 'shorts__viewer--fire-glow' : 'content__cover--fire-glow';
-
-      if (fireEffect) {
-        el.classList.remove(cls);
-        void (el as HTMLElement).offsetWidth;
-        el.classList.add(cls);
-      } else {
-        el.classList.remove(cls);
-      }
+      const el = document.querySelector('.shorts__viewer') || document.querySelector(CLAIM_COVER_SHORTS_SELECTOR);
+      updateRestartableEffect(el, 'data-shorts-fire-glow', fireEffect);
     }, [fireEffect]);
     React.useEffect(() => {
-      const el = document.querySelector('.shorts__viewer') || document.querySelector('.content__cover--shorts');
-      if (!el) return;
-      const cls = el.classList.contains('shorts__viewer') ? 'shorts__viewer--slime-glow' : 'content__cover--slime-glow';
-
-      if (slimeEffect) {
-        el.classList.remove(cls);
-        void (el as HTMLElement).offsetWidth;
-        el.classList.add(cls);
-      } else {
-        el.classList.remove(cls);
-      }
+      const el = document.querySelector('.shorts__viewer') || document.querySelector(CLAIM_COVER_SHORTS_SELECTOR);
+      updateRestartableEffect(el, 'data-shorts-slime-glow', slimeEffect);
     }, [slimeEffect]);
     React.useEffect(() => {
       setCountersZeroed(false);
@@ -165,20 +174,20 @@ const ShortsActions = React.memo<Props>(
 
     const content = (
       <div
-        className={classnames('shorts-page__navigation', {
-          'shorts-page__navigation--mobile-desktop': isMobile,
+        className={classnames(SHORTS_PAGE_NAVIGATION_CLASS, {
+          [SHORTS_ACTION_CLASSES.mobileDesktopNavigation]: isMobile,
         })}
       >
         <>
           <Button
-            className="shorts-page__actions-button shorts-page__actions-button--info"
+            className={classnames(SHORTS_ACTION_CLASSES.button, SHORTS_ACTION_CLASSES.info)}
             onClick={onInfoClick}
             icon={ICONS.INFO}
             iconSize={20}
             title={__('Show Details')}
           />
           <Button
-            className="shorts-page__actions-button shorts-page__actions-button--previous"
+            className={classnames(SHORTS_ACTION_CLASSES.button, SHORTS_ACTION_CLASSES.previous)}
             onClick={() => {
               setCountersZeroed(true);
               onPrevious();
@@ -189,7 +198,7 @@ const ShortsActions = React.memo<Props>(
             disabled={isAtStart}
           />
           <Button
-            className="shorts-page__actions-button shorts-page__actions-button--next"
+            className={classnames(SHORTS_ACTION_CLASSES.button, SHORTS_ACTION_CLASSES.next)}
             onClick={() => {
               setCountersZeroed(true);
               onNext();
@@ -200,8 +209,8 @@ const ShortsActions = React.memo<Props>(
             disabled={isAtEnd}
           />
           <div
-            className={classnames('shorts-page__ratings', {
-              'shorts-page__ratings--no-slime': disableSlimes,
+            className={classnames(SHORTS_ACTION_CLASSES.ratings, {
+              [SHORTS_ACTION_CLASSES.ratingsNoSlime]: disableSlimes,
             })}
             style={
               {
@@ -225,8 +234,9 @@ const ShortsActions = React.memo<Props>(
               } as React.CSSProperties
             }
           >
-            <div className="fire-and-count">
+            <div className={classnames(SHORTS_ACTION_CLASSES.reactionCount, SHORTS_ACTION_CLASSES.fireCount)}>
               <Button
+                button="alt"
                 onClick={() => {
                   if (myReaction !== REACTION_TYPES.LIKE) {
                     setFireEffect(false);
@@ -244,27 +254,18 @@ const ShortsActions = React.memo<Props>(
                 title={__('I Like This')}
                 requiresAuth={!hyperbeamNodeEnabled()}
                 authSrc="filereaction_like"
-                className={classnames('shorts-page__actions-button button--file-action button-like', {
-                  'button--fire': myReaction === REACTION_TYPES.LIKE,
-                })}
-                label={
-                  <>
-                    {myReaction === REACTION_TYPES.LIKE && (
-                      <>
-                        <div className="button__fire-glow" />
-                        <div className="button__fire-particle1" />
-                        <div className="button__fire-particle2" />
-                        <div className="button__fire-particle3" />
-                        <div className="button__fire-particle4" />
-                        <div className="button__fire-particle5" />
-                        <div className="button__fire-particle6" />
-                      </>
-                    )}
-                  </>
-                }
+                className={classnames(
+                  SHORTS_ACTION_CLASSES.button,
+                  FILE_ACTION_BUTTON_CLASS,
+                  BUTTON_REACTION_LIKE_CLASS,
+                  {
+                    [BUTTON_REACTION_LIKE_ACTIVE_CLASS]: myReaction === REACTION_TYPES.LIKE,
+                  }
+                )}
+                label={<>{myReaction === REACTION_TYPES.LIKE && <ButtonFireEffect />}</>}
               />
               {countersZeroed ? (
-                <span className="counter-inline">0</span>
+                <span className={COUNTER_INLINE_CLASS}>0</span>
               ) : (
                 <Counter
                   key={'fire-' + (claimId || '')}
@@ -275,7 +276,7 @@ const ShortsActions = React.memo<Props>(
               )}
             </div>
             <div
-              className="slime-and-count"
+              className={classnames(SHORTS_ACTION_CLASSES.reactionCount, SHORTS_ACTION_CLASSES.slimeCount)}
               style={
                 disableSlimes
                   ? {
@@ -285,23 +286,19 @@ const ShortsActions = React.memo<Props>(
               }
             >
               <Button
+                button="alt"
                 requiresAuth={!hyperbeamNodeEnabled()}
                 authSrc={'filereaction_dislike'}
                 title={__('I dislike this')}
-                className={classnames('shorts-page__actions-button button--file-action button-dislike', {
-                  'button--slime': myReaction === REACTION_TYPES.DISLIKE,
-                })}
-                label={
-                  <>
-                    {myReaction === REACTION_TYPES.DISLIKE && (
-                      <>
-                        <div className="button__slime-stain" />
-                        <div className="button__slime-drop1" />
-                        <div className="button__slime-drop2" />
-                      </>
-                    )}
-                  </>
-                }
+                className={classnames(
+                  SHORTS_ACTION_CLASSES.button,
+                  FILE_ACTION_BUTTON_CLASS,
+                  BUTTON_REACTION_DISLIKE_CLASS,
+                  {
+                    [BUTTON_REACTION_DISLIKE_ACTIVE_CLASS]: myReaction === REACTION_TYPES.DISLIKE,
+                  }
+                )}
+                label={<>{myReaction === REACTION_TYPES.DISLIKE && <ButtonSlimeEffect />}</>}
                 iconSize={16}
                 icon={myReaction === REACTION_TYPES.DISLIKE ? ICONS.SLIME_ACTIVE : ICONS.SLIME}
                 onClick={() => {
@@ -318,7 +315,7 @@ const ShortsActions = React.memo<Props>(
                 }}
               />
               {countersZeroed ? (
-                <span className="counter-inline">0</span>
+                <span className={COUNTER_INLINE_CLASS}>0</span>
               ) : (
                 <Counter
                   key={'slime-' + (claimId || '')}
@@ -332,7 +329,7 @@ const ShortsActions = React.memo<Props>(
           {channelUrl ? (
             <div
               ref={followRef}
-              className="shorts-actions__item"
+              className={SHORTS_ACTION_CLASSES.item}
               onMouseEnter={() => setAvatarHover(true)}
               onMouseLeave={() => setAvatarHover(false)}
               onClick={() => {
@@ -344,7 +341,7 @@ const ShortsActions = React.memo<Props>(
                 if (!isSubscribed && followRef.current) {
                   const container = followRef.current;
                   container.querySelectorAll('.shorts-heart-particle').forEach((el) => el.remove());
-                  const badge = container.querySelector('.shorts-floating-action__subscribe');
+                  const badge = container.querySelector('[data-shorts-subscribe-badge]');
 
                   if (badge) {
                     const containerRect = container.getBoundingClientRect();
@@ -355,7 +352,7 @@ const ShortsActions = React.memo<Props>(
                     for (let i = 0; i < 6; i++) {
                       const heart = document.createElement('span');
                       heart.textContent = '\u2764';
-                      heart.className = 'shorts-heart-particle';
+                      heart.className = SHORTS_ACTION_CLASSES.heartParticle;
                       heart.style.left = cx + (Math.random() * 16 - 8) + 'px';
                       heart.style.top = cy + 'px';
                       heart.style.animationDelay = Math.random() * 0.4 + 's';
@@ -383,17 +380,27 @@ const ShortsActions = React.memo<Props>(
                 }
               }}
             >
-              <div className="shorts-floating-action shorts-floating-action--avatar">
+              <div
+                className={classnames(SHORTS_FLOATING_ACTION_CLASSES.item, SHORTS_FLOATING_ACTION_CLASSES.avatarItem)}
+              >
                 <ChannelThumbnail
                   key={channelUrl}
                   uri={channelUrl}
                   hideStakedIndicator
-                  className="shorts-floating-action__avatar"
+                  className={classnames(
+                    SHORTS_FLOATING_ACTION_CLASSES.avatar,
+                    SHORTS_FLOATING_ACTION_CLASSES.avatarPage
+                  )}
                 />
                 <div
-                  className={classnames('shorts-floating-action__subscribe', {
-                    'shorts-floating-action__subscribe--active': isSubscribed,
-                  })}
+                  className={classnames(
+                    SHORTS_FLOATING_ACTION_CLASSES.subscribe,
+                    SHORTS_FLOATING_ACTION_CLASSES.subscribePage,
+                    {
+                      [SHORTS_FLOATING_ACTION_CLASSES.subscribeActive]: isSubscribed,
+                    }
+                  )}
+                  data-shorts-subscribe-badge
                 >
                   <Icon
                     icon={
@@ -410,12 +417,12 @@ const ShortsActions = React.memo<Props>(
               <p>{isSubscribed ? __('Following') : __('Follow')}</p>
             </div>
           ) : (
-            <div className="shorts-actions__item shorts-actions__item--placeholder" />
+            <div className={classnames(SHORTS_ACTION_CLASSES.item, SHORTS_ACTION_CLASSES.placeholder)} />
           )}
 
-          <div className="shorts-actions__item">
+          <div className={SHORTS_ACTION_CLASSES.item}>
             <Button
-              className="shorts-page__actions-button shorts-page__actions-button--comments"
+              className={classnames(SHORTS_ACTION_CLASSES.button, 'shorts-page__actions-button--comments')}
               onClick={onCommentsClick}
               icon={ICONS.COMMENTS_LIST}
               iconSize={16}
@@ -424,15 +431,15 @@ const ShortsActions = React.memo<Props>(
             <p>{__('Comments')}</p>
           </div>
 
-          <div className="shorts-actions__group">
-            <div className="shorts-actions__item">
+          <div className={SHORTS_ACTION_CLASSES.group}>
+            <div className={SHORTS_ACTION_CLASSES.item}>
               <ClaimCollectionAddButton uri={uri} isShortsPage />
             </div>
 
             {!isUnlisted && (
-              <div className="shorts-actions__item">
+              <div className={SHORTS_ACTION_CLASSES.item}>
                 <Button
-                  className="shorts-page__actions-button"
+                  className={SHORTS_ACTION_CLASSES.button}
                   onClick={() =>
                     dispatch(
                       doOpenModal(MODALS.REPOST, {
@@ -449,11 +456,11 @@ const ShortsActions = React.memo<Props>(
               </div>
             )}
           </div>
-          <div className="shorts-actions__group shorts-actions__group--bottom">
+          <div className={classnames(SHORTS_ACTION_CLASSES.group, SHORTS_ACTION_CLASSES.groupBottom)}>
             {(!isUnlisted || claimIsMine) && (
-              <div className="shorts-actions__item">
+              <div className={SHORTS_ACTION_CLASSES.item}>
                 <Button
-                  className="shorts-page__actions-button shorts-page__actions-button--share"
+                  className={classnames(SHORTS_ACTION_CLASSES.button, 'shorts-page__actions-button--share')}
                   onClick={handleShareClick}
                   icon={ICONS.SHARE}
                   iconSize={16}
@@ -462,9 +469,9 @@ const ShortsActions = React.memo<Props>(
                 <p>{__('Share')}</p>
               </div>
             )}
-            <div className="shorts-actions__item">
+            <div className={SHORTS_ACTION_CLASSES.item}>
               <Button
-                className={classnames('shorts-page__actions-button button-bubble', {
+                className={classnames(SHORTS_ACTION_CLASSES.button, 'button-bubble', {
                   'button-bubble--active': autoPlayNextShort,
                 })}
                 title={__('Autoplay Next')}
@@ -481,13 +488,13 @@ const ShortsActions = React.memo<Props>(
     );
     const portalTarget =
       typeof document !== 'undefined'
-        ? document.querySelector('.shorts__viewer') || document.querySelector('.content__cover--shorts')
+        ? document.querySelector('.shorts__viewer') || document.querySelector(CLAIM_COVER_SHORTS_SELECTOR)
         : null;
     const effectOverlays = portalTarget && (
       <>
         {fireEffect &&
           createPortal(
-            <div className="shorts-viewer-flames">
+            <div className={SHORTS_EFFECT_CLASSES.flames}>
               {Array.from(
                 {
                   length: 50,
@@ -495,7 +502,7 @@ const ShortsActions = React.memo<Props>(
                 (_, i) => (
                   <div
                     key={i}
-                    className="shorts-viewer-flames__particle"
+                    className={SHORTS_EFFECT_CLASSES.flameParticle}
                     style={{
                       left: `calc(${(i / 50) * 100}% - 35px)`,
                       animationDelay: `${Math.random()}s`,
@@ -506,7 +513,11 @@ const ShortsActions = React.memo<Props>(
             </div>,
             portalTarget
           )}
-        {slimeEffect && createPortal(<div className="shorts-viewer-slime" />, portalTarget)}
+        {slimeEffect &&
+          createPortal(
+            <div className={SHORTS_EFFECT_CLASSES.slime} style={{ filter: SHORTS_MOBILE_SLIME_FILTER }} />,
+            portalTarget
+          )}
       </>
     );
 

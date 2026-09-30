@@ -1,4 +1,3 @@
-import 'scss/component/_videojs-skin.scss';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Video } from '@videojs/react/video';
 import Player from './player';
@@ -34,6 +33,9 @@ import * as SETTINGS from 'constants/settings';
 import { getLivestreamTurnServer } from 'constants/livestream';
 import type { MediaWithHls, HlsWithP2P, P2PHlsConfig } from './types';
 import { isEmbedPath } from 'util/embed';
+import { CAST_CLASSES } from './cast-classes';
+import { VIDEO_PARENT_CLASSES } from './video-parent-classes';
+import { TAP_TO_UNMUTE_CLASS } from './tap-to-unmute-classes';
 
 const IS_IOS = platform.isIOS();
 const IS_MOBILE = platform.isMobile();
@@ -1128,12 +1130,7 @@ function VideoJsInner(props: Props) {
   }, []);
 
   return (
-    <div
-      className={classnames('video-js-parent', {
-        'video-js-parent--ios': IS_IOS,
-      })}
-      ref={containerRef}
-    >
+    <div className={classnames(VIDEO_PARENT_CLASSES.root, IS_IOS && VIDEO_PARENT_CLASSES.ios)} ref={containerRef}>
       <OdyseeSkin
         isLivestream={Boolean(isLivestream)}
         isMarkdownOrComment={isMarkdownOrComment}
@@ -1169,7 +1166,7 @@ function VideoJsInner(props: Props) {
         onSelectOriginalSource={() => setSourceMode('original')}
         onSelectAdaptiveSource={() => setSourceMode('adaptive')}
       >
-        {isCasting && thumbnail && <img src={thumbnail} className="odysee-cast-thumbnail" alt="" />}
+        {isCasting && thumbnail && <img src={thumbnail} className={CAST_CLASSES.thumbnail} alt="" />}
 
         {playbackSource && (
           <Video
@@ -1202,7 +1199,7 @@ function VideoJsInner(props: Props) {
           label={__('Tap to unmute')}
           button="link"
           icon={ICONS.VOLUME_MUTED}
-          className="video-js--tap-to-unmute"
+          className={TAP_TO_UNMUTE_CLASS}
           onClick={unmuteAndHideHint}
         />
       )}
@@ -1211,7 +1208,7 @@ function VideoJsInner(props: Props) {
           label={__('Retry')}
           button="link"
           icon={ICONS.REFRESH}
-          className="video-js--tap-to-unmute"
+          className={TAP_TO_UNMUTE_CLASS}
           onClick={retryVideoAfterFailure}
         />
       )}

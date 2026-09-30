@@ -6,7 +6,6 @@ import I18nMessage from 'component/i18nMessage';
 import { getTimeAgoStr } from 'util/time';
 import { useAppSelector } from 'redux/hooks';
 import { selectMomentReleaseTimeForUri } from 'redux/selectors/claims';
-import './style.lazy.scss';
 
 const CALC_TIME_INTERVAL_MS = 1000;
 type Props = {
@@ -40,9 +39,9 @@ export default function LivestreamScheduledInfo(props: Props) {
   }, [releaseTimeMs]);
   if (!startDateFromNow) return null;
   return (
-    <div className="livestream-scheduled">
+    <div className="tw:absolute tw:bottom-app-m tw:left-app-m tw:flex tw:items-center tw:rounded-app tw:bg-[var(--color-black)] tw:p-app-m tw:text-[var(--color-white)]">
       <Icon icon={ICONS.LIVESTREAM_SOLID} size={32} />
-      <p className="livestream-scheduled__time">
+      <p className="tw:pl-app-m tw:leading-none">
         <span>
           {!inPast ? (
             <>
@@ -54,7 +53,7 @@ export default function LivestreamScheduledInfo(props: Props) {
                 Live %time_date%
               </I18nMessage>
               <br />
-              <span className="livestream-scheduled__date">{startDate}</span>
+              <span className="tw:text-app-xsmall">{startDate}</span>
             </>
           ) : (
             __('Starting Soon')

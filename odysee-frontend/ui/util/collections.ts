@@ -127,15 +127,16 @@ export function getLocalizedNameForCollectionId(collectionId: string) {
   }
 }
 export function isClaimAllowedForCollection(claim: StreamClaim | null | undefined) {
-  if (claim) {
-    const streamType = claim.value?.stream_type;
+  const contentClaim = (claim?.reposted_claim || claim) as StreamClaim | undefined;
+  if (contentClaim) {
+    const streamType = contentClaim.value?.stream_type;
     const isPlayable = streamType && (streamType === 'audio' || streamType === 'video');
 
     // Ideally, unlisted and scheduled (if started) claims should be allowed,
     // but the decision is to disable for now for simplicity.
     if (isPlayable) {
-      if (!isClaimUnlisted(claim) && !isClaimPrivate(claim)) {
-        const ss: ClaimScheduledState = getClaimScheduledState(claim);
+      if (!isClaimUnlisted(contentClaim) && !isClaimPrivate(contentClaim)) {
+        const ss: ClaimScheduledState = getClaimScheduledState(contentClaim);
         return ss === 'non-scheduled' || ss === 'started';
       }
     }

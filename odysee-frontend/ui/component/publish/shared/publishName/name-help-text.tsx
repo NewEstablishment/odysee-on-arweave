@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import * as React from 'react';
 import Button from 'component/button';
 import { buildURI } from 'util/lbryURI';
@@ -29,7 +30,7 @@ function NameHelpText(props: Props) {
     nameHelpText = __('You are currently editing this claim.');
   } else if (isUriPendingUpload(uri, currentUploadNames)) {
     nameHelpText = (
-      <div className="error__text">
+      <div className={ERROR_TEXT_CLASS}>
         {/* prettier-ignore */}
         <I18nMessage tokens={{
         existing_uri: <u><em>{uri}</em></u>
@@ -42,7 +43,7 @@ function NameHelpText(props: Props) {
     const isPreviewClaim = myClaimForUri.claim_id?.startsWith('__preview_');
     if (isPreviewClaim) {
       nameHelpText = (
-        <div className="error__text">
+        <div className={ERROR_TEXT_CLASS}>
           {__('Another upload is already using this URL. Please choose a different one.')}
         </div>
       );
@@ -52,7 +53,7 @@ function NameHelpText(props: Props) {
         streamClaimId: myClaimForUri.claim_id,
       });
       nameHelpText = (
-        <div className="error__text" style={{ marginLeft: 0 }}>
+        <div className={ERROR_TEXT_CLASS} style={{ marginLeft: 0 }}>
           <I18nMessage
             tokens={{
               existing_uri: (
@@ -73,7 +74,7 @@ function NameHelpText(props: Props) {
       );
     }
   } else if (uri && myClaimForUriCaseInsensitive) {
-    nameHelpText = <div className="error__text">{__('You already have a claim with this name.')}</div>;
+    nameHelpText = <div className={ERROR_TEXT_CLASS}>{__('You already have a claim with this name.')}</div>;
   }
 
   return <React.Fragment>{nameHelpText}</React.Fragment>;

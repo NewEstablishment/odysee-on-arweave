@@ -1,9 +1,10 @@
 import { lazyImport } from 'util/lazyImport';
 import { useIsMobile, useIsMobileLandscape } from 'effects/use-screensize';
 import FileTitleSection from 'component/fileTitleSection';
+import { FILE_PAGE_MEDIA_ACTIONS_CLASS } from 'component/filePrice/classes';
 import LivestreamLink from 'component/livestreamLink';
 import React from 'react';
-import { PRIMARY_PLAYER_WRAPPER_CLASS } from 'constants/player';
+import { PRIMARY_PLAYER_WRAPPER_STYLE_CLASS } from 'component/viewers/classes';
 import VideoClaimInitiator from 'component/videoClaimInitiator';
 import * as ICONS from 'constants/icons';
 import * as SETTINGS from 'constants/settings';
@@ -22,6 +23,7 @@ import Lbry from 'lbry';
 import { toHex } from 'util/hex';
 import LivestreamWebrtcOptIn from 'component/livestreamWebrtcOptIn';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { HELP_NOTICE_CLASS } from 'component/common/help-classes';
 
 const LivestreamScheduledInfo = lazyImport(
   () =>
@@ -111,7 +113,7 @@ export default function LivestreamLayout(props: Props) {
 
   const noticeContent =
     !liveStatusFetching && !activeStreamUri && !showScheduledInfo && !isCurrentClaimLive ? (
-      <div className="help--notice" style={{ marginTop: '20px' }}>
+      <div className={HELP_NOTICE_CLASS} style={{ marginTop: '20px' }}>
         {channelName
           ? __("%channelName% isn't live right now, but the chat is! Check back later to watch the stream.", {
               channelName,
@@ -120,7 +122,7 @@ export default function LivestreamLayout(props: Props) {
       </div>
     ) : (
       chatDisabled && (
-        <div className="help--notice">
+        <div className={HELP_NOTICE_CLASS}>
           {channelName
             ? __('%channel% has disabled chat for this stream. Enjoy the stream!', { channel: channelName })
             : __('This channel has disabled chat for this stream. Enjoy the stream!')}
@@ -130,7 +132,7 @@ export default function LivestreamLayout(props: Props) {
 
   if (isMobilePortrait) {
     const infoContent = (
-      <section className="file-page__media-actions">
+      <section className={FILE_PAGE_MEDIA_ACTIONS_CLASS} data-file-page-media-actions>
         {noticeContent}
         <LivestreamLink title={__("Click here to access the stream that's currently active")} uri={uri} />
         {claimIsMine && serverMetrics?.live && <LivestreamMetrics metrics={serverMetrics} mode="compact" />}
@@ -154,7 +156,7 @@ export default function LivestreamLayout(props: Props) {
 
     return (
       <section className="card-stack file-page__video">
-        <div className={PRIMARY_PLAYER_WRAPPER_CLASS}>
+        <div className={PRIMARY_PLAYER_WRAPPER_STYLE_CLASS}>
           <VideoClaimInitiator key={playerKey} uri={claim.canonical_url}>
             {showScheduledInfo && <LivestreamScheduledInfo uri={claim.canonical_url} />}
           </VideoClaimInitiator>
@@ -172,13 +174,13 @@ export default function LivestreamLayout(props: Props) {
 
   return (
     <section className="card-stack file-page__video">
-      <div className={PRIMARY_PLAYER_WRAPPER_CLASS}>
+      <div className={PRIMARY_PLAYER_WRAPPER_STYLE_CLASS}>
         <VideoClaimInitiator key={playerKey} uri={claim.canonical_url}>
           {showScheduledInfo && <LivestreamScheduledInfo uri={claim.canonical_url} />}
         </VideoClaimInitiator>
       </div>
       <div className="file-page__secondary-content">
-        <div className="file-page__media-actions">
+        <div className={FILE_PAGE_MEDIA_ACTIONS_CLASS} data-file-page-media-actions>
           <div className="section card-stack">
             {noticeContent}
             <LivestreamLink title={__("Click here to access the stream that's currently active")} uri={uri} />

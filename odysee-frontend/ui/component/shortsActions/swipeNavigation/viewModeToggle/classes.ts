@@ -1,0 +1,9 @@
+export const SHORTS_VIEW_MODE_TOGGLE_CLASS = String.raw`shorts-page__view-toggle--overlay tw:pointer-events-auto tw:absolute tw:top-[20px] tw:left-1/2 tw:z-[4] tw:flex tw:[transform:translateX(-50%)] tw:gap-[8px] tw:[transition:opacity_100ms_ease-out] tw:active-player-fullscreen:!top-[10px] tw:shorts:[[data-shorts-viewer]_&]:opacity-0 tw:upto-shorts:top-[60px] tw:shorts:[[data-shorts-viewer]:has(.media-controls[data-visible])_&]:opacity-100 tw:shorts:[[data-shorts-viewer]:has(.media-controls[data-visible])_&]:[transition:opacity_100ms_ease-out] tw:shorts:[[data-shorts-viewer]:has([data-paused])_&]:opacity-100 tw:shorts:[[data-shorts-viewer]:has([data-paused])_&]:[transition:opacity_100ms_ease-out] tw:shorts:[body:has(.swipe-navigation-overlay.shorts-swipe-overlay:hover)_&]:opacity-100 tw:shorts:[body:has(.swipe-navigation-overlay.shorts-swipe-overlay:hover)_&]:[transition:opacity_100ms_ease-out] tw:shorts:[[data-claim-cover-shorts]:hover_&]:opacity-100 tw:shorts:[[data-claim-cover-shorts]:hover_&]:[transition:opacity_100ms_ease-out]`;
+
+export const SHORTS_VIEW_MODE_TOGGLE_HIDDEN_CLASS =
+  'shorts-page__view-toggle--hidden tw:!pointer-events-none tw:!opacity-0';
+
+export const SHORTS_VIEW_MODE_BUTTON_CLASS = String.raw`button-bubble tw:cursor-pointer tw:whitespace-nowrap tw:rounded-[20px] tw:border tw:border-solid tw:border-[rgba(255,255,255,0.2)] tw:bg-[rgba(0,0,0,0.6)] tw:px-[16px] tw:py-[8px] tw:text-app-small tw:font-medium tw:text-white tw:[transition:all_0.2s_ease-in-out] tw:[&:hover:not(.button-bubble--active)]:border-[rgba(255,255,255,0.3)] tw:[&:hover:not(.button-bubble--active)]:bg-[var(--color-odysee)] tw:upto-shorts:px-[12px] tw:upto-shorts:py-[6px] tw:upto-shorts:text-app-xsmall`;
+
+export const SHORTS_VIEW_MODE_BUTTON_ACTIVE_CLASS =
+  'button-bubble--active tw:!cursor-default tw:border-app-primary tw:bg-app-primary tw:text-white';

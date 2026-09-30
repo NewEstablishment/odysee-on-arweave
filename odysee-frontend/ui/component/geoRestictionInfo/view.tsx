@@ -1,5 +1,4 @@
 import React from 'react';
-import './style.scss';
 import Card from 'component/common/card';
 import Icon from 'component/common/icon';
 import Tooltip from 'component/common/tooltip';
@@ -42,10 +41,13 @@ export default function GeoRestrictionInfo(props: Props) {
 
   return (
     <Tooltip title={msg} followCursor>
-      <div className="geo-restriction-info" onClick={showMsg}>
-        <div className="geo-restriction-info__container">
+      <div
+        className="tw:my-app-m tw:flex tw:flex-col tw:items-center tw:rounded-app tw:bg-app-card tw:text-[#e2495e]"
+        onClick={showMsg}
+      >
+        <div className="tw:my-app-l tw:flex tw:items-center">
           <Icon icon={ICONS.EYE_OFF} size={24} />
-          <span className="geo-restriction-info__title">{title}</span>
+          <span className="tw:ml-app-s tw:text-app-large tw:italic">{title}</span>
         </div>
       </div>
     </Tooltip>

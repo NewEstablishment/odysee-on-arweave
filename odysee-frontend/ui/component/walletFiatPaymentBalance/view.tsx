@@ -3,6 +3,7 @@ import * as PAGES from 'constants/pages';
 import React from 'react';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   totalTippedAmount: number;
   transactions: StripeTransactions;
@@ -40,17 +41,17 @@ const WalletBalance = (props: Props) => {
     <Card
       actions={
         <>
-          <h2 className="section__title--small">
+          <h2 className={SECTION_CLASSES.titleSmall}>
             {(transactions && transactions.length) || 0}
             {__('Total Tips')}
           </h2>
 
-          <h2 className="section__title--small">
+          <h2 className={SECTION_CLASSES.titleSmall}>
             {totalCreatorsSupported || 0}
             {__('Creators Supported')}
           </h2>
 
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="secondary"
               label={__('Manage Cards')}

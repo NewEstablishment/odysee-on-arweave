@@ -1,3 +1,7 @@
+import { ERROR_PANEL_CLASS, ERROR_TEXT_CLASS } from 'component/common/error-classes';
+import { JOIN_MEMBERSHIP_CLASSES } from 'component/joinMembershipCard/classes';
+import { MEMBERSHIP_TIER_CLASSES } from 'component/joinMembershipCard/internal/previewPage/internal/membershipTier/classes';
+import { CONFIRM_WRAPPER_CLASS } from 'component/common/confirm-classes';
 import React from 'react';
 import * as STRIPE from 'constants/stripe';
 import BusyIndicator from 'component/common/busy-indicator';
@@ -15,6 +19,8 @@ import { selectMembershipBuyError, selectPurchaseIsPendingForMembershipId } from
 import { selectArweaveBalance, selectArweaveExchangeRates } from 'redux/selectors/arwallet';
 import { doArConnect } from 'redux/actions/arwallet';
 import { doMembershipBuyClear } from 'redux/actions/memberships';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 type Props = {
   uri: string;
@@ -49,7 +55,7 @@ const ConfirmationPage = (props: Props) => {
   }, [dispatch]);
   const total = Number((Number(selectedCreatorMembership.prices[0].amount) / 100).toFixed(2));
   return (
-    <div className="confirm__wrapper">
+    <div className={CONFIRM_WRAPPER_CLASS}>
       <h1>{__('Almost done')}</h1>
       <ConfirmationSection
         label={
@@ -71,15 +77,15 @@ const ConfirmationPage = (props: Props) => {
         </span>
       </section>
       <ConfirmationSection
-        className={'membership-tier__description'}
+        className={JOIN_MEMBERSHIP_CLASSES.tierDescription}
         label={__('Description')}
         value={selectedCreatorMembership.description}
       />
 
       <section>
         <label>{__('Total Monthly Cost')}</label>
-        <span className="total-membership-price">
-          <span className="total">
+        <span>
+          <span className={JOIN_MEMBERSHIP_CLASSES.totalPrice}>
             ${total} (<Symbol token="ar" amount={total / exchangeRate.ar} />)
           </span>
         </span>
@@ -88,9 +94,11 @@ const ConfirmationPage = (props: Props) => {
         <ConfirmationSection
           label={__('Features and Perks')}
           value={
-            <ul className="ul--no-style membership-tier__perks">
+            <ul className={`ul--no-style ${MEMBERSHIP_TIER_CLASSES.perks} ${MEMBERSHIP_TIER_CLASSES.perksRootList}`}>
               {selectedCreatorMembership.perks.map((tierPerk, i) => (
-                <li key={i}>{__(tierPerk.name)}</li>
+                <li className={MEMBERSHIP_TIER_CLASSES.perksItem} key={i}>
+                  {__(tierPerk.name)}
+                </li>
               ))}
             </ul>
           }
@@ -103,7 +111,7 @@ const ConfirmationPage = (props: Props) => {
             {__('You currently have EUR selected as your preferred currency, currently only USD is supported.')}
           </ErrorBubble>
 
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="primary" label={__('Change Settings')} navigate="/$/araccount" />
           </div>
         </>
@@ -111,17 +119,17 @@ const ConfirmationPage = (props: Props) => {
         <BusyIndicator message={__('Processing payment...')} />
       ) : (
         <>
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             {incognito && (
-              <p className="help">
-                <div className="error__text">
+              <p className={HELP_CLASS}>
+                <div className={ERROR_TEXT_CLASS}>
                   {__("You are about to join as Anonymous, you won't be able to view or comment on chat at this time")}
                 </div>
               </p>
             )}
             {(!arBalance || (dollarsPerAr && Number(dollarsPerAr) * arBalance < total)) && (
-              <p className="help">
-                <div className="error__text">{__('Insufficient Balance')}</div>
+              <p className={HELP_CLASS}>
+                <div className={ERROR_TEXT_CLASS}>{__('Insufficient Balance')}</div>
               </p>
             )}
 
@@ -135,8 +143,8 @@ const ConfirmationPage = (props: Props) => {
             <Button button="link" label={__('Cancel')} onClick={onCancel} />
           </div>
 
-          {membershipBuyError && <p className="error">{membershipBuyError}</p>}
-          <p className="help">
+          {membershipBuyError && <p className={ERROR_PANEL_CLASS}>{membershipBuyError}</p>}
+          <p className={HELP_CLASS}>
             <I18nMessage
               tokens={{
                 membership_terms_and_conditions: (

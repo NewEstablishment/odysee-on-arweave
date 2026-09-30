@@ -10,7 +10,6 @@
  */
 import React from 'react';
 import classnames from 'classnames';
-import './style.scss';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
 // prettier-ignore
@@ -60,14 +59,14 @@ export default function SortableList(props: Props) {
 
           return (
             <div
-              className={classnames('sortable__item', {
-                'sortable__item--hidden': onIsHiddenAtIndex && onIsHiddenAtIndex(item, index),
+              className={classnames('tw:flex tw:items-center tw:last:mb-0', {
+                'tw:hidden': onIsHiddenAtIndex && onIsHiddenAtIndex(item, index),
               })}
               ref={draggableProvided.innerRef}
               {...draggableProvided.draggableProps}
               {...draggableProvided.dragHandleProps}
             >
-              <div className="sortable__drag-handle" ref={draggedItemRef}>
+              <div className="tw:mr-app-xxs tw:opacity-40" ref={draggedItemRef}>
                 <Icon icon={ICONS.MENU} title={__('Drag')} size={20} />
               </div>
               {onGetElemAtIndex(item, index)}
@@ -85,7 +84,7 @@ export default function SortableList(props: Props) {
           provided
           /* ,snapshot */
         ) => (
-          <div ref={provided.innerRef} {...provided.droppableProps} className={classnames('sortable__bin', className)}>
+          <div ref={provided.innerRef} {...provided.droppableProps} className={className}>
             {list.map((item, index) => (
               <DraggableItem key={item} item={item} index={index} />
             ))}
@@ -98,7 +97,7 @@ export default function SortableList(props: Props) {
 
   return (
     <React.Suspense fallback={null}>
-      <div className="sortable">
+      <div className="tw:mb-app-m">
         <Lazy.DragDropContext onDragEnd={onDragEnd}>
           <DroppableBin list={list} />
         </Lazy.DragDropContext>

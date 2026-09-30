@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as React from 'react';
 import { normalizeURI } from 'util/lbryURI';
 import FilePrice from 'component/filePrice';
@@ -19,6 +20,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doFetchSubCount, selectSubCountForUri } from 'lbryinc';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { getClaimTitle } from 'util/claim';
+import { BADGE_CLASSES } from 'component/badge/classes';
 
 const RETRY_COUNT_MAX = 6;
 const RETRY_INTERVAL_MS = 5000;
@@ -82,7 +84,7 @@ export default function FileTitleSection(props: Props) {
           {escapeHtmlProperty(title)}
           {nsfw && (
             <span className="media__title-badge">
-              <span className="badge badge--tag-mature">{__('Mature')}</span>
+              <span className={`${BADGE_CLASSES.base} ${BADGE_CLASSES.tagMature}`}>{__('Mature')}</span>
             </span>
           )}
           <GeoRestrictionInfo uri={uri} />
@@ -97,10 +99,10 @@ export default function FileTitleSection(props: Props) {
       }
       actions={
         isNsfwBlocked ? (
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <h2>
               <>
-                <Icon className="icon--hidden" icon={ICONS.EYE_OFF} />
+                <Icon className="tw:mr-app-s" icon={ICONS.EYE_OFF} />
                 {ENABLE_MATURE ? __('Mature content blocked.') : __('Mature content is not supported.')}
               </>
             </h2>

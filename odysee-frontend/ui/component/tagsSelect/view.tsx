@@ -9,6 +9,8 @@ import Card from 'component/common/card';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectFollowedTags } from 'redux/selectors/tags';
 import { doToggleTagFollowDesktop as doToggleTagFollowDesktopAction } from 'redux/actions/tags';
+import { TAGS_SELECT_CONTROL_CLASS } from './classes';
+import { PUBLISH_ROW_CLASS } from 'component/publish/shared/publish-row-classes';
 type Props = {
   showClose?: boolean;
   suggestMature?: boolean;
@@ -94,7 +96,7 @@ export default function TagsSelect(props: Props) {
             )
           }
           body={
-            <div className="publish-row">
+            <div className={PUBLISH_ROW_CLASS}>
               <TagsSearch
                 label={label}
                 onRemove={handleTagClick}
@@ -126,10 +128,10 @@ export default function TagsSelect(props: Props) {
         {onSelect && (
           <Card
             background
-            className="card--tags card--control-tags"
+            className={`card--tags ${TAGS_SELECT_CONTROL_CLASS}`}
             title={__('User Interactions')}
             body={
-              <div className="publish-row">
+              <div className={PUBLISH_ROW_CLASS}>
                 <TagsSearch
                   onRemove={handleTagClick}
                   onSelect={onSelect}

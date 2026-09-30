@@ -13,6 +13,12 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doFetchPersonalRecommendations } from 'redux/actions/search';
 import { selectPersonalRecommendations } from 'redux/selectors/search';
 import { selectUser } from 'redux/selectors/user';
+import {
+  CLAIM_GRID_CLASS,
+  CLAIM_GRID_SECONDARY_TITLE_CLASS,
+  CLAIM_GRID_VIEW_MORE_CLASS,
+} from 'component/common/claim-grid-classes';
+import { EMPTY_CENTERED_TIGHT_CLASS } from 'component/common/empty-classes';
 // ****************************************************************************
 // RecommendedPersonal
 // ****************************************************************************
@@ -111,13 +117,13 @@ export default function RecommendedPersonal(props: Props) {
     return (
       <>
         {header}
-        <ul className="claim-grid">
+        <ul className={CLAIM_GRID_CLASS}>
           {Array.from({ length: countCollapsed }, (_, i) => (
             <ClaimPreviewTile key={i} placeholder />
           ))}
         </ul>
         <div
-          className="upcoming-list__view-more"
+          className={CLAIM_GRID_VIEW_MORE_CLASS}
           style={{
             visibility: 'hidden',
           }}
@@ -125,7 +131,7 @@ export default function RecommendedPersonal(props: Props) {
           <Button
             label='"View More" dummy to reduce layout shift'
             button="link"
-            className="claim-grid__title--secondary"
+            className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
           />
         </div>
       </>
@@ -136,7 +142,7 @@ export default function RecommendedPersonal(props: Props) {
     return (
       <div>
         {header}
-        <div className="empty empty--centered-tight">
+        <div className={EMPTY_CENTERED_TIGHT_CLASS}>
           <I18nMessage
             tokens={{
               learn_more: <Button button="link" navigate={`/$/${PAGES.FYP}`} label={__('Learn More')} />,
@@ -162,12 +168,12 @@ export default function RecommendedPersonal(props: Props) {
       />
 
       {view !== VIEW.ALL_VISIBLE && (
-        <div className="upcoming-list__view-more">
+        <div className={CLAIM_GRID_VIEW_MORE_CLASS}>
           <Button
             label={view === VIEW.COLLAPSED ? __('Show more') : __('Show less')}
             button="link"
             iconRight={view === VIEW.COLLAPSED ? ICONS.DOWN : ICONS.UP}
-            className="claim-grid__title--secondary"
+            className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
             onClick={() => {
               if (view === VIEW.COLLAPSED) {
                 setView(VIEW.EXPANDED);

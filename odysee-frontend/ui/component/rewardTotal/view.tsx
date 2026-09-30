@@ -5,6 +5,7 @@ import I18nMessage from 'component/i18nMessage';
 import LbcSymbol from 'component/common/lbc-symbol';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimedRewards } from 'redux/selectors/rewards';
+import { CARD_CLASSES } from 'component/common/card-classes';
 type Props = Record<string, never>;
 
 function RewardTotal(props: Props) {
@@ -16,7 +17,7 @@ function RewardTotal(props: Props) {
   const integer = Math.round(total * rewardTotal);
   return (
     <section
-      className="card  card--section card--reward-total"
+      className={`card ${CARD_CLASSES.section} tw:bg-cover tw:bg-no-repeat tw:text-app-large tw:font-[var(--font-weight-bold)] tw:text-[var(--color-white)]`}
       style={{
         backgroundImage: `url(${TotalBackground})`,
       }}

@@ -16,6 +16,8 @@ import { LocalStorage } from 'util/storage';
 import { useIsMobile } from 'effects/use-screensize';
 import { isEmbedPath } from 'util/embed';
 import { fullscreenElement as getFullscreenElement, requestFullscreen } from 'util/full-screen';
+import { FILE_VIEWER_CLASSES } from '../classes';
+import { EMBED_REACTIONS_OVERLAY_CLASS, RECOMMENDATION_OVERLAY_CLASSES } from './classes';
 
 const PLAY_POSITION_SAVE_INTERVAL_MS = 15000;
 const POSITION_SYNC_INTERVAL_MS = 30000;
@@ -393,22 +395,25 @@ function VideoViewer(props: Props) {
   return (
     <>
       <div
-        className={classnames('file-viewer', {
+        className={classnames(FILE_VIEWER_CLASSES.base, showEmbedEndOverlay && FILE_VIEWER_CLASSES.embeddedEnded, {
           'file-viewer--is-playing': isPlaying,
-          'file-viewer--ended-embed': showEmbedEndOverlay,
           'file-viewer--ended': showRecommendationOverlay,
         })}
+        data-file-viewer
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
         {showEmbedEndOverlay && <FileViewerEmbeddedEnded uri={uri} doReplay={replay} />}
         {showRecommendationOverlay && (
-          <div className="recommendation-overlay-wrapper">
-            <div className="recommendation-overlay-grid">
+          <div className={RECOMMENDATION_OVERLAY_CLASSES.wrapper} data-recommendation-overlay>
+            <div className={RECOMMENDATION_OVERLAY_CLASSES.grid}>
               {recomendedContent &&
                 recomendedContent.slice(0, 9).map((url, i) => (
                   <div
                     key={url}
+                    className={classnames(RECOMMENDATION_OVERLAY_CLASSES.item, {
+                      [RECOMMENDATION_OVERLAY_CLASSES.replayItem]: i === 4,
+                    })}
                     onClick={() => {
                       i === 4 && isMobile ? replay() : doPlayNextUri({ uri: url });
                     }}
@@ -471,8 +476,8 @@ function VideoViewer(props: Props) {
         />
 
         {isEmbedded && authenticated && !showEmbedEndOverlay && (hovered || !isPlaying) && (
-          <div className="embed-reactions-overlay" aria-label={__('Reactions')}>
-            <FileReactions uri={uri} />
+          <div className={EMBED_REACTIONS_OVERLAY_CLASS} aria-label={__('Reactions')}>
+            <FileReactions uri={uri} compact />
           </div>
         )}
       </div>

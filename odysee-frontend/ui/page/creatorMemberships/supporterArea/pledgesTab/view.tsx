@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import Yrbl from 'component/yrbl';
 import Spinner from 'component/spinner';
@@ -9,6 +10,8 @@ import { selectMembershipMineFetching, selectMyPurchasedMembershipsFromCreators 
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { doMembershipMine } from 'redux/actions/memberships';
 import { doResolveClaimIds } from 'redux/actions/claims';
+import { MEMBERSHIP_TABLE_PAGE_CLASS, SUPPORTER_MEMBERSHIP_TABLE_CLASS } from '../../tableClasses';
+import { TABLE_CLASS } from 'component/common/table-classes';
 type Props = {};
 
 function PledgesTab(props: Props) {
@@ -74,13 +77,13 @@ function PledgesTab(props: Props) {
 
   if (myMembershipSubs === undefined && isFetchingMembershipSubs) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     );
   } else if (myMembershipSubs === undefined && !isFetchingMembershipSubs) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <p>{__('Failed to fetch memberships')}</p>
       </div>
     );
@@ -102,8 +105,8 @@ function PledgesTab(props: Props) {
   return (
     <div className="membership__mypledges-wrapper">
       <div className="membership__mypledges-content">
-        <div className="membership-table__wrapper">
-          <table className="table table--pledges">
+        <div className={SUPPORTER_MEMBERSHIP_TABLE_CLASS}>
+          <table className={`${TABLE_CLASS} table--pledges`}>
             <thead>
               <tr>
                 <th className="channelName-header" colSpan={2}>
@@ -129,7 +132,7 @@ function PledgesTab(props: Props) {
                   order={order}
                 />
                 <th>{__('Status')}</th>
-                <th className="membership-table__page">{__('Page')}</th>
+                <th className={MEMBERSHIP_TABLE_PAGE_CLASS}>{__('Page')}</th>
               </tr>
             </thead>
             <tbody>

@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import type { ElementRef } from 'react';
 import { URL, URL_LOCAL, URL_DEV, KNOWN_APP_DOMAINS } from 'config';
 import * as PAGES from 'constants/pages';
@@ -11,7 +12,9 @@ import { Combobox, ComboboxInput, ComboboxPopover, ComboboxList, ComboboxOption 
 import useSearch from 'effects/use-search';
 import { Form } from 'component/common/form';
 import Button from 'component/button';
+import { TAG_CLASSES } from 'component/tag/classes';
 import WunderbarTopSuggestion from 'component/wunderbarTopSuggestion';
+import { WUNDERBAR_TOP_SUGGESTION_CLASSES } from 'component/wunderbarTopSuggestion/classes';
 import WunderbarSuggestion from 'component/wunderbarSuggestion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { formatLbryUrlForWeb } from 'util/url';
@@ -26,6 +29,13 @@ import { doResolveUris } from 'redux/actions/claims';
 import { selectSubscriptionUris } from 'redux/selectors/subscriptions';
 import { selectClaimsByUri } from 'redux/selectors/claims';
 import analytics from 'analytics';
+import { WUNDERBAR_SUGGESTIONS_CLASSES } from './classes';
+import {
+  WUNDERBAR_CLASS,
+  WUNDERBAR_CLEAR_CLASS,
+  WUNDERBAR_INPUT_CLASS,
+  WUNDERBAR_WRAPPER_CLASS,
+} from 'component/wunderbar/classes';
 const LBRY_PROTOCOL = 'lbry://';
 const WEB_DEV_PREFIX = `${URL_DEV}/`;
 const WEB_LOCAL_PREFIX = `${URL_LOCAL}/`;
@@ -312,16 +322,16 @@ export default function WunderBarSuggestions(props: Props) {
   return (
     <>
       <Form
-        className={classnames('wunderbar__wrapper', {
-          'wunderbar__wrapper--mobile': isMobile,
+        className={classnames(WUNDERBAR_WRAPPER_CLASS, {
+          [WUNDERBAR_SUGGESTIONS_CLASSES.wrapperMobile]: isMobile,
         })}
         onSubmit={() => handleSelect(term)}
       >
-        <Combobox className="wunderbar" onSelect={handleSelect} openOnFocus>
+        <Combobox className={WUNDERBAR_CLASS} onSelect={handleSelect} openOnFocus>
           <Icon icon={ICONS.SEARCH} />
           <ComboboxInput
             ref={inputRef}
-            className="wunderbar__input"
+            className={WUNDERBAR_INPUT_CLASS}
             placeholder={__('Search')}
             onChange={(e) => setTerm(e.target.value)}
             value={term}
@@ -331,7 +341,7 @@ export default function WunderBarSuggestions(props: Props) {
               icon={ICONS.REMOVE}
               aria-label={__('Clear')}
               button="alt"
-              className="wunderbar__clear"
+              className={WUNDERBAR_CLEAR_CLASS}
               onClick={() => {
                 setTerm('');
               }}
@@ -341,30 +351,44 @@ export default function WunderBarSuggestions(props: Props) {
           {isFocused && (
             <ComboboxPopover
               portal={false}
-              className={classnames('wunderbar__suggestions', {
-                'wunderbar__suggestions--mobile': isMobile,
+              data-wunderbar-mobile-suggestions={isMobile || undefined}
+              className={classnames(WUNDERBAR_SUGGESTIONS_CLASSES.root, {
+                [WUNDERBAR_SUGGESTIONS_CLASSES.mobileSuggestions]: isMobile,
               })}
             >
               <ComboboxList>
                 {!noBottomLinks && (
-                  <div className="wunderbar__bottom-links">
-                    <ComboboxOption value={term} className="wunderbar__more-results">
+                  <div className={WUNDERBAR_SUGGESTIONS_CLASSES.bottomLinks} data-wunderbar-bottom-links>
+                    <ComboboxOption
+                      value={term}
+                      className={WUNDERBAR_SUGGESTIONS_CLASSES.moreResults}
+                      data-wunderbar-more-results
+                    >
                       <Button ref={viewResultsRef} button="link" label={__('View All Results')} />
                     </ComboboxOption>
-                    <ComboboxOption value={`${TAG_SEARCH_PREFIX}${term}`} className="wunderbar__more-results">
-                      <Button ref={exploreTagRef} className="wunderbar__tag-search" button="link">
+                    <ComboboxOption
+                      value={`${TAG_SEARCH_PREFIX}${term}`}
+                      className={WUNDERBAR_SUGGESTIONS_CLASSES.moreResults}
+                      data-wunderbar-more-results
+                    >
+                      <Button
+                        ref={exploreTagRef}
+                        className={WUNDERBAR_SUGGESTIONS_CLASSES.tagSearch}
+                        button="link"
+                        data-wunderbar-tag-search
+                      >
                         {__('Search tag')}
-                        <div className="tag">{term.split(' ').join('')}</div>
+                        <div className={TAG_CLASSES.base}>{term.split(' ').join('')}</div>
                       </Button>
                     </ComboboxOption>
                   </div>
                 )}
 
-                <hr className="wunderbar__top-separator" />
+                <hr className={WUNDERBAR_TOP_SUGGESTION_CLASSES.separator} />
 
                 {uriFromQueryIsValid && !noTopSuggestion ? <WunderbarTopSuggestion query={nameFromQuery} /> : null}
 
-                <div className="wunderbar__label">{__('Search Results')}</div>
+                <div className={WUNDERBAR_TOP_SUGGESTION_CLASSES.label}>{__('Search Results')}</div>
 
                 {subscriptionResults.length > 0 &&
                   subscriptionResults.map((uri) => <WunderbarSuggestion key={uri} uri={uri} />)}
@@ -382,13 +406,13 @@ export default function WunderBarSuggestions(props: Props) {
         </Combobox>
       </Form>
       {isMobile && !term && (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Yrbl subtitle={__('Search for something...')} alwaysShow />
         </div>
       )}
 
       {isMobile && noResults && (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Yrbl type="sad" subtitle={__('No results')} alwaysShow />
         </div>
       )}

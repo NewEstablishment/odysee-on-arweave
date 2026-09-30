@@ -11,13 +11,13 @@ import classnames from 'classnames';
 import RecSys from 'recsys';
 import LangFilterIndicator from 'component/langFilterIndicator';
 import { useLocation } from 'react-router-dom';
-import './style.scss';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { doFetchRecommendedContent } from 'redux/actions/search';
 import { selectRecommendedContentForUri, selectIsSearching } from 'redux/selectors/search';
 import { selectClientSetting } from 'redux/selectors/settings';
 import * as SETTINGS from 'constants/settings';
+import { RECOMMENDED_CONTENT_CLASS, RECOMMENDED_CONTENT_CLASSES as C } from './classes';
 const VIEW_ALL_RELATED = 'view_all_related';
 const VIEW_MORE_FROM = 'view_more_from';
 type Props = {
@@ -93,24 +93,26 @@ export default React.memo<Props>(function RecommendedContent(props: Props) {
     <Card
       isBodyList
       smallTitle={!isMobile && !isSmall}
-      className="file-page__recommended"
+      className={RECOMMENDED_CONTENT_CLASS}
       title={__('Related')}
       titleActions={
         signingChannel && (
-          <div className="recommended-content__bubble">
+          <div className={C.bubble}>
             {searchInLanguage && <LangFilterIndicator />}
 
             <Button
-              className={classnames('button-bubble', {
-                'button-bubble--active': viewMode === VIEW_ALL_RELATED,
+              className={classnames(C.button, {
+                [C.buttonActive]: viewMode === VIEW_ALL_RELATED,
+                [C.buttonInactive]: viewMode !== VIEW_ALL_RELATED,
               })}
               label={__('Related')}
               onClick={() => setViewMode(VIEW_ALL_RELATED)}
             />
 
             <Button
-              className={classnames('button-bubble', {
-                'button-bubble--active': viewMode === VIEW_MORE_FROM,
+              className={classnames(C.button, {
+                [C.buttonActive]: viewMode === VIEW_MORE_FROM,
+                [C.buttonInactive]: viewMode !== VIEW_MORE_FROM,
               })}
               label={__('More from %claim_name%', {
                 claim_name: channelName,

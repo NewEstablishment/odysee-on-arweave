@@ -1,0 +1,5 @@
+export const LOADING_SCREEN_CLASSES = {
+  base: String.raw`tw:relative tw:!h-full tw:w-full tw:flex tw:flex-row tw:items-center tw:justify-center tw:rounded-t-app tw:bg-[var(--color-black)] tw:bg-center tw:bg-no-repeat tw:bg-[length:100%] tw:text-[var(--color-white)] tw:cursor-default tw:before:float-left tw:before:!pt-[unset] tw:before:content-[''] tw:after:block tw:after:clear-both tw:after:content-[''] tw:[&_[data-file-viewer-embedded-title]]:text-[0.875rem] tw:[&_[data-file-viewer-embedded-title]]:leading-[1.2] tw:[&_[data-file-viewer-overlay-logo]]:pl-0 tw:[&_[data-file-viewer-overlay-logo]_:is(.icon,[data-embed-overlay-logo],svg)]:!h-[24px] tw:[&_[data-file-viewer-overlay-logo]_:is(.icon,[data-embed-overlay-logo],svg)]:!w-auto tw:[&_[data-file-viewer-overlay-logo]_:is(.icon,[data-embed-overlay-logo],svg)]:max-w-none tw:[.file-page\_\_video-container_&]:aspect-video tw:[.file-page\_\_video-container_&]:max-h-[var(--desktop-portrait-player-max-height)]`,
+  draggable: 'tw:cursor-grab',
+  transparent: 'tw:!bg-transparent tw:!text-app-text',
+} as const;

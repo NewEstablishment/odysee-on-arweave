@@ -1,5 +1,4 @@
 import React from 'react';
-import classnames from 'classnames';
 import { Menu, MenuButton, MenuList, MenuItem } from 'component/common/menu';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
@@ -17,7 +16,6 @@ import { doUpdatePublishForm } from 'redux/actions/publish';
 import { doFetchCreatorSettings, doUpdateCreatorSettings } from 'redux/actions/comments';
 import { doOpenModal } from 'redux/actions/app';
 import { doToast } from 'redux/actions/notifications';
-import './style.scss';
 type TemplateEntry = UploadTemplate & {
   channelId: string;
   channelName: string;
@@ -62,6 +60,18 @@ const DEFAULT_RENTAL_DURATION = {
   value: 1,
   unit: 'weeks',
 };
+const TEMPLATE_WRAPPER_CLASS_NAME = 'tw:relative tw:z-[1] tw:ml-auto tw:inline-flex tw:items-center tw:[float:none]';
+const TEMPLATE_MENU_BUTTON_CLASS_NAME = String.raw`button tw:inline-flex tw:!h-[36px] tw:!min-h-[36px] tw:min-w-[8.75rem] tw:items-center tw:justify-center tw:gap-app-xxs tw:!mt-0 tw:whitespace-nowrap tw:!rounded-app tw:![border:none] tw:!bg-[var(--color-header-button)] tw:px-app-s tw:py-0 tw:!text-app-body tw:leading-none tw:!text-app-text tw:![box-shadow:none] tw:[float:none] tw:hover:!bg-[var(--color-button-toggle-bg-hover)] tw:hover:!text-app-text tw:hover:![box-shadow:none] tw:hover:!outline-none tw:focus:!bg-[var(--color-button-toggle-bg-hover)] tw:focus:!text-app-text tw:focus:![box-shadow:none] tw:focus:!outline-none tw:focus-visible:!bg-[var(--color-button-toggle-bg-hover)] tw:focus-visible:!text-app-text tw:focus-visible:![box-shadow:none] tw:focus-visible:!outline-none tw:aria-expanded:!bg-[var(--color-header-button)] tw:aria-expanded:!text-app-text tw:aria-expanded:![box-shadow:none] tw:upto-small:!h-[34px] tw:upto-small:!min-h-[34px] tw:upto-small:min-w-[7.5rem] tw:upto-small:gap-app-xxxs tw:upto-small:pr-app-xxs tw:upto-small:pl-app-xs`;
+const TEMPLATE_MENU_BUTTON_ICON_CLASS_NAME =
+  'tw:!m-0 tw:!size-[1rem] tw:!rounded-none tw:![background:none] tw:!p-0 tw:!stroke-current';
+const TEMPLATE_MENU_LIST_CLASS_NAME =
+  'menu__list tw:w-auto tw:max-w-[min(92vw,22rem)] tw:text-app-body tw:upto-small:max-w-[min(94vw,22rem)]';
+const TEMPLATE_MENU_LINK_CLASS_NAME = String.raw`menu__link tw:flex tw:min-h-[var(--button-height)] tw:max-w-full tw:items-center tw:gap-app-xs tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:!rounded-none tw:px-app-s tw:py-app-xs tw:[&_.icon]:shrink-0`;
+const TEMPLATE_SAVE_CLASS_NAME =
+  'tw:absolute tw:top-[calc(100%+var(--spacing-xs))] tw:right-0 tw:z-[12] tw:flex tw:min-w-[min(94vw,22rem)] tw:flex-col tw:items-stretch tw:gap-app-xxs tw:whitespace-normal tw:rounded-app tw:border tw:border-app-border tw:!bg-app-background tw:![background-image:none] tw:p-app-xs tw:[box-shadow:0_4px_12px_rgba(0,0,0,0.3)] tw:![-webkit-backdrop-filter:none] tw:![backdrop-filter:none] tw:[&_fieldset-section]:m-0 tw:[&_fieldset-section]:w-full tw:[&_input]:h-[34px] tw:[&_input]:min-w-0 tw:[&_input]:w-full tw:[&_input]:rounded-app tw:[&_input]:border tw:[&_input]:border-app-border tw:[&_input]:[background:var(--color-input-bg)] tw:[&_input]:px-app-xs tw:[&_input]:py-0 tw:[&_input]:text-app-small tw:[&_input]:text-app-text tw:upto-small:right-0 tw:upto-small:w-[min(94vw,22rem)] tw:upto-small:max-w-[min(94vw,22rem)]';
+const TEMPLATE_SAVE_BUTTON_CLASS_NAME =
+  'tw:m-0 tw:inline-flex tw:h-[30px] tw:min-w-0 tw:flex-1 tw:shrink-0 tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-app tw:border tw:bg-[var(--color-input-bg)] tw:px-app-xs tw:py-0 tw:text-app-small tw:font-bold tw:text-app-text tw:[float:none] tw:hover:bg-[rgba(var(--color-primary-dynamic),0.1)] tw:disabled:cursor-not-allowed tw:disabled:opacity-40';
+const TEMPLATE_SAVE_META_CLASS_NAME = 'tw:block tw:w-full tw:text-app-xsmall';
 
 function getTemplateSortTimestamp(template: { createdAt: number; lastUsedAt?: number }): number {
   return Number(template.lastUsedAt || template.createdAt || 0);
@@ -572,15 +582,13 @@ export default function PublishTemplateButton() {
 
   function renderTemplateMenuItem(template: TemplateEntry) {
     return (
-      <MenuItem
-        key={getTemplateKey(template.channelId, template.id)}
-        className="publish-template-menu__item"
-        onSelect={() => handleApplyTemplate(template)}
-      >
-        <div className="menu__link publish-template-menu__template-link">
-          <Icon aria-hidden icon={template.isPinned ? ICONS.PIN : ICONS.STACK} />
-          <span className="publish-template-menu__template-name">{template.name}</span>
-          <span className="publish-template-menu__template-meta">{template.channelName}</span>
+      <MenuItem key={getTemplateKey(template.channelId, template.id)} onSelect={() => handleApplyTemplate(template)}>
+        <div className={TEMPLATE_MENU_LINK_CLASS_NAME}>
+          <Icon aria-hidden icon={template.isPinned ? ICONS.PIN : ICONS.STACK} className="tw:size-[0.95rem]" />
+          <span className="tw:min-w-0 tw:overflow-hidden tw:text-ellipsis">{template.name}</span>
+          <span className="tw:ml-auto tw:max-w-[48%] tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.6)]">
+            {template.channelName}
+          </span>
         </div>
       </MenuItem>
     );
@@ -588,30 +596,34 @@ export default function PublishTemplateButton() {
 
   if (!activeChannelClaim) return null;
   return (
-    <div className="publish-template-wrapper">
+    <div className={TEMPLATE_WRAPPER_CLASS_NAME}>
       <Menu>
-        <MenuButton className="button publish-template-menu-button">
-          <Icon icon={ICONS.STACK} />
+        <MenuButton className={TEMPLATE_MENU_BUTTON_CLASS_NAME}>
+          <Icon icon={ICONS.STACK} className={TEMPLATE_MENU_BUTTON_ICON_CLASS_NAME} />
           {__('Prefill')}
-          <Icon icon={ICONS.DOWN} />
+          <Icon icon={ICONS.DOWN} className={TEMPLATE_MENU_BUTTON_ICON_CLASS_NAME} />
         </MenuButton>
-        <MenuList className="menu__list publish-template-menu__list">
-          <MenuItem className="publish-template-menu__item" onSelect={() => openModal(MODALS.COPY_FROM_UPLOAD)}>
-            <div className="menu__link">
+        <MenuList className={TEMPLATE_MENU_LIST_CLASS_NAME}>
+          <MenuItem onSelect={() => openModal(MODALS.COPY_FROM_UPLOAD)}>
+            <div className={TEMPLATE_MENU_LINK_CLASS_NAME}>
               <Icon aria-hidden icon={ICONS.COPY} />
               {__('Copy from Previous Upload...')}
             </div>
           </MenuItem>
-          <hr className="publish-template-menu__separator" />
+          <hr className="tw:my-app-xxs tw:mx-0 tw:[border-top:1px_solid_var(--color-border)] tw:[border-right:0] tw:[border-bottom:0] tw:[border-left:0]" />
 
           {shouldShowTemplateSearch && (
             <div
-              className="publish-template-menu__search"
+              className="tw:flex tw:items-center tw:gap-app-xxs tw:px-app-s tw:pt-0 tw:pb-app-xxs"
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <Icon icon={ICONS.SEARCH} />
+              <Icon
+                icon={ICONS.SEARCH}
+                className="tw:size-[0.9rem] tw:shrink-0 tw:stroke-[rgba(var(--color-text-base),0.65)]"
+              />
               <input
+                className="tw:h-[30px] tw:w-full tw:rounded-app tw:border tw:border-app-border tw:bg-[var(--color-input-bg)] tw:px-app-xs tw:py-0 tw:text-app-small tw:text-app-text"
                 type="text"
                 name="upload_template_menu_search"
                 value={templateSearchQuery}
@@ -637,8 +649,8 @@ export default function PublishTemplateButton() {
               )}
 
               {!showAllRecentTemplates && hiddenTemplateCount > 0 && !normalizedTemplateSearch && (
-                <MenuItem className="publish-template-menu__item" onSelect={() => setShowAllTemplates(true)}>
-                  <div className="menu__link">
+                <MenuItem onSelect={() => setShowAllTemplates(true)}>
+                  <div className={TEMPLATE_MENU_LINK_CLASS_NAME}>
                     <Icon aria-hidden icon={ICONS.DOWN} />
                     {__('Show %count% more recent...', {
                       count: hiddenTemplateCount,
@@ -648,8 +660,8 @@ export default function PublishTemplateButton() {
               )}
 
               {showAllTemplates && !normalizedTemplateSearch && recentTemplates.length > MAX_VISIBLE_TEMPLATES && (
-                <MenuItem className="publish-template-menu__item" onSelect={() => setShowAllTemplates(false)}>
-                  <div className="menu__link">
+                <MenuItem onSelect={() => setShowAllTemplates(false)}>
+                  <div className={TEMPLATE_MENU_LINK_CLASS_NAME}>
                     <Icon aria-hidden icon={ICONS.UP} />
                     {__('Show fewer')}
                   </div>
@@ -657,31 +669,33 @@ export default function PublishTemplateButton() {
               )}
             </>
           ) : (
-            <div className="publish-template-menu__empty">
+            <div className="tw:px-app-s tw:py-app-xs tw:text-app-small tw:text-[rgba(var(--color-text-base),0.6)]">
               {normalizedTemplateSearch
                 ? __('No templates match your search.')
                 : __('No templates found across your channels.')}
             </div>
           )}
 
-          <hr className="publish-template-menu__separator" />
+          <hr className="tw:my-app-xxs tw:mx-0 tw:[border-top:1px_solid_var(--color-border)] tw:[border-right:0] tw:[border-bottom:0] tw:[border-left:0]" />
 
           <MenuItem
-            className={classnames('publish-template-menu__item', {
-              'publish-template-menu__item--disabled': !hasPublishFormTemplateChanges,
-            })}
+            className={
+              !hasPublishFormTemplateChanges
+                ? String.raw`tw:opacity-[0.45] tw:[&_.menu\_\_link]:cursor-not-allowed`
+                : undefined
+            }
             onSelect={() => hasPublishFormTemplateChanges && openSaveInput()}
             disabled={!hasPublishFormTemplateChanges}
           >
-            <div className="menu__link">
+            <div className={TEMPLATE_MENU_LINK_CLASS_NAME}>
               <Icon aria-hidden icon={ICONS.ADD} />
               {__('Save Current as Template')}
             </div>
           </MenuItem>
 
           {canUpdateSelectedTemplate && selectedTemplate && (
-            <MenuItem className="publish-template-menu__item" onSelect={handleUpdateSelectedTemplate}>
-              <div className="menu__link">
+            <MenuItem onSelect={handleUpdateSelectedTemplate}>
+              <div className={TEMPLATE_MENU_LINK_CLASS_NAME}>
                 <Icon aria-hidden icon={ICONS.REFRESH} />
                 {__('Update Selected Template')}
               </div>
@@ -689,19 +703,16 @@ export default function PublishTemplateButton() {
           )}
 
           {selectedTemplate && (
-            <MenuItem
-              className="publish-template-menu__item"
-              onSelect={() => handleToggleTemplatePin(selectedTemplate)}
-            >
-              <div className="menu__link">
+            <MenuItem onSelect={() => handleToggleTemplatePin(selectedTemplate)}>
+              <div className={TEMPLATE_MENU_LINK_CLASS_NAME}>
                 <Icon aria-hidden icon={ICONS.PIN} />
                 {selectedTemplate.isPinned ? __('Unpin Selected Template') : __('Pin Selected Template')}
               </div>
             </MenuItem>
           )}
 
-          <MenuItem className="publish-template-menu__item" onSelect={handleManageTemplates}>
-            <div className="menu__link">
+          <MenuItem onSelect={handleManageTemplates}>
+            <div className={TEMPLATE_MENU_LINK_CLASS_NAME}>
               <Icon aria-hidden icon={ICONS.SETTINGS} />
               {__('Manage Templates')}
             </div>
@@ -710,8 +721,8 @@ export default function PublishTemplateButton() {
       </Menu>
 
       {showSaveInput && (
-        <div className="publish-template-save">
-          <div className="publish-template-save__input-row">
+        <div className={TEMPLATE_SAVE_CLASS_NAME}>
+          <div className="tw:w-full">
             <FormField
               type="search"
               name={templateInputName}
@@ -742,10 +753,10 @@ export default function PublishTemplateButton() {
               autoFocus
             />
           </div>
-          <div className="publish-template-save__action-row">
+          <div className="tw:flex tw:w-full tw:gap-app-xxs">
             <button
               type="button"
-              className="publish-template-save__confirm"
+              className={`${TEMPLATE_SAVE_BUTTON_CLASS_NAME} tw:[border-color:rgba(var(--color-primary-dynamic),0.65)]`}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -757,7 +768,7 @@ export default function PublishTemplateButton() {
             </button>
             <button
               type="button"
-              className="publish-template-save__cancel"
+              className={`${TEMPLATE_SAVE_BUTTON_CLASS_NAME} tw:[border-color:var(--color-border)]`}
               onClick={(e) => {
                 e.stopPropagation();
                 closeSaveInput();
@@ -766,17 +777,17 @@ export default function PublishTemplateButton() {
               {__('Cancel')}
             </button>
           </div>
-          <span className="publish-template-save__target">
+          <span className={`${TEMPLATE_SAVE_META_CLASS_NAME} tw:text-[rgba(var(--color-text-base),0.65)]`}>
             {__('Saving to %channel%', {
               channel: saveTargetChannelName,
             })}
           </span>
           {existingTemplateByNameForSave && (
-            <span className="publish-template-save__overwrite-hint">
+            <span className={`${TEMPLATE_SAVE_META_CLASS_NAME} tw:text-[rgba(var(--color-primary-dynamic),0.95)]`}>
               {__('Template exists. Saving will update it.')}
             </span>
           )}
-          <span className="publish-template-save__warning">
+          <span className="tw:mt-app-xxs tw:block tw:w-full tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.5)]">
             {__('Template data is public. Do not include private information.')}
           </span>
         </div>

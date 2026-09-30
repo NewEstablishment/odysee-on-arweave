@@ -1,10 +1,12 @@
 import React from 'react';
 import classnames from 'classnames';
+import { COLLECTION_ACTIONS_CLASS } from '../collectionHeader/classes';
 import * as MODALS from 'constants/modal_types';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from 'component/common/tabs';
+import { TAB_LIST_COLLECTION_EDIT_CLASS } from 'component/common/tabs-classes';
 import { Form, Submit, FormErrors } from 'component/common/form';
 import { COLLECTION_PAGE } from 'constants/urlParams';
 import Button from 'component/button';
@@ -34,7 +36,9 @@ import {
 } from 'redux/actions/collections';
 import { doOpenModal } from 'redux/actions/app';
 import { doToast } from 'redux/actions/notifications';
-import './style.scss';
+import { COLLECTION_PUBLISH_FORM_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 export const PAGE_TAB_QUERY = `tab`;
 const TAB = {
   GENERAL: 0,
@@ -258,7 +262,8 @@ const CollectionPublishForm = (props: Props) => {
 
   return (
     <Form
-      className="main--contained collection-publish-form__wrapper"
+      className={COLLECTION_PUBLISH_FORM_CLASS}
+      data-collection-publish-form
       onSubmit={handleSubmitForm}
       errors={{
         ...(itemError
@@ -276,7 +281,7 @@ const CollectionPublishForm = (props: Props) => {
     >
       <CollectionFormContext.Provider value={collectionFormContext}>
         <Tabs onChange={onTabChange} index={tabIndex}>
-          <TabList className="tabs__list--collection-edit-page">
+          <TabList className={TAB_LIST_COLLECTION_EDIT_CLASS}>
             <Tab>{__('General')}</Tab>
             <Tab>
               {__('Items')}
@@ -299,7 +304,7 @@ const CollectionPublishForm = (props: Props) => {
             <TabPanel>
               {tabIndex === TAB.ITEMS && (
                 <>
-                  <div className={classnames('collection-actions')}>
+                  <div className={classnames(COLLECTION_ACTIONS_CLASS)}>
                     <SortButton collectionId={collectionId} />
                   </div>
                   <CollectionItemsList
@@ -320,7 +325,7 @@ const CollectionPublishForm = (props: Props) => {
           </ErrorBubble>
         )}
 
-        <div className="section__actions">
+        <div className={SECTION_CLASSES.actions}>
           <Submit
             {...({
               button: 'primary',
@@ -347,7 +352,7 @@ const CollectionPublishForm = (props: Props) => {
 
         <FormErrors />
 
-        <p className="help">
+        <p className={HELP_CLASS}>
           {publishing
             ? hasClaim
               ? __('Publishing creates a new immutable snapshot while keeping this playlist link unchanged.')

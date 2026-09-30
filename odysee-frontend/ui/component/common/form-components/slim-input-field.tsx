@@ -1,6 +1,7 @@
 import React from 'react';
 import Drawer from '@mui/material/Drawer';
 import CommentSelectors from 'component/commentCreate/internal/comment-selectors';
+import { SLIM_INPUT_DRAWER_CLASS } from './slim-input-field-classes';
 type TextareaWrapperProps = {
   slimInput?: boolean;
   slimInputButtonRef?: any;
@@ -42,7 +43,7 @@ export const TextareaWrapper = (wrapperProps: TextareaWrapperProps) => {
       </div>
     ) : (
       <Drawer
-        className="comment-create--drawer"
+        className={SLIM_INPUT_DRAWER_CLASS}
         anchor="bottom"
         open
         onClose={handleCloseAll} // The Modal tries to enforce focus when open and doesn't allow clicking or changing any

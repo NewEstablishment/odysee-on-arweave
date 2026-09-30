@@ -1,4 +1,6 @@
 import React from 'react';
+import { BUSY_INDICATOR_LOADER_CLASS } from './busy-indicator-classes';
+
 type Props = {
   message?: string | null;
 };
@@ -6,7 +8,7 @@ type Props = {
 function BusyIndicator({ message = '' }: Props) {
   return (
     <span className="busy-indicator">
-      {message} <span className="busy-indicator__loader" />
+      {message} <span className={BUSY_INDICATOR_LOADER_CLASS} />
     </span>
   );
 }

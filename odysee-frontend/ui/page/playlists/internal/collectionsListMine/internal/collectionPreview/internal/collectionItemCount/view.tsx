@@ -4,6 +4,7 @@ import * as COLLECTIONS_CONSTS from 'constants/collections';
 import Icon from 'component/common/icon';
 import { useAppSelector } from 'redux/hooks';
 import { selectCountForCollectionId, selectCountForCollectionIdNonDeleted } from 'redux/selectors/collections';
+import { COLLECTION_ITEM_COUNT_CLASS } from './classes';
 type Props = {
   collectionId: string;
 };
@@ -17,7 +18,7 @@ function CollectionItemCount(props: Props) {
         : selectCountForCollectionId(state, collectionId)
     ) || 0;
   return (
-    <div className="collection-counter">
+    <div className={COLLECTION_ITEM_COUNT_CLASS}>
       <Icon icon={ICONS.PLAYLIST} />
       <span>{collectionCount}</span>
     </div>

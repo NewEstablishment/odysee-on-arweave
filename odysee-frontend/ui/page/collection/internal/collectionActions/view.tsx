@@ -18,6 +18,9 @@ import {
   selectCollectionTypeForId,
 } from 'redux/selectors/collections';
 import { DISABLE_REACTIONS_VIDEO_TAG } from 'constants/tags';
+import { COLLECTION_ACTIONS_CLASS } from '../collectionHeader/classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { MEDIA_ACTIONS_CLASS, MEDIA_ACTIONS_STRETCH_CLASS } from 'component/common/media-classes';
 type Props = {
   uri: string;
   collectionId: string;
@@ -45,8 +48,8 @@ function CollectionActions(props: Props) {
   return (
     <>
       <div
-        className={classnames('media__actions justify-space-between collection-actions', {
-          stretch: isMobile,
+        className={classnames(MEDIA_ACTIONS_CLASS, 'tw:justify-between', COLLECTION_ACTIONS_CLASS, {
+          [MEDIA_ACTIONS_STRETCH_CLASS]: isMobile,
         })}
       >
         <SectionElement>
@@ -71,7 +74,7 @@ type SectionProps = {
 const SectionElement = (props: SectionProps) => {
   const { children } = props;
   const isMobile = useIsMobile();
-  return isMobile ? children : <div className="section__actions">{children}</div>;
+  return isMobile ? children : <div className={SECTION_CLASSES.actions}>{children}</div>;
 };
 
 export default CollectionActions;

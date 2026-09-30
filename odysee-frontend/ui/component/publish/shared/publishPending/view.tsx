@@ -5,6 +5,7 @@ import Spinner from 'component/spinner';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doCheckReflectingFiles } from 'redux/actions/publish';
 import { makeSelectReflectingClaimForUri } from 'redux/selectors/claims';
+import { PUBLISH_PENDING_CONFIRMING_CLASS } from './classes';
 type Props = {
   uri?: string;
 };
@@ -40,7 +41,7 @@ const PublishPending = (props: Props) => {
     );
   } else {
     return (
-      <div className="confirming-change">
+      <div className={PUBLISH_PENDING_CONFIRMING_CLASS}>
         {__('Confirming')} <Spinner type="small" />
       </div>
     );

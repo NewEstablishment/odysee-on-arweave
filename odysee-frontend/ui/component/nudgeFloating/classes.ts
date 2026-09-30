@@ -1,0 +1,5 @@
+export const NUDGE_CLASSES = {
+  root: String.raw`tw:absolute tw:top-[4rem] tw:left-0 tw:z-[3] tw:overflow-visible tw:rounded-app tw:border-2 tw:border-solid tw:border-[var(--color-text)] tw:bg-[rgba(var(--color-header-background-base),1)] tw:p-app-m tw:font-bold tw:whitespace-normal tw:text-[var(--color-text)] tw:[box-shadow:var(--card-box-shadow)] tw:after:absolute tw:after:top-[-0.5rem] tw:after:left-[1rem] tw:after:size-0 tw:after:border-[10px] tw:after:border-solid tw:after:border-transparent tw:after:border-t-0 tw:after:[border-top-style:none] tw:after:[border-top-color:var(--color-text)] tw:after:border-b-[8px] tw:after:border-b-[var(--color-text)] tw:after:content-[''] tw:[&_.nudge\_\_close_.icon]:![stroke:var(--color-secondary-contrast)] tw:[&_.nudge\_\_close:hover]:!bg-[var(--color-primary)] tw:[&_.nudge\_\_close:hover_.icon]:![stroke:var(--color-primary-contrast)] tw:small:top-[calc(var(--height-button)+var(--spacing-s))]`,
+  wrapper: 'tw:mr-app-m tw:w-[10rem] tw:small:w-[12.5rem]',
+  text: 'tw:line-clamp-4 tw:max-w-[200px]',
+} as const;

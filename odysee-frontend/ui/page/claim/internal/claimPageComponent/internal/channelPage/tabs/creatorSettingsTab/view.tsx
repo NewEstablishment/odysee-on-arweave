@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as React from 'react';
 import humanizeDuration from 'humanize-duration';
 import * as ICONS from 'constants/icons';
@@ -9,6 +10,10 @@ import SearchChannelField from 'component/searchChannelField';
 import SettingsRow from 'component/settingsRow';
 import Spinner from 'component/spinner';
 import { FormField } from 'component/common/form-components/form-field';
+import {
+  FORM_FIELD_COPYABLE_CLASS,
+  FORM_FIELD_PRICE_AMOUNT_CLASS,
+} from 'component/common/form-components/form-field-classes';
 import I18nMessage from 'component/i18nMessage';
 import { parseURI } from 'util/lbryURI';
 import debounce from 'util/debounce';
@@ -36,6 +41,8 @@ import { selectMyChannelClaims } from 'redux/selectors/claims';
 import { selectYoutubeChannels } from 'redux/selectors/user';
 import CopyableText from 'component/copyableText';
 import { DOMAIN } from 'config';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_INLINE_CLASS } from 'component/common/help-classes';
 type ChannelSettings = {
   comments_enabled?: boolean;
   min_tip_amount_comment?: number;
@@ -319,7 +326,7 @@ export default function CreatorSettingsTab(props: Props) {
   const isDisabled = activeChannelClaim && settingsByChannelId && settingsByChannelId[activeChannelClaim.claim_id] === null;
   return <div className="creator-settings-tab">
       <div className="card-stack">
-        {isBusy && <div className="main--empty">
+        {isBusy && <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Spinner />
           </div>}
 
@@ -355,8 +362,8 @@ export default function CreatorSettingsTab(props: Props) {
                   </SettingsRow>
 
                   <SettingsRow title={__('Minimum channel age for comments')} subtitle={__(HELP.CHANNEL_AGE)}>
-                    <div className="section__actions">
-                      <FormField name="time_since_first_comment" className="form-field--copyable" disabled={minChannelAgeMinutes <= 0} type="text" readOnly value={minChannelAgeMinutes > 0 ? humanizeDuration(minChannelAgeMinutes * 60 * 1000, {
+                    <div className={SECTION_CLASSES.actions}>
+                      <FormField name="time_since_first_comment" className={FORM_FIELD_COPYABLE_CLASS} disabled={minChannelAgeMinutes <= 0} type="text" readOnly value={minChannelAgeMinutes > 0 ? humanizeDuration(minChannelAgeMinutes * 60 * 1000, {
                 round: true
               }) : __('No limit')} inputButton={<Button button="secondary" icon={ICONS.EDIT} title={__('Change')} onClick={() => {
                 doOpenModal(MODALS.MIN_CHANNEL_AGE, {
@@ -375,7 +382,7 @@ export default function CreatorSettingsTab(props: Props) {
                   <SettingsRow title={<I18nMessage tokens={{
             usd: '$'
           }}>Minimum %usd% tip amount for comments</I18nMessage>} subtitle={__(HELP.MIN_TIP)}>
-                    <FormField name="min_tip_amount_comment" className="form-field--price-amount" type="number" placeholder="0" value={minUSDTip || (minTip ? 0.01 : minUSDTip)} // Default to 0.01 if LBC limit is used, so user has way to clear it on Odysee
+                    <FormField name="min_tip_amount_comment" className={FORM_FIELD_PRICE_AMOUNT_CLASS} type="number" placeholder="0" value={minUSDTip || (minTip ? 0.01 : minUSDTip)} // Default to 0.01 if LBC limit is used, so user has way to clear it on Odysee
             onChange={e => {
               const newMinUSDTip = parseFloat(e.target.value);
               setMinUSDTip(newMinUSDTip);
@@ -405,11 +412,11 @@ export default function CreatorSettingsTab(props: Props) {
             usd: '$'
           }}>Minimum %usd% tip amount for hyperchats</I18nMessage>} subtitle={<>
                         {__(HELP.MIN_SUPER)}
-                        {minTip !== 0 && <p className="help--inline">
+                        {minTip !== 0 && <p className={HELP_INLINE_CLASS}>
                             <em>{__(HELP.MIN_SUPER_OFF)}</em>
                           </p>}
                       </>}>
-                    <FormField name="min_tip_amount_super_chat" className="form-field--price-amount" min={0} step="any" type="number" placeholder="0" value={minUSDSuper || (minSuper ? 0.01 : minUSDSuper)} // Default to 0.01 if LBC limit is used, so user has way to clear it on Odysee
+                    <FormField name="min_tip_amount_super_chat" className={FORM_FIELD_PRICE_AMOUNT_CLASS} min={0} step="any" type="number" placeholder="0" value={minUSDSuper || (minSuper ? 0.01 : minUSDSuper)} // Default to 0.01 if LBC limit is used, so user has way to clear it on Odysee
             disabled={!!minTip || !!minUSDTip} onChange={e => {
               const newMinUSDSuper = parseFloat(e.target.value);
               setMinUSDSuper(newMinUSDSuper);

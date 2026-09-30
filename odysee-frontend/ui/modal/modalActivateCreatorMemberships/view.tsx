@@ -6,6 +6,8 @@ import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
+import { MEMBERSHIP_CONFIRM_CLASSES } from 'modal/modalConfirmOdyseeMembership/classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   bankAccountConfirmed: boolean;
 };
@@ -39,12 +41,12 @@ export default function ModalRemoveCard(props: Props) {
   return (
     <Modal ariaHideApp={false} isOpen type="card" onAborted={closeModal}>
       <Card
-        className="stripe__confirm-remove-membership"
+        className={MEMBERSHIP_CONFIRM_CLASSES.card}
         title={__('Activate Memberships')}
         subtitle={!bankAccountConfirmed ? needToAddABankAccountText : activateYourMembershipsText}
         actions={
           <div
-            className="section__actions"
+            className={`${SECTION_CLASSES.actions} ${MEMBERSHIP_CONFIRM_CLASSES.actions}`}
             style={{
               marginTop: '10px',
             }}

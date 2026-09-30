@@ -7,7 +7,7 @@ import { useAppSelector } from 'redux/hooks';
 import { makeSelectNsfwCountFromUris, makeSelectOmittedCountForChannel } from 'redux/selectors/claims';
 import { parseURI } from 'util/lbryURI';
 import { selectShowMatureContent } from 'redux/selectors/settings';
-import './style.lazy.scss';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 type Props = {
   uri?: string;
@@ -34,7 +34,7 @@ export default function HiddenNsfwClaims(props: Props) {
     obscureNsfw && (
       <>
         {number ? (
-          <div className="section--padded section__subtitle">
+          <div className={`${SECTION_CLASSES.padded} ${SECTION_CLASSES.subtitle}`}>
             <I18nMessage
               tokens={{
                 content_viewing_preferences_link: (
@@ -52,15 +52,22 @@ export default function HiddenNsfwClaims(props: Props) {
           <>
             {mature && (
               <div className="main">
-                <div className="info-wrapper">
-                  <label>
-                    <Icon icon={ICONS.INFO} />
+                <div className="tw:mt-app-m tw:rounded-app tw:bg-app-error tw:p-app-m">
+                  <label className="tw:mt-0 tw:text-black">
+                    <Icon icon={ICONS.INFO} className="tw:mr-app-xxs tw:mb-[-2px]" />
                     {__('Mature content')}
                   </label>
-                  <p>
+                  <p className="tw:text-app-text-error">
                     <I18nMessage
                       tokens={{
-                        download_url: <Button label={__('lbry.com')} button="link" href="https://lbry.com/get" />,
+                        download_url: (
+                          <Button
+                            className="tw:text-app-text-error"
+                            label={__('lbry.com')}
+                            button="link"
+                            href="https://lbry.com/get"
+                          />
+                        ),
                       }}
                     >
                       You can download the LBRY Desktop or Android app on %download_url% and enable mature content in

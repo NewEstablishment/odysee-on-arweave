@@ -21,6 +21,8 @@ import {
 } from 'redux/actions/payments';
 import { selectArweaveConnecting } from 'redux/selectors/arwallet';
 import { LocalStorage } from 'util/storage';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { ANNOUNCEMENT_CLASS } from 'component/common/announcement-classes';
 
 type Props = {
   previousModal?: {
@@ -31,7 +33,7 @@ type Props = {
 const ConnectingCard = () => {
   return (
     <Card
-      className="announcement"
+      className={ANNOUNCEMENT_CLASS}
       title={__('Connecting Wallet')}
       body={<div className="section">{__('Connecting...')}</div>}
     />
@@ -69,7 +71,7 @@ export default function ModalAnnouncements(props: Props) {
   const RegisterCard = () => {
     return (
       <Card
-        className="announcement"
+        className={ANNOUNCEMENT_CLASS}
         title={__('Unregistered Wallet Address')}
         subtitle={__(
           'Your Wander address, %address%, is not onboarded with the payments system. You can switch your Arweave address, or register this one for use.',
@@ -78,7 +80,7 @@ export default function ModalAnnouncements(props: Props) {
           }
         )}
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="primary"
               label={__('Register')}
@@ -122,7 +124,7 @@ export default function ModalAnnouncements(props: Props) {
   const MakeDefaultCard = () => {
     return (
       <Card
-        className="announcement"
+        className={ANNOUNCEMENT_CLASS}
         title={__('Make Default Wallet Address')}
         body={
           <div className="section">
@@ -132,7 +134,7 @@ export default function ModalAnnouncements(props: Props) {
           </div>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="primary"
               label={__('Make Default')}
@@ -154,7 +156,7 @@ export default function ModalAnnouncements(props: Props) {
   const ErrorCard = () => {
     return (
       <Card
-        className="announcement"
+        className={ANNOUNCEMENT_CLASS}
         title={__('Wallet Connect Error')}
         body={
           <div className="section">
@@ -171,7 +173,7 @@ export default function ModalAnnouncements(props: Props) {
           </div>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="alt"
               label={__('Disconnect')}
@@ -187,7 +189,7 @@ export default function ModalAnnouncements(props: Props) {
   const AddressInUseCard = () => {
     return (
       <Card
-        className="announcement"
+        className={ANNOUNCEMENT_CLASS}
         title={__('Wallet Connect Error')}
         body={
           <div className="section">
@@ -199,7 +201,7 @@ export default function ModalAnnouncements(props: Props) {
           </div>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="primary"
               label={__('Change login')}

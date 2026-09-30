@@ -1,10 +1,11 @@
-import 'scss/component/_superchat.scss';
 import { getFormattedCreditsAmount, formatFullPrice } from 'util/format-credits';
 import classnames from 'classnames';
 import Icon from 'component/common/icon';
 import LbcSymbol from 'component/common/lbc-symbol';
 import Symbol from 'component/common/symbol';
 import React from 'react';
+import { CREDIT_AMOUNT_CLASS, HYPERCHAT_AMOUNT_CLASS } from './credit-amount-classes';
+
 type Props = {
   token?: string;
   chain?: string;
@@ -105,18 +106,18 @@ function CreditAmount({
     <span
       title={amount && !hideTitle ? String(formatFullPrice(amount, 2)) : ''}
       className={classnames('credit-amount-wrapper', className, {
-        hyperChat: hyperChat,
+        [HYPERCHAT_AMOUNT_CLASS]: hyperChat,
       })}
     >
       {icon && <Icon className="credit-amount__prefix-icon" icon={icon} />}
 
       {customAmounts
         ? Object.values(customAmounts).map((amount, index) => (
-            <span key={String(amount)} className="credit-amount">
+            <span key={String(amount)} className={CREDIT_AMOUNT_CLASS}>
               {getAmountText(Number(amount), !index)}
             </span>
           ))
-        : amount && <span className="credit-amount">{getAmountText(amount, isFiat)}</span>}
+        : amount && <span className={CREDIT_AMOUNT_CLASS}>{getAmountText(amount, isFiat)}</span>}
 
       {isEstimate ? (
         <span className="credit-amount__estimate" title={__('This is an estimate and does not include data fees')}>

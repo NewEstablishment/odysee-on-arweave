@@ -8,6 +8,7 @@ import MembershipBadge from 'component/membershipBadge';
 import { useAppSelector } from 'redux/hooks';
 import { selectClaimUriForId } from 'redux/selectors/claims';
 import { selectUserOdyseeMembership } from 'redux/selectors/memberships';
+import { CHANNEL_SELECTOR_CLASSES as C } from '../../classes';
 
 type Props = {
   channelId: string;
@@ -21,11 +22,13 @@ const ChannelListItem = (props: Props) => {
   const odyseeMembership = useAppSelector((state) => selectUserOdyseeMembership(state, channelId));
   return (
     <div
-      className={classnames('channel-selector__item', {
-        'channel-selector__item--selected': isSelected,
+      className={classnames(C.item, {
+        [C.itemSelected]: isSelected,
       })}
+      data-channel-selector-item=""
+      data-channel-selector-selected={isSelected ? '' : undefined}
     >
-      <ChannelThumbnail uri={uri} hideStakedIndicator xsmall noLazyLoad />
+      <ChannelThumbnail className={C.itemThumbnail} uri={uri} hideStakedIndicator xsmall noLazyLoad />
       <ChannelTitle uri={uri} />
       {odyseeMembership && <MembershipBadge membershipName={odyseeMembership} />}
       {isSelected && <Icon icon={ICONS.DOWN} />}

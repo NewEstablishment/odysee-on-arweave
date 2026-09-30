@@ -6,6 +6,13 @@ import * as FILE_LIST from 'constants/file_list';
 import * as KEYCODES from 'constants/keycodes';
 import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
+import { FILE_LIST_HEADER_CLASSES } from 'page/fileListPublished/internal/fileListHeader/classes';
+import {
+  CLAIM_SEARCH_MENU_GROUP_CLASS,
+  CLAIM_SEARCH_MENU_SUBGROUP_CLASS,
+  CLAIM_SEARCH_WRAPPER_WRAP_CLASS,
+} from 'component/claimListHeader/classes';
+import { WUNDERBAR_INLINE_CLASS, WUNDERBAR_INPUT_INLINE_CLASS } from 'component/wunderbar/classes';
 
 const RightSideActions = () => {
   const { searchText, setSearchText, isFilteringEnabled, sortOption, updateFilteringSetting, setFilterParamsChanged } =
@@ -55,13 +62,13 @@ const RightSideActions = () => {
 
   //
   return (
-    <div className="claim-search__wrapper--wrap">
+    <div className={CLAIM_SEARCH_WRAPPER_WRAP_CLASS}>
       {/* Search Field */}
       {isFilteringEnabled && (
-        <div className="claim-search__menu-group">
-          <div className="claim-search__menu-subgroup">
+        <div className={CLAIM_SEARCH_MENU_GROUP_CLASS}>
+          <div className={CLAIM_SEARCH_MENU_SUBGROUP_CLASS}>
             <FormField
-              className="claim-search__dropdown uploads__dropdown"
+              className={FILE_LIST_HEADER_CLASSES.uploadsDropdown}
               type="select"
               name="sort_by"
               value={sortOption.key}
@@ -79,7 +86,7 @@ const RightSideActions = () => {
               ))}
             </FormField>
             <FormField
-              className="claim-search__dropdown uploads__dropdown"
+              className={FILE_LIST_HEADER_CLASSES.uploadsDropdown}
               type="select"
               name="order_by"
               value={sortOption.value}
@@ -97,14 +104,14 @@ const RightSideActions = () => {
               ))}
             </FormField>
           </div>
-          <div className="claim-search__menu-subgroup">
-            <Form onSubmit={() => {}} className="wunderbar--inline">
+          <div className={CLAIM_SEARCH_MENU_SUBGROUP_CLASS}>
+            <Form onSubmit={() => {}} className={WUNDERBAR_INLINE_CLASS}>
               <Icon icon={ICONS.SEARCH} />
               <FormField
                 name="collection_search"
                 onFocus={onTextareaFocus}
                 onBlur={onTextareaBlur}
-                className="wunderbar__input--inline"
+                className={WUNDERBAR_INPUT_INLINE_CLASS}
                 value={searchText}
                 onChange={(e) => handleSearchTextChange(e.target.value)}
                 type="text"

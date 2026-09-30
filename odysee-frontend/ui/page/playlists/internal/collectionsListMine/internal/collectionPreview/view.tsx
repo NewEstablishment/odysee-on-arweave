@@ -44,6 +44,7 @@ import {
   selectCollectionIsPublishingForId,
   selectCollectionPublishErrorForId,
 } from 'redux/selectors/collections';
+import { COLLECTION_PREVIEW_CLASS } from './classes';
 type Props = {
   uri?: string;
   collectionId?: string;
@@ -106,7 +107,7 @@ function CollectionPreview(props: Props) {
   };
   if (collectionId === COLLECTIONS_CONSTS.QUEUE_ID && isEmpty) return null;
   return (
-    <li role="link" onClick={handleClick} className="playlist-preview__wrapper">
+    <li role="link" onClick={handleClick} className={COLLECTION_PREVIEW_CLASS}>
       <CollectionMenuList collectionId={collectionId} />
       <div
         className="background"

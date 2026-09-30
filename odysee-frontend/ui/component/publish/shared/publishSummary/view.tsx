@@ -1,4 +1,5 @@
 import React from 'react';
+import { PUBLISH_DETAILS_TITLE_CLASS } from 'component/publish/shared/publish-details-classes';
 import Tag from 'component/tag';
 import Icon from 'component/common/icon';
 import LbcSymbol from 'component/common/lbc-symbol';
@@ -20,7 +21,8 @@ import { selectMembershipTiersForCreatorId } from 'redux/selectors/memberships';
 import ClaimPreviewTile from 'component/claimPreviewTile';
 import { buildURI, isNameValid } from 'util/lbryURI';
 import * as ACTIONS from 'constants/action_types';
-import './style.scss';
+import { PUBLISH_SUMMARY_CHANNEL_CLASS } from './classes';
+import { TABLE_CLASS, TABLE_CONDENSED_CLASS, TABLE_PUBLISH_PREVIEW_CLASS } from 'component/common/table-classes';
 
 function createRow(label: string, value: any, hide?: boolean) {
   if (hide) return null;
@@ -192,7 +194,7 @@ export default function PublishSummary() {
         return (
           <>
             {fiatPurchaseEnabled && fiatPurchaseFee && (
-              <div className="publish-summary__price-row">
+              <div className="tw:flex tw:items-center tw:gap-app-xxs">
                 <Icon icon={ICONS.BUY} />
                 {__('Purchase for %currency%%amount%', {
                   currency: STRIPE.CURRENCY[fiatPurchaseFee.currency].symbol,
@@ -201,7 +203,7 @@ export default function PublishSummary() {
               </div>
             )}
             {fiatRentalEnabled && fiatRentalFee && (
-              <div className="publish-summary__price-row">
+              <div className="tw:flex tw:items-center tw:gap-app-xxs">
                 <Icon icon={ICONS.TIME} />
                 {__('Rent %duration% for %currency%%amount%', {
                   duration: secondsToDhms(rentalSeconds),
@@ -240,11 +242,11 @@ export default function PublishSummary() {
   const visibleTags = removeInternalTags(tags);
 
   return (
-    <div className="publish-summary">
-      <div className="publish-summary__columns">
-        <div className="publish-summary__left">
-          <h3 className="publish-details__title">{__('Summary')}</h3>
-          <table className="table table--condensed table--publish-preview">
+    <div>
+      <div className="tw:grid tw:grid-cols-[1fr_300px] tw:items-stretch tw:gap-app-m tw:upto-tablet:grid-cols-1">
+        <div className="publish-summary-left-surface tw:min-w-0">
+          <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Summary')}</h3>
+          <table className={`${TABLE_CLASS} ${TABLE_CONDENSED_CLASS} ${TABLE_PUBLISH_PREVIEW_CLASS}`}>
             <tbody>
               {createRow(__('Title'), truncate(title, 128))}
               {createRow(
@@ -252,11 +254,9 @@ export default function PublishSummary() {
                 description ? (
                   <>
                     <div
-                      className={
-                        descExpanded
-                          ? 'publish-summary__description publish-summary__description--expanded'
-                          : 'publish-summary__description'
-                      }
+                      className={`tw:overflow-hidden tw:text-app-small tw:text-app-text-subtitle tw:[transition:max-height_0.3s_ease] ${
+                        descExpanded ? 'tw:max-h-none' : 'tw:max-h-[100px]'
+                      }`}
                     >
                       <MarkdownPreview content={description} simpleLinks />
                     </div>
@@ -273,7 +273,7 @@ export default function PublishSummary() {
               {createRow(
                 __('Channel'),
                 channel ? (
-                  <div className="publish-summary__channel">
+                  <div className={PUBLISH_SUMMARY_CHANNEL_CLASS}>
                     {channelClaim && (
                       <ChannelThumbnail
                         key={channelClaim.claim_id}
@@ -285,7 +285,7 @@ export default function PublishSummary() {
                     {channel}
                   </div>
                 ) : (
-                  <div className="publish-summary__channel">
+                  <div className={PUBLISH_SUMMARY_CHANNEL_CLASS}>
                     <Icon sectionIcon icon={ICONS.ANONYMOUS} />
                     <i>{__('Anonymous')}</i>
                   </div>
@@ -308,7 +308,7 @@ export default function PublishSummary() {
               {visibleTags.length > 0 &&
                 createRow(
                   __('Tags'),
-                  <div className="publish-summary__tags">
+                  <div className="tw:flex tw:flex-wrap tw:gap-app-xxs">
                     {visibleTags.map((tag) => (
                       <Tag key={tag.name} name={tag.name} type="flow" onClick={() => {}} />
                     ))}
@@ -318,9 +318,11 @@ export default function PublishSummary() {
           </table>
         </div>
 
-        <div className="publish-summary__right">
-          <h3 className="publish-details__title">{__('Preview')}</h3>
-          <div className="publish-summary__preview-wrap">{previewUri && <ClaimPreviewTile uri={previewUri} />}</div>
+        <div className="publish-summary-right-surface tw:flex tw:flex-col">
+          <h3 className={PUBLISH_DETAILS_TITLE_CLASS}>{__('Preview')}</h3>
+          <div className="publish-summary-preview-surface tw:flex tw:flex-1 tw:flex-col">
+            {previewUri && <ClaimPreviewTile uri={previewUri} />}
+          </div>
         </div>
       </div>
     </div>

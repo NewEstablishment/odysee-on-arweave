@@ -3,6 +3,13 @@ import classnames from 'classnames';
 import { Menu, MenuButton, MenuList, MenuItem } from 'component/common/menu';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
+import { SHORTS_PAGE_MENU_BUTTON_CLASS } from '../../classes';
+import {
+  SHORTS_VIEW_MENU_CLASS,
+  SHORTS_VIEW_MENU_LINK_CLASS,
+  SHORTS_VIEW_MENU_OPTION_ACTIVE_CLASS,
+  SHORTS_VIEW_MENU_OPTION_CLASS,
+} from './classes';
 type Props = {
   viewMode: string;
   channelName?: string;
@@ -13,7 +20,7 @@ const ViewModeSelector = ({ viewMode, channelName, onViewModeChange }: Props) =>
   return (
     <Menu>
       <MenuButton
-        className="shorts-page-menu__button"
+        className={SHORTS_PAGE_MENU_BUTTON_CLASS}
         onClick={(e) => {
           e.stopPropagation();
         }}
@@ -21,23 +28,23 @@ const ViewModeSelector = ({ viewMode, channelName, onViewModeChange }: Props) =>
         <Icon size={20} icon={ICONS.MORE} />
       </MenuButton>
 
-      <MenuList className="menu__list shorts-page__view-menu">
+      <MenuList className={SHORTS_VIEW_MENU_CLASS}>
         <MenuItem
-          className={classnames('comment__menu-option', {
-            'comment__menu-option--active': viewMode === 'related',
+          className={classnames(SHORTS_VIEW_MENU_OPTION_CLASS, {
+            [SHORTS_VIEW_MENU_OPTION_ACTIVE_CLASS]: viewMode === 'related',
           })}
           onSelect={() => onViewModeChange('related')}
         >
-          <div className="menu__link">{__('Related')}</div>
+          <div className={SHORTS_VIEW_MENU_LINK_CLASS}>{__('Related')}</div>
         </MenuItem>
 
         <MenuItem
-          className={classnames('comment__menu-option', {
-            'comment__menu-option--active': viewMode === 'channel',
+          className={classnames(SHORTS_VIEW_MENU_OPTION_CLASS, {
+            [SHORTS_VIEW_MENU_OPTION_ACTIVE_CLASS]: viewMode === 'channel',
           })}
           onSelect={() => onViewModeChange('channel')}
         >
-          <div className="menu__link">
+          <div className={SHORTS_VIEW_MENU_LINK_CLASS}>
             {__('From %channel%', {
               channel:
                 channelName && channelName.length > 20

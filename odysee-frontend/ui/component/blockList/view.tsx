@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import { Combobox, ComboboxInput, ComboboxPopover, ComboboxList, ComboboxOption } from 'component/common/combobox';
 import { matchSorter } from 'match-sorter';
 import React from 'react';
@@ -9,6 +10,11 @@ import * as ICONS from 'constants/icons';
 import Paginate from 'component/common/paginate';
 import Yrbl from 'component/yrbl';
 import useThrottle from 'effects/use-throttle';
+import { BLOCK_LIST_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_NOTICE_CLASS } from 'component/common/help-classes';
+import { WUNDERBAR_CLASS, WUNDERBAR_INPUT_CLASS, WUNDERBAR_WRAPPER_CLASS } from 'component/wunderbar/classes';
+import { WUNDERBAR_SUGGESTIONS_CLASSES } from 'component/wunderbarSuggestions/classes';
 const PAGE_SIZE = 10;
 
 function reduceUriToChannelName(uri: string) {
@@ -56,7 +62,7 @@ export default function BlockList(props: Props) {
   // **************************************************************************
   function getRenderActions() {
     if (getActionButtons) {
-      return (claim) => <div className="section__actions">{getActionButtons(claim.permanent_url)}</div>;
+      return (claim) => <div className={SECTION_CLASSES.actions}>{getActionButtons(claim.permanent_url)}</div>;
     }
 
     return undefined;
@@ -93,12 +99,12 @@ export default function BlockList(props: Props) {
 
   if (!hasLocalList) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Yrbl
           title={titleEmptyList}
           subtitle={subtitleEmptyList}
           actions={
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="primary" label={__('Go Home')} navigate="/" />
             </div>
           }
@@ -109,7 +115,7 @@ export default function BlockList(props: Props) {
 
   return (
     <>
-      <div className="help--notice">{help}</div>
+      <div className={HELP_NOTICE_CLASS}>{help}</div>
       <div
         className="section"
         style={{
@@ -123,7 +129,7 @@ export default function BlockList(props: Props) {
           onResultsUpdated={filterSearchResults}
         />
       </div>
-      <div className={classnames('section block-list', className)}>
+      <div className={classnames('section', BLOCK_LIST_CLASS, className)}>
         <ClaimList
           uris={searchList || paginatedLocalList}
           showUnresolvedClaims
@@ -163,18 +169,23 @@ function SearchList(props: LsbProps) {
   }, [results]);
   // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="wunderbar__wrapper">
+    <div className={WUNDERBAR_WRAPPER_CLASS}>
       <label>{__('Search blocked channel name')}</label>
-      <Combobox className="wunderbar" onSelect={handleSelect}>
+      <Combobox className={WUNDERBAR_CLASS} onSelect={handleSelect}>
         <Icon icon={ICONS.SEARCH} />
-        <ComboboxInput selectOnClick className="wunderbar__input" onChange={handleChange} placeholder={placeholder} />
+        <ComboboxInput
+          selectOnClick
+          className={WUNDERBAR_INPUT_CLASS}
+          onChange={handleChange}
+          placeholder={placeholder}
+        />
         {results && (
-          <ComboboxPopover className="wunderbar__suggestions" portal={false}>
+          <ComboboxPopover className={WUNDERBAR_SUGGESTIONS_CLASSES.root} portal={false}>
             {results.length > 0 ? (
               <ComboboxList>
                 {results.slice(0, 10).map((result, index) => (
                   <ComboboxOption
-                    className="wunderbar__more-results"
+                    className={WUNDERBAR_SUGGESTIONS_CLASSES.moreResults}
                     key={index}
                     value={formatter ? formatter(result) : result}
                   />

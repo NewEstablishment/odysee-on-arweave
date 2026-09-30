@@ -1,0 +1,1 @@
+export const ZOOMABLE_IMAGE_CLASS = String.raw`img__zoomable tw:cursor-pointer tw:[[data-comment-message]_.markdown-preview_&]:!mb-app-xs tw:[[data-comment-message]_.markdown-preview_&]:!max-h-[300px] tw:[[data-comment-message]_.markdown-preview_&]:rounded-app tw:[[data-comment-message]_.markdown-preview_&]:!pt-0`;

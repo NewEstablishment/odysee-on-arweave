@@ -12,10 +12,31 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doUploadThumbnail } from 'redux/actions/publish';
 import { doOpenModal } from 'redux/actions/app';
 import { doToast } from 'redux/actions/notifications';
-import './style.lazy.scss';
 
 const DEFAULT_PERCENTAGES = [0.1, 0.25, 0.5, 0.75, 0.9];
 const THUMBNAIL_MAX_WIDTH = 1920;
+const THUMBNAIL_GRID_CLASS =
+  'tw:grid tw:grid-cols-[repeat(4,1fr)] tw:gap-app-s tw:[@media(max-width:900px)]:grid-cols-[repeat(2,1fr)]';
+const THUMBNAIL_ITEM_BASE_CLASS =
+  'tw:relative tw:rounded-app tw:border-2 tw:border-solid tw:border-app-border tw:bg-app-card tw:p-0 tw:[transition:border-color_0.15s_ease]';
+const THUMBNAIL_ITEM_CLASS = `${THUMBNAIL_ITEM_BASE_CLASS} tw:cursor-pointer tw:overflow-hidden tw:hover:border-[rgba(var(--color-primary-dynamic),0.6)]`;
+const THUMBNAIL_ITEM_SELECTED_CLASS =
+  'tw:border-app-primary tw:[box-shadow:0_0_0_2px_rgba(var(--color-primary-dynamic),0.3)]';
+const THUMBNAIL_ITEM_SKELETON_CLASS = `${THUMBNAIL_ITEM_BASE_CLASS} tw:cursor-default tw:overflow-hidden tw:hover:border-app-border`;
+const THUMBNAIL_ITEM_ACTION_CLASS =
+  'tw:flex tw:aspect-video tw:items-center tw:justify-center tw:bg-app-card tw:hover:bg-app-card tw:disabled:cursor-default tw:disabled:opacity-40';
+const THUMBNAIL_ITEM_CUSTOM_CLASS = `${THUMBNAIL_ITEM_BASE_CLASS} tw:relative tw:flex tw:cursor-pointer tw:flex-col tw:overflow-visible tw:hover:border-[rgba(var(--color-primary-dynamic),0.6)]`;
+const THUMBNAIL_IMAGE_CLASS = 'tw:block tw:aspect-video tw:w-full tw:object-cover';
+const THUMBNAIL_LABEL_CLASS =
+  'tw:absolute tw:right-app-xxs tw:bottom-app-xxs tw:rounded-[calc(var(--border-radius)/2)] tw:bg-[rgba(0,0,0,0.7)] tw:px-app-xxs tw:py-[2px] tw:text-app-xsmall tw:leading-[1.3] tw:text-white';
+const THUMBNAIL_CUSTOM_SLIDER_CLASS =
+  'thumbnail-picker-slider-surface tw:absolute tw:right-[6px] tw:bottom-[-6px] tw:left-[6px] tw:z-[1] tw:m-0 tw:h-[16px] tw:w-auto tw:cursor-pointer tw:appearance-none tw:!bg-transparent tw:px-0 tw:py-[18px] tw:opacity-80 tw:![box-shadow:none]';
+const THUMBNAIL_EXPAND_BUTTON_CLASS =
+  'tw:absolute tw:top-[4px] tw:right-[4px] tw:z-[2] tw:flex tw:size-[26px] tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[4px] tw:![border:0] tw:bg-[rgba(0,0,0,0.6)] tw:p-0 tw:text-white tw:hover:bg-[rgba(0,0,0,0.85)]';
+const THUMBNAIL_LIGHTBOX_SLIDER_CLASS =
+  'thumbnail-picker-lightbox-slider-surface tw:mx-app-m tw:mt-app-s tw:mb-0 tw:block tw:h-[20px] tw:w-[calc(100%-var(--spacing-m)*2)] tw:cursor-pointer tw:appearance-none tw:!bg-transparent tw:px-0 tw:py-[14px] tw:![box-shadow:none]';
+const THUMBNAIL_LIGHTBOX_CLOSE_CLASS =
+  'tw:absolute tw:top-[8px] tw:right-[8px] tw:z-[1] tw:flex tw:size-[32px] tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[50%] tw:![border:0] tw:bg-[rgba(0,0,0,0.6)] tw:p-0 tw:text-white tw:hover:bg-[rgba(0,0,0,0.85)]';
 
 type FrameData = {
   blobUrl: string;
@@ -48,8 +69,6 @@ function ThumbnailPicker(props: Props) {
   const currentThumbnail = useAppSelector((state) => state.publish.thumbnail);
   const uploadThumbnailStatus = useAppSelector((state) => state.publish.uploadThumbnailStatus);
   const editingURI = useAppSelector((state) => state.publish.editingURI);
-  const [showUrlInput, setShowUrlInput] = useState(false);
-  const [urlInputValue, setUrlInputValue] = useState('');
   const dispatch = useAppDispatch();
 
   const [frames, setFrames] = useState<FrameData[]>([]);
@@ -523,26 +542,26 @@ function ThumbnailPicker(props: Props) {
   }
 
   return (
-    <div className="thumbnail-picker">
+    <div className="tw:w-full">
       {mode === 'auto' && (
         <>
           {loading && (
-            <div className="thumbnail-picker__loading">
-              <div className="thumbnail-picker__grid thumbnail-picker__grid--skeleton">
+            <div className="tw:relative">
+              <div className={`${THUMBNAIL_GRID_CLASS} tw:pointer-events-none`}>
                 {Array.from({ length: 8 }, (_, i) => (
-                  <div key={i} className="thumbnail-picker__item thumbnail-picker__item--skeleton">
-                    <div className="thumbnail-picker__skeleton-box" />
+                  <div key={i} className={THUMBNAIL_ITEM_SKELETON_CLASS}>
+                    <div className="tw:aspect-video tw:w-full tw:bg-[linear-gradient(90deg,var(--color-card-background)_25%,rgba(var(--color-border-base),0.3)_50%,var(--color-card-background)_75%)] tw:bg-[length:200%_100%] tw:[animation:thumbnail-picker-shimmer_1.5s_infinite]" />
                   </div>
                 ))}
               </div>
-              <div className="thumbnail-picker__spinner">
+              <div className="tw:flex tw:items-center tw:justify-center tw:gap-app-s tw:py-app-m">
                 <Spinner type="small" text={<span>{__('Extracting frames')}...</span>} />
               </div>
             </div>
           )}
 
           {!loading && error && (
-            <div className="thumbnail-picker__error">
+            <div className="tw:flex tw:flex-col tw:items-center tw:gap-app-s tw:py-app-l tw:text-app-text-subtitle">
               <p>{error}</p>
               <Button button="secondary" label={__('Try again')} onClick={handleRegenerate} />
             </div>
@@ -550,7 +569,7 @@ function ThumbnailPicker(props: Props) {
 
           {!loading && !error && (
             <>
-              <div className="thumbnail-picker__grid">
+              <div className={THUMBNAIL_GRID_CLASS}>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -587,11 +606,9 @@ function ThumbnailPicker(props: Props) {
                   }}
                 />
                 <button
-                  className={
-                    'thumbnail-picker__item' +
-                    (uploadedThumbUrl ? '' : ' thumbnail-picker__item--action') +
-                    (selectedIndex === -2 ? ' thumbnail-picker__item--selected' : '')
-                  }
+                  className={`${THUMBNAIL_ITEM_CLASS} ${uploadedThumbUrl ? '' : THUMBNAIL_ITEM_ACTION_CLASS} ${
+                    selectedIndex === -2 ? THUMBNAIL_ITEM_SELECTED_CLASS : ''
+                  }`}
                   onClick={() => {
                     if (uploadedThumbUrl) {
                       setSelectedIndex(-2);
@@ -604,27 +621,25 @@ function ThumbnailPicker(props: Props) {
                 >
                   {uploadedThumbUrl ? (
                     <>
-                      <img src={uploadedThumbUrl} className="thumbnail-picker__image" alt={__('Uploaded thumbnail')} />
+                      <img src={uploadedThumbUrl} className={THUMBNAIL_IMAGE_CLASS} alt={__('Uploaded thumbnail')} />
                       {selectedIndex === -2 && isUploadInProgress && (
-                        <span className="thumbnail-picker__upload-status">
+                        <span className="tw:absolute tw:inset-0 tw:flex tw:flex-col tw:items-center tw:justify-center tw:gap-app-xs tw:bg-[rgba(0,0,0,0.55)] tw:text-app-small tw:font-bold tw:text-white">
                           <Spinner type="small" />
                           <span>{__('Uploading')}...</span>
                         </span>
                       )}
                     </>
                   ) : (
-                    <div className="thumbnail-picker__action-content">
+                    <div className="tw:flex tw:flex-col tw:items-center tw:gap-app-xxs tw:text-app-xsmall tw:font-semibold tw:text-app-text-subtitle">
                       <Icon icon={ICONS.PUBLISH} size={24} />
                       <span>{__('Upload')}</span>
                     </div>
                   )}
                 </button>
                 <button
-                  className={
-                    'thumbnail-picker__item' +
-                    (urlThumbUrl ? '' : ' thumbnail-picker__item--action') +
-                    (selectedIndex === -3 ? ' thumbnail-picker__item--selected' : '')
-                  }
+                  className={`${THUMBNAIL_ITEM_CLASS} ${urlThumbUrl ? '' : THUMBNAIL_ITEM_ACTION_CLASS} ${
+                    selectedIndex === -3 ? THUMBNAIL_ITEM_SELECTED_CLASS : ''
+                  }`}
                   onClick={() => {
                     if (urlThumbUrl) {
                       setSelectedIndex(-3);
@@ -642,9 +657,9 @@ function ThumbnailPicker(props: Props) {
                   type="button"
                 >
                   {urlThumbUrl ? (
-                    <img src={urlThumbUrl} className="thumbnail-picker__image" alt={__('URL thumbnail')} />
+                    <img src={urlThumbUrl} className={THUMBNAIL_IMAGE_CLASS} alt={__('URL thumbnail')} />
                   ) : (
-                    <div className="thumbnail-picker__action-content">
+                    <div className="tw:flex tw:flex-col tw:items-center tw:gap-app-xxs tw:text-app-xsmall tw:font-semibold tw:text-app-text-subtitle">
                       <Icon icon={ICONS.COPY_LINK} size={24} />
                       <span>{__('URL')}</span>
                     </div>
@@ -652,24 +667,20 @@ function ThumbnailPicker(props: Props) {
                 </button>
                 {editingURI && currentThumbnail && (
                   <button
-                    className={
-                      'thumbnail-picker__item' + (selectedIndex === -4 ? ' thumbnail-picker__item--selected' : '')
-                    }
+                    className={`${THUMBNAIL_ITEM_CLASS} ${selectedIndex === -4 ? THUMBNAIL_ITEM_SELECTED_CLASS : ''}`}
                     onClick={() => {
                       setSelectedIndex(-4);
                       onThumbnailSelected?.(currentThumbnail);
                     }}
                     type="button"
                   >
-                    <img src={currentThumbnail} className="thumbnail-picker__image" alt={__('Current thumbnail')} />
-                    <span className="thumbnail-picker__label">{__('Current')}</span>
+                    <img src={currentThumbnail} className={THUMBNAIL_IMAGE_CLASS} alt={__('Current thumbnail')} />
+                    <span className={THUMBNAIL_LABEL_CLASS}>{__('Current')}</span>
                   </button>
                 )}
                 {imagePreviewUrl && (
                   <button
-                    className={
-                      'thumbnail-picker__item' + (selectedIndex === -5 ? ' thumbnail-picker__item--selected' : '')
-                    }
+                    className={`${THUMBNAIL_ITEM_CLASS} ${selectedIndex === -5 ? THUMBNAIL_ITEM_SELECTED_CLASS : ''}`}
                     onClick={() => {
                       setSelectedIndex(-5);
                       if (imageFile) {
@@ -683,16 +694,15 @@ function ThumbnailPicker(props: Props) {
                     }}
                     type="button"
                   >
-                    <img src={imagePreviewUrl} className="thumbnail-picker__image" alt={__('Source image')} />
-                    <span className="thumbnail-picker__label">{__('Source')}</span>
+                    <img src={imagePreviewUrl} className={THUMBNAIL_IMAGE_CLASS} alt={__('Source image')} />
+                    <span className={THUMBNAIL_LABEL_CLASS}>{__('Source')}</span>
                   </button>
                 )}
                 {hasVideo && (filePath || remoteVideoUrl) && !extractionFailed && (
                   <button
-                    className={
-                      'thumbnail-picker__item thumbnail-picker__item--custom' +
-                      (selectedIndex === -1 ? ' thumbnail-picker__item--selected' : '')
-                    }
+                    className={`${THUMBNAIL_ITEM_CUSTOM_CLASS} ${
+                      selectedIndex === -1 ? THUMBNAIL_ITEM_SELECTED_CLASS : ''
+                    }`}
                     type="button"
                     onClick={async () => {
                       setSelectedIndex(-1);
@@ -715,17 +725,23 @@ function ThumbnailPicker(props: Props) {
                           }
                         }
                       }}
-                      className="thumbnail-picker__custom-video"
+                      className={`tw:block tw:aspect-video tw:w-full tw:bg-black tw:object-cover ${
+                        selectedIndex === -1 ? 'tw:opacity-100' : 'tw:opacity-40'
+                      }`}
                       muted
                       playsInline
                       disablePictureInPicture
                     />
-                    <div className="thumbnail-picker__custom-overlay">
+                    <div
+                      className={`tw:pointer-events-none tw:absolute tw:inset-0 tw:flex tw:flex-col tw:items-center tw:justify-center tw:gap-app-xxs tw:text-app-xsmall tw:font-semibold tw:text-app-text-subtitle ${
+                        selectedIndex === -1 ? 'tw:opacity-0' : ''
+                      }`}
+                    >
                       <Icon icon={ICONS.CAMERA} size={24} />
                       <span>{__('Custom')}</span>
                     </div>
                     <input
-                      className="thumbnail-picker__custom-slider"
+                      className={THUMBNAIL_CUSTOM_SLIDER_CLASS}
                       type="range"
                       min={0}
                       max={duration || 1}
@@ -748,7 +764,7 @@ function ThumbnailPicker(props: Props) {
                       }}
                     />
                     <button
-                      className="thumbnail-picker__expand-btn"
+                      className={THUMBNAIL_EXPAND_BUTTON_CLASS}
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -776,9 +792,9 @@ function ThumbnailPicker(props: Props) {
                 {frames.map((frame, index) => (
                   <button
                     key={frame.blobUrl}
-                    className={
-                      'thumbnail-picker__item' + (selectedIndex === index ? ' thumbnail-picker__item--selected' : '')
-                    }
+                    className={`${THUMBNAIL_ITEM_CLASS} ${
+                      selectedIndex === index ? THUMBNAIL_ITEM_SELECTED_CLASS : ''
+                    }`}
                     onClick={() => {
                       setSelectedIndex(index);
                       uploadFrame(frames[index]);
@@ -788,9 +804,9 @@ function ThumbnailPicker(props: Props) {
                     <img
                       src={frame.blobUrl}
                       alt={__('Thumbnail at %timestamp%', { timestamp: frame.label })}
-                      className="thumbnail-picker__image"
+                      className={THUMBNAIL_IMAGE_CLASS}
                     />
-                    <span className="thumbnail-picker__label">{frame.label}</span>
+                    <span className={THUMBNAIL_LABEL_CLASS}>{frame.label}</span>
                   </button>
                 ))}
               </div>
@@ -800,11 +816,13 @@ function ThumbnailPicker(props: Props) {
       )}
 
       {mode === 'manual' && duration > 0 && (
-        <div className="thumbnail-picker__manual">
-          <div className="thumbnail-picker__mode-header">
+        <div className="tw:flex tw:flex-col tw:gap-app-m">
+          <div className="tw:mb-app-m tw:flex tw:items-start tw:justify-between tw:gap-app-m">
             <div>
-              <h3 className="thumbnail-picker__title">{__('Manual frame selection')}</h3>
-              <p className="thumbnail-picker__subtitle">{__('Scrub through the video to find the perfect frame.')}</p>
+              <h3 className="tw:m-0">{__('Manual frame selection')}</h3>
+              <p className="tw:mt-app-xxs tw:mr-0 tw:mb-0 tw:ml-0 tw:text-app-text-subtitle">
+                {__('Scrub through the video to find the perfect frame.')}
+              </p>
             </div>
             <Button
               button="link"
@@ -818,7 +836,7 @@ function ThumbnailPicker(props: Props) {
           </div>
 
           {/* Video scrubber */}
-          <div className="thumbnail-picker__manual-video">
+          <div className="tw:aspect-video tw:max-w-full tw:overflow-hidden tw:rounded-app tw:bg-black">
             <video
               ref={(el) => {
                 manualVideoRef.current = el;
@@ -828,17 +846,17 @@ function ThumbnailPicker(props: Props) {
                   el.currentTime = manualTimestamp;
                 }
               }}
-              className="thumbnail-picker__video"
+              className="tw:block tw:h-full tw:w-full tw:object-contain"
               muted
               playsInline
             />
           </div>
 
-          <div className="thumbnail-picker__manual-controls">
-            <div className="thumbnail-picker__manual-range-row">
+          <div className="tw:flex tw:flex-col tw:gap-app-s">
+            <div className="tw:flex tw:items-center tw:gap-app-s">
               <input
                 id="thumbnail-picker-manual-range"
-                className="thumbnail-picker__manual-range"
+                className="tw:flex-1"
                 type="range"
                 min={0}
                 max={duration}
@@ -850,17 +868,19 @@ function ThumbnailPicker(props: Props) {
                   if (manualVideoRef.current) manualVideoRef.current.currentTime = ts;
                 }}
               />
-              <span className="thumbnail-picker__manual-timestamp">{formatTimestamp(manualTimestamp)}</span>
+              <span className="tw:min-w-[3.5rem] tw:text-right tw:tabular-nums">
+                {formatTimestamp(manualTimestamp)}
+              </span>
             </div>
           </div>
 
           {error && (
-            <div className="thumbnail-picker__error">
+            <div className="tw:flex tw:flex-col tw:items-center tw:gap-app-s tw:py-app-l tw:text-app-text-subtitle">
               <p>{error}</p>
             </div>
           )}
 
-          <div className="thumbnail-picker__actions">
+          <div className="tw:mt-app-m tw:flex tw:flex-wrap tw:items-center tw:gap-app-m">
             <Button
               button="secondary"
               label={manualLoading ? __('Capturing...') : __('Capture this frame')}
@@ -870,16 +890,16 @@ function ThumbnailPicker(props: Props) {
           </div>
 
           {manualFrame && (
-            <div className="thumbnail-picker__manual-preview">
-              <div className="thumbnail-picker__item thumbnail-picker__item--selected">
+            <div className="tw:max-w-[28rem]">
+              <div className={`${THUMBNAIL_ITEM_CLASS} ${THUMBNAIL_ITEM_SELECTED_CLASS}`}>
                 <img
                   src={manualFrame.blobUrl}
                   alt={__('Thumbnail at %timestamp%', { timestamp: manualFrame.label })}
-                  className="thumbnail-picker__image"
+                  className={THUMBNAIL_IMAGE_CLASS}
                 />
-                <span className="thumbnail-picker__label">{manualFrame.label}</span>
+                <span className={THUMBNAIL_LABEL_CLASS}>{manualFrame.label}</span>
               </div>
-              <div className="thumbnail-picker__actions">
+              <div className="tw:mt-app-m tw:flex tw:flex-wrap tw:items-center tw:gap-app-m">
                 <Button
                   button="primary"
                   label={uploading ? __('Uploading...') : __('Use this frame')}
@@ -893,8 +913,14 @@ function ThumbnailPicker(props: Props) {
       )}
 
       {extractorExpanded && (filePath || remoteVideoUrl) && (
-        <div className="thumbnail-picker__lightbox" onClick={() => setExtractorExpanded(false)}>
-          <div className="thumbnail-picker__lightbox-content" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="tw:fixed tw:inset-0 tw:z-[10000] tw:flex tw:items-center tw:justify-center tw:bg-[rgba(0,0,0,0.75)] tw:backdrop-blur-[4px] tw:[animation:thumbnail-lightbox-in_0.2s_ease]"
+          onClick={() => setExtractorExpanded(false)}
+        >
+          <div
+            className="tw:relative tw:w-[90vw] tw:max-w-[900px] tw:overflow-hidden tw:rounded-app tw:bg-app-card tw:[animation:thumbnail-lightbox-scale_0.2s_ease] tw:[box-shadow:0_20px_60px_rgba(0,0,0,0.5)]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <video
               ref={(el) => {
                 expandedVideoRef.current = el;
@@ -903,13 +929,13 @@ function ThumbnailPicker(props: Props) {
                   el.currentTime = manualTimestamp;
                 }
               }}
-              className="thumbnail-picker__lightbox-video"
+              className="tw:block tw:aspect-video tw:w-full tw:bg-black tw:object-contain"
               muted
               playsInline
               disablePictureInPicture
             />
             <input
-              className="thumbnail-picker__lightbox-slider"
+              className={THUMBNAIL_LIGHTBOX_SLIDER_CLASS}
               type="range"
               min={0}
               max={duration || 1}
@@ -922,10 +948,12 @@ function ThumbnailPicker(props: Props) {
                 if (manualVideoRef.current) manualVideoRef.current.currentTime = ts;
               }}
             />
-            <div className="thumbnail-picker__lightbox-info">
-              <span className="thumbnail-picker__lightbox-timestamp">{formatTimestamp(manualTimestamp)}</span>
+            <div className="tw:flex tw:justify-center tw:py-app-xxs">
+              <span className="tw:text-app-small tw:tabular-nums tw:text-app-text-subtitle">
+                {formatTimestamp(manualTimestamp)}
+              </span>
             </div>
-            <div className="thumbnail-picker__lightbox-actions">
+            <div className="tw:flex tw:justify-center tw:gap-app-s tw:pt-app-s tw:pr-app-m tw:pb-app-m tw:pl-app-m">
               <Button
                 button="primary"
                 label={uploading ? __('Uploading...') : __('Use this frame')}
@@ -940,7 +968,7 @@ function ThumbnailPicker(props: Props) {
               <Button button="secondary" label={__('Close')} onClick={() => setExtractorExpanded(false)} />
             </div>
             <button
-              className="thumbnail-picker__lightbox-close"
+              className={THUMBNAIL_LIGHTBOX_CLOSE_CLASS}
               type="button"
               onClick={() => setExtractorExpanded(false)}
             >

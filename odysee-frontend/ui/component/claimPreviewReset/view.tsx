@@ -2,7 +2,6 @@ import React from 'react';
 import { SITE_HELP_EMAIL } from 'config';
 import Button from 'component/button';
 import { killStream } from 'util/livestream';
-import 'scss/component/claim-preview-reset.scss';
 // import { iconClasses } from '@mui/material';
 import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
@@ -47,9 +46,9 @@ const ClaimPreviewReset = (props: Props) => {
   };
 
   return (
-    <p className={'claim-preview-reset'}>
-      <span className={'claim-preview-reset__hint'}>
-        <Icon icon={ICONS.INFO} />
+    <p className="claim-preview-reset-surface tw:flex tw:flex-col tw:items-center tw:justify-between tw:rounded-app tw:border tw:border-app-primary tw:bg-[rgba(var(--color-primary-static),0.1)] tw:py-app-xxs tw:pr-app-xxs tw:pl-app-s tw:text-app-small tw:min-xsmall:flex-row">
+      <span className="tw:inline-block tw:text-app-text tw:min-xsmall:mr-app-m tw:upto-small:mb-app-s">
+        <Icon className="tw:mr-app-xxxs tw:mb-[-3px]" icon={ICONS.INFO} />
         {__(
           "If you're having trouble starting a stream or if your stream shows that you're live but aren't, try a reset. If the problem persists, please reach out at %SITE_HELP_EMAIL%.",
           {
@@ -60,7 +59,7 @@ const ClaimPreviewReset = (props: Props) => {
       <Button
         button="primary"
         label={__('Reset stream')}
-        className={'claim-preview-reset__button'}
+        className="claim-preview-reset-button-surface tw:w-full tw:min-xsmall:mt-0 tw:min-xsmall:w-auto"
         onClick={handleClick}
       />
     </p>

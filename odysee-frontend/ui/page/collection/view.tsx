@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import CollectionItemsList from 'component/collectionItemsList';
 import Page from 'component/page';
@@ -7,6 +8,7 @@ import { COLLECTION_PAGE } from 'constants/urlParams';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import CollectionPublishForm from './internal/collectionPublishForm';
 import CollectionHeader from './internal/collectionHeader';
+import { PLAYLISTS_FIXED_BOTTOM_CLASS, PLAYLISTS_PAGE_CLASS } from '../playlists/classes';
 import Spinner from 'component/spinner';
 import Card from 'component/common/card';
 import Button from 'component/button';
@@ -23,13 +25,15 @@ import {
   selectCollectionHasUnsavedEditsForId,
 } from 'redux/selectors/collections';
 import { isHyperbeamSignedIn } from 'util/hyperbeamAccount';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 import { doResolveClaimId as doResolveClaimIdAction } from 'redux/actions/claims';
 import {
   doCollectionEdit as doCollectionEditAction,
   doFetchItemsInCollection as doFetchItemsInCollectionAction,
   doRemoveFromUnsavedChangesCollectionsForCollectionId as doRemoveUnsavedAction,
 } from 'redux/actions/collections';
-import '../playlists/style.scss';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { TAB_PANEL_CLASS } from 'component/common/tabs-classes';
 
 type Props = {
   collectionId?: string;
@@ -133,7 +137,7 @@ const CollectionPage = (props: Props) => {
   if (geoRestriction) {
     return (
       <Page noSideNavigation={isEmbedPath}>
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Yrbl
             title={__('Content unavailable')}
             subtitle={geoRestriction.message ? __(geoRestriction.message) : ''}
@@ -152,7 +156,7 @@ const CollectionPage = (props: Props) => {
 
   if (!hasPrivate && isResolvingCollection) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     );
@@ -161,7 +165,7 @@ const CollectionPage = (props: Props) => {
   if (!collection && !isResolvingCollection) {
     return (
       <Page noSideNavigation={isEmbedPath}>
-        <div className="main--empty empty">{__('Nothing here')}</div>
+        <div className={`${PAGE_MAIN_EMPTY_CLASS} ${EMPTY_CLASS}`}>{__('Nothing here')}</div>
       </Page>
     );
   }
@@ -194,7 +198,7 @@ const CollectionPage = (props: Props) => {
   }
 
   return (
-    <Page className="playlists-page__wrapper" noSideNavigation={isEmbedPath}>
+    <Page className={PLAYLISTS_PAGE_CLASS} noSideNavigation={isEmbedPath}>
       <div className="section card-stack">
         <CollectionPageContext.Provider
           value={{
@@ -219,12 +223,12 @@ const CollectionPage = (props: Props) => {
         </CollectionPageContext.Provider>
       </div>
       {showEdit && (
-        <div className="card-fixed-bottom">
+        <div className={PLAYLISTS_FIXED_BOTTOM_CLASS}>
           <Card
-            className="card--after-tabs tab__panel"
+            className={`card--after-tabs ${TAB_PANEL_CLASS}`}
             actions={
               <>
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   <Button
                     button="primary"
                     label={shouldResolveCollectionItems ? __('Loading') : __('Save')}

@@ -8,6 +8,8 @@ import UserPasswordReset from 'component/userPasswordReset';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectEmailToVerify, selectEmailNewErrorMessage, selectEmailNewIsPending } from 'redux/selectors/user';
 import { doUserSignIn, doClearEmailEntry } from 'redux/actions/user';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PAGE_MAIN_SIGN_IN_CLASS } from 'component/page/classes';
 
 type Props = {
   onHandleEmailOnly: () => void;
@@ -33,7 +35,7 @@ export default function UserSignInPassword(props: Props) {
   }
 
   return (
-    <div className="main__sign-in">
+    <div className={PAGE_MAIN_SIGN_IN_CLASS}>
       {forgotPassword ? (
         <UserPasswordReset />
       ) : (
@@ -78,7 +80,7 @@ export default function UserSignInPassword(props: Props) {
                 helper={<Button button="link" label={__('Forgot Password?')} onClick={() => setForgotPassword(true)} />}
               />
 
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button button="primary" type="submit" label={__('Continue')} disabled={!password || isPending} />
                 <Button button="link" onClick={handleChangeToSignIn} label={__('Use Magic Link')} />
               </div>

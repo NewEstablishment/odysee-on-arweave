@@ -22,6 +22,7 @@ import Tooltip from 'component/common/tooltip';
 import FileThumbnail from 'component/fileThumbnail';
 import UriIndicator from 'component/uriIndicator';
 import PreviewOverlayProperties from 'component/previewOverlayProperties';
+import { CLAIM_PREVIEW_FILE_PROPERTY_OVERLAY_CLASS } from 'component/previewOverlayProperties/classes';
 import ClaimTags from 'component/claimTags';
 import SubscribeButton from 'component/subscribeButton';
 import JoinMembershipButton from 'component/joinMembershipButton';
@@ -38,8 +39,31 @@ import ButtonFloatingPlayer from 'component/buttonFloatingPlayer';
 import ClaimMenuList from 'component/claimMenuList';
 import ClaimPreviewReset from 'component/claimPreviewReset';
 import ClaimPreviewLoading from 'component/common/claim-preview-loading';
+import { DMCA_INFO_CLASS } from 'component/common/content-restriction-classes';
 import ClaimPreviewHidden from './internal/claim-preview-no-mature';
 import ClaimPreviewNoContent from './internal/claim-preview-no-content';
+import { CLAIM_PREVIEW_HOVER_ACTIONS_GRID_CLASS } from './hover-action-classes';
+import {
+  CLAIM_PREVIEW_ACTIONS_CLASS,
+  CLAIM_PREVIEW_BACKGROUND_CLASS,
+  CLAIM_PREVIEW_ACTIVE_WRAPPER_CLASS,
+  CLAIM_PREVIEW_CHANNEL_CLASS,
+  CLAIM_PREVIEW_CHANNEL_SUB_COUNT_CLASS,
+  CLAIM_PREVIEW_CHANNEL_STAKED_CLASS,
+  CLAIM_PREVIEW_COLLECTION_EDITING_CLASS,
+  CLAIM_PREVIEW_DESCRIPTION_CLASS,
+  CLAIM_PREVIEW_LIST_INDEX_CLASS,
+  CLAIM_PREVIEW_LARGE_CLASS,
+  CLAIM_PREVIEW_LIVE_WRAPPER_CLASS,
+  CLAIM_PREVIEW_MEMBERSHIP_CLASS,
+  CLAIM_PREVIEW_PENDING_CLASS,
+  CLAIM_PREVIEW_PLAYLIST_ROW_CLASS,
+  CLAIM_PREVIEW_RECOMMENDATION_WRAPPER_CLASS,
+  CLAIM_PREVIEW_ROOT_CLASS,
+  CLAIM_PREVIEW_SMALL_CLASS,
+  CLAIM_PREVIEW_TAGS_CLASS,
+  CLAIM_PREVIEW_TEXT_CLASS,
+} from './classes';
 import { ENABLE_NO_SOURCE_CLAIMS } from 'config';
 import { getThumbnailCdnUrl } from 'util/thumbnail';
 import CollectionEditButtons from 'component/collectionEditButtons';
@@ -233,7 +257,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
     return (
       <div className="media__subtitle">
         <Tooltip title={formattedSubCountLocale} followCursor placement="top">
-          <span className="claim-preview__channel-sub-count">
+          <span className={CLAIM_PREVIEW_CHANNEL_SUB_COUNT_CLASS} data-claim-preview-channel-sub-count>
             {getChannelSubCountStr(channelSubCount, formattedSubCount)}
           </span>
         </Tooltip>
@@ -422,7 +446,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
       !claimIsMine &&
       !hideJoin &&
       (!banState.muted || showUserBlocked) && (
-        <div className={'membership-button-wrapper' + (type ? ' ' + type : '')}>
+        <div className={classnames(CLAIM_PREVIEW_MEMBERSHIP_CLASS, type)} data-claim-preview-membership>
           <JoinMembershipButton uri={uri} />
         </div>
       ),
@@ -485,10 +509,12 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
         className={classnames('claim-preview__wrapper', {
           'claim-preview__wrapper--row': !type,
           'claim-preview__wrapper--inline': type === 'inline',
-          'claim-preview__wrapper--playlist-row': type === 'small' && collectionId,
-          'claim-preview__wrapper--active': active,
-          'non-clickable': !playlistPreviewItem || nonClickable,
+          [CLAIM_PREVIEW_PLAYLIST_ROW_CLASS]: type === 'small' && collectionId,
+          [CLAIM_PREVIEW_ACTIVE_WRAPPER_CLASS]: active,
+          'tw:pointer-events-none': !playlistPreviewItem || nonClickable,
         })}
+        data-claim-preview-active-wrapper={active ? true : undefined}
+        data-claim-preview-playlist-row={type === 'small' && collectionId ? true : undefined}
       >
         <ClaimPreviewHidden
           message={!claim && playlistPreviewItem ? __('Deleted content') : __('This content is hidden')}
@@ -536,17 +562,20 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
         'claim-preview__wrapper--row': !type,
         'claim-preview__wrapper--channel': isChannelUri && type !== 'inline',
         'claim-preview__wrapper--inline': type === 'inline',
-        'claim-preview__wrapper--recommendation': type === 'small',
-        'claim-preview__wrapper--playlist-row': type === 'small' && collectionId,
-        'claim-preview__wrapper--live': isLivestreamActive,
-        'claim-preview__wrapper--active': active,
-        'non-clickable': nonClickable,
+        [CLAIM_PREVIEW_RECOMMENDATION_WRAPPER_CLASS]: type === 'small',
+        [CLAIM_PREVIEW_PLAYLIST_ROW_CLASS]: type === 'small' && collectionId,
+        [CLAIM_PREVIEW_LIVE_WRAPPER_CLASS]: isLivestreamActive,
+        [CLAIM_PREVIEW_ACTIVE_WRAPPER_CLASS]: active,
+        'tw:pointer-events-none': nonClickable,
       })}
+      data-claim-preview-active-wrapper={active ? true : undefined}
+      data-claim-preview-playlist-row={type === 'small' && collectionId ? true : undefined}
     >
       <>
         {!type && (
           <div
-            className="claim-preview__background"
+            className={CLAIM_PREVIEW_BACKGROUND_CLASS}
+            data-claim-preview-background
             style={
               backgroundImage && {
                 backgroundImage: 'url(' + backgroundImage + ')',
@@ -556,20 +585,23 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
         )}
 
         <div
-          className={classnames('claim-preview', {
-            'claim-preview--small': type === 'small' || type === 'tooltip',
-            'claim-preview--large': type === 'large',
+          className={classnames(CLAIM_PREVIEW_ROOT_CLASS, {
+            [CLAIM_PREVIEW_SMALL_CLASS]: type === 'small' || type === 'tooltip',
+            [CLAIM_PREVIEW_LARGE_CLASS]: type === 'large',
             'claim-preview--inline': type === 'inline',
             'claim-preview--tooltip': type === 'tooltip',
-            'claim-preview--channel': isChannelUri,
+            [CLAIM_PREVIEW_CHANNEL_CLASS]: isChannelUri,
             'claim-preview--visited': !isChannelUri && !claimIsMine && hasVisitedUri,
-            'claim-preview--pending': pending,
-            'claim-preview--collection-editing': isMyCollection && showEdit,
+            [CLAIM_PREVIEW_PENDING_CLASS]: pending,
+            [CLAIM_PREVIEW_COLLECTION_EDITING_CLASS]: isMyCollection && showEdit,
           })}
+          data-claim-preview-pending={pending ? true : undefined}
+          data-claim-preview-small={type === 'small' || type === 'tooltip' ? true : undefined}
+          data-claim-preview-collection-editing={isMyCollection && showEdit ? true : undefined}
         >
           {!hideRepostLabel && <ClaimRepostAuthor uri={uri} short={false} />}
           {showIndexes && (
-            <span className="card__subtitle card__subtitle--small-no-margin claim-preview__list-index">
+            <span className={`${CLAIM_PREVIEW_LIST_INDEX_CLASS} tw:m-0 tw:text-app-xsmall tw:text-app-text-subtitle`}>
               {indexInContainer + 1}
             </span>
           )}
@@ -601,7 +633,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
                     externalHover={rowHover}
                   >
                     {!smallThumbnail && (
-                      <div className="claim-preview__hover-actions-grid">
+                      <div className={CLAIM_PREVIEW_HOVER_ACTIONS_GRID_CLASS}>
                         {showCollectionContext && (
                           <>
                             <FileWatchLaterLink focusable={false} uri={repostedContentUri} />
@@ -613,7 +645,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
                         )}
                       </div>
                     )}
-                    <div className="claim-preview__file-property-overlay">
+                    <div className={CLAIM_PREVIEW_FILE_PROPERTY_OVERLAY_CLASS} data-claim-preview-file-property-overlay>
                       <PreviewOverlayProperties
                         uri={uri}
                         small={type === 'small'}
@@ -629,7 +661,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
               ) : (
                 <>
                   <FileThumbnail thumbnail={thumbnailUrl} uri={uri}>
-                    <div className="claim-preview__file-property-overlay">
+                    <div className={CLAIM_PREVIEW_FILE_PROPERTY_OVERLAY_CLASS} data-claim-preview-file-property-overlay>
                       <PreviewOverlayProperties
                         uri={uri}
                         small={type === 'small'}
@@ -645,7 +677,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
             </>
           )}
 
-          <div className="claim-preview__text">
+          <div className={CLAIM_PREVIEW_TEXT_CLASS}>
             <div className="claim-preview-metadata">
               <div className="claim-preview-info">
                 {pending ? (
@@ -669,7 +701,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
                       e.stopPropagation();
                     }}
                   >
-                    <div className="dmca-info">{__('DMCA flagged')}</div>
+                    <div className={DMCA_INFO_CLASS}>{__('DMCA flagged')}</div>
                   </a>
                 )}
                 {banState.filtered && claimIsMine && (
@@ -681,14 +713,14 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
                       e.stopPropagation();
                     }}
                   >
-                    <div className="dmca-info">{__('Filtered')}</div>
+                    <div className={DMCA_INFO_CLASS}>{__('Filtered')}</div>
                   </a>
                 )}
                 {(pending || !!reflectingProgress) && <PublishPending uri={uri} />}
               </div>
               <div className="claim-tile__info">
                 {!isChannelUri && signingChannel && (
-                  <div className="claim-preview__channel-staked">
+                  <div className={CLAIM_PREVIEW_CHANNEL_STAKED_CLASS} data-claim-preview-channel-staked>
                     <UriIndicator focusable={false} uri={uri} link hideAnonymous external={isEmbed}>
                       <ChannelThumbnail uri={signingChannel.permanent_url} xsmall />
                     </UriIndicator>
@@ -699,7 +731,7 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
 
                 {type !== 'small' && (
                   <>
-                    <div className="claim-preview__tags">
+                    <div className={CLAIM_PREVIEW_TAGS_CLASS} data-claim-preview-tags>
                       {claim && (
                         <React.Fragment>
                           {typeof properties === 'function'
@@ -717,14 +749,14 @@ const ClaimPreview = forwardRef<any, Props>((props: Props, ref: any) => {
               {(pending || !!reflectingProgress) && <PublishPending uri={uri} />}
 
               {!type && (
-                <div className="description__wrapper">
+                <div className={CLAIM_PREVIEW_DESCRIPTION_CLASS} data-claim-preview-description>
                   <div className="description">{claim?.value?.description || __('No description available.')}</div>
                 </div>
               )}
             </div>
 
             {type !== 'small' && (!pending || !type) && isChannelUri && (
-              <div className="claim-preview__actions">
+              <div className={CLAIM_PREVIEW_ACTIONS_CLASS}>
                 {!hideJoin && <JoinButton />}
                 {!pending && (
                   <>

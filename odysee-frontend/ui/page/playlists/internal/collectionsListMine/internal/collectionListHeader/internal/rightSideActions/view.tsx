@@ -10,6 +10,8 @@ import Icon from 'component/common/icon';
 import Button from 'component/button';
 import { useAppDispatch } from 'redux/hooks';
 import { doOpenModal } from 'redux/actions/app';
+import { CLAIM_SEARCH_MENU_GROUP_CLASS, CLAIM_SEARCH_WRAPPER_WRAP_CLASS } from 'component/claimListHeader/classes';
+import { WUNDERBAR_INLINE_CLASS, WUNDERBAR_INPUT_INLINE_CLASS } from 'component/wunderbar/classes';
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -64,16 +66,16 @@ const RightSideActions = () => {
   }
 
   return (
-    <div className="claim-search__wrapper--wrap">
+    <div className={CLAIM_SEARCH_WRAPPER_WRAP_CLASS}>
       {/* Search Field */}
-      <div className="claim-search__menu-group">
-        <Form onSubmit={() => {}} className="wunderbar--inline">
+      <div className={CLAIM_SEARCH_MENU_GROUP_CLASS}>
+        <Form onSubmit={() => {}} className={WUNDERBAR_INLINE_CLASS}>
           <Icon icon={ICONS.SEARCH} />
           <FormField
             name="collection_search"
             onFocus={onTextareaFocus}
             onBlur={onTextareaBlur}
-            className="wunderbar__input--inline"
+            className={WUNDERBAR_INPUT_INLINE_CLASS}
             value={searchText}
             onChange={(e) => handleSearchTextChange(e.target.value)}
             type="text"

@@ -14,6 +14,9 @@ import {
   selectUser2FAPending,
 } from 'redux/selectors/user';
 import { doToast } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PAGE_MAIN_SIGN_UP_CLASS } from 'component/page/classes';
+import { HELP_CARD_ACTIONS_CLASS } from 'component/common/help-classes';
 
 const THIRTY_SECONDS_IN_MS = 30000;
 
@@ -69,7 +72,7 @@ const UserEmailVerify = React.memo(function UserEmailVerify(props: { cancelButto
   }, [wait, email, resendVerificationEmail, toast]);
 
   return (
-    <div className="main__sign-up">
+    <div className={PAGE_MAIN_SIGN_UP_CLASS}>
       <Card
         title={isReturningUser ? __('Check Your email') : __('Confirm your account')}
         subtitle={
@@ -96,7 +99,7 @@ const UserEmailVerify = React.memo(function UserEmailVerify(props: { cancelButto
         }
         actions={
           <React.Fragment>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="primary"
                 label={__('Resend Link')}
@@ -105,7 +108,7 @@ const UserEmailVerify = React.memo(function UserEmailVerify(props: { cancelButto
               />
               <UserSignOutButton label={__('Start Over')} />
             </div>
-            <p className="help--card-actions">
+            <p className={HELP_CARD_ACTIONS_CLASS}>
               <I18nMessage
                 tokens={{
                   help_link: <Button button="link" href={`mailto:${SITE_HELP_EMAIL}`} label={`${SITE_HELP_EMAIL}`} />,

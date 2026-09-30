@@ -46,6 +46,7 @@ import classnames from 'classnames';
 import describeUnknown from 'util/describeUnknown';
 import LivestreamSourceSelector from 'component/livestreamSourceSelector/view';
 import type { VideoSource, AudioSource } from 'component/livestreamSourceSelector/view';
+import { LIVESTREAM_SOURCE_SELECTOR_CLASSES as SOURCE_CLASSES } from 'component/livestreamSourceSelector/classes';
 import LivestreamCompositor, { ChatWidgetEditPreview } from 'component/livestreamCompositor/view';
 import LivestreamCropSelector from 'component/livestreamCropSelector/view';
 import LivestreamSourceSettings from 'component/livestreamSourceSettings/view';
@@ -53,7 +54,7 @@ import SpacemanPng from './spaceman.png';
 import { PLACEHOLDER_MESSAGES, PLACEHOLDER_HYPERCHATS, hyperchatColor } from 'util/livestreamChatPlaceholders';
 import type { CompositorLayer } from 'component/livestreamCompositor/view';
 import { AudioMixer } from 'util/audioMixer';
-import './style.scss';
+import { LIVESTREAM_STUDIO_CLASSES as C } from './classes';
 
 type Props = {
   streamKey: string | null;
@@ -341,7 +342,7 @@ function StreamPreview({ canvasRef }: { canvasRef: React.RefObject<HTMLCanvasEle
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
   }, [canvasRef]);
-  return <canvas ref={mirrorRef} className="livestream-studio__preview-canvas" />;
+  return <canvas ref={mirrorRef} className={C.previewCanvas} />;
 }
 
 function getCodecAttemptOrder(
@@ -2378,8 +2379,8 @@ export default function LivestreamStudio(props: Props) {
 
   if (!livestreamEnabled) {
     return (
-      <div className="livestream-studio">
-        <div className="livestream-studio__disabled">
+      <div className={C.root}>
+        <div className={C.disabled}>
           <svg
             width="48"
             height="48"
@@ -2403,7 +2404,7 @@ export default function LivestreamStudio(props: Props) {
 
   return (
     <div
-      className={classnames('livestream-studio', { 'livestream-studio--floating': isFloating })}
+      className={classnames(C.root, { [C.floating]: isFloating })}
       onMouseDown={(e) => {
         if (!(e.target as HTMLElement).closest('.livestream-compositor')) {
           setSelectedLayerId(null);
@@ -2411,21 +2412,21 @@ export default function LivestreamStudio(props: Props) {
       }}
     >
       {/* Main Stage + Sources */}
-      <div className="livestream-studio__stage-row">
-        <div className="livestream-studio__stage-column">
-          <div className="livestream-studio__stage">
-            <div className="livestream-studio__preview-tabs">
+      <div className={C.stageRow}>
+        <div className={C.stageColumn}>
+          <div className={classnames(C.stage, { [C.stageLive]: isLive })}>
+            <div className={C.previewTabs}>
               <button
-                className={classnames('livestream-studio__preview-tab', {
-                  'livestream-studio__preview-tab--active': previewTab === 'preview',
+                className={classnames(C.previewTab, {
+                  [C.previewTabActive]: previewTab === 'preview',
                 })}
                 onClick={() => setPreviewTab('preview')}
               >
                 {__('Preview')}
               </button>
               <button
-                className={classnames('livestream-studio__preview-tab', {
-                  'livestream-studio__preview-tab--active': previewTab === 'compositor',
+                className={classnames(C.previewTab, {
+                  [C.previewTabActive]: previewTab === 'compositor',
                 })}
                 onClick={() => setPreviewTab('compositor')}
               >
@@ -2436,8 +2437,8 @@ export default function LivestreamStudio(props: Props) {
                 .map((layer) => (
                   <button
                     key={layer.id}
-                    className={classnames('livestream-studio__preview-tab', {
-                      'livestream-studio__preview-tab--active': previewTab === layer.id,
+                    className={classnames(C.previewTab, {
+                      [C.previewTabActive]: previewTab === layer.id,
                     })}
                     onClick={() => setPreviewTab(layer.id)}
                   >
@@ -2447,10 +2448,9 @@ export default function LivestreamStudio(props: Props) {
             </div>
 
             <div
-              className={classnames('livestream-studio__preview', {
-                'livestream-studio__preview--active': hasCamera,
-                'livestream-studio__preview--live': isLive,
-                'livestream-studio__preview--portrait': isMobile && isPortraitOrientation(),
+              className={classnames(C.preview, {
+                [C.previewActive]: hasCamera,
+                [C.previewPortrait]: isMobile && isPortraitOrientation(),
               })}
             >
               {(isFloating || previewTab === 'preview') && <StreamPreview canvasRef={compositorCanvasRef} />}
@@ -2545,13 +2545,13 @@ export default function LivestreamStudio(props: Props) {
               {justWentLive && <LivestreamConnectingAnimation status="connecting" onLive />}
 
               {hasCamera && (
-                <div className="livestream-studio__preview-overlay">
-                  <div className="livestream-studio__overlay-bottom">
+                <div className={C.previewOverlay}>
+                  <div className={C.overlayBottom}>
                     {isLive && (
                       <>
                         {/* Viewers (only if > 0) */}
                         {totalViewers > 0 && (
-                          <span className="livestream-studio__pill">
+                          <span className={C.pill}>
                             <svg
                               width="10"
                               height="10"
@@ -2575,14 +2575,14 @@ export default function LivestreamStudio(props: Props) {
                       const fps = isLive
                         ? formatFpsLabel(runtimeStats.fps ?? cs?.frameRate)
                         : formatFpsLabel(previewFrameFps ?? cs?.frameRate ?? runtimeStats.fps);
-                      return fps ? <span className="livestream-studio__pill">{fps}</span> : null;
+                      return fps ? <span className={C.pill}>{fps}</span> : null;
                     })()}
                     {/* Resolution */}
                     {(() => {
                       const outW = getOutputWidth();
                       const outH = getOutputHeight();
                       const res = formatResolutionLabel(`${outW}x${outH}`);
-                      return res ? <span className="livestream-studio__pill">{res}</span> : null;
+                      return res ? <span className={C.pill}>{res}</span> : null;
                     })()}
                     {isLive && (
                       <>
@@ -2593,7 +2593,7 @@ export default function LivestreamStudio(props: Props) {
                               ? serverMetrics.throughput.in_bps / 1000
                               : runtimeStats.videoBitrateKbps;
                           return bps != null && bps > 0 ? (
-                            <span className="livestream-studio__pill">
+                            <span className={C.pill}>
                               <svg
                                 width="9"
                                 height="9"
@@ -2613,10 +2613,10 @@ export default function LivestreamStudio(props: Props) {
                         })()}
                         {/* Codec pill */}
                         {runtimeStats.videoCodec && (
-                          <span className="livestream-studio__pill" title={runtimeStats.encoderImpl || ''}>
+                          <span className={C.pill} title={runtimeStats.encoderImpl || ''}>
                             {runtimeStats.videoCodec}
                             {runtimeStats.encoderImpl && (
-                              <span className="livestream-studio__pill-hw">
+                              <span className={C.pillHw}>
                                 {classifyEncoderImplementation(runtimeStats.encoderImpl) === 'hardware' ? 'HW' : 'SW'}
                               </span>
                             )}
@@ -2624,7 +2624,7 @@ export default function LivestreamStudio(props: Props) {
                         )}
                         {runtimeStats.qualityLimitationReason && runtimeStats.qualityLimitationReason !== 'none' && (
                           <span
-                            className="livestream-studio__pill"
+                            className={C.pill}
                             title={JSON.stringify(runtimeStats.qualityLimitationDurations || {})}
                           >
                             {formatQualityLimitationSummary(
@@ -2640,15 +2640,15 @@ export default function LivestreamStudio(props: Props) {
               )}
 
               {!hasCamera && (
-                <div className="livestream-studio__placeholder">
+                <div className={C.placeholder}>
                   {cameraAutoStarting && !errorMessage && (
-                    <p className="livestream-studio__placeholder-text" style={{ opacity: 0.5 }}>
+                    <p className={C.placeholderText} style={{ opacity: 0.5 }}>
                       {__('Starting camera...')}
                     </p>
                   )}
                   {!cameraAutoStarting && !errorMessage && (
                     <>
-                      <div className="livestream-studio__placeholder-icon">
+                      <div className={C.placeholderIcon}>
                         <svg
                           width="48"
                           height="48"
@@ -2663,12 +2663,12 @@ export default function LivestreamStudio(props: Props) {
                           <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                         </svg>
                       </div>
-                      {disabledReason && <p className="livestream-studio__placeholder-text">{disabledReason}</p>}
+                      {disabledReason && <p className={C.placeholderText}>{disabledReason}</p>}
                     </>
                   )}
                   {errorMessage && (
                     <>
-                      <div className="livestream-studio__placeholder-icon livestream-studio__placeholder-icon--error">
+                      <div className={classnames(C.placeholderIcon, C.placeholderIconError)}>
                         <svg
                           width="40"
                           height="40"
@@ -2683,8 +2683,8 @@ export default function LivestreamStudio(props: Props) {
                           <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10" />
                         </svg>
                       </div>
-                      <p className="livestream-studio__placeholder-error">{errorMessage}</p>
-                      <button className="livestream-studio__allow-camera-btn" onClick={requestCameraPreview}>
+                      <p className={C.placeholderError}>{errorMessage}</p>
+                      <button className={C.allowCameraButton} onClick={requestCameraPreview}>
                         {__('Try Again')}
                       </button>
                     </>
@@ -2695,11 +2695,11 @@ export default function LivestreamStudio(props: Props) {
 
             {/* Controls bar */}
             {hasCamera && (
-              <div className="livestream-studio__taskbar">
+              <div className={C.taskbar}>
                 <button
-                  className={classnames('livestream-studio__control-btn', {
-                    'livestream-studio__control-btn--on': micEnabled,
-                    'livestream-studio__control-btn--off': !micEnabled,
+                  className={classnames(C.controlButton, {
+                    [C.controlOn]: micEnabled,
+                    [C.controlOff]: !micEnabled,
                   })}
                   onClick={() => setMicEnabled(!micEnabled)}
                   disabled={isStopping}
@@ -2735,9 +2735,9 @@ export default function LivestreamStudio(props: Props) {
                 </button>
 
                 <button
-                  className={classnames('livestream-studio__control-btn', {
-                    'livestream-studio__control-btn--on': cameraEnabled,
-                    'livestream-studio__control-btn--off': !cameraEnabled,
+                  className={classnames(C.controlButton, {
+                    [C.controlOn]: cameraEnabled,
+                    [C.controlOff]: !cameraEnabled,
                   })}
                   onClick={() => setCameraEnabled(!cameraEnabled)}
                   disabled={isStopping}
@@ -2769,7 +2769,7 @@ export default function LivestreamStudio(props: Props) {
 
                 {isMobile && (
                   <button
-                    className="livestream-studio__control-btn"
+                    className={C.controlButton}
                     onClick={flipCamera}
                     disabled={isStopping}
                     title={facingMode === 'user' ? __('Switch to rear camera') : __('Switch to front camera')}
@@ -2793,15 +2793,15 @@ export default function LivestreamStudio(props: Props) {
                   </button>
                 )}
 
-                <div className="livestream-studio__taskbar-spacer" />
+                <div className={C.taskbarSpacer} />
 
                 {compositorLayers
                   .filter((l) => l.minimized)
                   .map((layer) => (
                     <button
                       key={layer.id}
-                      className={classnames('livestream-studio__taskbar-item', {
-                        'livestream-studio__taskbar-item--active': layer.id === selectedLayerId,
+                      className={classnames(C.taskbarItem, {
+                        [C.taskbarItemActive]: layer.id === selectedLayerId,
                       })}
                       onClick={() => {
                         setCompositorLayers((prev) =>
@@ -2817,9 +2817,9 @@ export default function LivestreamStudio(props: Props) {
 
                 {(isLive || p2pEnabled) && (
                   <button
-                    className={classnames('livestream-studio__control-btn livestream-studio__control-btn--p2p', {
-                      'livestream-studio__control-btn--p2p-active': p2pEnabled,
-                      'livestream-studio__control-btn--p2p-pulse': p2pEnabled,
+                    className={classnames(C.controlButton, C.controlP2p, {
+                      [C.controlP2pActive]: p2pEnabled,
+                      [C.controlP2pPulse]: p2pEnabled,
                     })}
                     onClick={() => {
                       if (p2pEnabled) {
@@ -2849,14 +2849,14 @@ export default function LivestreamStudio(props: Props) {
           </div>
 
           {savedCompositions.length > 0 && (
-            <div className="livestream-sources__box livestream-studio__saved-box">
-              <h3 className="livestream-sources__title">{__('Saved compositions')}</h3>
-              <div className="livestream-sources__subbox">
-                <div className="livestream-studio__saved-grid">
+            <div className={classnames(SOURCE_CLASSES.box, C.savedBox)}>
+              <h3 className={SOURCE_CLASSES.title}>{__('Saved compositions')}</h3>
+              <div className={SOURCE_CLASSES.subbox}>
+                <div className={C.savedGrid}>
                   {savedCompositions.map((c) => (
                     <div
                       key={c.id}
-                      className="livestream-studio__saved-item"
+                      className={C.savedItem}
                       role="button"
                       tabIndex={0}
                       onClick={() => handleLoadSaved(c)}
@@ -2869,16 +2869,16 @@ export default function LivestreamStudio(props: Props) {
                       title={__('Load composition')}
                     >
                       {c.thumbnail ? (
-                        <img className="livestream-studio__saved-thumb" src={c.thumbnail} alt={c.name} />
+                        <img className={C.savedThumb} src={c.thumbnail} alt={c.name} />
                       ) : (
-                        <div className="livestream-studio__saved-thumb livestream-studio__saved-thumb--empty" />
+                        <div className={classnames(C.savedThumb, C.savedThumbEmpty)} />
                       )}
-                      <div className="livestream-studio__saved-name" title={c.name}>
+                      <div className={C.savedName} title={c.name}>
                         {c.name}
                       </div>
                       <button
                         type="button"
-                        className="livestream-studio__saved-delete"
+                        className={C.savedDelete}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteSaved(c.id);
@@ -2895,7 +2895,7 @@ export default function LivestreamStudio(props: Props) {
           )}
         </div>
 
-        <div className="livestream-studio__sources-column">
+        <div className={C.sourcesColumn}>
           {(() => {
             const sourceTabLayer =
               previewTab !== 'preview' && previewTab !== 'compositor'
@@ -2958,10 +2958,10 @@ export default function LivestreamStudio(props: Props) {
           })()}
 
           {/* Primary Action - below video/audio boxes */}
-          <div className="livestream-studio__action-area">
+          <div className={C.actionArea}>
             <button
               type="button"
-              className="livestream-studio__save-comp-btn"
+              className={C.saveCompositionButton}
               onClick={() => setSaveModalOpen(true)}
               disabled={compositorLayers.length === 0}
             >
@@ -2974,7 +2974,8 @@ export default function LivestreamStudio(props: Props) {
               <>
                 <Button
                   button="primary"
-                  className="livestream-studio__go-live-btn"
+                  className={C.goLiveButton}
+                  contentClassName={C.goLiveContent}
                   onClick={handleGoLive}
                   disabled={Boolean(disabledReason) || status === 'requesting_permission' || existingStreamActive}
                   label={
@@ -2991,7 +2992,7 @@ export default function LivestreamStudio(props: Props) {
                   icon={status !== 'requesting_permission' ? ICONS.LIVESTREAM : undefined}
                 />
                 {existingStreamActive && (
-                  <p className="livestream-studio__hint-msg">
+                  <p className={C.hintMessage}>
                     {__('A stream is already live on this channel. End it before starting a new one.')}
                   </p>
                 )}
@@ -3000,7 +3001,8 @@ export default function LivestreamStudio(props: Props) {
             {isConnecting && (
               <Button
                 button="primary"
-                className="livestream-studio__go-live-btn livestream-studio__stop-btn"
+                className={classnames(C.goLiveButton, C.stopButton)}
+                contentClassName={C.goLiveContent}
                 onClick={handleCancel}
                 label={__('Cancel')}
               />
@@ -3008,7 +3010,8 @@ export default function LivestreamStudio(props: Props) {
             {isLive && (
               <Button
                 button="primary"
-                className="livestream-studio__go-live-btn livestream-studio__stop-btn"
+                className={classnames(C.goLiveButton, C.stopButton)}
+                contentClassName={C.goLiveContent}
                 onClick={handleStop}
                 disabled={isStopping}
                 label={__('End Stream')}
@@ -3017,36 +3020,41 @@ export default function LivestreamStudio(props: Props) {
             {isStopping && (
               <Button
                 button="primary"
-                className="livestream-studio__go-live-btn livestream-studio__stop-btn"
+                className={classnames(C.goLiveButton, C.stopButton)}
+                contentClassName={C.goLiveContent}
                 disabled
                 label={__('Ending stream...')}
               />
             )}
             {errorMessage && (status === 'error' || status === 'preview') && (
-              <p className="livestream-studio__error-msg">{errorMessage}</p>
+              <p className={C.errorMessage}>{errorMessage}</p>
             )}
-            {disabledReason && !hasCamera && <p className="livestream-studio__hint-msg">{disabledReason}</p>}
+            {disabledReason && !hasCamera && <p className={C.hintMessage}>{disabledReason}</p>}
           </div>
         </div>
       </div>
 
       {saveModalOpen && (
-        <div className="livestream-studio__modal-backdrop" onClick={() => setSaveModalOpen(false)}>
-          <div className="livestream-studio__modal" onClick={(e) => e.stopPropagation()}>
-            <h3 className="livestream-studio__modal-title">{__('Save composition')}</h3>
+        <div className={C.modalBackdrop} onClick={() => setSaveModalOpen(false)}>
+          <div className={C.modal} onClick={(e) => e.stopPropagation()}>
+            <h3 className={C.modalTitle}>{__('Save composition')}</h3>
             <input
               type="text"
-              className="livestream-studio__modal-input"
+              className={C.modalInput}
               placeholder={__('Composition name')}
               value={saveModalName}
               onChange={(e) => setSaveModalName(e.target.value)}
               autoFocus
             />
-            <div className="livestream-studio__modal-actions">
-              <button type="button" className="livestream-studio__modal-cancel" onClick={() => setSaveModalOpen(false)}>
+            <div className={C.modalActions}>
+              <button
+                type="button"
+                className={classnames(C.modalButton, C.modalCancel)}
+                onClick={() => setSaveModalOpen(false)}
+              >
                 {__('Cancel')}
               </button>
-              <button type="button" className="livestream-studio__modal-save" onClick={handleSaveComposition}>
+              <button type="button" className={classnames(C.modalButton, C.modalSave)} onClick={handleSaveComposition}>
                 {__('Save')}
               </button>
             </div>
@@ -3056,8 +3064,8 @@ export default function LivestreamStudio(props: Props) {
 
       {/* P2P seeding banner for streamer - hidden once enabled */}
       {isLive && !p2pEnabled && !showP2pConfirm && (
-        <div className="livestream-studio__p2p-banner">
-          <div className="livestream-studio__p2p-banner-icon">
+        <div className={C.p2pBanner}>
+          <div className={C.p2pBannerIcon}>
             <svg
               width="18"
               height="18"
@@ -3071,13 +3079,13 @@ export default function LivestreamStudio(props: Props) {
               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
             </svg>
           </div>
-          <div className="livestream-studio__p2p-banner-text">
-            <span className="livestream-studio__p2p-banner-title">{__('Help viewers with P2P')}</span>
-            <span className="livestream-studio__p2p-banner-sub">
+          <div className={C.p2pBannerText}>
+            <span className={C.p2pBannerTitle}>{__('Help viewers with P2P')}</span>
+            <span className={C.p2pBannerSub}>
               {__('Seed your stream directly to viewers via peer-to-peer. Reduces server load.')}
             </span>
           </div>
-          <button className="livestream-studio__p2p-banner-btn" onClick={() => setShowP2pConfirm(true)}>
+          <button className={C.p2pBannerButton} onClick={() => setShowP2pConfirm(true)}>
             {__('Enable')}
           </button>
         </div>
@@ -3085,13 +3093,11 @@ export default function LivestreamStudio(props: Props) {
 
       {/* Claim Preview - AFTER the button */}
       {nextStreamUri && (
-        <div className="livestream-studio__claim-section">
-          <div className="livestream-studio__claim-header">
-            <span className="livestream-studio__claim-label">
+        <div className={C.claimSection}>
+          <div className={C.claimHeader}>
+            <span className={C.claimLabel}>
               {__('Streaming to')}
-              {existingStreamActive && !isLive && (
-                <span className="livestream-studio__claim-live-badge">{__('LIVE')}</span>
-              )}
+              {existingStreamActive && !isLive && <span className={C.claimLiveBadge}>{__('LIVE')}</span>}
             </span>
           </div>
           <ClaimPreview uri={nextStreamUri} />
@@ -3099,7 +3105,7 @@ export default function LivestreamStudio(props: Props) {
       )}
 
       {!nextStreamUri && (
-        <div className="livestream-studio__no-claim">
+        <div className={C.noClaim}>
           <p>{__('No livestream claim found.')}</p>
           <Button
             button="link"
@@ -3119,8 +3125,8 @@ export default function LivestreamStudio(props: Props) {
 
       {/* P2P confirmation dialog */}
       {showP2pConfirm && (
-        <div className="livestream-studio__p2p-confirm">
-          <div className="livestream-studio__p2p-confirm-card">
+        <div className={C.p2pConfirm}>
+          <div className={C.p2pConfirmCard}>
             <svg
               width="24"
               height="24"
@@ -3139,9 +3145,9 @@ export default function LivestreamStudio(props: Props) {
                 'Your stream will be shared peer-to-peer with viewers. This reduces server load but your IP address may be visible to viewers. This also applies when you watch other livestreams.'
               )}
             </p>
-            <div className="livestream-studio__p2p-confirm-actions">
+            <div className={C.p2pConfirmActions}>
               <button
-                className="livestream-studio__p2p-confirm-btn livestream-studio__p2p-confirm-btn--primary"
+                className={classnames(C.p2pConfirmButton, C.p2pConfirmPrimary)}
                 onClick={() => {
                   dispatch(doSetClientSetting(SETTINGS.P2P_DELIVERY, true, prefsReady));
                   setShowP2pConfirm(false);
@@ -3150,7 +3156,7 @@ export default function LivestreamStudio(props: Props) {
                 {__('Always')}
               </button>
               <button
-                className="livestream-studio__p2p-confirm-btn livestream-studio__p2p-confirm-btn--outline"
+                className={classnames(C.p2pConfirmButton, C.p2pConfirmOutline)}
                 onClick={() => {
                   // Session only - set in redux but don't push to wallet
                   dispatch(doSetClientSetting(SETTINGS.P2P_DELIVERY, true));
@@ -3160,7 +3166,7 @@ export default function LivestreamStudio(props: Props) {
                 {__('Try now')}
               </button>
               <button
-                className="livestream-studio__p2p-confirm-btn livestream-studio__p2p-confirm-btn--secondary"
+                className={classnames(C.p2pConfirmButton, C.p2pConfirmSecondary)}
                 onClick={() => setShowP2pConfirm(false)}
               >
                 {__('Not now')}

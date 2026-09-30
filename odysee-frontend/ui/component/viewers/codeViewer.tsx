@@ -13,6 +13,7 @@ import { python } from '@codemirror/legacy-modes/mode/python';
 import { ruby } from '@codemirror/legacy-modes/mode/ruby';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { xml } from '@codemirror/legacy-modes/mode/xml';
+import { FILE_VIEWER_CLASSES } from './classes';
 
 type Props = {
   theme: string;
@@ -223,5 +224,5 @@ export default function CodeViewer(props: Props) {
     });
   }, [contentType]);
 
-  return <div className="file-render__content" ref={containerRef} />;
+  return <div className={FILE_VIEWER_CLASSES.content} ref={containerRef} />;
 }

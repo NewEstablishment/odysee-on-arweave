@@ -5,6 +5,7 @@ import React from 'react';
 import classnames from 'classnames';
 import { MATURE_TAGS } from 'constants/tags';
 import Button from 'component/button';
+import { TAG_CLASSES } from './classes';
 type Props = {
   name: string;
   title?: string;
@@ -41,14 +42,14 @@ function Tag(props: Props) {
       {...clickProps}
       disabled={disabled}
       title={title}
-      className={classnames('tag', {
-        'tag--disabled': disabled,
-        'tag--large': type === 'large',
-        'tag--remove': type === 'remove',
+      className={classnames(TAG_CLASSES.base, {
+        [TAG_CLASSES.disabled]: disabled,
+        [TAG_CLASSES.large]: type === 'large',
+        [TAG_CLASSES.remove]: type === 'remove',
         // tag--add only adjusts the color, which causes issues with mature tag color clashing
         'tag--add': !isMature && type === 'add',
-        'tag--mature': isMature,
-        'tag--flow': type === 'flow',
+        [TAG_CLASSES.mature]: isMature,
+        [TAG_CLASSES.flow]: type === 'flow',
       })}
       label={name}
       iconSize={12}

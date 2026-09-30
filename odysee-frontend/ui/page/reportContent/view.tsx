@@ -2,12 +2,13 @@ import React from 'react';
 import { useLocation } from 'react-router-dom';
 import Page from 'component/page';
 import ReportContent from 'component/reportContent';
+import { REPORT_CONTENT_PAGE_CLASS } from './classes';
 export default function ReportContentPage(props: any) {
   const location = useLocation();
   return (
     <Page
       noSideNavigation
-      className="main--report-content"
+      className={REPORT_CONTENT_PAGE_CLASS}
       backout={{
         backLabel: __('Done'),
         title: __('Report content'),

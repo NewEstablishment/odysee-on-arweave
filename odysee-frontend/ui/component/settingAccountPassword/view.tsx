@@ -12,6 +12,7 @@ import {
   doClearPasswordEntry as doClearPasswordEntryAction,
 } from 'redux/actions/user';
 import { doToast as doToastAction } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 export default function SettingAccountPassword() {
   const dispatch = useAppDispatch();
@@ -64,7 +65,7 @@ export default function SettingAccountPassword() {
           onChange={(e) => setNewPassword(e.target.value)}
         />
 
-        <div className="section__actions">
+        <div className={SECTION_CLASSES.actions}>
           <Button button="primary" type="submit" label={__('Set Password')} disabled={!newPassword} />
           {hasPassword ? (
             <Button button="link" label={__('Forgot Password?')} navigate={`/$/${PAGES.AUTH_PASSWORD_RESET}`} />

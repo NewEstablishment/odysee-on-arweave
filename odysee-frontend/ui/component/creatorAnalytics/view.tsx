@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import React from 'react';
@@ -24,7 +25,8 @@ import { selectModerationBlockList } from 'redux/selectors/comments';
 import { doSyncCommentModerationData } from 'redux/actions/comments';
 import { doFetchViewCount } from 'lbryinc';
 import { selectViewCount } from 'lbryinc';
-import './style.scss';
+import { CREATOR_ANALYTICS_CLASSES as C } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 type ChannelStats = {
   ChannelSubs: number;
@@ -56,13 +58,21 @@ function formatCurrency(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
-function TrendIndicator({ value, suffix = '' }: { value: number; suffix?: string }) {
+function TrendIndicator({
+  value,
+  suffix = '',
+  inheritStyle = false,
+}: {
+  value: number;
+  suffix?: string;
+  inheritStyle?: boolean;
+}) {
   if (value === 0) {
-    return <span className="dashboard__trend dashboard__trend--neutral">0{suffix}</span>;
+    return <span className={`${C.trend} ${C.trendNeutral} ${inheritStyle ? C.trendInherited : ''}`}>0{suffix}</span>;
   }
   const isPositive = value > 0;
   return (
-    <span className={`dashboard__trend ${isPositive ? 'dashboard__trend--up' : 'dashboard__trend--down'}`}>
+    <span className={`${C.trend} ${isPositive ? C.trendUp : C.trendDown} ${inheritStyle ? C.trendInherited : ''}`}>
       <Icon icon={isPositive ? ICONS.TRENDING : ICONS.DOWN} size={10} />
       {isPositive ? '+' : ''}
       {value}
@@ -222,7 +232,7 @@ export default function CreatorAnalytics(props: Props) {
 
   if (!stats && fetching) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner delayed />
       </div>
     );
@@ -235,7 +245,7 @@ export default function CreatorAnalytics(props: Props) {
         title={__('No stats available')}
         subtitle={__('Stats will appear once your content gets some views. Make sure data sharing is enabled.')}
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="primary" label={__('Upload Something')} onClick={() => navigate(`/$/${PAGES.UPLOAD}`)} />
           </div>
         }
@@ -246,108 +256,112 @@ export default function CreatorAnalytics(props: Props) {
   if (!stats) return null;
 
   return (
-    <div className="dashboard">
-      <div className="dashboard__overview">
-        <div className="dashboard__stat-card">
-          <div className="dashboard__stat-icon dashboard__stat-icon--red">
+    <div className={C.root}>
+      <div className={C.overview}>
+        <div className={C.statCard}>
+          <div className={C.statIconRed}>
             <Icon icon={ICONS.SUBSCRIBE} size={28} />
           </div>
-          <div className="dashboard__stat-body">
-            <span className="dashboard__stat-value">{formatNumber(stats.ChannelSubs)}</span>
-            <span className="dashboard__stat-label">{__('Followers')}</span>
+          <div className={C.statBody}>
+            <span className={C.statValue}>{formatNumber(stats.ChannelSubs)}</span>
+            <span className={C.statLabel}>{__('Followers')}</span>
             <TrendIndicator value={stats.ChannelSubChange} suffix={__(' this week')} />
           </div>
         </div>
 
-        <div className="dashboard__stat-card">
-          <div className="dashboard__stat-icon dashboard__stat-icon--green">
+        <div className={C.statCard}>
+          <div className={C.statIconGreen}>
             <Icon icon={ICONS.EYE} size={28} />
           </div>
-          <div className="dashboard__stat-body">
-            <span className="dashboard__stat-value">{formatNumber(stats.AllContentViews)}</span>
-            <span className="dashboard__stat-label">{__('Total Views')}</span>
+          <div className={C.statBody}>
+            <span className={C.statValue}>{formatNumber(stats.AllContentViews)}</span>
+            <span className={C.statLabel}>{__('Total Views')}</span>
             <TrendIndicator value={stats.AllContentViewChange} suffix={__(' this week')} />
           </div>
         </div>
 
-        <div className="dashboard__stat-card">
-          <div className="dashboard__stat-icon dashboard__stat-icon--blue">
+        <div className={C.statCard}>
+          <div className={C.statIconBlue}>
             <Icon icon={ICONS.PUBLISH} size={28} />
           </div>
-          <div className="dashboard__stat-body">
-            <span className="dashboard__stat-value">{channelClaims.length}</span>
-            <span className="dashboard__stat-label">{__('Uploads')}</span>
+          <div className={C.statBody}>
+            <span className={C.statValue}>{channelClaims.length}</span>
+            <span className={C.statLabel}>{__('Uploads')}</span>
           </div>
         </div>
 
         {hasMemberships && (
           <>
-            <div className="dashboard__stat-card">
-              <div className="dashboard__stat-icon">
+            <div className={C.statCard}>
+              <div>
                 <Icon icon={ICONS.MEMBERSHIP} size={20} />
               </div>
-              <div className="dashboard__stat-body">
-                <span className="dashboard__stat-value">{supporterCount}</span>
-                <span className="dashboard__stat-label">{__('Members')}</span>
+              <div className={C.statBody}>
+                <span className={C.statValue}>{supporterCount}</span>
+                <span className={C.statLabel}>{__('Members')}</span>
               </div>
             </div>
 
-            <div className="dashboard__stat-card">
-              <div className="dashboard__stat-icon">
+            <div className={C.statCard}>
+              <div>
                 <Icon icon={ICONS.FINANCE} size={20} />
               </div>
-              <div className="dashboard__stat-body">
-                <span className="dashboard__stat-value">{formatCurrency(monthlyIncome || 0)}</span>
-                <span className="dashboard__stat-label">{__('Monthly Income')}</span>
+              <div className={C.statBody}>
+                <span className={C.statValue}>{formatCurrency(monthlyIncome || 0)}</span>
+                <span className={C.statLabel}>{__('Monthly Income')}</span>
               </div>
             </div>
           </>
         )}
       </div>
 
-      <div className="dashboard__sections">
-        <div className="dashboard__main">
-          <div className="dashboard__section">
-            <h2 className="dashboard__section-title">{__('Top Content')}</h2>
-            <div className="dashboard__top-content">
+      <div className={C.sections}>
+        <div className={C.main}>
+          <div className={C.section}>
+            <h2 className={C.sectionTitle}>{__('Top Content')}</h2>
+            <div className={C.topContent}>
               {stats.VideoURITopNew && topNewClaim && (
-                <div className="dashboard__top-item">
-                  <span className="dashboard__top-badge">{__('Trending')}</span>
+                <div className={C.topItem} data-creator-analytics-top-item>
+                  <span className={C.topBadge}>{__('Trending')}</span>
                   <ClaimPreview uri={stats.VideoURITopNew} />
-                  <div className="dashboard__top-meta">
+                  <div className={C.topMeta}>
                     <span>
                       {formatNumber(stats.VideoViewsTopNew)} {__('views')}
                     </span>
-                    <span className="dashboard__top-meta-dot">·</span>
-                    <TrendIndicator value={stats.VideoViewChangeTopNew} suffix={__(' this week')} />
+                    <span>·</span>
+                    <TrendIndicator value={stats.VideoViewChangeTopNew} suffix={__(' this week')} inheritStyle />
                   </div>
                 </div>
               )}
 
               {stats.VideoURITopCommentNew && stats.VideoCommentTopCommentNew > 0 && topCommentClaim && (
-                <div className="dashboard__top-item">
-                  <span className="dashboard__top-badge">{__('Most Discussed')}</span>
+                <div className={C.topItem} data-creator-analytics-top-item>
+                  <span className={C.topBadge}>{__('Most Discussed')}</span>
                   <ClaimPreview uri={stats.VideoURITopCommentNew} />
-                  <div className="dashboard__top-meta">
+                  <div className={C.topMeta}>
                     <span>
                       {formatNumber(stats.VideoCommentTopCommentNew)} {__('comments')}
                     </span>
-                    <span className="dashboard__top-meta-dot">·</span>
-                    <TrendIndicator value={stats.VideoCommentChangeTopCommentNew} suffix={__(' this week')} />
+                    <span>·</span>
+                    <TrendIndicator
+                      value={stats.VideoCommentChangeTopCommentNew}
+                      suffix={__(' this week')}
+                      inheritStyle
+                    />
                   </div>
                 </div>
               )}
 
               {stats.VideoURITopAllTime && topAllTimeClaim && (
-                <div className="dashboard__top-item">
-                  <span className="dashboard__top-badge">{__('All-Time Best')}</span>
+                <div className={C.topItem} data-creator-analytics-top-item>
+                  <span className={C.topBadge}>{__('All-Time Best')}</span>
                   <ClaimPreview uri={stats.VideoURITopAllTime} />
-                  <div className="dashboard__top-meta">
+                  <div className={C.topMeta}>
                     <span>
                       {formatNumber(stats.VideoViewsTopAllTime)} {__('views')}
                     </span>
-                    <span className="dashboard__top-meta-dot">·</span>
-                    <TrendIndicator value={stats.VideoViewChangeTopAllTime} suffix={__(' this week')} />
+                    <span>·</span>
+                    <TrendIndicator value={stats.VideoViewChangeTopAllTime} suffix={__(' this week')} inheritStyle />
                   </div>
                 </div>
               )}
@@ -355,17 +369,17 @@ export default function CreatorAnalytics(props: Props) {
           </div>
 
           {recentClaims.length > 0 && (
-            <div className="dashboard__section">
-              <div className="dashboard__section-header">
-                <h2 className="dashboard__section-title">{__('Recent Uploads')}</h2>
+            <div className={C.section}>
+              <div className={C.sectionHeader}>
+                <h2 className={`${C.sectionTitle} ${C.sectionTitleInline}`}>{__('Recent Uploads')}</h2>
                 <Button button="link" label={__('View all')} navigate={`/$/${PAGES.UPLOADS}`} />
               </div>
-              <table className="dashboard__table">
+              <table className={C.table}>
                 <thead>
                   <tr>
-                    <th>{__('Title')}</th>
-                    <th>{__('Views')}</th>
-                    <th>{__('Published')}</th>
+                    <th className={C.tableHeaderCell}>{__('Title')}</th>
+                    <th className={C.tableHeaderCell}>{__('Views')}</th>
+                    <th className={C.tableHeaderCell}>{__('Published')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -376,12 +390,16 @@ export default function CreatorAnalytics(props: Props) {
                     return (
                       <tr
                         key={c.claim_id}
-                        className="dashboard__table-row"
+                        className={C.tableRow}
                         onClick={() => navigate(formatLbryUrlForWeb(c.canonical_url || c.permanent_url))}
                       >
-                        <td className="dashboard__table-title">{title}</td>
-                        <td className="dashboard__table-views">{views !== null ? formatNumber(views) : '--'}</td>
-                        <td className="dashboard__table-date">{date ? date.toLocaleDateString() : '--'}</td>
+                        <td className={`${C.tableCell} ${C.tableRowCell} ${C.tableTitle}`}>{title}</td>
+                        <td className={`${C.tableCell} ${C.tableRowCell} ${C.tableViews}`}>
+                          {views !== null ? formatNumber(views) : '--'}
+                        </td>
+                        <td className={`${C.tableCell} ${C.tableRowCell} ${C.tableDate}`}>
+                          {date ? date.toLocaleDateString() : '--'}
+                        </td>
                       </tr>
                     );
                   })}
@@ -391,24 +409,22 @@ export default function CreatorAnalytics(props: Props) {
           )}
 
           {recentComments.length > 0 && (
-            <div className="dashboard__section">
-              <h2 className="dashboard__section-title">{__('Recent Comments')}</h2>
-              <div className="dashboard__comments">
+            <div className={C.section}>
+              <h2 className={C.sectionTitle}>{__('Recent Comments')}</h2>
+              <div className={C.comments}>
                 {recentComments.map((comment: any) => (
                   <div
                     key={comment.comment_id}
-                    className="dashboard__comment"
+                    className={C.comment}
                     onClick={() => comment._claimUrl && navigate(`${comment._claimUrl}?lc=${comment.comment_id}`)}
                   >
                     {blockedChannels.includes(comment.channel_url) && (
-                      <span className="dashboard__comment-badge dashboard__comment-badge--blocked">
-                        {__('Blocked')}
-                      </span>
+                      <span className={C.commentBadge}>{__('Blocked')}</span>
                     )}
-                    <div className="dashboard__comment-header">
+                    <div className={C.commentHeader}>
                       {comment.channel_url ? (
                         <span
-                          className="dashboard__comment-author dashboard__link"
+                          className={`${C.commentAuthor} ${C.link}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             navigate(formatLbryUrlForWeb(comment.channel_url));
@@ -417,16 +433,16 @@ export default function CreatorAnalytics(props: Props) {
                           {comment.channel_name}
                         </span>
                       ) : (
-                        <span className="dashboard__comment-author">{__('Anonymous')}</span>
+                        <span className={C.commentAuthor}>{__('Anonymous')}</span>
                       )}
-                      <span className="dashboard__comment-time">
+                      <span className={C.commentTime}>
                         {comment.timestamp ? new Date(comment.timestamp * 1000).toLocaleDateString() : ''}
                       </span>
                     </div>
-                    <p className="dashboard__comment-text">{comment.comment}</p>
+                    <p className={C.commentText}>{comment.comment}</p>
                     {comment._claimTitle && (
                       <span
-                        className="dashboard__comment-claim dashboard__link"
+                        className={`${C.commentClaim} ${C.link}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           navigate(comment._claimUrl);
@@ -442,20 +458,34 @@ export default function CreatorAnalytics(props: Props) {
           )}
         </div>
 
-        <div className="dashboard__sidebar">
-          <div className="dashboard__section">
-            <h2 className="dashboard__section-title">{__('Quick Actions')}</h2>
-            <div className="dashboard__actions">
-              <Button button="secondary" icon={ICONS.PUBLISH} label={__('Upload')} navigate={`/$/${PAGES.UPLOAD}`} />
-              <Button button="secondary" icon={ICONS.POST} label={__('Post')} navigate={`/$/${PAGES.POST}`} />
+        <div className={C.sidebar}>
+          <div className={C.section}>
+            <h2 className={C.sectionTitle}>{__('Quick Actions')}</h2>
+            <div className={C.actions}>
               <Button
                 button="secondary"
+                className={C.actionButton}
+                icon={ICONS.PUBLISH}
+                label={__('Upload')}
+                navigate={`/$/${PAGES.UPLOAD}`}
+              />
+              <Button
+                button="secondary"
+                className={C.actionButton}
+                icon={ICONS.POST}
+                label={__('Post')}
+                navigate={`/$/${PAGES.POST}`}
+              />
+              <Button
+                button="secondary"
+                className={C.actionButton}
                 icon={ICONS.LIVESTREAM}
                 label={__('Go Live')}
                 navigate={`/$/${PAGES.LIVESTREAM}`}
               />
               <Button
                 button="secondary"
+                className={C.actionButton}
                 icon={ICONS.SETTINGS}
                 label={__('Settings')}
                 navigate={
@@ -468,35 +498,40 @@ export default function CreatorAnalytics(props: Props) {
           </div>
 
           {activeChannel && (
-            <div className="dashboard__section">
-              <h2 className="dashboard__section-title">{__('Channel')}</h2>
+            <div className={C.section}>
+              <h2 className={C.sectionTitle}>{__('Channel')}</h2>
               <Button
                 button="secondary"
-                className="dashboard__channel-card"
+                className={C.channelButton}
+                contentClassName={C.channelContent}
                 navigate={formatLbryUrlForWeb(activeChannel.canonical_url || activeChannel.permanent_url)}
               >
-                <ChannelThumbnail uri={activeChannel.permanent_url} xsmall />
-                <div className="dashboard__channel-info">
-                  <span className="dashboard__channel-name">{activeChannel.value?.title || activeChannel.name}</span>
-                  <span className="dashboard__channel-url">{activeChannel.name}</span>
+                <ChannelThumbnail uri={activeChannel.permanent_url} className="tw:shrink-0" xsmall />
+                <div className={C.channelInfo}>
+                  <span className={C.channelName} data-dashboard-channel-name>
+                    {activeChannel.value?.title || activeChannel.name}
+                  </span>
+                  <span className={C.channelUrl} data-dashboard-channel-url>
+                    {activeChannel.name}
+                  </span>
                 </div>
               </Button>
             </div>
           )}
 
           {hasMemberships && (
-            <div className="dashboard__section">
-              <h2 className="dashboard__section-title">{__('Membership')}</h2>
-              <div className="dashboard__membership-summary">
-                <div className="dashboard__membership-row">
+            <div className={C.section}>
+              <h2 className={C.sectionTitle}>{__('Membership')}</h2>
+              <div className={C.membershipSummary}>
+                <div className={C.membershipRow}>
                   <span>{__('Members')}</span>
                   <span>{supporterCount}</span>
                 </div>
-                <div className="dashboard__membership-row">
+                <div className={C.membershipRow}>
                   <span>{__('Tiers')}</span>
                   <span>{membershipTiers?.length || 0}</span>
                 </div>
-                <div className="dashboard__membership-row">
+                <div className={C.membershipRow}>
                   <span>{__('Monthly')}</span>
                   <span>{formatCurrency(monthlyIncome || 0)}</span>
                 </div>

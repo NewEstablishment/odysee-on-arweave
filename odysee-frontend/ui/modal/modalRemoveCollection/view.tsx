@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from 'modal/modal';
@@ -11,6 +12,8 @@ import { selectCollectionTitleForId, selectCollectionKeyForId } from 'redux/sele
 import { doHideModal } from 'redux/actions/app';
 import { doCollectionDelete } from 'redux/actions/collections';
 import { doToast } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 type Props = {
   collectionId: string;
   simplify?: boolean;
@@ -72,11 +75,11 @@ function ModalRemoveCollection(props: Props) {
         body={
           <>
             {getBody()}
-            <p className="help error__text">{__('This action is permanent and cannot be undone')}</p>
+            <p className={`${HELP_CLASS} ${ERROR_TEXT_CLASS}`}>{__('This action is permanent and cannot be undone')}</p>
           </>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="primary"
               label={deleting ? __('Deleting...') : __('Delete')}

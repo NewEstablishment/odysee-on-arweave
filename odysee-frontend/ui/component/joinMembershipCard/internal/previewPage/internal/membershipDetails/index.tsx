@@ -1,7 +1,9 @@
 import React from 'react';
+import classnames from 'classnames';
 import WalletStatus from 'component/walletStatus';
 import { useArStatus } from 'effects/use-ar-status';
-import './style.scss';
+import { JOIN_MEMBERSHIP_CLASSES } from '../../../../classes';
+import { MEMBERSHIP_TIER_CLASSES } from '../membershipTier/classes';
 type Props = {
   membership: CreatorMembership;
   headerAction?: any;
@@ -51,8 +53,15 @@ const MembershipDetails = (props: Props) => {
   return (
     <>
       {unlockableTierIds && (
-        <div className={'access-status ' + (membershipIsUnlockable ? 'green' : 'red')}>
-          <p>{accessText}</p>
+        <div
+          className={classnames(
+            'tw:mb-app-s tw:rounded-app tw:border-2 tw:p-app-s',
+            membershipIsUnlockable
+              ? 'tw:border-[rgba(0,255,64,0.6)] tw:bg-[rgba(0,255,21,0.2)]'
+              : 'tw:border-[rgba(255,0,0,0.6)] tw:bg-[rgba(255,0,0,0.2)]'
+          )}
+        >
+          <p className="tw:text-center">{accessText}</p>
         </div>
       )}
 
@@ -60,14 +69,27 @@ const MembershipDetails = (props: Props) => {
         <WalletStatus />
       ) : (
         <>
-          {!isChannelTab && <div className="selected-membership">{selectedMembershipName}</div>}
+          {!isChannelTab && (
+            <div className="tw:mb-[calc(var(--spacing-s)*-1)] tw:max-w-full tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap">
+              {selectedMembershipName}
+            </div>
+          )}
 
-          <section className="membership-tier__header">
-            <span>{membership.name}</span>
+          <section
+            className={classnames(
+              isChannelTab ? MEMBERSHIP_TIER_CLASSES.header : MEMBERSHIP_TIER_CLASSES.headerTypography,
+              {
+                [JOIN_MEMBERSHIP_CLASSES.detailsHeader]: !isChannelTab,
+              }
+            )}
+          >
+            <span className={isChannelTab ? MEMBERSHIP_TIER_CLASSES.headerName : undefined}>{membership.name}</span>
           </section>
 
-          <section className="membership-tier__infos">
-            <span className="membership-tier__infos-description">{membership.description}</span>
+          <section
+            className={classnames('membership-tier__infos', !isChannelTab && JOIN_MEMBERSHIP_CLASSES.detailsInfo)}
+          >
+            <span className={JOIN_MEMBERSHIP_CLASSES.detailsDescription}>{membership.description}</span>
             <label>{__('Pledge')}</label>
             <span
               style={{
@@ -77,15 +99,24 @@ const MembershipDetails = (props: Props) => {
               ${(Number(membership?.prices[0].amount) / 100).toFixed(2)}
             </span>
 
-            <div className="membership-tier__perks">
-              <div className="membership-tier__moon" />
+            <div className={MEMBERSHIP_TIER_CLASSES.perks}>
+              <div className={JOIN_MEMBERSHIP_CLASSES.moon} />
               <div className="membership-tier__perks-content">
                 {membership.perks && membership.perks.length > 0 ? (
                   <>
                     <label>{__('Perks')}</label>
-                    <ul>
+                    <ul className={MEMBERSHIP_TIER_CLASSES.perksList}>
                       {membership.perks.map((tierPerk, i) => (
-                        <li key={i}>{__(tierPerk.name)}</li>
+                        <li
+                          className={classnames(
+                            MEMBERSHIP_TIER_CLASSES.perksItem,
+                            MEMBERSHIP_TIER_CLASSES.perksItemTierColor,
+                            MEMBERSHIP_TIER_CLASSES.perksItemMuted
+                          )}
+                          key={i}
+                        >
+                          {__(tierPerk.name)}
+                        </li>
                       ))}
                     </ul>
                   </>
@@ -96,7 +127,7 @@ const MembershipDetails = (props: Props) => {
             </div>
           </section>
 
-          {headerAction && <section className="membership-tier__actions">{headerAction}</section>}
+          {headerAction && <section className={JOIN_MEMBERSHIP_CLASSES.tierActions}>{headerAction}</section>}
         </>
       )}
     </>

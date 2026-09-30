@@ -8,6 +8,7 @@ import { selectClaimIdForUri, selectIsStreamPlaceholderForUri } from 'redux/sele
 import { selectViewersForId, selectIsActiveLivestreamForUri } from 'redux/selectors/livestream';
 import { selectLanguage } from 'redux/selectors/settings';
 import { doFetchViewCount, selectViewCountForUri } from 'lbryinc';
+import { FILE_VIEW_COUNT_CENTERED_CLASS } from './classes';
 type Props = {
   uri: string;
 };
@@ -28,7 +29,9 @@ function FileViewCount(props: Props) {
   const count = isLivestreamClaim ? activeViewers || 0 : viewCount;
   const countCompact = Number.isInteger(count) ? toCompactNotation(count, lang, 10000) : null;
   const countFullResolution = Number(count).toLocaleString();
-  const Placeholder = <Skeleton variant="text" animation="wave" className="file-view-count-placeholder" />;
+  const Placeholder = (
+    <Skeleton variant="text" animation="wave" className="tw:w-[10ch] tw:bg-[var(--color-header-button)]" />
+  );
   const retryCountRef = React.useRef(0);
 
   function getRegularViewCountElem() {
@@ -79,7 +82,7 @@ function FileViewCount(props: Props) {
   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Tooltip title={countFullResolution} followCursor placement="top">
-      <span className="media__subtitle--centered">
+      <span className={FILE_VIEW_COUNT_CENTERED_CLASS}>
         {isLivestreamClaim && getLivestreamViewCountElem()}
         {!isLivestreamClaim && activeViewers === undefined && getRegularViewCountElem()}
       </span>

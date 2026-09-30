@@ -1,6 +1,17 @@
 import React from 'react';
 import classnames from 'classnames';
 import Button from 'component/button';
+import { ButtonFireEffect, ButtonSlimeEffect } from 'component/buttonReactionEffects/view';
+import {
+  BUTTON_FIRE_GLOW_CLASS,
+  BUTTON_REACTION_DISLIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_DISLIKE_CLASS,
+  BUTTON_REACTION_LIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_LIKE_CLASS,
+  BUTTON_SLIME_GLOW_CLASS,
+} from 'component/button/classes';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
+import { SHORTS_FLOATING_ACTION_CLASSES } from 'component/shortsActions/classes';
 import ChannelThumbnail from 'component/channelThumbnail';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
@@ -30,6 +41,7 @@ import {
   DISABLE_REACTIONS_ALL_TAG,
   DISABLE_REACTIONS_VIDEO_TAG,
 } from 'constants/tags';
+import { FLOATING_SHORTS_ACTIONS_CLASSES } from './classes';
 type Props = {
   uri: string;
   claimId: string;
@@ -93,8 +105,8 @@ const FloatingShortsActions = ({
   const isSlimeActive = effectiveReaction === REACTION_TYPES.DISLIKE;
   return (
     <>
-      <div className="content__shorts-floating-nav">
-        <div className="shorts-floating-action">
+      <div className={FLOATING_SHORTS_ACTIONS_CLASSES.nav} data-floating-shorts-reveal>
+        <div className={SHORTS_FLOATING_ACTION_CLASSES.item}>
           <Button
             onClick={onPrevious}
             icon={ICONS.UP}
@@ -104,14 +116,14 @@ const FloatingShortsActions = ({
           />
         </div>
 
-        <div className="shorts-floating-action">
+        <div className={SHORTS_FLOATING_ACTION_CLASSES.item}>
           <Button onClick={onNext} icon={ICONS.DOWN} iconSize={16} title={__('Next Short')} disabled={!onNext} />
         </div>
       </div>
 
-      <div className="content__shorts-floating-actions">
+      <div className={FLOATING_SHORTS_ACTIONS_CLASSES.actions} data-floating-shorts-reveal>
         <div
-          className="shorts-floating-action"
+          className={SHORTS_FLOATING_ACTION_CLASSES.item}
           style={
             disableReactions
               ? {
@@ -122,6 +134,7 @@ const FloatingShortsActions = ({
           }
         >
           <Button
+            button="alt"
             onClick={() => {
               setOptimisticReaction(isFireActive ? null : REACTION_TYPES.LIKE);
 
@@ -141,28 +154,16 @@ const FloatingShortsActions = ({
             iconSize={14}
             requiresAuth={!hyperbeamNodeEnabled()}
             authSrc="filereaction_like"
-            className={classnames('button--file-action button-like', {
-              'button--fire': isFireActive,
-              'button--fire-glow-pulse': fireButtonGlow,
+            className={classnames(FILE_ACTION_BUTTON_CLASS, BUTTON_REACTION_LIKE_CLASS, {
+              [BUTTON_REACTION_LIKE_ACTIVE_CLASS]: isFireActive,
+              [BUTTON_FIRE_GLOW_CLASS]: fireButtonGlow,
             })}
-            label={
-              isFireActive ? (
-                <>
-                  <div className="button__fire-glow" />
-                  <div className="button__fire-particle1" />
-                  <div className="button__fire-particle2" />
-                  <div className="button__fire-particle3" />
-                  <div className="button__fire-particle4" />
-                  <div className="button__fire-particle5" />
-                  <div className="button__fire-particle6" />
-                </>
-              ) : null
-            }
+            label={isFireActive ? <ButtonFireEffect /> : null}
           />
         </div>
 
         <div
-          className="shorts-floating-action"
+          className={SHORTS_FLOATING_ACTION_CLASSES.item}
           style={
             disableReactions || disableSlimes
               ? {
@@ -173,6 +174,7 @@ const FloatingShortsActions = ({
           }
         >
           <Button
+            button="alt"
             onClick={() => {
               setOptimisticReaction(isSlimeActive ? null : REACTION_TYPES.DISLIKE);
 
@@ -192,25 +194,17 @@ const FloatingShortsActions = ({
             iconSize={14}
             requiresAuth={!hyperbeamNodeEnabled()}
             authSrc="filereaction_dislike"
-            className={classnames('button--file-action button-dislike', {
-              'button--slime': isSlimeActive,
-              'button--slime-glow-pulse': slimeButtonGlow,
+            className={classnames(FILE_ACTION_BUTTON_CLASS, BUTTON_REACTION_DISLIKE_CLASS, {
+              [BUTTON_REACTION_DISLIKE_ACTIVE_CLASS]: isSlimeActive,
+              [BUTTON_SLIME_GLOW_CLASS]: slimeButtonGlow,
             })}
-            label={
-              isSlimeActive ? (
-                <>
-                  <div className="button__slime-stain" />
-                  <div className="button__slime-drop1" />
-                  <div className="button__slime-drop2" />
-                </>
-              ) : null
-            }
+            label={isSlimeActive ? <ButtonSlimeEffect /> : null}
           />
         </div>
 
         {channelUrl && (
           <div
-            className="shorts-floating-action shorts-floating-action--avatar"
+            className={classnames(SHORTS_FLOATING_ACTION_CLASSES.item, SHORTS_FLOATING_ACTION_CLASSES.avatarItem)}
             onMouseEnter={() => setAvatarHover(true)}
             onMouseLeave={() => setAvatarHover(false)}
             onClick={() => {
@@ -230,12 +224,13 @@ const FloatingShortsActions = ({
               key={channelUrl}
               uri={channelUrl}
               hideStakedIndicator
-              className="shorts-floating-action__avatar"
+              className={SHORTS_FLOATING_ACTION_CLASSES.avatar}
             />
             <div
-              className={classnames('shorts-floating-action__subscribe', {
-                'shorts-floating-action__subscribe--active': isSubscribed,
+              className={classnames(SHORTS_FLOATING_ACTION_CLASSES.subscribe, {
+                [SHORTS_FLOATING_ACTION_CLASSES.subscribeActive]: isSubscribed,
               })}
+              data-shorts-subscribe-badge
             >
               <Icon
                 icon={
@@ -251,11 +246,11 @@ const FloatingShortsActions = ({
           </div>
         )}
 
-        <div className="shorts-floating-action">
+        <div className={SHORTS_FLOATING_ACTION_CLASSES.item}>
           <Button navigate={navigateUrl} onClick={() => doSetShortsSidePanel(true)} icon={ICONS.INFO} iconSize={14} />
         </div>
 
-        <div className="shorts-floating-action">
+        <div className={SHORTS_FLOATING_ACTION_CLASSES.item}>
           <Button
             className={classnames('button-bubble', {
               'button-bubble--active': autoPlayNextShort,

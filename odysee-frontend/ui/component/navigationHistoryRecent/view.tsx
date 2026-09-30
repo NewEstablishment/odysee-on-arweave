@@ -1,5 +1,6 @@
 import React from 'react';
 import Button from 'component/button';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import NavigationHistoryItem from 'component/navigationHistoryItem';
 import { useAppSelector } from 'redux/hooks';
 import { selectRecentHistory } from 'redux/selectors/content';
@@ -15,7 +16,7 @@ export default function NavigationHistoryRecent(props: Props) {
       {history.map(({ lastViewed, uri }) => (
         <NavigationHistoryItem slim key={uri} uri={uri} lastViewed={lastViewed} />
       ))}
-      <div className="card__actions">
+      <div className={CARD_CLASSES.actions}>
         <Button navigate="/$/library/all" button="link" label={__('See All Visited Links')} />
       </div>
     </div>

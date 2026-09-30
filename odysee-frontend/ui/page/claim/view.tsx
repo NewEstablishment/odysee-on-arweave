@@ -8,6 +8,7 @@ import { selectClaimForUri, selectIsStreamPlaceholderForUri, selectChannelClaimI
 import { selectCommentsDisabledSettingForChannelId } from 'redux/selectors/comments';
 import Page from 'component/page';
 import ClaimPageComponent from './internal/claimPageComponent';
+import { CHANNEL_PAGE_CLASSES } from './internal/claimPageComponent/internal/channelPage/classes';
 import { hyperbeamImmutableIdFromUri } from 'util/hyperbeam-route';
 
 type Props = {
@@ -83,7 +84,7 @@ const ClaimPage = (props: Props) => {
     if (editing) {
       const ChannelPageEditingWrapperLocal = ({ children }: { children: any }) => (
         <Page
-          className="channelPage-wrapper channelPage-edit-wrapper"
+          className={`channelPage-wrapper ${CHANNEL_PAGE_CLASSES.editWrapper}`}
           noFooter
           fullWidthPage
           noSideNavigation={isEmbedPath}

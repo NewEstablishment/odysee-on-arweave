@@ -1,6 +1,7 @@
 import * as ICONS from 'constants/icons';
 import React from 'react';
 import Button from 'component/button';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
 import { COL_TYPES } from 'constants/collections';
 import { useAppDispatch } from 'redux/hooks';
 import { doCollectionEdit } from 'redux/actions/collections';
@@ -33,11 +34,12 @@ function ButtonAddToQueue(props: Props) {
   }
 
   return (
-    <div className="claim-preview__hover-actions third-item">
+    <div className="claim-preview__hover-actions tw:col-start-2 tw:row-start-2">
       <Button
+        button="alt"
         title={__('Remove')}
         label={__('Remove')}
-        className="button--file-action"
+        className={FILE_ACTION_BUTTON_CLASS}
         icon={ICONS.DELETE}
         onClick={(e) => handleRemove(e)}
         tabIndex={focusable ? 0 : -1}

@@ -29,6 +29,7 @@ function getOptimizedImgUrl(url, width, height, quality) {
 // OptimizedImage
 // ****************************************************************************
 type Props = {
+  'data-channel-thumbnail-image'?: boolean;
   src: string;
   width?: number;
   quality?: number;

@@ -22,6 +22,8 @@ import {
 import { doOpenModal as doOpenModalAction } from 'redux/actions/app';
 import { selectPreferredCurrency } from 'redux/selectors/settings';
 import { selectArweaveExchangeRates } from 'redux/selectors/arwallet';
+import { PAID_CONTENT_OVERLAY_CLASSES } from './classes';
+import { PURCHASE_BUTTON_CLASS } from '../../classes';
 type RentalTagParams = {
   price: number;
   expirationTimeInSeconds: number;
@@ -97,7 +99,9 @@ export default function PaidContentOvelay(props: Props) {
     return ({ label }: { label: string }) => {
       return (
         <Button
-          className={'purchase-button' + (sdkFeeRequired ? ' purchase-button--fee' : '')}
+          className={PURCHASE_BUTTON_CLASS}
+          data-purchase-button
+          data-purchase-button-fee={sdkFeeRequired || undefined}
           icon={sdkFeeRequired && !purchaseTag ? ICONS.LBC : fiatIconToUse}
           button="primary"
           label={label}
@@ -114,12 +118,12 @@ export default function PaidContentOvelay(props: Props) {
     }
   }, [clickProps, isEmbed, passClickPropsToParent]);
   return (
-    <div className="paid-content-overlay">
-      <div className="paid-content-overlay__body">
-        <div className="paid-content-prompt paid-content-prompt--overlay">
+    <div className={PAID_CONTENT_OVERLAY_CLASSES.overlay} data-paid-content-overlay>
+      <div className={PAID_CONTENT_OVERLAY_CLASSES.body}>
+        <div className={`${PAID_CONTENT_OVERLAY_CLASSES.prompt} ${PAID_CONTENT_OVERLAY_CLASSES.promptOverlay}`}>
           {sdkFeeRequired && canReceiveTips && (
             <>
-              <div className="paid-content-prompt__price">
+              <div className={PAID_CONTENT_OVERLAY_CLASSES.price}>
                 <Icon icon={ICONS.BUY} />
                 <I18nMessage
                   tokens={{
@@ -138,7 +142,7 @@ export default function PaidContentOvelay(props: Props) {
           )}
           {sdkFeeRequired && !canReceiveTips && (
             <>
-              <div className="paid-content-prompt__price">
+              <div className={PAID_CONTENT_OVERLAY_CLASSES.price}>
                 <Icon icon={ICONS.BUY} />
                 <I18nMessage
                   tokens={{
@@ -154,7 +158,7 @@ export default function PaidContentOvelay(props: Props) {
           )}
           {rentalTag && purchaseTag && (
             <>
-              <div className="paid-content-prompt__price">
+              <div className={PAID_CONTENT_OVERLAY_CLASSES.price}>
                 <Icon icon={ICONS.BUY} />
                 {__('Purchase for %currency%%amount%', {
                   currency: fiatSymbol,
@@ -163,7 +167,7 @@ export default function PaidContentOvelay(props: Props) {
                 (<Symbol token="ar" amount={Number(purchaseTag) / exchangeRate?.ar} precision={4} />)
               </div>
 
-              <div className="paid-content-prompt__price">
+              <div className={PAID_CONTENT_OVERLAY_CLASSES.price}>
                 <Icon icon={ICONS.TIME} />
                 {__('Rent %duration% for %currency%%amount%', {
                   duration: secondsToDhms(rentalExpirationTimeInSeconds),
@@ -178,7 +182,7 @@ export default function PaidContentOvelay(props: Props) {
 
           {rentalTag && !purchaseTag && (
             <>
-              <div className="paid-content-prompt__price">
+              <div className={PAID_CONTENT_OVERLAY_CLASSES.price}>
                 <Icon icon={ICONS.TIME} />
                 {__('Rent %duration% for %currency%%amount%', {
                   currency: fiatSymbol,
@@ -192,7 +196,7 @@ export default function PaidContentOvelay(props: Props) {
           )}
           {purchaseTag && !rentalTag && !sdkFeeRequired && (
             <>
-              <div className="paid-content-prompt__price">
+              <div className={PAID_CONTENT_OVERLAY_CLASSES.price}>
                 <Icon icon={ICONS.BUY} />
                 {__('Purchase for %currency%%amount%', {
                   currency: fiatSymbol,

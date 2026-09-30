@@ -1,5 +1,4 @@
 import React from 'react';
-import './style.scss';
 
 type Entity = { x: number; y: number; alive: boolean; row: number };
 type Bullet = { x: number; y: number };
@@ -514,10 +513,16 @@ export default function SpaceInvaders({ onClose }: Props) {
   }, []);
 
   return (
-    <div className="space-invaders__overlay" onClick={onClose}>
-      <div className="space-invaders__modal" onClick={(e) => e.stopPropagation()}>
-        <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="space-invaders__canvas" />
-        <div className="space-invaders__controls">
+    <div
+      className="tw:fixed tw:inset-0 tw:z-[10000] tw:flex tw:items-center tw:justify-center tw:bg-[rgba(0,0,0,0.8)]"
+      onClick={onClose}
+    >
+      <div
+        className="tw:flex tw:flex-col tw:overflow-hidden tw:rounded-[12px] tw:[box-shadow:0_0_40px_rgba(247,121,55,0.3)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="tw:block" />
+        <div className="tw:bg-[#111] tw:p-[8px] tw:text-center tw:font-[monospace] tw:text-[12px] tw:text-[rgba(255,255,255,0.4)]">
           <span>{__('Arrow keys to move, Space to shoot, Esc to close')}</span>
         </div>
       </div>

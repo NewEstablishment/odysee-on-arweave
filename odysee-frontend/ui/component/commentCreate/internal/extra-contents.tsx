@@ -1,9 +1,12 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import * as ICONS from 'constants/icons';
 import CreditAmount from 'component/common/credit-amount';
 import I18nMessage from 'component/i18nMessage';
 import Icon from 'component/common/icon';
+import { ICON_HELP_CLASS } from 'component/common/icon-classes';
 import SelectChannel from 'component/selectChannel';
+import { COMMENT_CREATE_CLASSES } from '../classes';
 type SelectorProps = {
   isReply: boolean;
   isLivestream: boolean;
@@ -11,8 +14,8 @@ type SelectorProps = {
 export const FormChannelSelector = (selectorProps: SelectorProps) => {
   const { isReply, isLivestream } = selectorProps;
   return (
-    <div className="comment-create__label-wrapper">
-      <span className="comment-create__label">
+    <div className={COMMENT_CREATE_CLASSES.labelWrapper}>
+      <span className={COMMENT_CREATE_CLASSES.label}>
         {(isReply ? __('Replying as') : isLivestream ? __('Chat as') : __('Comment as')) + ' '}
       </span>
 
@@ -33,10 +36,10 @@ export const HelpText = (helpTextProps: HelpTextProps) => {
   const { deletedComment, minAmount, minTip, minSuper, minUSDAmount, minUSDSuper, minUSDTip } = helpTextProps;
   return (
     <>
-      {deletedComment && <div className="error__text">{__('This comment has been deleted.')}</div>}
+      {deletedComment && <div className={ERROR_TEXT_CLASS}>{__('This comment has been deleted.')}</div>}
 
       {(!!minAmount || !!minUSDAmount) && (
-        <div className="help--notice comment-create__min-amount-notice">
+        <div className={COMMENT_CREATE_CLASSES.minAmount}>
           <span>{!!minTip || !!minUSDTip ? __('Comment minimum: ') : __('HyperChat minimum: ')}</span>
           {(!!minTip || !!minSuper || !!minUSDTip || !!minUSDSuper) && (
             <>
@@ -58,7 +61,7 @@ export const HelpText = (helpTextProps: HelpTextProps) => {
                   ? __('This channel requires a minimum amount for HyperChats to be visible.')
                   : ''
             }
-            className="icon--help"
+            className={ICON_HELP_CLASS}
             icon={ICONS.HELP}
             tooltip
             size={16}

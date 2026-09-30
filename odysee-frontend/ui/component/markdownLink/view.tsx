@@ -10,6 +10,7 @@ import { Menu, MenuButton } from 'component/common/menu';
 import { useIsMobile } from 'effects/use-screensize';
 import { useAppSelector } from 'redux/hooks';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
+import { MARKDOWN_LINK_FAVICON_CLASS } from './classes';
 type Props = {
   href: string;
   title?: string;
@@ -156,7 +157,7 @@ function MarkdownLink(props: Props) {
     const isMailto = href.startsWith('mailto:');
     const faviconUrl = !isLbryLink && !isMailto && linkUrlObject ? `/$/favicon?d=${linkUrlObject.host}` : null;
     element = (
-      <span className="button--external-link-wrap">
+      <span className="tw:inline-flex tw:items-center tw:whitespace-nowrap">
         {faviconUrl && (
           <span
             ref={(el) => {
@@ -179,7 +180,7 @@ function MarkdownLink(props: Props) {
               );
               img.src = faviconUrl;
             }}
-            className="markdown-link-favicon"
+            className={MARKDOWN_LINK_FAVICON_CLASS}
           />
         )}
         <Button

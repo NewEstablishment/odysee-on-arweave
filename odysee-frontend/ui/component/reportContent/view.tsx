@@ -3,12 +3,17 @@ import React from 'react';
 import Button from 'component/button';
 import { Form, FormField } from 'component/common/form';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { CONFIRM_VALUE_CLASS, CONFIRM_WRAPPER_CLASS } from 'component/common/confirm-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import ClaimPreview from 'component/claimPreview';
 import CommentView from 'component/comment';
 import ChannelSelector from 'component/channelSelector';
 import Spinner from 'component/spinner';
 import ErrorText from 'component/common/error-text';
+import { ERROR_NO_OVERFLOW_CLASS } from 'component/common/error-classes';
 import Icon from 'component/common/icon';
+import { ICON_HELP_CLASS } from 'component/common/icon-classes';
 import { COUNTRIES } from 'util/country';
 import { URL } from 'config';
 import { EMAIL_REGEX } from 'constants/email';
@@ -113,7 +118,7 @@ function getClaimPreview(claim: StreamClaim) {
 
 function getCommentPreviews(comment: any) {
   return comment ? (
-    <div className="section non-clickable">
+    <div className="section tw:pointer-events-none">
       <CommentView comment={comment} threadLevel={-1} isTopLevel hideActions hideContextMenu />
     </div>
   ) : null;
@@ -347,7 +352,7 @@ export default function ReportContent() {
       case PAGE_TYPE:
         return (
           <>
-            <div className="section section--vertical-compact">
+            <div className={`section ${SECTION_CLASSES.verticalCompact}`}>
               <fieldset>
                 {Object.keys(REPORT_API.PARAMETERS['type']).map((x) => {
                   return (
@@ -364,7 +369,7 @@ export default function ReportContent() {
                 })}
               </fieldset>
             </div>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="primary"
                 label={__('Next')}
@@ -385,7 +390,7 @@ export default function ReportContent() {
                 <div>
                   <b>{__(input.type)}</b>
                 </div>
-                <div className="section section--vertical-compact">
+                <div className={`section ${SECTION_CLASSES.verticalCompact}`}>
                   <fieldset>
                     {REPORT_API.PARAMETERS['type'][input.type][REPORT_API.CATEGORIES].map((x) => {
                       return (
@@ -402,7 +407,7 @@ export default function ReportContent() {
                   </fieldset>
                 </div>
               </div>
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button button="alt" label={__('Back')} onClick={() => setPage(PAGE_TYPE)} />
                 <Button
                   button="primary"
@@ -421,7 +426,7 @@ export default function ReportContent() {
             switch (input.category) {
               case REPORT_API.COPYRIGHT_ISSUES:
                 body = (
-                  <div className="section section--vertical-compact">
+                  <div className={`section ${SECTION_CLASSES.verticalCompact}`}>
                     <FormField
                       type="select"
                       name="affected_party"
@@ -469,7 +474,7 @@ export default function ReportContent() {
 
               case REPORT_API.OTHER_LEGAL_ISSUES:
                 body = (
-                  <div className="section section--vertical-compact">
+                  <div className={`section ${SECTION_CLASSES.verticalCompact}`}>
                     <FormField
                       type="text"
                       name="reporter_name"
@@ -581,7 +586,7 @@ export default function ReportContent() {
         return (
           <>
             {body}
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="alt" label={__('Back')} onClick={() => setPage(PAGE_CATEGORY)} />
               <Button
                 button="primary"
@@ -631,7 +636,7 @@ export default function ReportContent() {
               <div className="section">
                 <label>{__('Your channel')}</label>
                 <Icon
-                  className="icon--help"
+                  className={ICON_HELP_CLASS}
                   icon={ICONS.HELP}
                   tooltip
                   size={16}
@@ -642,7 +647,7 @@ export default function ReportContent() {
                 <ChannelSelector />
               </div>
             </div>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="alt" label={__('Back')} onClick={() => setPage(PAGE_INFRINGEMENT_DETAILS)} />
               <Button
                 button="primary"
@@ -661,7 +666,7 @@ export default function ReportContent() {
       case PAGE_SUBMITTER_DETAILS_ADDRESS:
         return (
           <>
-            <div className="section section--vertical-compact">
+            <div className={`section ${SECTION_CLASSES.verticalCompact}`}>
               <FormField
                 type="text"
                 name="street_address"
@@ -713,7 +718,7 @@ export default function ReportContent() {
                 ))}
               </FormField>
             </div>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="alt" label={__('Back')} onClick={() => setPage(PAGE_SUBMITTER_DETAILS)} />
               <Button
                 button="primary"
@@ -728,9 +733,9 @@ export default function ReportContent() {
       case PAGE_CONFIRM:
         return (
           <>
-            <div className="section section--padded card--inline confirm__wrapper">
+            <div className={`section ${SECTION_CLASSES.padded} ${CARD_CLASSES.inline} ${CONFIRM_WRAPPER_CLASS}`}>
               <div className="confirm__label">{__('Contact details')}</div>
-              <div className="confirm__value">{input.email}</div>
+              <div className={CONFIRM_VALUE_CLASS}>{input.email}</div>
               {input.type === REPORT_API.INFRINGES_MY_RIGHTS && (
                 <FormField
                   type="text"
@@ -744,7 +749,7 @@ export default function ReportContent() {
               )}
             </div>
             <div className="section">{__('Send report?')}</div>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="alt" label={__('Back')} onClick={() => setPage(PAGE_SUBMITTER_DETAILS)} />
               <Button
                 button="primary"
@@ -764,14 +769,14 @@ export default function ReportContent() {
           body = <Spinner />;
         } else if (error) {
           body = (
-            <div className="error__wrapper--no-overflow">
+            <div className={ERROR_NO_OVERFLOW_CLASS}>
               <ErrorText>{error}</ErrorText>
             </div>
           );
         } else {
           body = (
             <>
-              <div className="section__title">{__('Report submitted')}</div>
+              <div className={SECTION_CLASSES.title}>{__('Report submitted')}</div>
               <div className="section">{__('We will review and respond shortly.')}</div>
             </>
           );
@@ -780,7 +785,7 @@ export default function ReportContent() {
         return (
           <>
             <div className="section">{body}</div>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               {error && <Button button="alt" label={__('Back')} onClick={() => setPage(PAGE_CONFIRM)} />}
               <Button button="primary" label={__('Close')} disabled={isReporting} onClick={() => navigate(-1)} />
             </div>

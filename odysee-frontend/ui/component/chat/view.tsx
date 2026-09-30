@@ -2,6 +2,7 @@ import { useIsMobile } from 'effects/use-screensize';
 import * as ICONS from 'constants/icons';
 import { MAX_LIVESTREAM_COMMENTS } from 'constants/livestream';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import classnames from 'classnames';
 import CreditAmount from 'component/common/credit-amount';
 import Icon from 'component/common/icon';
@@ -37,7 +38,8 @@ import {
 } from 'redux/selectors/memberships';
 import { doResolveUris } from 'redux/actions/claims';
 import { getChannelIdFromClaim, getChannelTitleFromClaim } from 'util/claim';
-import './style.lazy.scss';
+import { CHAT_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 export const VIEW_MODES = {
   CHAT: 'chat',
@@ -294,7 +296,7 @@ export default function ChatLayout(props: Props) {
       !notAuthedToLiveChat &&
       isLivestreamChatMembersOnly &&
       chatUnlocked && (
-        <div className="livestream__members-only-message">
+        <div className={CHAT_CLASSES.membersOnly}>
           <Tooltip
             title={__('Only "%channel_name%" members are able to chat right now. Enjoy!', {
               channel_name: channelTitle,
@@ -316,16 +318,25 @@ export default function ChatLayout(props: Props) {
   }, [notAuthedToLiveChat, channelTitle, chatUnlocked, isLivestreamChatMembersOnly]);
   if (!claimId) {
     return (
-      <div className="chat__wrapper">
+      <div className={classnames(CHAT_CLASSES.wrapper, CHAT_CLASSES.wrapperContexts)}>
         {!hideHeader && (
-          <div className="chat__header">
-            <div className="chat__toggle-mode">
-              <Button button="alt" className="button-toggle button-toggle--active" label={__('Livestream Chat')} />
+          <div className={CHAT_CLASSES.header}>
+            <div className={CHAT_CLASSES.toggleMode}>
+              <Button
+                button="alt"
+                className={classnames(
+                  BUTTON_TOGGLE_CLASS,
+                  BUTTON_TOGGLE_ACTIVE_CLASS,
+                  CHAT_CLASSES.contentToggle,
+                  CHAT_CLASSES.contentToggleActive
+                )}
+                label={__('Livestream Chat')}
+              />
             </div>
           </div>
         )}
-        <div className="livestream-comments__wrapper">
-          <div className="livestream-comments__top-actions" />
+        <div className={CHAT_CLASSES.commentsWrapper}>
+          <div className={CHAT_CLASSES.topActions} />
           <ChatComments
             uri={uri}
             comments={[]}
@@ -334,7 +345,7 @@ export default function ChatLayout(props: Props) {
             handleCommentClick={() => {}}
             {...({} as any)}
           />
-          <div className="chat__comment-create">
+          <div className={CHAT_CLASSES.composer}>
             <CommentCreate isLivestream uri={uri} bottom embed={false} disableInput />
           </div>
         </div>
@@ -344,17 +355,19 @@ export default function ChatLayout(props: Props) {
 
   if (openedPopoutWindow || chatHidden) {
     return (
-      <div className="card livestream__chat">
-        <div className="card__header--between livestreamDiscussion__header">
-          <div className="card__title-section--small livestreamDiscussion__title">{__('Livestream Chat')}</div>
+      <div className={classnames('card', CHAT_CLASSES.previewCard)}>
+        <div className={classnames('card__header--between', CHAT_CLASSES.previewHeader)}>
+          <div className={classnames(CHAT_CLASSES.previewTitleSection, CHAT_CLASSES.discussionTitle)}>
+            {__('Livestream Chat')}
+          </div>
         </div>
 
-        <div className="livestream-comments__wrapper">
-          <div className="main--empty">
+        <div className={CHAT_CLASSES.commentsWrapper}>
+          <div className={CHAT_CLASSES.commentsEmpty}>
             <Yrbl
               title={__('Chat Hidden')}
               actions={
-                <div className="section__actions">
+                <div className={SECTION_CLASSES.actions}>
                   {openedPopoutWindow && (
                     <Button
                       button="secondary"
@@ -374,7 +387,7 @@ export default function ChatLayout(props: Props) {
             />
           </div>
 
-          <div className="livestream__comment-create">
+          <div className={CHAT_CLASSES.previewCommentCreate}>
             <CommentCreate isLivestream bottom uri={uri} disableInput />
           </div>
         </div>
@@ -397,13 +410,11 @@ export default function ChatLayout(props: Props) {
 
   return (
     <div
-      className={classnames('chat__wrapper', {
-        'livestream__chat--popout': isPopoutWindow,
-      })}
+      className={classnames(CHAT_CLASSES.wrapper, CHAT_CLASSES.wrapperContexts, isPopoutWindow && CHAT_CLASSES.popout)}
     >
       {!hideHeader && (
-        <div className="chat__header">
-          <div className="chat__toggle-mode">
+        <div className={CHAT_CLASSES.header}>
+          <div className={CHAT_CLASSES.toggleMode}>
             {/* the superchats in chronological order button */}
             <ChatContentToggle
               {...toggleProps}
@@ -441,12 +452,8 @@ export default function ChatLayout(props: Props) {
         </div>
       )}
 
-      <div className="livestream-comments__wrapper">
-        <div
-          className={classnames('livestream-comments__top-actions', {
-            'livestream-comments__top-actions--mobile': isMobile,
-          })}
-        >
+      <div className={CHAT_CLASSES.commentsWrapper}>
+        <div className={classnames(CHAT_CLASSES.topActions, isMobile && CHAT_CLASSES.topActionsMobile)}>
           {viewMode === VIEW_MODES.CHAT && hyperChatsByAmount && (
             <LivestreamHyperchats
               superChats={hyperChatsByAmount}
@@ -474,7 +481,7 @@ export default function ChatLayout(props: Props) {
             viewMode === VIEW_MODES.CHAT &&
             (isMobile ? (
               <Slide direction="left" in={showPinned} mountOnEnter unmountOnExit>
-                <div className="livestream-pinned__wrapper--mobile">
+                <div className={CHAT_CLASSES.pinnedMobile}>
                   <ChatComment
                     comment={pinnedComment}
                     key={pinnedComment.comment_id}
@@ -488,7 +495,7 @@ export default function ChatLayout(props: Props) {
               </Slide>
             ) : (
               showPinned && (
-                <div className="livestream-pinned__wrapper">
+                <div className={CHAT_CLASSES.pinned}>
                   <ChatComment
                     comment={pinnedComment}
                     key={pinnedComment.comment_id}
@@ -507,7 +514,7 @@ export default function ChatLayout(props: Props) {
           viewMode === VIEW_MODES.CHAT &&
           (isMobile ? (
             <Slide direction="left" in={showPinned} mountOnEnter unmountOnExit>
-              <div className="livestream-pinned__wrapper--mobile">
+              <div className={CHAT_CLASSES.pinnedMobile}>
                 <ChatComment
                   comment={selectedHyperchat}
                   key={selectedHyperchat.comment_id}
@@ -527,7 +534,7 @@ export default function ChatLayout(props: Props) {
               </div>
             </Slide>
           ) : (
-            <div className="livestream-pinned__wrapper">
+            <div className={CHAT_CLASSES.pinned}>
               <ChatComment
                 comment={selectedHyperchat}
                 key={selectedHyperchat.comment_id}
@@ -552,7 +559,7 @@ export default function ChatLayout(props: Props) {
         {scrolledPastRecent && (
           <Button
             button="secondary"
-            className="livestream-comments__scroll-to-recent"
+            className={CHAT_CLASSES.scrollToRecent}
             label={viewMode === VIEW_MODES.CHAT ? __('Recent Comments') : __('Recent Tips')}
             onClick={restoreScrollPos}
             iconRight={ICONS.DOWN}
@@ -560,7 +567,7 @@ export default function ChatLayout(props: Props) {
         )}
 
         {!isMobile && membersOnlyMessage}
-        <div className="chat__comment-create">
+        <div className={CHAT_CLASSES.composer}>
           {isMobile && membersOnlyMessage}
 
           <CommentCreate
@@ -588,9 +595,12 @@ const ChatContentToggle = (props: ToggleProps) => {
   const { viewMode, toggleMode, label, onClick } = props;
   return (
     <Button
-      className={classnames('button-toggle', {
-        'button-toggle--active': viewMode === toggleMode,
-      })}
+      className={classnames(
+        BUTTON_TOGGLE_CLASS,
+        CHAT_CLASSES.contentToggle,
+        viewMode === toggleMode && BUTTON_TOGGLE_ACTIVE_CLASS,
+        viewMode === toggleMode && CHAT_CLASSES.contentToggleActive
+      )}
       label={label}
       onClick={() => onClick(toggleMode)}
     />

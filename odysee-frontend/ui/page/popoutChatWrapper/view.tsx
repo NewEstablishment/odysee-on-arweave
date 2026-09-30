@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import { getChannelIdFromClaim } from 'util/claim';
 import { formatLbryChannelName } from 'util/url';
 import { buildURI } from 'util/lbryURI';
@@ -75,7 +76,7 @@ export default function PopoutChatPage() {
 
   if (contentRestrictedFromUser) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Yrbl type="sad" subtitle={__('No results')} />
       </div>
     );

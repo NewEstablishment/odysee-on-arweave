@@ -27,6 +27,8 @@ import {
   doAddTag as doAddTagAction,
 } from 'redux/actions/tags';
 import { doToast } from 'redux/actions/notifications';
+import { TAGS_LIST_CLASS, TAGS_SEARCH_CLASSES } from './classes';
+import { FORM_FIELD_HINT_CLASS } from 'component/common/form-components/form-field-classes';
 type Props = {
   tagsPassedIn: Array<Tag>;
   unfollowedTags?: Array<Tag>;
@@ -264,7 +266,7 @@ export default function TagsSearch(props: Props) {
 
   return (
     <React.Fragment>
-      <Form className="tags__input-wrapper" onSubmit={handleSubmit}>
+      <Form className={TAGS_SEARCH_CLASSES.root} onSubmit={handleSubmit}>
         <fieldset-section>
           <label
             style={{
@@ -284,7 +286,7 @@ export default function TagsSearch(props: Props) {
               label || __('Following --[button label indicating a channel has been followed]--')
             )}
           </label>
-          <ul className="tags--remove">
+          <ul className={TAGS_SEARCH_CLASSES.removeList}>
             {countWithoutSpecialTags === 0 && <Tag key={`placeholder-tag`} name={'example'} disabled type={'remove'} />}
             {Boolean(tagsPassedIn.length) &&
               removeInternalTags(tagsPassedIn).map((tag) => (
@@ -301,7 +303,7 @@ export default function TagsSearch(props: Props) {
           {!hideInputField && (
             <FormField
               autoFocus={!disableAutoFocus}
-              className="tag__input"
+              className={TAGS_SEARCH_CLASSES.input}
               onChange={onChange}
               placeholder={placeholder || __('gaming, crypto')}
               type="text"
@@ -318,7 +320,7 @@ export default function TagsSearch(props: Props) {
           {!hideSuggestions && (
             <section>
               <label>{labelSuggestions || (newTag.length ? __('Matching') : __('Known Tags'))}</label>
-              <ul className="tags">
+              <ul className={TAGS_LIST_CLASS}>
                 {Boolean(enteredTag) && !suggestedTags.includes(enteredTag) && (
                   <Tag
                     disabled={enteredTag !== 'mature' && maxed}
@@ -338,12 +340,12 @@ export default function TagsSearch(props: Props) {
                   />
                 ))}
               </ul>
-              <p className="form-field__hint mt-m">{help}</p>
+              <p className={`${FORM_FIELD_HINT_CLASS} tw:mt-app-m`}>{help}</p>
             </section>
           )}
         </fieldset-section>
         {!disableControlTags && onSelect && ( // onSelect ensures this does not appear on TagFollow
-          <div className="control-tags">
+          <div className={TAGS_SEARCH_CLASSES.controlTags}>
             {FILTERED_CONTROL_TAGS.map((t) => (
               <FormField
                 key={t}

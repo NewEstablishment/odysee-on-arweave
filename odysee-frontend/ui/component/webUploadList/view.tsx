@@ -2,6 +2,7 @@ import * as React from 'react';
 import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import FileThumbnail from 'component/fileThumbnail';
 import WebUploadItem from './internal/web-upload-item';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -17,6 +18,12 @@ import type { PipelineItem } from 'redux/actions/publishPipeline';
 import { useNavigate } from 'react-router-dom';
 import * as PAGES from 'constants/pages';
 import { formatLbryUrlForWeb } from 'util/url';
+import {
+  WEB_UPLOAD_ITEM_CLASS,
+  WEB_UPLOAD_PROGRESS_CLASSES,
+  WEB_UPLOAD_ROUND_BUTTON_CLASS,
+  WEB_UPLOAD_STATS_CLASS,
+} from './classes';
 
 const STAGE_LABELS: Record<string, string> = {
   queued: 'Queued',
@@ -76,7 +83,9 @@ export default function WebUploadList() {
           {pipelineItems.map((item: PipelineItem) => (
             <li
               key={item.id}
-              className="claim-preview__wrapper claim-preview__wrapper--row web-upload-item claim-preview claim-preview--inactive card--inline"
+              className={`claim-preview__wrapper claim-preview__wrapper--row claim-preview ${CARD_CLASSES.inline} ${WEB_UPLOAD_ITEM_CLASS}`}
+              data-claim-preview-inactive
+              data-web-upload-item
             >
               <FileThumbnail thumbnail={item.thumbnail} />
               <div className="claim-preview-metadata">
@@ -97,7 +106,7 @@ export default function WebUploadList() {
                   </div>
                   {canPause(item) && (
                     <button
-                      className="web-upload-item__round-btn"
+                      className={WEB_UPLOAD_ROUND_BUTTON_CLASS}
                       title={__('Pause')}
                       onClick={async () => {
                         const stage = item.stage;
@@ -126,7 +135,7 @@ export default function WebUploadList() {
                   )}
                   {(item.stage === 'published' || item.stage === 'error') && (
                     <button
-                      className="web-upload-item__round-btn"
+                      className={WEB_UPLOAD_ROUND_BUTTON_CLASS}
                       title={__('Dismiss')}
                       onClick={() => setDismissedIds((prev) => new Set(prev).add(item.id))}
                     >
@@ -135,7 +144,7 @@ export default function WebUploadList() {
                   )}
                   {item.stage === 'paused' && (
                     <button
-                      className="web-upload-item__round-btn"
+                      className={WEB_UPLOAD_ROUND_BUTTON_CLASS}
                       title={__('Resume')}
                       onClick={() => {
                         if (item.previousStage === 'uploading') {
@@ -152,8 +161,8 @@ export default function WebUploadList() {
                     </button>
                   )}
                 </div>
-                <div className="claim-upload__progress--label">{item.filename}</div>
-                <div className="web-upload-item__stats">
+                <div className="tw:text-app-small tw:text-app-text-subtitle">{item.filename}</div>
+                <div className={WEB_UPLOAD_STATS_CLASS}>
                   <span>
                     {item.stage === 'paused' || item.stage === 'pausing'
                       ? formatSpeed(0)
@@ -167,9 +176,9 @@ export default function WebUploadList() {
                       : ''}
                   </span>
                 </div>
-                <div className="claim-upload__progress--outer card--inline">
-                  <div className="claim-upload__progress--inner" style={{ width: `${Math.round(item.progress)}%` }}>
-                    <span className="claim-upload__progress--inner-text">{getProgressText(item)}</span>
+                <div className={`${WEB_UPLOAD_PROGRESS_CLASSES.outer} ${CARD_CLASSES.inline}`} data-web-upload-progress>
+                  <div className={WEB_UPLOAD_PROGRESS_CLASSES.inner} style={{ width: `${Math.round(item.progress)}%` }}>
+                    <span className={WEB_UPLOAD_PROGRESS_CLASSES.text}>{getProgressText(item)}</span>
                   </div>
                 </div>
               </div>

@@ -5,6 +5,7 @@ import * as KEYCODES from 'constants/keycodes';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import { FormField } from 'component/common/form';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doPlaylistAddAndAllowPlaying } from 'redux/actions/content';
 import { selectCollectionForId } from 'redux/selectors/collections';
@@ -82,7 +83,7 @@ function FormNewCollection(props: Props) {
             button="alt"
             icon={ICONS.COMPLETED}
             title={__('Confirm')}
-            className="button-toggle"
+            className={BUTTON_TOGGLE_CLASS}
             disabled={newCollectionName.trim().length === 0}
             onClick={handleAddCollection}
             ref={buttonref}
@@ -90,7 +91,7 @@ function FormNewCollection(props: Props) {
           {!onlyCreate && (
             <Button
               button="alt"
-              className="button-toggle"
+              className={BUTTON_TOGGLE_CLASS}
               icon={ICONS.REMOVE}
               title={__('Cancel')}
               onClick={handleClearNew}

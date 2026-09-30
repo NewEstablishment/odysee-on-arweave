@@ -1,5 +1,5 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import type { DoFetchClaimListMine } from 'redux/actions/claims';
-import './style.scss';
 import * as ICONS from 'constants/icons';
 import * as FILE_LIST from 'constants/file_list';
 import * as SETTINGS from 'constants/settings';
@@ -43,6 +43,7 @@ import { doFetchClaimListMine, doCheckPendingClaims, doClearClaimSearch } from '
 import { doBeginPublish } from 'redux/actions/publish';
 import { selectUploadsFilteringSetting } from 'redux/selectors/settings';
 import { doSetClientSetting } from 'redux/actions/settings';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 // Avoid prop drilling
 export const FileListContext = React.createContext<any>({
   searchText: '',
@@ -316,9 +317,9 @@ function FileListPublished() {
   const AdvisoryMsg = () => {
     if (filterType === FILE_LIST.FILE_TYPE.UNLISTED.key) {
       return (
-        <div className="flp__advisory">
+        <div className="tw:my-app-m tw:flex tw:rounded-app tw:border tw:border-app-border tw:bg-app-card-highlighted tw:p-app-s tw:text-app-small tw:text-app-text">
           <Icon icon={ICONS.INFO} />
-          <p>
+          <p className="tw:ml-app-s">
             {__(
               'A special link is required to share unlisted contents. The link can be obtained from "Copy Link" in the context menu, or the "Share" functionality in the file page.'
             )}
@@ -350,7 +351,7 @@ function FileListPublished() {
               loading={fetching}
             />
             {isLoadingLong && isFilteringEnabled && (
-              <div className="main--empty">
+              <div className={PAGE_MAIN_EMPTY_CLASS}>
                 <Spinner type="small" />
                 <p>{__('Larger upload list may take time to load with filters enabled')}</p>
               </div>
@@ -490,7 +491,7 @@ function FileListPublished() {
         !fetching && (
           <React.Fragment>
             {!fetching && !hasClaims ? (
-              <section className="main--empty">
+              <section className={PAGE_MAIN_EMPTY_CLASS}>
                 <Yrbl
                   title={filterType === FILE_LIST.FILE_TYPE.REPOSTS.key ? __('No Reposts') : __('No uploads')}
                   subtitle={
@@ -500,7 +501,7 @@ function FileListPublished() {
                   }
                   actions={
                     filterType !== FILE_LIST.FILE_TYPE.REPOSTS.key && (
-                      <div className="section__actions">
+                      <div className={SECTION_CLASSES.actions}>
                         <Button
                           button="primary"
                           label={__('Upload Something New')}
@@ -512,7 +513,7 @@ function FileListPublished() {
                 />
               </section>
             ) : (
-              <section className="main--empty">
+              <section className={PAGE_MAIN_EMPTY_CLASS}>
                 <Spinner delayed />
               </section>
             )}

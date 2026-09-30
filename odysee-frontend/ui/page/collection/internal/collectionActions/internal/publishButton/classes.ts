@@ -1,0 +1,1 @@
+export const COLLECTION_PUBLISH_WARNING_CLASS = String.raw`tw:!bg-[rgba(244,44,44,0.9)] tw:[&_.button-surface\_\_content_.icon]:stroke-white tw:[&_.button-surface\_\_content_.button-surface\_\_label]:text-white tw:hover:!bg-[rgb(244,44,44)] tw:hover:[&_.button-surface\_\_content_.icon]:stroke-white tw:hover:[&_.button-surface\_\_content_.button-surface\_\_label]:text-white`;

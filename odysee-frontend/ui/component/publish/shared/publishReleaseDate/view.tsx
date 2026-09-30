@@ -1,4 +1,11 @@
 import React from 'react';
+import {
+  PUBLISH_DATE_PICKER_INPUT_CLASS,
+  PUBLISH_FORM_FIELD_CALENDAR_CLASS,
+  PUBLISH_FORM_FIELD_DATE_PICKER_CLASS,
+  PUBLISH_FORM_FIELD_DATE_PICKER_CONTROLS_CLASS,
+  PUBLISH_FORM_FIELD_DATE_PICKER_ERROR_CLASS,
+} from '../release-date-classes';
 import classnames from 'classnames';
 import Button from 'component/button';
 import DatePicker from 'react-datepicker';
@@ -85,12 +92,12 @@ const PublishReleaseDate = (props: Props) => {
 
   return (
     <div
-      className={classnames('form-field-date-picker', {
-        'form-field-date-picker--disabled': releaseTimeDisabled,
+      className={classnames(PUBLISH_FORM_FIELD_DATE_PICKER_CLASS, {
+        'tw:pointer-events-none tw:opacity-30': releaseTimeDisabled,
       })}
     >
       <label>{__('Release date')}</label>
-      <div className="form-field-date-picker__controls">
+      <div className={PUBLISH_FORM_FIELD_DATE_PICKER_CONTROLS_CLASS}>
         {showDatePicker && (
           <DatePicker
             selected={releaseTime ? linuxTimestampToDate(releaseTime) : null}
@@ -98,8 +105,8 @@ const PublishReleaseDate = (props: Props) => {
             showTimeSelect
             dateFormat={clock24h ? 'yyyy-MM-dd HH:mm' : 'yyyy-MM-dd h:mm aa'}
             timeFormat={clock24h ? 'HH:mm' : 'h:mm aa'}
-            className="date-picker-input"
-            calendarClassName="form-field-calendar"
+            className={PUBLISH_DATE_PICKER_INPUT_CLASS}
+            calendarClassName={PUBLISH_FORM_FIELD_CALENDAR_CLASS}
             minDate={minDate}
             maxDate={new Date(9999, 11, 31)}
             isClearable={false}
@@ -121,10 +128,12 @@ const PublishReleaseDate = (props: Props) => {
             onClick={() => newDate(DEFAULT)}
           />
         )}
-        {releaseTimeError && <span className="form-field-date-picker__error">{releaseTimeError}</span>}
+        {releaseTimeError && (
+          <span className={`${PUBLISH_FORM_FIELD_DATE_PICKER_ERROR_CLASS} tw:mt-[2px]`}>{releaseTimeError}</span>
+        )}
       </div>
       {claimDateStr && (
-        <div className="form-field-date-picker__past-value">
+        <div className="tw:mt-app-xxxs tw:text-app-xsmall tw:text-app-text-subtitle">
           {__('Previous:  %date%', {
             date: claimDateStr,
           })}

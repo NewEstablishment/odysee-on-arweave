@@ -1,0 +1,1 @@
+export const BUSY_INDICATOR_LOADER_CLASS = String.raw`busy-indicator__loader tw:my-[-1rem] tw:mx-0 tw:inline-block tw:min-h-[8px] tw:min-w-[16px] tw:bg-[url('/img/busy.gif')] tw:bg-center tw:bg-no-repeat tw:px-[30px] tw:py-0 tw:align-middle tw:first:!pl-[2px] tw:last:!pr-[2px]`;

@@ -4,6 +4,7 @@ import Button from 'component/button';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectCanonicalUrlForUri } from 'redux/selectors/claims';
 import { doToast as doToastAction } from 'redux/actions/notifications';
+import { MEDIA_URI_CLASS } from 'component/common/media-classes';
 type Props = {
   uri: string;
   inline?: boolean;
@@ -18,7 +19,7 @@ function ClaimUri(props: Props) {
   return (
     <Button
       button="link"
-      className={classnames('media__uri', {
+      className={classnames(MEDIA_URI_CLASS, {
         'media__uri--inline': inline,
       })}
       label={noShortUrl ? uri : shortUrl || uri}

@@ -1,4 +1,3 @@
-import 'scss/component/_header.scss';
 import { ENABLE_NO_SOURCE_CLAIMS } from 'config';
 import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import * as ICONS from 'constants/icons';
@@ -15,6 +14,8 @@ import { selectUser, selectUserAuthenticated, selectUserIsNative } from 'redux/s
 import { selectActivePipelineItems, selectCurrentUploads } from 'redux/selectors/publish';
 import { doBeginPublish as doBeginPublishAction } from 'redux/actions/publish';
 import { useLivestreamPublish } from 'contexts/livestreamPublish';
+import { HEADER_NAVIGATION_ICON_CLASS } from 'component/header/classes';
+import { HEADER_LIVESTREAM_LIVE_CLASS } from './classes';
 type HeaderMenuButtonProps = {
   authRedirect?: string;
 };
@@ -31,8 +32,8 @@ function HeaderLivestreamButton({
   return (
     <Tooltip title={isLive ? __('Live') : __('Go live')}>
       <Button
-        className={classnames('header__navigationItem--icon', {
-          'header__livestream-btn--live': isLive,
+        className={classnames(HEADER_NAVIGATION_ICON_CLASS, {
+          [HEADER_LIVESTREAM_LIVE_CLASS]: isLive,
         })}
         {...uploadProps}
         onClick={() => doBeginPublish(PUBLISH_TYPES.LIVESTREAM)}
@@ -61,12 +62,12 @@ export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
     requiresAuth: !authenticated,
   };
   return canUpload ? (
-    <div className="header__buttons">
+    <div className="tw:flex">
       <UploadManagerMenu hasActivity={hasUploadActivity} onUploadClick={() => doBeginPublish(PUBLISH_TYPES.FILE)} />
       {livestreamEnabled && <HeaderLivestreamButton uploadProps={uploadProps} doBeginPublish={doBeginPublish} />}
       {!isNative && (
         <Tooltip title={__('Post an article')}>
-          <Button className="header__navigationItem--icon" onClick={() => doBeginPublish(PUBLISH_TYPES.POST)}>
+          <Button className={HEADER_NAVIGATION_ICON_CLASS} onClick={() => doBeginPublish(PUBLISH_TYPES.POST)}>
             <Icon size={18} icon={ICONS.POST} aria-hidden />
           </Button>
         </Tooltip>
@@ -75,17 +76,17 @@ export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
   ) : (
     <>
       <Tooltip title={__('Upload')}>
-        <Button className="header__navigationItem--icon" navigate={`/$/${PAGES.AUTH}${authRedirectParam}`}>
+        <Button className={HEADER_NAVIGATION_ICON_CLASS} navigate={`/$/${PAGES.AUTH}${authRedirectParam}`}>
           <Icon size={18} icon={ICONS.PUBLISH} aria-hidden />
         </Button>
       </Tooltip>
       <Tooltip title={__('Settings')}>
-        <Button className="header__navigationItem--icon" navigate={`/$/${PAGES.SETTINGS}`}>
+        <Button className={HEADER_NAVIGATION_ICON_CLASS} navigate={`/$/${PAGES.SETTINGS}`}>
           <Icon size={18} icon={ICONS.SETTINGS} aria-hidden />
         </Button>
       </Tooltip>
       <Tooltip title={__('Help')}>
-        <Button className="header__navigationItem--icon" navigate={`/$/${PAGES.HELP}`}>
+        <Button className={HEADER_NAVIGATION_ICON_CLASS} navigate={`/$/${PAGES.HELP}`}>
           <Icon size={18} icon={ICONS.HELP} aria-hidden />
         </Button>
       </Tooltip>

@@ -1,8 +1,9 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
-import './style.scss';
 import Entry from './entry/view';
 import SortableList from './sortableList';
 import { FormField } from 'component/common/form-components/form-field';
+import { FORM_FIELD_ADDRESS_CLASS } from 'component/common/form-components/form-field-classes';
 import Spinner from 'component/spinner';
 import { URL } from 'config';
 import * as ICONS from 'constants/icons';
@@ -31,7 +32,7 @@ type Props = {
 };
 
 const CenteredSpinner = (props: {}) => (
-  <div className="main--empty">
+  <div className={PAGE_MAIN_EMPTY_CLASS}>
     <Spinner />
   </div>
 );
@@ -107,7 +108,7 @@ export default function ChannelFinder(props: Props) {
               hideInvalid
             />
           ) : isUrl ? (
-            <div className="main--empty">{__('No results')}</div>
+            <div className={PAGE_MAIN_EMPTY_CLASS}>{__('No results')}</div>
           ) : null}
         </>
       )}
@@ -117,8 +118,10 @@ export default function ChannelFinder(props: Props) {
   const MiscSuggestions = (props: {}) => {
     const show = showSubscriptions && subscriptionUris.length > 0 && !searchResponse.loading;
     return show ? (
-      <div className="channel-finder__misc-suggestions">
-        <label>{__('Following')}</label>
+      <div className="tw:[&:not(:first-child)]:mt-app-m tw:[&:not(:first-child)]:[border-top:1px_solid_var(--color-border)]">
+        <label className="tw:pt-app-m tw:pb-app-xxs tw:text-app-small tw:text-app-text-subtitle">
+          {__('Following')}
+        </label>
         {subscriptionUris.map((uri) => (
           <Entry
             key={uri}
@@ -232,13 +235,13 @@ export default function ChannelFinder(props: Props) {
   }
 
   return (
-    <div className="channel-finder">
-      <div className="channel-finder__top">
-        <div className="channel-finder__input">
+    <div className="tw:py-app-m tw:upto-small:py-app-xs">
+      <div>
+        <div>
           <FormField
             type="text"
             name="search_term"
-            className="form-field--address"
+            className={FORM_FIELD_ADDRESS_CLASS}
             label={label}
             placeholder={`\u{1F50E} ${placeholder || __('Enter channel name or URL')}`}
             value={searchTerm}
@@ -248,8 +251,8 @@ export default function ChannelFinder(props: Props) {
           />
         </div>
       </div>
-      <div className="channel-finder__middle">
-        <div className="channel-finder__suggestion-list">
+      <div className="tw:flex tw:px-app-xs tw:py-app-s tw:upto-small:flex-col">
+        <div className="tw:h-[40vh] tw:w-1/2 tw:overflow-auto tw:rounded-app tw:bg-[var(--color-header-button)] tw:px-app-s tw:py-app-xs tw:upto-small:h-[30vh] tw:upto-small:w-full">
           {searchResponse.loading || isResolvingUri ? (
             <CenteredSpinner />
           ) : (
@@ -260,8 +263,10 @@ export default function ChannelFinder(props: Props) {
             </>
           )}
         </div>
-        <div className="channel-finder__selected-list">
-          <div className="channel-finder__selected-list-label">{__('Selected channels')}</div>
+        <div className="tw:ml-app-s tw:h-[40vh] tw:w-1/2 tw:flex-grow tw:overflow-auto tw:rounded-app tw:bg-[var(--color-header-button)] tw:px-app-s tw:py-app-xs tw:upto-small:mt-app-s tw:upto-small:ml-0 tw:upto-small:h-[30vh] tw:upto-small:w-full">
+          <div className="tw:mb-app-xs tw:self-end tw:[border-bottom:1px_solid_var(--color-border)] tw:pb-app-xs tw:text-app-text-subtitle">
+            {__('Selected channels')}
+          </div>
           <SortableList
             list={selectedUris}
             onGetElemAtIndex={(uri, index) => (
@@ -280,7 +285,7 @@ export default function ChannelFinder(props: Props) {
           />
         </div>
       </div>
-      <div className="channel-finder__bottom">
+      <div className="tw:pl-app-xs">
         <FormField
           type="checkbox"
           name="suggest_followed_channels"

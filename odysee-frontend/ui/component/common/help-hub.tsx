@@ -1,6 +1,8 @@
 // import * as ICONS from 'constants/icons';
 import React from 'react';
 import I18nMessage from 'component/i18nMessage';
+import { HELP_HUB_CLASS } from './help-hub-classes';
+
 type Props = {
   href?: string;
   image?: string;
@@ -27,7 +29,7 @@ export default function HelpHub(props: Props) {
   const { href, image, text } = props;
 
   return (
-    <div className="help-hub__wrapper">
+    <div className={HELP_HUB_CLASS}>
       <span>{hubMessage(text, href)}</span>
       {image && (
         <img

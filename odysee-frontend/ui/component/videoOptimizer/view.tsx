@@ -4,7 +4,17 @@ import { useAppDispatch } from 'redux/hooks';
 import { doToast } from 'redux/actions/notifications';
 import { doUpdatePublishForm } from 'redux/actions/publish';
 import { cacheOptimizedFile } from 'util/uploadCache';
-import './style.scss';
+import {
+  publishStatusActionClassName,
+  publishStatusCardClassName,
+  publishStatusCheckboxClassName,
+  publishStatusDescriptionClassName,
+  publishStatusHeaderClassName,
+  publishStatusIconClassName,
+  publishStatusTextClassName,
+  publishStatusTitleClassName,
+  type PublishStatusVariant,
+} from 'component/publish/shared/publishStatusCard/classes';
 
 // Lazy-import mediabunny to keep it out of the main bundle
 async function loadMediaBunny() {
@@ -16,7 +26,7 @@ type Props = {
   file: File;
   fileBitrate: number; // bps
   fileSizeTooBig?: boolean;
-  variant: 'error' | 'mandatory' | 'recommended';
+  variant: PublishStatusVariant;
   onOptimized: (optimizedFile: File) => void;
   onSkip: () => void;
 };
@@ -30,6 +40,33 @@ type AnalysisResult = {
 };
 
 type OptimizeState = 'idle' | 'analyzing' | 'ready' | 'optimizing' | 'done' | 'error';
+
+const optimizerLabelVariantClassNames: Record<PublishStatusVariant, string> = {
+  error: 'tw:bg-[rgba(244,67,54,0.15)] tw:text-[#f44336]',
+  mandatory: 'tw:bg-[rgba(255,180,0,0.15)] tw:text-[#f5a623]',
+  recommended: 'tw:bg-[rgba(76,175,80,0.15)] tw:text-[#4caf50]',
+};
+
+function optimizerOptionClassName(selected: boolean, variant: PublishStatusVariant) {
+  const stateClassName = selected
+    ? variant === 'mandatory'
+      ? 'tw:cursor-default tw:border-[#f5a623] tw:bg-[rgba(255,180,0,0.06)]'
+      : 'tw:cursor-default tw:border-[#4caf50] tw:bg-[rgba(76,175,80,0.06)]'
+    : variant === 'mandatory'
+      ? 'tw:cursor-pointer tw:border-app-border tw:bg-[rgba(var(--color-header-button-base),0.04)] tw:hover:border-[rgba(255,180,0,0.5)]'
+      : 'tw:cursor-pointer tw:border-app-border tw:bg-[rgba(var(--color-header-button-base),0.04)] tw:hover:border-[rgba(76,175,80,0.5)]';
+
+  return `tw:mt-0 tw:flex tw:flex-1 tw:items-start tw:gap-app-xs tw:rounded-[8px] tw:border tw:p-app-s tw:[transition:border-color_0.15s_ease,background_0.15s_ease] ${stateClassName}`;
+}
+
+function optimizerRadioClassName(variant: PublishStatusVariant) {
+  const colorClassName =
+    variant === 'mandatory'
+      ? 'tw:border-[rgba(255,180,0,0.4)] tw:hover:border-[#f5a623] tw:checked:border-[#f5a623] tw:checked:bg-[#f5a623]'
+      : 'tw:border-[rgba(76,175,80,0.4)] tw:hover:border-[#4caf50] tw:checked:border-[#4caf50] tw:checked:bg-[#4caf50]';
+
+  return `video-optimizer-radio-surface tw:relative tw:mt-[2px] tw:mr-0 tw:mb-0 tw:ml-0 tw:size-[18px] tw:min-h-[18px] tw:min-w-[18px] tw:shrink-0 tw:cursor-pointer tw:appearance-none tw:rounded-[50%] tw:border-2 tw:bg-transparent tw:p-0 tw:[box-shadow:none] tw:focus:outline-none tw:focus:[box-shadow:none] tw:focus-visible:outline-none tw:focus-visible:[box-shadow:none] tw:hover:[box-shadow:none] ${colorClassName}`;
+}
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -247,9 +284,9 @@ export default function VideoOptimizer({ file, fileBitrate, fileSizeTooBig, vari
   // Don't show anything if not a high bitrate video
   if (state === 'idle' || state === 'analyzing') {
     return (
-      <div className="video-optimizer video-optimizer--analyzing">
-        <div className="video-optimizer__spinner" />
-        <span className="video-optimizer__analyzing-text">{__('Analyzing video...')}</span>
+      <div className="tw:mt-app-s tw:flex tw:items-center tw:gap-app-xs tw:rounded-app tw:border tw:border-[rgba(var(--color-header-button-base),0.12)] tw:bg-[rgba(var(--color-header-button-base),0.06)] tw:px-app-m tw:py-app-s">
+        <div className="tw:size-[16px] tw:rounded-[50%] tw:border-2 tw:border-[rgba(var(--color-primary-dynamic),0.2)] tw:border-t-app-primary tw:[animation:video-opt-spin_0.6s_linear_infinite]" />
+        <span className="tw:text-app-small tw:text-app-text-subtitle">{__('Analyzing video...')}</span>
       </div>
     );
   }
@@ -261,10 +298,10 @@ export default function VideoOptimizer({ file, fileBitrate, fileSizeTooBig, vari
   const progressPercent = Math.round(progress * 100);
 
   return (
-    <div className="video-optimizer">
-      <div className={`publish-status-card publish-status-card--${variant}`}>
-        <div className="publish-status-card__header">
-          <div className="publish-status-card__icon">
+    <div className="tw:mt-app-s">
+      <div className={publishStatusCardClassName}>
+        <div className={publishStatusHeaderClassName}>
+          <div className={publishStatusIconClassName(variant)}>
             <svg
               width="20"
               height="20"
@@ -278,14 +315,16 @@ export default function VideoOptimizer({ file, fileBitrate, fileSizeTooBig, vari
               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
             </svg>
           </div>
-          <div className="publish-status-card__text">
-            <h3 className="publish-status-card__title">
+          <div className={publishStatusTextClassName}>
+            <h3 className={publishStatusTitleClassName}>
               {__('Optimize Video')}
-              <span className={`video-optimizer__label video-optimizer__label--${variant}`}>
+              <span
+                className={`tw:ml-app-xs tw:rounded-[4px] tw:px-[8px] tw:py-[4px] tw:align-middle tw:text-app-xsmall tw:font-semibold ${optimizerLabelVariantClassNames[variant]}`}
+              >
                 {variant === 'mandatory' ? __('Mandatory') : variant === 'error' ? __('Required') : __('Recommended')}
               </span>
             </h3>
-            <p className="publish-status-card__description">
+            <p className={publishStatusDescriptionClassName}>
               {fileSizeTooBig
                 ? __(
                     'Your file size exceeds the upload limit. Choose between reducing the bitrate or lowering the resolution to fit.'
@@ -300,10 +339,11 @@ export default function VideoOptimizer({ file, fileBitrate, fileSizeTooBig, vari
           </div>
           {state === 'ready' && (
             <label
-              className="publish-status-card__action"
+              className={publishStatusActionClassName(variant)}
               style={variant === 'mandatory' ? { pointerEvents: 'none', opacity: 0.7 } : undefined}
             >
               <input
+                className={publishStatusCheckboxClassName(variant)}
                 type="checkbox"
                 checked={optimizeEnabled}
                 readOnly={variant === 'mandatory'}
@@ -320,78 +360,104 @@ export default function VideoOptimizer({ file, fileBitrate, fileSizeTooBig, vari
         </div>
 
         {/* Options */}
-        <div className="video-optimizer__options">
-          <label
-            className={`video-optimizer__option ${selectedOption === 'bitrate' ? 'video-optimizer__option--selected' : ''}`}
-          >
+        <div className="tw:mt-app-m tw:mb-app-m tw:flex tw:flex-col tw:gap-app-xs">
+          <label className={optimizerOptionClassName(selectedOption === 'bitrate', variant)}>
             <input
+              className={optimizerRadioClassName(variant)}
               type="radio"
               name="optimize_mode"
               checked={selectedOption === 'bitrate'}
               onChange={() => setSelectedOption('bitrate')}
             />
-            <div className="video-optimizer__option-info">
-              <strong>{__('Reduce Bitrate')}</strong>
-              <div className="video-optimizer__stats">
-                <div className="video-optimizer__stat">
-                  <span className="video-optimizer__stat-label">{__('Bitrate')}</span>
-                  <span className="video-optimizer__stat-value video-optimizer__stat-value--warn">
+            <div className="tw:flex tw:flex-col tw:gap-[2px]">
+              <strong className="tw:text-app-small tw:text-app-text">{__('Reduce Bitrate')}</strong>
+              <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-app-s tw:rounded-[8px] tw:bg-[rgba(var(--color-header-button-base),0.08)] tw:p-app-s tw:upto-small:gap-app-xs tw:upto-small:p-app-xs">
+                <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-[2px]">
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:uppercase tw:tracking-[0.04em] tw:text-app-text-subtitle">
+                    {__('Bitrate')}
+                  </span>
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-[#f5a623] tw:[font-variant-numeric:tabular-nums]">
                     {formatBitrate(analysis.bitrateMbps * 1e6)}
                   </span>
                 </div>
-                <div className="video-optimizer__stat-arrow">→</div>
-                <div className="video-optimizer__stat">
-                  <span className="video-optimizer__stat-label">{__('Target')}</span>
-                  <span className="video-optimizer__stat-value video-optimizer__stat-value--good">
+                <div className="tw:flex tw:shrink-0 tw:items-center tw:text-app-text-subtitle tw:upto-small:hidden">
+                  →
+                </div>
+                <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-[2px]">
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:uppercase tw:tracking-[0.04em] tw:text-app-text-subtitle">
+                    {__('Target')}
+                  </span>
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-[#4caf50] tw:[font-variant-numeric:tabular-nums]">
                     {formatBitrate(targetBitrateMbps * 1e6)}
                   </span>
                 </div>
-                <div className="video-optimizer__stat">
-                  <span className="video-optimizer__stat-label">{__('Resolution')}</span>
-                  <span className="video-optimizer__stat-value">{analysis.height}p</span>
+                <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-[2px]">
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:uppercase tw:tracking-[0.04em] tw:text-app-text-subtitle">
+                    {__('Resolution')}
+                  </span>
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-app-text-subtitle tw:[font-variant-numeric:tabular-nums]">
+                    {analysis.height}p
+                  </span>
                 </div>
                 {estimatedSize && (
-                  <div className="video-optimizer__stat">
-                    <span className="video-optimizer__stat-label">{__('Est. Size')}</span>
-                    <span className="video-optimizer__stat-value">{formatSize(estimatedSize)}</span>
+                  <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-[2px]">
+                    <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:uppercase tw:tracking-[0.04em] tw:text-app-text-subtitle">
+                      {__('Est. Size')}
+                    </span>
+                    <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-app-text-subtitle tw:[font-variant-numeric:tabular-nums]">
+                      {formatSize(estimatedSize)}
+                    </span>
                   </div>
                 )}
               </div>
             </div>
           </label>
-          <label
-            className={`video-optimizer__option ${selectedOption === 'resolution' ? 'video-optimizer__option--selected' : ''}`}
-          >
+          <label className={optimizerOptionClassName(selectedOption === 'resolution', variant)}>
             <input
+              className={optimizerRadioClassName(variant)}
               type="radio"
               name="optimize_mode"
               checked={selectedOption === 'resolution'}
               onChange={() => setSelectedOption('resolution')}
             />
-            <div className="video-optimizer__option-info">
-              <strong>{__('Lower Resolution')}</strong>
-              <div className="video-optimizer__stats">
-                <div className="video-optimizer__stat">
-                  <span className="video-optimizer__stat-label">{__('Bitrate')}</span>
-                  <span className="video-optimizer__stat-value video-optimizer__stat-value--warn">
+            <div className="tw:flex tw:flex-col tw:gap-[2px]">
+              <strong className="tw:text-app-small tw:text-app-text">{__('Lower Resolution')}</strong>
+              <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-app-s tw:rounded-[8px] tw:bg-[rgba(var(--color-header-button-base),0.08)] tw:p-app-s tw:upto-small:gap-app-xs tw:upto-small:p-app-xs">
+                <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-[2px]">
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:uppercase tw:tracking-[0.04em] tw:text-app-text-subtitle">
+                    {__('Bitrate')}
+                  </span>
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-[#f5a623] tw:[font-variant-numeric:tabular-nums]">
                     {formatBitrate(analysis.bitrateMbps * 1e6)}
                   </span>
                 </div>
-                <div className="video-optimizer__stat-arrow">→</div>
-                <div className="video-optimizer__stat">
-                  <span className="video-optimizer__stat-label">{__('Target')}</span>
-                  <span className="video-optimizer__stat-value video-optimizer__stat-value--good">
+                <div className="tw:flex tw:shrink-0 tw:items-center tw:text-app-text-subtitle tw:upto-small:hidden">
+                  →
+                </div>
+                <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-[2px]">
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:uppercase tw:tracking-[0.04em] tw:text-app-text-subtitle">
+                    {__('Target')}
+                  </span>
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-[#4caf50] tw:[font-variant-numeric:tabular-nums]">
                     {formatBitrate(altTargetBitrateMbps * 1e6)}
                   </span>
                 </div>
-                <div className="video-optimizer__stat">
-                  <span className="video-optimizer__stat-label">{__('Resolution')}</span>
-                  <span className="video-optimizer__stat-value">{altHeight}p</span>
+                <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-[2px]">
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:uppercase tw:tracking-[0.04em] tw:text-app-text-subtitle">
+                    {__('Resolution')}
+                  </span>
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-app-text-subtitle tw:[font-variant-numeric:tabular-nums]">
+                    {altHeight}p
+                  </span>
                 </div>
                 {altEstimatedSize && (
-                  <div className="video-optimizer__stat">
-                    <span className="video-optimizer__stat-label">{__('Est. Size')}</span>
-                    <span className="video-optimizer__stat-value">{formatSize(altEstimatedSize)}</span>
+                  <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-[2px]">
+                    <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:uppercase tw:tracking-[0.04em] tw:text-app-text-subtitle">
+                      {__('Est. Size')}
+                    </span>
+                    <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-app-text-subtitle tw:[font-variant-numeric:tabular-nums]">
+                      {formatSize(altEstimatedSize)}
+                    </span>
                   </div>
                 )}
               </div>
@@ -401,20 +467,25 @@ export default function VideoOptimizer({ file, fileBitrate, fileSizeTooBig, vari
 
         {/* Progress bar (during optimization) */}
         {state === 'optimizing' && (
-          <div className="video-optimizer__progress-section">
-            <div className="video-optimizer__progress-bar">
-              <div className="video-optimizer__progress-fill" style={{ width: `${progressPercent}%` }} />
+          <div className="tw:mb-app-m">
+            <div className="tw:h-[6px] tw:overflow-hidden tw:rounded-[3px] tw:bg-[rgba(var(--color-header-button-base),0.15)]">
+              <div
+                className="tw:h-full tw:rounded-[3px] tw:bg-[linear-gradient(90deg,rgba(var(--color-primary-dynamic),0.8),var(--color-primary))] tw:[transition:width_0.3s_ease]"
+                style={{ width: `${progressPercent}%` }}
+              />
             </div>
-            <div className="video-optimizer__progress-info">
-              <span className="video-optimizer__progress-percent">{progressPercent}%</span>
-              <span className="video-optimizer__progress-label">{__('Optimizing...')}</span>
+            <div className="tw:mt-app-xxs tw:flex tw:items-center tw:justify-between">
+              <span className="tw:text-app-small tw:font-bold tw:text-app-primary tw:[font-variant-numeric:tabular-nums]">
+                {progressPercent}%
+              </span>
+              <span className="tw:text-app-xsmall tw:text-app-text-subtitle">{__('Optimizing...')}</span>
             </div>
           </div>
         )}
 
         {/* Done state */}
         {state === 'done' && (
-          <div className="video-optimizer__done">
+          <div className="tw:mb-app-m tw:flex tw:items-center tw:gap-app-xs tw:rounded-[8px] tw:border tw:border-[rgba(76,175,80,0.2)] tw:bg-[rgba(76,175,80,0.1)] tw:px-app-s tw:py-app-xs tw:text-app-small tw:font-semibold tw:text-[#4caf50]">
             <svg
               width="20"
               height="20"
@@ -432,8 +503,11 @@ export default function VideoOptimizer({ file, fileBitrate, fileSizeTooBig, vari
         )}
 
         {state === 'optimizing' && (
-          <div className="video-optimizer__actions">
-            <button className="video-optimizer__btn video-optimizer__btn--cancel" onClick={handleCancel}>
+          <div className="tw:mt-app-s tw:upto-small:flex-col">
+            <button
+              className="tw:inline-flex tw:cursor-pointer tw:items-center tw:justify-center tw:gap-[6px] tw:rounded-[8px] tw:border tw:border-[rgba(var(--color-header-button-base),0.18)] tw:bg-[rgba(var(--color-header-button-base),0.06)] tw:px-[20px] tw:py-[10px] tw:text-app-small tw:font-semibold tw:text-app-text-subtitle tw:transition-all tw:duration-150 tw:ease-[ease] tw:hover:bg-[rgba(var(--color-header-button-base),0.12)] tw:hover:text-app-text tw:upto-small:w-full"
+              onClick={handleCancel}
+            >
               {__('Cancel')}
             </button>
           </div>

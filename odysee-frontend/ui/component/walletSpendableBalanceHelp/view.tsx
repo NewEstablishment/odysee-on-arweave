@@ -5,6 +5,9 @@ import React from 'react';
 import { useAppSelector } from 'redux/hooks';
 import { selectBalance } from 'redux/selectors/wallet';
 import { selectArweaveBalance, selectArweaveConnecting, selectArweaveExchangeRates } from 'redux/selectors/arwallet';
+import { HELP_CLASS } from 'component/common/help-classes';
+
+const SPENDABLE_HELP_CLASS = 'tw:mt-app-xxs tw:block tw:text-app-small';
 
 type Props = {
   asset?: string;
@@ -52,25 +55,25 @@ function WalletSpendableBalanceHelp(props: Props) {
 
   if (asset === 'lbc') {
     return !LBCBalance ? null : inline ? (
-      <span className="help--spendable">{getMessage('%LBCBalance% available')}</span>
+      <span className={SPENDABLE_HELP_CLASS}>{getMessage('%LBCBalance% available')}</span>
     ) : (
-      <div className="help">{getMessage('Your immediately spendable balance is %LBCBalance%.')}</div>
+      <div className={HELP_CLASS}>{getMessage('Your immediately spendable balance is %LBCBalance%.')}</div>
     );
   } else if (asset === 'usdc') {
     return arConnecting ? (
-      <span className="help">{__('Connecting...')}</span>
+      <span className={HELP_CLASS}>{__('Connecting...')}</span>
     ) : USDCBalance ? (
-      <span className="help--spendable">{getMessage('%USDCBalance% available.')}</span>
+      <span className={SPENDABLE_HELP_CLASS}>{getMessage('%USDCBalance% available.')}</span>
     ) : (
-      <div className="help">{getMessage('Your immediately spendable balance is %USDCBalance%.')}</div>
+      <div className={HELP_CLASS}>{getMessage('Your immediately spendable balance is %USDCBalance%.')}</div>
     );
   } else if (asset === 'ar') {
     return arConnecting ? (
-      <span className="help">{__('Connecting...')}</span>
+      <span className={HELP_CLASS}>{__('Connecting...')}</span>
     ) : ARBalance ? (
-      <span className="help--spendable">{getMessage('$%ConvertedBalance% (%ARBalance%) available.')}</span>
+      <span className={SPENDABLE_HELP_CLASS}>{getMessage('$%ConvertedBalance% (%ARBalance%) available.')}</span>
     ) : (
-      <div className="help">{getMessage('Your immediately spendable balance is %ARBalance%.')}</div>
+      <div className={HELP_CLASS}>{getMessage('Your immediately spendable balance is %ARBalance%.')}</div>
     );
   }
 }

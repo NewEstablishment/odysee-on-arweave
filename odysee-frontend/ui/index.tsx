@@ -35,6 +35,7 @@ if (typeof AbortSignal.any !== 'function') {
 }
 
 import React, { useState, useEffect } from 'react';
+import { PAGE_MAIN_LAUNCHING_CLASS } from 'component/page/classes';
 // core-js polyfills are loaded by Vite automatically via browserslist
 import { setGlobalDevModeChecks } from 'reselect';
 
@@ -93,13 +94,10 @@ import { doSendPastRecsysEntries } from 'redux/actions/content';
 import { reloadOnceForDynamicImportError } from 'util/importFailure';
 import { installHyperbeamFetchDebug } from 'util/hyperbeamDebug';
 import { isServedFromManifest } from 'util/manifest-prefix';
-// Import 3rd-party styles before ours for the current way we are code-splitting.
-import 'scss/third-party.scss';
+// Import third-party styles before the application cascade.
 import 'react-datepicker/dist/react-datepicker.css';
-// Import our app styles
-// If a style is not necessary for the initial page load, it should be removed from `all.scss`
-// and loaded dynamically in the component that consumes it
-import 'scss/all.scss';
+import 'react-image-crop/dist/ReactCrop.css';
+import './styles/index.css';
 
 installHyperbeamFetchDebug();
 
@@ -309,7 +307,7 @@ function AppWrapper() {
       <PersistGate
         persistor={persistor}
         onBeforeLift={() => setPersistDone(true)}
-        loading={<div className="main--launching" />}
+        loading={<div className={PAGE_MAIN_LAUNCHING_CLASS} />}
       >
         <div className="app-gate-root">
           <AppRouter>

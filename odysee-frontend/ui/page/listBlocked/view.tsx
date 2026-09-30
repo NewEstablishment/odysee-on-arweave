@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as ICONS from 'constants/icons';
 import { BLOCK_LEVEL } from 'constants/comment';
 import React from 'react';
@@ -5,10 +6,13 @@ import classnames from 'classnames';
 import dayjs from 'util/dayjs';
 import humanizeDuration from 'humanize-duration';
 import BlockList from 'component/blockList';
+import { BLOCK_LIST_DELEGATOR_CLASS, BLOCK_LIST_MODERATOR_CLASS } from 'component/blockList/classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import ClaimPreview from 'component/claimPreview';
 import Page from 'component/page';
 import Spinner from 'component/spinner';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import usePersistedState from 'effects/use-persisted-state';
 import ChannelBlockButton from 'component/channelBlockButton';
 import ChannelMuteButton from 'component/channelMuteButton';
@@ -28,6 +32,7 @@ import {
 } from 'redux/selectors/comments';
 import { selectMyChannelClaimIds } from 'redux/selectors/claims';
 import { doResolveUris } from 'redux/actions/claims';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const VIEW = {
   BLOCKED: 'blocked',
@@ -92,7 +97,7 @@ function ListBlocked() {
     const getBanInfoElem = (timeoutInfo) => {
       return (
         <div>
-          <div className="help">
+          <div className={HELP_CLASS}>
             <blockquote>
               {dayjs(timeoutInfo.blockedAt).format('LLL')}
               <br />
@@ -131,7 +136,7 @@ function ListBlocked() {
           <>
             {delegatorUrisForBlockedUri.map((delegatorUri) => {
               return (
-                <div className="block-list--delegator" key={delegatorUri}>
+                <div className={BLOCK_LIST_DELEGATOR_CLASS} key={delegatorUri}>
                   <label>{__('Blocked on behalf of:')}</label>
                   <ul className="section">
                     <div>
@@ -210,8 +215,8 @@ function ListBlocked() {
         icon={icon}
         button="alt"
         label={__(label)}
-        className={classnames(`button-toggle`, {
-          'button-toggle--active': viewMode === view,
+        className={classnames(BUTTON_TOGGLE_CLASS, {
+          [BUTTON_TOGGLE_ACTIVE_CLASS]: viewMode === view,
         })}
         onClick={() => setViewMode(view)}
       />
@@ -252,21 +257,21 @@ function ListBlocked() {
       }}
     >
       {fetchingModerationBlockList && (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       )}
 
       {!fetchingModerationBlockList && (
         <>
-          <div className="section__header--actions">
-            <div className="section__actions--inline">
+          <div className={SECTION_CLASSES.headerActions}>
+            <div className={SECTION_CLASSES.actionsInline}>
               {getViewElem(VIEW.BLOCKED, 'Blocked', ICONS.BLOCK)}
               {isAdmin && getViewElem(VIEW.ADMIN, 'Global', ICONS.BLOCK)}
               {isModerator && getViewElem(VIEW.MODERATOR, 'Moderator', ICONS.BLOCK)}
               {getViewElem(VIEW.MUTED, 'Hidden', ICONS.EYE_OFF)}
             </div>
-            <div className="section__actions--inline">{getRefreshElem()}</div>
+            <div className={SECTION_CLASSES.actionsInline}>{getRefreshElem()}</div>
           </div>
 
           <BlockList
@@ -276,7 +281,7 @@ function ListBlocked() {
             titleEmptyList={getEmptyListTitle(viewMode)}
             subtitleEmptyList={getEmptyListSubtitle(viewMode)}
             getActionButtons={getActionButtons}
-            className={viewMode === VIEW.MODERATOR ? 'block-list--moderator' : undefined}
+            className={viewMode === VIEW.MODERATOR ? BLOCK_LIST_MODERATOR_CLASS : undefined}
           />
         </>
       )}

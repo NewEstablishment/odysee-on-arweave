@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import { Modal } from 'modal/modal';
 import Button from 'component/button';
@@ -7,6 +8,9 @@ import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
 import { doCommentAbandon } from 'redux/actions/comments';
 import { selectCommentForCommentId } from 'redux/selectors/comments';
+import { REMOVE_COMMENT_PREVIEW_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 type Props = {
   commentId: string;
   // sha256 digest identifying the comment
@@ -19,7 +23,7 @@ type Props = {
 
 function getCommentPreview(comment: any) {
   return comment ? (
-    <div className="section comment-preview non-clickable">
+    <div className={`section ${REMOVE_COMMENT_PREVIEW_CLASS} tw:pointer-events-none`}>
       <CommentView comment={comment} threadLevel={-1} isTopLevel hideActions hideContextMenu forceDisplayDeadComment />
     </div>
   ) : null;
@@ -38,7 +42,7 @@ function ModalRemoveComment(props: Props) {
           <React.Fragment>
             <p>{__('Are you sure you want to remove this comment?')}</p>
             {Boolean(supportAmount) && (
-              <p className="help error__text">
+              <p className={`${HELP_CLASS} ${ERROR_TEXT_CLASS}`}>
                 {__('This comment has a tip associated with it which cannot be reverted.')}
               </p>
             )}
@@ -47,7 +51,7 @@ function ModalRemoveComment(props: Props) {
         }
         actions={
           <>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="primary"
                 label={__('Remove')}

@@ -1,6 +1,7 @@
 import React from 'react';
 import Button from 'component/button';
 import classnames from 'classnames';
+import { FILE_ACTION_BUTTON_CLASS } from './file-action-button-classes';
 type Props = {
   title?: string;
   iconSize?: number;
@@ -22,12 +23,12 @@ function FileActionButton(props: Props) {
   const { title, iconSize, noStyle, className, ...buttonProps } = props;
   return (
     <Button
-      button={noStyle ? 'alt' : undefined}
+      button="alt"
       title={title}
       className={
         noStyle
           ? className || undefined
-          : classnames('button--file-action', {
+          : classnames(FILE_ACTION_BUTTON_CLASS, {
               [className || '']: Boolean(className),
             })
       }

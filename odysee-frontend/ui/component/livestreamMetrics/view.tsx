@@ -9,7 +9,7 @@ import {
   formatAudioBitrate,
   formatSourceType,
 } from 'util/livestreamMetrics';
-import './style.scss';
+import { LIVESTREAM_METRICS_CLASSES as C } from './classes';
 
 type Mode = 'compact' | 'overlay' | 'full' | 'card';
 
@@ -26,18 +26,18 @@ function CompactMetrics({ metrics }: { metrics: StreamMetrics }) {
   const tp = metrics.throughput;
 
   return (
-    <div className="stream-metrics stream-metrics--compact">
+    <div className={`${C.base} ${C.compact}`}>
       {/* Source type */}
-      {metrics.source_type && <span className="stream-metrics__chip">{formatSourceType(metrics.source_type)}</span>}
+      {metrics.source_type && <span className={C.chip}>{formatSourceType(metrics.source_type)}</span>}
       {/* Video info */}
       {metrics.video && (
-        <span className="stream-metrics__chip">
+        <span className={C.chip}>
           {formatResolution(metrics.video)} {formatCodec(metrics.video.codec)}
         </span>
       )}
       {/* Ingest bitrate */}
       {tp && tp.in_bps > 0 && (
-        <span className="stream-metrics__chip" title={`avg ${formatBps(tp.avg_in_bps)}`}>
+        <span className={C.chip} title={`avg ${formatBps(tp.avg_in_bps)}`}>
           {/* Arrow up icon */}
           <svg
             width="10"
@@ -57,9 +57,9 @@ function CompactMetrics({ metrics }: { metrics: StreamMetrics }) {
       )}
       {/* Health dot */}
       <span
-        className={classnames('stream-metrics__health-dot', {
-          'stream-metrics__health-dot--good': tp && tp.in_bps > 0,
-          'stream-metrics__health-dot--unknown': !tp || tp.in_bps <= 0,
+        className={classnames(C.healthDot, {
+          [C.healthGood]: tp && tp.in_bps > 0,
+          [C.healthUnknown]: !tp || tp.in_bps <= 0,
         })}
       />
     </div>
@@ -74,8 +74,8 @@ function OverlayMetrics({ metrics }: { metrics: StreamMetrics }) {
   const viewers = metrics.viewers?.total ?? 0;
 
   return (
-    <div className="stream-metrics stream-metrics--overlay">
-      <span className="stream-metrics__viewers-badge">
+    <div className={`${C.base} ${C.overlay}`}>
+      <span className={C.viewersBadge}>
         <svg
           width="11"
           height="11"
@@ -91,9 +91,7 @@ function OverlayMetrics({ metrics }: { metrics: StreamMetrics }) {
         </svg>
         <span>{viewers}</span>
       </span>
-      {metrics.source_type && (
-        <span className="stream-metrics__source-badge">{formatSourceType(metrics.source_type)}</span>
-      )}
+      {metrics.source_type && <span className={C.sourceBadge}>{formatSourceType(metrics.source_type)}</span>}
     </div>
   );
 }
@@ -103,8 +101,8 @@ function OverlayMetrics({ metrics }: { metrics: StreamMetrics }) {
 function FullMetrics({ metrics }: { metrics: StreamMetrics }) {
   if (!metrics.live) {
     return (
-      <div className="stream-metrics stream-metrics--full stream-metrics--offline">
-        <span className="stream-metrics__offline-label">{__('Stream offline')}</span>
+      <div className={`${C.base} ${C.full} ${C.fullOffline}`}>
+        <span className={C.offlineLabel}>{__('Stream offline')}</span>
       </div>
     );
   }
@@ -113,10 +111,10 @@ function FullMetrics({ metrics }: { metrics: StreamMetrics }) {
   const tp = metrics.throughput;
 
   return (
-    <div className="stream-metrics stream-metrics--full">
+    <div className={`${C.base} ${C.full}`}>
       {/* Top row: viewers + source */}
-      <div className="stream-metrics__full-header">
-        <div className="stream-metrics__full-viewers">
+      <div className={C.fullHeader}>
+        <div className={C.fullViewers}>
           <svg
             width="16"
             height="16"
@@ -130,66 +128,64 @@ function FullMetrics({ metrics }: { metrics: StreamMetrics }) {
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
             <circle cx="12" cy="12" r="3" />
           </svg>
-          <span className="stream-metrics__full-viewer-count">{viewers?.total ?? 0}</span>
-          <span className="stream-metrics__full-viewer-label">{__('viewers')}</span>
+          <span className={C.fullViewerCount}>{viewers?.total ?? 0}</span>
+          <span className={C.fullViewerLabel}>{__('viewers')}</span>
         </div>
-        {metrics.source_type && (
-          <span className="stream-metrics__full-source">{formatSourceType(metrics.source_type)}</span>
-        )}
+        {metrics.source_type && <span className={C.fullSource}>{formatSourceType(metrics.source_type)}</span>}
       </div>
 
       {/* Grid of stats */}
-      <div className="stream-metrics__full-grid">
+      <div className={C.fullGrid}>
         {viewers && (viewers.llhls > 0 || viewers.webrtc > 0) && (
-          <div className="stream-metrics__full-stat">
-            <span className="stream-metrics__full-stat-label">{__('Viewer breakdown')}</span>
-            <span className="stream-metrics__full-stat-value">
+          <div className={C.fullStat}>
+            <span className={C.fullStatLabel}>{__('Viewer breakdown')}</span>
+            <span className={C.fullStatValue}>
               {viewers.llhls} LLHLS / {viewers.webrtc} WebRTC
             </span>
           </div>
         )}
 
         {metrics.video && (
-          <div className="stream-metrics__full-stat">
-            <span className="stream-metrics__full-stat-label">{__('Video')}</span>
-            <span className="stream-metrics__full-stat-value">
+          <div className={C.fullStat}>
+            <span className={C.fullStatLabel}>{__('Video')}</span>
+            <span className={C.fullStatValue}>
               {formatCodec(metrics.video.codec)} {formatResolution(metrics.video)} @ {metrics.video.framerate}fps
             </span>
           </div>
         )}
 
         {metrics.video && (
-          <div className="stream-metrics__full-stat">
-            <span className="stream-metrics__full-stat-label">{__('Video bitrate')}</span>
-            <span className="stream-metrics__full-stat-value">{formatVideoBitrate(metrics.video)}</span>
+          <div className={C.fullStat}>
+            <span className={C.fullStatLabel}>{__('Video bitrate')}</span>
+            <span className={C.fullStatValue}>{formatVideoBitrate(metrics.video)}</span>
           </div>
         )}
 
         {metrics.audio && (
-          <div className="stream-metrics__full-stat">
-            <span className="stream-metrics__full-stat-label">{__('Audio')}</span>
-            <span className="stream-metrics__full-stat-value">
+          <div className={C.fullStat}>
+            <span className={C.fullStatLabel}>{__('Audio')}</span>
+            <span className={C.fullStatValue}>
               {formatCodec(metrics.audio.codec)} {formatAudioBitrate(metrics.audio)}
             </span>
           </div>
         )}
 
         {tp && (
-          <div className="stream-metrics__full-stat">
-            <span className="stream-metrics__full-stat-label">{__('Throughput in')}</span>
-            <span className="stream-metrics__full-stat-value">
+          <div className={C.fullStat}>
+            <span className={C.fullStatLabel}>{__('Throughput in')}</span>
+            <span className={C.fullStatValue}>
               {formatBps(tp.in_bps)}
-              <span className="stream-metrics__full-stat-sub">avg {formatBps(tp.avg_in_bps)}</span>
+              <span className={C.fullStatSub}>avg {formatBps(tp.avg_in_bps)}</span>
             </span>
           </div>
         )}
 
         {tp && (
-          <div className="stream-metrics__full-stat">
-            <span className="stream-metrics__full-stat-label">{__('Throughput out')}</span>
-            <span className="stream-metrics__full-stat-value">
+          <div className={C.fullStat}>
+            <span className={C.fullStatLabel}>{__('Throughput out')}</span>
+            <span className={C.fullStatValue}>
               {formatBps(tp.out_bps)}
-              <span className="stream-metrics__full-stat-sub">avg {formatBps(tp.avg_out_bps)}</span>
+              <span className={C.fullStatSub}>avg {formatBps(tp.avg_out_bps)}</span>
             </span>
           </div>
         )}
@@ -203,12 +199,12 @@ function FullMetrics({ metrics }: { metrics: StreamMetrics }) {
 function CardMetrics({ metrics }: { metrics: StreamMetrics }) {
   if (!metrics.live) {
     return (
-      <div className="stream-metrics stream-metrics--card stream-metrics--card-offline">
-        <div className="stream-metrics__card-header">
-          <span className="stream-metrics__card-dot stream-metrics__card-dot--offline" />
-          <span className="stream-metrics__card-title">{__('Stream Health')}</span>
+      <div className={`${C.base} ${C.card} ${C.cardOffline}`}>
+        <div className={C.cardHeader}>
+          <span className={`${C.cardDot} ${C.cardDotOffline}`} />
+          <span className={C.cardTitle}>{__('Stream Health')}</span>
         </div>
-        <p className="stream-metrics__card-offline-text">{__('Not currently streaming via RTMP.')}</p>
+        <p className={C.cardOfflineText}>{__('Not currently streaming via RTMP.')}</p>
       </div>
     );
   }
@@ -217,14 +213,12 @@ function CardMetrics({ metrics }: { metrics: StreamMetrics }) {
   const tp = metrics.throughput;
 
   return (
-    <div className="stream-metrics stream-metrics--card">
-      <div className="stream-metrics__card-header">
-        <span className="stream-metrics__card-dot stream-metrics__card-dot--live" />
-        <span className="stream-metrics__card-title">{__('Stream Health')}</span>
-        {metrics.source_type && (
-          <span className="stream-metrics__card-source">{formatSourceType(metrics.source_type)}</span>
-        )}
-        <span className="stream-metrics__card-viewers">
+    <div className={`${C.base} ${C.card}`}>
+      <div className={C.cardHeader}>
+        <span className={`${C.cardDot} ${C.cardDotLive}`} />
+        <span className={C.cardTitle}>{__('Stream Health')}</span>
+        {metrics.source_type && <span className={C.cardSource}>{formatSourceType(metrics.source_type)}</span>}
+        <span className={C.cardViewers}>
           <svg
             width="14"
             height="14"
@@ -242,57 +236,57 @@ function CardMetrics({ metrics }: { metrics: StreamMetrics }) {
         </span>
       </div>
 
-      <div className="stream-metrics__card-grid">
+      <div className={C.cardGrid}>
         {metrics.video && (
-          <div className="stream-metrics__card-stat">
-            <span className="stream-metrics__card-stat-label">{__('Video')}</span>
-            <span className="stream-metrics__card-stat-value">
+          <div className={C.cardStat}>
+            <span className={C.cardStatLabel}>{__('Video')}</span>
+            <span className={C.cardStatValue}>
               {formatCodec(metrics.video.codec)} {formatResolution(metrics.video)}
             </span>
           </div>
         )}
 
         {metrics.video && (
-          <div className="stream-metrics__card-stat">
-            <span className="stream-metrics__card-stat-label">{__('Bitrate')}</span>
-            <span className="stream-metrics__card-stat-value">{formatVideoBitrate(metrics.video)}</span>
+          <div className={C.cardStat}>
+            <span className={C.cardStatLabel}>{__('Bitrate')}</span>
+            <span className={C.cardStatValue}>{formatVideoBitrate(metrics.video)}</span>
           </div>
         )}
 
         {metrics.video && (
-          <div className="stream-metrics__card-stat">
-            <span className="stream-metrics__card-stat-label">{__('FPS')}</span>
-            <span className="stream-metrics__card-stat-value">{metrics.video.framerate}</span>
+          <div className={C.cardStat}>
+            <span className={C.cardStatLabel}>{__('FPS')}</span>
+            <span className={C.cardStatValue}>{metrics.video.framerate}</span>
           </div>
         )}
 
         {metrics.audio && (
-          <div className="stream-metrics__card-stat">
-            <span className="stream-metrics__card-stat-label">{__('Audio')}</span>
-            <span className="stream-metrics__card-stat-value">
+          <div className={C.cardStat}>
+            <span className={C.cardStatLabel}>{__('Audio')}</span>
+            <span className={C.cardStatValue}>
               {formatCodec(metrics.audio.codec)} {formatAudioBitrate(metrics.audio)}
             </span>
           </div>
         )}
 
         {tp && (
-          <div className="stream-metrics__card-stat">
-            <span className="stream-metrics__card-stat-label">{__('In')}</span>
-            <span className="stream-metrics__card-stat-value">{formatBps(tp.in_bps)}</span>
+          <div className={C.cardStat}>
+            <span className={C.cardStatLabel}>{__('In')}</span>
+            <span className={C.cardStatValue}>{formatBps(tp.in_bps)}</span>
           </div>
         )}
 
         {tp && (
-          <div className="stream-metrics__card-stat">
-            <span className="stream-metrics__card-stat-label">{__('Out')}</span>
-            <span className="stream-metrics__card-stat-value">{formatBps(tp.out_bps)}</span>
+          <div className={C.cardStat}>
+            <span className={C.cardStatLabel}>{__('Out')}</span>
+            <span className={C.cardStatValue}>{formatBps(tp.out_bps)}</span>
           </div>
         )}
 
         {viewers && (viewers.llhls > 0 || viewers.webrtc > 0) && (
-          <div className="stream-metrics__card-stat stream-metrics__card-stat--wide">
-            <span className="stream-metrics__card-stat-label">{__('Viewers')}</span>
-            <span className="stream-metrics__card-stat-value">
+          <div className={`${C.cardStat} ${C.cardStatWide}`}>
+            <span className={C.cardStatLabel}>{__('Viewers')}</span>
+            <span className={C.cardStatValue}>
               {viewers.llhls} LLHLS / {viewers.webrtc} WebRTC
             </span>
           </div>

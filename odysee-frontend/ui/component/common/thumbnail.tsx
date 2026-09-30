@@ -1,5 +1,6 @@
 import React from 'react';
 import classnames from 'classnames';
+import { CARD_CLASSES } from './card-classes';
 type Props = {
   src: string;
   shouldObscure: boolean;
@@ -14,7 +15,7 @@ const Thumbnail = (props: Props) => {
       className={classnames(
         'card__media',
         {
-          'card__media--nsfw': shouldObscure,
+          [CARD_CLASSES.mediaNsfw]: shouldObscure,
         },
         className
       )}

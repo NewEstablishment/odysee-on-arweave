@@ -8,7 +8,7 @@ import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { doFetchClaimListMine } from 'redux/actions/claims';
 import { setUnion } from 'util/set-operations';
 import { removeInternalTags } from 'util/tags';
-import './style.scss';
+import { PUBLISH_TAGS_PICKER_CLASSES } from './classes';
 
 type Props = {
   tags: Array<Tag>;
@@ -87,21 +87,21 @@ export default function PublishTagsPicker({ tags, limitSelect, onAdd, onRemove }
   }
 
   return (
-    <div className="publish-tags-picker">
-      <div className="publish-tags-picker__selected">
-        <div className="publish-tags-picker__label">
+    <div className={PUBLISH_TAGS_PICKER_CLASSES.root}>
+      <div className={PUBLISH_TAGS_PICKER_CLASSES.panel}>
+        <div className="tw:text-app-xsmall tw:font-semibold tw:tracking-normal tw:text-app-text-subtitle tw:uppercase">
           {__('Selected')} ({removeInternalTags(tags).length}/{limitSelect})
         </div>
-        <ul className="publish-tags-picker__list">
+        <ul className="tw:m-0 tw:flex tw:list-outside tw:list-none tw:flex-wrap tw:gap-app-xxs tw:p-0">
           {removeInternalTags(tags).length === 0 && (
-            <span className="publish-tags-picker__empty">{__('No tags added')}</span>
+            <span className="tw:text-app-small tw:text-app-text-subtitle">{__('No tags added')}</span>
           )}
           {removeInternalTags(tags).map((tag) => (
             <Tag key={tag.name} name={tag.name} type="remove" onClick={() => onRemove(tag)} />
           ))}
         </ul>
       </div>
-      <div className="publish-tags-picker__suggestions">
+      <div className={PUBLISH_TAGS_PICKER_CLASSES.panel}>
         <form onSubmit={handleSubmit}>
           <FormField
             type="text"
@@ -112,7 +112,7 @@ export default function PublishTagsPicker({ tags, limitSelect, onAdd, onRemove }
             label={false}
           />
         </form>
-        <ul className="publish-tags-picker__list">
+        <ul className="tw:m-0 tw:flex tw:list-outside tw:list-none tw:flex-wrap tw:gap-app-xxs tw:p-0">
           {search.trim() && !suggestions.includes(search.trim().toLowerCase()) && !maxed && (
             <Tag name={search.trim().toLowerCase()} type="add" onClick={() => handleAdd(search.trim().toLowerCase())} />
           )}

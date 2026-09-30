@@ -2,6 +2,7 @@ import * as ICONS from 'constants/icons';
 import React, { useCallback } from 'react';
 import Button from 'component/button';
 import Spinner from 'component/spinner';
+import { BUTTON_GROUP_CLASS } from 'component/button/classes';
 type Props = {
   data: any;
   label: string;
@@ -28,7 +29,7 @@ function FileExporter({ data, label, tooltip, defaultFileName, onFetch, progress
     return (
       <>
         {!progressMsg && (
-          <div className="button-group">
+          <div className={BUTTON_GROUP_CLASS}>
             <Button
               button="alt"
               disabled={disabled}

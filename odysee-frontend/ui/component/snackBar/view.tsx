@@ -8,6 +8,7 @@ import I18nMessage from 'component/i18nMessage';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doDismissToast } from 'redux/actions/notifications';
 import { selectToast, selectToastCount } from 'redux/selectors/notifications';
+import { SNACK_BAR_CLASSES } from './classes';
 
 const SnackBar = React.memo(function SnackBar() {
   const dispatch = useAppDispatch();
@@ -77,35 +78,40 @@ const SnackBar = React.memo(function SnackBar() {
 
   return (
     <div
-      className={classnames('snack-bar', {
-        'snack-bar--error': isError,
+      className={classnames(SNACK_BAR_CLASSES.root, {
+        [SNACK_BAR_CLASSES.error]: isError,
       })}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       {snackCount > 1 && (
-        <div className="snack-bar-counter-bubble">
+        <div className={SNACK_BAR_CLASSES.counter}>
           <span className="notification__count">{snackCount}</span>
         </div>
       )}
-      <div className="snack-bar__message">
+      <div className={SNACK_BAR_CLASSES.message}>
         <Icon icon={isError ? ICONS.ALERT : ICONS.COMPLETED} size={18} />
-        <p className="snack-bar__messageText">
+        <p className={SNACK_BAR_CLASSES.messageText}>
           <LbcMessage>{message}</LbcMessage>
           {subMessage && (
-            <p className="snack-bar__messageText snack-bar__messageText--sub">
+            <p className={classnames(SNACK_BAR_CLASSES.messageText, SNACK_BAR_CLASSES.messageTextSub)}>
               <LbcMessage>{subMessage}</LbcMessage>
             </p>
           )}
         </p>
-        <Button className="snack-bar__close" icon={ICONS.REMOVE} title={__('Dismiss')} onClick={() => removeSnack()} />
+        <Button
+          className={SNACK_BAR_CLASSES.close}
+          icon={ICONS.REMOVE}
+          title={__('Dismiss')}
+          onClick={() => removeSnack()}
+        />
       </div>
       {linkText && linkTarget && ( // This is a little weird because of `linkTarget` code in `lbry-redux`
         // Any navigation code should happen in the app, and that should be removed from lbry-redux
-        <Button navigate={`/$${linkTarget}`} className="snack-bar__action" label={linkText} />
+        <Button navigate={`/$${linkTarget}`} className={SNACK_BAR_CLASSES.action} label={linkText} />
       )}
       {actionText && action && (
-        <div className="snack-bar__action">
+        <div className={SNACK_BAR_CLASSES.action}>
           <I18nMessage
             tokens={{
               firstAction: <Button onClick={() => handleAction(action)} label={actionText} />,

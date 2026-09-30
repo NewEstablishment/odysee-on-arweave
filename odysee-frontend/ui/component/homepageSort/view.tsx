@@ -176,13 +176,18 @@ export default function HomepageSort(props: Props) {
 
           return (
             <div
-              className="homepage-sort__entry"
+              className="tw:mb-app-m tw:flex tw:w-full tw:items-center tw:rounded-app tw:bg-[rgba(var(--color-background-base),0.6)] tw:px-app-m tw:py-app-xs tw:text-app-small tw:last:mb-0 tw:hover:bg-[rgba(var(--color-background-base),1)]"
               ref={draggableProvided.innerRef}
               {...draggableProvided.draggableProps}
               {...draggableProvided.dragHandleProps}
             >
               <div ref={draggedItemRef}>
-                <Icon icon={ICONS.MENU} title={__('Drag')} size={20} />
+                <Icon
+                  className="tw:mt-app-xxs tw:mr-app-s tw:opacity-40"
+                  icon={ICONS.MENU}
+                  title={__('Drag')}
+                  size={20}
+                />
               </div>
               {__(label)} {}
             </div>
@@ -199,11 +204,15 @@ export default function HomepageSort(props: Props) {
           <div
             ref={provided.innerRef}
             {...provided.droppableProps}
-            className={classnames('homepage-sort__bin', className, {
-              'homepage-sort__bin--highlight': snapshot.isDraggingOver,
-            })}
+            className={classnames(
+              'tw:mr-app-s tw:w-1/2 tw:overflow-x-hidden tw:overflow-y-auto tw:rounded-app tw:bg-[var(--color-header-button)] tw:p-app-s tw:last:mr-0',
+              className,
+              {
+                'tw:[outline-color:var(--color-primary)] tw:[outline-width:2px]': snapshot.isDraggingOver,
+              }
+            )}
           >
-            <div className="homepage-sort__bin-header">{__(bin.title)}</div>
+            <div className="tw:mb-app-s tw:text-center tw:text-app-text-subtitle">{__(bin.title)}</div>
 
             {bin.list.map((item, index) => (
               <DraggableItem key={item} item={item} index={index} />
@@ -225,7 +234,7 @@ export default function HomepageSort(props: Props) {
   }, [listActive, listHidden, onUpdate]);
   return (
     <React.Suspense fallback={null}>
-      <div className="homepage-sort">
+      <div className="tw:mb-app-m tw:flex tw:h-[50vh]">
         <Lazy.DragDropContext onDragEnd={onDragEnd}>
           <DroppableBin bin={BINS.ACTIVE} />
           <DroppableBin bin={BINS.HIDDEN} />

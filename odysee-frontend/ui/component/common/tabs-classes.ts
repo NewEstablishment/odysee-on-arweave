@@ -1,0 +1,17 @@
+export const TABS_CLASS = 'tabs tw:relative';
+
+export const TAB_PANEL_CLASS = 'tab__panel';
+
+export const TAB_WRAPPER_CLASS = 'tab__wrapper';
+
+export const TAB_WRAPPER_FIXED_CLASS = 'tab__wrapper--fixed';
+
+export const TAB_SELECTED_CLASS = 'tw:bg-app-background';
+
+export const TAB_LIST_CLASS = String.raw`tabs__list tw:relative tw:flex tw:items-center tw:overflow-x-auto tw:overflow-y-hidden tw:bg-[var(--tab-list-background,var(--color-tabs-background))] tw:pt-[var(--tab-list-padding-top,var(--tab-list-padding-block,var(--spacing-xxs)))] tw:pr-[var(--tab-list-padding-right,var(--tab-list-padding-inline,var(--spacing-main-padding)))] tw:pb-[var(--tab-list-padding-bottom,var(--tab-list-padding-block,var(--spacing-xxs)))] tw:pl-[var(--tab-list-padding-left,var(--tab-list-padding-inline,var(--spacing-main-padding)))] tw:[scroll-behavior:smooth] tw:[-webkit-overflow-scrolling:touch] tw:[&>*:not(.tab)]:ml-auto tw:[&_.tab]:flex-[var(--tab-flex,inherit)] tw:[&_.tab]:whitespace-nowrap tw:[&_.tab:hover]:text-[var(--tab-hover-color,var(--color-link))] tw:[&.isSticky]:z-[4] tw:upto-small:[&_.tab[aria-selected='true']]:text-[var(--tab-selected-color,var(--color-primary))] tw:upto-small:[&_.tab[aria-selected='true']::after]:bottom-[calc(var(--tab-indicator-size)*-2)] tw:upto-small:[&_.tab[aria-selected='true']::after]:!h-[var(--tab-selected-indicator-height,8px)] tw:upto-small:[&_.tab[aria-selected='true']::after]:bg-[var(--tab-selected-indicator-color,var(--color-primary))] tw:upto-small:[&_.tab:last-of-type]:mr-0`;
+
+export const TAB_CLASS = String.raw`tab tw:relative tw:mr-[var(--tab-margin-right,var(--spacing-l))] tw:px-[var(--tab-padding-inline,0px)] tw:pt-[var(--tab-padding-top,5px)] tw:pb-[var(--tab-padding-bottom,5px)] tw:[font-size:var(--font-body)] tw:text-[var(--color-tab-text)] tw:after:absolute tw:after:bottom-[calc(var(--tab-indicator-size)*-2+6px)] tw:after:z-[1] tw:after:[display:var(--tab-indicator-display,block)] tw:after:h-0 tw:after:w-full tw:after:content-[''] tw:after:[transition:all_var(--animation-duration)_var(--animation-style)] tw:focus:shadow-none tw:hover:after:h-[4px] tw:hover:after:bg-[var(--color-link)] tw:upto-small:after:bottom-[calc(var(--tab-indicator-size)*-2-6px)] tw:upto-xsmall:mr-[var(--tab-margin-right,var(--spacing-s))]`;
+
+export const TAB_LIST_COLLECTION_EDIT_CLASS = String.raw`tabs__list--collection-edit-page tw:relative tw:mb-app-l tw:h-[46px] tw:rounded-app tw:border-b tw:border-b-[var(--color-header-button)] tw:[--tab-list-padding-right:var(--tab-list-collection-edge,var(--spacing-m))] tw:[--tab-selected-color:var(--color-link)] tw:[--tab-selected-indicator-height:4px] tw:[--tab-selected-indicator-color:var(--color-link)] tw:[&_.tab[aria-selected='true']]:text-[var(--tab-selected-color)] tw:[&_.tab[aria-selected='true']::after]:h-[var(--tab-selected-indicator-height)] tw:[&_.tab[aria-selected='true']::after]:bg-[var(--tab-selected-indicator-color)] tw:upto-small:[--tab-list-padding-left:var(--tab-list-collection-edge,var(--spacing-m))]`;
+
+export const TAB_DIVIDER_CLASS = String.raw`tab__divider tw:absolute tw:mt-[-46px] tw:block tw:h-[4px] tw:z-[1] tw:bg-[var(--color-link)] tw:[transition:all_var(--animation-duration)_var(--animation-style)] tw:[.tabs\_\_list--comment-selector+&]:hidden tw:[.MuiPaper-root_&]:top-0 tw:[.MuiPaper-root_&]:mt-[calc(var(--tab-indicator-size)*-1-var(--spacing-l)+10px)] tw:upto-small:!hidden`;

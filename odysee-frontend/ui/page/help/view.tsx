@@ -12,6 +12,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doOpenModal } from 'redux/actions/app';
 import { selectHomepageAnnouncement } from 'redux/selectors/settings';
 import { selectUser } from 'redux/selectors/user';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 export default function HelpPage() {
   const dispatch = useAppDispatch();
@@ -27,7 +28,7 @@ export default function HelpPage() {
           title={__("What's New")}
           subtitle={__('See what are the latest features and changes in Odysee.')}
           actions={
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 label={__("What's New")}
                 icon={ICONS.FEEDBACK}
@@ -45,7 +46,7 @@ export default function HelpPage() {
         })}
         subtitle={__('Our support posts answer many common questions.')}
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               href="https://help.odysee.tv/"
               label={__('View %SITE_NAME% Help Hub', {
@@ -72,7 +73,7 @@ export default function HelpPage() {
           </I18nMessage>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="secondary"
               label={__('Join our Discord')}
@@ -111,7 +112,7 @@ export default function HelpPage() {
         title={__('Report a bug or suggest something')}
         subtitle={__('Did you find something wrong? Think Odysee could add something useful and cool?')}
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button navigate="/$/report" label={__('Submit Feedback')} icon={ICONS.FEEDBACK} button="secondary" />
           </div>
         }

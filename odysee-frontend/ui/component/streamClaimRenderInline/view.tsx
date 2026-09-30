@@ -46,6 +46,7 @@ import { makeSelectFileRenderModeForUri } from 'redux/selectors/content';
 import { doAnalyticsViewForUri } from 'redux/actions/app';
 import { doClaimEligiblePurchaseRewards } from 'redux/actions/rewards';
 import withStreamClaimRender from 'hocs/withStreamClaimRender';
+import { FILE_RENDER_CLASSES } from 'component/viewers/classes';
 
 type Props = {
   uri: string;
@@ -197,10 +198,12 @@ function StreamClaimRenderInline(props: Props) {
 
   return (
     <div
-      className={classnames('file-render', className, {
-        'file-render--document': RENDER_MODES.TEXT_MODES.includes(renderMode) && !embedded,
-        'file-render--embed': embedded,
+      className={classnames(FILE_RENDER_CLASSES.base, className, {
+        'tw:h-auto tw:max-h-none tw:text-app-large': RENDER_MODES.TEXT_MODES.includes(renderMode) && !embedded,
+        [FILE_RENDER_CLASSES.embed]: embedded,
       })}
+      data-file-render
+      data-file-render-embed={embedded || undefined}
     >
       {renderViewer()}
     </div>

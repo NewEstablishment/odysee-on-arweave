@@ -3,6 +3,11 @@ import classnames from 'classnames';
 import ChannelThumbnail from 'component/channelThumbnail';
 import Icon from 'component/common/icon';
 import { getClaimTitle } from 'util/claim';
+
+const ENTRY_TITLE_CLASS =
+  'tw:overflow-hidden tw:text-ellipsis tw:text-app-small tw:[display:-webkit-box] tw:[-webkit-box-orient:vertical] tw:[-webkit-line-clamp:1]';
+const ENTRY_NAME_CLASS = 'tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-app-xsmall';
+
 type Props = {
   uri: string;
   claim: Claim | null | undefined;
@@ -24,38 +29,68 @@ export default function Entry(props: Props) {
   const isInvalid = claim === null;
   return (
     <div
-      className={classnames('entry', {
-        'entry--no-hover-highlight': noHoverHighlight,
-        'entry--hidden': isInvalid && hideInvalid,
-        'non-clickable': !uri,
-      })}
+      className={classnames(
+        'tw:group/entry tw:flex tw:w-full tw:items-center tw:justify-between tw:rounded-app tw:px-app-s tw:py-app-s',
+        noHoverHighlight
+          ? 'tw:hover:[background:unset] tw:hover:text-[unset]'
+          : 'tw:hover:bg-[var(--color-odysee)] tw:hover:text-[var(--color-odysee-contrast)]',
+        {
+          'tw:hidden': isInvalid && hideInvalid,
+          'tw:pointer-events-none': !uri,
+        }
+      )}
       title={tooltip}
       onClick={onClick}
     >
-      <div className="entry__content">
+      <div className="tw:flex">
         {claim ? (
           <>
             <ChannelThumbnail xsmall uri={uri} />
-            <div className="entry__label">
-              <span className="entry__title">{title || name}</span>
-              <span className="entry__name">{name}</span>
+            <div className="tw:ml-app-xxs tw:flex tw:max-w-[75%] tw:flex-col">
+              <span className={ENTRY_TITLE_CLASS}>{title || name}</span>
+              <span
+                className={classnames(ENTRY_NAME_CLASS, 'tw:text-app-text-subtitle', {
+                  'tw:group-hover/entry:text-[unset]': !noHoverHighlight,
+                  'tw:group-hover/entry:text-app-text-subtitle': noHoverHighlight,
+                })}
+              >
+                {name}
+              </span>
             </div>
           </>
         ) : (
           <>
             <ChannelThumbnail xsmall uri={uri} />
-            <div className="entry__label">
+            <div className="tw:ml-app-xxs tw:flex tw:max-w-[75%] tw:flex-col">
               {uri === null ? (
-                <span className="entry__title">{'---'}</span>
+                <span className={ENTRY_TITLE_CLASS}>{'---'}</span>
               ) : isResolvingUri || claim === undefined ? (
                 <>
-                  <span className="entry__title entry__title--placeholder" />
-                  <span className="entry__name entry__name--placeholder" />
+                  <span
+                    className={`${ENTRY_TITLE_CLASS} tw:mb-app-xxxs tw:h-[0.9rem] tw:w-[15ch] tw:rounded-app tw:bg-[var(--color-header-button)]`}
+                  />
+                  <span
+                    className={classnames(
+                      ENTRY_NAME_CLASS,
+                      'tw:h-[0.9rem] tw:w-1/2 tw:rounded-app tw:bg-[var(--color-header-button)] tw:text-app-text-subtitle',
+                      {
+                        'tw:group-hover/entry:text-[unset]': !noHoverHighlight,
+                        'tw:group-hover/entry:text-app-text-subtitle': noHoverHighlight,
+                      }
+                    )}
+                  />
                 </>
               ) : (
                 <>
-                  <span className="entry__title">{'[Removed]'}</span>
-                  <span className="entry__name">{uri}</span>
+                  <span className={ENTRY_TITLE_CLASS}>{'[Removed]'}</span>
+                  <span
+                    className={classnames(ENTRY_NAME_CLASS, 'tw:text-app-text-subtitle', {
+                      'tw:group-hover/entry:text-[unset]': !noHoverHighlight,
+                      'tw:group-hover/entry:text-app-text-subtitle': noHoverHighlight,
+                    })}
+                  >
+                    {uri}
+                  </span>
                 </>
               )}
             </div>
@@ -63,8 +98,8 @@ export default function Entry(props: Props) {
         )}
       </div>
       <div
-        className={classnames('entry__action-icon', {
-          'entry__action-icon--hover-only': iconRightOnHoverOnly,
+        className={classnames('tw:pr-app-xs', {
+          'tw:hidden tw:group-hover/entry:block': iconRightOnHoverOnly,
         })}
       >
         {iconRight && <Icon icon={iconRight} />}

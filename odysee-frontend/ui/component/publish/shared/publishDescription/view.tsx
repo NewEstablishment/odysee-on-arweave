@@ -52,7 +52,6 @@ function PublishDescription(props: Props) {
   return (
     <>
       <Card
-        className="card--description"
         actions={
           <FormField
             type={'textarea'}

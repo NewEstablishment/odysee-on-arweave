@@ -9,6 +9,7 @@ import * as MODALS from 'constants/modal_types';
 import * as PAGES from 'constants/pages';
 import ChannelThumbnail from 'component/channelThumbnail';
 import Icon from 'component/common/icon';
+import { BUTTON_CONTENT_CLASS } from 'component/button/classes';
 import classnames from 'classnames';
 import React from 'react';
 import { useIsMobile } from 'effects/use-screensize';
@@ -24,6 +25,7 @@ import { selectModerationDelegatorsById, selectModerationDelegatesById } from 'r
 import { selectPlayingUri } from 'redux/selectors/content';
 import { selectUserAuthenticated } from 'redux/selectors/user';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
+import { COMMENT_MENU_CLASSES, COMMENT_MENU_LIVE_CLASS } from './classes';
 
 type Props = {
   uri: string | null | undefined;
@@ -182,9 +184,13 @@ function CommentMenuList(props: Props) {
           <Icon aria-hidden icon={ICONS.BLOCK} />
           {__('Block')}
         </div>
-        {subtitle.line1 && <span className="comment__menu-help">{subtitle.line1}</span>}
+        {subtitle.line1 && (
+          <span className={COMMENT_MENU_CLASSES.help} data-comment-menu-help>
+            {subtitle.line1}
+          </span>
+        )}
         {subtitle.line2 && (
-          <span className="comment__menu-help">
+          <span className={COMMENT_MENU_CLASSES.help} data-comment-menu-help>
             {subtitle.line2} {!personalPermanentBlockOnly && <Icon aria-hidden icon={ICONS.EXTERNAL} />}
           </span>
         )}
@@ -208,14 +214,14 @@ function CommentMenuList(props: Props) {
   return (
     <MenuList
       className={classnames('menu__list', {
-        'menu__chat-comment': isLiveComment || isUserLabel,
+        [COMMENT_MENU_LIVE_CLASS]: isLiveComment || isUserLabel,
       })}
       onClick={(e) => e.stopPropagation()}
     >
       {(isLiveComment || isUserLabel) && (
         <MenuItem onSelect={(e) => e.preventDefault()}>
           <NavLink className="comment__menu-option menu__link" to={formatLbryUrlForWeb(authorUri)}>
-            <span className={'button__content'}>
+            <span className={BUTTON_CONTENT_CLASS}>
               <Icon aria-hidden icon={ICONS.CHANNEL} className={'icon'} />
               {__('Visit')}
             </span>
@@ -228,7 +234,7 @@ function CommentMenuList(props: Props) {
             className="comment__menu-option menu__link"
             onSelect={() => setQuickReply(reduceUriToChannelName(authorCanonicalUri, authorUri))}
           >
-            <span className={'button__content'}>
+            <span className={BUTTON_CONTENT_CLASS}>
               <Icon aria-hidden icon={ICONS.REPLY} className={'icon'} />
               {__('Reply --[verb, reply to a comment]--')}
             </span>
@@ -239,7 +245,7 @@ function CommentMenuList(props: Props) {
 
       {/* Administration & moderation */}
       {activeChannelIsCreator && !commentIsMine && (
-        <div className="comment__menu-title">
+        <div className={COMMENT_MENU_CLASSES.title} data-comment-menu-title>
           <Icon aria-hidden icon={ICONS.BADGE_STREAMER} className={'icon'} />
           {__('Creator tools')}
         </div>
@@ -249,7 +255,7 @@ function CommentMenuList(props: Props) {
           className="comment__menu-option menu__link"
           onSelect={() => dispatch(doCommentPin(commentId, claim ? claim.claim_id : '', isPinned))}
         >
-          <span className={'button__content'}>
+          <span className={BUTTON_CONTENT_CLASS}>
             <Icon aria-hidden icon={ICONS.PIN} className={'icon'} />
             {isPinned ? __('Unpin') : __('Pin')}
           </span>
@@ -270,7 +276,7 @@ function CommentMenuList(props: Props) {
               <Icon aria-hidden icon={ICONS.ADD} />
               {__('Add as moderator')}
             </div>
-            <span className="comment__menu-help">
+            <span className={COMMENT_MENU_CLASSES.help} data-comment-menu-help>
               {activeChannelClaim
                 ? __('Assign this user to moderate %channel%.', {
                     channel: activeChannelClaim.name,
@@ -285,7 +291,7 @@ function CommentMenuList(props: Props) {
             <Icon aria-hidden icon={ICONS.REMOVE} />
             {__('Remove as moderator')}
           </div>
-          <span className="comment__menu-help">
+          <span className={COMMENT_MENU_CLASSES.help} data-comment-menu-help>
             {activeChannelClaim
               ? __('Remove this user as a moderator of %channel%.', {
                   channel: activeChannelClaim.name,
@@ -336,7 +342,9 @@ function CommentMenuList(props: Props) {
               {__('Hide')}
             </div>
             {activeChannelIsCreator && (
-              <span className="comment__menu-help">{__('Hide this channel for you only.')}</span>
+              <span className={COMMENT_MENU_CLASSES.help} data-comment-menu-help>
+                {__('Hide this channel for you only.')}
+              </span>
             )}
           </MenuItem>
           <MenuItem
@@ -369,9 +377,9 @@ function CommentMenuList(props: Props) {
         </MenuItem>
       )}
       {activeChannelClaim && !isLiveComment && (
-        <div className="comment__menu-active">
+        <div className={COMMENT_MENU_CLASSES.active} data-comment-menu-active>
           <ChannelThumbnail xsmall noLazyLoad uri={activeChannelClaim.permanent_url} />
-          <div className="comment__menu-channel">
+          <div className={COMMENT_MENU_CLASSES.channel} data-comment-menu-channel>
             {__('Interacting as')}
             <span>{activeChannelClaim.name}</span>
           </div>

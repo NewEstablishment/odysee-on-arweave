@@ -11,6 +11,7 @@ import Card from 'component/common/card';
 import Symbol from 'component/common/symbol';
 import LbcSymbol from 'component/common/lbc-symbol';
 import I18nMessage from 'component/i18nMessage';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { useArStatus } from 'effects/use-ar-status';
 import { LocalStorage } from 'util/storage';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -38,6 +39,8 @@ import { doFetchUtxoCounts, doUtxoConsolidate } from 'redux/actions/wallet';
 import { doOpenModal } from 'redux/actions/app';
 import { selectClaimedRewards } from 'redux/selectors/rewards';
 import { selectClientSettings } from 'redux/selectors/settings';
+import { WALLET_BALANCE_CLASSES } from './classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 export const WALLET_CONSOLIDATE_UTXOS = 400;
 const LARGE_WALLET_BALANCE = 100;
@@ -82,9 +85,11 @@ const WalletBalance = () => {
   };
 
   return (
-    <div className={'columns'}>
-      <div className="column">
+    <div className={WALLET_BALANCE_CLASSES.columns}>
+      <div className={WALLET_BALANCE_CLASSES.column}>
         <Card
+          className={WALLET_BALANCE_CLASSES.card}
+          titleClassName={WALLET_BALANCE_CLASSES.cardTitle}
           title={<Symbol token="lbc" amount={Number(totalBalance).toFixed(8)} precision={6} isTitle counter />}
           subtitle={
             totalLocked > 0 ? (
@@ -103,7 +108,7 @@ const WalletBalance = () => {
           background
           actions={
             <>
-              <h2 className="section__title--small">
+              <h2 className={WALLET_BALANCE_CLASSES.sectionTitle}>
                 <I18nMessage
                   tokens={{
                     lbc_amount: <CreditAmount amount={LBCBalance} precision={4} />,
@@ -113,7 +118,7 @@ const WalletBalance = () => {
                 </I18nMessage>
               </h2>
 
-              <h2 className="section__title--small">
+              <h2 className={WALLET_BALANCE_CLASSES.sectionTitle}>
                 <I18nMessage
                   tokens={{
                     lbc_amount: <CreditAmount amount={totalLocked} precision={4} />,
@@ -129,18 +134,18 @@ const WalletBalance = () => {
                 />
               </h2>
               {detailsExpanded && (
-                <div className="section__subtitle">
+                <div className={SECTION_CLASSES.subtitle}>
                   <dl>
                     <dt>
-                      <span className="dt__text">{__('...earned from others')}</span>
-                      <span className="help--dt">({__('Unlock to spend')})</span>
+                      <span className="tw:mr-app-s">{__('...earned from others')}</span>
+                      <span className={WALLET_BALANCE_CLASSES.helpDt}>({__('Unlock to spend')})</span>
                     </dt>
                     <dd>
-                      <span className="dd__text">
+                      <span className="tw:flex tw:justify-end">
                         {Boolean(tipsBalance) && (
                           <Button
                             button="link"
-                            className="dd__button"
+                            className="tw:mr-app-s"
                             disabled={operationPending}
                             icon={ICONS.UNLOCK}
                             onClick={() => doOpenModal_(MODALS.MASS_TIP_UNLOCK)}
@@ -151,16 +156,18 @@ const WalletBalance = () => {
                     </dd>
 
                     <dt>
-                      <span className="dt__text">{__('...on initial publishes')}</span>
-                      <span className="help--dt">({__('Delete or edit past content to spend')})</span>
+                      <span className="tw:mr-app-s">{__('...on initial publishes')}</span>
+                      <span className={WALLET_BALANCE_CLASSES.helpDt}>
+                        ({__('Delete or edit past content to spend')})
+                      </span>
                     </dt>
                     <dd>
                       <CreditAmount amount={claimsBalance} precision={4} />
                     </dd>
 
                     <dt>
-                      <span className="dt__text">{__('...supporting content')}</span>
-                      <span className="help--dt">({__('Delete supports to spend')})</span>
+                      <span className="tw:mr-app-s">{__('...supporting content')}</span>
+                      <span className={WALLET_BALANCE_CLASSES.helpDt}>({__('Delete supports to spend')})</span>
                     </dt>
                     <dd>
                       <CreditAmount amount={supportsBalance} precision={4} />
@@ -169,7 +176,7 @@ const WalletBalance = () => {
                 </div>
               )}
 
-              <div className="section__actions">
+              <div className={WALLET_BALANCE_CLASSES.sectionActions}>
                 <Button
                   button="secondary"
                   label={__('Receive')}
@@ -179,7 +186,7 @@ const WalletBalance = () => {
                 <Button button="secondary" label={__('Send')} icon={ICONS.SEND} navigate={`/$/${PAGES.SEND}`} />
               </div>
               {(otherCount > WALLET_CONSOLIDATE_UTXOS || consolidateIsPending || consolidatingUtxos) && (
-                <p className="help">
+                <p className={HELP_CLASS}>
                   <I18nMessage
                     tokens={{
                       now: (
@@ -205,8 +212,10 @@ const WalletBalance = () => {
         />
       </div>
       {/* ARWEAVE */}
-      <div className="column">
+      <div className={WALLET_BALANCE_CLASSES.column}>
         <Card
+          className={WALLET_BALANCE_CLASSES.card}
+          titleClassName={WALLET_BALANCE_CLASSES.cardTitle}
           title={
             !hasArConnection ? (
               <Symbol token="wallet" amount="0" precision={2} isTitle counter />
@@ -220,7 +229,7 @@ const WalletBalance = () => {
           subtitle={
             !hasArConnection ? (
               <>
-                <div className="wallet-check-row">
+                <div className={WALLET_BALANCE_CLASSES.walletCheckRow}>
                   <div>{__(`Wander login${!isMobile ? ' or extension' : ''}`)}</div>
                   <div>
                     {!hasConnection && !isSigningIn ? (
@@ -233,7 +242,7 @@ const WalletBalance = () => {
                   </div>
                 </div>
 
-                <div className="wallet-check-row">
+                <div className={WALLET_BALANCE_CLASSES.walletCheckRow}>
                   <div>{__('Wander wallet connection')}</div>
                   <div>
                     {hasArConnection ? (
@@ -279,7 +288,7 @@ const WalletBalance = () => {
                             href="https://help.odysee.tv/category-monetization/setup"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="link"
+                            className={WALLET_BALANCE_CLASSES.link}
                           >
                             {__('Learn more')}
                           </a>
@@ -293,20 +302,20 @@ const WalletBalance = () => {
                             href="https://help.odysee.tv/category-monetization/setup"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="link"
+                            className={WALLET_BALANCE_CLASSES.link}
                           >
                             {__('Learn more')}
                           </a>
                         </p>
                       ),
                       login: (
-                        <a className="link" onClick={handleSignIn}>
+                        <a className={WALLET_BALANCE_CLASSES.link} onClick={handleSignIn}>
                           Sign in
                         </a>
                       ),
                       extension: (
                         <a
-                          className="link"
+                          className={WALLET_BALANCE_CLASSES.link}
                           rel="noreferrer"
                           href="https://www.wander.app/download?tab=download-browser"
                           target="_blank"
@@ -316,7 +325,7 @@ const WalletBalance = () => {
                       ),
                       app: (
                         <a
-                          className="link"
+                          className={WALLET_BALANCE_CLASSES.link}
                           rel="noreferrer"
                           href="https://www.wander.app/download?tab=download-mobile"
                           target="_blank"
@@ -340,7 +349,7 @@ const WalletBalance = () => {
                       text: <p>Odysee is signing you in to your Wander wallet. Please wait...</p>,
                       status: (
                         <a
-                          className="link"
+                          className={WALLET_BALANCE_CLASSES.link}
                           onClick={() => {
                             window.wanderInstance.open();
                           }}
@@ -361,7 +370,7 @@ const WalletBalance = () => {
                     )}
                   </p>
                   <a
-                    className="link"
+                    className={WALLET_BALANCE_CLASSES.link}
                     onClick={() => {
                       LocalStorage.setItem('AR_ADDRESS_IN_USE', 'false');
                       window.wanderInstance.open();
@@ -376,12 +385,12 @@ const WalletBalance = () => {
                     tokens={{
                       text: <p>To use AR on Odysee, the Wander wallet must be connected.</p>,
                       link: (
-                        <a className="link" onClick={() => doArConnect_()}>
+                        <a className={WALLET_BALANCE_CLASSES.link} onClick={() => doArConnect_()}>
                           Connect now
                         </a>
                       ),
                       login: (
-                        <a className="link" onClick={() => window.wanderInstance.open()}>
+                        <a className={WALLET_BALANCE_CLASSES.link} onClick={() => window.wanderInstance.open()}>
                           change login
                         </a>
                       ),
@@ -392,7 +401,7 @@ const WalletBalance = () => {
                 </div>
               ) : (
                 <>
-                  <h2 className="section__title--small">
+                  <h2 className={WALLET_BALANCE_CLASSES.sectionTitle}>
                     <I18nMessage
                       tokens={{
                         ar_amount: <Symbol token="ar" amount={arBalance} precision={6} />,
@@ -401,14 +410,14 @@ const WalletBalance = () => {
                       %ar_amount%
                     </I18nMessage>
                   </h2>
-                  <h2 className="section__title--small">
+                  <h2 className={WALLET_BALANCE_CLASSES.sectionTitle}>
                     <img src="https://thumbnails.odycdn.com/optimize/s:40:0/quality:95/plain/https://thumbs.odycdn.com/6392753ffcf0f9318c3bded3b13388e6.webp" />
                     AR Price: ${Number(arStatus.exchangeRates.ar).toFixed(2)} USD
                   </h2>
                 </>
               )}
 
-              <div className="section__actions">
+              <div className={WALLET_BALANCE_CLASSES.sectionActions}>
                 <Button
                   button="secondary"
                   label={__(`Deposit${!isMobile ? ' Funds' : ''}`)}

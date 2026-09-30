@@ -19,6 +19,10 @@ import {
 import { makeSelectPendingAmountByUri } from 'redux/selectors/wallet';
 import { doOpenModal } from 'redux/actions/app';
 import { getClaimMetadata } from 'util/claim';
+import { FILE_DESCRIPTION_CLASSES as C } from './classes';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 type Props = {
   uri: string;
   expandOverride: boolean;
@@ -54,18 +58,18 @@ export default function FileDescription(props: Props) {
   }, [description, shouldRenderFullDescription]);
 
   if (isEmpty) {
-    return <span className="empty">{__('Empty claim or metadata info.')}</span>;
+    return <span className={EMPTY_CLASS}>{__('Empty claim or metadata info.')}</span>;
   }
 
   return (
     <>
       <div
-        className={classnames({
-          'media__info-text--contracted media__info-text--fade': !expanded && !expandOverride && !isLivestreamClaim,
-          'media__info-text--expanded': expanded || isLivestreamClaim,
+        className={classnames(C.surface, {
+          [C.contracted]: !shouldRenderFullDescription,
+          [C.expanded]: shouldRenderFullDescription,
         })}
       >
-        <div className="mediaInfo__description">
+        <div className={C.content}>
           {previewDescription && (
             <DeferredMarkdown
               className="markdown-preview--description"
@@ -79,7 +83,7 @@ export default function FileDescription(props: Props) {
         </div>
       </div>
 
-      <div className="card__bottom-actions">
+      <div className={CARD_CLASSES.bottomActions}>
         {!expandOverride && (
           <>
             {!isLivestreamClaim && !isShort && (
@@ -89,7 +93,7 @@ export default function FileDescription(props: Props) {
           </>
         )}
 
-        <div className="section__actions--no-margin">
+        <div className={SECTION_CLASSES.actionsNoMargin}>
           {claimIsMine && hasSupport && (
             <Button
               button="link"

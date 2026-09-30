@@ -16,6 +16,7 @@ import {
   selectArEnabledMembershipTiersForChannelUri,
 } from 'redux/selectors/memberships';
 import { selectIsClaimOdyseeChannelForUri, selectClaimForUri } from 'redux/selectors/claims';
+import { JOIN_MEMBERSHIP_BUTTON_CLASS } from './classes';
 const DEFAULT_PROPS = {
   button: 'alt',
   icon: ICONS.MEMBERSHIP,
@@ -116,7 +117,7 @@ const JoinMembershipButton = (props: Props) => {
           label={getDescriptor()}
           disabled
           title={__('Verifying Payment')}
-          className="button--membership-active"
+          className={JOIN_MEMBERSHIP_BUTTON_CLASS}
           style={{
             backgroundColor: 'rgba(var(--color-membership-' + membershipIndex + '), 1)',
           }}
@@ -128,7 +129,7 @@ const JoinMembershipButton = (props: Props) => {
       return (
         <Button
           {...DEFAULT_PROPS}
-          className="button--membership"
+          className={JOIN_MEMBERSHIP_BUTTON_CLASS}
           label={__('Renew', {
             membership_tier_name: membershipName,
           })}
@@ -163,7 +164,7 @@ const JoinMembershipButton = (props: Props) => {
         title={__('You are a %descriptor% member', {
           descriptor: getDescriptor(),
         })}
-        className="button--membership-active"
+        className={JOIN_MEMBERSHIP_BUTTON_CLASS}
         style={{
           backgroundColor: 'rgba(var(--color-membership-' + membershipIndex + '), 1)',
         }}
@@ -174,7 +175,7 @@ const JoinMembershipButton = (props: Props) => {
   return (
     <Button
       {...DEFAULT_PROPS}
-      className="button--membership"
+      className={JOIN_MEMBERSHIP_BUTTON_CLASS}
       label={__('Join')}
       title={__('Become A Member')}
       onClick={() =>

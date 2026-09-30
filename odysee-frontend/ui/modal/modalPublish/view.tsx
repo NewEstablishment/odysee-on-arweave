@@ -4,11 +4,14 @@ import { Modal } from 'modal/modal';
 import ClaimPreview from 'component/claimPreview';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import Nag from 'component/nag';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { doHideModal } from 'redux/actions/app';
 import { navigateTo } from 'redux/router';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 type Props = {
   uri: string;
@@ -58,11 +61,11 @@ function ModalPublishSuccess(props: Props) {
         subtitle={publishMessage}
         body={
           <React.Fragment>
-            <div className="card--inline">
+            <div className={CARD_CLASSES.inline}>
               <ClaimPreview type="small" uri={uri} />
             </div>
             {filePath && !IS_WEB && (
-              <p className="help">
+              <p className={HELP_CLASS}>
                 <React.Fragment>
                   {__(
                     `Upload will continue in the background, please do not shut down immediately. Leaving the app running helps the network, thank you!`
@@ -74,7 +77,7 @@ function ModalPublishSuccess(props: Props) {
           </React.Fragment>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             {!livestream && (
               <Button
                 button="primary"

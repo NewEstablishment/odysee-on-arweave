@@ -30,7 +30,7 @@ function PublishAdditionalOptions(props: Props) {
   const showReleaseDate = !showSchedulingOptions && visibility === 'public';
 
   return (
-    <div className="publish-additional">
+    <div className="tw:flex tw:flex-col tw:gap-app-l tw:upto-small:gap-app-m">
       {showReleaseDate && <PublishReleaseDate />}
       <div>
         <FormField

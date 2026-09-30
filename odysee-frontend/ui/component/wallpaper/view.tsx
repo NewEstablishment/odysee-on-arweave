@@ -1,4 +1,5 @@
 import React from 'react';
+import { WALLPAPER_CLASSES, WALLPAPER_PORTAL_STAR_CLASSES } from './classes';
 // import { resetColors } from 'util/theme';
 type Props = {
   uri?: string;
@@ -199,18 +200,18 @@ const Wallpaper = (props: Props) => {
   return (
     <>
       <div
-        className={'background-image'}
+        className={WALLPAPER_CLASSES.background}
         style={{
           backgroundImage:
             'url("https://thumbnails.odycdn.com/optimize/plain/https://player.odycdn.com/speech/2e9a7dc6c99f0fb9.jpg")',
         }}
       />
-      <div className="theme" />
+      <div className={WALLPAPER_CLASSES.shade} />
 
       {/* <div className="backdrop"/> */}
-      <div className="stars">
-        <div id="stars" />
-        <div id="stars2" />
+      <div className={WALLPAPER_CLASSES.stars}>
+        <div id="stars" className={WALLPAPER_PORTAL_STAR_CLASSES.small} />
+        <div id="stars2" className={WALLPAPER_PORTAL_STAR_CLASSES.medium} />
       </div>
     </>
   ); // }

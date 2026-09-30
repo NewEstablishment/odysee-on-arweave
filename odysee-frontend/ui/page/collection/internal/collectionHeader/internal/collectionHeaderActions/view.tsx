@@ -1,6 +1,7 @@
 import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
 import React from 'react';
+import { COLLECTION_HEADER_CLASSES } from '../../classes';
 import { Menu, MenuButton, MenuList, MenuItem } from 'component/common/menu';
 import Icon from 'component/common/icon';
 import { useIsMobile } from 'effects/use-screensize';
@@ -25,6 +26,7 @@ import {
 import { doOpenModal } from 'redux/actions/app';
 import { doToggleCollectionSavedForId, doRetryCollectionPublish } from 'redux/actions/collections';
 import { doToast } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   uri?: string;
   collectionId: string;
@@ -70,14 +72,14 @@ function CollectionHeaderActions(props: Props) {
                 <>
                   {isPublishing && (
                     <Tooltip title={__('Publishing playlist updates in the background')} arrow={false} enterDelay={100}>
-                      <div className="pending-change">
+                      <div className={COLLECTION_HEADER_CLASSES.pending}>
                         <Spinner />
                       </div>
                     </Tooltip>
                   )}
                   {collectionHasEdits && publishError && (
                     <Tooltip title={__('Last publish failed. Open menu to retry.')} arrow={false} enterDelay={100}>
-                      <div className="pending-change">
+                      <div className={COLLECTION_HEADER_CLASSES.pending}>
                         <Icon icon={ICONS.WARNING} />
                       </div>
                     </Tooltip>
@@ -192,7 +194,7 @@ type SectionProps = {
 const SectionElement = (props: SectionProps) => {
   const { children } = props;
   const isMobile = useIsMobile();
-  return isMobile ? children : <div className="section__actions">{children}</div>;
+  return isMobile ? children : <div className={SECTION_CLASSES.actions}>{children}</div>;
 };
 
 export default CollectionHeaderActions;

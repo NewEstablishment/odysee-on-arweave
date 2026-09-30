@@ -21,6 +21,7 @@ import {
   selectCheapestProtectedContentMembershipForId,
 } from 'redux/selectors/memberships';
 import { doOpenModal as doOpenModalAction } from 'redux/actions/app';
+import { PROTECTED_CONTENT_OVERLAY_CLASS } from './classes';
 type Props = {
   fileUri?: string;
   uri: string;
@@ -76,7 +77,7 @@ const ProtectedContentOverlay = (props: Props) => {
 
   // know if membership is disabled.. no address..
   return (
-    <div className="protected-content-overlay">
+    <div className={PROTECTED_CONTENT_OVERLAY_CLASS} data-protected-content-overlay>
       <Icon icon={ICONS.LOCK} />
       {!joinEnabled && (
         <>

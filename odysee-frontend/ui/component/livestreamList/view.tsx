@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import ClaimList from 'component/claimList';
 import Spinner from 'component/spinner';
@@ -28,7 +29,7 @@ export default function LivestreamList() {
 
   if (fetchingActiveLivestreams) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner delayed />
       </div>
     );

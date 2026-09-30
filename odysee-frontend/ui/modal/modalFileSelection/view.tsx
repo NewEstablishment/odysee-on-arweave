@@ -9,6 +9,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
 import { doUpdatePublishForm } from 'redux/actions/publish';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   files: Array<WebFile>;
 };
@@ -58,7 +59,7 @@ const ModalFileSelection = (props: Props) => {
             <div>
               <FileList files={files} onChange={handleFileChange} />
             </div>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 disabled={!selectedFile || !files || !files.length}
                 button="primary"

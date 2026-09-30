@@ -17,6 +17,8 @@ import {
 } from 'redux/selectors/user';
 import { doUserPasswordReset, doClearPasswordEntry, doClearEmailEntry } from 'redux/actions/user';
 import { doToast } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PAGE_MAIN_SIGN_IN_CLASS } from 'component/page/classes';
 
 function UserPasswordReset() {
   const dispatch = useAppDispatch();
@@ -58,7 +60,7 @@ function UserPasswordReset() {
     }
   }, [passwordResetSuccess, dispatch]);
   return (
-    <section className="main__sign-in">
+    <section className={PAGE_MAIN_SIGN_IN_CLASS}>
       <Card
         title={__('Reset your password')}
         actions={
@@ -77,7 +79,7 @@ function UserPasswordReset() {
                 onChange={(e) => setEmail(e.target.value)}
               />
 
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button
                   button="primary"
                   type="submit"

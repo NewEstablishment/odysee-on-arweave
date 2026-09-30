@@ -6,6 +6,7 @@ import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
 import classnames from 'classnames';
 import debounce from 'util/debounce';
+import { CLAIM_LIST_HEADER_TAG_CLASSES as C } from '../../classes';
 type Props = {
   urlParams: any;
   handleChange: any;
@@ -28,17 +29,17 @@ function TagSearch(props: Props) {
   );
   return (
     <div
-      className={classnames('clh-tag-search', {
-        'clh-tag-search--standalone': standalone,
+      className={classnames(C.root, {
+        [C.standalone]: standalone,
       })}
       title={__('Multiple tags can be added by separating them with a comma.\nExample: sports,news,tv')}
     >
       {!standalone && <label>{__('Tags')}</label>}
-      <div className="clh-tag-search__input_group">
+      <div className={C.inputGroup}>
         <FormField
           placeholder={__('Search tags')}
           type="text"
-          className="clh-tag-search__input"
+          className={C.input}
           name="tag_query"
           value={tagSearchQuery}
           onChange={(e) => {
@@ -52,7 +53,7 @@ function TagSearch(props: Props) {
             icon={ICONS.REMOVE}
             aria-label={__('Clear')}
             button="alt"
-            className="clh-tag-search__clear"
+            className={C.clear}
             onClick={() => {
               setTagSearchQuery('');
               handleChange({

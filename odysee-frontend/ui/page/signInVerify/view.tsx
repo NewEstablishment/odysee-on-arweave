@@ -8,6 +8,8 @@ import Card from 'component/common/card';
 import { useLocation } from 'react-router-dom';
 import { useAppDispatch } from 'redux/hooks';
 import { doToast } from 'redux/actions/notifications';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PAGE_MAIN_SIGN_UP_CLASS } from 'component/page/classes';
 
 // Guard against parents remounting. We don't want to send multi api calls.
 let verificationApiHistory = {
@@ -99,7 +101,7 @@ function SignInVerifyPage() {
 
   return (
     <Page authPage noFooter>
-      <div className="main__sign-up">
+      <div className={PAGE_MAIN_SIGN_UP_CLASS}>
         {verificationTried && (
           <Card
             title={successful ? __('Log in success!') : needsRecaptcha ? __('Log in') : __('Log in failed')}
@@ -130,7 +132,7 @@ function SignInVerifyPage() {
             actions={
               <>
                 {!successful && needsRecaptcha && (
-                  <div className="section__actions">
+                  <div className={SECTION_CLASSES.actions}>
                     <ReCAPTCHA
                       sitekey="6LePsJgUAAAAAFTuWOKRLnyoNKhm0HA4C3elrFMG"
                       onChange={onCaptchaChange}

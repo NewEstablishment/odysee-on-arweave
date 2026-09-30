@@ -3,6 +3,7 @@ import classnames from 'classnames';
 import Button from 'component/button';
 import { ExpandableContext } from 'contexts/expandable';
 import { useOnResize } from 'effects/use-on-resize';
+import { EXPANDABLE_CLASSES } from './expandable-classes';
 const COLLAPSED_HEIGHT = 220;
 type Props = {
   children: React.ReactNode | Array<React.ReactNode>;
@@ -50,9 +51,9 @@ export default function Expandable(props: Props) {
       }}
     >
       <div
-        className={classnames('expandable', {
-          'expandable--open': expanded,
-          'expandable--closed-fade': !expanded && (childOverflows || containsImage),
+        className={classnames(EXPANDABLE_CLASSES.root, {
+          [EXPANDABLE_CLASSES.open]: expanded,
+          [EXPANDABLE_CLASSES.closedFade]: !expanded && (childOverflows || containsImage),
         })}
         ref={expandableRef}
       >

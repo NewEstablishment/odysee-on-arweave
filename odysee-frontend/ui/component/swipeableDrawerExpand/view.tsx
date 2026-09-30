@@ -1,4 +1,3 @@
-import 'scss/component/_swipeable-drawer.scss';
 import { Global } from '@emotion/react';
 import classnames from 'classnames';
 import * as ICONS from 'constants/icons';
@@ -6,6 +5,7 @@ import * as React from 'react';
 import Button from 'component/button';
 import { useAppDispatch } from 'redux/hooks';
 import { doToggleAppDrawer as doToggleAppDrawerAction } from 'redux/actions/app';
+import { SWIPEABLE_DRAWER_CLASSES } from 'component/swipeableDrawer/classes';
 type Props = {
   label: any;
   icon: string;
@@ -28,8 +28,8 @@ function DrawerExpandButton(props: Props) {
       />
 
       <Button
-        className={classnames('swipeable-drawer__expand-button', {
-          fixed,
+        className={classnames(SWIPEABLE_DRAWER_CLASSES.expand, {
+          [SWIPEABLE_DRAWER_CLASSES.expandFixed]: fixed,
         })}
         button="primary"
         icon={icon || (fixed ? ICONS.UP : undefined)}

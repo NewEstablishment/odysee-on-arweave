@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import { Modal } from 'modal/modal';
 import Button from 'component/button';
@@ -8,6 +9,8 @@ import { selectTitleForUri, makeSelectClaimForUri, makeSelectIsAbandoningClaimFo
 import { doHideModal } from 'redux/actions/app';
 import { doResolveUri } from 'redux/actions/claims';
 import { doDeleteFileAndMaybeGoBack } from 'redux/actions/file';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 type Props = {
   uri: string;
   doGoBack: boolean;
@@ -44,10 +47,12 @@ function ModalRemoveFile(props: Props) {
             Are you sure you'd like to remove %title%?
           </I18nMessage>
         }
-        body={<p className="help error__text">{__('This action is permanent and cannot be undone')}</p>}
+        body={
+          <p className={`${HELP_CLASS} ${ERROR_TEXT_CLASS}`}>{__('This action is permanent and cannot be undone')}</p>
+        }
         actions={
           <>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button
                 button="primary"
                 label={
@@ -61,7 +66,7 @@ function ModalRemoveFile(props: Props) {
               />
               <Button button="link" label={__('Cancel')} onClick={closeModal} />
             </div>
-            <p className="help">{__('These changes will appear shortly.')}</p>
+            <p className={HELP_CLASS}>{__('These changes will appear shortly.')}</p>
           </>
         }
       />

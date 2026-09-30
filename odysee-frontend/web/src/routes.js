@@ -400,6 +400,7 @@ async function postHyperbeamUpload(ctx) {
   copyHeader(ctx, response.headers, 'url');
   copyHeader(ctx, response.headers, 'signers');
   copyHeader(ctx, response.headers, 'signers+link');
+  copyHyperbeamSessionCookies(ctx, response.headers);
   ctx.body = response.body;
 }
 
@@ -1099,6 +1100,21 @@ async function writeHyperbeamUploadChunk(nodeUrl, authToken, chunk, index) {
 function copyHeader(ctx, headers, name) {
   const value = headers[name];
   if (value) ctx.set(name, value);
+}
+
+function copyHyperbeamSessionCookies(ctx, headers) {
+  const source = headers['set-cookie'];
+  const cookies = (Array.isArray(source) ? source : source ? [source] : [])
+    .filter((cookie) => /^secret-[^=]+=/.test(cookie))
+    .map((cookie) => {
+      const attributes = cookie
+        .split(';')
+        .map((part) => part.trim())
+        .filter((part) => part && !/^path=/i.test(part) && !/^samesite=/i.test(part));
+      return `${attributes.join('; ')}; Path=/; SameSite=Lax`;
+    });
+
+  if (cookies.length) ctx.set('Set-Cookie', cookies);
 }
 
 function parseJsonBuffer(body) {

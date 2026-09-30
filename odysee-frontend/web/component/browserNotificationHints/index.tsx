@@ -2,7 +2,6 @@ import * as React from 'react';
 import * as ICONS from 'constants/icons';
 import Icon from 'component/common/icon';
 import { Modal } from 'modal/modal';
-import 'scss/component/notifications-blocked.scss';
 type InlineMessageProps = {
   title: string;
   children: React.ReactNode;
@@ -11,11 +10,11 @@ type InlineMessageProps = {
 const InlineMessage = (props: InlineMessageProps) => {
   const { title, children } = props;
   return (
-    <div className="notifications-blocked">
-      <Icon className="notifications-blocked__icon" color="#E50054" icon={ICONS.ALERT} size={32} />
+    <div className="tw:flex tw:items-center tw:rounded-app tw:border tw:border-app-primary tw:bg-[rgba(var(--color-primary-dynamic),0.06)] tw:p-app-m">
+      <Icon className="tw:mr-app-m tw:shrink-0" color="#E50054" icon={ICONS.ALERT} size={32} />
       <div>
         <span>{title}</span>
-        <span className={'notifications-blocked__subText'}>{children}</span>
+        <span className="tw:inline-block tw:text-app-small tw:text-app-text-subtitle">{children}</span>
       </div>
     </div>
   );
@@ -31,15 +30,17 @@ export const BrowsernotificationsBlocked = () => {
 export const BrowserNotificationHints = () => {
   return (
     <InlineMessage title={__("Browser notifications aren't supported. Here's a few tips:")}>
-      <ul className={'notifications-blocked__subText notifications-blocked__subTextList'}>
-        <li>{__("Notifications aren't available when in incognito or private mode.")}</li>
-        <li>
+      <ul className="tw:inline-block tw:text-app-small tw:text-app-text-subtitle">
+        <li className="tw:ml-app-m">{__("Notifications aren't available when in incognito or private mode.")}</li>
+        <li className="tw:ml-app-m">
           {__(
             "On Firefox, notifications won't function if cookies are set to clear on browser close. Please disable or add an exception for Odysee, then refresh."
           )}
         </li>
-        <li>{__('For Brave, enable google push notifications in settings.')}</li>
-        <li>{__('Check browser settings to see if notifications are disabled or otherwise restricted.')}</li>
+        <li className="tw:ml-app-m">{__('For Brave, enable google push notifications in settings.')}</li>
+        <li className="tw:ml-app-m">
+          {__('Check browser settings to see if notifications are disabled or otherwise restricted.')}
+        </li>
       </ul>
     </InlineMessage>
   );

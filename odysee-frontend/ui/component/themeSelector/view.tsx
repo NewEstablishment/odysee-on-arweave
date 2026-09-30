@@ -1,6 +1,7 @@
 import React from 'react';
 import * as SETTINGS from 'constants/settings';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_SMUSHED_CLASS } from 'component/common/form-components/fieldset-group-classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClientSetting } from 'redux/selectors/settings';
 import { doSetClientSetting, doSetDarkTime } from 'redux/actions/settings';
@@ -99,7 +100,7 @@ export default function ThemeSelector() {
         />
 
         {automaticDarkModeEnabled && (
-          <fieldset-group class="fieldset-group--smushed">
+          <fieldset-group class={FIELDSET_GROUP_SMUSHED_CLASS}>
             <FormField
               type="select"
               name="automatic_dark_mode_range_start"

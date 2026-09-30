@@ -7,6 +7,7 @@ import * as PAGES from 'constants/pages';
 import * as CS from 'constants/claim_search';
 import * as SETTINGS from 'constants/settings';
 import Page from 'component/page';
+import { PAGE_TITLE_CLASS } from 'component/page/classes';
 import ClaimListDiscover from 'component/claimListDiscover';
 import Button from 'component/button';
 import { ClaimSearchFilterContext } from 'contexts/claimSearchFilterContext';
@@ -22,6 +23,8 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectClientSetting, selectHomepageDiscoverNew } from 'redux/selectors/settings';
 import { doResolveUri } from 'redux/actions/claims';
+import { DISCOVER_TAGS_LINK_CLASS } from './classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const CATEGORY_CONTENT_TYPES_FILTER = CS.CONTENT_TYPES.filter((x) => x !== CS.CLAIM_REPOST);
 
@@ -103,7 +106,7 @@ function DiscoverPage(props: Props) {
     if (!dynamicRouteProps) {
       return (
         <a
-          className="help"
+          className={HELP_CLASS}
           target="_blank"
           rel="noreferrer"
           href="https://help.odysee.tv/category-blockchain/category-staking/increase/"
@@ -163,7 +166,7 @@ function DiscoverPage(props: Props) {
       });
     } else if (tag && !isCategory) {
       headerLabel = (
-        <h1 className="page__title">
+        <h1 className={PAGE_TITLE_CLASS}>
           <Icon icon={ICONS.TAG} size={10} />
           <span>
             #{(tag === CS.TAGS_ALL && __('All Content')) || (tag === CS.TAGS_FOLLOWED && __('Followed Tags')) || tag}
@@ -171,7 +174,7 @@ function DiscoverPage(props: Props) {
 
           <span>
             <Button
-              className="claim-search__tags-link"
+              className={DISCOVER_TAGS_LINK_CLASS}
               button="link"
               label={__('Manage Tags')}
               navigate={`/$/${PAGES.TAGS_FOLLOWING_MANAGE}`}
@@ -182,7 +185,7 @@ function DiscoverPage(props: Props) {
     } else {
       headerLabel = (
         <>
-          <h1 className="page__title">
+          <h1 className={PAGE_TITLE_CLASS}>
             <Icon icon={(dynamicRouteProps && dynamicRouteProps.icon) || ICONS.DISCOVER} size={10} />
             <label>{(dynamicRouteProps && __(dynamicRouteProps.title)) || __('All Content')}</label>
           </h1>

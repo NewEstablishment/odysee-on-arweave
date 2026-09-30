@@ -4,6 +4,7 @@ import { FormField } from './form-field';
 import { INVALID_NAME_ERROR } from 'constants/claim';
 import { isNameValid } from 'util/lbryURI';
 import { FormContext } from 'component/common/form-components/form';
+import { FIELDSET_GROUP_DISABLED_PREFIX_CLASS } from './fieldset-group-classes';
 type Props = {
   channelName?: string | null | undefined;
   name: string | null | undefined;
@@ -25,7 +26,7 @@ export const FormUrlName = (props: Props) => {
     setNameError(newNameError); // eslint-disable-next-line react-hooks/exhaustive-deps -- only listen to name
   }, [name]);
   return (
-    <fieldset-group class="fieldset-group--smushed fieldset-group--disabled-prefix">
+    <fieldset-group class={FIELDSET_GROUP_DISABLED_PREFIX_CLASS}>
       <fieldset-section>
         <label htmlFor="collection__name">{__('Name')}</label>
         <div className="form-field__prefix">{!channelName ? `${DOMAIN}/` : `${DOMAIN}/${channelName}/`}</div>

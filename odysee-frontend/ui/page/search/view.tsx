@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React, { useEffect } from 'react';
 import Lbry from 'lbry';
 import { parseURI } from 'util/lbryURI';
@@ -18,6 +19,8 @@ import {
 } from 'redux/selectors/search';
 import { selectClientSetting, selectLanguage, selectShowMatureContent } from 'redux/selectors/settings';
 import { getSearchQueryString } from 'util/query-params';
+import { SEARCH_PAGE_CLASS } from './classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 export default function SearchPage() {
   const dispatch = useAppDispatch();
@@ -100,7 +103,7 @@ export default function SearchPage() {
   }
 
   return (
-    <Page className="searchPage-wrapper">
+    <Page className={SEARCH_PAGE_CLASS}>
       <section className="search">
         <ClaimList
           uris={uris || []}
@@ -112,7 +115,9 @@ export default function SearchPage() {
           pageSize={SEARCH_PAGE_SIZE}
           header={<SearchOptions simple additionalOptions={searchOptions} onSearchOptionsChanged={resetPage} />}
         />
-        <div className="main--empty help">{__('These search results are provided by Odysee.')}</div>
+        <div className={`${PAGE_MAIN_EMPTY_CLASS} ${HELP_CLASS}`}>
+          {__('These search results are provided by Odysee.')}
+        </div>
       </section>
     </Page>
   );

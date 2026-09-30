@@ -4,12 +4,15 @@ import { createSelector } from 'reselect';
 import { useIsShortsMobile } from 'effects/use-screensize';
 import RecSys from 'recsys';
 import { v4 as Uuidv4 } from 'uuid';
-import { PRIMARY_PLAYER_WRAPPER_CLASS } from '../videoPlayers/view';
+import { PRIMARY_PLAYER_WRAPPER_STYLE_CLASS } from 'component/viewers/classes';
 import ShortsActions from 'component/shortsActions';
 import ShortsVideoPlayer from 'component/shortsVideoPlayer';
+import { SHORTS_VIDEO_SECTION_CLASS } from 'component/shortsVideoPlayer/classes';
 import ShortsSidePanel from 'component/shortsSidePanel';
 import ShortsMobileSidePanel from 'component/shortsMobileSidePanel';
 import SwipeNavigationPortal from 'component/shortsActions/swipeNavigation';
+import { SHORTS_DOCUMENT_PLAYING_TARGET_CLASS, SHORTS_SWIPE_OVERLAY_CLASS } from 'component/shortsActions/classes';
+import { CLAIM_COVER_SHORTS_SELECTOR } from 'component/claimCoverRender/classes';
 import { NavigationType, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { LINKED_COMMENT_QUERY_PARAM, THREAD_COMMENT_QUERY_PARAM } from 'constants/comment';
 import { lockBodyScroll, unlockBodyScroll } from 'util/body-scroll-lock';
@@ -62,6 +65,7 @@ import { doClaimSearch as doClaimSearchAction, doResolveUri as doResolveUriActio
 import { toggleAutoplayNextShort } from 'redux/actions/settings';
 import { doFetchShortsRecommendedContent as doFetchShortsRecommendedContentAction } from 'redux/actions/search';
 import { doOpenModal as doOpenModalAction } from 'redux/actions/app';
+import { SHORTS_PAGE_CLASSES, SHORTS_VIEWER_CONTENT_CLASSES } from './classes';
 
 const EMPTY_ARRAY: string[] = [];
 
@@ -117,7 +121,6 @@ const selectShortsRecommendedContent = (state: any, uri: string) => {
   const viewMode = selectShortsViewMode(state);
   return viewMode === 'channel' ? selectShortsChannelUris(state, uri) : selectShortsRelatedUris(state, uri);
 };
-export const SHORTS_PLAYER_WRAPPER_CLASS = 'shorts-page__video-container';
 const REEL_TRANSITION_MS = 320;
 const REEL_NAVIGATION_FALLBACK_MS = 1200;
 type ReelDirection = 'next' | 'previous';
@@ -242,8 +245,8 @@ export default function ShortsPage(props: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(() => {
     const viewer =
-      document.querySelector('.shorts__viewer .content__wrapper') || document.querySelector('.shorts__viewer');
-    const cover = document.querySelector('.content__cover--shorts');
+      document.querySelector('.shorts__viewer [data-content-wrapper]') || document.querySelector('.shorts__viewer');
+    const cover = document.querySelector(CLAIM_COVER_SHORTS_SELECTOR);
     const target = viewer || cover || null;
     setOverlayTarget((prev) => (prev !== target ? target : prev));
   });
@@ -273,7 +276,7 @@ export default function ShortsPage(props: Props) {
   const isSwipeInsideSidePanel = React.useCallback((clientX, clientY) => {
     const el = document.elementFromPoint(clientX, clientY);
     if (!el) return false;
-    return !!el.closest('.shorts-page__side-panel, .shorts-page__side-panel--open');
+    return !!el.closest('[data-shorts-side-panel]');
   }, []);
   const fetchForMode = React.useCallback(
     (mode) => {
@@ -723,7 +726,7 @@ export default function ShortsPage(props: Props) {
         onPrevious={goToPrevious}
         isEnabled={isSwipeEnabled && hasPlaylist}
         isMobile={isMobile}
-        className="shorts-swipe-overlay"
+        className={SHORTS_SWIPE_OVERLAY_CLASS}
         sidePanelOpen={sidePanelOpen}
         thumbnailUrl={thumbnail}
         hasPlaylist={hasPlaylist}
@@ -738,10 +741,10 @@ export default function ShortsPage(props: Props) {
       {transitionPreviewTarget &&
         createPortal(
           <div
-            className={classnames('shorts-transition-preview', {
-              'shorts-transition-preview--next': isTransitioning && transitionDirection === 'next',
-              'shorts-transition-preview--previous': isTransitioning && transitionDirection === 'previous',
-              'shorts-transition-preview--panel-open': sidePanelOpen,
+            className={classnames(SHORTS_PAGE_CLASSES.transitionPreview, {
+              [SHORTS_PAGE_CLASSES.transitionPreviewNext]: isTransitioning && transitionDirection === 'next',
+              [SHORTS_PAGE_CLASSES.transitionPreviewPrevious]: isTransitioning && transitionDirection === 'previous',
+              [SHORTS_PAGE_CLASSES.transitionPreviewPanelOpen]: sidePanelOpen,
             })}
             style={transitionPreviewStyle}
           />,
@@ -750,10 +753,10 @@ export default function ShortsPage(props: Props) {
       {transitionPreviewTarget &&
         createPortal(
           <div
-            className={classnames('shorts-transition-current', {
-              'shorts-transition-current--next': isTransitioning && transitionDirection === 'next',
-              'shorts-transition-current--previous': isTransitioning && transitionDirection === 'previous',
-              'shorts-transition-current--panel-open': sidePanelOpen,
+            className={classnames(SHORTS_PAGE_CLASSES.transitionCurrent, {
+              [SHORTS_PAGE_CLASSES.transitionCurrentNext]: isTransitioning && transitionDirection === 'next',
+              [SHORTS_PAGE_CLASSES.transitionCurrentPrevious]: isTransitioning && transitionDirection === 'previous',
+              [SHORTS_PAGE_CLASSES.transitionCurrentPanelOpen]: sidePanelOpen,
             })}
             style={
               thumbnail
@@ -775,18 +778,20 @@ export default function ShortsPage(props: Props) {
         createPortal(
           <>
             {overlayTarget.closest('.shorts__viewer') && (
-              <div className="shorts-viewer__content-info">
+              <div className={`${SHORTS_VIEWER_CONTENT_CLASSES.info} ${SHORTS_DOCUMENT_PLAYING_TARGET_CLASS}`}>
                 {channelUri && (
                   <Link
                     to={channelUri.replace('lbry://', '/').replace(/#/g, ':')}
-                    className="shorts-viewer__channel"
+                    className={SHORTS_VIEWER_CONTENT_CLASSES.channel}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <ChannelThumbnail uri={channelUri} xxsmall checkMembership={false} />
-                    <span className="shorts-viewer__channel-name">{channelDisplayName || channelName}</span>
+                    <span className={SHORTS_VIEWER_CONTENT_CLASSES.channelName}>
+                      {channelDisplayName || channelName}
+                    </span>
                   </Link>
                 )}
-                <span className="shorts-viewer__title">{title}</span>
+                <span className={SHORTS_VIEWER_CONTENT_CLASSES.title}>{title}</span>
               </div>
             )}
             {channelId && (
@@ -801,12 +806,16 @@ export default function ShortsPage(props: Props) {
           overlayTarget
         )}
       <div
-        className={classnames('shorts-page', {
+        className={classnames(SHORTS_PAGE_CLASSES.root, {
           'shorts-page--transitioning': isTransitioning,
         })}
         ref={shortsContainerRef}
       >
-        <div className={`shorts-page__container ${sidePanelOpen ? 'shorts-page__container--panel-open' : ''}`}>
+        <div
+          className={classnames(SHORTS_PAGE_CLASSES.container, {
+            [SHORTS_PAGE_CLASSES.containerPanelOpen]: sidePanelOpen,
+          })}
+        >
           {!isMobile && (
             <ShortsSidePanel
               isOpen={sidePanelOpen}
@@ -821,12 +830,12 @@ export default function ShortsPage(props: Props) {
               onClose={handleClosePanel}
             />
           )}
-          <div className="shorts-page__main-content">
-            <div className="shorts-page__video-section">
+          <div className={SHORTS_PAGE_CLASSES.mainContent}>
+            <div className={SHORTS_VIDEO_SECTION_CLASS}>
               <ShortsVideoPlayer
                 uri={uri}
                 isMobile={isMobile}
-                primaryPlayerWrapperClass={PRIMARY_PLAYER_WRAPPER_CLASS}
+                primaryPlayerWrapperClass={PRIMARY_PLAYER_WRAPPER_STYLE_CLASS}
                 nextRecommendedShort={nextRecommendedShort}
                 autoPlayNextShort={autoPlayNextShort}
                 isAtEnd={isAtEnd}

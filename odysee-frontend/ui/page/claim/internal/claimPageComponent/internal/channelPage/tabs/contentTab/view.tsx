@@ -16,6 +16,7 @@ import { SearchResults } from './internal/searchResults';
 import { useIsLargeScreen } from 'effects/use-screensize';
 import usePersistedState from 'effects/use-persisted-state';
 import { tagSearchCsOptionsHook } from 'util/search';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { lazyImport } from 'util/lazyImport';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { PAGE_SIZE } from 'constants/claim';
@@ -32,6 +33,13 @@ import { selectClientSetting, selectShowMatureContent } from 'redux/selectors/se
 import { selectAdBlockerFound } from 'redux/selectors/app';
 import { selectActiveLivestreamForChannel } from 'redux/selectors/livestream';
 import { getChannelIdFromClaim } from 'util/claim';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
+import {
+  WUNDERBAR_CLEAR_CLASS,
+  WUNDERBAR_INLINE_CLASS,
+  WUNDERBAR_INPUT_INLINE_CLASS,
+} from 'component/wunderbar/classes';
 const HiddenNsfwClaims = lazyImport(
   () =>
     import(
@@ -162,21 +170,21 @@ function ContentTab(props: Props) {
       )}
 
       {!fetching && channelIsBlackListed && (
-        <section className="card card--section">
+        <section className={`card ${CARD_CLASSES.section}`}>
           <p>
             {__(
               'In response to a complaint we received under the US Digital Millennium Copyright Act, we have blocked access to this channel from our applications. Content may also be blocked due to DMCA Red Flag rules which are obvious copyright violations we come across, are discussed in public channels, or reported to us.'
             )}
           </p>
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="link" href="https://help.odysee.tv/copyright/" label={__('Read More')} />
           </div>
         </section>
       )}
 
       {!fetching && channelIsBlocked && (
-        <div className="card--section">
-          <h2 className="help">{__('You have blocked this channel content.')}</h2>
+        <div className={CARD_CLASSES.section}>
+          <h2 className={HELP_CLASS}>{__('You have blocked this channel content.')}</h2>
         </div>
       )}
 
@@ -219,11 +227,11 @@ function ContentTab(props: Props) {
             loadedCallback={shortsOnly && searchQuery.length > 0 ? undefined : loadedCallback}
             meta={
               showFilters && (
-                <Form onSubmit={() => {}} className="wunderbar--inline">
+                <Form onSubmit={() => {}} className={WUNDERBAR_INLINE_CLASS}>
                   <Icon icon={ICONS.SEARCH} />
                   <FormField
                     name="channel_search"
-                    className="wunderbar__input--inline"
+                    className={WUNDERBAR_INPUT_INLINE_CLASS}
                     value={searchQuery}
                     onChange={handleInputChange}
                     type="text"
@@ -234,7 +242,7 @@ function ContentTab(props: Props) {
                       icon={ICONS.REMOVE}
                       aria-label={__('Clear')}
                       button="alt"
-                      className="wunderbar__clear"
+                      className={WUNDERBAR_CLEAR_CLASS}
                       onClick={() => setSearchQuery('')}
                     />
                   )}

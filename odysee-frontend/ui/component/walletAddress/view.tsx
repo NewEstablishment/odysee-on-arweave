@@ -3,9 +3,11 @@ import Button from 'component/button';
 import CopyableText from 'component/copyableText';
 import QRCode from 'component/common/qr-code';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectReceiveAddress, selectGettingNewAddress } from 'redux/selectors/wallet';
 import { doCheckAddressIsMine, doGetNewAddress } from 'redux/actions/wallet';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const WalletAddress = React.memo(function WalletAddress() {
   const dispatch = useAppDispatch();
@@ -42,7 +44,7 @@ const WalletAddress = React.memo(function WalletAddress() {
             snackMessage={__('Address copied.')}
           />
 
-          <div className="card__actions">
+          <div className={CARD_CLASSES.actions}>
             {!IS_WEB && (
               <Button
                 button="secondary"
@@ -53,7 +55,7 @@ const WalletAddress = React.memo(function WalletAddress() {
             )}
             <Button button="link" label={showQR ? __('Hide QR code') : __('Show QR code')} onClick={toggleQR} />
           </div>
-          <p className="help">
+          <p className={HELP_CLASS}>
             {!IS_WEB &&
               __('You can generate a new address at any time, and any previous addresses will continue to work.')}
           </p>

@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import * as PAGES from 'constants/pages';
 import React, { useEffect } from 'react';
 import BusyIndicator from 'component/common/busy-indicator';
@@ -17,6 +18,10 @@ import { selectFetchingRewards, selectUnclaimedRewards, selectClaimedRewards } f
 import { doUserFetch } from 'redux/actions/user';
 import { doRewardList } from 'redux/actions/rewards';
 import { selectDaemonSettings } from 'redux/selectors/settings';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { REWARDS_CARD_LIST_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 function RewardsPage() {
   const dispatch = useAppDispatch();
@@ -79,7 +84,7 @@ function RewardsPage() {
             </React.Fragment>
           }
           actions={
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button navigate="/" button="primary" label="Return Home" />
               <Button onClick={() => dispatch(doUserFetch())} button="link" label="Refresh" />
             </div>
@@ -113,9 +118,9 @@ function RewardsPage() {
   function renderUnclaimedRewards() {
     if (!IS_WEB && daemonSettings && !daemonSettings.share_usage_data) {
       return (
-        <section className="card card--section">
-          <h2 className="card__title card__title--deprecated">{__('Credits Disabled')}</h2>
-          <p className="error__text">
+        <section className={`card ${CARD_CLASSES.section}`}>
+          <h2 className={`card__title ${CARD_CLASSES.titleDeprecated}`}>{__('Credits Disabled')}</h2>
+          <p className={ERROR_TEXT_CLASS}>
             <I18nMessage
               tokens={{
                 settings: <Button button="link" navigate="/$/settings" label="Settings" />,
@@ -131,7 +136,9 @@ function RewardsPage() {
       return <BusyIndicator message={__('Fetching available credits')} />;
     } else if (user === null) {
       return (
-        <p className="help">{__('This application is unable to receive credits due to an authentication failure.')}</p>
+        <p className={HELP_CLASS}>
+          {__('This application is unable to receive credits due to an authentication failure.')}
+        </p>
       );
     } else if (!rewards || rewards.length <= 0) {
       return (
@@ -153,8 +160,8 @@ function RewardsPage() {
     return (
       <div
         aria-hidden={isNotEligible}
-        className={classnames('card__list', {
-          'card--disabled': isNotEligible,
+        className={classnames(REWARDS_CARD_LIST_CLASS, {
+          [CARD_CLASSES.disabled]: isNotEligible,
         })}
       >
         {rewards.map((reward) => (

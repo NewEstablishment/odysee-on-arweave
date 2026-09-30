@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import classnames from 'classnames';
 import * as COLS from 'constants/collections';
@@ -23,6 +24,8 @@ import {
 } from 'redux/selectors/collections';
 import { doResolveClaimIds } from 'redux/actions/claims';
 import { doFetchThumbnailClaimsForCollectionIds } from 'redux/actions/collections';
+import { PLAYLISTS_CLAIM_LIST_CLASS } from '../../classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 type Props = { handleCreatePlaylist?: () => void };
 // Avoid prop drilling
 export const CollectionsListContext = React.createContext<any>({
@@ -236,9 +239,10 @@ export default function CollectionsListMine(props: Props) {
       {/* Playlists: previews */}
       {filteredCollectionsLength > 0 ? (
         <ul
-          className={classnames('ul--no-style claim-list', {
+          className={classnames(PLAYLISTS_CLAIM_LIST_CLASS, {
             playlists: !isMobile,
           })}
+          data-claim-list
         >
           {/* !isMobile && <TableHeader /> */}
 
@@ -257,7 +261,7 @@ export default function CollectionsListMine(props: Props) {
           <Paginate totalPages={totalPages} shouldResetPageNumber={filterParamsChanged} />
         </ul>
       ) : (
-        <div className="empty main--empty">{__('No matching playlists')}</div>
+        <div className={`${EMPTY_CLASS} ${PAGE_MAIN_EMPTY_CLASS}`}>{__('No matching playlists')}</div>
       )}
     </>
   );

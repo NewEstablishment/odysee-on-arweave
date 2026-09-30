@@ -3,11 +3,15 @@ import Button from 'component/button';
 import { FormField, Form } from 'component/common/form';
 import { Lbryio } from 'lbryinc';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { CONFIRM_VALUE_CLASS, CONFIRM_WRAPPER_CLASS } from 'component/common/confirm-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import LbcSymbol from 'component/common/lbc-symbol';
 import Spinner from 'component/spinner';
 import Nag from 'component/nag';
 import CopyableText from 'component/copyableText';
 import Icon from 'component/common/icon';
+import { ICON_HELP_CLASS } from 'component/common/icon-classes';
 import QRCode from 'component/common/qr-code';
 import usePersistedState from 'effects/use-persisted-state';
 import * as ICONS from 'constants/icons';
@@ -24,6 +28,9 @@ import { selectCoinSwaps } from 'redux/selectors/coinSwap';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
 import { doGetNewAddress, doCheckAddressIsMine } from 'redux/actions/wallet';
 import { selectReceiveAddress } from 'redux/selectors/wallet';
+import { WALLET_SWAP_SUBITEM_CLASS, WALLET_SWAP_TABLE_CLASS } from './classes';
+import { TABLE_WRAPPER_CLASS } from 'component/common/table-classes';
+import { HELP_CLASS, HELP_WARNING_CLASS } from 'component/common/help-classes';
 const ENABLE_ALTERNATIVE_COINS = true;
 const BTC_SATOSHIS = 100000000;
 const LBC_MAX = 21000000;
@@ -117,7 +124,7 @@ const explorerUrl = (coin, txid) => {
 };
 
 function getGap() {
-  return <div className="confirm__value" />; // better way?
+  return <div className={CONFIRM_VALUE_CLASS} />; // better way?
 }
 
 function WalletSwap() {
@@ -158,7 +165,7 @@ function WalletSwap() {
             Remove %address%?
           </I18nMessage>
         ),
-        body: <p className="help--warning">{__('This process cannot be reversed.')}</p>,
+        body: <p className={HELP_WARNING_CLASS}>{__('This process cannot be reversed.')}</p>,
         onConfirm: (closeModal) => {
           dispatch(doRemoveCoinSwap(chargeCode));
           closeModal();
@@ -511,7 +518,7 @@ function WalletSwap() {
       <>
         <Button autoFocus button="primary" label={__('Close')} onClick={() => navigate(-1)} />
         <Icon
-          className="icon--help"
+          className={ICON_HELP_CLASS}
           icon={ICONS.HELP}
           tooltip
           size={16}
@@ -550,7 +557,7 @@ function WalletSwap() {
 
   const actionMain = (
     <>
-      <div className="section section--padded card--inline confirm__wrapper">
+      <div className={`section ${SECTION_CLASSES.padded} ${CARD_CLASSES.inline} ${CONFIRM_WRAPPER_CLASS}`}>
         <div className="section">
           <FormField
             autoFocus
@@ -565,7 +572,7 @@ function WalletSwap() {
             }
             type="number"
             name="lbc"
-            className="form-field--price-amount--auto"
+            className="tw:w-auto tw:min-w-full"
             affixClass="form-field--fix-no-height"
             max={LBC_MAX}
             min={LBC_MIN}
@@ -578,13 +585,13 @@ function WalletSwap() {
           />
           {getGap()}
           <div className="confirm__label">{__('Estimated BTC price')}</div>
-          <div className="confirm__value">
+          <div className={CONFIRM_VALUE_CLASS}>
             {formatCoinAmountString(btc)} {btc === 0 ? '' : 'BTC'}
             {isFetchingRate && <Spinner type="small" />}
           </div>
         </div>
       </div>
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <Button
           autoFocus
           onClick={handleStartSwap}
@@ -601,7 +608,7 @@ function WalletSwap() {
   );
   const actionPending = (
     <>
-      <div className="section section--padded card--inline confirm__wrapper">
+      <div className={`section ${SECTION_CLASSES.padded} ${CARD_CLASSES.inline} ${CONFIRM_WRAPPER_CLASS}`}>
         <div className="section">
           {swap && swap.coins && ENABLE_ALTERNATIVE_COINS && (
             <>
@@ -637,11 +644,11 @@ function WalletSwap() {
               }) as any
             }
           />
-          <div className="help">{__('Use the copy button to ensure the EXACT amount is sent!')}</div>
+          <div className={HELP_CLASS}>{__('Use the copy button to ensure the EXACT amount is sent!')}</div>
           {getGap()}
           <div className="confirm__label">{__('To --[the tip recipient]--')}</div>
           <CopyableText primaryButton copyable={getCoinAddress(coin)} snackMessage={__('Address copied.')} />
-          <div className="confirm__value--subitem">
+          <div className={WALLET_SWAP_SUBITEM_CLASS}>
             <Button
               button="link"
               label={showQr ? __('Hide QR code') : __('Show QR code')}
@@ -651,50 +658,50 @@ function WalletSwap() {
           </div>
           {getGap()}
           <div className="confirm__label">{__('Receive')}</div>
-          <div className="confirm__value">{<LbcSymbol postfix={getLbcAmountStrForSwap(swap)} size={22} />}</div>
+          <div className={CONFIRM_VALUE_CLASS}>{<LbcSymbol postfix={getLbcAmountStrForSwap(swap)} size={22} />}</div>
         </div>
       </div>
-      <div className="section__actions">{getCloseButton()}</div>
+      <div className={SECTION_CLASSES.actions}>{getCloseButton()}</div>
     </>
   );
   const actionConfirmingSend = (
     <>
-      <div className="section section--padded card--inline confirm__wrapper">
+      <div className={`section ${SECTION_CLASSES.padded} ${CARD_CLASSES.inline} ${CONFIRM_WRAPPER_CLASS}`}>
         <div className="section">
           <div className="confirm__label">{__('Confirming')}</div>
-          <div className="confirm__value confirm__value--no-gap">{getSentAmountStr(swap)}</div>
-          <div className="confirm__value--subitem">{getViewTransactionElement(swap, true)}</div>
+          <div className={`${CONFIRM_VALUE_CLASS} tw:!mb-0`}>{getSentAmountStr(swap)}</div>
+          <div className={WALLET_SWAP_SUBITEM_CLASS}>{getViewTransactionElement(swap, true)}</div>
         </div>
       </div>
-      <div className="section__actions">{getCloseButton()}</div>
+      <div className={SECTION_CLASSES.actions}>{getCloseButton()}</div>
     </>
   );
   const actionProcessingAndSuccess = (
     <>
-      <div className="section section--padded card--inline confirm__wrapper">
+      <div className={`section ${SECTION_CLASSES.padded} ${CARD_CLASSES.inline} ${CONFIRM_WRAPPER_CLASS}`}>
         <div className="section">
           <div className="confirm__label">{__('Sent')}</div>
-          <div className="confirm__value confirm__value--no-gap">{getSentAmountStr(swap)}</div>
-          <div className="confirm__value--subitem">{getViewTransactionElement(swap, true)}</div>
+          <div className={`${CONFIRM_VALUE_CLASS} tw:!mb-0`}>{getSentAmountStr(swap)}</div>
+          <div className={WALLET_SWAP_SUBITEM_CLASS}>{getViewTransactionElement(swap, true)}</div>
           {getGap()}
           <div className="confirm__label">{action === ACTION_STATUS_SUCCESS ? __('Received') : __('Receiving')}</div>
-          <div className="confirm__value confirm__value--no-gap">
+          <div className={`${CONFIRM_VALUE_CLASS} tw:!mb-0`}>
             {<LbcSymbol postfix={getLbcAmountStrForSwap(swap)} size={22} />}
           </div>
           {action === ACTION_STATUS_SUCCESS && (
-            <div className="confirm__value--subitem">{getViewTransactionElement(swap, false)}</div>
+            <div className={WALLET_SWAP_SUBITEM_CLASS}>{getViewTransactionElement(swap, false)}</div>
           )}
         </div>
       </div>
-      <div className="section__actions">{getCloseButton()}</div>
+      <div className={SECTION_CLASSES.actions}>{getCloseButton()}</div>
     </>
   );
   const actionPastSwaps = (
     <>
-      <div className="section section--padded card--inline confirm__wrapper">
+      <div className={`section ${SECTION_CLASSES.padded} ${CARD_CLASSES.inline} ${CONFIRM_WRAPPER_CLASS}`}>
         <div className="section">
-          <div className="table__wrapper">
-            <table className="table table--btc-swap">
+          <div className={TABLE_WRAPPER_CLASS}>
+            <table className={WALLET_SWAP_TABLE_CLASS}>
               <thead>
                 <tr>
                   <th>{__('Code')}</th>
@@ -715,7 +722,7 @@ function WalletSwap() {
                         <td>
                           <Button
                             button="link"
-                            className="button--hash-id"
+                            className="tw:font-app-mono"
                             title={x.chargeCode}
                             label={x.chargeCode}
                             onClick={() => {
@@ -740,7 +747,7 @@ function WalletSwap() {
           </div>
         </div>
       </div>
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <Button
           autoFocus
           button="primary"

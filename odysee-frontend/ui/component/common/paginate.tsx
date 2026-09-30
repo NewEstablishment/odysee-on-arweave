@@ -2,9 +2,10 @@ import React from 'react';
 import { Form, FormField } from 'component/common/form';
 import ReactPaginateModule from 'react-paginate';
 const ReactPaginate = (ReactPaginateModule as any).default || ReactPaginateModule;
-import './paginate.scss';
 import { useIsMobile } from 'effects/use-screensize';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { PAGINATION_CLASSES } from './paginate-classes';
+import { FIELDSET_GROUP_PAGINATE_CLASS } from './form-components/fieldset-group-classes';
 
 const PAGINATE_PARAM = 'page';
 
@@ -84,30 +85,31 @@ function Paginate(props: Props) {
       }
       onSubmit={handlePaginateKeyUp}
     >
-      <fieldset-group class="fieldset-group--smushed fieldgroup--paginate">
+      <fieldset-group class={FIELDSET_GROUP_PAGINATE_CLASS}>
         <fieldset-section>
           <ReactPaginate
             pageCount={totalPages}
             pageRangeDisplayed={2}
             previousLabel="‹"
             nextLabel="›"
-            activeClassName="pagination__item--selected"
-            pageClassName="pagination__item"
-            previousClassName="pagination__item pagination__item--previous"
-            nextClassName="pagination__item pagination__item--next"
-            breakClassName="pagination__item pagination__item--break"
+            activeClassName={PAGINATION_CLASSES.selected}
+            pageClassName={PAGINATION_CLASSES.page}
+            previousClassName={PAGINATION_CLASSES.direction}
+            nextClassName={PAGINATION_CLASSES.direction}
+            breakClassName={PAGINATION_CLASSES.break}
+            disabledClassName={PAGINATION_CLASSES.disabled}
             marginPagesDisplayed={2}
             onPageChange={(e) => handleChangePage(e.selected + 1)}
             forcePage={currentPage - 1}
             initialPage={currentPage - 1}
-            containerClassName="pagination"
+            containerClassName={PAGINATION_CLASSES.container}
           />
         </fieldset-section>
         {!isMobile && (
           <FormField
             value={textValue}
             onChange={(e) => setTextValue(e.target.value)}
-            className="paginate-channel"
+            className={PAGINATION_CLASSES.channel}
             label={__('Go to page:')}
             type="text"
             name="paginate-file"

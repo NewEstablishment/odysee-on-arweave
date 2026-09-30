@@ -1,0 +1,22 @@
+import { CLAIM_TILE_ABOUT_CLASS } from './claim-grid-classes.ts';
+
+export const CLAIM_PREVIEW_PLACEHOLDER_CLASSES = {
+  tileRoot: 'placeholder claim-preview--tile tw:bg-[unset]',
+  rowRoot: String.raw`placeholder claim-preview__wrapper tw:bg-[rgba(var(--color-header-background-base),0.5)] tw:[&.claim-preview\_\_wrapper--row]:!bg-[rgba(var(--color-header-button-base),0.4)] tw:[.file-page\_\_recommended_&]:!bg-[unset]`,
+  wrapper: 'placeholder__wrapper tw:mt-app-xxxs tw:mb-[1.5px] tw:w-full',
+  thumbnail:
+    'media__thumb tw:rounded-app-thumbnail tw:[box-shadow:0_0_0_1px_rgba(0,0,0,0)_inset] tw:hover:[box-shadow:0_0_0_1px_rgba(0,0,0,0)_inset]',
+  rowThumbnail: String.raw`tw:w-[calc(var(--file-list-thumbnail-width)*1.2)] tw:[.file-page\_\_recommended_&]:!w-[var(--file-list-thumbnail-width)] tw:[:is(.player-fullscreen-target:fullscreen,html.ios-fullscreen_.player-fullscreen-target)_.video-fullscreen\_\_actions-wrapper--landscape_:where(.video-fullscreen\_\_side-panel-inner)_.placeholder.claim-preview\_\_wrapper_&]:!w-[calc(var(--file-list-thumbnail-width)*0.8)] tw:upto-small:!w-[calc(var(--file-list-thumbnail-width)*0.8)] tw:[@media(max-width:900px)]:[.file-page\_\_recommended_&]:!w-[calc(var(--file-list-thumbnail-width)*0.8)]`,
+  tileTitle:
+    'claim-tile__title tw:mt-[8px] tw:min-h-[var(--font-body)] tw:w-[95%] tw:rounded-app tw:bg-app-text tw:opacity-20',
+  rowTitle: String.raw`claim-preview__title tw:mt-[2px] tw:min-h-[var(--font-body)] tw:w-[45%] tw:rounded-app tw:bg-app-text tw:opacity-20 tw:[.file-page\_\_recommended_.placeholder\_\_wrapper_&]:!w-[95%] tw:[:is(.player-fullscreen-target:fullscreen,html.ios-fullscreen_.player-fullscreen-target)_.video-fullscreen\_\_actions-wrapper--landscape_:where(.video-fullscreen\_\_side-panel-inner)_.placeholder_&]:!w-[94%] tw:upto-small:w-[94%]`,
+  rowSecondaryTitle: String.raw`claim-preview__title_b tw:mt-[2px] tw:mb-[9px] tw:hidden tw:min-h-[var(--font-body)] tw:w-[68%] tw:rounded-app tw:bg-app-text tw:opacity-20 tw:[.claim-preview--tile_&]:min-h-[3.2rem] tw:[.claim-preview--tile_&]:pt-app-xs tw:[.claim-preview--tile_&]:text-app-small tw:[.file-page\_\_recommended_.placeholder\_\_wrapper_&]:!mb-0 tw:[.file-page\_\_recommended_.placeholder\_\_wrapper_&]:!block tw:[.file-page\_\_recommended_.placeholder\_\_wrapper_&]:!w-[91%] tw:[:is(.player-fullscreen-target:fullscreen,html.ios-fullscreen_.player-fullscreen-target)_.video-fullscreen\_\_actions-wrapper--landscape_:where(.video-fullscreen\_\_side-panel-inner)_.placeholder_&]:!block tw:[:is(.player-fullscreen-target:fullscreen,html.ios-fullscreen_.player-fullscreen-target)_.video-fullscreen\_\_actions-wrapper--landscape_:where(.video-fullscreen\_\_side-panel-inner)_.placeholder_&]:!w-[94%] tw:upto-small:block tw:upto-small:[.claim-preview--tile_&]:min-h-[unset]`,
+  about: `${CLAIM_TILE_ABOUT_CLASS} tw:w-[70%]`,
+  subtitle: String.raw`media__subtitle tw:mt-app-s tw:block tw:h-[var(--font-xsmall)] tw:w-[16%] tw:rounded-app tw:bg-app-text tw:opacity-10 tw:[.file-page\_\_recommended_.placeholder\_\_wrapper_&]:!mt-0 tw:[.file-page\_\_recommended_.placeholder\_\_wrapper_&]:!w-[94%] tw:[:is(.player-fullscreen-target:fullscreen,html.ios-fullscreen_.player-fullscreen-target)_.video-fullscreen\_\_actions-wrapper--landscape_:where(.video-fullscreen\_\_side-panel-inner)_.placeholder_.claim-tile\_\_about_&]:!w-[82%] tw:upto-small:w-[82%]`,
+  secondarySubtitle: String.raw`media__subtitle_b tw:mt-[4px] tw:!flex tw:h-[var(--font-xsmall)] tw:w-[14%] tw:flex-wrap tw:rounded-app tw:bg-app-text tw:opacity-10 tw:[.file-page\_\_recommended_.placeholder\_\_wrapper_&]:w-[46%] tw:[:is(.player-fullscreen-target:fullscreen,html.ios-fullscreen_.player-fullscreen-target)_.video-fullscreen\_\_actions-wrapper--landscape_:where(.video-fullscreen\_\_side-panel-inner)_.placeholder_.claim-tile\_\_about_&]:w-[56%] tw:upto-small:w-[56%]`,
+  buttonContent: 'tw:mt-[2px] tw:h-[var(--font-xsmall)] tw:w-[40%] tw:rounded-app tw:bg-app-text tw:opacity-10',
+} as const;
+
+export const CLAIM_PREVIEW_PLACEHOLDER_CHANNEL_CLASS = String.raw`claim-preview-placeholder-channel tw:mr-app-xs tw:block tw:size-[2rem] tw:rounded-[50%] tw:bg-[var(--color-placeholder-background)] tw:[.file-page\_\_recommended_.placeholder\_\_wrapper_&]:hidden tw:[.main--settings-page_.claim-preview\_\_wrapper--channel.placeholder_&]:hidden`;
+
+export const CLAIM_PREVIEW_PLACEHOLDER_CHANNEL_ROW_CLASS = `${CLAIM_PREVIEW_PLACEHOLDER_CHANNEL_CLASS} tw:mt-app-xs`;

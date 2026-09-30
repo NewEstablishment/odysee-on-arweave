@@ -1,5 +1,6 @@
 import React from 'react';
 import Button from 'component/button';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
 import * as ICONS from 'constants/icons';
 import { useAppDispatch } from 'redux/hooks';
 import { doRemovePersonalRecommendation } from 'redux/actions/search';
@@ -22,8 +23,8 @@ export default function FileHideRecommendation(props: Props) {
 
   return (
     <Button
-      button={buttonType}
-      className={buttonType ? undefined : 'button--file-action'}
+      button={buttonType || 'alt'}
+      className={buttonType ? undefined : FILE_ACTION_BUTTON_CLASS}
       title={label}
       icon={ICONS.REMOVE}
       label={showLabel ? label : null}

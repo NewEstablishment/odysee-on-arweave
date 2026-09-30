@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as MODALS from 'constants/modal_types';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { DOMAIN, THUMBNAIL_CDN_SIZE_LIMIT_BYTES } from 'config';
@@ -5,6 +6,7 @@ import * as React from 'react';
 import { FormField } from 'component/common/form';
 import FileSelector from 'component/common/file-selector';
 import Button from 'component/button';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import Spinner from 'component/spinner';
 import ThumbnailMissingImage from './thumbnail-missing.png';
 import ThumbnailBrokenImage from './thumbnail-broken.png';
@@ -13,7 +15,10 @@ import { selectPublishFormValues } from 'redux/selectors/publish';
 import { doUpdatePublishForm, doResetThumbnailStatus } from 'redux/actions/publish';
 import { doOpenModal } from 'redux/actions/app';
 import { lazyImport } from 'util/lazyImport';
-import './style.lazy.scss';
+import { SELECT_THUMBNAIL_COLUMN_ITEM_CLASS } from './classes';
+import { COLUMN_CLASS } from 'component/common/layout-classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const ThumbnailPicker = lazyImport(() => import('component/thumbnailPicker'));
 type Props = {
@@ -159,13 +164,13 @@ function SelectThumbnail(props: Props) {
   */
   const thumbPreview = (
     <div
-      className="column__item thumbnail-picker__preview"
+      className="column__item tw:relative tw:h-[calc(var(--thumbnail-preview-height)*1.5)] tw:w-[calc(var(--thumbnail-preview-width)*1.5)] tw:rounded-app tw:bg-[var(--color-thumbnail-background)] tw:bg-cover tw:bg-center tw:bg-no-repeat tw:p-app-s tw:text-app-small tw:upto-small:mb-app-s tw:upto-small:aspect-[16/9] tw:upto-small:h-[unset] tw:upto-small:w-full tw:mb-0"
       style={{
         backgroundImage: `url(${String(thumbnailSrc)})`,
       }}
     >
       {isUploadingThumbnail && (
-        <div className="thumbnail-picker__preview-overlay">
+        <div className="tw:absolute tw:inset-0 tw:flex tw:flex-col tw:items-center tw:justify-center tw:gap-app-xs tw:bg-[rgba(0,0,0,0.55)] tw:p-app-s tw:text-center tw:font-bold tw:text-white">
           <Spinner type="small" />
           <span>{__('Uploading thumbnail')}...</span>
         </div>
@@ -188,7 +193,7 @@ function SelectThumbnail(props: Props) {
     return (
       <React.Suspense
         fallback={
-          <div className="main--empty empty">
+          <div className={`${PAGE_MAIN_EMPTY_CLASS} ${EMPTY_CLASS}`}>
             <Spinner type="small" />
           </div>
         }
@@ -206,9 +211,9 @@ function SelectThumbnail(props: Props) {
   return (
     <>
       {optional && <h2 className="card__title">{__('Thumbnail (Optional)')}</h2>}
-      <div className="column card--thumbnail">
+      <div className={`${COLUMN_CLASS} card--thumbnail`}>
         {thumbPreview}
-        <div className="column__item">
+        <div className={`${SELECT_THUMBNAIL_COLUMN_ITEM_CLASS} tw:mb-0`}>
           {manualInput ? (
             <>
               <FormField
@@ -220,7 +225,7 @@ function SelectThumbnail(props: Props) {
                 onChange={handleThumbnailChange}
               />
               {!thumbUploaded && (
-                <p className="help">
+                <p className={HELP_CLASS}>
                   {isUploadingThumbnail
                     ? __('Please wait for thumbnail to finish uploading')
                     : __('Enter a URL for your thumbnail.')}
@@ -250,7 +255,7 @@ function SelectThumbnail(props: Props) {
                 }}
               />
               {!thumbUploaded && (
-                <p className="help">
+                <p className={HELP_CLASS}>
                   {isUploadingThumbnail
                     ? __('Please wait for thumbnail to finish uploading')
                     : __('Upload your thumbnail to %domain%. Recommended ratio is 16:9, %max_size%MB max.', {
@@ -261,10 +266,11 @@ function SelectThumbnail(props: Props) {
               )}
             </>
           )}
-          <div className="card__actions">
+          <div className={CARD_CLASSES.actions}>
             <Button
               button="link"
               label={manualInput ? __('Use thumbnail upload tool') : __('Enter a thumbnail URL')}
+              labelClassName="tw:min-w-0"
               disabled={isUploadingThumbnail}
               onClick={() =>
                 updatePublishForm({

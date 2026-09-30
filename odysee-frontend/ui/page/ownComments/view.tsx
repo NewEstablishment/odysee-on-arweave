@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import Button from 'component/button';
 import ChannelSelector from 'component/channelSelector';
@@ -20,6 +21,8 @@ import {
   selectTotalCommentsCountForUri,
 } from 'redux/selectors/comments';
 import { selectClaimsById } from 'redux/selectors/claims';
+import { OWN_COMMENTS_CARD_ACTIONS_CLASS, OWN_COMMENTS_CLAIM_CLASS, OWN_COMMENTS_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 // Local type for comment objects from the redux store
 type OwnComment = {
@@ -70,9 +73,13 @@ export default function OwnComments() {
       const isChannel = contentClaim && contentClaim.value_type === 'channel';
       const isLivestream = Boolean(contentClaim && contentClaim.value_type === 'stream' && !contentClaim.value.source);
       return (
-        <div key={comment.comment_id} className="comments-own card__main-actions">
-          <div className="section__actions">
-            <div className="comments-own--claim">
+        <div
+          key={comment.comment_id}
+          className={`${OWN_COMMENTS_CLASS} ${OWN_COMMENTS_CARD_ACTIONS_CLASS} card__main-actions`}
+          data-own-comments
+        >
+          <div className={SECTION_CLASSES.actions}>
+            <div className={OWN_COMMENTS_CLAIM_CLASS} data-own-comments-claim>
               {contentClaim && (
                 <ClaimPreview
                   uri={contentClaim.canonical_url}
@@ -226,7 +233,7 @@ export default function OwnComments() {
           <>
             {wasResetAndReady && <ul className="comments">{allComments && getCommentsElem(allComments)}</ul>}
             {(isFetchingComments || moreBelow) && (
-              <div className="main--empty" ref={spinnerRef}>
+              <div className={PAGE_MAIN_EMPTY_CLASS} ref={spinnerRef}>
                 <Spinner type="small" />
                 {isLoadingLong && <p>{__('Larger comment histories may take time to load')}</p>}
               </div>

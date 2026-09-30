@@ -10,6 +10,7 @@ import {
   selectCollectionIsPublishingForId,
   selectCollectionPublishErrorForId,
 } from 'redux/selectors/collections';
+import { COLLECTION_PUBLISH_WARNING_CLASS } from './classes';
 type Props = {
   uri?: string;
   collectionId: string;
@@ -35,7 +36,7 @@ function CollectionPublishButton(props: Props) {
     <FileActionButton
       title={label}
       label={label}
-      className={collectionHasEdits ? 'button--warning' : ''}
+      className={collectionHasEdits ? COLLECTION_PUBLISH_WARNING_CLASS : ''}
       onClick={() => navigate(`?${CP.QUERIES.VIEW}=${CP.VIEWS.PUBLISH}`)}
       icon={ICONS.PUBLISH}
       iconSize={18}

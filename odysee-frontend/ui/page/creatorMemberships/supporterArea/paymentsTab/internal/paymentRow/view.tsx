@@ -11,7 +11,9 @@ import { useAppSelector } from 'redux/hooks';
 import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { selectMembershipForId } from 'redux/selectors/memberships';
 import Button from 'component/button';
+import { BUTTON_LABEL_CLASS } from 'component/button/classes';
 import * as ICONS from 'constants/icons';
+import { MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS } from '../../../../tableClasses';
 interface IProps {
   transaction: MembershipPayment;
 }
@@ -49,7 +51,7 @@ function View(props: IProps) {
           <div>{dayjs(new Date(transaction.initiated_at)).format('LL')}</div>
         </Tooltip>
       </td>
-      <td className="channelThumbnail">
+      <td className={MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS}>
         {recipientUri ? (
           <UriIndicator focusable={false} uri={recipientUri} link>
             <ChannelThumbnail xsmall link uri={recipientUri} />
@@ -59,7 +61,7 @@ function View(props: IProps) {
           <div>Anon</div>
         )}
       </td>
-      <td className="channelThumbnail">
+      <td className={MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS}>
         {senderUri ? (
           <UriIndicator focusable={false} uri={senderUri} link>
             <ChannelThumbnail xsmall link uri={senderUri} />
@@ -70,7 +72,7 @@ function View(props: IProps) {
         )}
       </td>
       <td>
-        <span dir="auto" className="button__label">
+        <span dir="auto" className={BUTTON_LABEL_CLASS}>
           <Button
             button="primary"
             icon={ICONS.MEMBERSHIP}

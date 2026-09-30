@@ -10,6 +10,7 @@ import LbcMessage from 'component/common/lbc-message';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectUser } from 'redux/selectors/user';
 import { doOpenModal } from 'redux/actions/app';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   reward: {
     id: string;
@@ -39,7 +40,7 @@ const RewardTile = (props: Props) => {
       title={__(reward.reward_title)}
       subtitle={<LbcMessage>{reward.reward_description}</LbcMessage>}
       actions={
-        <div className="section__actions">
+        <div className={SECTION_CLASSES.actions}>
           {reward.reward_type === (rewards as any).TYPE_GENERATED_CODE && (
             <Button button="primary" onClick={openRewardCodeModal} label={__('Enter Code')} disabled={disabled} />
           )}

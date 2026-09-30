@@ -1,0 +1,6 @@
+const COMMENT_NESTED_ACTIONS_SHARED_CLASS = String.raw`tw:flex tw:[&>*:not(:last-of-type)]:mr-app-m tw:[&_.comment\_\_action:not([data-comment-action-active]):not([data-comment-creator-like])]:text-[rgba(var(--color-text-base),0.7)] tw:[&_.comment\_\_action:not([data-comment-action-active]):not([data-comment-creator-like]):hover]:text-[rgba(var(--color-text-base),1)] tw:[&_[data-comment-settings]]:ml-auto`;
+
+export const COMMENT_NESTED_ACTIONS_CLASS = `${COMMENT_NESTED_ACTIONS_SHARED_CLASS} ${String.raw`tw:mt-app-m tw:ml-[calc(2rem+var(--spacing-xs))] tw:[.card\_\_title-actions-container_&]:min-h-0 tw:[.card\_\_title-actions-container_&]:min-w-0 tw:small:ml-[calc(2.5rem+var(--spacing-m))] tw:upto-small:[:is(.card--enable-overflow,.card--comments-list)_.card\_\_main-actions_&]:mb-app-xxs tw:upto-small:[.comment\_\_list_.card\_\_header--between_.card\_\_title-actions-container_&]:mt-app-xxs tw:active-fullscreen-side-panel:[:is(.card--enable-overflow,.card--comments-list)_.card\_\_main-actions_&]:mb-app-xxs tw:active-fullscreen-side-panel:[.comment\_\_list_.card\_\_header--between_.card\_\_title-actions-container_&]:mt-app-xxs`}`;
+
+export const COMMENT_REPLIES_CLASS =
+  'tw:mt-app-m tw:ml-app-s tw:flex-1 tw:list-none tw:upto-small:mt-app-s tw:active-fullscreen-side-panel:mt-app-s';

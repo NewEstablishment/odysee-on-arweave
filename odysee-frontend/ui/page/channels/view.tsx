@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS, PAGE_TITLE_CLASS } from 'component/page/classes';
 import React from 'react';
 import ClaimList from 'component/claimList';
 import Page from 'component/page';
@@ -15,6 +16,8 @@ import { selectHasYoutubeChannels } from 'redux/selectors/user';
 import { doFetchOdyseeMembershipForChannelIds } from 'redux/actions/memberships';
 import { doFetchChannelListMine } from 'redux/actions/claims';
 import { doSetActiveChannel } from 'redux/actions/app';
+import { CHANNELS_PAGE_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 const YoutubeTransferStatus = lazyImport(
   () =>
@@ -43,9 +46,9 @@ export default function ChannelsPage() {
 
   if (!hasChannels && !hasYoutubeChannels) {
     return (
-      <Page className="channelsPage-wrapper">
+      <Page className={CHANNELS_PAGE_CLASS}>
         {fetchingChannels ? (
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Spinner delayed />
           </div>
         ) : (
@@ -53,7 +56,7 @@ export default function ChannelsPage() {
             title={__('No channels')}
             subtitle={__("You haven't created a channel yet. All of your beautiful channels will be listed here!")}
             actions={
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button button="primary" label={__('Create Channel')} navigate={`/$/${PAGES.CHANNEL_NEW}`} />
               </div>
             }
@@ -64,7 +67,7 @@ export default function ChannelsPage() {
   }
 
   return (
-    <Page className="channelsPage-wrapper">
+    <Page className={CHANNELS_PAGE_CLASS}>
       <div className="card-stack">
         {hasYoutubeChannels && (
           <React.Suspense fallback={null}>
@@ -74,7 +77,7 @@ export default function ChannelsPage() {
 
         <ClaimList
           header={
-            <h1 className="page__title">
+            <h1 className={PAGE_TITLE_CLASS}>
               <Icon icon={ICONS.CHANNEL} />
               <label>{__('Your channels')}</label>
             </h1>
@@ -102,7 +105,7 @@ export default function ChannelsPage() {
             return claimsInChannel === 0 ? (
               <span />
             ) : (
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button
                   button="alt"
                   icon={ICONS.ANALYTICS}

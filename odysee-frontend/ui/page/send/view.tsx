@@ -2,6 +2,7 @@ import React from 'react';
 import Page from 'component/page';
 import LbcSymbol from 'component/common/lbc-symbol';
 import WalletSend from 'component/walletSend';
+import { SEND_PAGE_CLASS } from './classes';
 import { URL as SITE_URL, URL_LOCAL, URL_DEV } from 'config';
 import { parseURI, isNameValid, isURIValid, normalizeURI } from 'util/lbryURI';
 type Props = {};
@@ -119,7 +120,7 @@ export default function SendPage(props: Props) {
   return (
     <Page
       noSideNavigation
-      className="main--send"
+      className={SEND_PAGE_CLASS}
       backout={{
         backLabel: __('Done'),
         title: (

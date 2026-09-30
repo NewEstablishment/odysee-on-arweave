@@ -4,6 +4,7 @@ import { buildURI } from 'util/lbryURI';
 import ChannelThumbnail from 'component/channelThumbnail';
 import Yrbl from 'component/yrbl';
 import Button from 'component/button';
+import { BUTTON_LABEL_CLASS } from 'component/button/classes';
 import ErrorBubble from 'component/common/error-bubble';
 import UriIndicator from 'component/uriIndicator';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -14,6 +15,9 @@ import {
   selectIncomingPaymentsBySubscriber,
 } from 'redux/selectors/memberships';
 import { doResolveClaimIds } from 'redux/actions/claims';
+import { CREATOR_MEMBERSHIP_CLASSES } from '../../classes';
+import { CREATOR_MEMBERSHIP_TABLE_CLASS, MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS } from '../../../tableClasses';
+import { TABLE_CLASS } from 'component/common/table-classes';
 type Props = {
   channelsToList: Array<ChannelClaim> | null | undefined;
   switchToTiersTab: () => void;
@@ -96,7 +100,7 @@ const SupportersTab = (props: Props) => {
 
   return (
     <>
-      <div className="membership-table__wrapper">
+      <div className={CREATOR_MEMBERSHIP_TABLE_CLASS}>
         {channelsToList &&
           channelsToList.map((listedChannelClaim) => {
             const supportersForChannel = supportersList
@@ -118,7 +122,7 @@ const SupportersTab = (props: Props) => {
               supportersWithChannel &&
               supportersWithChannel.length > 0 && (
                 <React.Fragment key={listedChannelClaim.claim_id}>
-                  <div className="table-channel-header">
+                  <div className={CREATOR_MEMBERSHIP_CLASSES.tableChannelHeader}>
                     {(!isViewingSingleChannel || !channelMembershipTiers) && (
                       <ChannelThumbnail xsmall uri={listedChannelClaim.canonical_url} />
                     )}
@@ -131,8 +135,8 @@ const SupportersTab = (props: Props) => {
                       : null}
                   </div>
 
-                  <div className="membership-table__wrapper">
-                    <table className="table">
+                  <div className={CREATOR_MEMBERSHIP_TABLE_CLASS}>
+                    <table className={TABLE_CLASS}>
                       <thead>
                         <tr>
                           <th className="channelName-header" colSpan={2}>
@@ -157,7 +161,7 @@ const SupportersTab = (props: Props) => {
                                 });
                           return (
                             <tr key={i}>
-                              <td className="channelThumbnail">
+                              <td className={MEMBERSHIP_TABLE_CHANNEL_CELL_CLASS}>
                                 {supporterUri ? (
                                   <UriIndicator focusable={false} uri={supporterUri} link>
                                     <ChannelThumbnail xsmall link uri={supporterUri} />
@@ -167,7 +171,7 @@ const SupportersTab = (props: Props) => {
                                 )}
                               </td>
                               <td>
-                                <span dir="auto" className="button__label">
+                                <span dir="auto" className={BUTTON_LABEL_CLASS}>
                                   {supporter.subscriber_channel_name === '' ? (
                                     __('Anonymous')
                                   ) : (

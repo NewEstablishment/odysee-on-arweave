@@ -1,0 +1,3 @@
+export const STREAM_CLAIM_OVERLAY_INTERACTIONS_CLASS = String.raw`tw:[&_.button]:border tw:[&_.button]:border-solid tw:[&_.button]:border-white tw:[&_.button]:opacity-90 tw:[&_.button]:[transition:all_0.2s] tw:[&_.button:hover]:[transform:scale(1.08)] tw:[&_.button:hover]:opacity-100 tw:[&_[data-purchase-button]]:opacity-100 tw:[&_[data-purchase-button]]:[transition:background-color_0.2s,border-color_0.2s,color_0.2s] tw:[&_[data-purchase-button]:hover]:[transform:none] tw:[&_[data-purchase-button]:hover]:opacity-100 tw:[.inline-player\_\_wrapper_&_.button-surface\_\_content]:!flex`;
+
+export const PURCHASE_BUTTON_CLASS = 'tw:my-[2px] tw:bg-app-primary tw:[&_svg]:stroke-white';

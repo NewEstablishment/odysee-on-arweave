@@ -6,7 +6,6 @@ import * as CS from 'constants/claim_search';
 import HomeTabSection from './internal/homeTabSection';
 import CollectionEditButtons from 'component/collectionEditButtons';
 import LivestreamLink from 'component/livestreamLink';
-import './style.scss';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   selectClaimForUri,
@@ -17,6 +16,7 @@ import { doResolveUris } from 'redux/actions/claims';
 import { selectSettingsByChannelId } from 'redux/selectors/comments';
 import { doUpdateCreatorSettings as doUpdateCreatorSettingsAction } from 'redux/actions/comments';
 import { PREFERENCE_EMBED } from 'constants/tags';
+import { HOME_TAB_CLASSES } from './classes';
 type Props = {
   uri: string;
   editMode: boolean;
@@ -138,9 +138,9 @@ function HomeTab(props: Props) {
 
   return (
     settingsByChannelId && (
-      <div className="home-tab">
+      <div className={HOME_TAB_CLASSES.root}>
         {editMode && (
-          <div className="channel_sections__actions">
+          <div className={HOME_TAB_CLASSES.actions}>
             <Button
               label={__('Edit Home Tab')}
               button="primary"
@@ -161,19 +161,20 @@ function HomeTab(props: Props) {
             return (
               <div
                 key={i}
-                className={classnames('home-section-wrapper', {
-                  'home-section-wrapper--edit': edit,
-                  'home-section-wrapper--edit-featured': edit && section?.type === 'featured',
-                  'home-section-wrapper--edit-content': edit && section?.type === 'content',
-                  'home-section-wrapper--edit-playlist': edit && section?.type === 'playlist',
-                  'home-section-wrapper--edit-playlists': edit && section?.type === 'playlists',
-                  'home-section-wrapper--edit-onerow':
-                    edit &&
+                className={classnames(
+                  HOME_TAB_CLASSES.wrapper,
+                  edit && HOME_TAB_CLASSES.wrapperEdit,
+                  edit && section?.type === 'featured' && HOME_TAB_CLASSES.wrapperEditFeatured,
+                  edit &&
+                    (section?.type === 'content' || section?.type === 'playlist' || section?.type === 'playlists') &&
+                    HOME_TAB_CLASSES.wrapperEditMultirow,
+                  edit &&
                     section?.type !== 'content' &&
                     section?.type !== 'featured' &&
                     section?.type !== 'playlist' &&
-                    section?.type !== 'playlists',
-                })}
+                    section?.type !== 'playlists' &&
+                    HOME_TAB_CLASSES.wrapperEditOneRow
+                )}
               >
                 <div className="order">
                   {edit && (
@@ -198,7 +199,7 @@ function HomeTab(props: Props) {
             );
           })}
         {edit && (
-          <div className="home-tab-edit">
+          <div className={HOME_TAB_CLASSES.editBar}>
             <Button label={__('Save')} button="primary" onClick={() => handleSaveHomeSection()} />
             <Button button="link" label={__('Cancel')} onClick={handleCancelChanges} />
           </div>

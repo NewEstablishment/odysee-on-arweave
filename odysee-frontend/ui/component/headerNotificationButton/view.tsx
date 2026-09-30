@@ -18,6 +18,10 @@ import { getNotificationLocation } from '../notification/helpers/target';
 import { generateNotificationTitle } from '../notification/helpers/title';
 import { generateNotificationText } from '../notification/helpers/text';
 import { parseURI } from 'util/lbryURI';
+import { HEADER_NOTIFICATION_CLASSES as H } from './classes';
+import { HEADER_NAVIGATION_ICON_CLASS } from 'component/header/classes';
+import { MENU_CLASSES } from 'component/common/menu-classes';
+import { NOTIFICATION_CLASSES as N } from 'component/notification/classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectNotifications, selectUnseenNotificationCount } from 'redux/selectors/notifications';
 import {
@@ -41,7 +45,12 @@ const creatorIcon = (channelUrl, channelThumbnail) => (
       title: '',
     }}
   >
-    <ChannelThumbnail small thumbnailPreview={channelThumbnail} uri={channelThumbnail ? undefined : channelUrl} />
+    <ChannelThumbnail
+      className={H.channelThumbnail}
+      small
+      thumbnailPreview={channelThumbnail}
+      uri={channelThumbnail ? undefined : channelUrl}
+    />
   </UriIndicator>
 );
 
@@ -55,7 +64,7 @@ function PushPromptInDrawer() {
 
   return (
     <Button
-      className="menu__list--notifications-push"
+      className={H.push}
       button="link"
       icon={ICONS.NOTIFICATION}
       label={__('Enable push')}
@@ -104,12 +113,12 @@ export default function NotificationHeaderButton() {
         padding: 'var(--spacing-xs)',
       },
     },
-    className: 'menu__list--header menu__list--notifications',
+    className: `${MENU_CLASSES.header} ${H.menu}`,
     sx: {
       'z-index': 2,
     },
     PaperProps: {
-      className: 'MuiMenu-list--paper',
+      className: `${MENU_CLASSES.paper} ${H.paper}`,
     },
     disableScrollLock: true,
   };
@@ -214,38 +223,27 @@ export default function NotificationHeaderButton() {
     }
 
     return (
-      <div
-        key={id}
-        className={
-          is_read
-            ? 'menu__list--notification menu__list--notification--with-overlay'
-            : 'menu__list--notification menu__list--notification--with-overlay menu__list--notification-unread'
-        }
-      >
+      <div key={id} className={`${H.row} ${H.rowWithOverlay}${is_read ? '' : ` ${H.unread}`}`}>
         <Link
           aria-label={notification_parameters?.device?.title || __('Open notification')}
-          className="notification__link-overlay"
+          className={N.linkOverlay}
           onAuxClick={() => handleNotificationClick(false)}
           onClick={() => handleNotificationClick(true)}
           state={notificationState}
           to={notificationLocation}
         />
-        <div className="notification__icon">{icon}</div>
-        <div className="menu__list--notification-info">
-          <div className="menu__list--notification-type">
+        <div className={`${N.icon} ${H.icon}`}>{icon}</div>
+        <div className={H.info}>
+          <div className={H.type}>
             {generateNotificationTitle(notification_rule, notification_parameters, channelName)}
           </div>
-          <div
-            className={
-              type === 'comments' ? 'menu__list--notification-title blockquote' : 'menu__list--notification-title'
-            }
-          >
+          <div className={`${H.title}${type === 'comments' ? ' blockquote' : ''}`}>
             {generateNotificationText(notification_rule, notification_parameters)}
           </div>
           {!is_read && <span className="dot">•</span>}
           <DateTime timeAgo date={active_at} />
         </div>
-        <div className="delete-notification" onClick={(e) => handleNotificationDelete(e, id)}>
+        <div className={H.delete} onClick={(e) => handleNotificationDelete(e, id)}>
           <Icon icon={ICONS.DELETE} sectionIcon />
         </div>
       </div>
@@ -256,7 +254,7 @@ export default function NotificationHeaderButton() {
     notificationsEnabled && (
       <>
         <Tooltip title={__('Notifications')}>
-          <Button className="header__navigationItem--icon" onClick={handleClick}>
+          <Button className={HEADER_NAVIGATION_ICON_CLASS} onClick={handleClick}>
             <Icon size={18} icon={ICONS.NOTIFICATION} aria-hidden />
             <NotificationBubble />
           </Button>
@@ -264,14 +262,14 @@ export default function NotificationHeaderButton() {
 
         <ClickAwayListener onClickAway={handleClickAway}>
           <MuiMenu {...menuProps}>
-            <div className="menu__list--notifications-list">
+            <div className={H.list}>
               {list.map((notification) => {
                 return menuEntry(notification);
               })}
               {list.length === 0 && (
-                <div className="menu__list--notification-empty">
-                  <div className="menu__list--notification-empty-title">{__('No notifications')}</div>
-                  <div className="menu__list--notification-empty-text">
+                <div className={H.empty}>
+                  <div className={H.emptyTitle}>{__('No notifications')}</div>
+                  <div className={H.emptyText}>
                     {__("You don't have any notifications yet, but they will be here when you do!")}
                   </div>
                 </div>
@@ -279,7 +277,7 @@ export default function NotificationHeaderButton() {
             </div>
 
             <NavLink onClick={handleClose} to={`/$/${PAGES.NOTIFICATIONS}`}>
-              <div className="menu__list--notifications-more">
+              <div className={H.more}>
                 {__('View all')}
                 <PushPromptInDrawer />
               </div>

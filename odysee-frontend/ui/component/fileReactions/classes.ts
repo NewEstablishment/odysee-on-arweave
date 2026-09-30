@@ -1,0 +1,8 @@
+export const FILE_REACTIONS_DISABLED_CLASS = 'tw:pointer-events-none tw:opacity-30';
+
+export const FILE_REACTIONS_CLASS = String.raw`ratio-wrapper tw:[.media\_\_actions_&]:relative tw:[.media\_\_actions_&]:w-full tw:[.media\_\_actions_&]:min-w-[134px] tw:[.media\_\_actions_&]:max-w-[164px] tw:[.media\_\_actions_&]:mr-app-m tw:[.media\_\_actions_&_.reaction-button-surface--dislike]:float-right tw:[.media\_\_actions_&_.reaction-button-surface--dislike]:mr-0 tw:upto-small:[.media\_\_actions_&]:min-w-[unset] tw:upto-small:[.media\_\_actions_&]:max-w-[unset] tw:upto-small:[.media\_\_actions_&]:mr-0 tw:upto-small:[.media\_\_actions_&_.button]:mb-0 tw:upto-small:[.media\_\_actions_&_.button]:inline-block tw:upto-small:[.media\_\_actions_&_.button]:bg-[unset] tw:upto-small:[.media\_\_actions_&~:is(.file-action-surface--button,.file-action-surface--menu)]:flex-auto tw:active-fullscreen-side-panel:[.media\_\_actions_&]:min-w-[unset] tw:active-fullscreen-side-panel:[.media\_\_actions_&]:max-w-[unset] tw:active-fullscreen-side-panel:[.media\_\_actions_&]:mr-0 tw:active-fullscreen-side-panel:[.media\_\_actions_&_.button]:mb-0 tw:active-fullscreen-side-panel:[.media\_\_actions_&_.button]:inline-block tw:active-fullscreen-side-panel:[.media\_\_actions_&_.button]:bg-[unset] tw:active-fullscreen-side-panel:[.media\_\_actions_&~:is(.file-action-surface--button,.file-action-surface--menu)]:flex-auto`;
+
+export const FILE_REACTIONS_NO_SLIME_CLASS = 'tw:!w-auto tw:![max-width:unset] tw:![min-width:unset]';
+
+export const FILE_REACTION_COUNT_PLACEHOLDER_CLASS =
+  'reaction-count-placeholder tw:w-[2ch] tw:bg-[var(--color-header-button)]';

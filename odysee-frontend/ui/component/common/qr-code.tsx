@@ -1,19 +1,26 @@
 import React from 'react';
 import classnames from 'classnames';
 import { QRCodeSVG } from 'qrcode.react';
+import { QR_CODE_CLASSES } from './qr-code-classes';
 type Props = {
   value: string;
   paddingRight?: boolean;
   paddingTop?: boolean;
+  className?: string;
 };
 
-function QRCode({ value, paddingRight = false, paddingTop = false }: Props) {
+function QRCode({ value, paddingRight = false, paddingTop = false, className }: Props) {
   return (
     <div
-      className={classnames('qr-code', {
-        'qr-code--right-padding': paddingRight,
-        'qr-code--top-padding': paddingTop,
-      })}
+      data-qr-code
+      className={classnames(
+        QR_CODE_CLASSES.root,
+        {
+          [QR_CODE_CLASSES.rightPadding]: paddingRight,
+          [QR_CODE_CLASSES.topPadding]: paddingTop,
+        },
+        className
+      )}
     >
       <QRCodeSVG value={value} />
     </div>

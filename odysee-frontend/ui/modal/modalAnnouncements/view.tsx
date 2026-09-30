@@ -11,6 +11,8 @@ import { doSetLastViewedAnnouncement } from 'redux/actions/content';
 import { selectLastViewedAnnouncement } from 'redux/selectors/content';
 import { selectHomepageAnnouncement } from 'redux/selectors/settings';
 import { selectUserVerifiedEmail } from 'redux/selectors/user';
+import { ANNOUNCEMENT_MARKDOWN_CLASS } from './classes';
+import { ANNOUNCEMENT_CLASS } from 'component/common/announcement-classes';
 type Props = {
   isAutoInvoked?: boolean;
 };
@@ -49,8 +51,8 @@ export default function ModalAnnouncements(props: Props) {
   return (
     <Modal type="card" isOpen onAborted={() => dispatch(doHideModal())}>
       <Card
-        className="announcement"
-        actions={<MarkdownPreview className="markdown-preview--announcement" content={announcement} simpleLinks />}
+        className={ANNOUNCEMENT_CLASS}
+        actions={<MarkdownPreview className={ANNOUNCEMENT_MARKDOWN_CLASS} content={announcement} simpleLinks />}
       />
     </Modal>
   );

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import MarkdownPreview from 'component/common/markdown-preview';
 import Button from 'component/button';
 import I18nMessage from 'component/i18nMessage';
+import { HELP_CLASS } from 'component/common/help-classes';
 type Props = {
   hideReleaseVersion?: boolean;
 };
@@ -21,7 +22,7 @@ const LastReleaseChanges = (props: Props) => {
     </p>
   );
   const seeReleaseNotes = (
-    <p className="help">
+    <p className={HELP_CLASS}>
       <I18nMessage
         tokens={{
           release_notes: (
@@ -74,7 +75,7 @@ const LastReleaseChanges = (props: Props) => {
   }
 
   return (
-    <div className="release__notes">
+    <div className="tw:max-h-[50vh] tw:overflow-auto">
       {releaseVersionTitle}
       <p>
         <MarkdownPreview content={releaseChanges} />

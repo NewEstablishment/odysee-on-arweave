@@ -1,5 +1,4 @@
 import React from 'react';
-import './style.scss';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import Icon from 'component/common/icon';
@@ -15,6 +14,10 @@ import { doRemovePipelineItem, doUpdatePipelineItem } from 'redux/actions/publis
 import { dequeue } from 'util/pipeline-queue';
 import { doSwitchPublishForm } from 'redux/actions/publish';
 import type { PipelineItem } from 'redux/actions/publishPipeline';
+import { NOTIFICATION_BUBBLE_CLASSES } from 'component/notificationBubble/classes';
+import { HEADER_NAVIGATION_ICON_CLASS } from 'component/header/classes';
+import { UPLOAD_MANAGER_CLASSES } from './classes';
+import { MENU_CLASSES } from 'component/common/menu-classes';
 
 const STAGE_LABELS: Record<string, string> = {
   queued: 'Queued',
@@ -106,18 +109,18 @@ export default function UploadManagerMenu(props: Props) {
       'aria-labelledby': 'upload-manager-button',
       sx: { padding: 0 },
     },
-    className: 'menu__list--header menu__list--upload-manager',
+    className: `${MENU_CLASSES.header} menu__list--upload-manager`,
     anchorOrigin: { vertical: 'bottom' as const, horizontal: 'center' as const },
     transformOrigin: { vertical: 'top' as const, horizontal: 'center' as const },
     sx: { 'z-index': 2 },
-    PaperProps: { className: 'MuiMenu-list--paper' },
+    PaperProps: { className: MENU_CLASSES.paper },
     disableScrollLock: true,
   };
 
   function renderPipelineEntry(item: PipelineItem) {
     return (
       <div
-        className="upload-manager__item"
+        className={UPLOAD_MANAGER_CLASSES.entry}
         key={item.id}
         onClick={() => {
           if (item.stage === 'published' && item.uri) {
@@ -128,7 +131,9 @@ export default function UploadManagerMenu(props: Props) {
           }
         }}
       >
-        <div className={'upload-manager__icon' + (item.stage === 'ready' ? ' upload-manager__icon--ready' : '')}>
+        <div
+          className={`${UPLOAD_MANAGER_CLASSES.icon}${item.stage === 'ready' ? ` ${UPLOAD_MANAGER_CLASSES.iconReady}` : ''}`}
+        >
           <Icon
             sectionIcon
             icon={(() => {
@@ -149,11 +154,15 @@ export default function UploadManagerMenu(props: Props) {
             })()}
           />
         </div>
-        <div className="upload-manager__info">
-          <div className="upload-manager__name-row">
-            <div className="upload-manager__name">{item.filename}</div>
+        <div className="tw:min-w-0 tw:flex-1 tw:overflow-hidden">
+          <div className="tw:flex tw:items-center tw:justify-between tw:gap-app-xs">
+            <div className="tw:block tw:min-w-0 tw:flex-1 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-app-text tw:group-hover/upload-manager-entry:text-app-primary">
+              {item.filename}
+            </div>
             {item.stage === 'uploading' && item.uploadSpeed ? (
-              <span className="upload-manager__speed">{formatSpeed(item.uploadSpeed)}</span>
+              <span className="tw:mr-app-xs tw:font-normal tw:text-[rgba(var(--color-text-base),0.5)]">
+                {formatSpeed(item.uploadSpeed)}
+              </span>
             ) : null}
           </div>
           {(() => {
@@ -163,20 +172,18 @@ export default function UploadManagerMenu(props: Props) {
             const allDone = item.stage === 'published';
             const isReady = item.stage === 'ready';
             return (
-              <div className="upload-manager__stage">
-                <div className="upload-manager__steps">
+              <div className="tw:flex tw:w-full tw:items-center tw:justify-between tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.6)]">
+                <div className="tw:flex tw:items-center tw:gap-app-xxs tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.4)]">
                   {displaySteps.map((step, i) => {
                     const isDone = allDone || (isReady && step !== 'processing') || (stepIndex >= 0 && i < stepIndex);
                     const isActive = (!allDone && !isReady && i === stepIndex) || (isReady && step === 'processing');
                     return (
                       <React.Fragment key={step}>
-                        {i > 0 && <span className="upload-manager__step-separator">›</span>}
+                        {i > 0 && <span className="tw:shrink-0 tw:text-[rgba(var(--color-text-base),0.3)]">›</span>}
                         <span
-                          className={
-                            'upload-manager__step' +
-                            (isDone ? ' upload-manager__step--done' : '') +
-                            (isActive ? ' upload-manager__step--active' : '')
-                          }
+                          className={`tw:whitespace-nowrap${
+                            isDone ? ' tw:text-[rgba(var(--color-text-base),0.6)] tw:line-through' : ''
+                          }${isActive ? ' tw:font-semibold tw:text-app-text' : ''}`}
                         >
                           {__(STEP_LABELS[step] || step)}
                         </span>
@@ -185,24 +192,31 @@ export default function UploadManagerMenu(props: Props) {
                   })}
                 </div>
                 {item.stage === 'ready' ? (
-                  <span className="upload-manager__ready-badge">{__('Action required')}</span>
+                  <span className="tw:whitespace-nowrap tw:text-app-xsmall tw:font-semibold tw:text-[var(--color-notification)]">
+                    {__('Action required')}
+                  </span>
                 ) : (
                   item.stage !== 'error' &&
                   item.stage !== 'published' &&
                   item.stage !== 'queued' && (
-                    <span className="upload-manager__percent">{formatPipelineProgress(item.progress)}%</span>
+                    <span className="tw:font-semibold tw:[font-variant-numeric:tabular-nums]">
+                      {formatPipelineProgress(item.progress)}%
+                    </span>
                   )
                 )}
               </div>
             );
           })()}
           {item.stage !== 'error' && item.stage !== 'published' && (
-            <div className="upload-manager__progress">
-              <div className="upload-manager__progress-bar" style={{ width: `${item.progress}%` }} />
+            <div className="tw:mt-app-xxs tw:h-[3px] tw:overflow-hidden tw:rounded-[2px] tw:bg-app-border">
+              <div
+                className="tw:h-full tw:rounded-[2px] tw:[background-image:var(--color-odysee-gradient)] tw:[transition:width_0.3s_ease]"
+                style={{ width: `${item.progress}%` }}
+              />
             </div>
           )}
         </div>
-        <div className="upload-manager__actions">
+        <div className="tw:ml-app-xs tw:flex tw:shrink-0 tw:items-center">
           {item.stage !== 'error' &&
             item.stage !== 'published' &&
             item.stage !== 'paused' &&
@@ -211,7 +225,7 @@ export default function UploadManagerMenu(props: Props) {
             item.stage !== 'processing' &&
             item.stage !== 'ready' && (
               <button
-                className="upload-manager__pause"
+                className={UPLOAD_MANAGER_CLASSES.actionButton}
                 onClick={async (e) => {
                   e.stopPropagation();
                   const stage = item.stage;
@@ -230,17 +244,17 @@ export default function UploadManagerMenu(props: Props) {
                 }}
                 title={__('Pause')}
               >
-                <span className="upload-manager__pause-icon" />
+                <span className={UPLOAD_MANAGER_CLASSES.pauseIcon} />
               </button>
             )}
           {item.stage === 'pausing' && (
-            <button className="upload-manager__pause" disabled title={__('Pausing')}>
-              <span className="upload-manager__pause-icon" />
+            <button className={UPLOAD_MANAGER_CLASSES.actionButton} disabled title={__('Pausing')}>
+              <span className={UPLOAD_MANAGER_CLASSES.pauseIcon} />
             </button>
           )}
           {item.stage === 'paused' && (
             <button
-              className="upload-manager__pause"
+              className={UPLOAD_MANAGER_CLASSES.actionButton}
               onClick={(e) => {
                 e.stopPropagation();
                 if (item.previousStage === 'uploading') {
@@ -259,7 +273,7 @@ export default function UploadManagerMenu(props: Props) {
           )}
           {(item.stage === 'error' || item.stage === 'queued' || item.stage === 'published') && (
             <button
-              className="upload-manager__remove"
+              className={UPLOAD_MANAGER_CLASSES.actionButton}
               onClick={(e) => {
                 e.stopPropagation();
                 if (item.stage === 'queued') dequeue(item.id);
@@ -277,13 +291,15 @@ export default function UploadManagerMenu(props: Props) {
 
   function renderUploadEntry(upload: any) {
     return (
-      <div className="upload-manager__item" key={upload.params?.guid}>
-        <div className="upload-manager__icon">
+      <div className={UPLOAD_MANAGER_CLASSES.entry} key={upload.params?.guid}>
+        <div className={UPLOAD_MANAGER_CLASSES.icon}>
           <Icon icon={ICONS.PUBLISH} sectionIcon />
         </div>
-        <div className="upload-manager__info">
-          <div className="upload-manager__name">{upload.params?.name || __('Uploading...')}</div>
-          <div className="upload-manager__stage">
+        <div className="tw:min-w-0 tw:flex-1 tw:overflow-hidden">
+          <div className="tw:block tw:min-w-0 tw:flex-1 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-app-text tw:group-hover/upload-manager-entry:text-app-primary">
+            {upload.params?.name || __('Uploading...')}
+          </div>
+          <div className="tw:flex tw:w-full tw:items-center tw:justify-between tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.6)]">
             {upload.status === 'error' ? __('Error') : __('Uploading %progress%%', { progress: upload.progress || 0 })}
           </div>
         </div>
@@ -408,11 +424,18 @@ export default function UploadManagerMenu(props: Props) {
       <Tooltip title={hasActivity ? __('Upload Progress') : __('Upload')}>
         <Button
           id="upload-manager-button"
-          className={'header__navigationItem--icon' + (pulsing ? ' upload-manager__complete-pulse' : '')}
+          className={`${HEADER_NAVIGATION_ICON_CLASS}${
+            pulsing
+              ? " tw:relative tw:after:absolute tw:after:inset-0 tw:after:rounded-[inherit] tw:after:content-[''] tw:after:[animation:upload-complete-pulse_3.5s_ease-in-out_infinite]"
+              : ''
+          }`}
           onClick={handleClick}
         >
           {hasActivity && overallProgress > 0 && (
-            <svg className="upload-manager__ring" viewBox="0 0 100 100">
+            <svg
+              className="tw:pointer-events-none tw:absolute tw:top-0 tw:left-0 tw:size-full tw:[transform:rotate(-90deg)]"
+              viewBox="0 0 100 100"
+            >
               <defs>
                 <linearGradient id="upload-ring-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
                   <stop offset="0%" stopColor="var(--color-primary)" />
@@ -420,7 +443,7 @@ export default function UploadManagerMenu(props: Props) {
                 </linearGradient>
               </defs>
               <circle
-                className="upload-manager__ring-progress"
+                className="tw:fill-none tw:[stroke:url(#upload-ring-gradient)] tw:[stroke-width:8] tw:[stroke-linecap:round] tw:[transition:stroke-dashoffset_0.3s_ease]"
                 cx="50"
                 cy="50"
                 r={ringRadius}
@@ -431,8 +454,8 @@ export default function UploadManagerMenu(props: Props) {
           )}
           <Icon size={18} icon={ICONS.PUBLISH} aria-hidden />
           {readyCount > 0 && (
-            <span className="notification__bubble">
-              <span className={'notification__count' + (readyCount > 9 ? ' notification__bubble--small' : '')}>
+            <span className={NOTIFICATION_BUBBLE_CLASSES.base}>
+              <span className={'notification__count' + (readyCount > 9 ? ` ${NOTIFICATION_BUBBLE_CLASSES.small}` : '')}>
                 {readyCount}
               </span>
             </span>
@@ -471,25 +494,35 @@ export default function UploadManagerMenu(props: Props) {
                   )
                   .join(', ');
                 return (
-                  <div className="upload-manager__header">
+                  <div className="tw:flex tw:items-center tw:justify-between tw:[border-bottom:1px_solid_rgba(var(--color-header-button-base),0.95)] tw:bg-[rgba(var(--color-header-background-base),1)] tw:px-app-s tw:py-app-xs tw:text-app-small tw:font-semibold tw:text-app-text">
                     <span>
                       {summary || __('%count% uploads', { count: pipelineItems.length + uploadEntries.length })}
                       {totalSpeed > 0 && (
-                        <span className="upload-manager__header-speed"> · {formatSpeed(totalSpeed)}</span>
+                        <span className="tw:font-normal tw:[font-variant-numeric:tabular-nums] tw:text-[rgba(var(--color-text-base),0.5)]">
+                          {' · '}
+                          {formatSpeed(totalSpeed)}
+                        </span>
                       )}
-                      {remainingTime && <span className="upload-manager__header-speed"> · {remainingTime}</span>}
+                      {remainingTime && (
+                        <span className="tw:font-normal tw:[font-variant-numeric:tabular-nums] tw:text-[rgba(var(--color-text-base),0.5)]">
+                          {' · '}
+                          {remainingTime}
+                        </span>
+                      )}
                     </span>
-                    <span className="upload-manager__header-progress">{overallProgress}%</span>
+                    <span className="tw:[font-variant-numeric:tabular-nums] tw:text-[rgba(var(--color-text-base),0.6)]">
+                      {overallProgress}%
+                    </span>
                   </div>
                 );
               })()}
-            <div className="upload-manager__list">
+            <div className="tw:bg-[var(--color-header-background)]">
               {pipelineItems.map(renderPipelineEntry)}
               {uploadEntries.map(renderUploadEntry)}
             </div>
 
             <div
-              className="upload-manager__more"
+              className="tw:relative tw:[border-top:1px_solid_rgba(var(--color-header-button-base),0.95)] tw:bg-[rgba(var(--color-header-background-base),1)] tw:px-app-xs tw:py-app-s tw:text-center tw:text-app-text tw:hover:cursor-pointer tw:hover:text-app-primary"
               onClick={() => {
                 dispatch({ type: 'PUBLISH_SET_ACTIVE_FORM', data: { id: '__new__' } });
                 navigate(`/$/${PAGES.UPLOAD}`);

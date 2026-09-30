@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import React from 'react';
@@ -5,6 +6,7 @@ import Button from 'component/button';
 import Yrbl from 'component/yrbl';
 import I18nMessage from 'component/i18nMessage';
 import LbcSymbol from 'component/common/lbc-symbol';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   includeWalletLink?: boolean;
   type?: string;
@@ -13,7 +15,7 @@ type Props = {
 export default function YrblWalletEmpty(props: Props) {
   const { includeWalletLink = false, type = 'sad' } = props;
   return (
-    <div className="main--empty">
+    <div className={PAGE_MAIN_EMPTY_CLASS}>
       <Yrbl
         type={type}
         title={__('Your wallet is empty')}
@@ -41,7 +43,7 @@ export default function YrblWalletEmpty(props: Props) {
           </div>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="primary"
               icon={ICONS.REWARDS}

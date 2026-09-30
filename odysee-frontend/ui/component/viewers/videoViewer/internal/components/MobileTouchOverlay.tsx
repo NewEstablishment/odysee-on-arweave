@@ -1,7 +1,10 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
+import classnames from 'classnames';
 import Player from '../player';
 import { icons } from 'component/common/icon-custom';
 import * as ICONS from 'constants/icons';
+import { CAST_CLASSES } from '../cast-classes';
+import { MOBILE_TOUCH_OVERLAY_CLASSES } from './mobile-touch-overlay-classes';
 
 const DOUBLE_TAP_THRESHOLD_MS = 300;
 const SEEK_AMOUNT = 10;
@@ -220,24 +223,27 @@ export default function MobileTouchOverlay(props) {
   );
 
   return (
-    <div className="odysee-touch-overlay" ref={overlayRef} onClick={handleTap}>
+    <div className={MOBILE_TOUCH_OVERLAY_CLASSES.root} ref={overlayRef} onClick={handleTap}>
       {showControls && (
-        <div className="odysee-mobile-center-controls">
+        <div className={MOBILE_TOUCH_OVERLAY_CLASSES.center}>
           <button
             type="button"
-            className={`odysee-mobile-skip-btn ${!canPlayPrevious ? 'odysee-mobile-skip-btn--disabled' : ''}`}
+            className={classnames(
+              MOBILE_TOUCH_OVERLAY_CLASSES.skipButton,
+              !canPlayPrevious && MOBILE_TOUCH_OVERLAY_CLASSES.skipDisabled
+            )}
             onClick={handlePrev}
           >
             <PrevIcon size={28} color="currentColor" />
           </button>
 
-          <button type="button" className="odysee-mobile-play-btn" onClick={handlePlayPause}>
+          <button type="button" className={MOBILE_TOUCH_OVERLAY_CLASSES.playButton} onClick={handlePlayPause}>
             {castBuffering ? (
-              <div className="odysee-cast-spinner odysee-cast-spinner--mobile" />
+              <div className={`${CAST_CLASSES.spinner} ${CAST_CLASSES.spinnerMobile}`} />
             ) : ended ? (
               <ReplayIcon size={48} color="currentColor" />
             ) : paused ? (
-              <PlayIcon className="odysee-mobile-play-icon" size={48} color="currentColor" />
+              <PlayIcon className={MOBILE_TOUCH_OVERLAY_CLASSES.playIcon} size={48} color="currentColor" />
             ) : (
               <svg xmlns="http://www.w3.org/2000/svg" width={48} height={48} viewBox="0 0 18 18" fill="currentColor">
                 <rect width={4} height={12} x={3} y={3} rx={1.75} />
@@ -248,7 +254,10 @@ export default function MobileTouchOverlay(props) {
 
           <button
             type="button"
-            className={`odysee-mobile-skip-btn ${!canPlayNext ? 'odysee-mobile-skip-btn--disabled' : ''}`}
+            className={classnames(
+              MOBILE_TOUCH_OVERLAY_CLASSES.skipButton,
+              !canPlayNext && MOBILE_TOUCH_OVERLAY_CLASSES.skipDisabled
+            )}
             onClick={handleNext}
           >
             <PrevIcon size={28} color="currentColor" style={{ transform: 'scaleX(-1)' }} />

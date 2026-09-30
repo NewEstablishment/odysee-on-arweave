@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { Scanner } from '@tailwindcss/oxide';
+import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
@@ -20,6 +22,41 @@ const useLocalUsagi = process.env.USE_LOCAL_USAGI === 'true';
 
 const UI_ROOT = path.resolve(__dirname, 'ui');
 const WEB_ROOT = path.resolve(__dirname, 'web');
+const APP_STYLE_ENTRY = path.resolve(UI_ROOT, 'styles/index.css');
+const APP_STYLE_SOURCE_PATTERNS = [
+  'ui/**/*.{js,jsx,ts,tsx}',
+  'web/**/*.{js,jsx,ts,tsx}',
+  'extras/**/*.{js,jsx,ts,tsx}',
+  'custom/**/*.{js,jsx,ts,tsx}',
+] as const;
+const ROUTE_STYLE_CHUNKS = [
+  {
+    file: 'ui/styles/chunks/studio.css',
+    sources: [
+      'ui/component/livestreamStudio/**/*.{js,jsx,ts,tsx}',
+      'ui/component/livestreamCompositor/**/*.{js,jsx,ts,tsx}',
+      'ui/component/livestreamCropSelector/**/*.{js,jsx,ts,tsx}',
+      'ui/component/livestreamSourceSelector/**/*.{js,jsx,ts,tsx}',
+      'ui/component/livestreamSourceSettings/**/*.{js,jsx,ts,tsx}',
+      'ui/component/livestreamConnectingAnimation/**/*.{js,jsx,ts,tsx}',
+    ],
+  },
+  {
+    file: 'ui/styles/chunks/publish.css',
+    sources: [
+      'ui/component/publish/upload/**/*.{js,jsx,ts,tsx}',
+      'ui/component/publish/post/**/*.{js,jsx,ts,tsx}',
+      'ui/component/publish/livestream/**/*.{js,jsx,ts,tsx}',
+      'ui/page/upload/**/*.{js,jsx,ts,tsx}',
+      'ui/page/post/**/*.{js,jsx,ts,tsx}',
+      'ui/page/livestreamCreate/**/*.{js,jsx,ts,tsx}',
+    ],
+  },
+  {
+    file: 'ui/styles/chunks/memberships.css',
+    sources: ['ui/page/creatorMemberships/**/*.{js,jsx,ts,tsx}', 'ui/page/odyseeMembership/**/*.{js,jsx,ts,tsx}'],
+  },
+] as const;
 const CUSTOM_HOMEPAGES_ROOT = path.resolve(__dirname, 'custom/homepages/v2');
 const CUSTOM_MEMES_ROOT = path.resolve(__dirname, 'custom/homepages/meme/index');
 const useCustomHomepages = process.env.CUSTOM_HOMEPAGE === 'true' && fs.existsSync(CUSTOM_HOMEPAGES_ROOT);
@@ -31,6 +68,8 @@ const DEV_HYPERBEAM_PUBLIC_DEVICE_PREFIX = '/$/api/hyperbeam-public-device/v1';
 // Mirrors HYPERBEAM_PUBLIC_STORE_BATCH_PATH in web/src/routes.js. The dev
 // route serves raw per-id reads; link expansion happens client-side.
 const DEV_HYPERBEAM_PUBLIC_STORE_BATCH_PATH = '/$/api/hyperbeam-public-store/v1/read-batch';
+const DEV_HYPERBEAM_NATIVE_WRITE_PROXY_PATH = '/$/api/hyperbeam-native-message/v1/write';
+const DEV_HYPERBEAM_NATIVE_WRITE_PATH = '/id?0.%21=true&committers=all';
 const DEV_HYPERBEAM_PUBLIC_STORE_BATCH_LIMIT = 100;
 const DEV_HYPERBEAM_PUBLIC_STORE_BATCH_CONCURRENCY = 12;
 const DEV_HYPERBEAM_PUBLIC_DEVICE_PATHS = new Set([
@@ -73,40 +112,6 @@ const DEV_HYPERBEAM_AUTH_DEVICE_PATHS = new Set([
   '/~odysee-file-reaction@1.0/list',
   '/~odysee-account@1.0/sub-count',
 ]);
-// Resolve pnpm's nested node_modules directories for SCSS loadPaths.
-// Only include directories that actually contain SCSS files to avoid
-// inflating the Sass resolver's search space with 800 irrelevant paths.
-function resolvePnpmNodeModules() {
-  const base = path.resolve(__dirname, 'node_modules');
-  const pnpmDir = path.join(base, '.pnpm');
-  if (!fs.existsSync(pnpmDir)) return [base];
-  try {
-    return fs
-      .readdirSync(pnpmDir)
-      .filter((d) => {
-        const nm = path.join(pnpmDir, d, 'node_modules');
-        if (!fs.existsSync(nm)) return false;
-        // Quick check: only include if a nested package contains .scss files
-        try {
-          return fs.readdirSync(nm).some((pkg) => {
-            const pkgPath = path.join(nm, pkg);
-            try {
-              if (!fs.statSync(pkgPath).isDirectory()) return false;
-              return fs.readdirSync(pkgPath).some((f) => f.endsWith('.scss'));
-            } catch {
-              return false;
-            }
-          });
-        } catch {
-          return false;
-        }
-      })
-      .map((d) => path.join(pnpmDir, d, 'node_modules'));
-  } catch {
-    return [base];
-  }
-}
-
 function readEnvKeys(filePath) {
   if (!fs.existsSync(filePath)) return [];
 
@@ -245,6 +250,101 @@ function preprocessPlugin() {
   };
 }
 
+function routeStyleChunksPlugin() {
+  const chunkByFile = new Map(ROUTE_STYLE_CHUNKS.map((chunk) => [path.resolve(__dirname, chunk.file), chunk] as const));
+  const routeSourcePatterns = ROUTE_STYLE_CHUNKS.flatMap((chunk) => chunk.sources);
+  let chunkCandidates: Map<string, string[]> | undefined;
+  const sourcePathFrom = (cssFile: string, pattern: string) => {
+    const relative = path.relative(path.dirname(cssFile), path.resolve(__dirname, pattern)).replaceAll(path.sep, '/');
+    return relative.startsWith('.') ? relative : `./${relative}`;
+  };
+  const scannerSources = (patterns: readonly string[], negated: boolean) =>
+    patterns.map((pattern) => ({ base: __dirname, negated, pattern }));
+  const inlineSourceCandidate = (candidate: string) => `"${candidate.replaceAll('"', '\\"')}"`;
+  const hasVariant = (candidate: string) => {
+    let bracketDepth = 0;
+    let parenthesisDepth = 0;
+    let escaped = false;
+    for (const character of candidate.slice(candidate.indexOf(':') + 1)) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '[') {
+        bracketDepth += 1;
+      } else if (character === ']') {
+        bracketDepth -= 1;
+      } else if (character === '(') {
+        parenthesisDepth += 1;
+      } else if (character === ')') {
+        parenthesisDepth -= 1;
+      } else if (character === ':' && bracketDepth === 0 && parenthesisDepth === 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const collectChunkCandidates = () => {
+    if (chunkCandidates) return chunkCandidates;
+
+    const rootCandidates = new Set(
+      new Scanner({
+        sources: [...scannerSources(APP_STYLE_SOURCE_PATTERNS, false), ...scannerSources(routeSourcePatterns, true)],
+      }).scan()
+    );
+    chunkCandidates = new Map(
+      ROUTE_STYLE_CHUNKS.map((chunk) => {
+        const candidates = new Scanner({ sources: scannerSources(chunk.sources, false) })
+          .scan()
+          .filter(
+            (candidate) => candidate.startsWith('tw:') && (!rootCandidates.has(candidate) || hasVariant(candidate))
+          )
+          .sort();
+        return [path.resolve(__dirname, chunk.file), candidates];
+      })
+    );
+    return chunkCandidates;
+  };
+
+  return {
+    name: 'route-style-chunks',
+    enforce: 'pre' as const,
+    transform(code: string, id: string) {
+      const cleanId = path.resolve(id.split('?')[0]);
+
+      if (cleanId === APP_STYLE_ENTRY) {
+        const exclusions = routeSourcePatterns
+          .map((pattern) => `@source not '${sourcePathFrom(APP_STYLE_ENTRY, pattern)}';`)
+          .join('\n');
+        return { code: `${code}\n${exclusions}\n`, map: null };
+      }
+
+      if (!chunkByFile.has(cleanId)) return null;
+
+      const sources = collectChunkCandidates()
+        .get(cleanId)!
+        .map((candidate) => `@source inline(${inlineSourceCandidate(candidate)});`)
+        .join('\n');
+      return { code: `${code}\n${sources}\n`, map: null };
+    },
+    handleHotUpdate(context) {
+      if (!/\.[cm]?[jt]sx?$/.test(context.file)) return;
+
+      chunkCandidates = undefined;
+      const modules = new Set(context.modules);
+      for (const styleFile of [APP_STYLE_ENTRY, ...chunkByFile.keys()]) {
+        const styleModules = context.server.moduleGraph.getModulesByFile(styleFile);
+        if (!styleModules) continue;
+        for (const styleModule of styleModules) {
+          context.server.moduleGraph.invalidateModule(styleModule);
+          modules.add(styleModule);
+        }
+      }
+      return [...modules];
+    },
+  };
+}
+
 function devRssRoutesPlugin() {
   return {
     name: 'dev-rss-routes',
@@ -342,7 +442,12 @@ function getDevHyperbeamJson(url: string) {
 }
 
 function postDevHyperbeamJson(url: string, body: Record<string, any>, headers: Record<string, string> = {}) {
-  return new Promise<{ statusCode: number; contentType: string; body: Buffer }>((resolve, reject) => {
+  return new Promise<{
+    statusCode: number;
+    contentType: string;
+    headers: http.IncomingHttpHeaders;
+    body: Buffer;
+  }>((resolve, reject) => {
     const target = new URL(url);
     const payload = Buffer.from(JSON.stringify(body));
     const request = (target.protocol === 'https:' ? https : http).request(
@@ -363,6 +468,7 @@ function postDevHyperbeamJson(url: string, body: Record<string, any>, headers: R
           resolve({
             statusCode: response.statusCode || 502,
             contentType: String(response.headers['content-type'] || 'application/json'),
+            headers: response.headers,
             body: Buffer.concat(chunks),
           });
         });
@@ -487,6 +593,54 @@ function devHyperbeamAuthRoutesPlugin() {
             res.statusCode = 502;
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'hyperbeam batch proxy failed' }));
+          }
+          return;
+        }
+
+        if (requestUrl.pathname === DEV_HYPERBEAM_NATIVE_WRITE_PROXY_PATH && req.method === 'POST') {
+          const nodeUrl = String(process.env.HYPERBEAM_BASE_URL || process.env.ODYSEE_HYPERBEAM_NODE_API || '').replace(
+            /\/+$/,
+            ''
+          );
+          if (!nodeUrl) {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'hyperbeam node unavailable' }));
+            return;
+          }
+
+          try {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const rawBody = Buffer.concat(chunks).toString('utf8');
+            const requestBody = rawBody ? JSON.parse(rawBody) : {};
+            const response = await postDevHyperbeamJson(`${nodeUrl}${DEV_HYPERBEAM_NATIVE_WRITE_PATH}`, requestBody, {
+              ...(cookieHeader ? { cookie: cookieHeader } : {}),
+              accept: 'application/json',
+            });
+            const sourceCookies = response.headers['set-cookie'];
+            const sessionCookies = (Array.isArray(sourceCookies) ? sourceCookies : sourceCookies ? [sourceCookies] : [])
+              .filter((cookie) => /^secret-[^=]+=/.test(cookie))
+              .map((cookie) => {
+                const attributes = cookie
+                  .split(';')
+                  .map((part) => part.trim())
+                  .filter((part) => part && !/^path=/i.test(part) && !/^samesite=/i.test(part));
+                return `${attributes.join('; ')}; Path=/; SameSite=Lax`;
+              });
+            res.statusCode = response.statusCode;
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Content-Type', response.contentType);
+            if (sessionCookies.length) res.setHeader('Set-Cookie', sessionCookies);
+            for (const header of ['message-id', 'id', 'path', 'read-path', 'url', 'signers', 'signers+link']) {
+              const value = response.headers[header];
+              if (value) res.setHeader(header, value);
+            }
+            res.end(response.body);
+          } catch (error) {
+            res.statusCode = 502;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'hyperbeam write proxy failed' }));
           }
           return;
         }
@@ -1143,7 +1297,7 @@ export default defineConfig({
 
   resolve: {
     conditions: ['browser', ...(isProduction ? ['production'] : ['development'])],
-    extensions: ['.ts', '.tsx', '.js', '.jsx', '.cjs', '.json', '.scss'],
+    extensions: ['.ts', '.tsx', '.js', '.jsx', '.cjs', '.json'],
     // Ensure a single copy of React across all packages (pnpm can nest duplicates)
     dedupe: ['react', 'react-dom'],
     alias: {
@@ -1193,16 +1347,9 @@ export default defineConfig({
     },
   },
 
-  css: {
-    preprocessorOptions: {
-      scss: {
-        silenceDeprecations: ['legacy-js-api', 'import', 'global-builtin'],
-        loadPaths: [path.resolve(__dirname, 'ui/scss'), ...resolvePnpmNodeModules()],
-      },
-    },
-  },
-
   plugins: [
+    routeStyleChunksPlugin(),
+    tailwindcss(),
     uiModuleResolverPlugin(),
     preprocessPlugin(),
     devRssRoutesPlugin(),
@@ -1357,7 +1504,7 @@ export default defineConfig({
     outDir: 'web/dist/public',
     sourcemap: isProduction ? true : 'inline',
     minify: isProduction,
-    cssTarget: ['chrome80', 'firefox78', 'safari13'],
+    cssTarget: ['chrome109', 'firefox115', 'safari15.4'],
     rolldownOptions: {
       input: path.resolve(__dirname, 'index.html'),
       output: {

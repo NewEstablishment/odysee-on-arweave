@@ -5,6 +5,7 @@ import { useAppDispatch } from 'redux/hooks';
 import { doMembershipClearData } from 'redux/actions/memberships';
 
 const isDev = process.env.NODE_ENV !== 'production';
+const MEMBERSHIP_BUTTON_CLASS = String.raw`tw:mt-[10px] tw:mb-[18px] tw:block tw:[.my-membership\_\_div_&]:max-w-[279px]`;
 type Props = {
   purchasedMemberships?: any | null | undefined;
 };
@@ -30,7 +31,7 @@ const ClearMembershipDataButton = (props: Props) => {
             button="primary"
             label="Clear Membership Data"
             icon={ICONS.SETTINGS}
-            className="membership_button"
+            className={MEMBERSHIP_BUTTON_CLASS}
             onClick={() => dispatch(doMembershipClearData())}
           />
         </div>

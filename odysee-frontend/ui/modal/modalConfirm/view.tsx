@@ -6,8 +6,10 @@ import Spinner from 'component/spinner';
 import { Modal } from 'modal/modal';
 import BusyIndicator from 'component/common/busy-indicator';
 import { FormField } from 'component/common/form';
+import { CONFIRM_WRAPPER_CLASS } from 'component/common/confirm-classes';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   title: string;
   subtitle?: string | React.ReactNode;
@@ -49,7 +51,7 @@ export default function ModalConfirm(props: Props) {
         title={title}
         subtitle={subtitle}
         body={body}
-        className="confirm__wrapper"
+        className={CONFIRM_WRAPPER_CLASS}
         actions={
           <>
             {checkboxLabel && (
@@ -62,7 +64,7 @@ export default function ModalConfirm(props: Props) {
                 onChange={() => setIsChecked(!isChecked)}
               />
             )}
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               {isBusy && busyMsg ? (
                 <BusyIndicator message={busyMsg} />
               ) : (

@@ -1,0 +1,13 @@
+export const FILE_PRICE_CLASSES = {
+  root: String.raw`filePrice tw:relative tw:flex tw:items-center tw:rounded-[calc(var(--border-radius)/2)] tw:bg-[rgba(var(--color-primary-dynamic),1)] tw:text-[var(--color-purchased-text)] tw:[&_.credit-amount]:relative tw:[&_.credit-amount]:whitespace-nowrap tw:[&_.credit-amount]:px-app-xxxs tw:[&_.credit-amount]:py-0 tw:[&_.credit-amount]:text-[var(--color-primary-contrast)] tw:[&_.credit-amount\_\_prefix-icon]:text-[var(--color-primary-contrast)]`,
+  fiat: 'filePrice--fiat tw:bg-[var(--color-fiat-payment)] tw:[&_.credit-amount]:mb-[-0.2rem]',
+  thumbnail: String.raw`filePrice--thumbnail tw:h-[1.2rem] tw:[&_.credit-amount\_\_prefix-icon]:ml-app-xxxs tw:[&_.credit-amount\_\_prefix-icon]:size-[12px] tw:[&_.credit-amount\_\_prefix-icon:only-child]:mr-app-xxxs`,
+  filePage: String.raw`filePrice--filepage tw:mt-app-s tw:h-[2.4rem] tw:rounded-app tw:px-app-s tw:opacity-0 tw:[animation:app-fade-in_1.5s] tw:[animation-fill-mode:forwards] tw:[&_.credit-amount]:!text-app-body tw:[&_.credit-amount]:font-bold tw:[&_.credit-amount]:pr-0 tw:[&_.credit-amount_svg]:mr-app-s tw:upto-small:mt-0 tw:upto-small:h-[2rem] tw:upto-small:px-app-xs`,
+  modal: String.raw`filePrice--modal tw:h-[3.5rem] tw:[transform:skew(10deg)] tw:border-[5px] tw:border-[var(--color-purchased)] tw:bg-[var(--color-purchased-alt)] tw:text-app-body tw:before:content-none tw:[&_.icon]:[transform:skew(-10deg)] tw:[&_.credit-amount]:mx-app-m tw:[&_.credit-amount]:ml-app-l tw:[&_.credit-amount]:text-app-large tw:[&_.credit-amount]:[transform:skew(-10deg)]`,
+  key: String.raw`filePrice--key tw:bg-[var(--color-purchased)] tw:[&_.credit-amount_p]:!text-black tw:[&_.icon--Key]:mx-app-m tw:[&_.icon--Key]:!text-black tw:[&_.icon--Key]:!stroke-black tw:[&_.icon--Key]:stroke-2 tw:[&_.icon]:!text-black tw:[&_.icon]:!stroke-black tw:upto-small:[&_.icon--Key]:mx-app-s`,
+  duo: 'filePriceFiatDuo tw:flex tw:[&>*:not(:last-child)]:mr-[calc(var(--spacing-xxs)/2)]',
+  duoFilePage:
+    'filePriceFiatDuo--filePage tw:upto-small:flex-col tw:upto-small:[&>*:not(:last-child)]:mb-[calc(var(--spacing-xxs)/2)]',
+} as const;
+
+export const FILE_PAGE_MEDIA_ACTIONS_CLASS = String.raw`tw:[.main--livestream--theater-mode_&]:flex-1 tw:[&_.card\_\_header--between]:flex-nowrap tw:[&_.card\_\_title-actions-container]:overflow-visible tw:[&_.card\_\_title-actions-container_.card\_\_title-actions]:[align-self:normal] tw:[&_.media\_\_info-text--contracted]:w-full tw:[&_.media\_\_info-text--contracted]:max-w-none tw:[&_.media\_\_info-text--expanded]:w-full tw:[&_.media\_\_info-text--expanded]:max-w-none`;

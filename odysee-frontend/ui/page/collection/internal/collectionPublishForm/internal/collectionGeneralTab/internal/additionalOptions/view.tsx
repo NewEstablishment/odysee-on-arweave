@@ -6,6 +6,10 @@ import { handleLanguageChange } from 'util/publish';
 import { CollectionFormContext } from 'page/collection/internal/collectionPublishForm/context';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { CARD_OVERFLOW_CLASS } from 'component/common/card-classes';
+import { COLLECTION_ADDITIONAL_OPTIONS_ROW_CLASS } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { PUBLISH_ROW_CLASS } from 'component/publish/shared/publish-row-classes';
 
 function CollectionPublishAdditionalOptions() {
   const { formParams, updateFormParams } = React.useContext(CollectionFormContext);
@@ -23,13 +27,13 @@ function CollectionPublishAdditionalOptions() {
     <>
       <Card
         background
-        className="card--enable-overflow"
+        className={CARD_OVERFLOW_CLASS}
         title={__('Additional Options')}
         body={
           <>
             {!hideSection && (
               <div>
-                <div className="publish-row publish-row--no-margin-select">
+                <div className={COLLECTION_ADDITIONAL_OPTIONS_ROW_CLASS}>
                   <FormField
                     name="language_select"
                     type="select"
@@ -71,8 +75,8 @@ function CollectionPublishAdditionalOptions() {
               </div>
             )}
 
-            <div className="publish-row">
-              <div className="section__actions">
+            <div className={PUBLISH_ROW_CLASS}>
+              <div className={SECTION_CLASSES.actions}>
                 <Button label={hideSection ? __('Show') : __('Hide')} button="link" onClick={toggleHideSection} />
               </div>
             </div>

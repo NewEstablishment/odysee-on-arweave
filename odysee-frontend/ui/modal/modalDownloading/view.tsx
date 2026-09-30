@@ -2,6 +2,7 @@ import React from 'react';
 import { Modal } from 'modal/modal';
 import { Line } from 'rc-progress';
 import Button from 'component/button';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectDownloadProgress, selectDownloadComplete, selectUpgradeDownloadPath } from 'redux/selectors/app';
 import { doStartUpgrade, doCancelUpgrade, doHideModal } from 'redux/actions/app';
@@ -43,7 +44,7 @@ export default function ModalDownloading() {
         </React.Fragment>
       ) : null}
 
-      <div className="card__actions">
+      <div className={CARD_CLASSES.actions}>
         {downloadComplete ? <Button button="primary" label={__('Begin Upgrade')} onClick={startUpgrade} /> : null}
         <Button button="link" label={__('Cancel')} onClick={cancelUpgrade} />
       </div>

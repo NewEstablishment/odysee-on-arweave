@@ -4,7 +4,13 @@ import * as PAGES from 'constants/pages';
 import * as REACTION_TYPES from 'constants/reactions';
 import React from 'react';
 import classnames from 'classnames';
+import {
+  COMMENT_REACTION_ACTIVE_CLASS,
+  COMMENT_REACTION_CREATOR_ACTION_CLASS,
+  COMMENT_REACTIONS_CREATOR_LIKE_CLASS,
+} from './classes';
 import Button from 'component/button';
+import { BUTTON_REACTION_DISLIKE_CLASS, BUTTON_REACTION_LIKE_CLASS } from 'component/button/classes';
 import ChannelThumbnail from 'component/channelThumbnail';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useIsMobile } from 'effects/use-screensize';
@@ -89,8 +95,10 @@ export default function CommentReactions(props: Props) {
 
   const shouldHide = !canCreatorReact && hideCreatorLike;
   const creatorLiked = getCountForReaction(REACTION_TYPES.CREATOR_LIKE, othersReacts, myReacts) > 0;
-  const likeIcon = myReacts && myReacts.includes(REACTION_TYPES.LIKE) ? ICONS.FIRE_ACTIVE : ICONS.FIRE;
-  const dislikeIcon = myReacts && myReacts.includes(REACTION_TYPES.DISLIKE) ? ICONS.SLIME_ACTIVE : ICONS.SLIME;
+  const liked = Boolean(myReacts && myReacts.includes(REACTION_TYPES.LIKE));
+  const disliked = Boolean(myReacts && myReacts.includes(REACTION_TYPES.DISLIKE));
+  const likeIcon = liked ? ICONS.FIRE_ACTIVE : ICONS.FIRE;
+  const dislikeIcon = disliked ? ICONS.SLIME_ACTIVE : ICONS.SLIME;
 
   function handleCommentLike() {
     if (nativeSignedIn || activeChannelId) {
@@ -132,9 +140,10 @@ export default function CommentReactions(props: Props) {
             title={__('Upvote')}
             icon={likeIcon}
             iconSize={isMobile && 12}
-            className={classnames('comment__action button-like', {
-              'comment__action--active': myReacts && myReacts.includes(REACTION_TYPES.LIKE),
+            className={classnames('comment__action', BUTTON_REACTION_LIKE_CLASS, {
+              [COMMENT_REACTION_ACTIVE_CLASS]: liked,
             })}
+            data-comment-action-active={liked ? '' : undefined}
             onClick={handleCommentLike}
             label={
               <span className="comment__reaction-count">
@@ -148,9 +157,10 @@ export default function CommentReactions(props: Props) {
               title={__('Downvote')}
               icon={dislikeIcon}
               iconSize={isMobile && 12}
-              className={classnames('comment__action button-dislike', {
-                'comment__action--active': myReacts && myReacts.includes(REACTION_TYPES.DISLIKE),
+              className={classnames('comment__action', BUTTON_REACTION_DISLIKE_CLASS, {
+                [COMMENT_REACTION_ACTIVE_CLASS]: disliked,
               })}
+              data-comment-action-active={disliked ? '' : undefined}
               onClick={handleCommentDislike}
               label={
                 <span className="comment__reaction-count">
@@ -168,11 +178,18 @@ export default function CommentReactions(props: Props) {
           requiresAuth={IS_WEB && !nativeMode}
           title={claimIsMine ? __('You loved this') : __('Creator loved this')}
           icon={creatorLiked ? ICONS.CREATOR_LIKE : ICONS.SUBSCRIBE}
-          className={classnames('comment__action comment__action--creator-like')}
+          className={classnames('comment__action', COMMENT_REACTION_CREATOR_ACTION_CLASS)}
+          data-comment-creator-like
           onClick={() => dispatch(doCommentReact(commentId, REACTION_TYPES.CREATOR_LIKE))}
         >
           {creatorLiked && (
-            <ChannelThumbnail xsmall uri={authorUri} hideStakedIndicator className="comment__creator-like" allowGifs />
+            <ChannelThumbnail
+              xsmall
+              uri={authorUri}
+              hideStakedIndicator
+              className={COMMENT_REACTIONS_CREATOR_LIKE_CLASS}
+              allowGifs
+            />
           )}
         </Button>
       )}

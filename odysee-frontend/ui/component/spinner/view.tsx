@@ -3,6 +3,7 @@ import classnames from 'classnames';
 import { DARK_THEME, LIGHT_THEME } from 'constants/themes';
 import { useAppSelector } from 'redux/hooks';
 import { selectTheme } from 'redux/selectors/settings';
+import { SPINNER_CLASS, SPINNER_RECT_CLASSES, SPINNER_VARIANT_CLASSES } from './classes';
 
 type Props = {
   dark?: boolean;
@@ -41,17 +42,15 @@ const Spinner = React.memo(function Spinner({ dark = false, light = false, type,
     <>
       {text}
       <div
-        className={classnames('spinner', {
-          'spinner--dark': !light && (dark || theme === LIGHT_THEME),
-          'spinner--light': !dark && (light || theme === DARK_THEME),
-          'spinner--small': type === 'small',
+        className={classnames(SPINNER_CLASS, {
+          [SPINNER_VARIANT_CLASSES.dark]: !light && (dark || theme === LIGHT_THEME),
+          [SPINNER_VARIANT_CLASSES.light]: !dark && (light || theme === DARK_THEME),
+          [SPINNER_VARIANT_CLASSES.small]: type === 'small',
         })}
       >
-        <div className="rect rect1" />
-        <div className="rect rect2" />
-        <div className="rect rect3" />
-        <div className="rect rect4" />
-        <div className="rect rect5" />
+        {SPINNER_RECT_CLASSES.map((className) => (
+          <div className={className} key={className} />
+        ))}
       </div>
     </>
   );

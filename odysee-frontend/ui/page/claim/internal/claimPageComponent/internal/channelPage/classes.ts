@@ -1,0 +1,11 @@
+export const CHANNEL_PAGE_CLASSES = {
+  coverLegacy: String.raw`channel-cover-legacy tw:!bg-cover tw:![background-position-y:calc(50%_-_280px)] tw:[@media(max-width:1600px)]:![background-position-y:calc(50%_-_120px)]`,
+  edit: String.raw`channel__edit tw:absolute tw:right-0 tw:bottom-app-m tw:[&_.button]:bg-[rgba(var(--color-background-base),0.9)] tw:[&_.button:hover]:bg-[rgba(var(--color-header-background-base),0.95)] tw:[&_.button:hover]:text-app-primary tw:upto-small:right-app-xs`,
+  editWrapper: String.raw`channelPage-edit-wrapper tw:[&_:is(.card,.wunderbar\_\_suggestions,.snack-bar--notification,.modal,[data-content-viewer],.MuiAutocomplete-paper,.card--after-tabs)]:mb-app-l tw:upto-small:[&_.modal]:mb-0!`,
+  tabList: String.raw`tabs__list--channel-page tw:mx-auto tw:w-[calc(100%-2*var(--spacing-l))] tw:max-w-[var(--page-max-width)] tw:!bg-transparent tw:[--tab-list-padding-left:11rem] tw:[transition:padding-left_0.2s] tw:[&_.tab[aria-selected='true']::after]:h-[4px] tw:[&_.tab[aria-selected='true']::after]:bg-[var(--color-link)] tw:[&_.tab:disabled]:[-webkit-touch-callout:none] tw:[&_.tab:disabled]:select-none tw:upto-small:w-full tw:upto-small:[--tab-list-padding-block:var(--spacing-s)] tw:upto-small:[--tab-list-padding-inline:var(--spacing-xs)] tw:upto-small:[--tab-list-padding-left:var(--spacing-xs)] tw:upto-small:[&_.tab:disabled]:hidden`,
+  tabPanel: String.raw`tw:mx-auto tw:mb-[calc(var(--spacing-xxl)*2)] tw:w-[calc(100%-2*var(--spacing-l))] tw:max-w-[var(--page-max-width)] tw:upto-small:w-full tw:upto-small:px-app-xs`,
+  tabPanelEdit: String.raw`tw:upto-small:mb-[calc(var(--spacing-xxl)*3)]`,
+  tabHidden: 'tab--hidden tw:hidden!',
+  tabWrapper: String.raw`tab__wrapper tw:sticky tw:top-[var(--header-height)] tw:z-10 tw:mb-app-l tw:border-b tw:border-b-[var(--color-header-button)] tw:bg-[var(--color-background)] tw:[transition:background-color_0.2s] tw:upto-small:top-[var(--header-height-mobile)] tw:upto-small:mb-app-s tw:upto-small:p-0`,
+  tabWrapperFixed: String.raw`tab__wrapper--fixed tw:bg-[var(--color-header-background)] tw:[-webkit-backdrop-filter:blur(4px)] tw:[backdrop-filter:blur(4px)] tw:[&_.tabs\_\_list]:[--tab-list-padding-left:5rem] tw:upto-small:[&_.tabs\_\_list]:[--tab-list-padding-left:4rem]`,
+} as const;

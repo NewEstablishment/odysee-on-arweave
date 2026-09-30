@@ -1,5 +1,4 @@
 import React from 'react';
-import { useOnResize } from 'effects/use-on-resize';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
 import { NavLink } from 'react-router-dom';
@@ -11,12 +10,25 @@ import ClaimPreviewTile from 'component/claimPreviewTile';
 import ChannelThumbnail from 'component/channelThumbnail';
 import SubscribeButton from 'component/subscribeButton';
 import { hyperbeamImmutableUri, hyperbeamImmutableWebPath } from 'util/hyperbeam-route';
-import './style.lazy.scss';
+import {
+  FEATURED_BANNER_CHANNEL_LINK_CLASS,
+  FEATURED_BANNER_LATEST_CLASS,
+  FEATURED_BANNER_TILES_CLASS,
+} from './classes';
 
 type Props = {
   homepageData: any;
   authenticated: boolean;
 };
+
+const FEATURED_ROOT_CLASS =
+  'tw:group/featured tw:relative tw:mt-[calc(var(--spacing-l)*-1)] tw:mr-[calc(var(--spacing-l)*-1)] tw:mb-app-l tw:ml-[calc(var(--spacing-l)*-1)] tw:aspect-[5/1] tw:w-[calc(100%+2*var(--spacing-l))] tw:select-none tw:overflow-hidden tw:bg-black tw:[-webkit-touch-callout:none] tw:[@media(max-width:1150px)]:ml-[calc(var(--spacing-l)*-1+6px)] tw:[@media(max-width:1150px)]:w-[calc(100%+2*var(--spacing-l)-6px)] tw:[@media(max-width:900px)]:mt-[calc(var(--spacing-xs)*-1)] tw:[@media(max-width:900px)]:mr-[calc(var(--spacing-xs)*-1)] tw:[@media(max-width:900px)]:mb-app-s tw:[@media(max-width:900px)]:ml-[calc(var(--spacing-xs)*-1)] tw:[@media(max-width:900px)]:w-[calc(100%+2*var(--spacing-xs))]';
+const FEATURED_CLOSE_CLASS =
+  'tw:absolute tw:top-app-s tw:right-app-s tw:z-10 tw:flex tw:size-[32px] tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-app tw:![border:none] tw:bg-[rgba(var(--color-header-background-base),0.8)] tw:p-0 tw:text-app-text tw:opacity-0 tw:[&_.icon]:size-[14px] tw:group-hover/featured:opacity-100 tw:hover:bg-[rgba(var(--color-header-background-base),1)] tw:[@media(max-width:900px)]:size-[30px] tw:[@media(max-width:900px)]:opacity-100 tw:[@media(max-width:900px)]:[&_.icon]:size-[12px]';
+const FEATURED_BROWSE_CLASS =
+  'tw:absolute tw:top-[calc(50%-30px)] tw:size-[60px] tw:rounded-[50%] tw:bg-[rgba(var(--color-header-background-base),0.8)] tw:text-center tw:[font-size:38px] tw:opacity-0 tw:group-hover/featured:opacity-100 tw:hover:cursor-pointer tw:hover:!bg-[rgba(var(--color-header-background-base),1)] tw:hover:!opacity-100 tw:[@media(max-width:900px)]:top-auto tw:[@media(max-width:900px)]:bottom-app-xxxs tw:[@media(max-width:900px)]:size-[30px] tw:[@media(max-width:900px)]:[font-size:20px] tw:[@media(max-width:900px)]:opacity-100';
+const FEATURED_DOT_CLASS =
+  'tw:mx-app-xxs tw:inline-block tw:rounded-[50%] tw:border tw:border-white tw:[transition:all_1s] tw:hover:cursor-pointer tw:hover:!bg-white';
 
 function getChannelUri(itemUrl: string): string | null {
   let path = itemUrl;
@@ -70,17 +82,20 @@ function BannerLatestClaims({ item, count }: { item: any; count: number }) {
   if (resultUris.length === 0) return null;
 
   return (
-    <div className="banner-latest-claims" onClick={(e) => e.preventDefault()}>
-      <div className="banner-latest-claims__header">
-        <NavLink to={hyperbeamImmutableWebPath(item.immutableId) || '/'} className="banner-latest-claims__channel-link">
+    <div className={FEATURED_BANNER_LATEST_CLASS} onClick={(e) => e.preventDefault()}>
+      <div className="tw:flex tw:w-0 tw:min-w-full tw:items-center tw:gap-app-m tw:overflow-hidden tw:[@media(max-width:1150px)]:w-auto tw:[@media(max-width:1150px)]:min-w-0">
+        <NavLink to={hyperbeamImmutableWebPath(item.immutableId) || '/'} className={FEATURED_BANNER_CHANNEL_LINK_CLASS}>
           <ChannelThumbnail uri={channelUri} xsmall />
-          <span className="banner-latest-claims__name" title={channelName}>
+          <span
+            className="tw:min-w-0 tw:flex-[0_1_auto] tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-app-body tw:font-bold tw:text-app-text tw:group-hover/channel:text-app-primary"
+            title={channelName}
+          >
             {channelName}
           </span>
         </NavLink>
         <SubscribeButton uri={channelUri} />
       </div>
-      <div className="banner-latest-claims__tiles">
+      <div className={FEATURED_BANNER_TILES_CLASS}>
         {resultUris.map((uri) => (
           <ClaimPreviewTile key={uri} uri={uri} />
         ))}
@@ -178,13 +193,13 @@ export default function FeaturedBanner(props: Props) {
   if (localBannerHidden) return null;
   return (
     <div
-      className="featured-banner-wrapper"
+      className={FEATURED_ROOT_CLASS}
       ref={wrapper}
       onMouseEnter={() => setPause(true)}
       onMouseLeave={() => setPause(false)}
     >
       <div
-        className="featured-banner-rotator"
+        className="tw:absolute tw:top-0 tw:ml-0 tw:flex tw:h-full tw:overflow-hidden tw:[transition:margin-left_1s]"
         style={{
           marginLeft: marginLeft,
         }}
@@ -192,15 +207,20 @@ export default function FeaturedBanner(props: Props) {
         {featured &&
           featured.items.map((item, i) => {
             return (
-              <div className="featured-banner-slide" key={i} style={{ minWidth: width }}>
+              <div
+                className="tw:relative tw:inline-block tw:h-full tw:shrink-0 tw:overflow-hidden"
+                key={i}
+                style={{ minWidth: width }}
+              >
                 <NavLink
-                  className="featured-banner-image"
+                  className="tw:block tw:max-h-full"
                   onClick={(e) => handleAnchor(e, item.url)}
                   to={hyperbeamImmutableWebPath(item.immutableId) || getUriTo(item.url)}
                   target={!item.url.includes('odysee.com') ? '_blank' : undefined}
                   title={item.label}
                 >
                   <img
+                    className="tw:w-full"
                     src={'https://thumbnails.odycdn.com/optimize/s:' + imageWidth + ':0/quality:95/plain/' + item.image}
                     style={{ width: width }}
                   />
@@ -212,27 +232,37 @@ export default function FeaturedBanner(props: Props) {
             );
           })}
       </div>
-      <div className="banner-controls">
-        <div className="banner-browse left" onClick={() => setIndex(index > 1 ? index - 1 : featured.items.length)}>
+      <div>
+        <div
+          className={`${FEATURED_BROWSE_CLASS} tw:left-[40px] tw:[@media(max-width:1150px)]:left-app-s`}
+          onClick={() => setIndex(index > 1 ? index - 1 : featured.items.length)}
+        >
           ‹
         </div>
-        <div className="banner-browse right" onClick={() => setIndex(index < featured.items.length ? index + 1 : 1)}>
+        <div
+          className={`${FEATURED_BROWSE_CLASS} tw:right-[40px] tw:[@media(max-width:1150px)]:right-app-s`}
+          onClick={() => setIndex(index < featured.items.length ? index + 1 : 1)}
+        >
           ›
         </div>
-        <div className="banner-active-indicator">
+        <div className="tw:absolute tw:bottom-app-m tw:mt-app-m tw:flex tw:w-full tw:items-center tw:justify-center tw:text-center tw:[@media(max-width:900px)]:bottom-[5px]">
           {featured &&
             featured.items.map((item, i) => {
               return (
                 <div
                   key={i}
-                  className={i + 1 === index ? 'banner-active-indicator-active' : ''}
+                  className={`${FEATURED_DOT_CLASS} ${
+                    i + 1 === index
+                      ? 'tw:size-[12px] tw:bg-white tw:[@media(max-width:900px)]:size-[8px]'
+                      : 'tw:size-[12px] tw:bg-[rgba(150,150,150,0.6)] tw:[@media(max-width:900px)]:size-[6px]'
+                  }`}
                   onClick={() => setIndex(i + 1)}
                 />
               );
             })}
         </div>
         {authenticated && (
-          <button className="banner-close-button" onClick={removeBanner} aria-label="Close banner">
+          <button className={FEATURED_CLOSE_CLASS} onClick={removeBanner} aria-label="Close banner">
             <Icon icon={ICONS.REMOVE} />
           </button>
         )}

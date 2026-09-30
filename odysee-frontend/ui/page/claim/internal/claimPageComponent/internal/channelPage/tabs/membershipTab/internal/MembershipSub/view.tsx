@@ -1,4 +1,5 @@
 import React from 'react';
+import classnames from 'classnames';
 import { Menu, MenuButton, MenuItem, MenuList } from 'component/common/menu';
 import Icon from 'component/common/icon';
 import * as ICONS from 'constants/icons';
@@ -12,6 +13,8 @@ import { selectChannelClaimIdForUri } from 'redux/selectors/claims';
 import { selectArweaveTipDataForId } from 'redux/selectors/payments';
 import { doOpenCancelationModalForMembership } from 'redux/actions/memberships';
 import { doOpenModal } from 'redux/actions/app';
+import { JOIN_MEMBERSHIP_CLASSES, JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES } from 'component/joinMembershipCard/classes';
+import { MEMBERSHIP_TIER_CLASSES } from 'component/joinMembershipCard/internal/previewPage/internal/membershipTier/classes';
 
 interface IProps {
   uri: string;
@@ -32,7 +35,7 @@ function MembershipSubscribed(props: IProps) {
     return null;
   }
 
-  const styleIndex = membershipIndex + 1;
+  const tierVariableClass = JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES[membershipIndex];
   const now = new Date();
   const subscriptionEndDate = membershipSub.subscription.ends_at;
   const subscriptionRenewalDate = membershipSub.subscription.earliest_renewal_at;
@@ -50,19 +53,19 @@ function MembershipSubscribed(props: IProps) {
   return (
     <>
       <Card
-        className="membership membership-tab"
+        className={JOIN_MEMBERSHIP_CLASSES.subscriptionCard}
         body={
           <>
-            <div className={'membership__body membership-tier' + styleIndex}>
-              <div className="membership__plan-header">
-                <span>{membershipSub.membership.name}</span>
+            <div className={classnames(JOIN_MEMBERSHIP_CLASSES.subscriptionBody, tierVariableClass)}>
+              <div className={JOIN_MEMBERSHIP_CLASSES.subscriptionHeader}>
+                <span className={JOIN_MEMBERSHIP_CLASSES.subscriptionHeaderName}>{membershipSub.membership.name}</span>
 
                 {isActive && !isCanceled && (
                   <Menu>
-                    <MenuButton className="menu__button">
+                    <MenuButton className={classnames('menu__button', JOIN_MEMBERSHIP_CLASSES.subscriptionMenuButton)}>
                       <Icon size={18} icon={ICONS.SETTINGS} />
                     </MenuButton>
-                    <MenuList className={'menu__list membership-tier' + styleIndex}>
+                    <MenuList className={classnames('menu__list', JOIN_MEMBERSHIP_CLASSES.tierMenu, tierVariableClass)}>
                       <MenuItem
                         className="comment__menu-option"
                         onSelect={() => dispatch(doOpenCancelationModalForMembership(membershipSub))}
@@ -76,10 +79,10 @@ function MembershipSubscribed(props: IProps) {
                 )}
                 {isCanceled && (
                   <Menu>
-                    <MenuButton className="menu__button">
+                    <MenuButton className={classnames('menu__button', JOIN_MEMBERSHIP_CLASSES.subscriptionMenuButton)}>
                       <Icon size={18} icon={ICONS.SETTINGS} />
                     </MenuButton>
-                    <MenuList className={'menu__list membership-tier' + styleIndex}>
+                    <MenuList className={classnames('menu__list', JOIN_MEMBERSHIP_CLASSES.tierMenu, tierVariableClass)}>
                       <MenuItem
                         className="comment__menu-option"
                         onSelect={() => dispatch(doOpenCancelationModalForMembership(membershipSub))}
@@ -93,8 +96,8 @@ function MembershipSubscribed(props: IProps) {
                 )}
               </div>
 
-              <div className="membership__plan-content">
-                <div>
+              <div className={JOIN_MEMBERSHIP_CLASSES.subscriptionContent}>
+                <div className={JOIN_MEMBERSHIP_CLASSES.subscriptionContentGroup}>
                   <label>{__('Creator revenue')}</label>
                   <span>${(membershipSub.subscription.current_price.amount / 100).toFixed(2)}</span>
 
@@ -106,12 +109,23 @@ function MembershipSubscribed(props: IProps) {
                 </div>
 
                 {perks && (
-                  <div className="membership-tier__perks">
+                  <div
+                    className={classnames(
+                      MEMBERSHIP_TIER_CLASSES.perks,
+                      JOIN_MEMBERSHIP_CLASSES.subscriptionContentGroup
+                    )}
+                  >
                     <label>{__('Odysee Perks')}</label>
 
-                    <ul>
+                    <ul className={MEMBERSHIP_TIER_CLASSES.perksList}>
                       {perks.map((tierPerk, i) => (
-                        <li key={i} className="membership__perk-item">
+                        <li
+                          key={i}
+                          className={classnames(
+                            MEMBERSHIP_TIER_CLASSES.perksItem,
+                            JOIN_MEMBERSHIP_CLASSES.subscriptionPerk
+                          )}
+                        >
                           {__(tierPerk.name)}
                         </li>
                       ))}
@@ -119,11 +133,12 @@ function MembershipSubscribed(props: IProps) {
                   </div>
                 )}
 
-                <div className="membership__plan-actions">
+                <div className={JOIN_MEMBERSHIP_CLASSES.subscriptionActions}>
                   {tipsEnabled &&
                     (isActive && !isCanceled ? (
                       canRenew ? (
                         <Button
+                          className={JOIN_MEMBERSHIP_CLASSES.subscriptionActionButton}
                           icon={ICONS.MEMBERSHIP}
                           button="primary"
                           label={__('Renew for $%membership_price% this month', {

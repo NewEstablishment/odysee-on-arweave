@@ -1,6 +1,13 @@
 import React from 'react';
 import Button from 'component/button';
 import classnames from 'classnames';
+import { SHORTS_DOCUMENT_PLAYING_TARGET_CLASS } from 'component/shortsActions/classes';
+import {
+  SHORTS_VIEW_MODE_BUTTON_ACTIVE_CLASS,
+  SHORTS_VIEW_MODE_BUTTON_CLASS,
+  SHORTS_VIEW_MODE_TOGGLE_CLASS,
+  SHORTS_VIEW_MODE_TOGGLE_HIDDEN_CLASS,
+} from './classes';
 type Props = {
   viewMode: string;
   channelName: string | null | undefined;
@@ -10,13 +17,13 @@ type Props = {
 const ViewModeToggle = React.memo<Props>(({ viewMode, channelName, onViewModeChange, isTransitioning }: Props) => {
   return (
     <div
-      className={classnames('shorts-page__view-toggle--overlay', {
-        'shorts-page__view-toggle--hidden': isTransitioning,
+      className={classnames(SHORTS_VIEW_MODE_TOGGLE_CLASS, SHORTS_DOCUMENT_PLAYING_TARGET_CLASS, {
+        [SHORTS_VIEW_MODE_TOGGLE_HIDDEN_CLASS]: isTransitioning,
       })}
     >
       <Button
-        className={classnames('button-bubble', {
-          'button-bubble--active': viewMode === 'related',
+        className={classnames(SHORTS_VIEW_MODE_BUTTON_CLASS, {
+          [SHORTS_VIEW_MODE_BUTTON_ACTIVE_CLASS]: viewMode === 'related',
         })}
         label={__('Related')}
         onClick={(e) => {
@@ -25,8 +32,8 @@ const ViewModeToggle = React.memo<Props>(({ viewMode, channelName, onViewModeCha
         }}
       />
       <Button
-        className={classnames('button-bubble', {
-          'button-bubble--active': viewMode === 'channel',
+        className={classnames(SHORTS_VIEW_MODE_BUTTON_CLASS, {
+          [SHORTS_VIEW_MODE_BUTTON_ACTIVE_CLASS]: viewMode === 'channel',
         })}
         label={__('From %channel%', {
           channel:

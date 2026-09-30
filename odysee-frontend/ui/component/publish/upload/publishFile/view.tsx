@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import { SITE_NAME, WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
 import * as ICONS from 'constants/icons';
 import { BITRATE } from 'constants/publish';
@@ -7,7 +8,10 @@ import { toHex } from 'util/hex';
 import FileSelector from 'component/common/file-selector';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { FormField } from 'component/common/form';
+import { FIELDSET_GROUP_CLASS } from 'component/common/form-components/fieldset-group-classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 import I18nMessage from 'component/i18nMessage';
 import Spinner from 'component/spinner';
 import PublishName from 'component/publish/shared/publishName';
@@ -19,7 +23,6 @@ import { NEW_LIVESTREAM_REPLAY_API } from 'constants/livestream';
 import Icon from 'component/common/icon';
 import VideoOptimizer from 'component/videoOptimizer/view';
 import VideoFormatNotice from 'component/videoFormatNotice/view';
-import './style.scss';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectBalance } from 'redux/selectors/wallet';
 import {
@@ -31,6 +34,7 @@ import {
 import { doUpdateFile, doUpdatePublishForm, doUpdateTitle } from 'redux/actions/publish';
 import { selectActiveChannelClaim } from 'redux/selectors/app';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import { HELP_CLASS, HELP_WARNING_CLASS } from 'component/common/help-classes';
 type Props = {
   uri: string | null | undefined;
   mode: string | null | undefined;
@@ -44,6 +48,14 @@ type Props = {
   setWaitForFile?: (wait: boolean) => void;
 };
 const INPUT_THROTTLE_MS = 750;
+const fileInfoPillBaseClassName =
+  'tw:inline-flex tw:h-[24px] tw:items-center tw:whitespace-nowrap tw:rounded-[5px] tw:px-[8px] tw:text-[11px] tw:font-semibold tw:tracking-normal tw:[font-variant-numeric:tabular-nums] tw:first:font-bold tw:first:text-app-text';
+const fileInfoPillClassName = (tone: 'default' | 'warn' | 'good' = 'default') =>
+  classnames(fileInfoPillBaseClassName, {
+    'tw:bg-[rgba(var(--color-header-button-base),0.12)] tw:text-app-text-subtitle': tone === 'default',
+    'tw:bg-[rgba(255,180,0,0.12)] tw:text-[#f5a623]': tone === 'warn',
+    'tw:bg-[rgba(76,175,80,0.1)] tw:text-[#4caf50]': tone === 'good',
+  });
 
 function PublishFile(props: Props) {
   const { uri, disabled, fileSource } = props;
@@ -171,7 +183,7 @@ function PublishFile(props: Props) {
 
   function linkReplays() {
     return (
-      <p className="help">
+      <p className={HELP_CLASS}>
         <Icon icon={ICONS.HELP} />
         <I18nMessage
           tokens={{
@@ -193,7 +205,7 @@ function PublishFile(props: Props) {
   function getUploadMessage() {
     if (fileSizeTooBig && !(isStillEditing && prevFileSizeTooBig)) {
       return (
-        <p className="help--warning">
+        <p className={HELP_WARNING_CLASS}>
           {UPLOAD_SIZE_MESSAGE}{' '}
           <Button button="link" label={__('Upload Guide')} href="https://help.odysee.tv/category-uploading/" />
         </p>
@@ -202,7 +214,7 @@ function PublishFile(props: Props) {
 
     if (fileBitrate > BITRATE.RECOMMENDED) {
       return (
-        <p className="help--warning">
+        <p className={HELP_WARNING_CLASS}>
           <Icon icon={ICONS.INFO} />
           {fileBitrate > BITRATE.MAX
             ? __(
@@ -220,7 +232,7 @@ function PublishFile(props: Props) {
     // (fileVideoCodec is empty string initially, populated by MediaBunny async)
     if (isVid && !duration && fileVideoCodec !== '') {
       return (
-        <p className="help--warning">
+        <p className={HELP_WARNING_CLASS}>
           <Icon icon={ICONS.INFO} />
           {__(
             "Couldn't detect the video encoding. This video will not be playable in most browsers. We recommend to use H264/AAC encoding with MP4 container."
@@ -232,7 +244,7 @@ function PublishFile(props: Props) {
 
     if (!!isStillEditing && name) {
       return (
-        <p className="help">
+        <p className={HELP_CLASS}>
           <Icon icon={ICONS.INFO} />
           {__("If you don't choose a file, the file from your existing claim %name% will be used", {
             name: name,
@@ -244,7 +256,7 @@ function PublishFile(props: Props) {
     if (!isStillEditing) {
       return (
         <p
-          className="help"
+          className={HELP_CLASS}
           style={{
             marginBottom: 0,
             fontSize: 'var(--font-xsmall)',
@@ -293,7 +305,7 @@ function PublishFile(props: Props) {
   return (
     <Card
       className={classnames({
-        'card--disabled': disabled || balance === 0,
+        [CARD_CLASSES.disabled]: disabled || balance === 0,
       })}
       actions={
         <>
@@ -308,32 +320,31 @@ function PublishFile(props: Props) {
               />
               {/* Inline codec/format info strip */}
               {isVid && filePath && (fileVideoCodec || fileAudioCodec || fileHeight > 0) && (
-                <div className="publish-file-info">
-                  {fileFormat && <span className="publish-file-info__pill">{fileFormat.toUpperCase()}</span>}
+                <div className="tw:mt-app-xs tw:flex tw:flex-wrap tw:items-center tw:gap-[5px] tw:rounded-[8px] tw:border tw:border-[rgba(var(--color-header-button-base),0.08)] tw:bg-[rgba(var(--color-header-button-base),0.06)] tw:px-[10px] tw:py-[8px] tw:[animation:publish-file-info-in_0.25s_ease]">
+                  {fileFormat && <span className={fileInfoPillClassName()}>{fileFormat.toUpperCase()}</span>}
                   {fileVideoCodec && (
-                    <span className="publish-file-info__pill">
+                    <span className={fileInfoPillClassName()}>
                       {fileVideoCodec.toUpperCase().replace('AVC', 'H.264').replace('HEVC', 'H.265')}
                     </span>
                   )}
-                  {fileAudioCodec && <span className="publish-file-info__pill">{fileAudioCodec.toUpperCase()}</span>}
+                  {fileAudioCodec && <span className={fileInfoPillClassName()}>{fileAudioCodec.toUpperCase()}</span>}
                   {(fileVideoCodec || fileAudioCodec) && (fileHeight > 0 || fileFps > 0) && (
-                    <span className="publish-file-info__dot" />
+                    <span className="tw:size-[3px] tw:flex-none tw:rounded-[50%] tw:bg-[rgba(var(--color-header-button-base),0.3)]" />
                   )}
                   {fileHeight > 0 && (
-                    <span className="publish-file-info__pill">
+                    <span className={fileInfoPillClassName()}>
                       {fileWidth}&times;{fileHeight}
                     </span>
                   )}
-                  {fileFps > 0 && <span className="publish-file-info__pill">{Math.round(fileFps)} fps</span>}
+                  {fileFps > 0 && <span className={fileInfoPillClassName()}>{Math.round(fileFps)} fps</span>}
                   {(fileHeight > 0 || fileFps > 0) && (fileBitrate > 0 || duration > 0) && (
-                    <span className="publish-file-info__dot" />
+                    <span className="tw:size-[3px] tw:flex-none tw:rounded-[50%] tw:bg-[rgba(var(--color-header-button-base),0.3)]" />
                   )}
                   {fileBitrate > 0 && (
                     <span
-                      className={classnames('publish-file-info__pill', {
-                        'publish-file-info__pill--warn': fileBitrate > BITRATE.RECOMMENDED,
-                        'publish-file-info__pill--good': fileBitrate > 0 && fileBitrate <= BITRATE.RECOMMENDED,
-                      })}
+                      className={fileInfoPillClassName(
+                        fileBitrate > BITRATE.RECOMMENDED ? 'warn' : fileBitrate > 0 ? 'good' : 'default'
+                      )}
                     >
                       {fileBitrate >= 1e6
                         ? `${(fileBitrate / 1e6).toFixed(1)} Mbps`
@@ -341,7 +352,7 @@ function PublishFile(props: Props) {
                     </span>
                   )}
                   {duration > 0 && (
-                    <span className="publish-file-info__pill">
+                    <span className={fileInfoPillClassName()}>
                       {Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}
                     </span>
                   )}
@@ -369,7 +380,7 @@ function PublishFile(props: Props) {
               {hasLivestreamData && linkReplays()}
 
               {fileSource === SOURCE_SELECT && (
-                <div className="main--empty empty">
+                <div className={`${PAGE_MAIN_EMPTY_CLASS} ${EMPTY_CLASS}`}>
                   <Spinner type="small" />
                 </div>
               )}
@@ -384,7 +395,7 @@ function PublishFile(props: Props) {
                 value={titleValue}
                 onChange={handleTitleChange}
                 onBlur={flushTitle}
-                className="fieldset-group"
+                className={FIELDSET_GROUP_CLASS}
                 max={200}
                 ref={titleInput}
               />

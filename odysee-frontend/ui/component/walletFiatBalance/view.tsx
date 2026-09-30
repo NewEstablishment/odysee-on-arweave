@@ -3,6 +3,7 @@ import * as PAGES from 'constants/pages';
 import React from 'react';
 import Button from 'component/button';
 import Card from 'component/common/card';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
 import { selectAccountStatus } from 'redux/selectors/payments';
 import { doTipAccountStatus } from 'redux/actions/payments';
@@ -21,11 +22,11 @@ export default function WalletFiatBalance() {
       background
       actions={
         <>
-          <h2 className="section__title--small">
+          <h2 className={SECTION_CLASSES.titleSmall}>
             ${totalTippedAmount ? (totalTippedAmount / 100).toFixed(2) : 0} {__('Total Received Tips')}
           </h2>
 
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button
               button="secondary"
               label={__('Bank Accounts')}

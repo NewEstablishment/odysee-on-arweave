@@ -1,6 +1,7 @@
 /**
  * Covers both "create" and "edit" actions for a featured-channel.
  */
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import { v4 as Uuidv4 } from 'uuid';
 import Button from 'component/button';
@@ -12,6 +13,7 @@ import { doUpdateCreatorSettings } from 'redux/actions/comments';
 import { doToast } from 'redux/actions/notifications';
 import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { selectFeaturedChannelsForChannelId, selectSectionsForChannelId } from 'redux/selectors/comments';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 const DEFAULT_SECTION = {
   version: '1.0',
@@ -140,7 +142,7 @@ export default function FeaturedChannelsEdit(props: Props) {
         title={__('Featured channel list not found')}
         subtitle={__('Try refreshing the page and re-initiate the edit.')}
         body={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="primary" label={__('OK')} onClick={handleCancel} />
           </div>
         }
@@ -166,12 +168,12 @@ export default function FeaturedChannelsEdit(props: Props) {
             onSelectedUrisChanged={handleSelectedUrisChanged}
           />
 
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button label={__('Done')} button="primary" disabled={!name || uris.length === 0} onClick={handleSave} />
             <Button button="link" label={__('Cancel')} onClick={handleCancel} />
           </div>
 
-          <div className="error__text">{!name && <span>{__('A title is required')}</span>}</div>
+          <div className={ERROR_TEXT_CLASS}>{!name && <span>{__('A title is required')}</span>}</div>
         </>
       }
     />

@@ -1,9 +1,11 @@
+import { PAGE_MAIN_EMPTY_CLASS, PAGE_TITLE_CLASS } from 'component/page/classes';
 import React from 'react';
 import ClaimList from 'component/claimList';
 import Page from 'component/page';
 import Button from 'component/button';
 import classnames from 'classnames';
 import Icon from 'component/common/icon';
+import { ICON_HELP_CLASS } from 'component/common/icon-classes';
 import Spinner from 'component/spinner';
 import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
@@ -18,7 +20,8 @@ import { doResolveUris } from 'redux/actions/claims';
 import { selectUserAuthenticated } from 'redux/selectors/user';
 import { selectFetchingRemoteHistory } from 'redux/selectors/content';
 import { doFetchViewHistory } from 'redux/actions/content';
-import './style.scss';
+import { CLAIM_LIST_ALT_CONTROLS_WRAP_CLASS, CLAIM_LIST_HEADER_CLASS } from 'component/claimList/classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 export const PAGE_SIZE = 30;
 // ****************************************************************************
 // WatchHistoryPage
@@ -74,25 +77,20 @@ export default function WatchHistoryPage() {
     : __('Your watch history is only saved locally on this device. Sign in to sync across devices.');
 
   return (
-    <Page className="historyPage-wrapper">
+    <Page className="watch-history-surface">
       <div className={classnames('section card-stack')}>
-        <div className="claim-list__header">
-          <h1 className="page__title">
-            <Icon
-              icon={ICONS.WATCH_HISTORY}
-              style={{
-                marginRight: 'var(--spacing-s)',
-              }}
-            />
+        <div className={CLAIM_LIST_HEADER_CLASS} data-claim-list-header>
+          <h1 className={PAGE_TITLE_CLASS}>
+            <Icon icon={ICONS.WATCH_HISTORY} className="tw:mr-app-s" />
             <label>{__('Watch History')}</label>
             <Tooltip title={historyInfoText}>
-              <Button className="icon--help" icon={ICONS.HELP} iconSize={14} />
+              <Button className={ICON_HELP_CLASS} icon={ICONS.HELP} iconSize={14} />
             </Tooltip>
           </h1>
 
-          <div className="claim-list__alt-controls--wrap">
+          <div className={CLAIM_LIST_ALT_CONTROLS_WRAP_CLASS}>
             {fetchingRemoteHistory && (
-              <span className="watch-history__syncing">
+              <span className="tw:mr-app-s tw:flex tw:items-center tw:gap-app-xs tw:text-app-small tw:text-app-text-subtitle">
                 <Spinner type="small" />
                 <span>{__('Syncing history...')}</span>
               </span>
@@ -108,7 +106,7 @@ export default function WatchHistoryPage() {
           </div>
         </div>
         {isAuthenticated && uris.length > 0 && (
-          <div className="watch-history__sync-notice">
+          <div className="tw:mb-app-s tw:flex tw:items-center tw:gap-app-xs tw:rounded-app tw:bg-app-header tw:px-app-s tw:py-app-xs tw:text-app-xsmall tw:text-app-text-subtitle">
             <Icon icon={ICONS.INFO} size={16} />
             <span>
               {__('Synced history is available for the last 30 days. Older history is only stored on this device.')}
@@ -127,26 +125,15 @@ export default function WatchHistoryPage() {
           />
         )}
         {uris.length === 0 && (
-          <div
-            style={{
-              textAlign: 'center',
-            }}
-          >
+          <div className="tw:text-center">
             <img src={YRBL_SAD_IMG_URL} />
-            <h2
-              className="main--empty empty"
-              style={{
-                marginTop: '0',
-              }}
-            >
-              {__('Nothing here')}
-            </h2>
+            <h2 className={`${PAGE_MAIN_EMPTY_CLASS} ${EMPTY_CLASS} tw:mt-0`}>{__('Nothing here')}</h2>
           </div>
         )}
         {uris.length === 0 && fetchingRemoteHistory && (
-          <div style={{ textAlign: 'center', padding: 'var(--spacing-l)' }}>
+          <div className="tw:p-app-l tw:text-center">
             <Spinner type="small" />
-            <p style={{ marginTop: 'var(--spacing-s)' }}>{__('Loading watch history from your account...')}</p>
+            <p className="tw:mt-app-s">{__('Loading watch history from your account...')}</p>
           </div>
         )}
       </div>

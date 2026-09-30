@@ -1,4 +1,3 @@
-import 'scss/component/_header.scss';
 import { formatCredits } from 'util/format-credits';
 import { useIsMobile } from 'effects/use-screensize';
 import * as ICONS from 'constants/icons';
@@ -6,6 +5,8 @@ import * as MODALS from 'constants/modal_types';
 import * as PAGES from 'constants/pages';
 import * as SETTINGS from 'constants/settings';
 import Button from 'component/button';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import classnames from 'classnames';
 import Logo from 'component/logo';
 import NotificationBubble from 'component/notificationBubble';
@@ -28,6 +29,22 @@ import { selectTotalBalance, selectBalance } from 'redux/selectors/wallet';
 import { selectUserAuthenticated, selectUserIsNative, selectEmailToVerify, selectUser } from 'redux/selectors/user';
 import { selectAPIArweaveActiveAccounts } from 'redux/selectors/payments';
 import { selectIsPlayerFloating } from 'redux/selectors/content';
+import {
+  HEADER_AUTH_BUTTONS_CLASS,
+  HEADER_AUTH_TITLE_CLASS,
+  HEADER_BALANCE_CLASS,
+  HEADER_BALANCE_LOADING_CLASS,
+  HEADER_BALANCE_ROUND_CLASS,
+  HEADER_CENTER_CLASS,
+  HEADER_CHANGELOG_BUTTON_CLASS,
+  HEADER_CONTENTS_CLASS,
+  HEADER_LOGO_BUTTON_CLASS,
+  HEADER_MENU_LEFT_CLASS,
+  HEADER_MENU_RIGHT_CLASS,
+  HEADER_MINIMAL_CLASS,
+  HEADER_NAVIGATION_CLASS,
+  HEADER_SIDEBAR_TOGGLE_CLASS,
+} from './classes';
 
 const HeaderMenuButtons = lazyImport(
   () =>
@@ -165,7 +182,7 @@ const Header = (props: Props) => {
   }, [canBackout, onBackout]);
 
   const userButtons = (hideWallet?: boolean, hideProfile?: boolean) => (
-    <div className="header__menu--right">
+    <div className={HEADER_MENU_RIGHT_CLASS}>
       {isMobile && !authHeader && !canBackout && <WunderBar />}
 
       {authenticated ? (
@@ -188,13 +205,13 @@ const Header = (props: Props) => {
                 >
                   <div>
                     {balanceLoading ? (
-                      <Skeleton variant="text" animation="wave" className="header__navigationItem--balanceLoading" />
+                      <Skeleton variant="text" animation="wave" className={HEADER_BALANCE_LOADING_CLASS} />
                     ) : (
                       <Button
+                        button="alt"
                         navigate={`/$/${PAGES.WALLET}`}
-                        className={classnames('button--file-action header__navigationItem--balance', {
-                          'header__navigationItem--balance-round':
-                            hideBalance || Number(roundedTotalBalance) === 0 || !prefsReady,
+                        className={classnames(FILE_ACTION_BUTTON_CLASS, HEADER_BALANCE_CLASS, {
+                          [HEADER_BALANCE_ROUND_CLASS]: hideBalance || Number(roundedTotalBalance) === 0 || !prefsReady,
                         })}
                         label={
                           hideBalance || Number(roundedTotalBalance) === 0 || !prefsReady
@@ -221,7 +238,7 @@ const Header = (props: Props) => {
           <React.Suspense fallback={null}>
             <HeaderProfileMenuButton />
           </React.Suspense>
-          <div className="header__authButtons">
+          <div className={HEADER_AUTH_BUTTONS_CLASS}>
             <Button
               button="link"
               label={__('Log In')}
@@ -239,25 +256,21 @@ const Header = (props: Props) => {
   );
 
   return (
-    <header
-      className={classnames('header', {
-        'header--minimal': authHeader,
-      })}
-    >
+    <header className={classnames('header', authHeader && HEADER_MINIMAL_CLASS)}>
       {!authHeader && canBackout ? (
-        <div className="card__actions--between header__contents">
-          <div className="header__menu--left">
+        <div className={`${CARD_CLASSES.actionsBetween} ${HEADER_CONTENTS_CLASS}`}>
+          <div className={HEADER_MENU_LEFT_CLASS}>
             <Button onClick={onBackout} button="link" label={backLabel || __('Cancel')} icon={ICONS.ARROW_LEFT} />
           </div>
 
-          {backTitle && <h1 className="header__authTitle">{(isMobile && simpleBackTitle) || backTitle}</h1>}
+          {backTitle && <h1 className={HEADER_AUTH_TITLE_CLASS}>{(isMobile && simpleBackTitle) || backTitle}</h1>}
 
           {userButtons(false, isMobile)}
         </div>
       ) : (
         <>
-          <div className="header__navigation">
-            <div className="header__menu--left">
+          <div className={HEADER_NAVIGATION_CLASS}>
+            <div className={HEADER_MENU_LEFT_CLASS}>
               <SkipNavigationButton />
 
               {!authHeader && !props.hideSidebarToggle && (
@@ -269,7 +282,7 @@ const Header = (props: Props) => {
                   <Button
                     aria-label={sidebarLabel}
                     id="navigation-button"
-                    className="header__navigationItem--icon button-rotate"
+                    className={HEADER_SIDEBAR_TOGGLE_CLASS}
                     icon={ICONS.MENU}
                     aria-expanded={sidebarOpen}
                     onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -280,7 +293,7 @@ const Header = (props: Props) => {
 
               <Button
                 aria-label={__('Home')}
-                className="header__navigationItem--logo"
+                className={HEADER_LOGO_BUTTON_CLASS}
                 onClick={() => {
                   if (pathname === '/' || pathname === '/$/embed/home') {
                     window.scrollTo({
@@ -299,7 +312,7 @@ const Header = (props: Props) => {
               {pathname === '/' && process.env.NODE_ENV !== 'production' && process.env.DEV_CHANGELOG && (
                 <Button
                   title="Changelog"
-                  className="header__changelog-button"
+                  className={HEADER_CHANGELOG_BUTTON_CLASS}
                   label="Changelog"
                   icon={ICONS.FEEDBACK}
                   onClick={() =>
@@ -324,7 +337,7 @@ const Header = (props: Props) => {
             </div>
 
             {!authHeader && !isMobile && (
-              <div className="header__center">
+              <div className={HEADER_CENTER_CLASS}>
                 <WunderBar />
                 <React.Suspense fallback={null}>
                   <HeaderMenuButtons authRedirect={authRedirect} />
@@ -336,10 +349,10 @@ const Header = (props: Props) => {
               ? userButtons(hideWallet, false)
               : !isVerifyPage &&
                 !hideCancel && (
-                  <div className="header__menu--right">
+                  <div className={HEADER_MENU_RIGHT_CLASS}>
                     <Button
                       title={__('Go Back')}
-                      button="alt" // className="button--header-close"
+                      button="alt"
                       icon={ICONS.REMOVE}
                       onClick={() => {
                         if (isYoutubeAuthErrorPage) {

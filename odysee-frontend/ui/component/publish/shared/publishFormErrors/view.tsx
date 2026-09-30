@@ -1,3 +1,4 @@
+import { ERROR_TEXT_CLASS } from 'component/common/error-classes';
 import React from 'react';
 import { SITE_NAME, WEB_PUBLISH_SIZE_LIMIT_GB } from 'config';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
@@ -48,7 +49,7 @@ function PublishFormErrors(props: Props) {
   });
 
   return (
-    <div className="error__text">
+    <div className={ERROR_TEXT_CLASS}>
       {waitForFile && <div>{__('Choose a replay file, or select None')}</div>}
       {missingRequiredFile && <div>{__('Choose a file to upload')}</div>}
       {missingTiers && <div>{__(HELP.NO_TIERS_SELECTED)}</div>}

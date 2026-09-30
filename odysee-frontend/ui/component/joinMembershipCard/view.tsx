@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import { Global } from '@emotion/react';
 import { Form } from 'component/common/form';
@@ -29,7 +30,7 @@ import {
 import { doMembershipList, doMembershipBuy, doMembershipBuyClear } from 'redux/actions/memberships';
 import { doToast } from 'redux/actions/notifications';
 import { getChannelIdFromClaim, isStreamPlaceholderClaim } from 'util/claim';
-import './style.scss';
+import { JOIN_MEMBERSHIP_CLASSES, JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES } from './classes';
 
 type Props = {
   uri?: string;
@@ -96,7 +97,9 @@ const JoinMembershipCard = (props: Props) => {
   );
   const membershipMine = useAppSelector(selectMembershipMineData);
 
-  const isUrlParamModal = React.useContext(ModalContext)?.isUrlParamModal;
+  const modalContext = React.useContext(ModalContext);
+  const isModal = Boolean(modalContext);
+  const isUrlParamModal = modalContext?.isUrlParamModal;
   const isPurchasing = React.useRef(false);
   const navigate = useNavigate();
   const skipToConfirmation = Number.isInteger(passedTierIndex);
@@ -218,7 +221,7 @@ const JoinMembershipCard = (props: Props) => {
 
   if (window.pendingMembership || creatorMemberships === undefined) {
     return (
-      <div className="main--empty">
+      <div className={PAGE_MAIN_EMPTY_CLASS}>
         <Spinner />
       </div>
     );
@@ -227,14 +230,11 @@ const JoinMembershipCard = (props: Props) => {
   return (
     <Form onSubmit={handleJoinMembership}>
       <Card
-        className={classnames('card--join-membership', {
-          'membership-tier1': selectedMembershipIndex === 0,
-          'membership-tier2': selectedMembershipIndex === 1,
-          'membership-tier3': selectedMembershipIndex === 2,
-          'membership-tier4': selectedMembershipIndex === 3,
-          'membership-tier5': selectedMembershipIndex === 4,
-          'membership-tier6': selectedMembershipIndex === 5,
-        })}
+        className={classnames(
+          JOIN_MEMBERSHIP_CLASSES.card,
+          isModal && JOIN_MEMBERSHIP_CLASSES.modalCard,
+          isModal && creatorMemberships.length > 0 && JOIN_MEMBERSHIP_TIER_VARIABLE_CLASSES[selectedMembershipIndex]
+        )}
         body={
           <>
             {isOnConfirmationPage && creatorMemberships?.length ? (

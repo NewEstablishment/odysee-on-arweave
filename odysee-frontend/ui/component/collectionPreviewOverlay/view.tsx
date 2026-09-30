@@ -1,5 +1,10 @@
 import React from 'react';
 import FileThumbnail from 'component/fileThumbnail';
+import {
+  COLLECTION_PREVIEW_GRID_CLASS,
+  COLLECTION_PREVIEW_GRID_ITEM_CLASS,
+  COLLECTION_PREVIEW_OVERLAY_CLASS,
+} from './classes';
 import { useAppSelector } from 'redux/hooks';
 import { selectThumbnailForId } from 'redux/selectors/claims';
 import { selectUrlsForCollectionId } from 'redux/selectors/collections';
@@ -24,10 +29,10 @@ function CollectionPreviewOverlay(props: Props) {
   // on the preview overlay (show the second and third instead)
   const displayedItems = !collectionThumbnail ? collectionItemUrls.slice(1, 3) : collectionItemUrls.slice(0, 2);
   return (
-    <div className="claim-preview__collection-wrapper">
-      <ul className="ul--no-style collection-preview-overlay__grid">
+    <div className={COLLECTION_PREVIEW_OVERLAY_CLASS}>
+      <ul className={`ul--no-style ${COLLECTION_PREVIEW_GRID_CLASS}`}>
         {displayedItems.map((uri) => (
-          <li className="li--no-style collection-preview-overlay__grid-item" key={uri}>
+          <li className={COLLECTION_PREVIEW_GRID_ITEM_CLASS} key={uri}>
             <FileThumbnail uri={uri} />
           </li>
         ))}

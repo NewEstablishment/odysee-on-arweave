@@ -5,6 +5,7 @@ import Button from 'component/button';
 import * as ICONS from 'constants/icons';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
+import { MODAL_VIEW_IMAGE_CLASSES as C } from './classes';
 
 type Props = {
   src: string;
@@ -20,12 +21,12 @@ export default function ModalViewImage(props: Props) {
   const resolvedTitle = title || __('Image preview');
 
   return (
-    <Modal className="modal-view-image lb-open-lightbox" onAborted={closeModal} isOpen type="custom">
-      <div className="modal-view-image__chrome">
-        <div className="modal-view-image__title" title={resolvedTitle}>
+    <Modal className={C.root} onAborted={closeModal} isOpen type="custom">
+      <div className={C.chrome}>
+        <div className={C.title} title={resolvedTitle}>
           {resolvedTitle}
         </div>
-        <div className="modal-view-image__actions">
+        <div className={C.actions}>
           <Button
             button="link"
             href={src}
@@ -33,7 +34,7 @@ export default function ModalViewImage(props: Props) {
             aria-label={__('Open original image')}
             label={__('Open original')}
             icon={ICONS.EXTERNAL}
-            className="modal-view-image__action-button"
+            className={C.actionButton}
           />
           <Button
             button="link"
@@ -41,20 +42,20 @@ export default function ModalViewImage(props: Props) {
             label={zoomed ? __('Fit to screen') : __('Zoom')}
             icon={zoomed ? ICONS.COMPACT : ICONS.EXPAND}
             onClick={toggleZoom}
-            className="modal-view-image__action-button"
+            className={C.actionButton}
           />
           <Button
             button="close"
             aria-label={__('Close image')}
             icon={ICONS.REMOVE}
             onClick={closeModal}
-            className="modal-view-image__close"
+            className={C.close}
           />
         </div>
       </div>
-      <div className={classnames('modal-view-image__viewport', zoomed && 'modal-view-image__viewport--zoomed')}>
+      <div className={classnames(C.viewport, zoomed && C.viewportZoomed)}>
         <img
-          className={classnames('modal-view-image__image', zoomed && 'modal-view-image__image--zoomed')}
+          className={classnames(C.image, zoomed && C.imageZoomed)}
           src={src}
           alt={resolvedTitle}
           onClick={toggleZoom}

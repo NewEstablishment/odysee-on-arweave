@@ -1,0 +1,10 @@
+export const COLLECTION_EDIT_BUTTONS_CLASS = String.raw`collection-preview__edit-buttons tw:top-[calc(var(--spacing-m)*-1)] tw:bottom-[calc(var(--spacing-m)*-1)] tw:left-0 tw:mr-app-s tw:grid tw:w-[2rem] tw:items-center tw:pl-0 tw:[grid-template-columns:1fr_1fr_1fr_1fr] tw:[&_.collection-preview\_\_edit-group]:hidden tw:[&_.collection-preview\_\_edit-group]:w-0 tw:[&_.collection-preview\_\_edit-group:nth-child(1)]:flex tw:[&_.collection-preview\_\_edit-group:nth-child(1)]:w-[2rem] tw:[&_.collection-preview\_\_edit-group_.button-collection-manage]:![background-color:unset]`;
+
+export const COLLECTION_EDIT_GROUP_CLASS = String.raw`collection-preview__edit-group tw:flex tw:h-full tw:w-[2rem] tw:grow-[4] tw:flex-col tw:items-stretch tw:justify-center tw:upto-small:mr-0 tw:upto-small:[&_button]:px-app-xs tw:upto-small:[&_button]:py-app-xs`;
+
+export const COLLECTION_MANAGE_BUTTON_CLASS = String.raw`button-collection-manage tw:m-0 tw:h-full tw:w-full tw:border-l-0 tw:[border-left-style:none] tw:bg-[var(--color-button-alt-bg)] tw:text-center tw:[font-size:var(--font-base)] tw:font-[var(--font-weight-bold)] tw:leading-[1.2] tw:text-[var(--color-button-alt-text)] tw:[&_button]:p-app-xxs tw:[&_.button-surface\_\_content]:[display:unset] tw:hover:bg-app-primary tw:hover:text-app-primary-contrast tw:hover:[&_.icon]:stroke-app-primary-contrast tw:upto-small:text-app-small tw:upto-small:focus:bg-[var(--color-button-alt-bg)]`;
+
+export const COLLECTION_MANAGE_DRAG_CLASS = String.raw`${COLLECTION_MANAGE_BUTTON_CLASS} tw:flex tw:cursor-grab tw:content-center tw:items-center tw:justify-center tw:rounded-l-app tw:pb-app-xs`;
+export const COLLECTION_MANAGE_DELETE_CLASS = String.raw`${COLLECTION_MANAGE_BUTTON_CLASS} tw:rounded-r-app`;
+export const COLLECTION_MANAGE_DELETE_CANCEL_CLASS = String.raw`${COLLECTION_MANAGE_BUTTON_CLASS} tw:rounded-tr-app`;
+export const COLLECTION_MANAGE_DELETE_CONFIRM_CLASS = String.raw`${COLLECTION_MANAGE_BUTTON_CLASS} tw:rounded-br-app tw:![background-color:red]`;

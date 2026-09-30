@@ -1,9 +1,15 @@
 import React from 'react';
 import classnames from 'classnames';
-import './syntax-highlighter.scss';
 import MarkdownPreview from 'component/common/markdown-preview';
 import { openContextMenu } from 'util/context-menu';
 import { NavigationPrompt } from 'component/common/navigation-prompt';
+import {
+  MARKDOWN_EDITOR_CLASSES,
+  MARKDOWN_EDITOR_STATUSBAR_CLASS,
+  MARKDOWN_EDITOR_TOOLBAR_BUTTON_CLASS,
+  MARKDOWN_EDITOR_TOOLBAR_CLASS,
+  MARKDOWN_EDITOR_TOOLBAR_GROUP_CLASS,
+} from './markdown-editor-classes';
 
 type Props = {
   className?: string;
@@ -222,19 +228,23 @@ export default function MarkdownEditor(props: Props) {
   ];
 
   return (
-    <div className={classnames('markdown-editor', className, previewOpen && 'markdown-editor--preview')}>
+    <div
+      className={classnames(MARKDOWN_EDITOR_CLASSES.root, className)}
+      data-markdown-editor
+      data-markdown-editor-preview={previewOpen || undefined}
+    >
       <NavigationPrompt
         when={shouldWarnOnUnload}
         message={__('You have unsaved markdown text, are you sure you want to leave?')}
       />
 
-      <div className="markdown-editor__toolbar" role="toolbar" aria-label={__('Markdown formatting options')}>
-        <div className="markdown-editor__toolbar-group">
+      <div className={MARKDOWN_EDITOR_TOOLBAR_CLASS} role="toolbar" aria-label={__('Markdown formatting options')}>
+        <div className={MARKDOWN_EDITOR_TOOLBAR_GROUP_CLASS}>
           {toolbarButtons.map((button) => (
             <button
               key={button.label}
               type="button"
-              className="markdown-editor__toolbar-button"
+              className={MARKDOWN_EDITOR_TOOLBAR_BUTTON_CLASS}
               aria-label={button.label}
               title={button.label}
               disabled={disabled || previewOpen}
@@ -244,10 +254,10 @@ export default function MarkdownEditor(props: Props) {
             </button>
           ))}
         </div>
-        <div className="markdown-editor__toolbar-group">
+        <div className={MARKDOWN_EDITOR_TOOLBAR_GROUP_CLASS}>
           <button
             type="button"
-            className="markdown-editor__toolbar-button markdown-editor__toolbar-button--preview"
+            className={`${MARKDOWN_EDITOR_TOOLBAR_BUTTON_CLASS} tw:min-w-[4.75rem]`}
             aria-pressed={previewOpen}
             onClick={() => setPreviewOpen((value) => !value)}
           >
@@ -259,7 +269,8 @@ export default function MarkdownEditor(props: Props) {
       <textarea
         id={id}
         ref={inputRef}
-        className={classnames('markdown-editor__textarea', previewOpen && 'markdown-editor__textarea--hidden')}
+        className={classnames(MARKDOWN_EDITOR_CLASSES.textarea, previewOpen && 'tw:hidden')}
+        data-markdown-editor-textarea
         disabled={disabled}
         placeholder={placeholder === undefined || placeholder === null ? undefined : String(placeholder)}
         value={stringValue}
@@ -295,12 +306,15 @@ export default function MarkdownEditor(props: Props) {
         }}
       />
 
-      <div className={classnames('markdown-editor__preview', !previewOpen && 'markdown-editor__preview--hidden')}>
+      <div
+        className={classnames(MARKDOWN_EDITOR_CLASSES.preview, !previewOpen && 'tw:hidden')}
+        data-markdown-editor-preview-surface
+      >
         <MarkdownPreview content={stringValue} noDataStore />
       </div>
 
-      <div className="markdown-editor__statusbar">
-        <span className="editor-statusbar__upload-hint">{__('Attach images by pasting or drag-and-drop.')}</span>
+      <div className={MARKDOWN_EDITOR_STATUSBAR_CLASS}>
+        <span className="tw:mr-auto">{__('Attach images by pasting or drag-and-drop.')}</span>
         <span>{__('Lines: %count%', { count: lineCount })}</span>
         <span>{__('Words: %count%', { count: wordCount })}</span>
         <span>{__('Cursor: %line%:%column%', { line, column })}</span>

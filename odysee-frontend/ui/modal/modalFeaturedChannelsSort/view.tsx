@@ -1,6 +1,5 @@
 // MODALS.FEATURED_CHANNELS_SORT
 import React from 'react';
-import './style.scss';
 import Button from 'component/button';
 import SortableList from 'component/channelFinder/sortableList'; // 1
 
@@ -11,6 +10,7 @@ import { selectClaimForClaimId } from 'redux/selectors/claims';
 import { selectSectionsForChannelId } from 'redux/selectors/comments';
 import { doUpdateCreatorSettings } from 'redux/actions/comments';
 import { doHideModal } from 'redux/actions/app';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 // 1TODO: we are not supposed to grab "internal" components. SortableList is
 // meant to be general purpose eventually.
@@ -82,14 +82,23 @@ export default function ModalFeaturedChannelsSort(props: Props) {
   }
 
   return (
-    <Modal isOpen type="custom" className="modalFCSort" onAborted={() => dispatch(doHideModal())}>
+    <Modal
+      isOpen
+      type="custom"
+      className="tw:upto-small:pr-app-xs tw:upto-small:pl-app-xs"
+      onAborted={() => dispatch(doHideModal())}
+    >
       <Card
         title={__('Sort Featured Channels')}
+        titleClassName="tw:upto-small:mb-app-l"
         body={
           <SortableList
             list={sectionIds}
             onGetElemAtIndex={(id, index) => (
-              <div key={id} className="modalFCSort__item">
+              <div
+                key={id}
+                className="tw:mb-app-xs tw:rounded-[var(--card-radius)] tw:border tw:border-app-border tw:p-app-xs"
+              >
                 {getEntry(id)}
               </div>
             )}
@@ -98,7 +107,7 @@ export default function ModalFeaturedChannelsSort(props: Props) {
           />
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="primary" label={__('Save')} onClick={handleSave} />
             <Button button="link" label={__('Cancel')} onClick={handleCancel} />
           </div>

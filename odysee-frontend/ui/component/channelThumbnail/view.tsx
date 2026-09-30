@@ -12,6 +12,7 @@ import { selectThumbnailForUri, selectClaimForUri, selectIsUriResolving } from '
 import { doResolveUri } from 'redux/actions/claims';
 import { selectUserOdyseeMembership } from 'redux/selectors/memberships';
 import { getChannelIdFromClaim } from 'util/claim';
+import { CHANNEL_THUMBNAIL_CLASSES as C } from './classes';
 type Props = {
   uri?: string;
   className?: string;
@@ -78,7 +79,7 @@ function ChannelThumbnail(props: Props) {
       linkPage: isChannel,
       placement: isChannel ? 'bottom' : undefined,
       hideTooltip,
-      className: isChannel ? 'profile-badge__tooltip' : undefined,
+      className: isChannel ? C.profileBadgeTooltip : undefined,
     };
   }, [hideTooltip, isChannel, odyseeMembership]);
   let channelName;
@@ -93,9 +94,9 @@ function ChannelThumbnail(props: Props) {
   if (channelName) {
     initializer = channelName.charCodeAt(0) - 65; // will be between 0 and 57
 
-    colorClassName = `channel-thumbnail__default--${Math.abs(initializer % 4)}`;
+    colorClassName = C.defaultColors[Math.abs(initializer % 4)];
   } else {
-    colorClassName = `channel-thumbnail__default--4`;
+    colorClassName = C.defaultColors[4];
   }
 
   React.useEffect(() => {
@@ -108,11 +109,11 @@ function ChannelThumbnail(props: Props) {
     return (
       <FreezeframeWrapper
         src={stableFreezeUrlRef.current}
-        className={classnames('channel-thumbnail', className, {
-          'channel-thumbnail--small': small,
-          'channel-thumbnail--xsmall': xsmall,
-          'channel-thumbnail--xxsmall': xxsmall,
-          'channel-thumbnail--resolving': isResolving,
+        className={classnames(C.base, className, {
+          [C.small]: small,
+          [C.xsmall]: xsmall,
+          [C.xxsmall]: xxsmall,
+          [C.resolving]: isResolving,
         })}
       >
         {showMemberBadge ? <MembershipBadge {...badgeProps} /> : null}
@@ -122,18 +123,19 @@ function ChannelThumbnail(props: Props) {
 
   return (
     <div
-      className={classnames('channel-thumbnail', className, {
+      className={classnames(C.base, className, {
         [colorClassName]: !showThumb,
-        'channel-thumbnail--small': small,
-        'channel-thumbnail--xsmall': xsmall,
-        'channel-thumbnail--xxsmall': xxsmall,
-        'channel-thumbnail--resolving': isResolving,
+        [C.small]: small,
+        [C.xsmall]: xsmall,
+        [C.xxsmall]: xxsmall,
+        [C.resolving]: isResolving,
       })}
       title={tooltipTitle}
     >
       {/* width: use the same size for all 'small' variants so that caching works better */}
       <OptimizedImage
-        className={!channelThumbnail ? 'channel-thumbnail__default' : 'channel-thumbnail__custom'}
+        data-channel-thumbnail-image
+        className={!channelThumbnail ? C.default : C.custom}
         src={(!thumbLoadError && channelThumbnail) || defaultAvatar}
         width={xxsmall || xsmall || small ? 64 : 160}
         quality={95}

@@ -3,6 +3,8 @@ import Button from 'component/button';
 import { Form } from 'component/common/form';
 import { Modal } from 'modal/modal';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { CONFIRM_VALUE_CLASS, CONFIRM_WRAPPER_CLASS } from 'component/common/confirm-classes';
 import LbcSymbol from 'component/common/lbc-symbol';
 import ClaimPreview from 'component/claimPreview';
 import { useAppDispatch, useAppSelector } from 'redux/hooks';
@@ -10,6 +12,8 @@ import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectActiveChannelClaim, selectIncognito } from 'redux/selectors/app';
 import { doHideModal } from 'redux/actions/app';
 import { doSendDraftTransaction, doSendTip } from 'redux/actions/wallet';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 type TipParams = {
   amount: number;
@@ -59,14 +63,14 @@ function ModalConfirmTransaction(props: Props) {
         <Card
           title={title}
           body={
-            <div className="section card--inline confirm__wrapper">
+            <div className={`section ${CARD_CLASSES.inline} ${CONFIRM_WRAPPER_CLASS}`}>
               <div className="section">
                 <div className="confirm__label">{__('Sending')}</div>
-                <div className="confirm__value">{<LbcSymbol postfix={amount} size={22} />}</div>
+                <div className={CONFIRM_VALUE_CLASS}>{<LbcSymbol postfix={amount} size={22} />}</div>
 
                 {!isAddress && <div className="confirm__label">{__('From --[the tip sender]--')}</div>}
                 {!isAddress && (
-                  <div className="confirm__value">
+                  <div className={CONFIRM_VALUE_CLASS}>
                     {incognito ? (
                       'Anonymous'
                     ) : (
@@ -83,7 +87,7 @@ function ModalConfirmTransaction(props: Props) {
                 )}
 
                 <div className="confirm__label">{__('To --[the tip recipient]--')}</div>
-                <div className="confirm__value">
+                <div className={CONFIRM_VALUE_CLASS}>
                   {!isAddress ? (
                     <ClaimPreview
                       key={destination}
@@ -102,11 +106,11 @@ function ModalConfirmTransaction(props: Props) {
           }
           actions={
             <>
-              <div className="section__actions">
+              <div className={SECTION_CLASSES.actions}>
                 <Button autoFocus button="primary" label={__('Send')} onClick={() => onConfirmed()} />
                 <Button button="link" label={__('Cancel')} onClick={closeModal} />
               </div>
-              <p className="help">{__('Once the transaction is sent, it cannot be reversed.')}</p>
+              <p className={HELP_CLASS}>{__('Once the transaction is sent, it cannot be reversed.')}</p>
             </>
           }
         />

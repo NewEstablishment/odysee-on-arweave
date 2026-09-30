@@ -35,7 +35,11 @@ import { useLivestreamPublish } from 'contexts/livestreamPublish';
 import useLivestreamMetrics from 'effects/use-livestream-metrics';
 import LivestreamMetrics from 'component/livestreamMetrics/view';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
-import './style.scss';
+import { LIVESTREAM_SETUP_CLASSES as styles } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { DISABLED_CLASS } from 'component/common/state-classes';
+import { PAGE_TITLE_MARGIN_CLASS } from 'component/page/classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 
 const ALL_LIVESTREAM_TABS = ['Preview', 'Stream', 'Setup'];
 
@@ -291,19 +295,17 @@ export default function LivestreamSetupPage() {
     <Page>
       {balance < 0.01 && <YrblWalletEmpty />}
 
-      <div className="livestream-setup__header">
-        <div className="livestream-setup__heading">
-          <h1 className="page__title page__title--margin">
+      <div className={styles.header}>
+        <div className={styles.heading}>
+          <h1 className={PAGE_TITLE_MARGIN_CLASS}>
             <Icon icon={ICONS.LIVESTREAM_MONOCHROME} />
             <label>{formTitle}</label>
           </h1>
-          <p className="livestream-setup__subtitle">
-            {__('Stream directly from your browser or use RTMP with OBS/Restream.')}
-          </p>
+          <p className={styles.subtitle}>{__('Stream directly from your browser or use RTMP with OBS/Restream.')}</p>
         </div>
-        <div className="livestream-setup__header-actions">
+        <div className={styles.headerActions}>
           <button
-            className="livestream-setup__create-btn livestream-setup__create-btn--secondary"
+            className={`${styles.createButton} ${styles.createButtonSecondary}`}
             onClick={() => navigate(`/$/${PAGES.LIVESTREAM_CREATE}?s=Replay`)}
             disabled={balance < 0.01 || (totalLivestreamClaims.length === 0 && !hasReplays)}
           >
@@ -312,7 +314,7 @@ export default function LivestreamSetupPage() {
           </button>
           <button
             ref={createBtnRef}
-            className="livestream-setup__create-btn"
+            className={styles.createButton}
             onClick={() => navigate(`/$/${PAGES.LIVESTREAM_CREATE}`)}
             disabled={balance < 0.01}
           >
@@ -320,21 +322,18 @@ export default function LivestreamSetupPage() {
             {__('Create / Edit')}
           </button>
           {totalLivestreamClaims.length === 0 && (
-            <p
-              className="help help--notice livestream-setup__claim-hint"
-              style={{ ['--claim-hint-arrow-right' as any]: `${arrowOffset}px` }}
-            >
+            <p className={styles.claimHint} style={{ ['--claim-hint-arrow-right' as any]: `${arrowOffset}px` }}>
               {__('Before you can go live, you have to create a livestream claim.')}
             </p>
           )}
         </div>
       </div>
 
-      <div className="livestream-setup__toolbar">
-        <div className="livestream-setup__tabs">
+      <div className={styles.toolbar}>
+        <div className={styles.tabs}>
           {BROWSER_STREAM_ENABLED && (
             <button
-              className={classnames('livestream-setup__tab', { 'livestream-setup__tab--active': tab === 'Preview' })}
+              className={classnames(styles.tab, { [styles.tabActive]: tab === 'Preview' })}
               onClick={() => setTab('Preview')}
               disabled={balance < 0.01}
             >
@@ -344,7 +343,7 @@ export default function LivestreamSetupPage() {
           )}
           {BROWSER_STREAM_ENABLED && (
             <button
-              className={classnames('livestream-setup__tab', { 'livestream-setup__tab--active': tab === 'Stream' })}
+              className={classnames(styles.tab, { [styles.tabActive]: tab === 'Stream' })}
               onClick={() => setTab('Stream')}
               disabled={balance < 0.01}
             >
@@ -353,8 +352,8 @@ export default function LivestreamSetupPage() {
             </button>
           )}
           <button
-            className={classnames('livestream-setup__tab', {
-              'livestream-setup__tab--active': tab === 'Setup',
+            className={classnames(styles.tab, {
+              [styles.tabActive]: tab === 'Setup',
             })}
             onClick={() => setTab('Setup')}
             disabled={balance < 0.01 || Boolean(editingURI)}
@@ -365,15 +364,15 @@ export default function LivestreamSetupPage() {
         </div>
 
         {tab === 'Stream' && (
-          <div className="livestream-setup__stream-options">
-            <div className="livestream-setup__option-group">
-              <span className="livestream-setup__option-label">{__('Quality')}</span>
-              <div className="livestream-setup__quality-pills">
+          <div className={styles.streamOptions}>
+            <div className={styles.optionGroup}>
+              <span className={styles.optionLabel}>{__('Quality')}</span>
+              <div className={styles.qualityPills}>
                 {WEBRTC_PUBLISH_PRESET_ORDER.map((id) => (
                   <button
                     key={id}
-                    className={classnames('livestream-setup__quality-pill', {
-                      'livestream-setup__quality-pill--active': presetId === id,
+                    className={classnames(styles.qualityPill, {
+                      [styles.qualityPillActive]: presetId === id,
                     })}
                     onClick={() => setPresetId(id)}
                     disabled={isStreamActive}
@@ -395,7 +394,7 @@ export default function LivestreamSetupPage() {
           type="happy"
           title={__("You haven't created a channel yet, let's fix that!")}
           actions={
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="primary" navigate={`/$/${PAGES.CHANNEL_NEW}`} label={__('Create A Channel')} />
             </div>
           }
@@ -403,21 +402,21 @@ export default function LivestreamSetupPage() {
       )}
 
       {tab === 'Preview' && (
-        <div className="livestream-setup__preview">
-          <div className="livestream-setup__preview-video">
-            <div className="livestream-setup__preview-placeholder" />
+        <div className={styles.preview}>
+          <div className={styles.previewVideo}>
+            <div className={styles.previewPlaceholder} />
             {!isStreamActive && (
-              <div className="livestream-setup__preview-offair">
-                <span className="livestream-setup__preview-offair-dot" />
+              <div className={styles.previewOffair}>
+                <span className={styles.previewOffairDot} />
                 {__('OFF AIR')}
               </div>
             )}
           </div>
           <div
-            className={classnames('livestream-setup__preview-chat-wrap', {
-              'livestream-setup__preview-chat-wrap--disabled':
-                !isStreamActive || !totalLivestreamClaims[0]?.canonical_url,
+            className={classnames(styles.previewChat, {
+              [styles.previewChatDisabled]: !isStreamActive || !totalLivestreamClaims[0]?.canonical_url,
             })}
+            data-livestream-preview-chat
           >
             <React.Suspense fallback={null}>
               <ChatLayout uri={totalLivestreamClaims[0]?.canonical_url || ''} />
@@ -428,7 +427,7 @@ export default function LivestreamSetupPage() {
 
       {!fetchingChannels && channelId && BROWSER_STREAM_ENABLED && (
         <div
-          className={classnames({ disabled: editingURI })}
+          className={classnames({ [DISABLED_CLASS]: editingURI })}
           style={tab !== 'Stream' ? { display: 'none' } : undefined}
         >
           <div ref={handleStudioMountRef} className="livestream-setup__studio-host" />
@@ -437,14 +436,14 @@ export default function LivestreamSetupPage() {
 
       {/* RTMP Setup Tab */}
       {tab === 'Setup' && (
-        <div className={editingURI ? 'disabled' : ''}>
+        <div className={editingURI ? DISABLED_CLASS : ''}>
           {!livestreamEnabled && (
             <Card
               background
-              className="livestream-setup__disabled-card"
+              className={styles.disabledCard}
               title={__('Livestreaming disabled')}
               body={
-                <p className="help">
+                <p className={HELP_CLASS}>
                   {__('This account has livestreaming disabled. Contact hello@odysee.com for help.')}
                 </p>
               }
@@ -452,22 +451,22 @@ export default function LivestreamSetupPage() {
           )}
 
           {livestreamEnabled && (
-            <div className="livestream-setup__rtmp">
+            <div className={styles.rtmp}>
               {!fetchingChannels && channelId && (
                 <>
                   {/* Stream Key Card */}
                   <div
-                    className={classnames('livestream-setup__key-card', {
-                      'livestream-setup__key-card--disabled': !streamKey || totalLivestreamClaims.length === 0,
+                    className={classnames(styles.keyCard, {
+                      [styles.keyCardDisabled]: !streamKey || totalLivestreamClaims.length === 0,
                     })}
                   >
-                    <div className="livestream-setup__key-header">
-                      <h3 className="livestream-setup__key-title">{__('Stream Credentials')}</h3>
-                      <p className="livestream-setup__key-subtitle">
+                    <div className={styles.keyHeader}>
+                      <h3 className={styles.keyTitle}>{__('Stream Credentials')}</h3>
+                      <p className={styles.keySubtitle}>
                         {__('Use these in OBS, Restream, or any RTMP-compatible software.')}
                       </p>
                     </div>
-                    <div className="livestream-setup__key-fields">
+                    <div className={styles.keyFields}>
                       <CopyableText
                         primaryButton
                         enableInputMask={!streamKey || totalLivestreamClaims.length === 0}
@@ -491,18 +490,16 @@ export default function LivestreamSetupPage() {
                   </div>
 
                   {/* OBS Tips */}
-                  <details className="livestream-setup__tips">
-                    <summary className="livestream-setup__tips-summary">{__('Recommended OBS settings')}</summary>
-                    <div className="livestream-setup__tips-body">
+                  <details className={styles.tips}>
+                    <summary className={styles.tipsSummary}>{__('Recommended OBS settings')}</summary>
+                    <div className={styles.tipsBody}>
                       <ul>
                         <li>{__('Bitrate: 1000-2500 kbps')}</li>
                         <li>{__('Keyframes: 2')}</li>
                         <li>{__('Profile: High')}</li>
                         <li>{__('Tune: Zerolatency')}</li>
                       </ul>
-                      <p className="livestream-setup__tips-note">
-                        {__('Max bitrate: 7000 kbps. Mobile: use PRISM Live Studio.')}
-                      </p>
+                      <p className={styles.tipsNote}>{__('Max bitrate: 7000 kbps. Mobile: use PRISM Live Studio.')}</p>
                     </div>
                   </details>
 
@@ -521,9 +518,11 @@ export default function LivestreamSetupPage() {
 
                   {/* No claims warning */}
                   {totalLivestreamClaims.length === 0 && (
-                    <div className="livestream-setup__no-claims">
-                      <p>{__('You need to publish a livestream claim before you can stream.')}</p>
-                      <div className="livestream-setup__no-claims-actions">
+                    <div className={styles.noClaims}>
+                      <p className={styles.noClaimsCopy}>
+                        {__('You need to publish a livestream claim before you can stream.')}
+                      </p>
+                      <div className={styles.noClaimsActions}>
                         <Button
                           button="primary"
                           onClick={() => createNewLivestream()}

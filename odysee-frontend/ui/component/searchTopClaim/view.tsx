@@ -16,6 +16,12 @@ import { doResolveUris } from 'redux/actions/claims';
 import { doOpenModal } from 'redux/actions/app';
 import { selectPendingIds, selectClaimForUri } from 'redux/selectors/claims';
 import { makeSelectWinningUriForQuery, selectIsResolvingWinningUri } from 'redux/selectors/search';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { CLAIM_PREVIEW_CUSTOM_PROPERTIES_CLASS } from 'component/claimPreview/classes';
+import { SEARCH_TOP_CLAIM_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_INLINE_CLASS } from 'component/common/help-classes';
+import { MEDIA_URI_CLASS } from 'component/common/media-classes';
 
 type Props = {
   query: string;
@@ -75,11 +81,11 @@ export default function SearchTopClaim(props: Props) {
     }
   }, [dispatch, uriFromQuery, channelUriFromQuery]);
   return (
-    <div className="search__header">
+    <div className={SEARCH_TOP_CLAIM_CLASSES.root}>
       {winningUri && (
-        <div className="claim-preview__actions--header">
+        <div className={SEARCH_TOP_CLAIM_CLASSES.actions}>
           <a
-            className="media__uri"
+            className={MEDIA_URI_CLASS}
             target="_blank"
             rel="noreferrer"
             href="https://help.odysee.tv/category-blockchain/category-staking/increase/"
@@ -98,7 +104,7 @@ export default function SearchTopClaim(props: Props) {
             showNullPlaceholder
             uri={winningUri}
             properties={(claim) => (
-              <span className="claim-preview__custom-properties">
+              <span className={CLAIM_PREVIEW_CUSTOM_PROPERTIES_CLASS} data-claim-preview-custom-properties>
                 <ClaimRepostAuthor short uri={winningUri} />
                 <ClaimEffectiveAmount uri={winningUri} />
               </span>
@@ -112,7 +118,7 @@ export default function SearchTopClaim(props: Props) {
         </div>
       )}
       {!winningUri && !isSearching && !isResolvingWinningUri && uriFromQuery && (
-        <div className="card card--section help--inline">
+        <div className={`card ${CARD_CLASSES.section} ${HELP_INLINE_CLASS}`}>
           <I18nMessage
             tokens={{
               repost: (
@@ -130,11 +136,11 @@ export default function SearchTopClaim(props: Props) {
         </div>
       )}
       {!hideLink && winningUri && (
-        <div className="section__actions--between section__actions--no-margin">
+        <div className={`${SECTION_CLASSES.actionsBetween} ${SECTION_CLASSES.actionsNoMargin}`}>
           <span />
           <Button
             button="link"
-            className="search__top-link"
+            className={SEARCH_TOP_CLAIM_CLASSES.topLink}
             label={
               <I18nMessage
                 tokens={{

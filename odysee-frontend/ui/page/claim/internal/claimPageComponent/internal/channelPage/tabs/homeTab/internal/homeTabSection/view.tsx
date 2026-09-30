@@ -33,8 +33,11 @@ import {
   selectClaimIdsForCollectionId,
 } from 'redux/selectors/collections';
 import { SECTION_TAGS } from 'constants/collections';
+import { CLAIM_GRID_CLASS } from 'component/common/claim-grid-classes';
+import { EMPTY_CENTERED_CLASS } from 'component/common/empty-classes';
 import { selectFeaturedChannelsForChannelId } from 'redux/selectors/comments';
 import { CsOptHelper } from 'util/claim-search';
+import { HOME_TAB_CLASSES } from '../../classes';
 type Props = {
   channelClaimId: any;
   index: number;
@@ -326,7 +329,7 @@ function HomeTabSection(props: Props) {
   })();
 
   return (
-    <div className="home-section-content">
+    <div className={HOME_TAB_CLASSES.content}>
       {!editMode && index === 0 && (
         <UpcomingClaims
           name="homeTab"
@@ -338,8 +341,8 @@ function HomeTabSection(props: Props) {
         />
       )}
       {editMode && (
-        <div className="home-section-header-wrapper">
-          <div className="home-section-header-option">
+        <div className={HOME_TAB_CLASSES.headerWrapper}>
+          <div className={HOME_TAB_CLASSES.headerOption}>
             <label>{__('Type')}</label>
             <select
               name="type"
@@ -369,7 +372,7 @@ function HomeTabSection(props: Props) {
             </select>
           </div>
           {section.type === 'content' && (
-            <div className="home-section-header-option">
+            <div className={HOME_TAB_CLASSES.headerOption}>
               <label>{__('File Type')}</label>
               <select
                 name="file_type"
@@ -392,7 +395,7 @@ function HomeTabSection(props: Props) {
             </div>
           )}
           {section.type === 'playlist' && (
-            <div className="home-section-header-option">
+            <div className={HOME_TAB_CLASSES.headerOption}>
               <label>{__('Playlist')}</label>
               <select
                 name="claim_id"
@@ -419,7 +422,7 @@ function HomeTabSection(props: Props) {
             </div>
           )}
           {section.type === 'channels' && (
-            <div className="home-section-header-option">
+            <div className={HOME_TAB_CLASSES.headerOption}>
               <label>{__('Featured Channels')}</label>
               <select
                 name="claim_id"
@@ -446,7 +449,7 @@ function HomeTabSection(props: Props) {
             </div>
           )}
           {(section.type === 'content' || section.type === 'playlists') && (
-            <div className="home-section-header-option">
+            <div className={HOME_TAB_CLASSES.headerOption}>
               <label>{__('Order By')}</label>
               <select
                 name="order_by"
@@ -468,7 +471,7 @@ function HomeTabSection(props: Props) {
           )}
           {section.type === 'featured' && (
             <>
-              <div className="home-section-header-option">
+              <div className={HOME_TAB_CLASSES.headerOption}>
                 <label>{__('Search')}</label>
                 <input
                   id="featured"
@@ -478,7 +481,7 @@ function HomeTabSection(props: Props) {
                   placeholder={__('Search')}
                 />
               </div>
-              <div className="home-section-header-option">
+              <div className={HOME_TAB_CLASSES.headerOption}>
                 <label>{__('Results')}</label>
                 <select
                   name="claim_id"
@@ -512,10 +515,10 @@ function HomeTabSection(props: Props) {
         </div>
       )}
       {isLoading && (
-        <div className="home-section-content">
-          <div className="section">
-            <h2 className="home-section-title">{__('Loading...')}</h2>
-            <section className="claim-grid">
+        <div className={HOME_TAB_CLASSES.content}>
+          <div className={HOME_TAB_CLASSES.section}>
+            <h2 className={HOME_TAB_CLASSES.title}>{__('Loading...')}</h2>
+            <section className={CLAIM_GRID_CLASS}>
               {Array.from({ length: 12 }, (_, i) => (
                 <ClaimPreviewTile key={i} placeholder="loading" pulse />
               ))}
@@ -527,8 +530,8 @@ function HomeTabSection(props: Props) {
         !editMode &&
         ((requiresSearch && claimSearchResults && claimSearchResults.length === 0) ||
           (section.type === 'playlist' && !section.claim_id)) && (
-          <div className="section">
-            <div className="empty empty--centered">{__('No Content Found')}</div>
+          <div className={HOME_TAB_CLASSES.section}>
+            <div className={EMPTY_CENTERED_CLASS}>{__('No Content Found')}</div>
           </div>
         )}
       {section.type &&
@@ -536,12 +539,12 @@ function HomeTabSection(props: Props) {
           collectionUrls ||
           (claimSearchResults && claimSearchResults.length > 0) ||
           (section.type === 'featured' && hasFeaturedClaim)) && (
-          <div className="section">
+          <div className={HOME_TAB_CLASSES.section}>
             {section.type !== 'featured' ? (
               <>
-                <h2 className="home-section-title">{collectionName || getTitle() || __('Loading...')}</h2>
+                <h2 className={HOME_TAB_CLASSES.title}>{collectionName || getTitle() || __('Loading...')}</h2>
                 {(!featuredChannel || (featuredChannel && featuredChannel.value.uris.length > maxChannelsPerRow)) && (
-                  <label className="show-more" onClick={() => handleViewMore(section)}>
+                  <label className={HOME_TAB_CLASSES.showMore} onClick={() => handleViewMore(section)}>
                     {__('View More')}
                     <Icon icon={ICONS.ARROW_RIGHT} />
                   </label>

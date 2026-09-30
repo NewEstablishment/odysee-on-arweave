@@ -95,7 +95,10 @@ const SoftwareSecurityEngineerPage = () => {
               }}
             >
               To apply, please send your credentials to
-              <a className="careers-mail-link" href="mailto:careers@odysee.com">
+              <a
+                className="careers-mail-link tw:text-[rgba(var(--color-text-base),0.8)] tw:hover:text-[rgba(var(--color-text-base),1)]"
+                href="mailto:careers@odysee.com"
+              >
                 {' '}
                 careers@odysee.com
               </a>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { PAGE_TITLE_CLASS } from 'component/page/classes';
 import Button from 'component/button';
 import { ENABLE_NO_SOURCE_CLAIMS } from 'config';
 import * as SETTINGS from 'constants/settings';
@@ -11,6 +12,7 @@ import { resolveLangForClaimSearch } from 'util/default-languages';
 import { selectFilteredActiveLivestreamUris } from 'redux/selectors/livestream';
 import { selectClientSetting, selectLanguage } from 'redux/selectors/settings';
 import { doFetchAllActiveLivestreamsForQuery } from 'redux/actions/livestream';
+import { CLAIM_GRID_SECONDARY_TITLE_CLASS, CLAIM_GRID_VIEW_MORE_CLASS } from 'component/common/claim-grid-classes';
 const DEFAULT_LIVESTREAM_TILE_LIMIT = 8;
 const SECTION = Object.freeze({
   COLLAPSED: 1,
@@ -87,7 +89,7 @@ export default function LivestreamSection(props: Props) {
               : activeLivestreamUris
           }
           tileLayout={tileLayout}
-          headerLabel={<h1 className="page__title">{__('Livestreams')}</h1>}
+          headerLabel={<h1 className={PAGE_TITLE_CLASS}>{__('Livestreams')}</h1>}
           useSkeletonScreen={false}
           showHeader={false}
           hideFilters
@@ -98,12 +100,12 @@ export default function LivestreamSection(props: Props) {
         />
 
         {liveTilesOverLimit && liveSection === SECTION.COLLAPSED && (
-          <div className="upcoming-list__view-more">
+          <div className={CLAIM_GRID_VIEW_MORE_CLASS}>
             <Button
               label={__('Show more livestreams')}
               button="link"
               iconRight={ICONS.DOWN}
-              className="claim-grid__title--secondary"
+              className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
               onClick={() => {
                 dispatch(doFetchAllActiveLivestreamsForQuery());
                 setExpandedYPos(window.scrollY);
@@ -114,12 +116,12 @@ export default function LivestreamSection(props: Props) {
         )}
 
         {liveTilesOverLimit && liveSection === SECTION.EXPANDED && (
-          <div className="upcoming-list__view-more">
+          <div className={CLAIM_GRID_VIEW_MORE_CLASS}>
             <Button
               label={__('Show fewer livestreams')}
               button="link"
               iconRight={ICONS.UP}
-              className="claim-grid__title--secondary"
+              className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
               onClick={collapseSection}
             />
           </div>
@@ -144,12 +146,12 @@ export default function LivestreamSection(props: Props) {
       />
 
       {liveTilesOverLimit && liveSection === SECTION.COLLAPSED && (
-        <div className="upcoming-list__view-more">
+        <div className={CLAIM_GRID_VIEW_MORE_CLASS}>
           <Button
             label={__('Show more livestreams')}
             button="link"
             iconRight={ICONS.DOWN}
-            className="claim-grid__title--secondary"
+            className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
             onClick={() => {
               dispatch(doFetchAllActiveLivestreamsForQuery());
               setExpandedYPos(window.scrollY);
@@ -160,12 +162,12 @@ export default function LivestreamSection(props: Props) {
       )}
 
       {liveTilesOverLimit && liveSection === SECTION.EXPANDED && (
-        <div className="upcoming-list__view-more">
+        <div className={CLAIM_GRID_VIEW_MORE_CLASS}>
           <Button
             label={__('Show fewer livestreams')}
             button="link"
             iconRight={ICONS.UP}
-            className="claim-grid__title--secondary"
+            className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
             onClick={collapseSection}
           />
         </div>

@@ -1,5 +1,4 @@
 import React from 'react';
-import 'scss/component/_view_count.scss';
 import * as PAGES from 'constants/pages';
 import { toCompactNotation } from 'util/string';
 import { useAppSelector } from 'redux/hooks';
@@ -7,6 +6,7 @@ import { selectClaimForUri } from 'redux/selectors/claims';
 import { selectViewCountForUri } from 'lbryinc';
 import { selectLanguage } from 'redux/selectors/settings';
 import { selectState as selectUserState } from 'redux/selectors/user';
+import { FILE_VIEW_COUNT_CLASS } from './classes';
 type Props = {
   uri: string;
   isLivestream?: boolean;
@@ -43,7 +43,7 @@ function FileViewCountInline(props: Props) {
   }
 
   return (
-    <span className="view_count">
+    <span className={FILE_VIEW_COUNT_CLASS}>
       {viewCount !== 1
         ? __('%view_count% views', {
             view_count: formattedViewCount,

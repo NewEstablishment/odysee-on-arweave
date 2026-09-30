@@ -4,7 +4,6 @@ import { useLocation } from 'react-router-dom';
 import { buildHyperbeamPlaybackUrl } from 'util/hyperbeam-playback';
 import { fetchHyperbeamStreamVerification, hyperbeamStoreReadPath } from 'util/hyperbeam';
 import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
-import './style.lazy.scss';
 
 const TIMEOUT_MS = 8000;
 const BODY_PREVIEW_LIMIT = 512 * 1024;
@@ -70,6 +69,65 @@ type SignatureInput = {
   tag?: string;
   nativeId?: string;
 };
+
+const DEBUG_ROOT_CLASS =
+  'tw:fixed tw:right-[12px] tw:bottom-[12px] tw:z-[2147483647] tw:flex tw:flex-col tw:overflow-hidden tw:rounded-[8px] tw:border tw:border-[rgba(92,109,133,0.62)] tw:bg-[rgba(20,24,32,0.98)] tw:text-[#e6edf7] tw:[box-shadow:0_18px_60px_rgba(0,0,0,0.58),0_0_0_1px_rgba(255,255,255,0.04)] tw:[font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] tw:[font-size:13px] tw:leading-[1.45] tw:[@media(max-width:760px)]:right-[8px] tw:[@media(max-width:760px)]:bottom-[8px]';
+const DEBUG_ROOT_OPEN_CLASS =
+  'tw:w-[min(820px,calc(100vw-24px))] tw:max-h-[74vh] tw:[@media(max-width:760px)]:w-[calc(100vw-16px)] tw:[@media(max-width:760px)]:max-h-[72vh]';
+const DEBUG_ROOT_CLOSED_CLASS =
+  'tw:w-[min(440px,calc(100vw-24px))] tw:max-h-none tw:[@media(max-width:760px)]:w-[calc(100vw-16px)] tw:[@media(max-width:760px)]:max-h-[72vh]';
+const DEBUG_TOPBAR_CLASS =
+  'tw:flex tw:min-h-[44px] tw:items-center tw:gap-[10px] tw:[border-bottom:1px_solid_rgba(255,255,255,0.08)] tw:bg-[#0f131a]';
+const DEBUG_TOGGLE_CLASS =
+  'tw:min-w-0 tw:flex-1 tw:cursor-pointer tw:![border:0] tw:bg-transparent tw:px-[12px] tw:py-[9px] tw:text-left tw:text-[#f8fafc] tw:[font-family:inherit] tw:[font-size:13px] tw:[font-style:inherit] tw:[font-variant:inherit] tw:font-normal tw:leading-[1.45]';
+const DEBUG_TOOL_BUTTON_CLASS =
+  'tw:flex-[0_0_auto] tw:cursor-pointer tw:rounded-[5px] tw:border tw:border-[rgba(148,163,184,0.36)] tw:bg-[rgba(30,41,59,0.72)] tw:text-[#e6edf7] tw:[font-family:inherit] tw:[font-size:12px] tw:[font-style:inherit] tw:[font-variant:inherit] tw:leading-[1.45]';
+const DEBUG_STEP_CLASS =
+  'tw:group/debug-step tw:rounded-[7px] tw:border tw:border-[rgba(101,119,145,0.52)] tw:[border-left-width:5px] tw:bg-[#1b2029]';
+const DEBUG_SUMMARY_CLASS =
+  "tw:relative tw:grid tw:cursor-pointer tw:list-none tw:[list-style-position:outside] tw:grid-cols-[auto_minmax(0,1fr)_auto] tw:[align-items:start] tw:gap-[10px] tw:px-[16px] tw:py-[12px] tw:before:text-[#94a3b8] tw:before:content-['>'] tw:[&::-webkit-details-marker]:hidden tw:group-open/debug-step:before:content-['v'] tw:[@media(max-width:760px)]:grid-cols-[auto_minmax(0,1fr)]";
+const DEBUG_STEP_STRONG_CLASS =
+  'tw:flex-[0_0_auto] tw:rounded-[9999px] tw:px-[10px] tw:py-[3px] tw:[font-size:12px] tw:font-extrabold tw:leading-[1.2] tw:lowercase';
+const DEBUG_COMMITMENT_STRONG_CLASS =
+  'tw:flex-[0_0_auto] tw:rounded-[9999px] tw:px-[10px] tw:py-[3px] tw:[font-size:13px] tw:font-extrabold tw:leading-[1.2] tw:lowercase tw:text-[#f8fafc]';
+const DEBUG_STATUS_CLASS = `${DEBUG_STEP_STRONG_CLASS} tw:[@media(max-width:760px)]:col-[2/3] tw:[@media(max-width:760px)]:[justify-self:start]`;
+const DEBUG_STEP_VARIANT_CLASSES: Record<Step['statusKind'], string> = {
+  error: 'tw:[border-left-color:#ef4444]',
+  ok: 'tw:[border-left-color:#2ebd62]',
+  pending: 'tw:[border-left-color:#64748b]',
+  trusted: 'tw:[border-left-color:#d69e2e]',
+  warn: 'tw:[border-left-color:#d69e2e]',
+};
+const DEBUG_STATUS_VARIANT_CLASSES: Record<Step['statusKind'], string> = {
+  error: 'tw:bg-[rgba(127,29,29,0.5)] tw:text-[#fecaca]',
+  ok: 'tw:bg-[rgba(22,101,52,0.42)] tw:text-[#7ee787]',
+  pending: 'tw:bg-[rgba(71,85,105,0.42)] tw:text-[#cbd5e1]',
+  trusted: 'tw:bg-[rgba(146,64,14,0.42)] tw:text-[#f7c948]',
+  warn: 'tw:bg-[rgba(146,64,14,0.42)] tw:text-[#f7c948]',
+};
+const DEBUG_STATUS_BACKGROUND_CLASSES: Record<Step['statusKind'], string> = {
+  error: 'tw:bg-[rgba(127,29,29,0.5)]',
+  ok: 'tw:bg-[rgba(22,101,52,0.42)]',
+  pending: 'tw:bg-[rgba(71,85,105,0.42)]',
+  trusted: 'tw:bg-[rgba(146,64,14,0.42)]',
+  warn: 'tw:bg-[rgba(146,64,14,0.42)]',
+};
+const DEBUG_REQUEST_VARIANT_CLASSES = {
+  error: 'tw:border-[rgba(239,68,68,0.7)]',
+  locator: 'tw:border-[rgba(214,158,46,0.5)]',
+  media: 'tw:border-[rgba(103,183,255,0.42)]',
+  playback: 'tw:border-[rgba(103,183,255,0.42)]',
+  source: 'tw:border-[rgba(46,189,98,0.52)]',
+} as const;
+const DEBUG_COMMITMENT_VARIANT_CLASSES = {
+  derived: 'tw:[border-left-color:#94a3b8]',
+  node: 'tw:[border-left-color:#67b7ff]',
+  source: 'tw:[border-left-color:#2ebd62] tw:bg-[rgba(20,83,45,0.22)]',
+} as const;
+
+function debugRootClass(open: boolean): string {
+  return `${DEBUG_ROOT_CLASS} ${open ? DEBUG_ROOT_OPEN_CLASS : DEBUG_ROOT_CLOSED_CLASS}`;
+}
 
 export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Props) {
   const { search } = useLocation();
@@ -211,11 +269,7 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
 
   if (protectedPlayback) {
     return renderDebugPortal(
-      <section
-        className={`hyperbeam-debug ${open ? 'hyperbeam-debug--open' : 'hyperbeam-debug--closed'}`}
-        role="dialog"
-        aria-label={__('HyperBEAM playback trace')}
-      >
+      <section className={debugRootClass(open)} role="dialog" aria-label={__('HyperBEAM playback trace')}>
         <DebugTopbar
           copied={copied}
           open={open}
@@ -226,7 +280,7 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
         />
 
         {open && (
-          <div className="hyperbeam-debug__body">
+          <div className="tw:min-h-0 tw:overflow-auto tw:p-[16px] tw:[@media(max-width:760px)]:p-[10px]">
             <DebugHeader status={__('skipped')} />
             <StepCard
               step={{
@@ -447,11 +501,7 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
   ];
 
   return renderDebugPortal(
-    <section
-      className={`hyperbeam-debug ${open ? 'hyperbeam-debug--open' : 'hyperbeam-debug--closed'}`}
-      role="dialog"
-      aria-label={__('HyperBEAM playback trace')}
-    >
+    <section className={debugRootClass(open)} role="dialog" aria-label={__('HyperBEAM playback trace')}>
       <DebugTopbar
         copied={copied}
         open={open}
@@ -468,17 +518,17 @@ export default function HyperbeamPlaybackDebug({ uri, claim, accessStatus }: Pro
       />
 
       {open && (
-        <div className="hyperbeam-debug__body">
+        <div className="tw:min-h-0 tw:overflow-auto tw:p-[16px] tw:[@media(max-width:760px)]:p-[10px]">
           <DebugHeader status={state.loading ? __('loading') : mediaUrl ? __('ready') : __('waiting')} />
 
           {state.verificationError && (
-            <div className="hyperbeam-debug__notice hyperbeam-debug__notice--error">
+            <div className="tw:mb-[12px] tw:grid tw:gap-[3px] tw:rounded-[6px] tw:border tw:border-[rgba(239,68,68,0.38)] tw:bg-[rgba(127,29,29,0.28)] tw:px-[12px] tw:py-[10px] tw:text-[#fecaca]">
               <strong>{__('verification request failed')}</strong>
               <span>{state.verificationError}</span>
             </div>
           )}
 
-          <div className="hyperbeam-debug__steps">
+          <div className="tw:grid tw:gap-[10px]">
             {steps.map((step, index) => (
               <StepCard index={index} key={step.title} step={step} />
             ))}
@@ -505,18 +555,26 @@ function DebugTopbar({
   onToggle: () => void;
 }) {
   return (
-    <div className="hyperbeam-debug__topbar">
-      <button className="hyperbeam-debug__toggle" type="button" onClick={onToggle}>
-        <span>{open ? __('HyperBEAM playback trace hide') : __('HyperBEAM playback trace show')}</span>
-        <small>{subtitle}</small>
+    <div className={DEBUG_TOPBAR_CLASS}>
+      <button className={DEBUG_TOGGLE_CLASS} type="button" onClick={onToggle}>
+        <span className="tw:block tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:font-extrabold">
+          {open ? __('HyperBEAM playback trace hide') : __('HyperBEAM playback trace show')}
+        </span>
+        <small className="tw:mt-[1px] tw:block tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[#8995a8]">
+          {subtitle}
+        </small>
       </button>
       {open && (
-        <button className="hyperbeam-debug__copy" type="button" onClick={onCopy}>
+        <button
+          className={`${DEBUG_TOOL_BUTTON_CLASS} tw:px-[10px] tw:py-[5px] tw:font-bold`}
+          type="button"
+          onClick={onCopy}
+        >
           {copied ? __('copied') : __('copy json')}
         </button>
       )}
       <button
-        className="hyperbeam-debug__close"
+        className={`${DEBUG_TOOL_BUTTON_CLASS} tw:mr-[10px] tw:px-[9px] tw:py-[5px] tw:font-black tw:leading-none`}
         type="button"
         title={__('Close HyperBEAM playback trace')}
         onClick={(event) => {
@@ -536,41 +594,69 @@ function renderDebugPortal(content: React.ReactNode) {
 
 function DebugHeader({ status }: { status: string }) {
   return (
-    <div className="hyperbeam-debug__header">
+    <div className="tw:mb-[14px] tw:flex tw:items-start tw:justify-between tw:gap-[16px] tw:[@media(max-width:760px)]:flex-col">
       <div>
-        <div className="hyperbeam-debug__eyebrow">{__('HyperBEAM proof path')}</div>
-        <h2>{__('Name to bytes')}</h2>
-        <p>{__('Public Odysee locator -> native source objects -> signed byte-range media response.')}</p>
+        <div className="tw:mb-[4px] tw:[font-size:11px] tw:font-extrabold tw:text-[#8ea0b8] tw:uppercase">
+          {__('HyperBEAM proof path')}
+        </div>
+        <h2 className="tw:m-0 tw:[font-size:22px] tw:leading-[1.2] tw:text-[#f8fafc]">{__('Name to bytes')}</h2>
+        <p className="tw:mt-[5px] tw:mr-0 tw:mb-0 tw:ml-0 tw:text-[#93a0b3]">
+          {__('Public Odysee locator -> native source objects -> signed byte-range media response.')}
+        </p>
       </div>
-      <code>{status}</code>
+      <code className="tw:flex-[0_0_auto] tw:rounded-[9999px] tw:bg-[rgba(22,101,52,0.42)] tw:px-[10px] tw:py-[4px] tw:[font-size:12px] tw:font-extrabold tw:text-[#7ee787]">
+        {status}
+      </code>
     </div>
   );
 }
 
 function StepCard({ index, step }: { index: number; step: Step }) {
   return (
-    <details className={`hyperbeam-debug__step hyperbeam-debug__step--${step.statusKind}`} open>
-      <summary>
-        <span className="hyperbeam-debug__step-title">{`${index + 1}. ${step.title}`}</span>
-        <span className="hyperbeam-debug__step-subtitle">{step.subtitle}</span>
-        <strong>{step.status}</strong>
+    <details className={`${DEBUG_STEP_CLASS} ${DEBUG_STEP_VARIANT_CLASSES[step.statusKind]}`} open>
+      <summary className={DEBUG_SUMMARY_CLASS}>
+        <span className="tw:[font-size:18px] tw:font-extrabold tw:leading-[1.2] tw:text-[#eef4ff]">{`${index + 1}. ${step.title}`}</span>
+        <span className="tw:col-[2/3] tw:mt-[-2px] tw:text-[#8f9bad] tw:[overflow-wrap:anywhere]">{step.subtitle}</span>
+        <strong className={`${DEBUG_STATUS_CLASS} ${DEBUG_STATUS_VARIANT_CLASSES[step.statusKind]}`}>
+          {step.status}
+        </strong>
       </summary>
 
       {(step.question || step.explanation || step.catchText) && (
-        <div className="hyperbeam-debug__explain">
-          {step.question && <h3>{step.question}</h3>}
-          {step.explanation && <p>{step.explanation}</p>}
-          {step.catchText && <p className="hyperbeam-debug__catch">{step.catchText}</p>}
+        <div className="tw:mt-0 tw:mr-[16px] tw:mb-[12px] tw:ml-[16px] tw:[border-top:1px_solid_rgba(148,163,184,0.18)] tw:pt-[14px]">
+          {step.question && (
+            <h3 className="tw:mt-0 tw:mr-0 tw:mb-[8px] tw:ml-0 tw:[font-size:16px] tw:font-black tw:text-[#67b7ff] tw:italic">
+              {step.question}
+            </h3>
+          )}
+          {step.explanation && (
+            <p className="tw:m-0 tw:max-w-[920px] tw:[font-size:14px] tw:text-[#e1e7ef]">{step.explanation}</p>
+          )}
+          {step.catchText && (
+            <p
+              className={`tw:mb-0 tw:max-w-[920px] tw:[font-size:14px] tw:!text-[#f2b632] ${
+                step.explanation ? 'tw:mt-[10px]' : 'tw:mt-0'
+              }`}
+            >
+              {step.catchText}
+            </p>
+          )}
         </div>
       )}
 
       {step.proofRows && <ProofRows rows={step.proofRows} />}
 
       {step.requests && step.requests.length > 0 && (
-        <div className="hyperbeam-debug__request-list">
-          <div className="hyperbeam-debug__section-label">{__('requests')}</div>
+        <div className="tw:mt-0 tw:mr-[16px] tw:mb-[12px] tw:ml-[16px] tw:grid tw:gap-[8px]">
+          <div className="tw:mt-0 tw:mr-0 tw:mb-[5px] tw:ml-0 tw:[font-size:12px] tw:font-extrabold tw:text-[#9aa8bc] tw:lowercase">
+            {__('requests')}
+          </div>
           {step.requests.map((request) => (
-            <RequestBlock key={`${request.kind}:${request.method}:${request.url}`} request={request} />
+            <RequestBlock
+              key={`${request.kind}:${request.method}:${request.url}`}
+              request={request}
+              statusKind={step.statusKind}
+            />
           ))}
         </div>
       )}
@@ -583,13 +669,15 @@ function ProofRows({ rows }: { rows: Array<[string, string | number | boolean | 
   if (visibleRows.length === 0) return null;
 
   return (
-    <div className="hyperbeam-debug__proof">
-      <div className="hyperbeam-debug__section-label">{__('proof')}</div>
-      <dl>
+    <div className="tw:mt-0 tw:mr-[16px] tw:mb-[12px] tw:ml-[16px]">
+      <div className="tw:mt-0 tw:mr-0 tw:mb-[5px] tw:ml-0 tw:[font-size:12px] tw:font-extrabold tw:text-[#9aa8bc] tw:lowercase">
+        {__('proof')}
+      </div>
+      <dl className="tw:m-0 tw:grid tw:grid-cols-[minmax(150px,0.22fr)_1fr] tw:gap-x-[12px] tw:gap-y-[7px] tw:rounded-[6px] tw:bg-[#0d1219] tw:p-[14px] tw:[@media(max-width:760px)]:grid-cols-[1fr]">
         {visibleRows.map(([label, value]) => (
           <React.Fragment key={label}>
-            <dt>{label}</dt>
-            <dd>{String(value)}</dd>
+            <dt className="tw:font-extrabold tw:text-[#8f9bad]">{label}</dt>
+            <dd className="tw:m-0 tw:min-w-0 tw:text-[#e8edf5] tw:[overflow-wrap:anywhere]">{String(value)}</dd>
           </React.Fragment>
         ))}
       </dl>
@@ -597,21 +685,28 @@ function ProofRows({ rows }: { rows: Array<[string, string | number | boolean | 
   );
 }
 
-function RequestBlock({ request }: { request: DebugRequest }) {
+function RequestBlock({ request, statusKind }: { request: DebugRequest; statusKind: Step['statusKind'] }) {
   const commitments = commitmentsFromRequest(request);
   const rawSignatureInput = request.headers['signature-input'];
+  const requestKind = (
+    request.error || (request.status && request.status >= 400) ? 'error' : request.kind.toLowerCase()
+  ) as keyof typeof DEBUG_REQUEST_VARIANT_CLASSES;
 
   return (
     <div
-      className={`hyperbeam-debug__request hyperbeam-debug__request--${
-        request.error || (request.status && request.status >= 400) ? 'error' : request.kind.toLowerCase()
+      className={`tw:grid tw:gap-[9px] tw:rounded-[6px] tw:border tw:bg-[#0d1219] tw:px-[12px] tw:py-[11px] ${
+        DEBUG_REQUEST_VARIANT_CLASSES[requestKind]
       }`}
     >
-      <div className="hyperbeam-debug__request-line">
-        <span className="hyperbeam-debug__request-kind">{request.kind}</span>
-        <strong>{request.method}</strong>
-        <code>{request.path}</code>
-        <span>
+      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-[8px] tw:text-[#dce6f4] tw:[@media(max-width:760px)]:flex-col tw:[@media(max-width:760px)]:items-start">
+        <span className="tw:rounded-[9999px] tw:bg-[rgba(46,189,98,0.2)] tw:px-[8px] tw:py-[2px] tw:[font-size:11px] tw:font-black tw:text-[#7ee787]">
+          {request.kind}
+        </span>
+        <strong className={`${DEBUG_STEP_STRONG_CLASS} ${DEBUG_STATUS_VARIANT_CLASSES[statusKind]}`}>
+          {request.method}
+        </strong>
+        <code className="tw:min-w-0 tw:text-[#f8fafc] tw:[overflow-wrap:anywhere]">{request.path}</code>
+        <span className="tw:text-[#cbd5e1]">
           {request.error
             ? `failed (${request.error})`
             : `-> ${request.status || 'pending'} (${request.elapsedMs || 0}ms)`}
@@ -619,40 +714,69 @@ function RequestBlock({ request }: { request: DebugRequest }) {
       </div>
 
       {request.bodyBytes !== undefined && (
-        <p className="hyperbeam-debug__request-note">{`${__('body')}: ${formatBytes(request.bodyBytes)}`}</p>
+        <p className="tw:m-0 tw:text-[#8f9bad]">{`${__('body')}: ${formatBytes(request.bodyBytes)}`}</p>
       )}
 
       {commitments.length > 0 && (
-        <div className="hyperbeam-debug__commitments">
+        <div className="tw:grid tw:gap-[8px]">
           {commitments.map((commitment) => (
-            <CommitmentCard commitment={commitment} kind={request.kind} key={`${request.url}:${commitment.label}`} />
+            <CommitmentCard
+              commitment={commitment}
+              kind={request.kind}
+              key={`${request.url}:${commitment.label}`}
+              statusKind={statusKind}
+            />
           ))}
         </div>
       )}
 
       {rawSignatureInput && (
-        <details className="hyperbeam-debug__raw">
-          <summary>{__('raw signature-input header')}</summary>
-          <code>{rawSignatureInput}</code>
+        <details className="tw:text-[#8f9bad]">
+          <summary className={DEBUG_SUMMARY_CLASS}>{__('raw signature-input header')}</summary>
+          <code className="tw:mt-[7px] tw:block tw:max-h-[120px] tw:overflow-auto tw:rounded-[6px] tw:bg-[#070b11] tw:p-[10px] tw:whitespace-pre-wrap tw:text-[#eef4ff] tw:[overflow-wrap:anywhere]">
+            {rawSignatureInput}
+          </code>
         </details>
       )}
     </div>
   );
 }
 
-function CommitmentCard({ commitment, kind }: { commitment: SignatureInput; kind: DebugRequestKind }) {
+function CommitmentCard({
+  commitment,
+  kind,
+  statusKind,
+}: {
+  commitment: SignatureInput;
+  kind: DebugRequestKind;
+  statusKind: Step['statusKind'];
+}) {
   const cardKind = commitmentKind(commitment, kind);
 
   return (
-    <div className={`hyperbeam-debug__commitment hyperbeam-debug__commitment--${cardKind}`}>
-      <div className="hyperbeam-debug__commitment-heading">
-        <span>{commitmentLabel(cardKind)}</span>
-        {commitment.alg && <strong>{`alg="${commitment.alg}"`}</strong>}
+    <div
+      className={`tw:grid tw:gap-[5px] tw:rounded-[6px] tw:border tw:border-[rgba(71,85,105,0.82)] tw:[border-left-width:5px] tw:bg-[rgba(15,23,42,0.78)] tw:px-[12px] tw:py-[10px] ${DEBUG_COMMITMENT_VARIANT_CLASSES[cardKind]}`}
+    >
+      <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-[10px]">
+        <span className="tw:rounded-[9999px] tw:bg-[rgba(103,183,255,0.16)] tw:px-[9px] tw:py-[2px] tw:font-black tw:text-[#67b7ff]">
+          {commitmentLabel(cardKind)}
+        </span>
+        {commitment.alg && (
+          <strong className={`${DEBUG_COMMITMENT_STRONG_CLASS} ${DEBUG_STATUS_BACKGROUND_CLASSES[statusKind]}`}>
+            {`alg="${commitment.alg}"`}
+          </strong>
+        )}
       </div>
-      {commitment.keyid && <p>{`${__('keyid')}: ${shorten(commitment.keyid, 86)}`}</p>}
-      {commitment.nativeId && <p>{`${__('native-id')}: ${commitment.nativeId}`}</p>}
-      {commitment.covered.length > 0 && <p>{`${__('covers')}: ${commitment.covered.join(', ')}`}</p>}
-      <p>{`${__('commitment label')}: ${commitment.label}`}</p>
+      {commitment.keyid && (
+        <p className="tw:m-0 tw:text-[#9eabbc] tw:[overflow-wrap:anywhere]">{`${__('keyid')}: ${shorten(commitment.keyid, 86)}`}</p>
+      )}
+      {commitment.nativeId && (
+        <p className="tw:m-0 tw:text-[#9eabbc] tw:[overflow-wrap:anywhere]">{`${__('native-id')}: ${commitment.nativeId}`}</p>
+      )}
+      {commitment.covered.length > 0 && (
+        <p className="tw:m-0 tw:text-[#9eabbc] tw:[overflow-wrap:anywhere]">{`${__('covers')}: ${commitment.covered.join(', ')}`}</p>
+      )}
+      <p className="tw:m-0 tw:text-[#9eabbc] tw:[overflow-wrap:anywhere]">{`${__('commitment label')}: ${commitment.label}`}</p>
     </div>
   );
 }

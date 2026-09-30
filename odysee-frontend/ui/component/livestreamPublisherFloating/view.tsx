@@ -26,7 +26,7 @@ import { doToast } from 'redux/actions/notifications';
 import { platform } from 'util/platform';
 import describeUnknown from 'util/describeUnknown';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
-import './style.scss';
+import { LIVESTREAM_PUBLISHER_FLOATING_CLASSES as C } from './classes';
 
 function formatResolutionLabel(resolution: string | null): string | null {
   if (!resolution) return null;
@@ -318,17 +318,17 @@ export default function LivestreamPublisherFloating() {
     const isLive = status === 'live';
     return (
       <>
-        <div className="livestream-floating-pill">
+        <div className={C.pill}>
           {isLive && (
-            <span className="livestream-floating-pill__badge livestream-floating-pill__badge--live">
-              <span className="livestream-floating-pill__dot" />
+            <span className={`${C.pillBadge} ${C.pillBadgeLive}`}>
+              <span className={C.pillDot} />
               {__('LIVE')}
             </span>
           )}
-          {status === 'connecting' && <span className="livestream-floating-pill__badge">{__('CONNECTING')}</span>}
+          {status === 'connecting' && <span className={C.pillBadge}>{__('CONNECTING')}</span>}
 
           {isLive && totalViewers > 0 && (
-            <span className="livestream-floating-pill__meta">
+            <span className={C.pillMeta}>
               <svg
                 width="10"
                 height="10"
@@ -345,14 +345,12 @@ export default function LivestreamPublisherFloating() {
               {totalViewers}
             </span>
           )}
-          {resolutionLabel && <span className="livestream-floating-pill__meta">{resolutionLabel}</span>}
-          {!isMobile && isLive && fpsLabel && <span className="livestream-floating-pill__meta">{fpsLabel}</span>}
-          {!isMobile && isLive && throughputLabel && (
-            <span className="livestream-floating-pill__meta">{throughputLabel}</span>
-          )}
+          {resolutionLabel && <span className={C.pillMeta}>{resolutionLabel}</span>}
+          {!isMobile && isLive && fpsLabel && <span className={C.pillMeta}>{fpsLabel}</span>}
+          {!isMobile && isLive && throughputLabel && <span className={C.pillMeta}>{throughputLabel}</span>}
 
           <button
-            className="livestream-floating-pill__btn"
+            className={C.pillButton}
             onClick={() => navigate(`/$/${PAGES.LIVESTREAM}`)}
             title={__('Go to stream page')}
           >
@@ -373,7 +371,7 @@ export default function LivestreamPublisherFloating() {
           </button>
 
           <button
-            className="livestream-floating-pill__btn"
+            className={C.pillButton}
             onClick={() => actions.setFloatingPreviewEnabled(true)}
             title={__('Show preview')}
           >
@@ -394,7 +392,7 @@ export default function LivestreamPublisherFloating() {
 
           {(isLive || status === 'connecting') && (
             <button
-              className="livestream-floating-pill__btn livestream-floating-pill__btn--stop"
+              className={`${C.pillButton} ${C.pillButtonStop}`}
               onClick={() => setShowStopConfirm(true)}
               title={__('End stream')}
             >
@@ -406,7 +404,7 @@ export default function LivestreamPublisherFloating() {
 
           {status === 'preview' && (
             <button
-              className="livestream-floating-pill__btn livestream-floating-pill__btn--close"
+              className={`${C.pillButton} ${C.pillButtonClose}`}
               onClick={() => actions.stopStream()}
               title={__('Close preview')}
             >
@@ -428,7 +426,7 @@ export default function LivestreamPublisherFloating() {
 
           {status === 'preview' && (
             <button
-              className="livestream-floating-pill__btn livestream-floating-pill__btn--go-live"
+              className={`${C.pillButton} ${C.pillButtonGoLive}`}
               onClick={() => void handleGoLiveFromPreview()}
               disabled={!canStartFromPreview}
               title={canStartFromPreview ? __('Go live') : __('Select an approved stream claim to go live')}
@@ -440,18 +438,15 @@ export default function LivestreamPublisherFloating() {
         </div>
 
         {showStopConfirm && (
-          <div className="livestream-floating-stop-confirm" onClick={() => setShowStopConfirm(false)}>
-            <div className="livestream-floating-stop-confirm__card" onClick={(e) => e.stopPropagation()}>
-              <p>{__('Are you sure you want to end the stream?')}</p>
-              <div className="livestream-floating-stop-confirm__actions">
-                <button
-                  className="livestream-floating-stop-confirm__btn livestream-floating-stop-confirm__btn--cancel"
-                  onClick={() => setShowStopConfirm(false)}
-                >
+          <div className={C.confirm} onClick={() => setShowStopConfirm(false)}>
+            <div className={C.confirmCard} onClick={(e) => e.stopPropagation()}>
+              <p className={C.confirmText}>{__('Are you sure you want to end the stream?')}</p>
+              <div className={C.confirmActions}>
+                <button className={`${C.confirmButton} ${C.confirmCancel}`} onClick={() => setShowStopConfirm(false)}>
                   {__('Cancel')}
                 </button>
                 <button
-                  className="livestream-floating-stop-confirm__btn livestream-floating-stop-confirm__btn--stop"
+                  className={`${C.confirmButton} ${C.confirmStop}`}
                   onClick={() => {
                     setShowStopConfirm(false);
                     actions.stopStream({
@@ -485,20 +480,16 @@ export default function LivestreamPublisherFloating() {
   return (
     <div
       ref={floatingRef}
-      className={classnames('livestream-floating', {
-        'livestream-floating--live': isLive,
+      className={classnames(C.root, {
+        [C.rootLive]: isLive,
       })}
       style={posStyle}
     >
-      <div className="livestream-floating__inner">
-        <video ref={videoRef} className="livestream-floating__video" playsInline muted autoPlay />
+      <div className={C.inner}>
+        <video ref={videoRef} className={C.video} playsInline muted autoPlay />
 
         {status === 'preview' && (
-          <button
-            className="livestream-floating__close"
-            onClick={() => actions.stopStream()}
-            title={__('Close preview')}
-          >
+          <button className={C.close} onClick={() => actions.stopStream()} title={__('Close preview')}>
             <svg
               width="16"
               height="16"
@@ -515,10 +506,10 @@ export default function LivestreamPublisherFloating() {
           </button>
         )}
 
-        <div className="livestream-floating__overlay">
-          <div className="livestream-floating__bottom-bar">
+        <div className={C.overlay}>
+          <div className={`${C.bar} ${C.bottomBar}`}>
             {isLive && totalViewers > 0 && (
-              <span className="livestream-floating__meta">
+              <span className={C.meta}>
                 <svg
                   width="9"
                   height="9"
@@ -536,34 +527,34 @@ export default function LivestreamPublisherFloating() {
               </span>
             )}
             {isLive && throughputLabel ? (
-              <span className="livestream-floating__meta">{throughputLabel}</span>
+              <span className={C.meta}>{throughputLabel}</span>
             ) : videoBitrateKbps != null && videoBitrateKbps > 0 ? (
-              <span className="livestream-floating__meta">
+              <span className={C.meta}>
                 {videoBitrateKbps >= 1000
                   ? `${(videoBitrateKbps / 1000).toFixed(1)} Mbps`
                   : `${Math.round(videoBitrateKbps)} kbps`}
               </span>
             ) : null}
-            {resolutionLabel && <span className="livestream-floating__meta">{resolutionLabel}</span>}
-            {fpsLabel && <span className="livestream-floating__meta">{fpsLabel}</span>}
+            {resolutionLabel && <span className={C.meta}>{resolutionLabel}</span>}
+            {fpsLabel && <span className={C.meta}>{fpsLabel}</span>}
           </div>
         </div>
       </div>
 
       {/* Info bar below video - title + stats + actions */}
       {showInfoBar && (
-        <div className="livestream-floating__info-bar">
+        <div className={C.infoBar}>
           <button
-            className="livestream-floating__info-title"
+            className={C.infoTitle}
             onClick={() => claimNavigateUrl && navigate(claimNavigateUrl)}
             title={claimTitle || undefined}
             disabled={!claimNavigateUrl}
           >
             {infoTitle}
           </button>
-          <div className="livestream-floating__info-actions">
+          <div className={C.infoActions}>
             <button
-              className="livestream-floating__control-btn"
+              className={C.controlButton}
               onClick={() => navigate(`/$/${PAGES.LIVESTREAM}`)}
               title={__('Go to stream page')}
             >
@@ -584,7 +575,7 @@ export default function LivestreamPublisherFloating() {
             </button>
 
             <button
-              className="livestream-floating__control-btn"
+              className={C.controlButton}
               onClick={() => actions.setFloatingPreviewEnabled(false)}
               title={__('Minimize to pill')}
             >
@@ -604,26 +595,26 @@ export default function LivestreamPublisherFloating() {
 
             {(isLive || status === 'connecting') && (
               <button
-                className="livestream-floating__control-btn livestream-floating__control-btn--stop livestream-floating__control-btn--wide"
+                className={`${C.controlButton} ${C.controlStop} ${C.controlWide}`}
                 onClick={() => setShowStopConfirm(true)}
                 title={__('End stream')}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <rect x="4" y="4" width="16" height="16" rx="2" />
                 </svg>
-                <span className="livestream-floating__control-btn-label">{__('Stop Stream')}</span>
+                <span className={C.controlLabel}>{__('Stop Stream')}</span>
               </button>
             )}
 
             {status === 'preview' && (
               <button
-                className="livestream-floating__control-btn livestream-floating__control-btn--primary livestream-floating__control-btn--wide"
+                className={`${C.controlButton} ${C.controlPrimary} ${C.controlWide}`}
                 onClick={() => void handleGoLiveFromPreview()}
                 title={canStartFromPreview ? __('Go live') : __('Select an approved stream claim to go live')}
                 disabled={!canStartFromPreview}
               >
                 <Icon icon={ICONS.LIVESTREAM} size={14} />
-                <span className="livestream-floating__control-btn-label">{__('Go Live')}</span>
+                <span className={C.controlLabel}>{__('Go Live')}</span>
               </button>
             )}
           </div>
@@ -631,18 +622,15 @@ export default function LivestreamPublisherFloating() {
       )}
 
       {showStopConfirm && (
-        <div className="livestream-floating-stop-confirm" onClick={() => setShowStopConfirm(false)}>
-          <div className="livestream-floating-stop-confirm__card" onClick={(e) => e.stopPropagation()}>
-            <p>{__('Are you sure you want to end the stream?')}</p>
-            <div className="livestream-floating-stop-confirm__actions">
-              <button
-                className="livestream-floating-stop-confirm__btn livestream-floating-stop-confirm__btn--cancel"
-                onClick={() => setShowStopConfirm(false)}
-              >
+        <div className={C.confirm} onClick={() => setShowStopConfirm(false)}>
+          <div className={C.confirmCard} onClick={(e) => e.stopPropagation()}>
+            <p className={C.confirmText}>{__('Are you sure you want to end the stream?')}</p>
+            <div className={C.confirmActions}>
+              <button className={`${C.confirmButton} ${C.confirmCancel}`} onClick={() => setShowStopConfirm(false)}>
                 {__('Cancel')}
               </button>
               <button
-                className="livestream-floating-stop-confirm__btn livestream-floating-stop-confirm__btn--stop"
+                className={`${C.confirmButton} ${C.confirmStop}`}
                 onClick={() => {
                   setShowStopConfirm(false);
                   actions.stopStream({

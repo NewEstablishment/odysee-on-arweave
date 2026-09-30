@@ -4,16 +4,16 @@ import Card from 'component/common/card';
 import ChannelSelector from 'component/channelSelector';
 import { useAppSelector } from 'redux/hooks';
 import { hasLegacyOdyseePremium } from 'redux/selectors/user';
-import './style.scss';
+import { ODYSEE_PREMIUM_CLASSES } from './classes';
 
 const OdyseeMembershipPage = () => {
   const hasOdyseeLegacy = useAppSelector(hasLegacyOdyseePremium);
 
   return (
-    <Page className="premium-wrapper card-stack">
+    <Page className="odysee-premium-page card-stack">
       <Card title={__('Odysee Premium')} subtitle={<ChannelSelector />}>
         <Card
-          className="premium-explanation-text"
+          className={ODYSEE_PREMIUM_CLASSES.explanation}
           title={__('Legacy Odysee Premium Membership')}
           subtitle={
             hasOdyseeLegacy

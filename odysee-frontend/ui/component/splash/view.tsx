@@ -11,6 +11,12 @@ import ModalDownloading from 'modal/modalDownloading';
 import Card from 'component/common/card';
 import I18nMessage from 'component/i18nMessage';
 import 'css-doodle';
+import {
+  SPLASH_ANIMATION_TOGGLE_CLASS,
+  SPLASH_DETAILS_CLASS,
+  SPLASH_DOODLE_CLASS,
+  SPLASH_TITLE_CLASS,
+} from './classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectDaemonVersionMatched, selectModal, selectSplashAnimationEnabled } from 'redux/selectors/app';
 import { doCheckDaemonVersion, doOpenModal, doHideModal, doToggleSplashAnimation } from 'redux/actions/app';
@@ -238,11 +244,11 @@ export default function SplashScreen({ onReadyToLaunch }: Props) {
 
   return (
     <div className="splash">
-      <h1 className="splash__title">LBRY</h1>
-      <div className="splash__details">{details}</div>
+      <h1 className={SPLASH_TITLE_CLASS}>LBRY</h1>
+      <div className={SPLASH_DETAILS_CLASS}>{details}</div>
 
       {!animationHidden && !error && (
-        <css-doodle class="doodle">
+        <css-doodle class={SPLASH_DOODLE_CLASS}>
           {`
             --color: @p(var(--color-primary), var(--color-secondary), var(--color-focus), var(--color-nothing));
             :doodle {
@@ -280,7 +286,7 @@ export default function SplashScreen({ onReadyToLaunch }: Props) {
       )}
       {!error && (
         <Button
-          className="splash__animation-toggle"
+          className={SPLASH_ANIMATION_TOGGLE_CLASS}
           label={!animationHidden ? __('I feel woosy! Stop spinning!') : __('Spin Spin Sugar')}
           onClick={() => toggleSplashAnimation()}
         />

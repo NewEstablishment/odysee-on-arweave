@@ -15,7 +15,8 @@ import { selectPurchaseIsPendingForMembershipId } from 'redux/selectors/membersh
 import { doHideModal } from 'redux/actions/app';
 import { doMembershipBuy } from 'redux/actions/memberships';
 import { doToast } from 'redux/actions/notifications';
-import './style.scss';
+import { MEMBERSHIP_CONFIRM_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 type Props = {
   membership: CreatorMembership;
   price: StripePriceDetails;
@@ -69,7 +70,7 @@ export default function ConfirmOdyseeMembershipPurchase(props: Props) {
 
   return (
     <Modal
-      className="confirm-odysee-premium__modal"
+      className="tw:max-w-[580px]"
       ariaHideApp={false}
       isOpen
       contentLabel={__('Confirm Membership Purchase')}
@@ -77,7 +78,7 @@ export default function ConfirmOdyseeMembershipPurchase(props: Props) {
       onAborted={() => dispatch(doHideModal())}
     >
       <Card
-        className="stripe__confirm-remove-membership"
+        className={MEMBERSHIP_CONFIRM_CLASSES.card}
         title={__('Confirm %plan% Membership', {
           plan,
         })}
@@ -86,13 +87,13 @@ export default function ConfirmOdyseeMembershipPurchase(props: Props) {
             <I18nMessage
               tokens={{
                 time_interval_bold: (
-                  <b className="membership-bolded">
+                  <b className="tw:text-app-text">
                     {__(MEMBERSHIP_CONSTS.INTERVALS[price.recurring.interval].toLowerCase())}
                   </b>
                 ),
                 time_interval: __(MEMBERSHIP_CONSTS.INTERVALS[price.recurring.interval].toLowerCase()),
                 price_bold: (
-                  <b className="membership-bolded">{`${STRIPE.CURRENCY[price.currency.toUpperCase()].symbol}${(price.unit_amount / 100).toFixed(2)}`}</b>
+                  <b className="tw:text-app-text">{`${STRIPE.CURRENCY[price.currency.toUpperCase()].symbol}${(price.unit_amount / 100).toFixed(2)}`}</b>
                 ),
                 plan,
               }}
@@ -103,7 +104,7 @@ export default function ConfirmOdyseeMembershipPurchase(props: Props) {
             {!noChannelsOrIncognitoMode ? (
               <I18nMessage
                 tokens={{
-                  channel_name: <b className="membership-bolded">{activeChannelName}</b>,
+                  channel_name: <b className="tw:text-app-text">{activeChannelName}</b>,
                 }}
               >
                 Your badge will be shown for your %channel_name% channel in all areas of the app, and can be added to
@@ -124,7 +125,7 @@ export default function ConfirmOdyseeMembershipPurchase(props: Props) {
           </>
         }
         actions={
-          <div className="section__actions">
+          <div className={`${SECTION_CLASSES.actions} ${MEMBERSHIP_CONFIRM_CLASSES.actions}`}>
             {!purchasePending ? (
               <>
                 <SubmitPurchaseButton handlePurchase={handlePurchase} />

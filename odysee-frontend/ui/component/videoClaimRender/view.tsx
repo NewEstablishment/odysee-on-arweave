@@ -5,6 +5,7 @@ import { useLocation } from 'react-router-dom';
 import { useAppSelector } from 'redux/hooks';
 import { selectStreamingUrlForUri } from 'redux/selectors/file_info';
 import { makeSelectContentTypeForUri } from 'redux/selectors/claims';
+import { FILE_RENDER_CLASSES } from 'component/viewers/classes';
 
 const VideoViewer = lazyImport(
   () =>
@@ -35,12 +36,15 @@ const VideoRender = (props: Props) => {
     <div
       className={classnames(
         {
-          'file-render': !applyShortsVideoRenderLayout,
-          'file-render--video': true,
-          'file-render--embed': embedded,
+          [FILE_RENDER_CLASSES.base]: !applyShortsVideoRenderLayout,
+          [FILE_RENDER_CLASSES.video]: true,
+          [FILE_RENDER_CLASSES.embed]: embedded,
         },
         className
       )}
+      data-file-render
+      data-file-render-embed={embedded || undefined}
+      data-file-render-video
     >
       <React.Suspense fallback={null}>
         <VideoViewer

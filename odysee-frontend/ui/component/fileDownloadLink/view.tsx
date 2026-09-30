@@ -2,6 +2,7 @@ import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
 import React, { useState } from 'react';
 import Button from 'component/button';
+import { FILE_ACTION_BUTTON_CLASS } from 'component/common/file-action-button-classes';
 import { webDownloadClaim } from 'util/downloadClaim';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectClaimIsMine, selectClaimForUri, selectProtectedContentTagForUri } from 'redux/selectors/claims';
@@ -59,8 +60,8 @@ function FileDownloadLink(props: Props) {
 
     return hideOpenButton ? null : (
       <Button
-        button={buttonType}
-        className={buttonType ? undefined : 'button--file-action'}
+        button={buttonType || 'alt'}
+        className={buttonType ? undefined : FILE_ACTION_BUTTON_CLASS}
         title={openLabel}
         label={showLabel ? openLabel : null}
         icon={ICONS.EXTERNAL}
@@ -87,8 +88,8 @@ function FileDownloadLink(props: Props) {
         </h2>
       )}
       <Button
-        button={buttonType}
-        className={buttonType ? undefined : 'button--file-action'}
+        button={buttonType || 'alt'}
+        className={buttonType ? undefined : FILE_ACTION_BUTTON_CLASS}
         title={label}
         icon={ICONS.DOWNLOAD}
         label={showLabel ? label : null}

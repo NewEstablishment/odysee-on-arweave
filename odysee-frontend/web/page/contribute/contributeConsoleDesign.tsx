@@ -32,6 +32,16 @@ const HELP_LINES = [
   '  links            Quick links',
   '  clear            Clear output',
 ];
+const CONSOLE_ROOT_CLASS =
+  "tw:mx-auto tw:box-border tw:w-full tw:max-w-[1000px] tw:rounded-[0.75rem] tw:border tw:border-app-border tw:bg-app-card tw:p-[1.5rem] tw:text-app-text tw:[font-family:'Fira_Code','Fira_Mono','Consolas',monospace]";
+const PROMPT_ROW_CLASS = 'tw:mt-[1rem] tw:mr-0 tw:mb-[0.3rem] tw:ml-0 tw:flex tw:items-baseline tw:gap-[0.5rem]';
+const CARET_CLASS = 'tw:shrink-0 tw:font-bold tw:text-[rgba(var(--color-primary-dynamic),0.8)] tw:select-none';
+const TEXT_CLASS = 'tw:my-[0.25rem] tw:leading-[1.55]';
+const QUOTE_CLASS =
+  'tw:my-[0.35rem] tw:[border-left:2px_solid_var(--color-border)] tw:pl-[0.5rem] tw:text-app-text-subtitle';
+const REPO_LINK_CLASS =
+  'tw:inline-block tw:rounded-[0.4rem] tw:border tw:border-app-border tw:px-[0.6rem] tw:py-[0.35rem] tw:text-[0.78rem] tw:text-app-text tw:no-underline tw:[transition:background_0.15s] tw:hover:bg-[rgba(var(--color-primary-dynamic),0.08)]';
+const INTERACTIVE_STRONG_CLASS = 'tw:font-semibold tw:text-[rgba(var(--color-primary-dynamic),0.8)]';
 
 function runCommand(rawInput) {
   const input = rawInput.trim().toLowerCase();
@@ -286,99 +296,118 @@ const ContributeConsoleDesign = () => {
   };
 
   return (
-    <div className="contribute-container contribute-console-design">
-      <div className="a43-screen">
-        <div className="a43-line a43-prompt">
-          <span className="a43-caret">$</span>
-          <span className="a43-cmd">cat welcome.md</span>
+    <div className={CONSOLE_ROOT_CLASS}>
+      <div className="tw:p-[1.5rem] tw:text-[0.85rem] tw:leading-[1.65] tw:max-[620px]:p-[1rem] tw:max-[620px]:text-[0.78rem]">
+        <div className={PROMPT_ROW_CLASS}>
+          <span className={CARET_CLASS}>$</span>
+          <span className="tw:font-semibold">cat welcome.md</span>
         </div>
-        <h1 className="a43-title">{CONTRIBUTION_TITLE}</h1>
-        <p className="a43-text">{CONTRIBUTION_INTRO}</p>
-        <p className="a43-text">{CONTRIBUTION_BODY}</p>
+        <h1 className="tw:my-[0.4rem] tw:text-[1.6rem] tw:leading-[1.15] tw:font-bold tw:[font-family:'Geist','DM_Sans','Segoe_UI',sans-serif] tw:max-[620px]:text-[1.3rem]">
+          {CONTRIBUTION_TITLE}
+        </h1>
+        <p className={TEXT_CLASS}>{CONTRIBUTION_INTRO}</p>
+        <p className={TEXT_CLASS}>{CONTRIBUTION_BODY}</p>
 
-        <div className="a43-actions">
+        <div className="tw:mt-[0.8rem] tw:mr-0 tw:mb-[0.4rem] tw:ml-0 tw:flex tw:flex-wrap tw:gap-[0.6rem]">
           <Button button="primary" label='Find "Help Wanted"' href={REPOSITORIES[0].href} />
           <Button button="alt" label="Join Discord" href="https://chat.odysee.com" />
           <Button button="link" label="Read llms.txt" href="https://llms.odysee.com" />
         </div>
 
-        <div className="a43-line a43-prompt">
-          <span className="a43-caret">$</span>
-          <span className="a43-cmd">cat why.md</span>
+        <div className={PROMPT_ROW_CLASS}>
+          <span className={CARET_CLASS}>$</span>
+          <span className="tw:font-semibold">cat why.md</span>
         </div>
         {WHY_POINTS.map((point) => (
-          <p key={point} className="a43-text a43-quote">
+          <p key={point} className={`${TEXT_CLASS} ${QUOTE_CLASS}`}>
             {'> '}
             {point}
           </p>
         ))}
 
-        <div className="a43-line a43-prompt">
-          <span className="a43-caret">$</span>
-          <span className="a43-cmd">ls ./tracks/</span>
+        <div className={PROMPT_ROW_CLASS}>
+          <span className={CARET_CLASS}>$</span>
+          <span className="tw:font-semibold">ls ./tracks/</span>
         </div>
-        <div className="a43-track-list">
+        <div className="tw:my-[0.4rem]">
           {TRACKS.map((track) => (
-            <div key={track.title} className="a43-track-entry">
-              <span className="a43-dir">{track.title.toLowerCase().replace(/\s+/g, '-')}/</span>
-              <span className="a43-desc"> - {track.summary}</span>
-              <ul className="a43-items">
+            <div
+              key={track.title}
+              className="tw:my-[0.5rem] tw:rounded-[0.4rem] tw:border tw:border-app-border tw:bg-[rgba(var(--color-primary-dynamic),0.04)] tw:px-[0.7rem] tw:py-[0.5rem]"
+            >
+              <span className="tw:font-semibold tw:text-[rgba(var(--color-primary-dynamic),0.8)]">
+                {track.title.toLowerCase().replace(/\s+/g, '-')}/
+              </span>
+              <span className="tw:text-app-text-subtitle"> - {track.summary}</span>
+              <ul className="tw:mt-[0.3rem] tw:mr-0 tw:mb-0 tw:ml-0 tw:pl-[1.5rem] tw:text-[0.8rem]">
                 {track.items.map((item) => (
-                  <li key={item}>{item}</li>
+                  <li key={item} className="tw:my-[0.1rem] tw:text-app-text-subtitle">
+                    {item}
+                  </li>
                 ))}
               </ul>
             </div>
           ))}
         </div>
 
-        <div className="a43-line a43-prompt">
-          <span className="a43-caret">$</span>
-          <span className="a43-cmd">cat CONTRIBUTING.md</span>
+        <div className={PROMPT_ROW_CLASS}>
+          <span className={CARET_CLASS}>$</span>
+          <span className="tw:font-semibold">cat CONTRIBUTING.md</span>
         </div>
-        <div className="a43-steps-block">
+        <div>
           {PROCESS_STEPS.map((step, index) => (
-            <p key={step} className="a43-text">
-              <span className="a43-num">{index + 1}.</span> {step}
+            <p key={step} className={TEXT_CLASS}>
+              <span className="tw:font-bold tw:text-[rgba(var(--color-primary-dynamic),0.8)]">{index + 1}.</span> {step}
             </p>
           ))}
         </div>
-        <p className="a43-text a43-note">{QUALITY_NOTE}</p>
+        <p
+          className={`${TEXT_CLASS} tw:mt-[0.6rem] tw:[border-left:2px_solid_rgba(var(--color-primary-dynamic),0.3)] tw:pl-[0.6rem] tw:text-[0.8rem] tw:text-app-text-subtitle`}
+        >
+          {QUALITY_NOTE}
+        </p>
 
-        <div className="a43-line a43-prompt">
-          <span className="a43-caret">$</span>
-          <span className="a43-cmd">cat repos.json | jq '.[]'</span>
+        <div className={PROMPT_ROW_CLASS}>
+          <span className={CARET_CLASS}>$</span>
+          <span className="tw:font-semibold">cat repos.json | jq '.[]'</span>
         </div>
-        <div className="a43-repos">
+        <div className="tw:my-[0.5rem] tw:flex tw:flex-wrap tw:gap-[0.5rem]">
           {REPOSITORIES.map((repo) => (
-            <a key={repo.label} href={repo.href} className="a43-repo">
+            <a key={repo.label} href={repo.href} className={REPO_LINK_CLASS}>
               {'{ '}
-              <span className="a43-key">"name"</span>: <span className="a43-val">"{repo.shortLabel}"</span>
+              <span className="tw:text-[rgba(var(--color-primary-dynamic),0.8)]">"name"</span>:{' '}
+              <span className="tw:text-app-text-subtitle">"{repo.shortLabel}"</span>
               {' }'}
             </a>
           ))}
         </div>
 
-        <div className="a43-divider" />
-        <p className="a43-interactive-hint">
-          Try it yourself - type <strong>help</strong>, <strong>tracks</strong>, <strong>repos</strong>, or{' '}
-          <strong>open frontend</strong>
+        <div className="tw:mt-[1.5rem] tw:mr-0 tw:mb-[1rem] tw:ml-0 tw:[border-top:1px_dashed_var(--color-border)]" />
+        <p className="tw:mt-0 tw:mr-0 tw:mb-[0.6rem] tw:ml-0 tw:text-[0.8rem] tw:text-app-text-subtitle">
+          Try it yourself - type <strong className={INTERACTIVE_STRONG_CLASS}>help</strong>,{' '}
+          <strong className={INTERACTIVE_STRONG_CLASS}>tracks</strong>,{' '}
+          <strong className={INTERACTIVE_STRONG_CLASS}>repos</strong>, or{' '}
+          <strong className={INTERACTIVE_STRONG_CLASS}>open frontend</strong>
         </p>
 
         {entries.map((entry, i) => (
-          <div key={i} className="a43-entry">
-            <div className="a43-line a43-prompt">
-              <span className="a43-caret">$</span>
-              <span className="a43-cmd">{entry.cmd}</span>
+          <div key={i} className="tw:my-[0.4rem]">
+            <div className={PROMPT_ROW_CLASS}>
+              <span className={CARET_CLASS}>$</span>
+              <span className="tw:font-semibold">{entry.cmd}</span>
             </div>
-            <div className="a43-output">
+            <div className="tw:pl-[1.1rem]">
               {entry.lines.map((line, j) => {
                 if (line.type === 'blank') {
-                  return <div key={j} className="a43-blank" />;
+                  return <div key={j} className="tw:h-[0.4rem]" />;
                 }
 
                 if (line.type === 'heading') {
                   return (
-                    <p key={j} className="a43-out-heading">
+                    <p
+                      key={j}
+                      className="tw:my-[0.3rem] tw:text-[1rem] tw:font-bold tw:[font-family:'Geist','DM_Sans','Segoe_UI',sans-serif]"
+                    >
                       {line.value}
                     </p>
                   );
@@ -386,7 +415,7 @@ const ContributeConsoleDesign = () => {
 
                 if (line.type === 'quote') {
                   return (
-                    <p key={j} className="a43-text a43-quote">
+                    <p key={j} className={`${TEXT_CLASS} ${QUOTE_CLASS}`}>
                       {'> '}
                       {line.value}
                     </p>
@@ -395,7 +424,13 @@ const ContributeConsoleDesign = () => {
 
                 if (line.type === 'link') {
                   return (
-                    <a key={j} className="a43-out-link" href={line.href} target="_blank" rel="noopener noreferrer">
+                    <a
+                      key={j}
+                      className="tw:my-[0.1rem] tw:block tw:whitespace-pre-wrap tw:text-[rgba(var(--color-primary-dynamic),0.8)] tw:no-underline tw:hover:opacity-80 tw:hover:underline"
+                      href={line.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       {line.value}
                     </a>
                   );
@@ -403,7 +438,7 @@ const ContributeConsoleDesign = () => {
 
                 if (line.type === 'error') {
                   return (
-                    <p key={j} className="a43-out-error">
+                    <p key={j} className="tw:my-[0.1rem] tw:text-[#e8585d]">
                       {line.value}
                     </p>
                   );
@@ -411,14 +446,14 @@ const ContributeConsoleDesign = () => {
 
                 if (line.type === 'hint') {
                   return (
-                    <p key={j} className="a43-out-hint">
+                    <p key={j} className="tw:my-[0.1rem] tw:text-[0.8rem] tw:text-app-text-subtitle">
                       {line.value}
                     </p>
                   );
                 }
 
                 return (
-                  <p key={j} className="a43-out-text">
+                  <p key={j} className="tw:my-[0.1rem] tw:whitespace-pre-wrap">
                     {line.value}
                   </p>
                 );
@@ -427,12 +462,12 @@ const ContributeConsoleDesign = () => {
           </div>
         ))}
 
-        <form className="a43-input-row" onSubmit={handleSubmit}>
-          <span className="a43-caret">$</span>
+        <form className="tw:mt-[0.6rem] tw:flex tw:items-center tw:gap-[0.5rem]" onSubmit={handleSubmit}>
+          <span className={CARET_CLASS}>$</span>
           <input
             ref={inputRef}
             type="text"
-            className="a43-input"
+            className="tw:flex-1 tw:border-none tw:bg-transparent tw:text-app-text tw:outline-none tw:[caret-color:rgba(var(--color-primary-dynamic),0.8)] tw:[font-family:inherit] tw:[font-size:inherit] tw:[line-height:inherit] tw:placeholder:text-app-text-subtitle tw:placeholder:opacity-50"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

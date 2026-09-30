@@ -3,6 +3,7 @@ import Button from 'component/button';
 import ClaimPreview from 'component/claimPreview';
 import Card from 'component/common/card';
 import { FormField } from 'component/common/form-components/form-field';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { Modal } from 'modal/modal';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
@@ -31,7 +32,7 @@ export default function ModalHideRecommendation(props: Props) {
         body={<ClaimPreview uri={uri} hideMenu hideActions nonClickable type="inline" properties={false} />}
         actions={
           <>
-            <div className="section__checkbox">
+            <div className={SECTION_CLASSES.checkbox}>
               <FormField
                 type="checkbox"
                 name="hide_channel"
@@ -40,7 +41,7 @@ export default function ModalHideRecommendation(props: Props) {
                 onChange={() => setHideChannel(!hideChannel)}
               />
             </div>
-            <div className="section__actions">
+            <div className={SECTION_CLASSES.actions}>
               <Button button="primary" label={__('Submit')} onClick={handleOnClick} />
               <Button button="link" label={__('Cancel')} onClick={hideModal} />
             </div>

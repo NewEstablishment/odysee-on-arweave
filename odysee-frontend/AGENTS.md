@@ -67,6 +67,32 @@ that file. Use `HYPERBEAM_BASE_URL` to override the materializer's node.
 The manifest and node should be same-origin so the `secret-*` identity cookie
 is sent on native writes.
 
+## Styling
+
+- New React-owned styling is Tailwind-first. Preserve semantic CSS variables
+  rather than copying theme values into components.
+- Keep plain CSS only for deliberate base rules, shared component contracts,
+  animations, third-party DOM, and generated markup. Do not introduce new Sass
+  nesting, mixins, variables, imports, or `@extend`.
+- Tailwind Preflight is disabled. The explicit application reset in
+  `ui/styles/base.css` is authoritative.
+- `ui/styles/index.css` owns the complete ordered global cascade. Deliberate
+  files under `ui/styles/chunks/` may contain delayed-route Tailwind utilities
+  only; their source ownership is enforced by `routeStyleChunksPlugin` in
+  `vite.config.ts`. Studio, publishing, and memberships use separate scoped
+  chunks and matching `withRouteStyleBoundary` wrappers. The scanner removes
+  shared unvariant base candidates while retaining route-owned responsive and
+  state variants so Tailwind order does not depend on navigation history. Do
+  not add component-local CSS patches or plain-CSS rules to those chunks.
+- Before changing or deleting a semantic selector, inspect its static and
+  dynamic uses, state selectors, breakpoints, RTL behavior, and loading
+  boundary.
+- Styling validation must not capture screenshots. Use DOM, accessibility,
+  geometry, and computed-style assertions.
+- Run `pnpm run audit:styles` for style-source changes. Run
+  `pnpm run test:style-chunks` after a production build when changing a style
+  chunk, its source boundary, or Vite CSS handling.
+
 ## Identity and account UI
 
 - The node's `cookie@1.0` provider mints identity on the first committed write.

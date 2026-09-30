@@ -1,0 +1,3 @@
+export const COLUMNS_CLASS = String.raw`columns tw:flex tw:items-start tw:justify-between tw:[&>*]:mb-app-l tw:[&>*]:min-w-[15rem] tw:[&>*]:flex-1 tw:[&>*]:basis-0 tw:[&>*:first-child]:mr-[1.5rem] tw:[&>*:first-child]:basis-px tw:upto-small:flex-col tw:upto-small:[&>*]:m-0 tw:upto-small:[&>*]:mb-app-m tw:upto-small:[&>*]:w-full tw:upto-small:[&>*]:basis-auto tw:upto-small:[&>*:first-child]:mr-0`;
+
+export const COLUMN_CLASS = String.raw`column tw:flex tw:upto-small:flex-col tw:upto-small:[&>*]:m-0 tw:upto-small:[&>*]:mb-app-m tw:upto-small:[&>*]:w-full tw:upto-small:[&>*]:basis-auto tw:upto-small:[&>*:first-child]:mr-0`;

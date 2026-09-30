@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import UploadForm from 'component/publish/upload/uploadForm';
 import Page from 'component/page';
@@ -15,7 +16,7 @@ function UploadPage() {
     <Page noFooter>
       {balance < 0.01 && <YrblWalletEmpty />}
       {balance >= 0.01 && fetchingChannels ? (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       ) : (

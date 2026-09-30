@@ -1,0 +1,1 @@
+export const REMOVE_COMMENT_PREVIEW_CLASS = String.raw`comment-preview tw:mt-app-s tw:rounded-app tw:border-2 tw:border-app-border tw:bg-app-header tw:p-app-s tw:[&_.comment\_\_thumbnail-wrapper]:[grid-gap:unset] tw:[&_.comment\_\_pin]:bg-app-background tw:[&_.comment\_\_pin]:pt-[1px] tw:[&_.comment\_\_pin_svg]:bg-app-header`;

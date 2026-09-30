@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { Form, FormField, Submit } from 'component/common/form';
+import { FIELDSET_GROUP_SMUSHED_CLASS } from 'component/common/form-components/fieldset-group-classes';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import countryData from 'country-data';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectPhoneNewErrorMessage } from 'redux/selectors/user';
@@ -86,7 +88,7 @@ const UserPhoneNew = React.memo(function UserPhoneNew({ cancelButton, isPending 
       )}
       actions={
         <Form onSubmit={handleSubmit}>
-          <fieldset-group class="fieldset-group--smushed">
+          <fieldset-group class={FIELDSET_GROUP_SMUSHED_CLASS}>
             <FormField label={__('Country')} type="select" name="country-codes" onChange={handleSelect}>
               {countryCodes.map((country, index) => (
                 <option key={index} value={country.countryCallingCode}>
@@ -104,7 +106,7 @@ const UserPhoneNew = React.memo(function UserPhoneNew({ cancelButton, isPending 
               onChange={handleChanged}
             />
           </fieldset-group>
-          <div className="card__actions">
+          <div className={CARD_CLASSES.actions}>
             <Submit label={__('Submit')} disabled={isPending} />
             {cancelButton}
           </div>

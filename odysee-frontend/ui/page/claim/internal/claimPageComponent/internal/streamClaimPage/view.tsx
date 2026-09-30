@@ -1,4 +1,3 @@
-import { PRIMARY_IMAGE_WRAPPER_CLASS } from 'constants/player';
 import * as React from 'react';
 import Button from 'component/button';
 import classnames from 'classnames';
@@ -9,12 +8,15 @@ import * as RENDER_MODES from 'constants/file_render_modes';
 import * as SETTINGS from 'constants/settings';
 import * as TAGS from 'constants/tags';
 import FileTitleSection from 'component/fileTitleSection';
+import { FILE_PAGE_MEDIA_ACTIONS_CLASS } from 'component/filePrice/classes';
 import StreamClaimRenderInline from 'component/streamClaimRenderInline';
 import FileRenderDownload from 'component/fileRenderDownload';
 import Empty from 'component/common/empty';
+import { DMCA_INFO_CLASS } from 'component/common/content-restriction-classes';
 import SwipeableDrawer from 'component/swipeableDrawer';
 import DrawerExpandButton from 'component/swipeableDrawerExpand';
 import WaitUntilOnPage from 'component/common/wait-until-on-page';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import { useIsMobile, useIsMobileLandscape } from 'effects/use-screensize';
 import { LINKED_COMMENT_QUERY_PARAM, THREAD_COMMENT_QUERY_PARAM } from 'constants/comment';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
@@ -40,6 +42,8 @@ import { doToggleAppDrawer as doToggleAppDrawerAction } from 'redux/actions/app'
 import { selectClientSetting } from 'redux/selectors/settings';
 import { getChannelIdFromClaim, isClaimShort } from 'util/claim';
 import { selectNoRestrictionOrUserIsMemberForContentClaimId } from 'redux/selectors/memberships';
+import { STREAM_CLAIM_PAGE_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 const CommentsList = lazyImport(
   () =>
     import(
@@ -85,7 +89,7 @@ type Props = {
 
 function dmcaInfo() {
   return (
-    <section className="card--section dmca-info">
+    <section className={`${CARD_CLASSES.section} ${DMCA_INFO_CLASS}`}>
       <p>
         {__(
           'In response to a complaint we received under the US Digital Millennium Copyright Act, we have blocked access to this content from our applications. Content may also be blocked due to DMCA Red Flag rules which are obvious copyright violations we come across, are discussed in public channels, or reported to us.'
@@ -96,7 +100,7 @@ function dmcaInfo() {
           email: 'help@odysee.com',
         })}
       </p>
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <Button
           button="link"
           href="https://help.odysee.tv/category-uploading/dmca-content/#receiving-a-dmca-notice"
@@ -109,14 +113,14 @@ function dmcaInfo() {
 
 function filteredInfo() {
   return (
-    <section className="card--section dmca-info">
+    <section className={`${CARD_CLASSES.section} ${DMCA_INFO_CLASS}`}>
       <p>{__('This content violates the terms and conditions of Odysee and has been filtered.')}</p>
       <p>
         {__('Please remove the content, or reach out to %email% if you think there has been a mistake.', {
           email: 'help@odysee.com',
         })}
       </p>
-      <div className="section__actions">
+      <div className={SECTION_CLASSES.actions}>
         <Button button="link" href="https://help.odysee.tv/communityguidelines/" label={__('Read More')} />
       </div>
     </section>
@@ -264,7 +268,7 @@ const StreamClaimPage = (props: Props) => {
       return (
         <>
           {thumbnail && (
-            <div className={PRIMARY_IMAGE_WRAPPER_CLASS}>
+            <div className={STREAM_CLAIM_PAGE_CLASSES.primaryImage} data-primary-image-wrapper>
               <StreamClaimRenderInline uri={uri} />
             </div>
           )}
@@ -275,7 +279,7 @@ const StreamClaimPage = (props: Props) => {
 
     if (RENDER_MODES.TEXT_MODES.includes(renderMode)) {
       return (
-        <div className="file-page__pdf-wrapper">
+        <div className="tw:relative">
           <StreamClaimRenderInline uri={uri} />
         </div>
       );
@@ -283,7 +287,7 @@ const StreamClaimPage = (props: Props) => {
 
     if (renderMode === RENDER_MODES.IMAGE) {
       return (
-        <div className={PRIMARY_IMAGE_WRAPPER_CLASS}>
+        <div className={STREAM_CLAIM_PAGE_CLASSES.primaryImage} data-primary-image-wrapper>
           <StreamClaimRenderInline uri={uri} />
         </div>
       );
@@ -311,7 +315,12 @@ const StreamClaimPage = (props: Props) => {
   };
   return (
     <>
-      <div className={classnames('section card-stack', `file-page__${renderMode}`)}>
+      <div
+        className={classnames('section card-stack', {
+          [STREAM_CLAIM_PAGE_CLASSES.image]: renderMode === RENDER_MODES.IMAGE,
+          [STREAM_CLAIM_PAGE_CLASSES.markdown]: isMarkdown,
+        })}
+      >
         {!isHidden && renderClaimLayout()}
         {(isClaimBlackListed && dmcaInfo()) || (isClaimFiltered && filteredInfo())}
 
@@ -319,7 +328,7 @@ const StreamClaimPage = (props: Props) => {
 
         {contentUnlocked && (
           <div className="file-page__secondary-content">
-            <section className="file-page__media-actions">
+            <section className={FILE_PAGE_MEDIA_ACTIONS_CLASS} data-file-page-media-actions>
               <React.Suspense fallback={null}>
                 {commentsDisabled ? (
                   <Empty {...emptyMsgProps} text={__('The creator of this content has disabled comments.')} />

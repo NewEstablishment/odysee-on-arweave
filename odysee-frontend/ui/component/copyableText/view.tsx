@@ -4,6 +4,7 @@ import Button from 'component/button';
 import React, { useRef } from 'react';
 import { useAppDispatch } from 'redux/hooks';
 import { doToast } from 'redux/actions/notifications';
+import { FORM_FIELD_COPYABLE_CLASS } from 'component/common/form-components/form-field-classes';
 
 type Props = {
   copyable: string;
@@ -108,7 +109,7 @@ export default function CopyableText(props: Props) {
   return (
     <FormField
       type={maskInput ? 'password' : 'text'}
-      className="form-field--copyable"
+      className={FORM_FIELD_COPYABLE_CLASS}
       hideValue={hideValue}
       readOnly
       name={name}

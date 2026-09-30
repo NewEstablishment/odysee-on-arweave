@@ -7,6 +7,8 @@ import { useAppSelector } from 'redux/hooks';
 import { selectClaimForUri, selectIsUriResolving } from 'redux/selectors/claims';
 import { selectUserOdyseeMembership } from 'redux/selectors/memberships';
 import { getChannelIdFromClaim } from 'util/claim';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
+import { URI_INDICATOR_CLASS } from './classes';
 
 type ChannelInfo = {
   uri: string;
@@ -90,7 +92,7 @@ function UriIndicator(props: Props) {
 
   if (!channelInfo && !claim && !showHiddenAsAnonymous) {
     return (
-      <span className={classnames('empty', className)}>
+      <span className={classnames(EMPTY_CLASS, className)}>
         {claim === null ? '---' : isResolvingUri || claim === undefined ? __('Validating...') : __('[Removed]')}
       </span>
     );
@@ -107,7 +109,7 @@ function UriIndicator(props: Props) {
       <span
         dir="auto"
         className={classnames('channel-name', className, {
-          'channel-name--inline': inline,
+          'tw:ml-app-xs': inline,
         })}
       >
         Anonymous
@@ -121,7 +123,7 @@ function UriIndicator(props: Props) {
       <span
         dir="auto"
         className={classnames('channel-name', {
-          'channel-name--inline': inline,
+          'tw:ml-app-xs': inline,
         })}
       >
         <p>{showAtSign ? channelName : stripLeadingAtSign(channelTitle)}</p>
@@ -148,7 +150,7 @@ function UriIndicator(props: Props) {
     } else {
       return (
         <Button
-          className={classnames(className, 'button--uri-indicator')}
+          className={classnames(className, URI_INDICATOR_CLASS)}
           navigate={channelLink}
           target={external ? '_blank' : undefined}
           aria-hidden={!focusable}

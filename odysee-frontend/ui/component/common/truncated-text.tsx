@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { TRUNCATED_TEXT_CLASS } from './truncated-text-classes';
 
 type Props = {
   text: string | null | undefined;
@@ -14,7 +15,7 @@ const TruncatedText = ({ text, lines, showTooltip = true, style }: Props) => {
   return (
     <span
       title={tooltip}
-      className="truncated-text"
+      className={TRUNCATED_TEXT_CLASS}
       style={{
         WebkitLineClamp: lines,
         ...style,

@@ -1,11 +1,19 @@
 import React from 'react';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import * as COLS from 'constants/collections';
 import classnames from 'classnames';
 import { FormField } from 'component/common/form';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 import { useLocation, useNavigate } from 'react-router-dom';
 import RightSideActions from './internal/rightSideActions';
 import FilteredTextLabel from './internal/filtered-text-label';
+import {
+  CLAIM_SEARCH_DROPDOWN_CLASS,
+  CLAIM_SEARCH_MENU_GROUP_CLASS,
+  CLAIM_SEARCH_MENU_SUBGROUP_CLASS,
+  CLAIM_SEARCH_WRAPPER_WRAP_CLASS,
+} from 'component/claimListHeader/classes';
 type Props = {
   filterType: string;
   isTruncated: boolean;
@@ -40,26 +48,26 @@ export default function CollectionsListMine(props: Props) {
 
   return (
     <div className="section__header-action-stack">
-      <div className="section__header--actions">
-        <div className="claim-search__wrapper--wrap">
+      <div className={SECTION_CLASSES.headerActions}>
+        <div className={CLAIM_SEARCH_WRAPPER_WRAP_CLASS}>
           {/* Filter Options */}
-          <div className="claim-search__menu-group">
-            <div className="claim-search__menu-subgroup">
+          <div className={CLAIM_SEARCH_MENU_GROUP_CLASS}>
+            <div className={CLAIM_SEARCH_MENU_SUBGROUP_CLASS}>
               {Object.values(COLS.LIST_TYPE).map((value) => (
                 <Button
                   label={__(String(value))}
                   key={String(value)}
                   button="alt"
                   onClick={() => handleFilterTypeChange(String(value))}
-                  className={classnames('button-toggle', {
-                    'button-toggle--active': filterType === value,
+                  className={classnames(BUTTON_TOGGLE_CLASS, {
+                    [BUTTON_TOGGLE_ACTIVE_CLASS]: filterType === value,
                   })}
                 />
               ))}
             </div>
-            <div className="claim-search__menu-subgroup">
+            <div className={CLAIM_SEARCH_MENU_SUBGROUP_CLASS}>
               <FormField
-                className="claim-search__dropdown"
+                className={CLAIM_SEARCH_DROPDOWN_CLASS}
                 type="select"
                 name="sort_by"
                 value={sortOption.key}
@@ -77,7 +85,7 @@ export default function CollectionsListMine(props: Props) {
                 ))}
               </FormField>
               <FormField
-                className="claim-search__dropdown"
+                className={CLAIM_SEARCH_DROPDOWN_CLASS}
                 type="select"
                 name="order_by"
                 value={sortOption.value}

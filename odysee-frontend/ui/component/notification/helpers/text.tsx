@@ -8,6 +8,8 @@ import {
 } from 'constants/notifications';
 import { parseSticker } from 'util/comments';
 import I18nMessage from 'component/i18nMessage';
+import { NOTIFICATION_CLASSES as C } from '../classes';
+import { COMMENT_STICKER_CLASS } from 'component/comment/classes';
 
 function replaceLbcWithCredits(str: string) {
   return str.replace(/\sLBC/g, ' Credits');
@@ -27,7 +29,7 @@ export function generateNotificationText(rule: string, notificationParams: any) 
     case RULE.REWARDS_APPROVAL_PROMPT:
     case RULE.FIAT_TIP:
       return (
-        <div className="notification__text" title={replaceLbcWithCredits(notificationParams.device.text)}>
+        <div className={C.text} title={replaceLbcWithCredits(notificationParams.device.text)}>
           <LbcMessage>{notificationParams.device.text}</LbcMessage>
         </div>
       );
@@ -55,9 +57,9 @@ export function generateNotificationText(rule: string, notificationParams: any) 
       const commentText = notificationParams.dynamic.comment;
       const sticker = commentText && parseSticker(commentText);
       return (
-        <div className="notification__text notification__text--replies" title={sticker ? undefined : commentText}>
+        <div className={`${C.text} ${C.replies}`} title={sticker ? undefined : commentText}>
           {sticker && (
-            <div className="sticker__comment">
+            <div className={COMMENT_STICKER_CLASS}>
               <OptimizedImage src={sticker.url} waitLoad loading="lazy" />
             </div>
           )}

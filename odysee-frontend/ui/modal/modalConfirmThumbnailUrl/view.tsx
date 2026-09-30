@@ -5,7 +5,6 @@ import ThumbnailBrokenImage from 'component/selectThumbnail/thumbnail-broken.png
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
 import { doUpdatePublishForm } from 'redux/actions/publish';
-import '../modalConfirmThumbnailUpload/style.scss';
 
 export type Props = {
   cb: (url: string) => void;
@@ -49,9 +48,9 @@ export default function ModalConfirmThumbnailUrl(props: Props) {
         autoFocus
       />
       {url.trim() && (
-        <div className="upload-thumbnail-preview">
+        <div className="tw:my-app-s tw:flex tw:rounded-app tw:border tw:border-app-border tw:p-app-s tw:upto-small:flex-col">
           <img
-            className="upload-thumbnail-preview__image"
+            className="tw:h-[var(--thumbnail-preview-height)] tw:min-h-[var(--thumbnail-preview-height)] tw:w-[var(--thumbnail-preview-width)] tw:min-w-[var(--thumbnail-preview-width)] tw:rounded-app tw:border tw:border-app-border tw:bg-[var(--color-thumbnail-background)] tw:object-contain"
             src={previewError ? ThumbnailBrokenImage : url.trim()}
             alt={__('Thumbnail Preview')}
             onError={() => setPreviewError(true)}

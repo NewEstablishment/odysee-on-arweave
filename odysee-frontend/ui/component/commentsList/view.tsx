@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import {
   COMMENT_PAGE_SIZE_TOP_LEVEL,
   SORT_BY,
@@ -10,8 +11,11 @@ import { getCommentsListTitle } from 'util/comments';
 import * as ICONS from 'constants/icons';
 import * as REACTION_TYPES from 'constants/reactions';
 import Button from 'component/button';
+import { BUTTON_TOGGLE_ACTIVE_CLASS, BUTTON_TOGGLE_CLASS } from 'component/button/classes';
 import Card from 'component/common/card';
+import { CARD_CLASSES, CARD_OVERFLOW_CLASS } from 'component/common/card-classes';
 import classnames from 'classnames';
+import { COMMENTS_LIST_CLASSES } from './classes';
 import CommentView from 'component/comment';
 import debounce from 'util/debounce';
 import Empty from 'component/common/empty';
@@ -418,7 +422,7 @@ export default function CommentList(props: Props) {
 
   return (
     <Card
-      className="card--enable-overflow comment__list"
+      className={`${CARD_OVERFLOW_CLASS} ${COMMENTS_LIST_CLASSES.overflowCard} ${COMMENTS_LIST_CLASSES.root}`}
       title={title}
       titleActions={<CommentActionButtons {...actionButtonsProps} />}
       actions={
@@ -426,7 +430,7 @@ export default function CommentList(props: Props) {
           <CommentCreate uri={uri} />
 
           {threadCommentId && threadComment && (
-            <span className="comment__actions comment__thread-links">
+            <span className={`comment__actions ${COMMENTS_LIST_CLASSES.threadLinks}`}>
               <ThreadLinkButton
                 label={__('View all comments')}
                 threadCommentParent={threadTopLevelComment || threadCommentId}
@@ -451,7 +455,7 @@ export default function CommentList(props: Props) {
           <ul
             ref={commentListRef}
             className={classnames('comments', {
-              'comments--contracted': isSmallScreen && !expandedComments && totalUnfilteredComments > 1,
+              [COMMENTS_LIST_CLASSES.contracted]: isSmallScreen && !expandedComments && totalUnfilteredComments > 1,
             })}
           >
             {threadComment && (
@@ -500,7 +504,7 @@ export default function CommentList(props: Props) {
           </ul>
 
           {!hasDefaultExpansion && (
-            <div className="card__bottom-actions card__bottom-actions--comments">
+            <div className={`${CARD_CLASSES.bottomActions} tw:mt-app-xl`}>
               {(!expandedComments || moreBelow) && totalUnfilteredComments > 1 && (
                 <Button
                   button="link"
@@ -534,7 +538,7 @@ export default function CommentList(props: Props) {
           {(threadCommentId
             ? isFetchingComments
             : isFetchingTopLevelComments || (hasDefaultExpansion && moreBelow)) && (
-            <div className="main--empty" ref={spinnerRef}>
+            <div className={PAGE_MAIN_EMPTY_CLASS} ref={spinnerRef}>
               <Spinner type="small" />
             </div>
           )}
@@ -561,7 +565,12 @@ const CommentActionButtons = (actionButtonsProps: ActionButtonsProps) => {
   return (
     <div className="comment__actions">
       {canSort && ENABLE_COMMENT_REACTIONS && (
-        <span className={`comment__sort ${!canSort ? 'comment__sort--disabled' : ''}`}>
+        <span
+          className={classnames(COMMENTS_LIST_CLASSES.sort, {
+            'tw:pointer-events-none tw:opacity-[0.35]': !canSort,
+          })}
+          data-comment-sort
+        >
           <SortButton {...sortButtonProps} label={__('Best')} icon={ICONS.BEST} sortOption={SORT_BY.POPULARITY} />
           <SortButton
             {...sortButtonProps}
@@ -573,7 +582,7 @@ const CommentActionButtons = (actionButtonsProps: ActionButtonsProps) => {
         </span>
       )}
 
-      <div className="comment__settings">
+      <div className={COMMENTS_LIST_CLASSES.settings} data-comment-settings>
         <Button
           button="alt"
           icon={ICONS.REFRESH}
@@ -581,8 +590,8 @@ const CommentActionButtons = (actionButtonsProps: ActionButtonsProps) => {
           className="comment__refresh-button"
           onClick={(e) => {
             const btn = e.currentTarget;
-            btn.classList.add('comment__refresh-button--spinning');
-            btn.addEventListener('animationend', () => btn.classList.remove('comment__refresh-button--spinning'), {
+            btn.classList.add(COMMENTS_LIST_CLASSES.refreshSpinning);
+            btn.addEventListener('animationend', () => btn.classList.remove(COMMENTS_LIST_CLASSES.refreshSpinning), {
               once: true,
             });
             handleRefresh();
@@ -607,8 +616,8 @@ const SortButton = (sortButtonProps: SortButtonProps) => {
   return (
     <Button
       {...buttonProps}
-      className={classnames(`button-toggle`, {
-        'button-toggle--active': activeSort === sortOption,
+      className={classnames(BUTTON_TOGGLE_CLASS, {
+        [BUTTON_TOGGLE_ACTIVE_CLASS]: activeSort === sortOption,
       })}
       button="alt"
       iconSize={18}

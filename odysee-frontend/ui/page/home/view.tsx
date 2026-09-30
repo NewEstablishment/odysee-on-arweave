@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import classnames from 'classnames';
 import { lazyImport } from 'util/lazyImport';
@@ -14,6 +15,14 @@ import ClaimTilesDiscover from 'component/claimTilesDiscover';
 import ClaimList from 'component/claimList';
 import ClaimPreviewTile from 'component/claimPreviewTile';
 import Icon from 'component/common/icon';
+import {
+  CLAIM_GRID_CLASS,
+  CLAIM_GRID_HEADER_CLASS,
+  CLAIM_GRID_SECONDARY_TITLE_CLASS,
+  CLAIM_GRID_TITLE_CLASS,
+  CLAIM_GRID_WRAPPER_CLASS,
+} from 'component/common/claim-grid-classes';
+import { EMPTY_CENTERED_CLASS } from 'component/common/empty-classes';
 import Spinner from 'component/spinner';
 import WaitUntilOnPage from 'component/common/wait-until-on-page';
 import RecommendedPersonal from 'component/recommendedPersonal';
@@ -39,6 +48,7 @@ import {
 import { selectCountForCollectionId, selectUrlsForCollectionIdNonDeleted } from 'redux/selectors/collections';
 import { selectPrefsReady } from 'redux/selectors/sync';
 import { getModalUrlParam } from 'util/url';
+import { HOME_PAGE_CLASS, HOME_PAGE_SECTION_TITLE_CLASS } from './classes';
 
 const FeaturedBanner: React.LazyExoticComponent<React.ComponentType<any>> = lazyImport(
   () =>
@@ -88,10 +98,12 @@ type SectionHeaderProps = {
 
 const SectionHeader = ({ title, navigate = '/', icon = '', help }: SectionHeaderProps) => {
   return (
-    <h1 className="claim-grid__header">
+    <h1 className={CLAIM_GRID_HEADER_CLASS} data-claim-grid-header>
       <Button navigate={navigate} button="link">
         <Icon className="claim-grid__header-icon" sectionIcon icon={icon} size={20} />
-        <span className="claim-grid__title">{title}</span>
+        <span className={CLAIM_GRID_TITLE_CLASS} data-claim-grid-title>
+          {title}
+        </span>
         {help}
       </Button>
     </h1>
@@ -256,7 +268,7 @@ function HomePage() {
     }
 
     const tilePlaceholder = (
-      <ul className="claim-grid">
+      <ul className={CLAIM_GRID_CLASS}>
         {Array.from({ length: options.pageSize || 8 }, (_, i) => (
           <ClaimPreviewTile showNoSourceClaims={ENABLE_NO_SOURCE_CLAIMS} key={i} placeholder uri={''} />
         ))}
@@ -312,7 +324,7 @@ function HomePage() {
         <>
           {index === cache.topGrid && <Meme meme={homepageMeme} />}
           {title && typeof title === 'string' && (
-            <div className="homePage-wrapper__section-title">
+            <div className={HOME_PAGE_SECTION_TITLE_CLASS}>
               <SectionHeader title={__(resolveTitleOverride(title))} navigate={route || link} icon={icon} help={help} />
               {(index === cache.topGrid ||
                 (index && index - 1 === cache.topGrid && visibleSortedRowData[cache.topGrid].id === 'UPCOMING')) &&
@@ -325,9 +337,10 @@ function HomePage() {
 
     return (
       <div
-        className={classnames('claim-grid__wrapper', {
+        className={classnames(CLAIM_GRID_WRAPPER_CLASS, {
           'hide-ribbon': link !== `/$/${PAGES.CHANNELS_FOLLOWING}`,
         })}
+        data-claim-grid-wrapper
       >
         {id === 'FYP' ? (
           <RecommendedPersonal header={<HeaderArea />} />
@@ -342,7 +355,7 @@ function HomePage() {
             )}
             {(route || link) && (
               <Button
-                className="claim-grid__title--secondary"
+                className={CLAIM_GRID_SECONDARY_TITLE_CLASS}
                 button="link"
                 navigate={route || link}
                 iconRight={ICONS.ARROW_RIGHT}
@@ -374,8 +387,8 @@ function HomePage() {
 
   if (waitForMaterializedHomepage) {
     return (
-      <Page className="homePage-wrapper" fullWidthPage>
-        <div className="main--empty">
+      <Page className={HOME_PAGE_CLASS} fullWidthPage>
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner text={__('Loading homepage...')} />
         </div>
       </Page>
@@ -383,9 +396,9 @@ function HomePage() {
   }
 
   return (
-    <Page className="homePage-wrapper" fullWidthPage>
+    <Page className={HOME_PAGE_CLASS} fullWidthPage>
       {visibleSortedRowData.length === 0 && authenticated && homepageFetched && (
-        <div className="empty--centered">
+        <div className={EMPTY_CENTERED_CLASS}>
           <Yrbl alwaysShow title={__('Clean as a whistle! --[title for empty homepage]--')} actions={customizeButton} />
         </div>
       )}

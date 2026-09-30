@@ -1,5 +1,8 @@
 import React from 'react';
+import classnames from 'classnames';
+import { FILE_VIEWER_CLASSES } from 'component/viewers/classes';
 import Button from 'component/button';
+import { BUTTON_LARGE_ICON_CLASS, BUTTON_PLAY_CLASS } from 'component/button/classes';
 import UriIndicator from 'component/uriIndicator';
 import I18nMessage from 'component/i18nMessage';
 import debounce from 'util/debounce';
@@ -9,11 +12,10 @@ import { selectTitleForUri, selectClaimIsNsfwForUri } from 'redux/selectors/clai
 import { selectModal } from 'redux/selectors/app';
 import { selectIsPlayerFloating, selectCanPlaybackFileForUri, selectHasUriPlaying } from 'redux/selectors/content';
 import { doPlayNextUri, doSetShowAutoplayCountdownForUri } from 'redux/actions/content';
+import { AUTOPLAY_COUNTDOWN_CLASSES } from './classes';
 
 const DEBOUNCE_SCROLL_HANDLER_MS = 150;
-const CLASSNAME_AUTOPLAY_COUNTDOWN = 'autoplay-countdown';
 
-/* this value is coupled with CSS timing variables on .autoplay-countdown__timer */
 const COUNTDOWN_TIME = 5;
 type Props = {
   uri?: string;
@@ -77,7 +79,7 @@ function AutoplayCountdown(props: Props) {
 
   function shouldPauseAutoplay() {
     // TODO: use ref instead querySelector
-    const elm = document.querySelector(`.${CLASSNAME_AUTOPLAY_COUNTDOWN}`);
+    const elm = document.querySelector('[data-autoplay-countdown]');
     return isAnyInputFocused() || (elm && elm.getBoundingClientRect().top < 0);
   }
 
@@ -131,9 +133,12 @@ function AutoplayCountdown(props: Props) {
   }
 
   return (
-    <div className="file-viewer__overlay">
-      <div className={CLASSNAME_AUTOPLAY_COUNTDOWN}>
-        <div className="file-viewer__overlay-secondary">
+    <div className={FILE_VIEWER_CLASSES.overlay} data-file-viewer-overlay>
+      <div className={AUTOPLAY_COUNTDOWN_CLASSES.root} data-autoplay-countdown>
+        <div
+          className={classnames(FILE_VIEWER_CLASSES.overlaySecondary, AUTOPLAY_COUNTDOWN_CLASSES.secondary)}
+          data-file-viewer-overlay-secondary
+        >
           <I18nMessage
             tokens={{
               channel: <UriIndicator link uri={playNextUri} />,
@@ -143,23 +148,44 @@ function AutoplayCountdown(props: Props) {
           </I18nMessage>
         </div>
 
-        <div className="file-viewer__overlay-title">{playNextClaimTitle}</div>
-        <div className="autoplay-countdown__timer">
-          <div className={'autoplay-countdown__button autoplay-countdown__button--' + (timer % 5)}>
+        <div className={FILE_VIEWER_CLASSES.overlayTitle} data-file-viewer-overlay-title>
+          {playNextClaimTitle}
+        </div>
+        <div className={AUTOPLAY_COUNTDOWN_CLASSES.timer}>
+          <div
+            className={classnames(
+              AUTOPLAY_COUNTDOWN_CLASSES.button,
+              AUTOPLAY_COUNTDOWN_CLASSES.progress[timer % COUNTDOWN_TIME]
+            )}
+          >
             <Button
               onClick={() => handlePlayNext(playNextUri)}
               iconSize={30}
               title={__('Play')}
-              className="button--icon button--play"
+              className={`${BUTTON_LARGE_ICON_CLASS} ${BUTTON_PLAY_CLASS}`}
             />
           </div>
 
           {isTimerPaused ? (
-            <div className="file-viewer__overlay-secondary autoplay-countdown__counter">
+            <div
+              className={classnames(
+                FILE_VIEWER_CLASSES.overlaySecondary,
+                AUTOPLAY_COUNTDOWN_CLASSES.secondary,
+                AUTOPLAY_COUNTDOWN_CLASSES.counter
+              )}
+              data-file-viewer-overlay-secondary
+            >
               {__('Autoplay timer paused.')}
             </div>
           ) : (
-            <div className="file-viewer__overlay-secondary autoplay-countdown__counter">
+            <div
+              className={classnames(
+                FILE_VIEWER_CLASSES.overlaySecondary,
+                AUTOPLAY_COUNTDOWN_CLASSES.secondary,
+                AUTOPLAY_COUNTDOWN_CLASSES.counter
+              )}
+              data-file-viewer-overlay-secondary
+            >
               {__(
                 !canPlayback
                   ? 'Skipping to next playable content in %seconds_left% seconds...'

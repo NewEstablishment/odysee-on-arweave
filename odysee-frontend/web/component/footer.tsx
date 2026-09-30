@@ -3,6 +3,8 @@ import Button from 'component/button';
 import * as PAGES from 'constants/pages';
 import { useLocation } from 'react-router-dom';
 import classnames from 'classnames';
+import { FOOTER_CLASSES, PORTAL_FOOTER_CLASS, SHORTS_FOOTER_CLASS } from 'component/footerClasses';
+
 export default function Footer() {
   useEffect(() => {
     const maxTimeout = 2000;
@@ -22,43 +24,45 @@ export default function Footer() {
 
     checkForOneTrust();
   }, []);
-  const { search } = useLocation();
+  const { pathname, search } = useLocation();
   const urlParams = new URLSearchParams(search);
   const isShorts = urlParams.get('view') === 'shorts';
+  const isPortal = pathname.startsWith(`/$/${PAGES.PORTAL}/`);
 
   return (
     <footer
-      className={classnames('footer', {
-        'footer--shorts': isShorts,
+      className={classnames(FOOTER_CLASSES.root, {
+        [SHORTS_FOOTER_CLASS]: isShorts,
+        [PORTAL_FOOTER_CLASS]: isPortal,
       })}
     >
-      <ul className="navigation__tertiary footer__links">
-        <li className="footer__link">
+      <ul className={`${FOOTER_CLASSES.links} tw:mt-app-m`}>
+        <li className={FOOTER_CLASSES.link}>
           <Button
             label={__('Community Guidelines')}
             href="https://help.odysee.tv/communityguidelines/"
             target="_blank"
           />
         </li>
-        <li className="footer__link">
+        <li className={FOOTER_CLASSES.link}>
           <Button label={__('FAQ')} href="https://help.odysee.tv/" target="_blank" />
         </li>
-        <li className="footer__link">
+        <li className={FOOTER_CLASSES.link}>
           <Button label={__('Support --[used in footer; general help/support]--')} href="https://help.odysee.tv/" />
         </li>
-        <li className="footer__link">
+        <li className={FOOTER_CLASSES.link}>
           <Button label={__('Contribute')} navigate={`/$/${PAGES.CONTRIBUTE}`} />
         </li>
-        <li className="footer__link">
+        <li className={FOOTER_CLASSES.link}>
           <Button label={__('Terms')} href="https://odysee.com/$/tos" />
         </li>
-        <li className="footer__link">
+        <li className={FOOTER_CLASSES.link}>
           <Button label={__('Privacy Policy')} href="https://odysee.com/$/privacypolicy" />
         </li>
-        <li className="footer__link">
+        <li className={FOOTER_CLASSES.link}>
           <Button label={__('IP Geolocation by DB-IP')} href="https://db-ip.com" target="_blank" />
         </li>
-        <li className="footer__link" id="gdprPrivacyFooter">
+        <li className={FOOTER_CLASSES.link} id="gdprPrivacyFooter">
           <Button label={__('Cookie Settings')} onClick={() => window.Optanon && window.Optanon.ToggleInfoDisplay()} />
         </li>
       </ul>

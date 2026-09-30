@@ -1,6 +1,5 @@
-import 'scss/component/_swipeable-drawer.scss';
 import { Global } from '@emotion/react';
-import { PRIMARY_PLAYER_WRAPPER_CLASS, PRIMARY_IMAGE_WRAPPER_CLASS, HEADER_HEIGHT_MOBILE } from 'constants/player';
+import { PRIMARY_PLAYER_WRAPPER_CLASS, PRIMARY_IMAGE_WRAPPER_SELECTOR, HEADER_HEIGHT_MOBILE } from 'constants/player';
 import { getMaxLandscapeHeight } from 'util/window';
 import Drawer from '@mui/material/Drawer';
 import * as ICONS from 'constants/icons';
@@ -10,6 +9,7 @@ import Button from 'component/button';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectIsDrawerOpenForType } from 'redux/selectors/app';
 import { doToggleAppDrawer as doToggleAppDrawerAction } from 'redux/actions/app';
+import { SWIPEABLE_DRAWER_CLASSES } from './classes';
 const TRANSITION_MS = 225;
 const TRANSITION_STR = `${TRANSITION_MS}ms cubic-bezier(0, 0, 0.2, 1) 0ms`;
 type Props = {
@@ -114,7 +114,7 @@ export default function SwipeableDrawer(props: Props) {
         }
 
         // Pause video if drawer made fullscreen (above the player)
-        const playerElement = document.querySelector('.content__viewer--inline');
+        const playerElement = document.querySelector('[data-content-viewer-inline]');
         const videoParent = playerElement && playerElement.querySelector('.video-js-parent');
         const isLivestream = videoParent && videoParent.classList.contains('livestreamPlayer');
         const videoNode = videoParent && videoParent.querySelector('video');
@@ -157,7 +157,7 @@ export default function SwipeableDrawer(props: Props) {
 
   const handleResize = React.useCallback(() => {
     const element =
-      document.querySelector(`.${PRIMARY_IMAGE_WRAPPER_CLASS}`) ||
+      document.querySelector(PRIMARY_IMAGE_WRAPPER_SELECTOR) ||
       document.querySelector(`.${PRIMARY_PLAYER_WRAPPER_CLASS}`);
     if (!element) return;
     const rect = element.getBoundingClientRect();
@@ -240,13 +240,13 @@ export default function SwipeableDrawer(props: Props) {
       >
         {open && (
           <div
-            className="swipeable-drawer__header"
+            className={SWIPEABLE_DRAWER_CLASSES.header}
             style={{
               top: -pullerHeight,
               height: pullerHeight,
             }}
           >
-            <span className="swipeable-drawer__puller" />
+            <span className={SWIPEABLE_DRAWER_CLASSES.puller} />
             <HeaderContents
               title={title}
               hasSubtitle={hasSubtitle}
@@ -295,10 +295,10 @@ type HeaderProps = {
 const HeaderContents = (props: HeaderProps) => {
   const { title, hasSubtitle, actions, handleClose, type, ...divProps } = props;
   return (
-    <div className="swipeable-drawer__header-content" {...divProps}>
+    <div className={SWIPEABLE_DRAWER_CLASSES.headerContent} {...divProps}>
       {title}
 
-      <div className="swipeable-drawer__header-actions">
+      <div className={SWIPEABLE_DRAWER_CLASSES.headerActions}>
         {actions}
 
         <Button

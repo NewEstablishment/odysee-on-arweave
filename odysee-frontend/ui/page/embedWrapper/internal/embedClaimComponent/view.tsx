@@ -1,5 +1,7 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import classnames from 'classnames';
+import { EMBED_CLAIM_NOTICE_CLASS, EMBED_CLAIM_NOTICE_SHORT_CLASS } from './classes';
 import * as RENDER_MODES from 'constants/file_render_modes';
 import { useLocation } from 'react-router-dom';
 import { parseURI } from 'util/lbryURI';
@@ -21,6 +23,8 @@ import { doFileGetForUri } from 'redux/actions/file';
 import { doFetchItemsInCollection } from 'redux/actions/collections';
 import { doFetchChannelIsLiveForId } from 'redux/actions/livestream';
 import withResolvedClaimRender from 'hocs/withResolvedClaimRender';
+import { FILE_VIEWER_CLASSES } from 'component/viewers/classes';
+import { HELP_NOTICE_CLASS } from 'component/common/help-classes';
 const LivestreamScheduledInfo: React.ComponentType<any> = lazyImport(
   () =>
     import(
@@ -112,7 +116,7 @@ const EmbedClaimComponent = (props: { uri: string; collectionId?: string }) => {
     if (featureParam === 'livenow' && latestClaimUrl) {
       return (
         <EmbeddedVideoClaim uri={latestClaimUrl} embedded>
-          <div className="help--notice help--notice-embed-livestream">
+          <div className={`${HELP_NOTICE_CLASS} ${EMBED_CLAIM_NOTICE_CLASS}`}>
             <I18nMessage
               tokens={{
                 channel_name: channelName,
@@ -130,7 +134,7 @@ const EmbedClaimComponent = (props: { uri: string; collectionId?: string }) => {
     return (
       <React.Suspense
         fallback={
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Spinner text={__('Loading...')} />
           </div>
         }
@@ -166,7 +170,7 @@ const EmbedClaimComponent = (props: { uri: string; collectionId?: string }) => {
 
         {latestClaimUrl === null && featureParam === 'livenow' && (
           <div
-            className="help--notice"
+            className={HELP_NOTICE_CLASS}
             style={{
               marginTop: '20px',
             }}
@@ -185,14 +189,14 @@ const EmbedClaimComponent = (props: { uri: string; collectionId?: string }) => {
     return (
       <React.Suspense
         fallback={
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Spinner text={__('Loading playlist...')} />
           </div>
         }
       >
         <ClaimPreview uri={uri} />
         {collectionUrls === undefined ? (
-          <div className="main--empty">
+          <div className={PAGE_MAIN_EMPTY_CLASS}>
             <Spinner text={__('Loading playlist...')} />
           </div>
         ) : collectionUrls && collectionUrls.length > 0 ? (
@@ -205,7 +209,7 @@ const EmbedClaimComponent = (props: { uri: string; collectionId?: string }) => {
           </div>
         ) : (
           <div
-            className="help--notice"
+            className={HELP_NOTICE_CLASS}
             style={{
               marginTop: '16px',
             }}
@@ -226,8 +230,8 @@ const EmbedClaimComponent = (props: { uri: string; collectionId?: string }) => {
               {showScheduledInfo && <LivestreamScheduledInfo uri={uri} />}
 
               <div
-                className={classnames('help--notice help--notice-embed-livestream', {
-                  'help--notice-short': showScheduledInfo,
+                className={classnames(HELP_NOTICE_CLASS, EMBED_CLAIM_NOTICE_CLASS, {
+                  [EMBED_CLAIM_NOTICE_SHORT_CLASS]: showScheduledInfo,
                 })}
               >
                 {showScheduledInfo ? (
@@ -303,15 +307,17 @@ const EmbeddedMarkdown = ({ uri, streamingUrl }: { uri: string; streamingUrl: st
     };
   }, [streamingUrl]);
   if (content === undefined) return <Spinner text={__('Loading post...')} />;
-  if (content === null) return <div className="help--notice">{__("Sorry, we couldn't load this post.")}</div>;
+  if (content === null) return <div className={HELP_NOTICE_CLASS}>{__("Sorry, we couldn't load this post.")}</div>;
   return (
     <div
-      className="file-viewer file-viewer--document"
+      className={`${FILE_VIEWER_CLASSES.base} ${FILE_VIEWER_CLASSES.document}`}
+      data-file-viewer
+      data-file-viewer-document
       style={{
         position: 'relative',
       }}
     >
-      <div className="document file-render__viewer markdown-post">
+      <div className="file-render__viewer" data-markdown-post>
         <MarkdownPreview content={content} isMarkdownPost promptLinks />
       </div>
     </div>

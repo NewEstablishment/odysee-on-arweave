@@ -2,10 +2,12 @@ import * as PAGES from 'constants/pages';
 import React from 'react';
 import { Modal } from 'modal/modal';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import Confetti from 'react-confetti';
 import Button from 'component/button';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
+import { YOUTUBE_WELCOME_EMOJI_CLASS } from './classes';
 
 const YoutubeWelcome = () => {
   const dispatch = useAppDispatch();
@@ -25,12 +27,12 @@ const YoutubeWelcome = () => {
           <React.Fragment>
             <p>
               {__('You make the party extra special!')}
-              <span className="emoji"> 💖</span>
+              <span className={YOUTUBE_WELCOME_EMOJI_CLASS}> 💖</span>
             </p>
           </React.Fragment>
         }
         actions={
-          <div className="card__actions">
+          <div className={CARD_CLASSES.actions}>
             <Button
               button="primary"
               label={__('Create an Account')}

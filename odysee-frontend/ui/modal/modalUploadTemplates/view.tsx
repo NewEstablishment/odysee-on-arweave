@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import { v4 as uuid } from 'uuid';
 import { Modal } from 'modal/modal';
@@ -16,7 +17,7 @@ import { doFetchCreatorSettings, doUpdateCreatorSettings } from 'redux/actions/c
 import { doUpdatePublishForm } from 'redux/actions/publish';
 import { doToast } from 'redux/actions/notifications';
 import { doHideModal } from 'redux/actions/app';
-import './style.scss';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 
 type TemplateEntry = UploadTemplate & {
   channelId: string;
@@ -24,6 +25,12 @@ type TemplateEntry = UploadTemplate & {
 };
 
 const TEMPLATE_SEARCH_THRESHOLD = 6;
+const TEMPLATE_TEXT_BUTTON_CLASS_NAME =
+  'tw:inline-flex tw:h-[32px] tw:cursor-pointer tw:items-center tw:justify-center tw:gap-app-xxxs tw:whitespace-nowrap tw:rounded-app tw:border tw:px-app-s tw:py-0 tw:text-app-small tw:text-app-text';
+const TEMPLATE_TEXT_BUTTON_DEFAULT_CLASS_NAME =
+  'tw:border-app-border tw:bg-transparent tw:hover:bg-[rgba(var(--color-primary-dynamic),0.1)]';
+const TEMPLATE_ACTION_BUTTON_CLASS_NAME =
+  'tw:inline-flex tw:size-[32px] tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-app tw:border tw:border-app-border tw:bg-transparent tw:text-app-text tw:hover:bg-[rgba(var(--color-primary-dynamic),0.1)] tw:disabled:cursor-not-allowed tw:disabled:opacity-40';
 
 function makeDuplicateTemplateName(name: string, existingTemplates: Array<UploadTemplate>): string {
   const baseName = (name || __('Template')).trim();
@@ -557,9 +564,9 @@ export default function ModalUploadTemplates() {
         title={__('Manage Upload Templates')}
         subtitle={__('Preview what each template fills, prefill instantly, or rename and delete templates.')}
         body={
-          <div className="upload-templates-manage">
+          <div className="tw:min-h-[100px]">
             {shouldShowSearch && (
-              <div className="upload-templates-manage__search">
+              <div className="tw:mb-app-s tw:[&_fieldset-section]:m-0">
                 <FormField
                   type="text"
                   name="upload_template_search"
@@ -572,7 +579,7 @@ export default function ModalUploadTemplates() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
                 {normalizedSearchQuery && (
-                  <div className="upload-templates-manage__search-count">
+                  <div className="tw:mt-app-xxxs tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.6)]">
                     {__('%count% results', {
                       count: filteredTemplates.length,
                     })}
@@ -582,11 +589,11 @@ export default function ModalUploadTemplates() {
             )}
 
             {sortedTemplates.length === 0 ? (
-              <div className="main--empty">{__('No templates saved yet.')}</div>
+              <div className={PAGE_MAIN_EMPTY_CLASS}>{__('No templates saved yet.')}</div>
             ) : filteredTemplates.length === 0 ? (
-              <div className="main--empty">{__('No templates match your search.')}</div>
+              <div className={PAGE_MAIN_EMPTY_CLASS}>{__('No templates match your search.')}</div>
             ) : (
-              <div className="upload-templates-manage__list">
+              <div className="tw:flex tw:max-h-[55vh] tw:flex-col tw:gap-app-xxs tw:overflow-y-auto tw:pr-app-xxxs">
                 {filteredTemplates.map((template) => {
                   const templateKey = getTemplateKey(template.channelId, template.id);
                   const isEditing = editingTemplateKey === templateKey;
@@ -595,9 +602,12 @@ export default function ModalUploadTemplates() {
                   const visiblePreviewFields = previewFields.slice(0, 5);
                   const hiddenPreviewFieldCount = Math.max(0, previewFields.length - visiblePreviewFields.length);
                   return (
-                    <div key={templateKey} className="upload-templates-manage__item">
+                    <div
+                      key={templateKey}
+                      className="tw:rounded-app tw:border tw:border-app-border tw:bg-[rgba(var(--color-primary-dynamic),0.02)] tw:p-app-s"
+                    >
                       {isEditing ? (
-                        <div className="upload-templates-manage__edit-row">
+                        <div className="tw:flex tw:flex-wrap tw:items-center tw:gap-app-xxs tw:[&_fieldset-section]:m-0 tw:[&_fieldset-section]:min-w-[14rem] tw:[&_fieldset-section]:flex-1 tw:upto-small:[&_fieldset-section]:w-full tw:upto-small:[&_fieldset-section]:min-w-0 tw:upto-small:[&_fieldset-section]:flex-[1_1_100%]">
                           <FormField
                             type="text"
                             name={editInputName}
@@ -626,38 +636,43 @@ export default function ModalUploadTemplates() {
                           />
                           <button
                             type="button"
-                            className="upload-templates-manage__action-btn"
+                            className={TEMPLATE_ACTION_BUTTON_CLASS_NAME}
                             onClick={() => handleConfirmRename(template)}
                             disabled={!editName.trim()}
                             title={__('Save name')}
                           >
-                            <Icon icon={ICONS.COMPLETE} />
+                            <Icon icon={ICONS.COMPLETE} className="tw:size-[1rem] tw:stroke-current" />
                           </button>
                           <button
                             type="button"
-                            className="upload-templates-manage__action-btn"
+                            className={TEMPLATE_ACTION_BUTTON_CLASS_NAME}
                             onClick={closeEditor}
                             title={__('Cancel')}
                           >
-                            <Icon icon={ICONS.REMOVE} />
+                            <Icon icon={ICONS.REMOVE} className="tw:size-[1rem] tw:stroke-current" />
                           </button>
                         </div>
                       ) : (
                         <>
-                          <div className="upload-templates-manage__display-row">
-                            <div className="upload-templates-manage__info">
-                              <Icon icon={ICONS.STACK} />
-                              <div className="upload-templates-manage__text">
-                                <div className="upload-templates-manage__name-row">
-                                  <span className="upload-templates-manage__name">{template.name}</span>
+                          <div className="tw:flex tw:items-start tw:gap-app-s tw:upto-small:flex-col">
+                            <div className="tw:flex tw:min-w-0 tw:flex-1 tw:items-start tw:gap-app-xs">
+                              <Icon
+                                icon={ICONS.STACK}
+                                className="tw:mt-[2px] tw:size-[1.1rem] tw:shrink-0 tw:stroke-app-text"
+                              />
+                              <div className="tw:flex tw:min-w-0 tw:flex-col tw:gap-app-xxxs">
+                                <div className="tw:flex tw:min-w-0 tw:items-center tw:gap-app-xxs">
+                                  <span className="tw:overflow-hidden tw:text-app-body tw:font-bold tw:text-ellipsis tw:whitespace-nowrap">
+                                    {template.name}
+                                  </span>
                                   {template.isPinned && (
-                                    <span className="upload-templates-manage__pinned">
-                                      <Icon icon={ICONS.PIN} />
+                                    <span className="tw:inline-flex tw:items-center tw:gap-[0.2rem] tw:whitespace-nowrap tw:rounded-app tw:border tw:border-[rgba(var(--color-primary-dynamic),0.5)] tw:bg-[rgba(var(--color-primary-dynamic),0.14)] tw:px-[0.35rem] tw:py-[0.1rem] tw:text-[0.68rem] tw:text-[rgba(var(--color-text-base),0.92)]">
+                                      <Icon icon={ICONS.PIN} className="tw:size-[0.72rem] tw:stroke-current" />
                                       {__('Pinned')}
                                     </span>
                                   )}
                                 </div>
-                                <div className="upload-templates-manage__meta">
+                                <div className="tw:flex tw:flex-wrap tw:gap-app-xs tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.6)]">
                                   <span>{template.channelName}</span>
                                   <span>
                                     {__('Created %date%', {
@@ -673,7 +688,7 @@ export default function ModalUploadTemplates() {
                                   </span>
                                 </div>
                                 {!isPreviewExpanded && (
-                                  <div className="upload-templates-manage__preview-summary">
+                                  <div className="tw:mt-app-xxs tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.62)]">
                                     {previewFields.length > 0
                                       ? __('%count% fields ready to prefill', {
                                           count: previewFields.length,
@@ -682,23 +697,23 @@ export default function ModalUploadTemplates() {
                                   </div>
                                 )}
                                 {isPreviewExpanded && visiblePreviewFields.length > 0 ? (
-                                  <div className="upload-templates-manage__preview">
+                                  <div className="tw:mt-app-xxs tw:flex tw:flex-wrap tw:gap-app-xxxs">
                                     {visiblePreviewFields.map((previewField) => (
                                       <span
                                         key={`${templateKey}:${previewField.label}`}
-                                        className="upload-templates-manage__preview-item"
+                                        className="tw:inline-flex tw:max-w-[min(100%,18rem)] tw:items-center tw:rounded-app tw:border tw:border-[rgba(var(--color-text-base),0.15)] tw:bg-[rgba(var(--color-text-base),0.04)] tw:px-[0.45rem] tw:py-[0.2rem] tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.86)] tw:upto-small:max-w-full"
                                         title={`${previewField.label}: ${previewField.value}`}
                                       >
-                                        <span className="upload-templates-manage__preview-label">
+                                        <span className="tw:shrink-0 tw:text-[rgba(var(--color-text-base),0.7)]">
                                           {previewField.label}:{' '}
                                         </span>
-                                        <span className="upload-templates-manage__preview-value">
+                                        <span className="tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap">
                                           {truncatePreviewValue(previewField.value)}
                                         </span>
                                       </span>
                                     ))}
                                     {hiddenPreviewFieldCount > 0 && (
-                                      <span className="upload-templates-manage__preview-more">
+                                      <span className="tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.55)]">
                                         {__('+%count% more', {
                                           count: hiddenPreviewFieldCount,
                                         })}
@@ -707,7 +722,7 @@ export default function ModalUploadTemplates() {
                                   </div>
                                 ) : (
                                   isPreviewExpanded && (
-                                    <div className="upload-templates-manage__preview-empty">
+                                    <div className="tw:text-app-xsmall tw:text-[rgba(var(--color-text-base),0.55)]">
                                       {__('No fields set in this template.')}
                                     </div>
                                   )
@@ -715,13 +730,16 @@ export default function ModalUploadTemplates() {
                               </div>
                             </div>
                           </div>
-                          <div className="upload-templates-manage__actions">
+                          <div className="tw:mt-app-xs tw:flex tw:flex-row tw:flex-wrap tw:items-center tw:gap-app-xxs tw:[border-top:1px_solid_rgba(var(--color-text-base),0.11)] tw:pt-app-xs tw:upto-small:justify-start">
                             <button
                               type="button"
-                              className="upload-templates-manage__text-btn"
+                              className={`${TEMPLATE_TEXT_BUTTON_CLASS_NAME} ${TEMPLATE_TEXT_BUTTON_DEFAULT_CLASS_NAME}`}
                               onClick={() => togglePreview(templateKey)}
                             >
-                              <Icon icon={isPreviewExpanded ? ICONS.UP : ICONS.DOWN} />
+                              <Icon
+                                icon={isPreviewExpanded ? ICONS.UP : ICONS.DOWN}
+                                className="tw:size-[0.95rem] tw:stroke-current"
+                              />
                               {isPreviewExpanded
                                 ? __('Hide fields')
                                 : __('View fields (%count%)', {
@@ -730,42 +748,42 @@ export default function ModalUploadTemplates() {
                             </button>
                             <button
                               type="button"
-                              className="upload-templates-manage__text-btn upload-templates-manage__text-btn--prefill"
+                              className={`${TEMPLATE_TEXT_BUTTON_CLASS_NAME} tw:border-[rgba(var(--color-primary-dynamic),0.65)] tw:bg-[rgba(var(--color-primary-dynamic),0.18)] tw:hover:bg-[rgba(var(--color-primary-dynamic),0.28)]`}
                               onClick={() => handlePrefillNow(template)}
                             >
-                              <Icon icon={ICONS.COPY} />
+                              <Icon icon={ICONS.COPY} className="tw:size-[0.95rem] tw:stroke-current" />
                               {__('Prefill now')}
                             </button>
                             <button
                               type="button"
-                              className="upload-templates-manage__text-btn"
+                              className={`${TEMPLATE_TEXT_BUTTON_CLASS_NAME} ${TEMPLATE_TEXT_BUTTON_DEFAULT_CLASS_NAME}`}
                               onClick={() => handleTogglePin(template)}
                             >
-                              <Icon icon={ICONS.PIN} />
+                              <Icon icon={ICONS.PIN} className="tw:size-[0.95rem] tw:stroke-current" />
                               {template.isPinned ? __('Unpin') : __('Pin')}
                             </button>
                             <button
                               type="button"
-                              className="upload-templates-manage__text-btn"
+                              className={`${TEMPLATE_TEXT_BUTTON_CLASS_NAME} ${TEMPLATE_TEXT_BUTTON_DEFAULT_CLASS_NAME}`}
                               onClick={() => handleDuplicate(template)}
                             >
-                              <Icon icon={ICONS.COPY_LINK} />
+                              <Icon icon={ICONS.COPY_LINK} className="tw:size-[0.95rem] tw:stroke-current" />
                               {__('Duplicate')}
                             </button>
                             <button
                               type="button"
-                              className="upload-templates-manage__text-btn"
+                              className={`${TEMPLATE_TEXT_BUTTON_CLASS_NAME} ${TEMPLATE_TEXT_BUTTON_DEFAULT_CLASS_NAME}`}
                               onClick={() => handleStartRename(template)}
                             >
-                              <Icon icon={ICONS.EDIT} />
+                              <Icon icon={ICONS.EDIT} className="tw:size-[0.95rem] tw:stroke-current" />
                               {__('Edit name')}
                             </button>
                             <button
                               type="button"
-                              className="upload-templates-manage__text-btn upload-templates-manage__text-btn--delete"
+                              className={`${TEMPLATE_TEXT_BUTTON_CLASS_NAME} tw:border-app-border tw:bg-transparent tw:hover:bg-[rgba(var(--color-error-dynamic,255,0,0),0.1)] tw:hover:text-app-error`}
                               onClick={() => handleDelete(template)}
                             >
-                              <Icon icon={ICONS.DELETE} />
+                              <Icon icon={ICONS.DELETE} className="tw:size-[0.95rem] tw:stroke-current" />
                               {__('Delete')}
                             </button>
                           </div>
@@ -779,7 +797,7 @@ export default function ModalUploadTemplates() {
           </div>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="primary" label={__('Save Changes')} onClick={handleSave} disabled={!hasChanges} />
             <Button button="link" label={__('Cancel')} onClick={() => dispatch(doHideModal())} />
           </div>

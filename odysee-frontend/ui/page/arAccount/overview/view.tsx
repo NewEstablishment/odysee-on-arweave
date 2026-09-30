@@ -6,6 +6,7 @@ import QRCode from 'component/common/qr-code';
 import CopyableText from 'component/copyableText';
 import ButtonToggle from 'component/buttonToggle';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
 import Symbol from 'component/common/symbol';
 import Button from 'component/button';
 import Spinner from 'component/spinner';
@@ -14,7 +15,8 @@ import I18nMessage from 'component/i18nMessage';
 import { LocalStorage } from 'util/storage';
 import { useAppDispatch } from 'redux/hooks';
 import { doArSend } from 'redux/actions/arwallet';
-import './style.scss';
+import { AR_ACCOUNT_OVERVIEW_CLASSES } from './classes';
+import { AR_ACCOUNT_CARD_CLASS, AR_ACCOUNT_CARD_TITLE_CLASS, AR_ACCOUNT_PAGE_CLASSES } from '../classes';
 type Props = {
   cardHeader?: any;
   wallet?: any;
@@ -170,33 +172,43 @@ function Overview(props: Props) {
 
   return (
     <Card
-      className={activeArStatus !== 'connected' ? `card--overview card--disabled` : `card--overview`}
+      className={`${AR_ACCOUNT_CARD_CLASS} ${AR_ACCOUNT_OVERVIEW_CLASSES.root}${
+        activeArStatus !== 'connected' ? ` ${CARD_CLASSES.disabled}` : ''
+      }`}
       title={cardHeader()}
+      titleClassName={AR_ACCOUNT_CARD_TITLE_CLASS}
       background
       actions={
         <>
-          <div className="payment-options-wrapper">
-            <div className="payment-options-card">
-              <div className="payment-options">
-                <h2 className="section__title--small">{__('Receive')}</h2>
-                <div className="payment-options-content">
-                  <div className="payment-option">
+          <div className={AR_ACCOUNT_OVERVIEW_CLASSES.optionsWrapper}>
+            <div className={AR_ACCOUNT_OVERVIEW_CLASSES.optionsCard}>
+              <div className={AR_ACCOUNT_OVERVIEW_CLASSES.options}>
+                <h2 className={AR_ACCOUNT_PAGE_CLASSES.sectionTitle}>{__('Receive')}</h2>
+                <div className={AR_ACCOUNT_OVERVIEW_CLASSES.content}>
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.contentOption}>
                     {/* <div className="sendArLabel">{__('Address')}</div> */}
                     <CopyableText copyable={wallet?.address} />
                   </div>
-                  <div className="payment-option__monetization">
-                    {__('Show QR code')} <ButtonToggle status={showQR} setStatus={() => setShowQR(!showQR)} />
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.monetization}>
+                    {__('Show QR code')}{' '}
+                    <ButtonToggle
+                      status={showQR}
+                      setStatus={() => setShowQR(!showQR)}
+                      className="tw:ml-auto tw:min-w-[40px]"
+                      tone="address"
+                    />
                   </div>
                 </div>
               </div>
-              <div className="payment-options">
-                <h2 className="section__title--small">
+              <div className={AR_ACCOUNT_OVERVIEW_CLASSES.options}>
+                <h2 className={AR_ACCOUNT_PAGE_CLASSES.sectionTitle}>
                   <I18nMessage
                     tokens={{
                       learnMore: (
-                        <div className="learn-more">
-                          <Icon icon={ICONS.INFO} />
+                        <div className={AR_ACCOUNT_PAGE_CLASSES.learnMore}>
+                          <Icon className={AR_ACCOUNT_PAGE_CLASSES.learnMoreIcon} icon={ICONS.INFO} />
                           <a
+                            className={AR_ACCOUNT_PAGE_CLASSES.learnMoreLink}
                             href="https://help.odysee.tv/category-monetization"
                             target="_blank"
                             rel="noopener noreferrer"
@@ -210,14 +222,16 @@ function Overview(props: Props) {
                     Monetization %learnMore%
                   </I18nMessage>
                 </h2>
-                <div className="payment-options-content">
-                  <div className="payment-option">
-                    <div className="payment-option__monetization">
-                      <div className="payment-option__labels">
+                <div className={AR_ACCOUNT_OVERVIEW_CLASSES.content}>
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.contentOption}>
+                    <div className={AR_ACCOUNT_OVERVIEW_CLASSES.monetization}>
+                      <div className={AR_ACCOUNT_OVERVIEW_CLASSES.labels}>
                         <h3>{__('Allow monetization')}</h3>
-                        <span>Turning this on enables your channel(s) to receive tips and setup memberships.</span>
+                        <span className={AR_ACCOUNT_OVERVIEW_CLASSES.labelsDescription}>
+                          Turning this on enables your channel(s) to receive tips and setup memberships.
+                        </span>
                       </div>
-                      <ButtonToggleAddressActive address={wallet?.address} />
+                      <ButtonToggleAddressActive address={wallet?.address} className="tw:ml-auto tw:min-w-[40px]" />
                     </div>
                   </div>
                 </div>
@@ -225,29 +239,25 @@ function Overview(props: Props) {
             </div>
 
             {showQR && (
-              <div className="payment-options">
-                <h2 className="section__title--small">{__('QR Code')}</h2>
-                <div className="payment-options-content">
-                  <div
-                    className="payment-option"
-                    style={{
-                      alignItems: 'center',
-                    }}
-                  >
+              <div className={AR_ACCOUNT_OVERVIEW_CLASSES.options}>
+                <h2 className={AR_ACCOUNT_PAGE_CLASSES.sectionTitle}>{__('QR Code')}</h2>
+                <div className={AR_ACCOUNT_OVERVIEW_CLASSES.content}>
+                  <div className={`${AR_ACCOUNT_OVERVIEW_CLASSES.contentOption} tw:items-center`}>
                     {wallet && wallet.address && <QRCode value={wallet.address} />}
                   </div>
                 </div>
               </div>
             )}
 
-            <div className="payment-options">
-              <h2 className="section__title--small">{__('Send')}</h2>
-              <div className="payment-options-content">
-                <div className="payment-option">
-                  <div className="sendAr-row">
-                    <div className="sendAr-row__amount">
-                      <div className="sendArLabel">{__('Amount')}</div>
+            <div className={AR_ACCOUNT_OVERVIEW_CLASSES.options}>
+              <h2 className={AR_ACCOUNT_PAGE_CLASSES.sectionTitle}>{__('Send')}</h2>
+              <div className={AR_ACCOUNT_OVERVIEW_CLASSES.content}>
+                <div className={AR_ACCOUNT_OVERVIEW_CLASSES.contentOption}>
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.sendRow}>
+                    <div className={`sendAr-row__amount ${AR_ACCOUNT_OVERVIEW_CLASSES.sendField}`}>
+                      <div className={AR_ACCOUNT_OVERVIEW_CLASSES.sendLabel}>{__('Amount')}</div>
                       <input
+                        className={AR_ACCOUNT_OVERVIEW_CLASSES.sendInput}
                         ref={inputAmountRef}
                         type="number"
                         step="0.00000001"
@@ -255,22 +265,23 @@ function Overview(props: Props) {
                         onChange={handleCheckForm}
                       />
                     </div>
-                    <div className="sendAr__total" onClick={handleSetMaxAmount}>
-                      <span>
+                    <div className={AR_ACCOUNT_OVERVIEW_CLASSES.sendTotal} onClick={handleSetMaxAmount}>
+                      <span className={AR_ACCOUNT_OVERVIEW_CLASSES.sendTotalValue}>
                         {__('Totally available: ')} {balance.ar.toFixed(8)}
                       </span>
                     </div>
 
-                    <div className="sendAr-row__receiver">
-                      <div className="sendArLabel">{__('Receiving address')}</div>
+                    <div className={`sendAr-row__receiver ${AR_ACCOUNT_OVERVIEW_CLASSES.sendField}`}>
+                      <div className={AR_ACCOUNT_OVERVIEW_CLASSES.sendLabel}>{__('Receiving address')}</div>
                       <input
+                        className={AR_ACCOUNT_OVERVIEW_CLASSES.sendInput}
                         ref={inputReceivingAddressRef}
                         type="text"
                         placeholder={`00000000000000000000000000000000000000000`}
                         onChange={handleCheckForm}
                       />
                     </div>
-                    <div className="sendAr-row__send">
+                    <div className={AR_ACCOUNT_OVERVIEW_CLASSES.sendAction}>
                       <Button
                         button="primary"
                         title={__('Send')}
@@ -287,13 +298,14 @@ function Overview(props: Props) {
 
           {walletType !== 'NATIVE_WALLET' && (
             <div>
-              <h2 className="section__title--small">
+              <h2 className={AR_ACCOUNT_PAGE_CLASSES.sectionTitle}>
                 <I18nMessage
                   tokens={{
                     learnMore: (
-                      <div className="learn-more">
-                        <Icon icon={ICONS.INFO} />
+                      <div className={AR_ACCOUNT_PAGE_CLASSES.learnMore}>
+                        <Icon className={AR_ACCOUNT_PAGE_CLASSES.learnMoreIcon} icon={ICONS.INFO} />
                         <a
+                          className={AR_ACCOUNT_PAGE_CLASSES.learnMoreLink}
                           href="https://help.odysee.tv/category-monetization/wander"
                           target="_blank"
                           rel="noopener noreferrer"
@@ -307,19 +319,19 @@ function Overview(props: Props) {
                   Connected wallet %learnMore%
                 </I18nMessage>
               </h2>
-              <div className="payment-options-content">
-                <div className="payment-option">
-                  <div className="payment-option__wallet">
-                    <div className="payment-option__wallet-info">
+              <div className={AR_ACCOUNT_OVERVIEW_CLASSES.content}>
+                <div className={AR_ACCOUNT_OVERVIEW_CLASSES.contentOption}>
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.wallet}>
+                    <div className={AR_ACCOUNT_OVERVIEW_CLASSES.walletInfo}>
                       {/* <h3>{__('Warning')}</h3> */}
-                      <span>
+                      <span className={AR_ACCOUNT_OVERVIEW_CLASSES.walletInfoDescription}>
                         We highly recommend backing up your wallet and its recovery file, and storing both somewhere
                         safe. In the Wallet, go to Account › Backup to generate a QR code you can scan to sign in on
                         other devices. We never see your wallet or recovery file, so if you lose them we can’t restore
                         your account.
                       </span>
                     </div>
-                    <div className="payment-option__wallet-button">
+                    <div className={AR_ACCOUNT_OVERVIEW_CLASSES.walletButton}>
                       <Button
                         button="primary"
                         label={__('Open wallet')}
@@ -333,17 +345,17 @@ function Overview(props: Props) {
             </div>
           )}
 
-          <h2 className="section__title--small">
+          <h2 className={AR_ACCOUNT_PAGE_CLASSES.sectionTitle}>
             {__('Transaction history')}
             <NavLink to={`wallet?tab=fiat-payment-history&currency=fiat&transactionType=tips`}>Tip history</NavLink>
           </h2>
-          <div className="transaction-history">
+          <div className={AR_ACCOUNT_OVERVIEW_CLASSES.history}>
             {!transactions ? (
               <Spinner type="small" />
             ) : (
               transactions.map((transaction, index) => (
-                <div key={index} className="transaction-history__row">
-                  <div className="transaction-history__date">
+                <div key={index} className={AR_ACCOUNT_OVERVIEW_CLASSES.historyRow}>
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.historyDate}>
                     {new Date(transaction.date * 1000)
                       .toLocaleString('en-US', {
                         month: '2-digit',
@@ -355,18 +367,18 @@ function Overview(props: Props) {
                       })
                       .replace(',', '')}
                   </div>
-                  <div className="transaction-history__action">
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.historyAction}>
                     {transaction.action === 'sendTip' ? __('Send') : __('Receive')}
                   </div>
-                  <div className="transaction-history__amount">{transaction.amount.toFixed(6)}</div>
-                  <div className="transaction-history__token">
-                    <Symbol token="ar" />
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.historyAmount}>{transaction.amount.toFixed(6)}</div>
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.historyToken}>
+                    <Symbol className={AR_ACCOUNT_OVERVIEW_CLASSES.historySymbol} token="ar" />
                   </div>
-                  <div className="transaction-history__direction">
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.historyDirection}>
                     {transaction.action === 'sendTip' ? __('to') : __('from')}
                   </div>
-                  <div className="transaction-history__target">{transaction.target}</div>
-                  <div className="transaction-history__viewblock">
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.historyTarget}>{transaction.target}</div>
+                  <div className={AR_ACCOUNT_OVERVIEW_CLASSES.historyViewblock}>
                     <a href={`https://viewblock.io/arweave/tx/${transaction.txId}`} target="_blank" rel="noreferrer">
                       <img src="https://thumbs.odycdn.com/ea5d40b35d7355f25d0199ed4832f77b.webp" />
                     </a>

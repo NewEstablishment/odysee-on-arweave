@@ -1,28 +1,25 @@
 import React from 'react';
-import QRCode from 'component/common/qr-code';
-import CopyableText from 'component/copyableText';
 import I18nMessage from 'component/i18nMessage';
 import Card from 'component/common/card';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import ReceiveAddressLayout from 'component/receiveAddressLayout';
 import Symbol from 'component/common/symbol';
-import './style.scss';
+import { PAYMENT_ACCOUNT_CARD_CLASS, PAYMENT_ACCOUNT_CARD_TITLE_CLASS, PAYMENT_ACCOUNT_PAGE_CLASSES } from '../classes';
+
+const DEPOSIT_ADDRESS = '0x67b573D3dA11E21Af9993c5a94C7c5cD88638F33';
 
 function ReceiveUsdc(props: any) {
   const { cardHeader, arWalletStatus } = props;
   return (
     <Card
-      className={!arWalletStatus ? `card--receiveusdc card--disabled` : `card--receiveusdc`}
+      className={`${PAYMENT_ACCOUNT_CARD_CLASS}${!arWalletStatus ? ` ${CARD_CLASSES.disabled}` : ''}`}
       title={cardHeader()}
+      titleClassName={PAYMENT_ACCOUNT_CARD_TITLE_CLASS}
       background
       actions={
-        <div className="section__flex">
-          <div className="qr__wrapper">
-            <QRCode value="0x67b573D3dA11E21Af9993c5a94C7c5cD88638F33" />
-            <div className="address__wrapper">
-              <CopyableText copyable={`0x67b573D3dA11E21Af9993c5a94C7c5cD88638F33`} />
-            </div>
-          </div>
-          <div className="section-content__wrapper">
-            <h2 className="section__title--small">
+        <ReceiveAddressLayout address={DEPOSIT_ADDRESS}>
+          <div className={PAYMENT_ACCOUNT_PAGE_CLASSES.sectionContent}>
+            <h2 className={PAYMENT_ACCOUNT_PAGE_CLASSES.sectionTitle}>
               <I18nMessage
                 tokens={{
                   usdc: (
@@ -55,7 +52,7 @@ function ReceiveUsdc(props: any) {
                 deposit %usdc% into your account directly from your own wallet.
               </I18nMessage>
             </h2>
-            <div className="section__warning">
+            <div className={PAYMENT_ACCOUNT_PAGE_CLASSES.sectionWarning}>
               <I18nMessage
                 tokens={{
                   usdc: (
@@ -89,7 +86,7 @@ function ReceiveUsdc(props: any) {
               </I18nMessage>
             </div>
           </div>
-        </div>
+        </ReceiveAddressLayout>
       }
     />
   );

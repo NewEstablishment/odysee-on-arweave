@@ -5,6 +5,13 @@ import * as REACTION_TYPES from 'constants/reactions';
 import * as ICONS from 'constants/icons';
 import RatioBar from 'component/ratioBar';
 import FileActionButton from 'component/common/file-action-button';
+import { ButtonFireEffect, ButtonSlimeEffect } from 'component/buttonReactionEffects/view';
+import {
+  BUTTON_REACTION_DISLIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_DISLIKE_CLASS,
+  BUTTON_REACTION_LIKE_ACTIVE_CLASS,
+  BUTTON_REACTION_LIKE_CLASS,
+} from 'component/button/classes';
 import Counter from 'component/counter';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { selectMyReactionForUri, selectLikeCountForUri, selectDislikeCountForUri } from 'redux/selectors/reactions';
@@ -18,12 +25,20 @@ import {
 } from 'redux/selectors/claims';
 import { DISABLE_SLIMES_VIDEO_TAG, DISABLE_SLIMES_ALL_TAG } from 'constants/tags';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
+import {
+  FILE_REACTION_COUNT_PLACEHOLDER_CLASS,
+  FILE_REACTIONS_CLASS,
+  FILE_REACTIONS_DISABLED_CLASS,
+  FILE_REACTIONS_NO_SLIME_CLASS,
+} from './classes';
+import { EMBED_COMPACT_REACTION_BUTTON_CLASS } from './compact-classes';
 const LIVE_REACTION_FETCH_MS = 1000 * 45;
 type Props = {
   uri: string;
+  compact?: boolean;
 };
 export default function FileReactions(props: Props) {
-  const { uri } = props;
+  const { uri, compact } = props;
   const dispatch = useAppDispatch();
   const [reactionPending, setReactionPending] = React.useState(false);
   const reactionPendingRef = React.useRef(false);
@@ -75,12 +90,13 @@ export default function FileReactions(props: Props) {
   }, [claimId, dispatch, isLivestreamClaim]);
   return (
     <div
-      className={classnames('ratio-wrapper', {
-        'ratio-wrapper--disabled': scheduledState === 'scheduled',
-        'ratio-wrapper--no-slime': disableSlimes,
+      className={classnames(FILE_REACTIONS_CLASS, {
+        [FILE_REACTIONS_DISABLED_CLASS]: scheduledState === 'scheduled',
+        [FILE_REACTIONS_NO_SLIME_CLASS]: disableSlimes,
       })}
     >
       <LikeButton
+        compact={compact}
         disabled={reactionPending}
         myReaction={myReaction}
         reactionCount={likeCount}
@@ -88,6 +104,7 @@ export default function FileReactions(props: Props) {
       />
       {!disableSlimes && (
         <DislikeButton
+          compact={compact}
           disabled={reactionPending}
           myReaction={myReaction}
           reactionCount={dislikeCount}
@@ -98,8 +115,9 @@ export default function FileReactions(props: Props) {
     </div>
   );
 }
-const Placeholder = <Skeleton variant="text" animation="wave" className="reaction-count-placeholder" />;
+const Placeholder = <Skeleton variant="text" animation="wave" className={FILE_REACTION_COUNT_PLACEHOLDER_CLASS} />;
 type ButtonProps = {
+  compact?: boolean;
   disabled: boolean;
   myReaction: string | null | undefined;
   reactionCount: number;
@@ -107,29 +125,19 @@ type ButtonProps = {
 };
 
 const LikeButton = (props: ButtonProps) => {
-  const { disabled, myReaction, reactionCount, onClick } = props;
+  const { compact, disabled, myReaction, reactionCount, onClick } = props;
   return (
     <FileActionButton
       disabled={disabled}
       title={__('I like this')}
       requiresAuth={!hyperbeamNodeEnabled()}
       authSrc="filereaction_like"
-      className={classnames('button--file-action button-like', {
-        'button--fire': myReaction === REACTION_TYPES.LIKE,
+      className={classnames(BUTTON_REACTION_LIKE_CLASS, compact && EMBED_COMPACT_REACTION_BUTTON_CLASS, {
+        [BUTTON_REACTION_LIKE_ACTIVE_CLASS]: myReaction === REACTION_TYPES.LIKE,
       })}
       label={
         <>
-          {myReaction === REACTION_TYPES.LIKE && (
-            <>
-              <div className="button__fire-glow" />
-              <div className="button__fire-particle1" />
-              <div className="button__fire-particle2" />
-              <div className="button__fire-particle3" />
-              <div className="button__fire-particle4" />
-              <div className="button__fire-particle5" />
-              <div className="button__fire-particle6" />
-            </>
-          )}
+          {myReaction === REACTION_TYPES.LIKE && <ButtonFireEffect />}
           {Number.isInteger(reactionCount) ? <Counter value={reactionCount} precision={0} /> : Placeholder}
         </>
       }
@@ -141,25 +149,19 @@ const LikeButton = (props: ButtonProps) => {
 };
 
 const DislikeButton = (props: ButtonProps) => {
-  const { disabled, myReaction, reactionCount, onClick } = props;
+  const { compact, disabled, myReaction, reactionCount, onClick } = props;
   return (
     <FileActionButton
       disabled={disabled}
       requiresAuth={!hyperbeamNodeEnabled()}
       authSrc={'filereaction_dislike'}
       title={__('I dislike this')}
-      className={classnames('button--file-action button-dislike', {
-        'button--slime': myReaction === REACTION_TYPES.DISLIKE,
+      className={classnames(BUTTON_REACTION_DISLIKE_CLASS, compact && EMBED_COMPACT_REACTION_BUTTON_CLASS, {
+        [BUTTON_REACTION_DISLIKE_ACTIVE_CLASS]: myReaction === REACTION_TYPES.DISLIKE,
       })}
       label={
         <>
-          {myReaction === REACTION_TYPES.DISLIKE && (
-            <>
-              <div className="button__slime-stain" />
-              <div className="button__slime-drop1" />
-              <div className="button__slime-drop2" />
-            </>
-          )}
+          {myReaction === REACTION_TYPES.DISLIKE && <ButtonSlimeEffect />}
           {Number.isInteger(reactionCount) ? <Counter value={reactionCount} precision={0} /> : Placeholder}
         </>
       }

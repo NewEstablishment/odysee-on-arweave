@@ -2,7 +2,6 @@ import * as ICONS from 'constants/icons';
 import React from 'react';
 import Page from 'component/page';
 import Icon from 'component/common/icon';
-import './style.scss';
 type Props = {};
 
 function TagsFollowingPage(props: Props) {
@@ -12,13 +11,9 @@ function TagsFollowingPage(props: Props) {
         .sort((a, b) => a.localeCompare(b))
         .map((tag) => (
           <>
-            <div
-              style={{
-                marginBottom: '15px',
-              }}
-            >
-              <Icon icon={ICONS[tag]} size={10} className="listed-icon" />
-              <h2 className="icon-display-name">{tag}</h2>
+            <div className="tw:mb-[15px]">
+              <Icon icon={ICONS[tag]} size={10} className="tw:mb-[-3px] tw:inline-block tw:size-[20px]" />
+              <h2 className="tw:ml-[7px] tw:inline">{tag}</h2>
               <br />
             </div>
           </>

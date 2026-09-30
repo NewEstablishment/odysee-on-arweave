@@ -1,6 +1,6 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import classnames from 'classnames';
-import './style.scss';
 import Button from 'component/button';
 import Section from 'component/channelSections/Section';
 import Spinner from 'component/spinner';
@@ -10,6 +10,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doOpenModal } from 'redux/actions/app';
 import { selectClaimIdForUri } from 'redux/selectors/claims';
 import { selectFeaturedChannelsForChannelId, selectFetchingCreatorSettings } from 'redux/selectors/comments';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
 
 type Props = {
   uri: string;
@@ -42,18 +43,25 @@ export default function SectionList(props: Props) {
 
   return (
     <div
-      className={classnames('channel_sections', {
-        'channel_sections--disabled': fetchingCreatorSettings,
+      className={classnames({
+        'tw:pointer-events-none tw:opacity-30': fetchingCreatorSettings,
       })}
     >
       {editMode && (
-        <div className="channel_sections__actions">
+        <div className="tw:flex tw:flex-wrap tw:items-center tw:justify-end tw:[&_svg]:cursor-pointer">
           {fetchingCreatorSettings && <Spinner type="small" />}
           {sectionCount > 1 && (
-            <Button title={__('Sort')} button="secondary" icon={ICONS.ARRANGE} onClick={handleSort} />
+            <Button
+              className="tw:mt-app-xs tw:ml-app-s"
+              title={__('Sort')}
+              button="secondary"
+              icon={ICONS.ARRANGE}
+              onClick={handleSort}
+            />
           )}
           <Button
             label={__('Add featured channels')}
+            className="tw:mt-app-xs tw:ml-app-s"
             button="primary"
             icon={ICONS.ADD}
             onClick={handleAddFeaturedChannels}
@@ -62,7 +70,7 @@ export default function SectionList(props: Props) {
       )}
       <div className="channel_sections__list">
         {sectionCount === 0 && (
-          <div className="empty main--empty">
+          <div className={`${EMPTY_CLASS} ${PAGE_MAIN_EMPTY_CLASS}`}>
             {fetchingCreatorSettings && <Spinner />}
             {!fetchingCreatorSettings && __('No featured channels.')}
           </div>
@@ -70,7 +78,14 @@ export default function SectionList(props: Props) {
         {!fetchingCreatorSettings &&
           featuredChannels &&
           featuredChannels.map((fc) => (
-            <Section key={fc.id} id={fc.id} title={fc.value.title} uris={fc.value.uris} channelId={claimId} />
+            <Section
+              key={fc.id}
+              id={fc.id}
+              title={fc.value.title}
+              uris={fc.value.uris}
+              channelId={claimId}
+              sectionListMenu
+            />
           ))}
       </div>
     </div>

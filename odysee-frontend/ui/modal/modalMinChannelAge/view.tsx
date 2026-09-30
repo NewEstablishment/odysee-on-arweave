@@ -7,6 +7,8 @@ import FormFieldDuration from 'component/formFieldDuration';
 import { Modal } from 'modal/modal';
 import { useAppDispatch } from 'redux/hooks';
 import { doHideModal } from 'redux/actions/app';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { HELP_WARNING_CLASS } from 'component/common/help-classes';
 
 const CHANNEL_AGE_LIMIT_MIN_DATE = new Date('February 8, 2022 00:00:00');
 const LIMITATION_WARNING = 'The minimum duration must not exceed Feb 8th, 2022.';
@@ -55,7 +57,7 @@ export default function ModalMinChannelAge(props: Props) {
               onChange={(e) => setMinChannelAgeInput(e.target.value)}
               onResolve={handleOnInputResolved}
             />
-            {showLimitationWarning && !limitDisabled && <p className="help--warning">{__(LIMITATION_WARNING)}</p>}
+            {showLimitationWarning && !limitDisabled && <p className={HELP_WARNING_CLASS}>{__(LIMITATION_WARNING)}</p>}
             <FormField
               type="checkbox"
               name="no_limit"
@@ -66,7 +68,7 @@ export default function ModalMinChannelAge(props: Props) {
           </>
         }
         actions={
-          <div className="section__actions">
+          <div className={SECTION_CLASSES.actions}>
             <Button button="primary" label={__('OK')} onClick={handleOnClick} disabled={!inputOk} />
             <Button button="link" label={__('Cancel')} onClick={hideModal} />
           </div>

@@ -7,7 +7,7 @@ function LoginGraphic(props: any) {
   });
 
   return (
-    <div className="signup-image">
+    <div className="tw:upto-small:w-full">
       <img alt={alt} src={LOGIN_IMG_URL} />
     </div>
   );

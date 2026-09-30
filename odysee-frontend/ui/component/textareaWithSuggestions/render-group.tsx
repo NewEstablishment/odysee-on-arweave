@@ -1,5 +1,6 @@
 import LbcSymbol from 'component/common/lbc-symbol';
 import React from 'react';
+import { TEXTAREA_SUGGESTIONS_CLASSES } from './classes';
 type Props = {
   groupName: string;
   suggestionTerm?: string | null | undefined;
@@ -10,8 +11,8 @@ type Props = {
 const TextareaSuggestionsGroup = (props: Props) => {
   const { groupName, suggestionTerm, searchQuery, children } = props;
   return (
-    <div key={groupName} className="textarea-suggestions__group">
-      <label className="textarea-suggestions__group-label">
+    <div key={groupName} className={TEXTAREA_SUGGESTIONS_CLASSES.group}>
+      <label className={TEXTAREA_SUGGESTIONS_CLASSES.groupLabel}>
         {groupName === 'Top' ? (
           <LbcSymbol
             prefix={__('Winning Search for %matching_term%', {
@@ -29,7 +30,7 @@ const TextareaSuggestionsGroup = (props: Props) => {
       </label>
 
       {children}
-      <hr className="textarea-suggestions__separator" />
+      <hr className={TEXTAREA_SUGGESTIONS_CLASSES.separator} />
     </div>
   );
 };

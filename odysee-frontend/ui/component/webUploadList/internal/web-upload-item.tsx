@@ -6,6 +6,11 @@ import FileThumbnail from 'component/fileThumbnail';
 import * as MODALS from 'constants/modal_types';
 import { serializeFileObj } from 'util/file';
 import { tusIsSessionLocked } from 'util/tus';
+import { CARD_CLASSES } from 'component/common/card-classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
+import { WEB_UPLOAD_ITEM_CLASS, WEB_UPLOAD_PROGRESS_CLASSES } from '../classes';
+import { EMPTY_CLASS } from 'component/common/empty-classes';
+import { HELP_WARNING_CLASS } from 'component/common/help-classes';
 type Props = {
   uploadItem: FileUploadItem;
   doPublishResume: (arg0: any) => void;
@@ -32,7 +37,7 @@ export default function WebUploadItem(props: Props) {
       doOpenModal(MODALS.CONFIRM, {
         title: __('Invalid file'),
         subtitle: __('It appears to be a different or modified file.'),
-        body: <p className="help--warning">{__('Please select the same file from the initial upload.')}</p>,
+        body: <p className={HELP_WARNING_CLASS}>{__('Please select the same file from the initial upload.')}</p>,
         onConfirm: (closeModal) => closeModal(),
         hideCancel: true,
       });
@@ -45,10 +50,12 @@ export default function WebUploadItem(props: Props) {
       subtitle: __('Cancel and remove the selected upload?'),
       body: params.name ? (
         <>
-          <div className="section section--padded border-std non-clickable">
-            <p className="empty">{`lbry://${params.name}`}</p>
+          <div
+            className={`section ${SECTION_CLASSES.padded} tw:pointer-events-none tw:rounded-[var(--card-radius)] tw:border tw:border-app-border`}
+          >
+            <p className={EMPTY_CLASS}>{`lbry://${params.name}`}</p>
           </div>
-          <div className="section section__subtitle">
+          <div className={`section ${SECTION_CLASSES.subtitle}`}>
             <p>
               {__(
                 'If the file has been fully uploaded and already being processed, it might still appear in your Uploads list later.'
@@ -257,7 +264,7 @@ export default function WebUploadItem(props: Props) {
 
   function getFileSelector() {
     return (
-      <div className="claim-preview--padded">
+      <div className="tw:p-app-s">
         <FileSelector
           label={__('File')}
           onFileChosen={handleFileChange} // https://stackoverflow.com/questions/19107685/safari-input-type-file-accept-video-ignores-mp4-files
@@ -270,18 +277,18 @@ export default function WebUploadItem(props: Props) {
   function getProgressBar() {
     return (
       <>
-        <div className="claim-upload__progress--label">lbry://{params.name}</div>
-        <div className={'claim-upload__progress--outer card--inline'}>
+        <div className="tw:text-app-small tw:text-app-text-subtitle">lbry://{params.name}</div>
+        <div className={`${WEB_UPLOAD_PROGRESS_CLASSES.outer} ${CARD_CLASSES.inline}`} data-web-upload-progress>
           <div
-            className={'claim-upload__progress--inner'}
+            className={WEB_UPLOAD_PROGRESS_CLASSES.inner}
             style={{
               width: `${progress}%`,
             }}
           >
-            <span className="claim-upload__progress--inner-text">{getProgressElem()}</span>
+            <span className={WEB_UPLOAD_PROGRESS_CLASSES.text}>{getProgressElem()}</span>
           </div>
         </div>
-        <div className="claim-upload__progress-sub-text">{getProgressSubText()}</div>
+        <div className="tw:text-app-small tw:text-app-text-subtitle tw:italic">{getProgressSubText()}</div>
       </>
     );
   }
@@ -293,15 +300,15 @@ export default function WebUploadItem(props: Props) {
   }, [locked, showFileSelector]);
   return (
     <li
-      className={
-        'claim-preview__wrapper claim-preview__wrapper--row web-upload-item claim-preview claim-preview--inactive card--inline'
-      }
+      className={`claim-preview__wrapper claim-preview__wrapper--row claim-preview ${CARD_CLASSES.inline} ${WEB_UPLOAD_ITEM_CLASS}`}
+      data-claim-preview-inactive
+      data-web-upload-item
     >
       <FileThumbnail thumbnail={params.thumbnail_url} />
       <div className={'claim-preview-metadata'}>
         <div className="claim-preview-info">
           <div className="claim-preview__title">{params.title}</div>
-          <div className="card__actions--inline">
+          <div className={CARD_CLASSES.actionsInline}>
             {getRetryButton()}
             {getCancelButton()}
           </div>

@@ -1,4 +1,6 @@
 import React from 'react';
+import { FILE_LIST_CLASS } from './file-list-classes';
+import { FORM_RADIO_CLASS } from './form-components/form-field-classes';
 
 type Props = {
   files: Array<WebFile>;
@@ -30,13 +32,13 @@ function FileList(props: Props) {
   }, [files, onChange, selectedName]);
 
   return (
-    <div className="file-list">
+    <div className={FILE_LIST_CLASS} data-file-list>
       <div aria-label="files" role="radiogroup">
         {files.map(({ name }) => {
           const id = `file-list-${name}`;
 
           return (
-            <span className="radio" key={name}>
+            <span className={FORM_RADIO_CLASS} key={name}>
               <input
                 checked={selectedName === name}
                 id={id}

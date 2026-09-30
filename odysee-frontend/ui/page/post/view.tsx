@@ -1,3 +1,4 @@
+import { PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import React from 'react';
 import PostForm from 'component/publish/post/postForm';
 import Page from 'component/page';
@@ -14,7 +15,7 @@ function PostPage() {
     <Page noFooter>
       {balance < 0.01 && <YrblWalletEmpty />}
       {balance >= 0.01 && fetchingChannels ? (
-        <div className="main--empty">
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
           <Spinner />
         </div>
       ) : (

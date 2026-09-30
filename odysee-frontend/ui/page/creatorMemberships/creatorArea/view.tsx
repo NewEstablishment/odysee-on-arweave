@@ -13,7 +13,6 @@ const Page = PageComponent as React.ComponentType<any>;
 const ChannelSelector = ChannelSelectorComponent as React.ComponentType<any>;
 import Button from 'component/button';
 import TabWrapper from './internal/tabWrapper';
-import './style.scss';
 import { LocalStorage } from '../../../util/storage';
 import { SETTINGS } from 'constants/icons';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -25,6 +24,8 @@ import {
   doGetMembershipSupportersList as doGetMembershipSupportersListAction,
 } from 'redux/actions/memberships';
 import { selectArweaveDefaultAccountMonetizationEnabled } from 'redux/selectors/payments';
+import { CREATOR_MEMBERSHIP_CLASSES } from './classes';
+import { SECTION_CLASSES } from 'component/common/section-classes';
 const OverviewTab = lazyImport(
   () =>
     import(
@@ -139,16 +140,20 @@ const CreatorArea = (props: Props) => {
   const switchToTiersTab = () => onTabChange(2);
 
   return (
-    <Page className="membershipPage-wrapper">
-      <div className="creator-header-wrapper">
-        <div className="creator-header">
-          <Button navigate={`/$/${PAGES.MEMBERSHIPS_LANDING}`} icon={ICONS.BACK} button="liquidass" />
-          <div>{__('Creator Portal')}</div>
+    <Page className={CREATOR_MEMBERSHIP_CLASSES.page}>
+      <div className={CREATOR_MEMBERSHIP_CLASSES.header}>
+        <div className={CREATOR_MEMBERSHIP_CLASSES.headerContent}>
+          <Button
+            className={CREATOR_MEMBERSHIP_CLASSES.headerBackButton}
+            navigate={`/$/${PAGES.MEMBERSHIPS_LANDING}`}
+            icon={ICONS.BACK}
+            button="liquidass"
+          />
+          <div className={CREATOR_MEMBERSHIP_CLASSES.headerTitle}>{__('Creator Portal')}</div>
         </div>
-        <div className={'right-side'}>
+        <div className={CREATOR_MEMBERSHIP_CLASSES.headerActions}>
           <Button
             button={'secondary'}
-            className={!ackInfo ? 'creator-header__ack--active' : 'creator-header__ack--quiet'}
             label={!ackInfo ? 'X' : 'Help'}
             onClick={() => {
               handleAckArPaymentsInfo(!ackInfo);
@@ -157,7 +162,7 @@ const CreatorArea = (props: Props) => {
         </div>
       </div>
       {!ackInfo && (
-        <div className={'membership-explainer'}>
+        <div className={CREATOR_MEMBERSHIP_CLASSES.explainer}>
           <h1>New Payments Info</h1>
           <div>
             <p>
@@ -185,32 +190,48 @@ const CreatorArea = (props: Props) => {
         </div>
       )}
 
-      <Tabs onChange={onTabChange} index={tabIndex}>
-        <div className="tab__wrapper">
-          <TabList>
-            <Tab aria-selected={tabIndex === 0} onClick={() => onTabChange(0)}>
+      <Tabs className={CREATOR_MEMBERSHIP_CLASSES.tabs} onChange={onTabChange} index={tabIndex}>
+        <div className={CREATOR_MEMBERSHIP_CLASSES.tabWrapper}>
+          <TabList className={CREATOR_MEMBERSHIP_CLASSES.tabList}>
+            <Tab
+              className={CREATOR_MEMBERSHIP_CLASSES.tab}
+              aria-selected={tabIndex === 0}
+              onClick={() => onTabChange(0)}
+            >
               {__('Overview')}
             </Tab>
-            <Tab aria-selected={tabIndex === 1} onClick={() => onTabChange(1)}>
+            <Tab
+              className={CREATOR_MEMBERSHIP_CLASSES.tab}
+              aria-selected={tabIndex === 1}
+              onClick={() => onTabChange(1)}
+            >
               {__('My Supporters')}
             </Tab>
-            <Tab aria-selected={tabIndex === 2} onClick={() => onTabChange(2)}>
+            <Tab
+              className={CREATOR_MEMBERSHIP_CLASSES.tab}
+              aria-selected={tabIndex === 2}
+              onClick={() => onTabChange(2)}
+            >
               {__('My Tiers')}
             </Tab>
-            <Tab aria-selected={tabIndex === 3} onClick={() => onTabChange(3)}>
+            <Tab
+              className={CREATOR_MEMBERSHIP_CLASSES.tab}
+              aria-selected={tabIndex === 3}
+              onClick={() => onTabChange(3)}
+            >
               {__('Payments')}
             </Tab>
           </TabList>
         </div>
 
         <TabPanels>
-          <TabPanel>
+          <TabPanel className={CREATOR_MEMBERSHIP_CLASSES.tabPanel}>
             <TabWrapper
               switchToTiersTab={switchToTiersTab}
               component={
                 <>
                   {!monetizationEnabled && (
-                    <div className={'help'}>
+                    <div className={CREATOR_MEMBERSHIP_CLASSES.help}>
                       <p>{disabledMessage}</p>
                       <NavLink to="/$/wallet">Set up wallet</NavLink>
                     </div>
@@ -221,18 +242,18 @@ const CreatorArea = (props: Props) => {
             />
           </TabPanel>
 
-          <TabPanel>
+          <TabPanel className={CREATOR_MEMBERSHIP_CLASSES.tabPanel}>
             <TabWrapper
               switchToTiersTab={switchToTiersTab}
               component={
                 <>
                   {!monetizationEnabled && (
-                    <div className={'help'}>
+                    <div className={CREATOR_MEMBERSHIP_CLASSES.help}>
                       <p>{disabledMessage}</p>
                       <NavLink to="/$/wallet">Set up wallet</NavLink>
                     </div>
                   )}
-                  <span className="section__subtitle ">{__('Choose what channel to list supporters for')}</span>
+                  <span className={SECTION_CLASSES.subtitle}>{__('Choose what channel to list supporters for')}</span>
                   <ChannelSelector
                     hideAnon
                     allOptionProps={{
@@ -248,19 +269,19 @@ const CreatorArea = (props: Props) => {
             />
           </TabPanel>
 
-          <TabPanel>
+          <TabPanel className={CREATOR_MEMBERSHIP_CLASSES.tabPanel}>
             <TabWrapper
               component={
                 <>
                   {!monetizationEnabled && (
-                    <div className={'help'}>
+                    <div className={CREATOR_MEMBERSHIP_CLASSES.help}>
                       <p>{disabledMessage}</p>
                       <NavLink to="/$/wallet">Set up wallet</NavLink>
                     </div>
                   )}
-                  <div className="create-tiers-header-buttons">
-                    <div className="create-tiers-channel-selector">
-                      <span className="section__subtitle ">{__('Choose what channel to manage tiers for')}</span>
+                  <div className={CREATOR_MEMBERSHIP_CLASSES.tierHeader}>
+                    <div className={CREATOR_MEMBERSHIP_CLASSES.tierSelector}>
+                      <span className={SECTION_CLASSES.subtitle}>{__('Choose what channel to manage tiers for')}</span>
                       <ChannelSelector
                         hideAnon
                         onChannelSelect={() => {
@@ -269,8 +290,8 @@ const CreatorArea = (props: Props) => {
                       />
                     </div>
 
-                    <div className="create-tiers-preview-button">
-                      <span className="section__subtitle ">{__('Preview your tiers')}</span>
+                    <div className={CREATOR_MEMBERSHIP_CLASSES.tierPreview}>
+                      <span className={SECTION_CLASSES.subtitle}>{__('Preview your tiers')}</span>
                       <br />
                       <Button
                         navigate={`${formatLbryUrlForWeb(previewChannelClaim?.canonical_url)}?view=membership`}
@@ -286,19 +307,19 @@ const CreatorArea = (props: Props) => {
               }
             />
           </TabPanel>
-          <TabPanel>
+          <TabPanel className={CREATOR_MEMBERSHIP_CLASSES.tabPanel}>
             <TabWrapper
               component={
                 <>
                   {!monetizationEnabled && (
-                    <div className={'help'}>
+                    <div className={CREATOR_MEMBERSHIP_CLASSES.help}>
                       <p>{disabledMessage}</p>
                       <NavLink to="/$/wallet">Set up wallet</NavLink>
                     </div>
                   )}
-                  <div className="create-tiers-header-buttons">
-                    <div className="create-tiers-channel-selector">
-                      <span className="section__subtitle ">{__('Memberships for Channel...')}</span>
+                  <div className={CREATOR_MEMBERSHIP_CLASSES.tierHeader}>
+                    <div className={CREATOR_MEMBERSHIP_CLASSES.tierSelector}>
+                      <span className={SECTION_CLASSES.subtitle}>{__('Memberships for Channel...')}</span>
                       <ChannelSelector
                         channelIds={myChannelIds}
                         hideCreateNew

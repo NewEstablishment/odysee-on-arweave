@@ -5,6 +5,7 @@ import { useAppSelector } from 'redux/hooks';
 import { selectIsFetchingComments } from 'redux/selectors/comments';
 import { selectIsUriResolving } from 'redux/selectors/claims';
 import { VIEW_MODES } from 'component/chat/view';
+import { CHAT_CLASSES } from '../classes';
 
 type ChatCommentData = {
   comment_id: string;
@@ -82,7 +83,7 @@ export default function ChatComments(props: Props) {
 
   if (resolvingSuperchats) {
     return (
-      <div className="main--empty">
+      <div className={CHAT_CLASSES.commentsEmpty}>
         <Spinner />
       </div>
     );
@@ -95,7 +96,7 @@ export default function ChatComments(props: Props) {
       forceUpdate,
     };
     return isMobile ? (
-      <div ref={discussionRef} className="livestream__comments--mobile">
+      <div ref={discussionRef} className={CHAT_CLASSES.commentsMobile}>
         {comments
           .slice(0)
           .slice()
@@ -115,7 +116,7 @@ export default function ChatComments(props: Props) {
     ) : (
       <div
         ref={discussionRef}
-        className="livestream__comments"
+        className={CHAT_CLASSES.comments}
         onMouseEnter={() => setHoverLock(true)}
         onMouseLeave={() => setHoverLock(false)}
       >
@@ -134,7 +135,7 @@ export default function ChatComments(props: Props) {
 
   return (
     <div
-      className="main--empty"
+      className={CHAT_CLASSES.commentsEmpty}
       style={{
         flex: 1,
       }}
