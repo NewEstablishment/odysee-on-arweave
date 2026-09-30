@@ -1,6 +1,10 @@
 {
   "port": 18801,
   "store-all-signed": true,
+  "rate-limit-requests": 10000,
+  "rate-limit-period": 60,
+  "rate-limit-max": 10000,
+  "rate-limit-min": 0,
   "homepage-materializer": true,
   "homepage-refresh-interval": "1-hour",
   "homepage-category-pool-size": 36,
@@ -63,7 +67,6 @@
     {
       "field": "schema",
       "values": [
-        "odysee-upload@1.0",
         "odysee-channel@1.0",
         "odysee-playlist@1.0",
         "odysee-comment@1.0"

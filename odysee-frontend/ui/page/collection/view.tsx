@@ -6,7 +6,7 @@ import * as PAGES from 'constants/pages';
 import * as COLLECTIONS_CONSTS from 'constants/collections';
 import { COLLECTION_PAGE } from 'constants/urlParams';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
-import CollectionPublishForm from './internal/collectionPublishForm';
+import CollectionEditForm from './internal/collectionPublishForm';
 import CollectionHeader from './internal/collectionHeader';
 import { PLAYLISTS_FIXED_BOTTOM_CLASS, PLAYLISTS_PAGE_CLASS } from '../playlists/classes';
 import Spinner from 'component/spinner';
@@ -38,8 +38,6 @@ import { TAB_PANEL_CLASS } from 'component/common/tabs-classes';
 type Props = {
   collectionId?: string;
 };
-export const CollectionPageContext = React.createContext<any>({});
-
 const CollectionPage = (props: Props) => {
   const dispatch = useAppDispatch();
   const { collectionId: routeCollectionId = '' } = useParams();
@@ -64,37 +62,26 @@ const CollectionPage = (props: Props) => {
   const isEmbedPath = pathname && pathname.startsWith('/$/embed');
   const { showEdit: pageShowEdit } = state || {};
   const [showEdit, setShowEdit] = React.useState(pageShowEdit);
+  const [saving, setSaving] = React.useState(false);
   const [unavailableUris, setUnavailable] = React.useState(brokenUrls || []);
   const { name } = collection || {};
   const urlParams = new URLSearchParams(search);
-  const publishing = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLISH;
   const editing = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.EDIT;
   const [forceCollectionView, setForceCollectionView] = React.useState(false);
-  const publishPage = (editing || publishing) && !forceCollectionView;
+  const editPage = editing && !forceCollectionView;
   const isBuiltin = COLLECTIONS_CONSTS.BUILTIN_PLAYLISTS.includes(collectionId);
-  const isOnPublicView = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLIC;
   const isResolvingCollection = hasClaim === undefined;
-  const shouldPromptSignIn = IS_WEB && publishPage && !isAuthenticated;
+  const shouldPromptSignIn = IS_WEB && editPage && !isAuthenticated;
   const collectionHasStoredItems = Boolean(collection?.items?.length);
   const shouldResolveCollectionItems = collectionHasStoredItems && !collectionHasItemsResolved;
 
   React.useEffect(() => {
-    if (editing || publishing) {
+    if (editing) {
       setForceCollectionView(false);
     }
-  }, [editing, publishing]);
+  }, [editing]);
 
-  function togglePublicCollection() {
-    if (isOnPublicView) {
-      return navigate(`/$/${PAGES.PLAYLIST}/${collectionId}`);
-    }
-
-    const newUrlParams = new URLSearchParams();
-    newUrlParams.append(COLLECTION_PAGE.QUERIES.VIEW, COLLECTION_PAGE.VIEWS.PUBLIC);
-    navigate(`/$/${PAGES.PLAYLIST}/${collectionId}?${newUrlParams.toString()}`);
-  }
-
-  function saveChanges() {
+  async function saveChanges() {
     if (!collectionHasUnsavedEdits && !shouldResolveCollectionItems) {
       return;
     }
@@ -104,13 +91,25 @@ const CollectionPage = (props: Props) => {
       return;
     }
 
-    dispatch(
-      doCollectionEditAction(collectionId, {
-        isPreview: false,
-      })
-    );
-    dispatch(doRemoveUnsavedAction(collectionId));
-    setShowEdit(false);
+    setSaving(true);
+    try {
+      const saved = await dispatch(
+        doCollectionEditAction(collectionId, {
+          isPreview: false,
+        })
+      );
+      if (saved) {
+        dispatch(doRemoveUnsavedAction(collectionId));
+        setShowEdit(false);
+        if (saved.claim_id && saved.claim_id !== collectionId) {
+          navigate(`/$/${PAGES.PLAYLIST}/${saved.claim_id}`, { replace: true });
+        }
+      }
+    } catch {
+      return;
+    } finally {
+      setSaving(false);
+    }
   }
 
   function clearChanges() {
@@ -133,6 +132,17 @@ const CollectionPage = (props: Props) => {
       dispatch(doFetchItemsInCollectionAction({ collectionId }));
     }
   }, [collectionId, dispatch, shouldResolveCollectionItems]);
+
+  if (claim?.hyperbeam?.deleted) {
+    return (
+      <Page noSideNavigation={isEmbedPath}>
+        <div className={PAGE_MAIN_EMPTY_CLASS}>
+          <h1>{__('Playlist deleted')}</h1>
+          <p>{__('This playlist was deleted by its owner. Previously shared snapshots may still be available.')}</p>
+        </div>
+      </Page>
+    );
+  }
 
   if (geoRestriction) {
     return (
@@ -170,14 +180,14 @@ const CollectionPage = (props: Props) => {
     );
   }
 
-  if (publishPage && !isBuiltin && isCollectionMine) {
+  if (editPage && !isBuiltin && isCollectionMine) {
     const getPagePath = (id) => `/$/${PAGES.PLAYLIST}/${id}`;
 
     const doReturnForId = (id) => {
       setForceCollectionView(true);
       navigate(getPagePath(id), { replace: true });
     };
-    const closePublishView = () => {
+    const closeEditView = () => {
       dispatch(doRemoveUnsavedAction(collectionId));
       window.location.assign(getPagePath(collectionId));
     };
@@ -188,11 +198,11 @@ const CollectionPage = (props: Props) => {
         noSideNavigation
         backout={{
           backNavDefault: `/$/${PAGES.PLAYLIST}/${collectionId}`,
-          onBack: closePublishView,
-          title: (editing ? __('Editing') : hasClaim ? __('Updating') : __('Publishing')) + ' ' + name,
+          onBack: closeEditView,
+          title: __('Editing') + ' ' + name,
         }}
       >
-        <CollectionPublishForm collectionId={collectionId} onDoneForId={doReturnForId} useIds />
+        <CollectionEditForm collectionId={collectionId} onDoneForId={doReturnForId} useIds />
       </Page>
     );
   }
@@ -200,27 +210,21 @@ const CollectionPage = (props: Props) => {
   return (
     <Page className={PLAYLISTS_PAGE_CLASS} noSideNavigation={isEmbedPath}>
       <div className="section card-stack">
-        <CollectionPageContext.Provider
-          value={{
-            togglePublicCollection,
-          }}
-        >
-          <CollectionHeader
-            collection={collection}
-            showEdit={showEdit}
-            setShowEdit={setShowEdit}
-            unavailableUris={unavailableUris}
-            setUnavailable={setUnavailable}
-          />
+        <CollectionHeader
+          collection={collection}
+          showEdit={showEdit}
+          setShowEdit={setShowEdit}
+          unavailableUris={unavailableUris}
+          setUnavailable={setUnavailable}
+        />
 
-          <CollectionItemsList
-            collectionId={collectionId}
-            showEdit={showEdit}
-            isEditPreview
-            unavailableUris={unavailableUris}
-            showNullPlaceholder
-          />
-        </CollectionPageContext.Provider>
+        <CollectionItemsList
+          collectionId={collectionId}
+          showEdit={showEdit}
+          isEditPreview
+          unavailableUris={unavailableUris}
+          showNullPlaceholder
+        />
       </div>
       {showEdit && (
         <div className={PLAYLISTS_FIXED_BOTTOM_CLASS}>
@@ -231,9 +235,9 @@ const CollectionPage = (props: Props) => {
                 <div className={SECTION_CLASSES.actions}>
                   <Button
                     button="primary"
-                    label={shouldResolveCollectionItems ? __('Loading') : __('Save')}
+                    label={shouldResolveCollectionItems ? __('Loading') : saving ? __('Saving...') : __('Save')}
                     onClick={saveChanges}
-                    disabled={shouldResolveCollectionItems || !collectionHasUnsavedEdits}
+                    disabled={saving || shouldResolveCollectionItems || !collectionHasUnsavedEdits}
                   />
                   <Button button="link" label={__('Cancel')} onClick={clearChanges} />
                 </div>

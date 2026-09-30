@@ -157,6 +157,7 @@ type ClaimSearchResponse = {
   items: Array<Claim>;
   page: number;
   page_size: number;
+  has_more?: boolean;
   total_items?: number;
   total_pages?: number;
 };

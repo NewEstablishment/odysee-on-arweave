@@ -8,6 +8,7 @@ import { selectHomepageData } from 'redux/selectors/settings';
 import { selectUser } from 'redux/selectors/user';
 import { PORTAL_PAGE_CLASSES, PORTAL_THEME_CLASS } from './classes';
 import { WALLPAPER_PORTAL_ACTIVE_CLASS } from 'component/wallpaper/classes';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 
 const Portals = lazyImport(
   () =>
@@ -64,7 +65,7 @@ function PortalPage() {
         <div className={PORTAL_PAGE_CLASSES.header}>
           <img
             className={PORTAL_PAGE_CLASSES.image}
-            src={'https://thumbnails.odycdn.com/optimize/s:237:0/quality:95/plain/' + portal.image}
+            src={getThumbnailCdnUrl({ thumbnail: portal.image, width: 237, height: 0, quality: 95 }) || undefined}
             style={{
               background: `rgba(` + portal.css.rgb + `,1)`,
             }}

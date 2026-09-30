@@ -10,6 +10,7 @@ import Spinner from 'component/spinner';
 import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
 import { YRBL_SAD_IMG_URL } from 'config';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 import Tooltip from 'component/common/tooltip';
 import useClaimListInfiniteScroll from 'effects/use-claimList-infinite-scroll';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
@@ -126,7 +127,7 @@ export default function WatchHistoryPage() {
         )}
         {uris.length === 0 && (
           <div className="tw:text-center">
-            <img src={YRBL_SAD_IMG_URL} />
+            <img src={getThumbnailCdnUrl({ thumbnail: YRBL_SAD_IMG_URL }) || undefined} />
             <h2 className={`${PAGE_MAIN_EMPTY_CLASS} ${EMPTY_CLASS} tw:mt-0`}>{__('Nothing here')}</h2>
           </div>
         )}

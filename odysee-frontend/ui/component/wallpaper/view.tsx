@@ -1,5 +1,6 @@
 import React from 'react';
 import { WALLPAPER_CLASSES, WALLPAPER_PORTAL_STAR_CLASSES } from './classes';
+import { manifestAssetPath } from 'util/manifest-prefix';
 // import { resetColors } from 'util/theme';
 type Props = {
   uri?: string;
@@ -202,8 +203,7 @@ const Wallpaper = (props: Props) => {
       <div
         className={WALLPAPER_CLASSES.background}
         style={{
-          backgroundImage:
-            'url("https://thumbnails.odycdn.com/optimize/plain/https://player.odycdn.com/speech/2e9a7dc6c99f0fb9.jpg")',
+          backgroundImage: `url("${manifestAssetPath('/img/spaceman_pattern.png')}")`,
         }}
       />
       <div className={WALLPAPER_CLASSES.shade} />

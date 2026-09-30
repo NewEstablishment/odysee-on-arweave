@@ -99,7 +99,7 @@ const WalletPage = () => {
             <div className={WALLET_ANNOUNCEMENT_CLASSES.root}>
               <img
                 className={WALLET_ANNOUNCEMENT_CLASSES.image}
-                src="https://thumbnails.odycdn.com/optimize/s:140:0/quality:95/plain/https://thumbs.odycdn.com/dcee45614b2798d1a09d2c43dda5fade.webp"
+                src="https://thumbs.odycdn.com/dcee45614b2798d1a09d2c43dda5fade.webp"
               />
               <h3 className={WALLET_ANNOUNCEMENT_CLASSES.title}>
                 <Icon className={WALLET_ANNOUNCEMENT_CLASSES.titleIcon} icon={ICONS.LBC} />

@@ -84,6 +84,7 @@ import { selectModal, selectActiveChannelClaim, selectIncognito } from 'redux/se
 import { selectClientSetting } from 'redux/selectors/settings';
 import { makeSelectFileRenderModeForUri } from 'redux/selectors/content';
 import { doFetchCreatorSettings } from 'redux/actions/comments';
+import { doClearPlayingUri } from 'redux/actions/content';
 import { selectUploadTemplatesForChannelId } from 'redux/selectors/comments';
 import { PAGE_TITLE_MARGIN_CLASS, PAGE_MAIN_EMPTY_CLASS } from 'component/page/classes';
 import { HELP_CLASS } from 'component/common/help-classes';
@@ -103,6 +104,12 @@ function UploadForm(props: Props) {
   const { disabled = false } = props;
   const dispatch = useAppDispatch();
   const reduxStore = useStore();
+
+  // Entering create/edit is an explicit task switch. Stop the previous viewer
+  // instead of leaving its draggable overlay above the wizard's navigation.
+  useEffect(() => {
+    dispatch(doClearPlayingUri());
+  }, [dispatch]);
 
   const publishFormValues = useAppSelector(selectPublishFormValues);
   const myClaimForUri = useAppSelector((state) => selectMyClaimForUri(state, true));
@@ -832,7 +839,9 @@ function UploadForm(props: Props) {
         !!title &&
         !!name &&
         isNameValid(name) &&
-        !!thumbnail &&
+        // HyperBEAM uploads do not require a thumbnail (mirrors formValidLessFile);
+        // without this waiver the final submit silently bounces back here.
+        (!!thumbnail || hyperbeamUploadEnabled()) &&
         !isOverwritingExistingClaim &&
         !(thumbnailError && !thumbnailUploaded) &&
         uploadThumbnailStatus !== THUMBNAIL_STATUSES.IN_PROGRESS,

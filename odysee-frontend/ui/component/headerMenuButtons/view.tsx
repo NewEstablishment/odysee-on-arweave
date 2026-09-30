@@ -1,5 +1,4 @@
 import { ENABLE_NO_SOURCE_CLAIMS } from 'config';
-import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 import * as ICONS from 'constants/icons';
 import * as PAGES from 'constants/pages';
 import * as PUBLISH_TYPES from 'constants/publish_types';
@@ -20,13 +19,7 @@ type HeaderMenuButtonProps = {
   authRedirect?: string;
 };
 
-function HeaderLivestreamButton({
-  uploadProps,
-  doBeginPublish,
-}: {
-  uploadProps: { requiresAuth: boolean };
-  doBeginPublish: (type: PublishType) => void;
-}) {
+function HeaderLivestreamButton({ doBeginPublish }: { doBeginPublish: (type: PublishType) => void }) {
   const ctx = useLivestreamPublish();
   const isLive = ctx.state.status === 'live' || ctx.state.status === 'connecting';
   return (
@@ -35,7 +28,6 @@ function HeaderLivestreamButton({
         className={classnames(HEADER_NAVIGATION_ICON_CLASS, {
           [HEADER_LIVESTREAM_LIVE_CLASS]: isLive,
         })}
-        {...uploadProps}
         onClick={() => doBeginPublish(PUBLISH_TYPES.LIVESTREAM)}
       >
         <Icon size={18} icon={ICONS.GOLIVE} aria-hidden />
@@ -48,7 +40,6 @@ export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
   const dispatch = useAppDispatch();
   const authenticated = useAppSelector(selectUserAuthenticated);
   const isNative = useAppSelector(selectUserIsNative);
-  const canUpload = authenticated || hyperbeamUploadEnabled();
   const user = useAppSelector(selectUser);
   const doBeginPublish = (type: PublishType) => dispatch(doBeginPublishAction(type));
   const livestreamEnabled = Boolean(!isNative && ENABLE_NO_SOURCE_CLAIMS && user && !user.odysee_live_disabled);
@@ -58,13 +49,13 @@ export default function HeaderMenuButtons(props: HeaderMenuButtonProps) {
   const hasUploadActivity =
     (pipelineItems as any[]).some((item: any) => item.stage !== 'error') ||
     Object.keys(currentUploads || {}).length > 0;
-  const uploadProps = {
-    requiresAuth: !authenticated,
-  };
-  return canUpload ? (
+  // Native uploads must be attributable to the signed-in profile, so the
+  // upload entry point requires a session even though the node would accept
+  // an anonymous write.
+  return authenticated ? (
     <div className="tw:flex">
       <UploadManagerMenu hasActivity={hasUploadActivity} onUploadClick={() => doBeginPublish(PUBLISH_TYPES.FILE)} />
-      {livestreamEnabled && <HeaderLivestreamButton uploadProps={uploadProps} doBeginPublish={doBeginPublish} />}
+      {livestreamEnabled && <HeaderLivestreamButton doBeginPublish={doBeginPublish} />}
       {!isNative && (
         <Tooltip title={__('Post an article')}>
           <Button className={HEADER_NAVIGATION_ICON_CLASS} onClick={() => doBeginPublish(PUBLISH_TYPES.POST)}>

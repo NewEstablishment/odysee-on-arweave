@@ -48,7 +48,7 @@ export const JOIN_MEMBERSHIP_CLASSES = {
   detailsDescription: 'tw:mb-app-s tw:block tw:[overflow-wrap:anywhere] tw:whitespace-pre-line',
   tabItem: 'tw:mb-app-m',
   tabHeader: 'tw:mb-app-m tw:items-center tw:text-center',
-  moon: String.raw`tw:float-left tw:mt-[-56px] tw:mb-[-76px] tw:ml-[-40px] tw:h-[260px] tw:w-[42%] tw:rounded-[var(--border-radius)_0_0_var(--border-radius)] tw:bg-cover tw:[background-image:url('https://thumbnails.odycdn.com/optimize/s:900:0/quality:95/plain/https://static.odycdn.com/images/moon.png')] tw:[background-position:-5px_-10px] tw:[transform:rotate(-16deg)]`,
+  moon: String.raw`tw:float-left tw:mt-[-56px] tw:mb-[-76px] tw:ml-[-40px] tw:h-[260px] tw:w-[42%] tw:rounded-[var(--border-radius)_0_0_var(--border-radius)] tw:bg-cover tw:[background-image:url('https://static.odycdn.com/images/moon.png')] tw:[background-position:-5px_-10px] tw:[transform:rotate(-16deg)]`,
   tierDescription:
     'tw:[display:-webkit-box] tw:[line-clamp:10] tw:[-webkit-line-clamp:10] tw:[-webkit-box-orient:vertical] tw:max-h-[300px] tw:overflow-y-scroll tw:[word-break:break-word] tw:whitespace-pre-line',
   modalAction: 'join-membership__modal-action tw:mt-app-l',

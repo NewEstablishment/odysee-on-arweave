@@ -15,6 +15,7 @@ import {
   FEATURED_BANNER_LATEST_CLASS,
   FEATURED_BANNER_TILES_CLASS,
 } from './classes';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 
 type Props = {
   homepageData: any;
@@ -221,7 +222,14 @@ export default function FeaturedBanner(props: Props) {
                 >
                   <img
                     className="tw:w-full"
-                    src={'https://thumbnails.odycdn.com/optimize/s:' + imageWidth + ':0/quality:95/plain/' + item.image}
+                    src={
+                      getThumbnailCdnUrl({
+                        thumbnail: item.image,
+                        width: imageWidth,
+                        height: 0,
+                        quality: 95,
+                      }) || undefined
+                    }
                     style={{ width: width }}
                   />
                 </NavLink>

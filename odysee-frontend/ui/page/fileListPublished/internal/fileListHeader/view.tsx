@@ -17,6 +17,7 @@ import {
   CLAIM_SEARCH_MENU_SUBGROUP_CLASS,
   CLAIM_SEARCH_WRAPPER_WRAP_CLASS,
 } from 'component/claimListHeader/classes';
+import { hyperbeamUploadEnabled } from 'util/hyperbeamDevices';
 type Props = {
   filterType: string;
   setFilterType: (type: string) => void;
@@ -55,18 +56,27 @@ export default function ClaimListHeader(props: Props) {
             {/* Filter Options */}
             <div className={CLAIM_SEARCH_MENU_GROUP_CLASS}>
               <div className={CLAIM_SEARCH_MENU_SUBGROUP_CLASS}>
-                {Object.values(FILE_LIST.FILE_TYPE).map((info: FilterInfo) => (
-                  <Button
-                    button="alt"
-                    key={info.label}
-                    label={__(info.label)}
-                    aria-label={info.ariaLabel}
-                    onClick={() => handleFilterTypeChange(info.key)}
-                    className={classnames(BUTTON_TOGGLE_CLASS, FILE_LIST_HEADER_CLASSES.uploadTypeFilter, {
-                      [BUTTON_TOGGLE_ACTIVE_CLASS]: filterType === info.key,
-                    })}
-                  />
-                ))}
+                {Object.values(FILE_LIST.FILE_TYPE)
+                  // Native uploads have no reposts, unlisted/scheduled tags,
+                  // or paid tiers yet; those filters can only ever be empty.
+                  .filter(
+                    (info: FilterInfo) =>
+                      !hyperbeamUploadEnabled() ||
+                      info.key === FILE_LIST.FILE_TYPE.ALL.key ||
+                      info.key === FILE_LIST.FILE_TYPE.UPLOADS.key
+                  )
+                  .map((info: FilterInfo) => (
+                    <Button
+                      button="alt"
+                      key={info.label}
+                      label={__(info.label)}
+                      aria-label={info.ariaLabel}
+                      onClick={() => handleFilterTypeChange(info.key)}
+                      className={classnames(BUTTON_TOGGLE_CLASS, FILE_LIST_HEADER_CLASSES.uploadTypeFilter, {
+                        [BUTTON_TOGGLE_ACTIVE_CLASS]: filterType === info.key,
+                      })}
+                    />
+                  ))}
               </div>
             </div>
           </div>

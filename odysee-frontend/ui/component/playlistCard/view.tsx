@@ -23,12 +23,7 @@ import { getMaxLandscapeHeight } from 'util/window';
 import { useIsMobile, useIsSmallScreen } from 'effects/use-screensize';
 import { getLocalizedNameForCollectionId } from 'util/collections';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import {
-  selectClaimForUri,
-  selectChannelNameForId,
-  selectThumbnailForUri,
-  selectClaimForClaimId,
-} from 'redux/selectors/claims';
+import { selectClaimForUri, selectChannelNameForId } from 'redux/selectors/claims';
 import {
   selectUrlsForCollectionId,
   selectCollectionTitleForId,
@@ -68,8 +63,6 @@ export default function PlaylistCard(props: Props) {
   const playingCurrentPlaylist = collectionId === playingCollectionId;
   const playingClaim = useAppSelector((state) => selectClaimForUri(state, playingUri));
   const playingItemUrl = playingCurrentPlaylist ? playingClaim?.permanent_url : undefined;
-  const claim = useAppSelector((state) => selectClaimForClaimId(state, collectionId));
-  const collectionUri = (claim && (claim.canonical_url || claim.permanent_url)) || null;
   const collectionUrls = useAppSelector((state) => selectUrlsForCollectionId(state, collectionId));
   const collectionName = useAppSelector((state) => selectCollectionTitleForId(state, collectionId));
   const isMyCollection = useAppSelector((state) => selectCollectionIsMine(state, collectionId));
@@ -85,7 +78,6 @@ export default function PlaylistCard(props: Props) {
     useAppSelector((state) => (collectionId ? selectCollectionForId(state, collectionId) : undefined))
   );
   const collectionSavedForId = useAppSelector((state) => selectCollectionSavedForId(state, collectionId));
-  const thumbnailFromClaim = useAppSelector((state) => selectThumbnailForUri(state, playingItemUrl || collectionUri));
 
   const doCollectionEdit = (id: string, params: CollectionEditParams) => dispatch(doCollectionEditAction(id, params));
   const doClearPlayingCollection = () => dispatch(doClearPlayingCollectionAction());
@@ -118,7 +110,6 @@ export default function PlaylistCard(props: Props) {
     isFloating,
     playingCollectionId,
     collectionSavedForId,
-    thumbnailFromClaim,
     doCollectionEdit,
     doDisablePlayerDrag,
     doClearPlayingCollection,
@@ -152,7 +143,6 @@ type PlaylistCardProps = {
   doOpenModal: (id: string, props: {}) => void;
   doClearQueueList: () => void;
   doToggleCollectionSavedForId: (id: string) => void;
-  thumbnailFromClaim: string;
   titleOnly?: boolean;
   bodyOnly?: boolean;
   showEdit: boolean;
@@ -191,7 +181,6 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
     doClearQueueList,
     doToggleCollectionSavedForId,
     collectionSavedForId,
-    thumbnailFromClaim,
     onClose,
     ...cardProps
   } = props;
@@ -209,12 +198,6 @@ const PlaylistCardComponent = (props: PlaylistCardProps) => {
   const [hasActive, setHasActive] = React.useState<boolean>(false);
   const [scrolledPastActive, setScrolledPast] = React.useState<boolean>(false);
 
-  /*
-  // Disabled due to it blocking the clicking of the scrollbar
-  const backgroundImage = thumbnailFromClaim
-    ? 'https://thumbnails.odycdn.com/optimize/s:390:0/quality:85/plain/' + thumbnailFromClaim
-    : undefined;
-  */
   function closePlaylist() {
     if (collectionEmpty) {
       doClearPlayingCollection();

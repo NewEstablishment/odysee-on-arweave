@@ -1,18 +1,16 @@
 import React from 'react';
-import { useLocation } from 'react-router-dom';
 import { FF_MAX_CHARS_IN_DESCRIPTION } from 'constants/form-field';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
-import { COLLECTION_PAGE } from 'constants/urlParams';
 import * as TAGS from 'constants/tags';
 import { FormField } from 'component/common/form';
 import { FormContext } from 'component/common/form-components/form';
 import TagsSelect from 'component/tagsSelect';
 import Card from 'component/common/card';
 import { CARD_CLASSES } from 'component/common/card-classes';
-import CollectionPublishAdditionalOptions from './internal/additionalOptions';
 import { COLLECTION_GENERAL_TAB_CLASS, COLLECTION_TITLE_SURFACE_CLASS } from './classes';
 import { lazyImport } from 'util/lazyImport';
 import { PUBLISH_ROW_CLASS } from 'component/publish/shared/publish-row-classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 const SelectThumbnail = lazyImport(
   () =>
     import(
@@ -22,7 +20,6 @@ const SelectThumbnail = lazyImport(
 );
 const TAGS_LIMIT = 5;
 const collectionSectionTitleClassName = 'tw:mt-app-l tw:text-app-large tw:font-bold';
-
 function normalizeTag(tag: any) {
   if (typeof tag === 'string') return { name: tag };
   return tag;
@@ -30,18 +27,16 @@ function normalizeTag(tag: any) {
 
 type Props = {
   collectionId: string;
+  initialVisibility: PlaylistVisibility;
   formParams: any;
   setThumbnailError: (error: string | null | undefined) => void;
   updateFormParams: (obj: any) => void;
 };
 
 function CollectionGeneralTab(props: Props) {
-  const { collectionId, formParams, setThumbnailError, updateFormParams } = props;
-  const { title, description, thumbnail_url: thumbnailUrl, tags } = formParams;
+  const { collectionId, initialVisibility, formParams, setThumbnailError, updateFormParams } = props;
+  const { title, description, thumbnail_url: thumbnailUrl, tags, visibility = 'private' } = formParams;
   const { updateFormErrors } = React.useContext(FormContext);
-  const { search } = useLocation();
-  const urlParams = new URLSearchParams(search);
-  const publishing = urlParams.get(COLLECTION_PAGE.QUERIES.VIEW) === COLLECTION_PAGE.VIEWS.PUBLISH;
   const selectedTags = React.useMemo(() => (tags || []).map(normalizeTag).filter((tag) => tag?.name), [tags]);
   const [thumbStatus, setThumbStatus] = React.useState<string | undefined>();
   const [thumbError, setThumbError] = React.useState<string | undefined>();
@@ -56,13 +51,7 @@ function CollectionGeneralTab(props: Props) {
               thumbnail_url: undefined,
             }
           : update;
-      updateFormParams(
-        !publishing
-          ? {
-              thumbnail_url: newParams.thumbnail_url,
-            }
-          : newParams
-      );
+      updateFormParams({ thumbnail_url: newParams.thumbnail_url });
       setThumbStatus(undefined);
       setThumbError(undefined);
     } else {
@@ -173,11 +162,33 @@ function CollectionGeneralTab(props: Props) {
         }
       />
 
-      {publishing && (
-        <fieldset-section>
-          <CollectionPublishAdditionalOptions />
-        </fieldset-section>
-      )}
+      <h2 className={`card__title ${collectionSectionTitleClassName}`}>{__('Visibility')}</h2>
+      <Card
+        background
+        body={
+          <>
+            <FormField
+              type="checkbox"
+              name="collection_public"
+              label={initialVisibility === 'public' ? __('Public playlist') : __('Make this playlist public')}
+              checked={visibility === 'public'}
+              disabled={initialVisibility === 'public'}
+              onChange={() =>
+                updateFormParams({
+                  visibility: visibility === 'public' ? 'private' : 'public',
+                })
+              }
+            />
+            <p className={HELP_CLASS}>
+              {initialVisibility === 'public'
+                ? __('This playlist is public. Its published history cannot be made private.')
+                : visibility === 'public'
+                  ? __('Saving will publish the decrypted playlist. This cannot be reversed.')
+                  : __('Only your signed-in account can decrypt this playlist and its items.')}
+            </p>
+          </>
+        }
+      />
     </div>
   );
 }

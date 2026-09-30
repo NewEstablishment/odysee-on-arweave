@@ -31,7 +31,12 @@ const deleteId = (list, id) => {
   return list.filter((n) => n.id !== id);
 };
 
+const differentAccount = (state, action) => action.data?.profile && action.data.profile !== state.nativeProfile;
+
 const defaultState = {
+  nativeProfile: undefined as string | undefined,
+  notificationError: null as string | null,
+  notificationsLoaded: false,
   notifications: [],
   notificationsFiltered: [],
   deletedNotificationIds: [],
@@ -68,10 +73,23 @@ export default handleActions(
       return { ...state, debugLog };
     },
     // Notifications
+    [ACTIONS.NOTIFICATION_NATIVE_RESET]: (state, action) => ({
+      ...state,
+      nativeProfile: action.data.profile,
+      notifications: [],
+      notificationsFiltered: [],
+      deletedNotificationIds: [],
+      notificationCategories: undefined,
+      notificationError: null,
+      notificationsLoaded: false,
+      fetchingNotifications: false,
+    }),
     [ACTIONS.NOTIFICATION_LIST_STARTED]: (state, action) => {
-      return { ...state, fetchingNotifications: true };
+      if (differentAccount(state, action)) return state;
+      return { ...state, fetchingNotifications: true, notificationError: null };
     },
     [ACTIONS.NOTIFICATION_LIST_COMPLETED]: (state, action) => {
+      if (differentAccount(state, action)) return state;
       const { deletedNotificationIds } = state;
       const { filterRule, newNotifications } = action.data;
 
@@ -80,36 +98,48 @@ export default handleActions(
           ...state,
           notificationsFiltered: deleteIds(newNotifications, deletedNotificationIds),
           fetchingNotifications: false,
+          notificationsLoaded: true,
+          notificationError: null,
         };
       } else {
         return {
           ...state,
           notifications: deleteIds(newNotifications, deletedNotificationIds),
           fetchingNotifications: false,
+          notificationsLoaded: true,
+          notificationError: null,
         };
       }
     },
     [ACTIONS.NOTIFICATION_LIST_FAILED]: (state, action) => {
-      return { ...state, fetchingNotifications: false };
+      if (differentAccount(state, action)) return state;
+      return {
+        ...state,
+        fetchingNotifications: false,
+        notificationError: String(action.data?.error || 'Unable to load notifications.'),
+      };
     },
     [ACTIONS.NOTIFICATION_CATEGORIES_COMPLETED]: (state, action) => {
       const { notificationCategories } = action.data;
       return { ...state, notificationCategories };
     },
     [ACTIONS.NOTIFICATION_READ_COMPLETED]: (state, action) => {
+      if (differentAccount(state, action)) return state;
       const { notifications, notificationsFiltered } = state;
       const { notificationIds } = action.data;
 
       return {
         ...state,
-        notifications: markIdsAsRead(notifications, notificationIds),
-        notificationsFiltered: markIdsAsRead(notificationsFiltered, notificationIds),
+        notifications: markIdsAsSeen(markIdsAsRead(notifications, notificationIds), notificationIds),
+        notificationsFiltered: markIdsAsSeen(markIdsAsRead(notificationsFiltered, notificationIds), notificationIds),
       };
     },
     [ACTIONS.NOTIFICATION_READ_FAILED]: (state, action) => {
+      if (differentAccount(state, action)) return state;
       return { ...state };
     },
     [ACTIONS.NOTIFICATION_SEEN_COMPLETED]: (state, action) => {
+      if (differentAccount(state, action)) return state;
       const { notifications, notificationsFiltered } = state;
       const { notificationIds } = action.data;
 
@@ -120,6 +150,7 @@ export default handleActions(
       };
     },
     [ACTIONS.NOTIFICATION_DELETE_COMPLETED]: (state, action) => {
+      if (differentAccount(state, action)) return state;
       const { notifications, notificationsFiltered, deletedNotificationIds } = state;
       const { notificationId } = action.data;
 

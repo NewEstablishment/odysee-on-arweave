@@ -23,7 +23,8 @@ import { doMembershipMine } from 'redux/actions/memberships';
 import { selectDefaultChannelId } from 'redux/selectors/settings';
 import { ODYSEE_TIER_NAMES } from 'constants/memberships';
 import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
-import { getHyperbeamAccount, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
+import { forgetHyperbeamAccount, getHyperbeamAccount, recoverHyperbeamAccount } from 'util/hyperbeamAccount';
+import { recoverOnce } from 'util/hyperbeamSession';
 export let sessionStorageAvailable = false;
 const CHECK_INTERVAL = 200;
 const AUTH_WAIT_TIMEOUT = 10000;
@@ -327,28 +328,26 @@ export function doAuthenticate(
     });
 
     if (hyperbeamNodeEnabled()) {
-      try {
-        const account = getHyperbeamAccount() ? await recoverHyperbeamAccount() : null;
-        dispatch({
-          type: ACTIONS.AUTHENTICATION_SUCCESS,
-          data: {
-            user: account
-              ? {
-                  id: account.id,
-                  name: account.name,
-                  has_verified_email: false,
-                  is_native: true,
-                }
-              : null,
-            accessToken: null,
-          },
-        });
-      } catch (error) {
-        dispatch({
-          type: ACTIONS.AUTHENTICATION_FAILURE,
-          data: { error },
-        });
+      // Recovery returns null only on the node's final answer (no session), so
+      // the saved account is then stale and dropped. Anything unverifiable
+      // throws instead: retried once, then reported, keeping the saved account.
+      let account = null;
+      if (getHyperbeamAccount()) {
+        try {
+          account = await recoverOnce(recoverHyperbeamAccount);
+        } catch (error) {
+          dispatch({ type: ACTIONS.AUTHENTICATION_FAILURE, data: { error } });
+          return;
+        }
+        if (!account) forgetHyperbeamAccount();
       }
+      dispatch({
+        type: ACTIONS.AUTHENTICATION_SUCCESS,
+        data: {
+          user: account ? { id: account.id, name: account.name, has_verified_email: false, is_native: true } : null,
+          accessToken: null,
+        },
+      });
       return;
     }
 

@@ -6,12 +6,15 @@ export type NativePlaylistReference = {
   reference_type: string;
   profile_id: string;
   profile_name?: string;
+  playlist_owner?: string;
   reference_id: string;
   reference_value: string;
   timestamp: number;
   message_id: string;
   owner: string;
   is_init: boolean;
+  playlist_state?: 'deleted';
+  previous_reference?: string;
 };
 
 /**
@@ -29,12 +32,15 @@ export function normalizeNativePlaylistReference(source: any): NativePlaylistRef
     reference_type: String(field(source, 'reference-type', 'reference_type') || ''),
     profile_id: String(field(source, 'profile-id', 'profile_id') || ''),
     profile_name: optionalString(field(source, 'profile-name', 'profile_name')),
+    playlist_owner: optionalString(field(source, 'playlist-owner', 'playlist_owner')),
     reference_id: explicitReferenceId || messageId,
     reference_value: String(field(source, 'reference-value', 'reference_value') || '').replace(/^\/+/, ''),
     timestamp: integer(field(source, 'timestamp'), -1),
     message_id: messageId,
     owner,
     is_init: !explicitReferenceId,
+    playlist_state: field(source, 'playlist-state', 'playlist_state'),
+    previous_reference: optionalString(field(source, 'previous-reference', 'previous_reference')),
   };
 
   if (
@@ -45,7 +51,12 @@ export function normalizeNativePlaylistReference(source: any): NativePlaylistRef
     !isNativeMessageId(normalized.reference_value) ||
     !isNativeMessageId(normalized.message_id) ||
     !isNativeMessageId(normalized.owner) ||
+    (normalized.playlist_owner !== undefined &&
+      (!isNativeMessageId(normalized.playlist_owner) || normalized.playlist_owner !== normalized.owner)) ||
     normalized.timestamp < 0 ||
+    (normalized.playlist_state !== undefined && normalized.playlist_state !== 'deleted') ||
+    (normalized.is_init && normalized.playlist_state !== undefined) ||
+    (normalized.playlist_state === 'deleted' && !isNativeMessageId(normalized.previous_reference)) ||
     (normalized.profile_name && !boundedText(normalized.profile_name, 200)) ||
     (authority && authority !== normalized.owner) ||
     (normalized.is_init && normalized.reference_id !== normalized.message_id)
@@ -59,6 +70,7 @@ export function normalizeNativePlaylistReference(source: any): NativePlaylistRef
 export function nativePlaylistReferenceInitMessage(params: {
   profileId: string;
   profileName?: string;
+  owner: string;
   snapshotId: string;
   timestamp: number;
 }): Record<string, any> {
@@ -67,6 +79,7 @@ export function nativePlaylistReferenceInitMessage(params: {
     'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
     'profile-id': params.profileId,
     'profile-name': params.profileName,
+    'playlist-owner': params.owner,
     'reference-value': params.snapshotId,
     timestamp: params.timestamp,
   });
@@ -75,16 +88,22 @@ export function nativePlaylistReferenceInitMessage(params: {
 export function nativePlaylistReferenceSetMessage(params: {
   profileId: string;
   profileName?: string;
+  owner: string;
   referenceId: string;
   snapshotId: string;
   timestamp: number;
+  deleted?: boolean;
+  previousReference?: string;
 }): Record<string, any> {
   return compact({
     device: REFERENCE_DEVICE,
     'reference-type': NATIVE_PLAYLIST_REFERENCE_TYPE,
     'profile-id': params.profileId,
     'profile-name': params.profileName,
+    'playlist-owner': params.owner,
     'reference-id': params.referenceId,
+    'playlist-state': params.deleted ? 'deleted' : undefined,
+    'previous-reference': params.deleted ? params.previousReference : undefined,
     'reference-value': params.snapshotId,
     timestamp: params.timestamp,
   });
@@ -109,6 +128,7 @@ export function projectNativePlaylistReference(
       candidate.reference_id !== init.reference_id ||
       candidate.owner !== init.owner ||
       candidate.profile_id !== init.profile_id ||
+      (init.playlist_owner && candidate.playlist_owner !== init.playlist_owner) ||
       candidate.timestamp <= init.timestamp
     ) {
       return;
@@ -122,11 +142,26 @@ export function projectNativePlaylistReference(
   Array.from(byTimestamp.keys())
     .sort((left, right) => left - right)
     .forEach((timestamp) => {
+      if (head.playlist_state === 'deleted') return;
       if (timestamp <= head.timestamp) return;
       const group = byTimestamp.get(timestamp) || [];
-      const values = new Set(group.map((candidate) => candidate.reference_value));
+      const values = new Set(
+        group.map((candidate) => `${candidate.reference_value}:${candidate.playlist_state || 'active'}`)
+      );
       if (values.size !== 1) return;
       const next = group.slice().sort((left, right) => left.message_id.localeCompare(right.message_id))[0];
+      if (next?.playlist_state === 'deleted' && next.previous_reference !== head.message_id) {
+        const aliases = byTimestamp.get(head.timestamp) || [];
+        if (
+          !aliases.some(
+            (candidate) =>
+              candidate.message_id === next.previous_reference &&
+              candidate.reference_value === head.reference_value &&
+              candidate.playlist_state === head.playlist_state
+          )
+        )
+          return;
+      }
       if (next) head = next;
     });
   return head;

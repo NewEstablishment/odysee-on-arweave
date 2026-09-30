@@ -6,8 +6,10 @@ import * as COLLECTIONS_CONSTS from 'constants/collections';
 import { FormField } from 'component/common/form';
 import Button from 'component/button';
 import { BUTTON_TOGGLE_CLASS } from 'component/button/classes';
+import { HELP_CLASS } from 'component/common/help-classes';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import { doPlaylistAddAndAllowPlaying } from 'redux/actions/content';
+import { doToast } from 'redux/actions/notifications';
 import { selectCollectionForId } from 'redux/selectors/collections';
 
 type Props = {
@@ -33,29 +35,40 @@ function FormNewCollection(props: Props) {
         })
       : ''
   );
+  const [saving, setSaving] = React.useState(false);
+  const [isPublic, setIsPublic] = React.useState(false);
 
   function handleNameInput(e) {
     const { value } = e.target;
     setCollectionName(value);
   }
 
-  function handleAddCollection() {
+  async function handleAddCollection() {
     const name = newCollectionName.trim();
-    let id;
-    dispatch(
-      doPlaylistAddAndAllowPlaying({
-        uri,
-        collectionName: name,
-        sourceId,
-        createNew: true,
-        createCb: !sourceId
-          ? undefined
-          : (newId) => {
-              id = newId;
-            },
-      })
-    );
-    closeForm(name, id);
+    setSaving(true);
+    try {
+      const id = await dispatch(
+        doPlaylistAddAndAllowPlaying({
+          uri,
+          collectionName: name,
+          sourceId,
+          createNew: true,
+          visibility: isPublic ? 'public' : 'private',
+        })
+      );
+      closeForm(name, id);
+    } catch (error) {
+      // Previously swallowed, which is why a failed create/copy looked like the
+      // button simply did nothing. Surface it so the user knows it did not save.
+      dispatch(
+        doToast({
+          message: (error && (error as Error).message) || __('The playlist could not be created'),
+          isError: true,
+        })
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<any>) {
@@ -70,38 +83,55 @@ function FormNewCollection(props: Props) {
   }
 
   return (
-    <FormField
-      autoFocus
-      type="text"
-      name="new_collection"
-      label={__('New Playlist Title')}
-      placeholder={__(COLLECTIONS_CONSTS.PLACEHOLDER)}
-      onKeyDown={handleKeyDown}
-      inputButton={
-        <>
-          <Button
-            button="alt"
-            icon={ICONS.COMPLETED}
-            title={__('Confirm')}
-            className={BUTTON_TOGGLE_CLASS}
-            disabled={newCollectionName.trim().length === 0}
-            onClick={handleAddCollection}
-            ref={buttonref}
-          />
-          {!onlyCreate && (
+    <div>
+      <FormField
+        autoFocus
+        type="text"
+        name="new_collection"
+        label={__('New Playlist Title')}
+        placeholder={__(COLLECTIONS_CONSTS.PLACEHOLDER)}
+        onKeyDown={handleKeyDown}
+        inputButton={
+          <>
             <Button
               button="alt"
+              icon={ICONS.COMPLETED}
+              title={__('Confirm')}
               className={BUTTON_TOGGLE_CLASS}
-              icon={ICONS.REMOVE}
-              title={__('Cancel')}
-              onClick={handleClearNew}
+              disabled={saving || newCollectionName.trim().length === 0}
+              onClick={handleAddCollection}
+              ref={buttonref}
             />
-          )}
-        </>
-      }
-      onChange={handleNameInput}
-      value={newCollectionName}
-    />
+            {!onlyCreate && (
+              <Button
+                button="alt"
+                className={BUTTON_TOGGLE_CLASS}
+                icon={ICONS.REMOVE}
+                title={__('Cancel')}
+                onClick={handleClearNew}
+              />
+            )}
+          </>
+        }
+        onChange={handleNameInput}
+        value={newCollectionName}
+      />
+      <FormField
+        type="checkbox"
+        name="new_collection_public"
+        label={__('Make this playlist public')}
+        checked={isPublic}
+        disabled={saving}
+        onChange={() => setIsPublic((current) => !current)}
+      />
+      <p className={HELP_CLASS}>
+        {isPublic
+          ? __('Anyone with the link can view this playlist. Public playlist history cannot be made private later.')
+          : __(
+              'Private by default. The title, description, thumbnail, tags, and items are encrypted for your account.'
+            )}
+      </p>
+    </div>
   );
 }
 

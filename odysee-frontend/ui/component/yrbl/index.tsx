@@ -3,6 +3,7 @@ import classnames from 'classnames';
 import { YRBL_HAPPY_IMG_URL, YRBL_SAD_IMG_URL } from 'config';
 import { YRBL_CLASSES as C } from './classes';
 import { SECTION_CLASSES } from 'component/common/section-classes';
+import { getThumbnailCdnUrl } from 'util/thumbnail';
 type Props = {
   title?: string;
   subtitle?: string | React.ReactNode;
@@ -12,8 +13,8 @@ type Props = {
   alwaysShow?: boolean;
 };
 const yrblTypes = {
-  happy: YRBL_HAPPY_IMG_URL,
-  sad: YRBL_SAD_IMG_URL,
+  happy: getThumbnailCdnUrl({ thumbnail: YRBL_HAPPY_IMG_URL }),
+  sad: getThumbnailCdnUrl({ thumbnail: YRBL_SAD_IMG_URL }),
 };
 export default class extends React.PureComponent<Props> {
   static defaultProps = {

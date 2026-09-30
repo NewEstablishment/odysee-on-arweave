@@ -39,6 +39,11 @@ storage and revisions would also violate the generic-write architecture.
 - Snapshot and reference writes are acknowledged by exact commitment/owner
   readback. The query listener is eventually consistent, so discovery of the
   just-written reference is not part of the synchronous save transaction.
+- After a successful write, unavailable exact readback is retried at most three
+  times (250 ms and 750 ms between attempts). Only reads retry; no snapshot or
+  reference is re-posted by this recovery. Every attempt still verifies the
+  exact commitment; returned owner, timestamp and reference target must match.
+  Exhaustion remains a failed acknowledgement, not assumed success.
 - Native shared preferences deliberately contain only settings, tags, welcome
   state, analytics sharing choice, and announcement state. Native follows are
   authoritative for subscriptions, moderation owns blocked state, and local

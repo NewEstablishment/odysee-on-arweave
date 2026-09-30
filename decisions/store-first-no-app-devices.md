@@ -28,19 +28,22 @@ inversion that makes the store unusable without the whole device fleet.
   cache and discovered via `~query@1.0`'s match index — the architecture
   rave/moderation already proved for native comments, with no custom
   device.
-- **Native playlists**: each public playlist is one independently addressable,
-  immutable full-snapshot message containing ordered immutable locators. Any
+- **Native playlists**: each playlist version is one independently
+  addressable immutable full snapshot containing ordered immutable locators.
+  Public snapshots are plaintext `odysee-playlist@1.0` messages; private
+  snapshots are `odysee-private-playlist@1.0` WeaveMail-format envelopes
+  produced and opened locally with the shared WeaveMail client primitives,
+  sealed to the verified owner's hosted wallet (exported via
+  `~secret@1.0/export`); there is no playlist crypto device or gateway. Any
   verified commitment ID is an exact route to that message; discovery may
   return another commitment locator for the same snapshot. Exact query lists
   snapshots by verified owner/profile; exact message reads hydrate them.
-  Editing or reordering and republishing changes the payload and creates a new
-  immutable snapshot and URL while the prior
-  snapshot remains addressable. The LBRY `collection_*` API and blockchain
-  publish controls are not part of this feature.
-  Stable mutable playlist heads, update, and delete require the separate
-  generic reference/frequency contract described by the core team. Until that
-  artifact is obtained and reviewed, the application does not substitute an
-  application-specific `playlist-ref`, revision projector, or mutable index.
+  Editing or reordering and saving changes the payload and creates a new
+  immutable snapshot while the prior snapshot remains addressable. The pinned
+  canonical `reference@1.0` init commitment is the stable playlist URL and
+  same-owner set messages advance its head. Save performs this write
+  automatically; LBRY `collection_*` calls and separate blockchain publish
+  controls are not part of this feature.
 - **Native subscriptions**: free channel follows use deterministic
   owner/channel relationship references. Follow, notification-preference,
   unfollow, and re-follow events form a contiguous append-only chain. Local

@@ -1074,6 +1074,16 @@ html.ios-fullscreen .media-default-skin video {
   transform-origin: left;
 }
 
+.ReactModal__Overlay .ReactModal__Content {
+  animation: modal-zoom-in 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ReactModal__Overlay .ReactModal__Content {
+    animation: none;
+  }
+}
+
 .media-default-skin .media-popover {
   --media-popover-side-offset: 0.5rem;
 }

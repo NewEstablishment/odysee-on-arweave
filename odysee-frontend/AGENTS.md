@@ -30,8 +30,13 @@ Full-text search calls generic `search@1.0` through `ui/util/hyperbeam.ts`.
 sort, limit, and offset. Hydrate the ordered immutable locators afterward;
 never implement ranking-affecting filters or pagination in a page component.
 Empty-query homepage/category discovery uses this same path. Native channel
-uploads use bounded exact `query@1.0` discovery because `channel-id` is not a
-generic full-text index selector.
+uploads in public discovery use the verified operator projection's
+`channel_claim_id` search selector. Exact query enumeration remains for owner
+library/account summaries; do not merge separately ranked native/legacy pages.
+Discovery pagination must survive missing hydrated records: preserve explicit
+`has_more` and the completed discovery page through Redux and scroll handling.
+Following resets list state when followed channel IDs change. See
+`../docs/following-feed-acceptance.md` for controlled versus live acceptance.
 
 Keep `/$/discover` mounted without tag or moderator prerequisites. Existing
 links use its query parameters for generic search filters; materialized named
@@ -95,6 +100,12 @@ is sent on native writes.
 
 ## Identity and account UI
 
+- Shared native read caches must evict unavailable (`null`/`undefined`) evidence
+  and rejected reads. Do not turn a transient verification failure into cached
+  denial or grant authority from stale display metadata. Preserve in-flight
+  deduplication and cache valid empty query results. Offline retry must re-read
+  owner/reference evidence without a page reload or TTL wait.
+
 - The node's `cookie@1.0` provider mints identity on the first committed write.
 - Its private non-volatile wallet store lets the same cookie recover the same
   committer across node restarts.
@@ -109,6 +120,13 @@ is sent on native writes.
   channel-signature gates for native writes.
 
 ## Reads, playback, and hydration
+
+Native profile edits belong in the integration boundary and use generic
+`odysee-profile-revision@1.0` snapshots. Preserve the root profile ID/handle;
+only display name, bio and immutable avatar/banner IDs change. Verify contiguous
+same-owner ancestry and preserve exact historical routes. See
+`../decisions/native-profile-revisions.md`. Do not route edits to legacy channel
+updates or modify Google authentication for this feature.
 
 Historical reads use store paths through generic cache/message routes. Native
 reads use exact committed IDs. Mutable names and claim IDs are locators only.
@@ -136,6 +154,14 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
   `/id?0.%21=true&committers=all` with cookie credentials.
 - It writes a generic `odysee-upload@1.0` record after the data write.
 - The uploads page queries those records rather than `claim_list`.
+- Upload edits are full editable metadata snapshots; preserve explicit empty
+  strings/lists and tags/languages. New predecessor links use exact immutable
+  IDs. Serialize writes per node/owner/root and reverify stored locator hints.
+- Friendly name/root routes discover current uploads; exact version routes and
+  playlist IDs do not advance implicitly. Tombstones hide current discovery,
+  not immutable history or media bytes.
+- Keep upload search projection in the operator worker and shared revision
+  helpers. Do not put product state rules in generic search or React pages.
 - Do not run legacy TUS token, transcode, transmux, optimizer, bitrate, or file
   size gates for a raw node upload.
 - Do not persist `File`, pipeline-item, or remote-upload transient state.
@@ -145,7 +171,12 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Node, loopback, private-network, relative, `data:`, and `blob:` image sources
   must bypass external thumbnail optimizers. Preserve the configured node
   scheme when rendering these URLs.
+- A HyperBEAM manifest must render remote historical thumbnails directly and
+  unwrap inherited `thumbnails.odycdn.com` URLs to their original source.
+  Built-in placeholders and wallpaper assets must use manifest-local files.
 - HyperBEAM mode must not send playback telemetry to the legacy Watchman host.
+- HyperBEAM mode must not poll the Odysee Web2 degraded-performance status
+  endpoint; node health is the relevant availability boundary.
 
 ## Comments
 
@@ -188,20 +219,44 @@ comment-control messages authorized by the exact content committer. Moderation
 delegates and blocked-word settings remain unsupported; fail explicitly
 instead of falling back to legacy services.
 
+Creator Hide/Unhide uses the existing owner visibility control, not author
+deletion. The owner-only Hidden comments review panel uses a separate local
+list so suppressed bodies do not enter the public Redux thread. Include hidden
+replies in review; suppress descendants of hidden parents in public lists and
+logical comment links. Exact historical message reads remain unchanged.
+
 ## Playlists
 
-- Public playlists are generic `odysee-playlist@1.0` messages written through
-  `/id?0.%21=true&committers=all`; do not call `collection_*` or add a playlist
-  device.
+- Public playlists are generic `odysee-playlist@1.0` messages and private
+  playlists are generic `odysee-private-playlist@1.0` ciphertext messages,
+  both written through `/id?0.%21=true&committers=all`; do not call
+  `collection_*` or add a playlist write device.
 - Store a complete ordered immutable item list in every snapshot. Native IDs
   and legacy outpoints are allowed; mutable claim IDs, names, and URIs are not.
 - The pinned external `reference@1.0` init commitment is the stable public
-  playlist ID. Republish writes a new full snapshot and then a strictly newer
+  playlist ID. Every later save writes a new full snapshot and then a strictly newer
   same-owner reference set; it never mutates an earlier snapshot.
 - Hydrate and verify every init, set, and selected snapshot. Bind authority to
   the init committer, never profile fields or query order. Reject foreign
   writers, stale or tied updates, and foreign-owned snapshots.
-- Local drafts and builtin lists remain local. Public deletion is not exposed.
+- Queue, Watch Later, Favorites, and failed-save recovery drafts remain local.
+  Creating, editing, adding to, or removing from a user playlist commits
+  automatically; do not expose a separate publish or republish action. Deletion
+  uses an owner-signed metadata-free tombstone and same-owner reference set;
+  see `../decisions/playlist-deletion.md`. Preserve exact historical reads.
+- New and copied playlists default private. `ui/util/weavemail.ts` carries the
+  shared WeaveMail 1.0 client primitives (vendored from PermawebOS-Browser; do
+  not reimplement them). The recipient key is the verified owner's hosted
+  wallet, exported through `~secret@1.0/export` and held in memory only. Do not
+  call or add a private-playlist or WeaveMail HTTP device, and do not generate
+  or persist browser keys. Verify the exact ciphertext commitment and owner
+  before local decryption; never expose plaintext, content keys, or wallet
+  material in committed messages.
+- Making a private playlist public writes a plaintext public snapshot and
+  advances the same stable reference. Require explicit irreversible
+  confirmation and never offer public-to-private.
+- Direct edit links must hydrate and resolve the private playlist's item set
+  before enabling Save; visiting the view page first must never be required.
 - Preserve Redux collection shape and playback order at the integration
   boundary. The playlist UI must not expose channel selection, URL names,
   bids, balances, confirmations, supports, reports, or abandon-claim flows.
@@ -258,6 +313,24 @@ instead of falling back to legacy services.
   save during index lag advances the same reference rather than forking a
   second init or restoring a stale snapshot.
 
+## Notifications
+
+- Derive the inbox from exact-verified native comments, uploads, and current
+  bell-enabled subscriptions. Self activity and suppressed comments do not notify.
+- Receipt IDs use the logical comment reference or immutable upload ID.
+- Seen, read, and dismiss actions append encrypted
+  `odysee-notification-receipt@1.0` messages through the generic cookie-signed
+  write. Reuse authenticated seal/open only for cryptography; no notification
+  device or notification fields in the shared preference blob.
+- Verify and decrypt exact receipt readback before acknowledging. Merge
+  receipt batches by union, retain acknowledged writes through index lag, and
+  clear private state on account changes.
+- The app polls while visible and on focus. Browser push, email, and legacy
+  notification import are outside this contract.
+- Run `test:native-notifications` and the browser test
+  `test:native-cookie-notifications`; its Vite/node setup is documented in
+  `../aidocs/native-notifications.md`.
+
 ## Analytics
 
 - `analytics@1.0` is a generic observational device. Odysee playback maps to
@@ -272,6 +345,9 @@ instead of falling back to legacy services.
   identity, verification, discovery order, or access.
 
 ## Publish and route guards
+
+- Entering the upload/create or metadata-edit wizard clears previous playback;
+  its floating viewer must not cover Next/Update controls.
 
 - A configured HyperBEAM node enables native upload routes even without a
   legacy verified-email account.
@@ -289,11 +365,13 @@ pnpm run typecheck:tsc
 pnpm run check
 pnpm run test:native-comment-revisions
 pnpm run test:native-message-verification
+pnpm run test:hyperbeam-session
 pnpm run test:native-comment-controls
 pnpm run test:native-reactions
 pnpm run test:native-playlists
 pnpm run test:native-subscriptions
 pnpm run test:native-preferences
+pnpm run test:native-notifications
 pnpm run test:manifest-homepage
 pnpm run test:static-manifest
 pnpm run build:manifest
@@ -322,7 +400,8 @@ normal-flow request reaches a legacy host.
   dashboard is not yet implemented.
 - Native subscriber counts, moderation delegates, and blocked-word settings
   are not implemented.
-- Upload edit/delete needs a complete append-only native contract.
+- Upload conflicts stop at the last unambiguous version; automatic merging of
+  genuinely conflicting edits is not supported.
 - Only single HTTP byte ranges are supported; multipart range responses are not.
 - The cookie identity is node/browser-local and is not yet portable or
   recoverable. Preference recovery consequently remains local to the same hosted

@@ -18,6 +18,7 @@ import { doFetchChannelListMine } from 'redux/actions/claims';
 import { doSetActiveChannel } from 'redux/actions/app';
 import { CHANNELS_PAGE_CLASS } from './classes';
 import { SECTION_CLASSES } from 'component/common/section-classes';
+import { hyperbeamNodeEnabled } from 'util/hyperbeamDevices';
 
 const YoutubeTransferStatus = lazyImport(
   () =>
@@ -83,20 +84,24 @@ export default function ChannelsPage() {
             </h1>
           }
           headerAltControls={
-            <>
-              <Button
-                button="secondary"
-                label={__('Sync YouTube Channel')}
-                icon={ICONS.YOUTUBE}
-                navigate={`/$/${PAGES.YOUTUBE_SYNC}`}
-              />
-              <Button
-                button="secondary"
-                icon={ICONS.CHANNEL}
-                label={__('New Channel')}
-                navigate={`/$/${PAGES.CHANNEL_NEW}`}
-              />
-            </>
+            // One cookie identity = one channel natively; legacy channel
+            // creation and YouTube sync can only fail there.
+            !hyperbeamNodeEnabled() && (
+              <>
+                <Button
+                  button="secondary"
+                  label={__('Sync YouTube Channel')}
+                  icon={ICONS.YOUTUBE}
+                  navigate={`/$/${PAGES.YOUTUBE_SYNC}`}
+                />
+                <Button
+                  button="secondary"
+                  icon={ICONS.CHANNEL}
+                  label={__('New Channel')}
+                  navigate={`/$/${PAGES.CHANNEL_NEW}`}
+                />
+              </>
+            )
           }
           loading={fetchingChannels}
           uris={channelUrls}

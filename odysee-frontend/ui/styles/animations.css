@@ -1200,6 +1200,16 @@
   }
 }
 
+@keyframes modal-zoom-in {
+  from {
+    transform: scale(0.92);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
 @keyframes header-livestream-live-pulse {
   0% {
     box-shadow: 0 0 0 0 #d33;

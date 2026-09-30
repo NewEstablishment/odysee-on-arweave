@@ -8,6 +8,7 @@ import { useAppSelector, useAppDispatch } from 'redux/hooks';
 import {
   selectCollectionForId,
   selectCollectionForIdHasClaimUrl,
+  selectCollectionIsSavingForId,
   selectCollectionLengthForId,
   selectFirstItemUrlForCollection,
   selectIsCollectionPrivateForId,
@@ -29,6 +30,7 @@ function CollectionSelectItem(props: Props) {
   const collection = useAppSelector((state) => selectCollectionForId(state, collectionId));
   const collectionHasClaim = useAppSelector((state) => selectCollectionForIdHasClaimUrl(state, collectionId, uri));
   const collectionPending = useAppSelector((state) => selectClaimIsPendingForId(state, collectionId));
+  const collectionSaving = useAppSelector((state) => selectCollectionIsSavingForId(state, collectionId));
   const collectionLength = useAppSelector((state) => selectCollectionLengthForId(state, collectionId));
   const isPrivate = useAppSelector((state) => selectIsCollectionPrivateForId(state, collectionId));
   const collectionThumbnail = useAppSelector((state) => selectThumbnailForCollectionId(state, collectionId));
@@ -73,7 +75,7 @@ function CollectionSelectItem(props: Props) {
         className={classnames(PLAYLIST_PICKER_CLASSES.row, {
           [PLAYLIST_PICKER_CLASSES.rowSelected]: collectionHasClaim,
         })}
-        disabled={collectionPending}
+        disabled={collectionPending || collectionSaving}
         onClick={handleChange}
         type="button"
       >

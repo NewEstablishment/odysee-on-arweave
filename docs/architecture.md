@@ -254,6 +254,12 @@ Two mitigations, in order of preference today:
 
 ## Writes
 
+Native profile metadata uses contiguous owner-signed full revisions rooted in
+the existing profile ID; friendly channel routes project current metadata and
+exact historical reads do not advance. See
+[profile revisions](../decisions/native-profile-revisions.md). This does not
+change authentication or Google-account linking.
+
 There is no custom write device. Uploads, comments, reactions, playlists,
 subscriptions, encrypted preference snapshots, and moderation events are
 ordinary committed messages, using stock HyperBEAM machinery end to end:
@@ -322,13 +328,31 @@ exact immutable read the comment document while older `comment`/`text` fields
 remain read-compatible.
 
 Comments, reactions, and subscriptions model changes as contiguous append-only
-revisions. Public playlists separate identity from content: each publish writes
-an immutable full `odysee-playlist@1.0` snapshot, while the pinned external
+revisions. Playlists separate identity from content: each save writes an
+immutable full public `odysee-playlist@1.0` snapshot or private
+`odysee-private-playlist@1.0` ciphertext snapshot, while the pinned external
 `reference@1.0` device supplies the stable public identity. Its init commitment
 is the playlist ID; later same-authority set messages point to new snapshots
-without mutating earlier content. Readers hydrate and verify every candidate,
+without mutating earlier content. Creating and editing user playlists therefore
+has no separate publish lifecycle: Save commits automatically. Readers hydrate and verify every candidate,
 derive authority from the init committer, and select only a strictly newer
 unambiguous set. Query order is never authority.
+
+New and copied playlists use private snapshots by default. The browser uses the
+shared WeaveMail 1.0 client primitives (vendored from PermawebOS-Browser): a
+fresh AES-256-GCM key per snapshot, wrapped with RSA-OAEP/SHA-256 to the
+owner's own hosted wallet. The wallet is exported in-session through the
+cookie-authenticated `~secret@1.0/export` boundary and held in memory only, so
+the recipient key is the identity itself and recovery follows the account. The
+public message reveals the encryption format, purpose, verified owner,
+ciphertext, wrapped key, IV, tag, and signature scope, but not playlist/profile
+metadata or items. There is no private-playlist or
+WeaveMail HTTP device. Owner-scoped reference discovery locates the ciphertext;
+exact commitment and committer verification happen before local decryption,
+and the decrypted payload schema provides the playlist domain check. Making a
+playlist public writes the plaintext public snapshot and advances the same
+reference. That transition is one-way because immutable public history cannot
+be made secret later.
 
 Private user preferences use the same separation. Each version is an immutable
 cookie-signed `odysee-preferences@1.0` message containing only an AES-256-GCM
@@ -366,11 +390,16 @@ player that competes with playback by seeking across the external source.
 Generic `search@1.0` provides ranked locator discovery for homepage, category,
 and text-search requests. The frontend maps filters and sort before the query,
 preserves locator order, and exact-hydrates every result; Meilisearch remains
-an index, never an object or authority source. Native per-channel listings use
-bounded `query@1.0` discovery over upload records and the same exact hydration
-boundary. Watch-page related content is also a generic full-text search: a
-bounded tag-and-title query plus a server-side current-claim exclusion replaces
-the legacy recommendation endpoint, while exact hydration remains unchanged.
+an index, never an object or authority source. Public native channel/Following
+listings use that same ranked index. An operator worker applies the shared
+verified upload revision projection before indexing one exact current locator
+per root. Owner libraries/account summaries retain exact query enumeration.
+See [native upload projection](../decisions/native-upload-projection.md) for
+metadata snapshots, explicit clears, serialized writes, current versus exact
+routes, and search-worker operation.
+Watch-page related content is also a generic full-text search: a bounded
+tag-and-title query plus a server-side current-claim exclusion replaces the
+legacy recommendation endpoint, while exact hydration remains unchanged.
 
 Static manifests embed homepage presentation templates, not node-specific
 claim selections. The node stores its immutable Lua materializer and homepage

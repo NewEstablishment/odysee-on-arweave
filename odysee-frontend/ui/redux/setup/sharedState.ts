@@ -11,12 +11,6 @@ export const triggerSharedStateActions = [
   ACTIONS.CREATE_CHANNEL_COMPLETED,
   ACTIONS.SYNC_CLIENT_SETTINGS,
   ACTIONS.SHARED_PREFERENCE_SET,
-  ACTIONS.COLLECTION_EDIT,
-  ACTIONS.COLLECTION_DELETE,
-  ACTIONS.COLLECTION_NEW,
-  ACTIONS.DELETE_ID_FROM_LOCAL_COLLECTIONS,
-  ACTIONS.COLLECTION_TOGGLE_SAVE,
-  ACTIONS.COLLECTION_AUTOPUBLISH_SET,
   ACTIONS.SET_LAST_VIEWED_ANNOUNCEMENT,
 ];
 
@@ -67,30 +61,6 @@ const sharedStateFilters = {
   sharing_3P: {
     source: 'app',
     property: 'allowAnalytics',
-  },
-  builtinCollections: {
-    source: 'collections',
-    property: 'builtin',
-  },
-  editedCollections: {
-    source: 'collections',
-    property: 'edited',
-  },
-  updatedCollections: {
-    source: 'collections',
-    property: 'updated',
-  },
-  savedCollectionIds: {
-    source: 'collections',
-    property: 'savedIds',
-  },
-  unpublishedCollections: {
-    source: 'collections',
-    property: 'unpublished',
-  },
-  autoPublishById: {
-    source: 'collections',
-    property: 'autoPublishById',
   },
   lastViewedAnnouncement: {
     source: 'content',
