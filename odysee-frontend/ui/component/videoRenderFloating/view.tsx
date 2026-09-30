@@ -2,6 +2,7 @@ import { Global } from '@emotion/react';
 import { VideoRenderFloatingContext } from 'contexts/videoRenderFloating';
 import type { ElementRef } from 'react';
 import * as MODALS from 'constants/modal_types';
+import * as PAGES from 'constants/pages';
 import * as ICONS from 'constants/icons';
 import {
   PRIMARY_PLAYER_WRAPPER_CLASS,
@@ -264,6 +265,11 @@ function VideoRenderFloating(props: Props) {
   const doSetPlayingUri = (arg0: PlayingUri) => dispatch(doSetPlayingUriAction(arg0));
   const routeLocation = useLocation();
   const currentLocation = location || routeLocation;
+  const inUploadWizard = routeLocation.pathname === `/$/${PAGES.UPLOAD}`;
+  React.useEffect(() => {
+    // A late playback callback can race the wizard's mount-time cleanup.
+    if (inUploadWizard && uri) dispatch(doClearPlayingUriAction());
+  }, [dispatch, inUploadWizard, uri]);
   const { state } = currentLocation || {};
   const { overrideFloating } = state || {};
   const isShortVideo = Boolean(isClaimShort && (!disableShortsView || isFloating));
@@ -806,7 +812,7 @@ function VideoRenderFloating(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draggable]);
 
-  if (!uri || (isFloating && noFloatingPlayer) || isBlocked) {
+  if (inUploadWizard || !uri || (isFloating && noFloatingPlayer) || isBlocked) {
     return null;
   }
 

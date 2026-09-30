@@ -29,6 +29,7 @@ import {
   selectMemberRestrictionStatus,
 } from 'redux/selectors/publish';
 import { doError, doToast } from 'redux/actions/notifications';
+import { doClearPlayingUri } from 'redux/actions/content';
 import { navigateTo } from 'redux/router';
 import analytics from 'analytics';
 import { doOpenModal, doSetActiveChannel, doSetIncognito } from 'redux/actions/app';
@@ -988,6 +989,9 @@ export const doPrepareEdit = (claim: StreamClaim, uri: string, claimType: string
       type: ACTIONS.DO_PREPARE_EDIT,
       data: publishData,
     });
+    // Stop native playback before changing routes, not only after the wizard
+    // mounts: a still-playing floating renderer can otherwise race navigation.
+    if (hyperbeamUploadEnabled()) dispatch(doClearPlayingUri());
     navigateTo(`/$/${PUBLISH_PATH_MAP[type]}`);
   };
 };

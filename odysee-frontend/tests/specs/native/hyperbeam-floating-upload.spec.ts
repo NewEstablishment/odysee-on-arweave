@@ -55,6 +55,19 @@ test('playing video floats before navigation and is cleared by the upload wizard
       await element.play();
     });
   }
+  // Edit must work with one normal click while media is actively playing.
+  // Do not pause first or force the click: both mask the reported regression.
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(false);
+  await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
+  await expect(page.locator('input[name="content_title"]')).toBeVisible({ timeout: 20000 });
+  await expect(page.locator('.content__viewer--floating')).toHaveCount(0);
+  await page.goto(`${manifest}/#/$/id/${upload.headers()['message-id']}`);
+  await expect(video).toBeVisible({ timeout: 30000 });
+  await video.evaluate(async (element: HTMLVideoElement) => {
+    element.muted = true;
+    await element.play();
+  });
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(1);
   // Same-document navigation preserves the player; a page.goto/reload would
   // destroy it and make the regression assertion vacuous.
   await page.evaluate(() => {

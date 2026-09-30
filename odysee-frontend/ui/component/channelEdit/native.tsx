@@ -21,7 +21,9 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
     avatar_id: '',
     banner_id: '',
   });
-  const [busy, setBusy] = React.useState(false);
+  const [operation, setOperation] = React.useState<'uploading' | 'saving' | null>(null);
+  const operationRef = React.useRef<'uploading' | 'saving' | null>(null);
+  const busy = operation !== null;
   const [error, setError] = React.useState('');
   const [reload, setReload] = React.useState(0);
   React.useEffect(() => {
@@ -48,22 +50,28 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
   }, [id, reload, claim?.hyperbeam?.profile_historical]);
 
   async function save() {
-    setBusy(true);
+    if (operationRef.current || !profile || !validProfileMetadata(metadata)) return;
+    operationRef.current = 'saving';
+    setOperation('saving');
     setError('');
     try {
-      await fetchHyperbeamProfileSave(id, profile.hyperbeam.profile_version, metadata);
+      const saved = await fetchHyperbeamProfileSave(id, profile.hyperbeam.profile_version, metadata);
+      // Keep the acknowledged head even if the subsequent UI refresh fails.
+      setProfile(saved);
       await dispatch(doResolveUri(uri, false));
       onDone?.();
     } catch (err) {
       setError(err.message || 'Profile save failed. Please retry.');
     } finally {
-      setBusy(false);
+      operationRef.current = null;
+      setOperation(null);
     }
   }
 
   async function imageChange(file: File | undefined, key: 'avatar_id' | 'banner_id') {
-    if (!file) return;
-    setBusy(true);
+    if (!file || operationRef.current) return;
+    operationRef.current = 'uploading';
+    setOperation('uploading');
     setError('');
     try {
       const imageId = await uploadProfileImage(file);
@@ -71,7 +79,8 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
     } catch (err) {
       setError(err.message || 'Image upload failed.');
     } finally {
-      setBusy(false);
+      operationRef.current = null;
+      setOperation(null);
     }
   }
 
@@ -90,6 +99,13 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
               {error}
             </p>
           )}
+          <p role="status" aria-live="polite" style={{ minHeight: '1.5em' }}>
+            {operation === 'uploading'
+              ? __('Uploading image. Please wait before saving.')
+              : operation === 'saving'
+                ? __('Saving profile...')
+                : ''}
+          </p>
           {!profile ? (
             <Button button="link" label={__('Reload profile')} onClick={() => setReload((value) => value + 1)} />
           ) : (
@@ -115,13 +131,15 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
               {(['avatar_id', 'banner_id'] as const).map((key) => (
                 <div key={key} className="section">
                   <label htmlFor={`profile_${key}`}>{key === 'avatar_id' ? __('Avatar') : __('Banner')}</label>
-                  {metadata[key] && (
-                    <img
-                      alt={key === 'avatar_id' ? __('Avatar preview') : __('Banner preview')}
-                      src={`${hyperbeamNodeBase()}/${metadata[key]}`}
-                      style={{ maxWidth: '100%', maxHeight: 180 }}
-                    />
-                  )}
+                  <div style={{ height: 180 }}>
+                    {metadata[key] && (
+                      <img
+                        alt={key === 'avatar_id' ? __('Avatar preview') : __('Banner preview')}
+                        src={`${hyperbeamNodeBase()}/${metadata[key]}`}
+                        style={{ maxWidth: '100%', maxHeight: 180 }}
+                      />
+                    )}
+                  </div>
                   <input
                     id={`profile_${key}`}
                     type="file"
@@ -132,14 +150,16 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
                       event.target.value = '';
                     }}
                   />
-                  {metadata[key] && (
-                    <Button
-                      button="link"
-                      label={key === 'avatar_id' ? __('Remove avatar') : __('Remove banner')}
-                      disabled={busy}
-                      onClick={() => setMetadata({ ...metadata, [key]: '' })}
-                    />
-                  )}
+                  <div style={{ minHeight: 40 }}>
+                    {metadata[key] && (
+                      <Button
+                        button="link"
+                        label={key === 'avatar_id' ? __('Remove avatar') : __('Remove banner')}
+                        disabled={busy}
+                        onClick={() => setMetadata({ ...metadata, [key]: '' })}
+                      />
+                    )}
+                  </div>
                 </div>
               ))}
               <p>
@@ -155,7 +175,8 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
         <div className="section__actions">
           <Button
             button="primary"
-            label={busy ? __('Saving...') : __('Save profile')}
+            label={__('Save profile')}
+            aria-busy={busy}
             disabled={busy || !profile || !validProfileMetadata(metadata)}
             onClick={save}
           />

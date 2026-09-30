@@ -7,6 +7,16 @@ assert.equal(
   'http://127.0.0.1:18801/native-id'
 );
 assert.equal(directImageUrl('http://localhost:18801/native-id'), 'http://localhost:18801/native-id');
+assert.equal(
+  directImageUrl('http://node.example/cover-id', ['https://node.example'], true),
+  'https://node.example/cover-id',
+  'HTTPS node images keep the configured HTTPS scheme'
+);
+assert.equal(
+  directImageUrl('http://node.example/cover-id', ['http://node.example'], true),
+  'http://node.example/cover-id',
+  'HTTP node covers must not be upgraded to an unsupported HTTPS endpoint'
+);
 assert.equal(directImageUrl('http://192.168.1.20/native-id'), 'http://192.168.1.20/native-id');
 assert.equal(directImageUrl('/native-id'), '/native-id');
 assert.equal(directImageUrl('data:image/png;base64,AA=='), 'data:image/png;base64,AA==');

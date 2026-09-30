@@ -9,7 +9,7 @@ import * as ICONS from 'constants/icons';
 import * as MODALS from 'constants/modal_types';
 import * as THUMBNAIL_STATUSES from 'constants/thumbnail_upload_statuses';
 import { useAppSelector, useAppDispatch } from 'redux/hooks';
-import { doUploadThumbnail } from 'redux/actions/publish';
+import { doUploadThumbnail, doUpdatePublishForm } from 'redux/actions/publish';
 import { doOpenModal } from 'redux/actions/app';
 import { doToast } from 'redux/actions/notifications';
 import './style.lazy.scss';
@@ -550,6 +550,21 @@ function ThumbnailPicker(props: Props) {
 
           {!loading && !error && (
             <>
+              {currentThumbnail && (
+                <Button
+                  button="link"
+                  label={__('Remove thumbnail')}
+                  disabled={isUploadInProgress}
+                  onClick={() => {
+                    cleanupUploadedPreview();
+                    setUploadedThumbUrl(null);
+                    setUrlThumbUrl(null);
+                    setSelectedIndex(null);
+                    dispatch(doUpdatePublishForm({ thumbnail: '', thumbnailPath: '', thumbnailError: false }));
+                    onThumbnailSelected?.('');
+                  }}
+                />
+              )}
               <div className="thumbnail-picker__grid">
                 <input
                   ref={fileInputRef}

@@ -142,6 +142,11 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Thumbnail bytes use the same generic committed-ID write path. Do not require
   a server-held cache-writer key or an SSR thumbnail bridge in this
   architecture.
+- New node thumbnails persist `thumbnail-id`, not the node hostname. Use
+  `nativeThumbnail.ts` at write/hydration boundaries; only exact configured-node
+  image URLs may become IDs. Keep old remote URL records readable. ID and URL
+  are one metadata field: replacement/clear resets the other representation.
+  Full revisions, search projection and exact history must preserve this rule.
 - Thumbnails and profile images share `ui/util/nativeImageUpload.ts` preflight
   and transport. Keep profile PNG/JPEG/WebP restrictions and thumbnail GIF
   support explicit. This browser check does not enforce node upload policy.
@@ -150,6 +155,10 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
 - Node, loopback, private-network, relative, `data:`, and `blob:` image sources
   must bypass external thumbnail optimizers. Preserve the configured node
   scheme when rendering these URLs.
+- Cover/avatar selectors use the shared image URL helper as well; do not upgrade
+  native HTTP cover URLs to HTTPS. Profile editing distinguishes uploading from
+  saving, disables conflicting actions and reserves preview space. Native Edit
+  clears playback before navigation, in addition to the wizard mount guard.
 - A HyperBEAM manifest must render remote historical thumbnails directly and
   unwrap inherited `thumbnails.odycdn.com` URLs to their original source.
   Built-in placeholders and wallpaper assets must use manifest-local files.

@@ -8,6 +8,7 @@ import {
   VISIBILITY_TAGS,
 } from 'constants/tags';
 import { hyperbeamNodeBase } from 'util/hyperbeamDevices';
+import { nativeThumbnailForWrite } from 'util/nativeThumbnail';
 import { getHyperbeamAccount } from 'util/hyperbeamAccount';
 import { fetchHyperbeamResolve, fetchHyperbeamUploadDelete, fetchHyperbeamUploadUpdate } from 'util/hyperbeam';
 
@@ -15,6 +16,7 @@ const METADATA_KEYS = [
   'title',
   'description',
   'thumbnail_url',
+  'thumbnail_id',
   'tags',
   'languages',
   'license',
@@ -183,6 +185,7 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
   if (!base) return null;
 
   const metadata = uploadPayload.metadata || {};
+  const thumbnail = nativeThumbnailForWrite(metadata, base);
   const channel = metadata.channel || {};
   const message: Record<string, any> = {
     schema: 'odysee-upload@1.0',
@@ -203,7 +206,8 @@ async function indexUploadResponse(dataId: string, uploadPayload: Record<string,
     description: metadata.description,
     tags: metadata.tags,
     languages: metadata.languages,
-    'thumbnail-url': metadata.thumbnail_url,
+    'thumbnail-url': thumbnail.thumbnail_url,
+    'thumbnail-id': thumbnail.thumbnail_id,
     license: metadata.license,
     'license-url': metadata.license_url,
     'release-time': metadata.release_time,

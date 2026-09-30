@@ -31,6 +31,7 @@ import { MEMBERS_ONLY_CONTENT_TAG, RESTRICTED_CHAT_COMMENTS_TAG } from 'constant
 import { getGeoRestrictionForClaim } from 'util/geoRestriction';
 import { parsePurchaseTag, parseRentalTag } from 'util/stripe';
 import { removeInternalStringTags } from 'util/tags';
+import { getImageProxyUrl } from 'util/thumbnail';
 export function selectClaimsStates(state: State) {
   return state.claims || EMPTY_OBJECT;
 }
@@ -573,17 +574,17 @@ export const makeSelectCoverForUri = (uri: string) =>
   createSelector(makeSelectClaimForUri(uri), (claim) => {
     if (claim && claim.value.cover) {
       const cover = claim && claim.value && claim.value.cover;
-      return cover && cover.url ? cover.url.trim().replace(/^http:\/\//i, 'https://') : undefined;
+      return cover && cover.url ? getImageProxyUrl(cover.url.trim()) : undefined;
     } else {
       const cover = claim && claim.signing_channel && claim.signing_channel.value && claim.signing_channel.value.cover;
-      return cover && cover.url ? cover.url.trim().replace(/^http:\/\//i, 'https://') : undefined;
+      return cover && cover.url ? getImageProxyUrl(cover.url.trim()) : undefined;
     }
   });
 export const makeSelectAvatarForUri = (uri: string) =>
   createSelector(makeSelectClaimForUri(uri), (claim) => {
-    if (claim && claim.value.cover) {
+    if (claim?.value_type === 'channel') {
       const avatar = claim && claim.value && claim.value.thumbnail && claim.value.thumbnail;
-      return avatar && avatar.url ? avatar.url.trim().replace(/^http:\/\//i, 'https://') : undefined;
+      return avatar && avatar.url ? getImageProxyUrl(avatar.url.trim()) : undefined;
     } else {
       const avatar =
         claim &&
@@ -591,7 +592,7 @@ export const makeSelectAvatarForUri = (uri: string) =>
         claim.signing_channel.value &&
         claim.signing_channel.value.thumbnail &&
         claim.signing_channel.value.thumbnail;
-      return avatar && avatar.url ? avatar.url.trim().replace(/^http:\/\//i, 'https://') : false;
+      return avatar && avatar.url ? getImageProxyUrl(avatar.url.trim()) : false;
     }
   });
 export const selectIsFetchingClaimListMine = (state: State) => selectState(state).isFetchingClaimListMine;

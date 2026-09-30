@@ -5,6 +5,7 @@
 // its tip and hide deleted tips. Chain legality is enforced client-side
 // against the verified committer, mirroring `nativeCommentRevisions`.
 import { nativeMessageVersionRef } from './nativeMessageVerification.ts';
+import { readNativeThumbnail } from './nativeThumbnail.ts';
 
 export const NATIVE_UPLOAD_SCHEMA = 'odysee-upload@1.0';
 
@@ -27,6 +28,7 @@ export type NativeUploadRevision = {
   title?: string;
   description?: string;
   thumbnail_url?: string;
+  thumbnail_id?: string;
   license?: string;
   license_url?: string;
   release_time?: number;
@@ -37,6 +39,7 @@ export type NativeUploadMetadata = {
   title?: string;
   description?: string;
   thumbnail_url?: string;
+  thumbnail_id?: string;
   license?: string;
   license_url?: string;
   release_time?: number | string;
@@ -50,6 +53,8 @@ export function normalizeNativeUploadRevision(
   owner: string | undefined
 ): NativeUploadRevision | null {
   if (field(payload, 'schema') !== NATIVE_UPLOAD_SCHEMA || field(payload, 'type') !== 'upload') return null;
+  const thumbnail = readNativeThumbnail(payload);
+  if (!thumbnail) return null;
   const revisionOf = stringField(payload, 'revision-of', 'revision_of');
   return {
     record_id: revisionOf || messageId,
@@ -69,7 +74,7 @@ export function normalizeNativeUploadRevision(
     timestamp: numberField(payload, 'timestamp') ?? 0,
     title: stringField(payload, 'title'),
     description: stringField(payload, 'description'),
-    thumbnail_url: stringField(payload, 'thumbnail-url', 'thumbnail_url'),
+    ...thumbnail,
     license: stringField(payload, 'license'),
     license_url: stringField(payload, 'license-url', 'license_url'),
     release_time: numberField(payload, 'release-time', 'release_time'),
@@ -93,6 +98,7 @@ export function nativeUploadRevisionMessage(
     ...nativeUploadTipMetadata(root),
     ...defined(nativeUploadTipMetadata(current)),
     ...defined(metadata),
+    ...thumbnailMetadata(metadata),
   };
   const message: Record<string, any> = {
     schema: NATIVE_UPLOAD_SCHEMA,
@@ -116,6 +122,7 @@ export function nativeUploadRevisionMessage(
           title: snapshot.title ?? '',
           description: snapshot.description ?? '',
           'thumbnail-url': snapshot.thumbnail_url ?? '',
+          'thumbnail-id': snapshot.thumbnail_id ?? '',
           license: snapshot.license ?? '',
           'license-url': snapshot.license_url ?? '',
           'release-time': snapshot.release_time ?? root.timestamp ?? 0,
@@ -190,13 +197,19 @@ export function nativeUploadTipMetadata(tip: NativeUploadRevision): NativeUpload
   return {
     title: tip.title,
     description: tip.description,
-    thumbnail_url: tip.thumbnail_url,
+    ...thumbnailMetadata(tip),
     license: tip.license,
     license_url: tip.license_url,
     release_time: tip.release_time,
     tags: tip.tags,
     languages: tip.languages,
   };
+}
+
+function thumbnailMetadata(metadata: NativeUploadMetadata): NativeUploadMetadata {
+  const thumbnail = readNativeThumbnail(metadata);
+  if (!thumbnail) throw new Error('Invalid or conflicting thumbnail reference.');
+  return thumbnail;
 }
 
 function revisionNumber(upload: NativeUploadRevision): number {

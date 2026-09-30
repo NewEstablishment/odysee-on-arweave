@@ -11,6 +11,19 @@ fields from the verified effective state. Older sparse revisions remain
 readable by applying their defined fields in chain order. Media ID, creation
 name/time and owner/channel binding stay anchored to the root.
 
+Native thumbnail references use `thumbnail-id` (43-character immutable ID).
+The shared integration helper converts only an exact configured-node `/<ID>`
+URL on write, including the thumbnail adapter's existing URL-shaped result.
+It never infers native identity from arbitrary remote URL tails. Other URLs
+remain `thumbnail-url` for backward compatibility; reading old messages never
+rewrites their URLs. ID and URL are mutually exclusive nonempty representations
+of one field, so replacement and explicit clears cannot inherit a stale image.
+Malformed/conflicting references are rejected by the revision normalizer.
+Hydration renders IDs against the active node; search documents retain the ID
+and derive `has_thumbnail` from either valid representation. Image-byte ownership
+does not confer upload authority. This portability does not establish replication
+or availability of those bytes on another node.
+
 New predecessors are exact immutable message IDs. Existing UUID version
 references remain readable using query to locate and verify their messages.
 The frontend serializes saves per node/owner/root with Web Locks across tabs

@@ -1,6 +1,38 @@
 # Image storage and migration
 
-## First slice — 2026-09-22
+Human QA: [Chrome image-workstream kit](chrome-image-acceptance.md), including
+current-build prerequisites, exact history, retry and separate importer checks.
+
+## Current acceptance limits
+
+As of September 30, native image/profile/upload contracts pass. The user's
+fresh local build confirms banner rendering and single-click profile Save
+without duplicate writes. Edit passed with Redux playback state, not decoded
+video. Delayed-upload disabled state, actual playing-video Edit, live offline
+recovery and fresh-guest acceptance remain open. These are user-reported
+browser results, not a new agent browser run or production deployment.
+
+## Image editor behavior
+
+- Cover/avatar selectors now use the shared image URL boundary rather than
+  unconditionally upgrading HTTP to HTTPS. Configured node schemes are retained;
+  native avatars no longer depend on having a banner.
+- Profile uploads and saves have distinct visible operation states, native
+  disabled controls and a synchronous in-flight guard. Preview/action space is
+  reserved so image loading does not move Save. A successful metadata write keeps
+  its acknowledged head even if the subsequent display refresh fails.
+- Native Edit clears playback in the shared prepare-edit action before routing;
+  the wizard/floating-renderer guards remain as defense against late playback.
+
+The profile contract suite executes selector/component/action code with
+controlled hooks and transports: HTTP/HTTPS covers, avatar without a cover,
+upload busy state, stale/duplicate clicks, retained-image retry, and playback
+clear-before-navigation. These are not browser tests. Enhanced profile/floating
+browser specs require slow-upload disabled state, exact cover CSS URL, guest
+state/history and one normal Edit click during real playback; those enhanced
+specs have not been executed against the fixed bundle.
+
+## Native image uploads
 
 Thumbnails, avatars and banners share the browser `nativeImageUpload.ts`
 validator and generic raw-byte `POST /id?0.%21=true&committers=all` transport.
@@ -22,11 +54,62 @@ No image device, SSR bridge, external upload service or new signer is added.
 - GIF decode acceptance does not validate every animation frame. This slice
   neither rewrites metadata nor claims EXIF stripping or image sanitization.
 
-The shared uploader returns both ID and URL, but native upload metadata still
-uses `thumbnail-url`. Moving new thumbnail references to an explicit immutable
-ID with backward-compatible hydration/search/revision support remains open.
-Do not silently reinterpret arbitrary remote 43-character URL paths as native
-image IDs or mutate existing immutable snapshots.
+## Portable thumbnail references
+
+New uploads and edits persist `thumbnail-id` for native image references.
+The existing thumbnail service still returns a URL to the form, but the shared
+write boundary converts only an exact configured-node `/<43-character-ID>` URL.
+Remote hosts, relative paths, query/fragment URLs and lookalike hosts are not
+reinterpreted. Explicit IDs are validated; conflicting nonempty ID/URL metadata
+is rejected. No new device, proxy or signer is introduced.
+
+The ID/URL pair is one logical metadata field. Setting either clears the other;
+explicit empty values remove the thumbnail; an unrelated edit preserves it.
+Both full snapshots and old sparse URL revisions follow this rule. Hydration
+builds native image URLs against the active node; search projection retains
+`thumbnail_id` and sets `has_thumbnail` without persisting a serving hostname.
+Old URL records and exact historical snapshots are unchanged. Another node
+must still have or be able to source the bytes: portability is not replication.
+
+The picker now exposes Remove thumbnail. Live acceptance also reproduced a
+playback callback race after entering the editor: mount-time cleanup alone
+could leave a floating viewer over Next. The floating renderer now suppresses
+itself on the upload route and clears late playback state.
+
+### Acceptance evidence
+
+Four Chromium workflows passed against a fresh, isolated HyperBEAM on `:18824`
+using the production-built frontend with test-only local asset interception.
+API reads/writes and commitment verification reached the real node. This is
+not a deployed/published manifest acceptance run.
+
+- Thumbnail wizard: injected 503 byte-write failure and immediate retry, create,
+  exact-byte image readback, ID-only metadata,
+  replace, clear, reload, and a fresh guest reading original/replacement images.
+- Profile editor: invalid-image rejection, avatar/banner save and replacement,
+  failed metadata save/retry, clear/reload, fresh guest, foreign/stale rejection
+  and exact historical avatar/profile reads.
+- Upload revision regression: metadata clear, refresh and exact version history.
+- Floating playback regression: actual playback continues while floating on
+  settings, then is removed on entering upload; Next is clicked normally.
+  An initial 3-second fixture ended before the timing assertion; the 15-second
+  fixture passes. The thumbnail replacement test also asserts no floating viewer.
+
+Contracts additionally cover thumbnail foreign/stale revisions, malformed IDs,
+old remote URL compatibility, metadata-only saves, search facets and rendering
+the same ID with a different node base. These are not live cross-node replication
+or Meilisearch-service tests. The real-decoder fixture covers all supported image
+types and failed-byte-write retry. Full frontend contract suites, TypeScript,
+format/lint (six existing warnings) and the standalone static bundle pass.
+No backend code changed; backend suites were not rerun. Canonical homepage
+materialization, manifest publication and production-scale image storage were
+not exercised; the isolated node deliberately has no search backend.
+
+Re-run `hyperbeam-thumbnail.spec.ts`, `hyperbeam-profile-edit.spec.ts`,
+`hyperbeam-upload-revisions.spec.ts` and `hyperbeam-floating-upload.spec.ts` with
+`HYPERBEAM_MANIFEST_URL` and a playable `HYPERBEAM_TEST_VIDEO` lasting at least
+15 seconds. For built-bundle transport only, set `HYPERBEAM_TEST_ASSET_DIR` to
+`web/dist/public`; omit it to test an actual published manifest.
 
 ## Legacy source audit
 
@@ -72,29 +155,33 @@ write images, attach metadata, or mark anything migrated. Planned URLs have
 not passed DNS/SSRF checks and are not approved fetch targets. Every planned
 entry explicitly records `unverified-export-url-only` evidence.
 
+## Capture and staging pilot
+
+`scripts/capture_legacy_images.py` consumes the existing inventory, downloads
+explicitly approved public HTTPS images, validates/decode-bounds them and stores
+exact originals plus provenance in a resumable private staging directory. It
+does not publish, rewrite historical claims or assert creator ownership.
+Default mode is offline validation. Capture requires Linux; the supplied pinned
+container preserves worker memory limits that macOS refuses to apply.
+
+See the [capture runbook](legacy-image-capture.md) for host approval, bounds,
+commands, checkpoint/retry semantics and fixture-vs-production evidence limits.
+The importer and security fixtures are separate from the frontend and do not
+require a node, search worker, account or custom device.
+
 ## Remaining implementation order
 
-1. Verify full thumbnail/avatar/banner editor lifecycles on an isolated node:
-   save, refresh, replace, clear, failed-save retry, fresh viewer, foreign/stale
-   revisions and exact historical snapshots. Existing profile/upload revision
-   specs provide the starting point; this slice does not newly certify them.
-2. Add portable native thumbnail-ID metadata with old URL compatibility through
-   the shared hydration/revision/search boundary. No page-specific rewriting.
-3. Build a bounded capture/staging importer: approved hosts, DNS/IP checks on
-   every connection/redirect, timeout/byte/decode limits, content hash, capture
-   time, source outpoint, safe checkpointing and explicit failed/missing states.
-4. Publish via generic signed writes using an explicitly selected migration
+1. Run the capture tool on a reviewed small public legacy export with explicitly
+   approved hosts. Controlled fixtures are not a production migration rehearsal.
+2. Publish via generic signed writes using an explicitly selected migration
    identity. Exact-read and compare bytes before marking a job complete. Keep
    source mappings/provenance separate from creator-authorized metadata.
-5. Define who authorizes migration mappings and how stores/integration consume
+3. Define who authorizes migration mappings and how stores/integration consume
    them. Test with legacy image hosts unavailable before declaring independence.
-6. Add bounded derivatives, operator upload controls and policy enforcement;
+4. Add bounded derivatives, operator upload controls and policy enforcement;
    prove replication and restore. A local write receipt is not permanent storage.
 
-No production exports or images were imported. No shared node/search services
-were changed. Existing unrelated QA and authentication research edits remain.
-
-## Validation
+## Validation commands and boundaries
 
 `pnpm run test:native-images` covers preflight, decode failures, dimensions,
 resource release, ID validation and write retry. Decoder behavior is stubbed
@@ -106,12 +193,17 @@ checks PNG/JPEG/WebP/GIF, profile GIF rejection, corrupt/spoofed images, exact
 bytes/content types, 503 retry and fresh-reader rendering. It is not a real
 HyperBEAM commitment, profile editor or production persistence test.
 
-All 14 frontend contract commands (images, profiles, upload revisions, comments,
-message verification, session/cache, controls, reactions, playlists,
-subscriptions, preferences, notifications, homepage and static manifest) pass;
-the offline inventory's four tests pass. TypeScript and formatting/lint pass
-(six existing unrelated lint warnings). The standalone static frontend bundle
-also compiles, without regenerating local-content selections. The canonical
-`build:manifest` is blocked at local-content materialization because configured
-node `127.0.0.1:18801` refuses connections. No live cookie lifecycle, full editor
-acceptance, backend tests or production migration is claimed.
+Run the affected frontend contracts from `odysee-frontend`:
+
+```sh
+pnpm run test:native-images
+pnpm run test:native-images:browser
+pnpm run test:native-profiles
+pnpm run test:native-upload-revisions
+pnpm run typecheck:tsc
+pnpm run check
+```
+
+A reduced-homepage bundle is not canonical homepage acceptance. Real browser
+flows, replication and production migration require their own fixtures and
+operator setup; contract passes do not close those gates.

@@ -1,0 +1,8 @@
+# Operator-only capture tool; keep separate from frontend/runtime dependencies.
+# CPython 3.14 wheels: macOS x86_64/arm64 and glibc Linux aarch64/x86_64.
+# Hashes from https://pypi.org/pypi/Pillow/12.3.0/json.
+Pillow==12.3.0 \
+    --hash=sha256:ba54cfebe86920a559a7c4d6b9050791c20513650a1952ebe3368c7dc70306f8 \
+    --hash=sha256:e158cb00350dc278f3b91551101aa7d12415a66ebf2c91d8d5ac14e56ddd3ad0 \
+    --hash=sha256:e9aeb04d6aef139de265b29683e119b638208f88cf73cdd1658aa07221165321 \
+    --hash=sha256:251bf95b67017e27b13d82f5b326234ca62d70f9cf4c2b9032de2358a3b12c7b

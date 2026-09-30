@@ -206,10 +206,15 @@ inherited `thumbnails.odycdn.com` optimizer URLs are unwrapped, and built-in
 wallpaper/placeholder assets are served from the manifest itself.
 
 Native thumbnails, avatars and banners share validated generic image uploads.
+New node thumbnails store immutable `thumbnail-id` metadata and hydrate against
+the active node; old URL records and exact historical images remain unchanged.
 The [image storage and migration notes](docs/image-storage-migration.md) cover
 the offline legacy inventory tool, tested boundaries and remaining byte-import,
-portable-reference and production-storage work. Remote URL rendering is not
+mapping-authority and production-storage work. Remote URL rendering is not
 legacy image migration.
+The [legacy-image capture pilot](docs/legacy-image-capture.md) stages bounded,
+provenance-labelled image downloads with explicit host approval and resumable
+checkpoints; it does not publish images or change creator ownership/metadata.
 
 Homepage and category `claim_search` requests map filters, ordering, and
 pagination to generic `search@1.0` requests, then hydrate the returned ordered

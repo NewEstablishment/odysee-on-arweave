@@ -167,6 +167,13 @@ shared projection, and an operator search worker. Public channel/Following
 search uses the shared indexed corpus and server-side filters/pagination.
 Older upload-device/SSR instructions below do not override that decision.
 
+Legacy image capture is an operator-only staging tool; see
+`docs/legacy-image-capture.md`. It consumes the offline inventory, requires
+explicit host approval for bounded HTTPS reads, and checkpoints exact bytes
+with unverified-current-URL provenance. Default mode is offline; capture runs
+on Linux/in the supplied container. Never add credentials, node publication,
+creator ownership claims or automatic migration mappings to this boundary.
+
 The native browser identity is the node's `secret-*` cookie, minted by
 `cookie@1.0` on the first committed write. Local storage contains display
 metadata only and grants no authority.

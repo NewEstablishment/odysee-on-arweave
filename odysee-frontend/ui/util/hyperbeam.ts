@@ -10,6 +10,7 @@ import { isClaimNsfw, isHyperbeamUploadClaim } from 'util/claim';
 import { rememberUploadVersion, serializeUploadWrite, uploadVersionHints } from 'util/nativeUploadWrites';
 import { cachedNativeRead } from 'util/nativeReadCache';
 import { readNativeWriteBack } from 'util/nativeReadback';
+import { nativeThumbnailForWrite, nativeThumbnailUrl, readNativeThumbnail } from 'util/nativeThumbnail';
 import {
   NATIVE_PROFILE_SCHEMA,
   normalizeProfileVersion,
@@ -3641,7 +3642,9 @@ function overlayNativeUploadTip(claim: any, tip: NativeUploadRevision): any {
       ...(metadata.license !== undefined ? { license: metadata.license } : {}),
       ...(metadata.license_url !== undefined ? { license_url: metadata.license_url } : {}),
       ...(metadata.release_time !== undefined ? { release_time: metadata.release_time } : {}),
-      ...(metadata.thumbnail_url !== undefined ? { thumbnail: { url: metadata.thumbnail_url } } : {}),
+      ...(metadata.thumbnail_url !== undefined || metadata.thumbnail_id !== undefined
+        ? { thumbnail: { url: nativeThumbnailUrl(metadata, hyperbeamBaseUrl()) } }
+        : {}),
       ...(metadata.tags !== undefined ? { tags: metadata.tags } : {}),
       ...(metadata.languages !== undefined ? { languages: metadata.languages } : {}),
     },
@@ -3684,7 +3687,12 @@ export async function fetchHyperbeamUploadUpdate(claim: any, metadata: NativeUpl
   const initial = await fetchNativeUploadChainForClaim(claim);
   return serializeUploadWrite(uploadWriteKey(initial.root), async () => {
     const { root, tip } = await fetchNativeUploadChainForClaim(claim);
-    const message = nativeUploadRevisionMessage(root, tip, metadata, 'edit');
+    const message = nativeUploadRevisionMessage(
+      root,
+      tip,
+      { ...metadata, ...nativeThumbnailForWrite(metadata, hyperbeamBaseUrl()) },
+      'edit'
+    );
     const messageId = await writeNativeMessage(message, 'upload revision');
     const written = await fetchNativeUploadRevisionItem(messageId);
     if (!written || !isNextNativeUploadRevision(root, tip, written)) {
@@ -4952,13 +4960,16 @@ function immutableClaimFromHyperbeam(
       ...existingValue,
       title,
       description,
-      thumbnail: thumbnailObject(
-        value(existingValue, 'thumbnail') ||
-          value(payload, 'thumbnail', 'thumbnail-url', 'thumbnail_url') ||
-          value(decodedValue, 'thumbnail'),
-        mediaUrl,
-        mediaType
-      ),
+      thumbnail:
+        value(payload, 'schema') === 'odysee-upload@1.0' && value(payload, 'thumbnail-id', 'thumbnail_id') !== undefined
+          ? { url: nativeThumbnailUrl(readNativeThumbnail(payload) || {}, hyperbeamBaseUrl()) }
+          : thumbnailObject(
+              value(existingValue, 'thumbnail') ||
+                value(payload, 'thumbnail', 'thumbnail-url', 'thumbnail_url') ||
+                value(decodedValue, 'thumbnail'),
+              mediaUrl,
+              mediaType
+            ),
       cover: thumbnailObject(
         value(existingValue, 'cover') || value(payload, 'cover') || value(decodedValue, 'cover'),
         '',
