@@ -61,6 +61,23 @@ const ClaimPage = (props: Props) => {
       ),
     [isEmbedPath]
   );
+  // Keep the editor mounted across parent renders (including online/offline
+  // changes). A new wrapper component type would discard unsaved form state
+  // and start a fresh profile read while the node is unreachable.
+  const ChannelPageEditingWrapper = React.useMemo(
+    () =>
+      ({ children }: { children: any }) => (
+        <Page
+          className="channelPage-wrapper channelPage-edit-wrapper"
+          noFooter
+          fullWidthPage
+          noSideNavigation={isEmbedPath}
+        >
+          {children}
+        </Page>
+      ),
+    [isEmbedPath]
+  );
 
   const ImmutableLoadingWrapper = React.useMemo(
     () =>
@@ -81,18 +98,7 @@ const ClaimPage = (props: Props) => {
     const editing = urlParams.get(CHANNEL_PAGE.QUERIES.VIEW) === CHANNEL_PAGE.VIEWS.EDIT;
 
     if (editing) {
-      const ChannelPageEditingWrapperLocal = ({ children }: { children: any }) => (
-        <Page
-          className="channelPage-wrapper channelPage-edit-wrapper"
-          noFooter
-          fullWidthPage
-          noSideNavigation={isEmbedPath}
-        >
-          {children}
-        </Page>
-      );
-
-      return <ClaimPageComponent uri={uri} ClaimRenderWrapper={ChannelPageEditingWrapperLocal} Wrapper={Page} />;
+      return <ClaimPageComponent uri={uri} ClaimRenderWrapper={ChannelPageEditingWrapper} Wrapper={Page} />;
     }
 
     return (

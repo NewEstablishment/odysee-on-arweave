@@ -209,7 +209,8 @@ test('profile metadata and images keep identity, reject unauthorized updates and
     const visitor = await freshReader.newPage();
     await visitor.goto(channel);
     await expect(visitor.getByText('Final profile title', { exact: true }).first()).toBeVisible({ timeout: 30000 });
-    await expect(visitor.locator('header.channel-cover')).toHaveCSS('background-image', 'none');
+    // With no uploaded cover the app intentionally renders a generated gradient.
+    await expect(visitor.locator('header.channel-cover')).not.toHaveCSS('background-image', /url\(/);
     await visitor.reload();
     await expect(visitor.getByText('Final profile title', { exact: true }).first()).toBeVisible({ timeout: 30000 });
     for (const imageId of [

@@ -223,6 +223,7 @@ HYPERBEAM_TEST_VIDEO='/absolute/path/to/30-second-test.mp4' \
 pnpm exec playwright test \
   tests/specs/native/hyperbeam-thumbnail.spec.ts \
   tests/specs/native/hyperbeam-profile-edit.spec.ts \
+  tests/specs/native/hyperbeam-image-recovery.spec.ts \
   tests/specs/native/hyperbeam-upload-revisions.spec.ts \
   tests/specs/native/hyperbeam-floating-upload.spec.ts \
   --project=chromium --workers=1

@@ -5,12 +5,20 @@ current-build prerequisites, exact history, retry and separate importer checks.
 
 ## Current acceptance limits
 
-As of September 30, native image/profile/upload contracts pass. The user's
-fresh local build confirms banner rendering and single-click profile Save
-without duplicate writes. Edit passed with Redux playback state, not decoded
-video. Delayed-upload disabled state, actual playing-video Edit, live offline
-recovery and fresh-guest acceptance remain open. These are user-reported
-browser results, not a new agent browser run or production deployment.
+October 1: five Chromium workflows pass on a freshly built reduced-homepage
+bundle against an isolated real HyperBEAM node, using test-only asset transport.
+Coverage includes delayed-upload disabled state, image interruption and profile
+save while offline followed by immediate retry without reload, one successful
+revision without reposting saved image bytes, fresh guest profile/thumbnail
+reads and exact history, and Edit/new-upload navigation during decoded playback.
+Image retry explicitly reselects the file; it is not an automatic upload queue.
+
+TypeScript, formatting/lint (six existing warnings), native profile/image/upload
+contracts and the reduced bundle build pass. This is not published-manifest,
+canonical homepage, live search, cross-node replication or production acceptance.
+Lost acknowledgements after a node accepts a write, video-upload metadata offline
+recovery and production migration remain separate gates. Backend/importer suites
+were not rerun for these rendering changes.
 
 ## Image editor behavior
 
@@ -23,14 +31,20 @@ browser results, not a new agent browser run or production deployment.
   its acknowledged head even if the subsequent display refresh fails.
 - Native Edit clears playback in the shared prepare-edit action before routing;
   the wizard/floating-renderer guards remain as defense against late playback.
+- The channel editor wrapper retains component identity across parent renders.
+  Recreating it previously discarded drafts and re-read the profile on offline
+  transitions. Native editor scroll clearance keeps Save reachable above fixed
+  status notifications without forced clicks.
 
 The profile contract suite executes selector/component/action code with
 controlled hooks and transports: HTTP/HTTPS covers, avatar without a cover,
 upload busy state, stale/duplicate clicks, retained-image retry, and playback
 clear-before-navigation. These are not browser tests. Enhanced profile/floating
 browser specs require slow-upload disabled state, exact cover CSS URL, guest
-state/history and one normal Edit click during real playback; those enhanced
-specs have not been executed against the fixed bundle.
+state/history and one normal Edit click during real playback. The offline
+regression is `hyperbeam-image-recovery.spec.ts`. Playback destinations use
+separate fresh contexts so abandoned edit drafts do not contaminate new-upload
+acceptance. A cleared cover may render the default gradient, but no image URL.
 
 ## Native image uploads
 

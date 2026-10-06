@@ -159,6 +159,11 @@ reads use exact committed IDs. Mutable names and claim IDs are locators only.
   native HTTP cover URLs to HTTPS. Profile editing distinguishes uploading from
   saving, disables conflicting actions and reserves preview space. Native Edit
   clears playback before navigation, in addition to the wizard mount guard.
+- Keep the channel-edit page wrapper identity stable across parent renders so
+  online/offline notifications cannot remount the editor and discard drafts.
+  Preserve scroll space below native profile actions for fixed status banners.
+  `hyperbeam-image-recovery.spec.ts` exercises real browser offline transitions,
+  immediate explicit retry, retained metadata and no repeat of saved image bytes.
 - A HyperBEAM manifest must render remote historical thumbnails directly and
   unwrap inherited `thumbnails.odycdn.com` URLs to their original source.
   Built-in placeholders and wallpaper assets must use manifest-local files.

@@ -395,6 +395,11 @@ $actions-z-index: 2;
   .card {
     margin-bottom: var(--spacing-l);
   }
+  // Native image forms can extend below the viewport. Leave enough scroll
+  // space to reach Save while offline/settings notifications are fixed below.
+  .card.native-profile-editor {
+    margin-bottom: 8rem;
+  }
   .form-field--SimpleMDE {
     margin-top: var(--spacing-m);
   }

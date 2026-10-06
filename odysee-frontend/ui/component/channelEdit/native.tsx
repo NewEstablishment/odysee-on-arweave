@@ -86,6 +86,7 @@ export default function NativeProfileEditor({ uri, onDone }: { uri: string; onDo
 
   return (
     <Card
+      className="native-profile-editor"
       title={__('Edit profile')}
       body={
         <>
