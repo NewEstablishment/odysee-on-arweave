@@ -34,3 +34,4 @@ wallet.json
 /config-test.json
 
 /logs/
+.claude/

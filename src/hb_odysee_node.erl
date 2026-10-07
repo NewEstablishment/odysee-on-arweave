@@ -147,7 +147,10 @@ cookie_auth_hooks(Opts) ->
     Pipeline = hb_maps:get(<<"request">>, Hooks, [], Opts),
     Hooks#{
         <<"cache-write">> =>
-            [#{ <<"device">> => <<"search@1.0">>, <<"path">> => <<"write">> }],
+            [
+                #{ <<"device">> => <<"match@1.0">>, <<"path">> => <<"index">> },
+                #{ <<"device">> => <<"search@1.0">>, <<"path">> => <<"write">> }
+            ],
         <<"request">> =>
             [
                 case Handler of
