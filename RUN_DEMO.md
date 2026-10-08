@@ -92,11 +92,12 @@ tab open. Have one short MP4 ready if you want to perform a fresh upload.
 ## Optional: large blobs in an S3 bucket
 
 `config-s3.json` is the demo configuration with size routing: values up to
-64 KiB stay in the LMDB stores, larger ones (media bodies) go to an
-S3-compatible bucket, and `cache-odysee-large` on disk catches them when the
-bucket is unreachable. The credentials live under the store's name in the
-top-level `priv` object, nowhere else; replace the two placeholders before
-starting. For a local bucket:
+1 MiB (metadata, cached upstream listings, thumbnails) stay in the LMDB
+stores, larger ones (media bodies) go to an S3-compatible bucket, and
+`cache-odysee-large` on disk catches them when the bucket is unreachable.
+The credentials live under the store's name in the top-level `priv` object,
+nowhere else; replace the two placeholders before starting. For a local
+bucket:
 
 ```sh
 docker run -d --name hb-s3-minio -p 127.0.0.1:9000:9000 -p 127.0.0.1:9001:9001 \
@@ -108,7 +109,7 @@ docker exec hb-s3-minio sh -c 'mc alias set local http://127.0.0.1:9000 \
 HB_CONFIG=config-s3.json HB_PRELOADED_STORE=_build/device-local-store rebar3 shell
 ```
 
-An upload larger than 64 KiB then appears as `data/<hash>` in the bucket and
+An upload larger than 1 MiB then appears as `data/<hash>` in the bucket and
 nowhere on disk; a bucket name that does not exist is reported as a
 `no_such_bucket` error event on the node and the write falls through to
 `cache-odysee-large`.

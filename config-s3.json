@@ -110,14 +110,14 @@
       "name": "cache-odysee-demo",
       "ao-types": "store-module=\"atom\", capacity=\"integer\", max-value-size=\"integer\"",
       "capacity": 34359738368,
-      "max-value-size": 65536
+      "max-value-size": 1048576
     },
     {
       "store-module": "hb_store_lmdb",
       "name": "cache-http",
       "ao-types": "store-module=\"atom\", capacity=\"integer\", max-value-size=\"integer\"",
       "capacity": 1073741824,
-      "max-value-size": 65536
+      "max-value-size": 1048576
     },
     {
       "store-module": "hb_store_s3",
@@ -125,7 +125,7 @@
       "bucket": "hb-s3",
       "endpoint": "http://127.0.0.1:9000",
       "ao-types": "store-module=\"atom\", min-value-size=\"integer\"",
-      "min-value-size": 65537
+      "min-value-size": 1048577
     },
     {
       "store-module": "hb_store_fs",
